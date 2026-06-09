@@ -1,3 +1,13 @@
+## 2026-06-10 01:00 MSK
+
+- Completed M1 Plan 1 Task 3 — config directory + split JSON persistence:
+  - Added `hub/src-tauri/src/config/` module: `paths.rs` (platform-specific config dir resolver), `schemas.rs` (typed `Settings` and `ProjectsFile` structs with safe defaults), `persistence.rs` (atomic write via temp+rename, idempotent saves, corrupt/missing file recovery with `.json.corrupt` backup), `commands.rs` (Tauri commands: `load_settings`, `save_settings`, `load_projects`, `save_projects`).
+  - Added `hub/src/lib/services/config.ts` — frontend TypeScript types and `invoke` wrappers for all four commands.
+  - Wired commands and `AppState` into Tauri builder in `lib.rs`.
+  - Config dir: macOS/Linux `~/.config/unity-agent-hub/`, Windows `%APPDATA%\unity-agent-hub\`. Auto-created on first access.
+  - Updated `hub/README.md` with config directory docs, file descriptions, and manual verification steps.
+  - Marked Task 3 as DONE in [execution/M1/execution-plan-1-foundation.md](execution/M1/execution-plan-1-foundation.md).
+
 ## 2026-06-10 00:15 MSK
 
 - Completed M1 Plan 1 Task 2 — shell components port:

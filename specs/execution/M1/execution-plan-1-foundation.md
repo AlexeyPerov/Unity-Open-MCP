@@ -62,7 +62,7 @@ Dependencies: Task 1.
 
 ---
 
-#### Task 3: Config directory + split JSON persistence (M1-3) [Score:8] [Agent:heavy]
+#### Task 3: Config directory + split JSON persistence (M1-3) [Score:8] [Agent:heavy] [DONE]
 
 **Required context**
 
