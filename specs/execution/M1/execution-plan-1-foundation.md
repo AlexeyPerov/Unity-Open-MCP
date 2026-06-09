@@ -120,7 +120,7 @@ Dependencies: Task 3.
 
 ---
 
-#### Task 5: Config persistence unit tests (M1-5 optional) [Score:5] [Agent:easy]
+#### Task 5: Config persistence unit tests (M1-5 optional) [Score:5] [Agent:easy] [DONE]
 
 **Required context**
 

@@ -1,3 +1,11 @@
+## 2026-06-10 02:00 MSK
+
+- Completed M1 Plan 1 Task 5 — config persistence unit tests:
+  - Added 19 Rust unit tests in `hub/src-tauri/src/config/` covering schema defaults, round-trip serialize/deserialize, camelCase serialization, optional field exclusion, corrupt JSON rejection, partial JSON rejection, atomic write (create/overwrite/no leftover tmp), backup_corrupt rename, and corrupt-file recovery to defaults.
+  - Added `tempfile` dev-dependency for clean test isolation.
+  - All tests pass via `cargo test` without Unity or Hub installed.
+  - Marked Task 5 as DONE in [execution/M1/execution-plan-1-foundation.md](execution/M1/execution-plan-1-foundation.md).
+
 ## 2026-06-10 01:30 MSK
 
 - Completed M1 Plan 1 Task 4 — first-run Unity Hub seed import:
