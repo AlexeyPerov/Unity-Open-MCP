@@ -12,6 +12,7 @@ pub fn run() {
         .manage(AppState {
             settings: Mutex::new(config::persistence::load_settings()),
             projects: Mutex::new(config::persistence::load_projects()),
+            discovery_cache: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             config::commands::load_settings,
@@ -19,6 +20,8 @@ pub fn run() {
             config::commands::load_projects,
             config::commands::save_projects,
             config::seed::seed_from_unity_hub,
+            config::discovery::discover_installations,
+            config::discovery::refresh_discovery,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

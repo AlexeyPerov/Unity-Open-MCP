@@ -1,3 +1,16 @@
+## 2026-06-10 03:00 MSK
+
+- Completed M1 Plan 2 Task 1 — Unity installation discovery service:
+  - Added `hub/src-tauri/src/config/discovery.rs` — scans parent folders for versioned Unity Editor installs with three-source precedence: user-configured `settings.unityDiscovery.parentFolders` (source: Manual), OS default Hub Editor paths (source: Hub), `UNITY_HUB` env override (source: Env).
+  - Platform-aware detection: macOS checks `Unity.app` bundle, Windows checks `Editor/Unity.exe`, Linux checks `Editor/Unity`.
+  - Builds in-memory model: version string, install path, source label, optional install date (from filesystem metadata).
+  - Deduplicates installs found through multiple scan roots; sorted by version descending.
+  - Scan errors are non-fatal — partial results returned with per-parent error detail for UI.
+  - Discovery results cached in `AppState.discovery_cache`; `discover_installations` returns cache, `refresh_discovery` forces rescan.
+  - Added `UnityInstallation`, `DiscoveryError`, `DiscoveryResult` types and `discoverInstallations()`, `refreshDiscovery()` to frontend config service.
+  - Added 9 unit tests covering: find installs, sort order, skip non-editor dirs, nonexistent parents, unreadable dirs, source labels, deduplication, install dates, empty settings.
+  - All 28 tests pass; builds cleanly.
+
 ## 2026-06-10 02:00 MSK
 
 - Completed M1 Plan 1 Task 5 — config persistence unit tests:

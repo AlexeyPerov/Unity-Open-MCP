@@ -1,12 +1,14 @@
 use tauri::State;
 use std::sync::Mutex;
 
+use crate::config::discovery::DiscoveryResult;
 use crate::config::persistence;
 use crate::config::schemas::{ProjectsFile, Settings};
 
 pub struct AppState {
     pub settings: Mutex<Settings>,
     pub projects: Mutex<ProjectsFile>,
+    pub discovery_cache: Mutex<Option<DiscoveryResult>>,
 }
 
 #[tauri::command]

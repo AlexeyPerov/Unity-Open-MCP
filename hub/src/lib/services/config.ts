@@ -46,6 +46,23 @@ export interface ProjectsFile {
   projects: ProjectEntry[];
 }
 
+export interface UnityInstallation {
+  version: string;
+  path: string;
+  source: string;
+  installDate?: string;
+}
+
+export interface DiscoveryError {
+  parentPath: string;
+  message: string;
+}
+
+export interface DiscoveryResult {
+  installations: UnityInstallation[];
+  errors: DiscoveryError[];
+}
+
 export interface SeedResult {
   projects: ProjectsFile;
   seededCount: number;
@@ -71,4 +88,12 @@ export async function saveProjects(projects: ProjectsFile): Promise<void> {
 
 export async function seedFromUnityHub(): Promise<SeedResult> {
   return invoke<SeedResult>("seed_from_unity_hub");
+}
+
+export async function discoverInstallations(): Promise<DiscoveryResult> {
+  return invoke<DiscoveryResult>("discover_installations");
+}
+
+export async function refreshDiscovery(): Promise<DiscoveryResult> {
+  return invoke<DiscoveryResult>("refresh_discovery");
 }
