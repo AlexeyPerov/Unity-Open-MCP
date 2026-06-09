@@ -32,7 +32,7 @@ Dependencies: none.
 
 ---
 
-#### Task 2: Copy/adapt vibe-launcher shell components (M1-2) [Score:8] [Agent:medium]
+#### Task 2: Copy/adapt vibe-launcher shell components (M1-2) [Score:8] [Agent:medium] [DONE]
 
 **Required context**
 
