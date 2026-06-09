@@ -1,3 +1,17 @@
+## 2026-06-10 04:00 MSK
+
+- Completed M1 Plan 2 Task 2 — Launch resolver + Unity process spawn:
+  - Added `hub/src-tauri/src/config/launch.rs` — resolves Unity executable for a project and spawns the editor process.
+  - Resolve flow: match project `unityVersion` to discovered install, find platform-specific executable (macOS: `Unity.app/Contents/MacOS/Unity`, Windows: `Editor/Unity.exe`).
+  - Typed errors: `ProjectNotFound`, `PathInvalid`, `VersionMissing`, `InstallNotFound`, `LaunchFailed` — all with camelCase serialization for frontend.
+  - Launch command: `-projectPath <path>` (respects `settings.launch.mode`), per-project `launchArgs` (whitespace-split), `-buildTarget <platformIntent>` when set.
+  - Spawns via `std::process::Command`; on success records `lastLaunchPid` and `lastLaunchAt` on project entry, persists to `projects.json`.
+  - Refreshes project `unityVersion` from `ProjectSettings/ProjectVersion.txt` before launch.
+  - Exposed `launch_project` and `refresh_project_version` Tauri commands.
+  - Added 12 unit tests covering: version file parsing (normal, missing, empty, no newline, non-version lines), error variant serialization, result camelCase serialization.
+  - All 40 tests pass; builds cleanly.
+  - Marked Task 2 as DONE in execution-plan-2-projects-launch.md.
+
 ## 2026-06-10 03:00 MSK
 
 - Completed M1 Plan 2 Task 1 — Unity installation discovery service:

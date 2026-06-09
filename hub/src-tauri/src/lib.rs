@@ -22,6 +22,8 @@ pub fn run() {
             config::seed::seed_from_unity_hub,
             config::discovery::discover_installations,
             config::discovery::refresh_discovery,
+            config::launch::launch_project,
+            config::launch::refresh_project_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

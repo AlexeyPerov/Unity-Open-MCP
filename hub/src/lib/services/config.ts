@@ -70,6 +70,25 @@ export interface SeedResult {
   error?: string;
 }
 
+export type LaunchError =
+  | { type: "projectNotFound"; projectId: string }
+  | { type: "pathInvalid"; projectId: string; path: string }
+  | { type: "versionMissing"; projectId: string }
+  | { type: "installNotFound"; projectId: string; version: string }
+  | { type: "launchFailed"; projectId: string; message: string };
+
+export interface LaunchResult {
+  projectId: string;
+  pid: number;
+  unityVersion?: string;
+  executablePath: string;
+}
+
+export interface VersionRefreshResult {
+  projectId: string;
+  unityVersion?: string;
+}
+
 export async function loadSettings(): Promise<Settings> {
   return invoke<Settings>("load_settings");
 }
@@ -96,4 +115,14 @@ export async function discoverInstallations(): Promise<DiscoveryResult> {
 
 export async function refreshDiscovery(): Promise<DiscoveryResult> {
   return invoke<DiscoveryResult>("refresh_discovery");
+}
+
+export async function launchProject(projectId: string): Promise<LaunchResult> {
+  return invoke<LaunchResult>("launch_project", { projectId });
+}
+
+export async function refreshProjectVersion(
+  projectId: string
+): Promise<VersionRefreshResult> {
+  return invoke<VersionRefreshResult>("refresh_project_version", { projectId });
 }

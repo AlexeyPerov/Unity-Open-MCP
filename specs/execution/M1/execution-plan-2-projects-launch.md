@@ -37,7 +37,7 @@ Dependencies: Plan 1 complete.
 
 ---
 
-#### Task 2: Launch resolver + Unity process spawn (M1-7) [Score:9] [Agent:heavy]
+#### Task 2: Launch resolver + Unity process spawn (M1-7) [Score:9] [Agent:heavy] [DONE]
 
 **Required context**
 

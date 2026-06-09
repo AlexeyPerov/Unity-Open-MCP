@@ -4,3 +4,4 @@ pub mod persistence;
 pub mod commands;
 pub mod seed;
 pub mod discovery;
+pub mod launch;
