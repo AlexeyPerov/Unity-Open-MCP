@@ -92,7 +92,7 @@ Dependencies: Task 1.
 
 ---
 
-#### Task 4: First-run Unity Hub seed import (M1-4) [Score:9] [Agent:heavy]
+#### Task 4: First-run Unity Hub seed import (M1-4) [Score:9] [Agent:heavy] [DONE]
 
 **Required context**
 

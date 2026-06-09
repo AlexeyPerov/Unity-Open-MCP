@@ -1,3 +1,16 @@
+## 2026-06-10 01:30 MSK
+
+- Completed M1 Plan 1 Task 4 — first-run Unity Hub seed import:
+  - Added `hub/src-tauri/src/config/seed.rs` — reads Unity Hub's `projects-v1.json` (OS-specific paths), maps entries to Hub `ProjectEntry` records with stable UUIDs, ISO 8601 timestamps, and Unity version strings.
+  - Seed is non-destructive: skipped when `projects.json` already has projects (second launch does not overwrite user edits).
+  - Missing project paths are kept with `skippedPaths` note for missing-path chip (Plan 2).
+  - Seed failure (Hub not installed / no projects file) yields empty project list + error message for UI.
+  - Added `chrono` dependency for Unix epoch ms → ISO 8601 conversion.
+  - Exposed `seed_from_unity_hub` Tauri command returning `SeedResult { projects, seededCount, skippedPaths, error? }`.
+  - Added `seedFromUnityHub()` to frontend config service (`src/lib/services/config.ts`).
+  - Updated `hub/README.md` with Unity Hub data paths, `projects-v1.json` format, and seed behavior docs.
+  - Marked Task 4 as DONE in [execution/M1/execution-plan-1-foundation.md](execution/M1/execution-plan-1-foundation.md).
+
 ## 2026-06-10 01:00 MSK
 
 - Completed M1 Plan 1 Task 3 — config directory + split JSON persistence:

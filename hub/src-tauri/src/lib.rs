@@ -18,6 +18,7 @@ pub fn run() {
             config::commands::save_settings,
             config::commands::load_projects,
             config::commands::save_projects,
+            config::seed::seed_from_unity_hub,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

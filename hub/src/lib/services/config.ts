@@ -46,6 +46,13 @@ export interface ProjectsFile {
   projects: ProjectEntry[];
 }
 
+export interface SeedResult {
+  projects: ProjectsFile;
+  seededCount: number;
+  skippedPaths: string[];
+  error?: string;
+}
+
 export async function loadSettings(): Promise<Settings> {
   return invoke<Settings>("load_settings");
 }
@@ -60,4 +67,8 @@ export async function loadProjects(): Promise<ProjectsFile> {
 
 export async function saveProjects(projects: ProjectsFile): Promise<void> {
   return invoke("save_projects", { projects });
+}
+
+export async function seedFromUnityHub(): Promise<SeedResult> {
+  return invoke<SeedResult>("seed_from_unity_hub");
 }

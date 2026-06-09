@@ -65,3 +65,44 @@ These call Tauri commands that handle atomic writes (temp file + rename) and cor
 2. Check `~/.config/unity-agent-hub/` (macOS) — both `settings.json` and `projects.json` should exist with default content.
 3. Call `saveSettings` with modified data, then reload — changes should persist.
 4. Manually truncate `settings.json` and restart — app should recover with defaults and a `.json.corrupt` backup.
+
+## First-run Unity Hub seed import
+
+On first launch (when `projects.json` has no projects yet), the Hub reads the local Unity Hub project registry and imports all projects into `projects.json`. This is a one-time seed — subsequent launches never overwrite user edits.
+
+### Unity Hub data paths (read-only)
+
+| Platform | Path |
+|---|---|
+| **macOS** | `~/Library/Application Support/UnityHub/` |
+| **Windows** | `%APPDATA%\UnityHub\` |
+| **Linux** | `~/.config/UnityHub/` |
+
+The seed reads `projects-v1.json` from the Unity Hub data directory. This file has the format:
+
+```json
+{
+  "schema_version": "v1",
+  "data": {
+    "<project_path>": {
+      "title": "MyProject",
+      "lastModified": 1779392390300,
+      "path": "/path/to/project",
+      "version": "2022.3.62f2",
+      ...
+    }
+  }
+}
+```
+
+### Seed behavior
+
+- Skipped silently if Unity Hub is not installed or has no projects.
+- Imported paths are validated for existence; missing paths are kept with a `skippedPaths` note for the missing-path chip (Plan 2).
+- Each imported project gets a new stable UUID `id`.
+- Projects are sorted by `lastModified` (most recent first).
+- `lastModified` (Unix epoch ms) is converted to ISO 8601 `lastModifiedAt`.
+
+### Frontend API
+
+- `seedFromUnityHub()` — returns `SeedResult { projects, seededCount, skippedPaths, error? }`
