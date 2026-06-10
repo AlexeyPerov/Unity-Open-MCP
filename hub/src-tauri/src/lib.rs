@@ -30,6 +30,8 @@ pub fn run() {
             config::projects::refresh_all_projects,
             config::projects::remove_project,
             config::commands::check_paths_exists,
+            config::logs::log_paths,
+            config::process::kill_unity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

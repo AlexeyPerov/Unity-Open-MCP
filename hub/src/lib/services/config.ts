@@ -89,6 +89,21 @@ export interface RunUnityResult {
   executablePath: string;
 }
 
+export interface LogPaths {
+  editorLogsFolder?: string;
+  editorLogFile?: string;
+  playerLogsFolder?: string;
+  crashLogsFolder?: string;
+}
+
+export type KillUnityStatus = "killed" | "notFound" | "accessDenied";
+
+export interface KillUnityResult {
+  pid: number;
+  status: KillUnityStatus;
+  message: string;
+}
+
 export interface LaunchResult {
   projectId: string;
   pid: number;
@@ -187,4 +202,12 @@ export async function refreshAllProjects(): Promise<RefreshAllResult> {
 
 export async function removeProject(projectId: string): Promise<RemoveProjectResult> {
   return invoke<RemoveProjectResult>("remove_project", { projectId });
+}
+
+export async function getLogPaths(projectPath: string): Promise<LogPaths> {
+  return invoke<LogPaths>("log_paths", { projectPath });
+}
+
+export async function killUnity(pid: number): Promise<KillUnityResult> {
+  return invoke<KillUnityResult>("kill_unity", { pid });
 }

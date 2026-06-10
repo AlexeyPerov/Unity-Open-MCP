@@ -5,10 +5,12 @@
   import {
     addProject,
     checkPathsExists,
+    killUnity,
     launchProject,
     refreshAllProjects,
     removeProject,
     type AddProjectError,
+    type KillUnityResult,
     type LaunchError,
     type ProjectEntry,
     type RemoveProjectError,
@@ -48,6 +50,7 @@
   let addingProject = $state(false);
   let refreshing = $state(false);
   let removingId = $state<string | null>(null);
+  let killingId = $state<string | null>(null);
   let addError = $state<string | null>(null);
   let actionError = $state<string | null>(null);
 
@@ -372,8 +375,59 @@
     }
   }
 
-  function handleKillUnityStub() {
-    S.appendDrawerLog("Kill Unity — wired in Plan 3");
+  function formatKillResult(result: KillUnityResult): string {
+    switch (result.status) {
+      case "killed":
+        return `kill: terminated pid ${result.pid} — ${result.message}`;
+      case "notFound":
+        return `kill: pid ${result.pid} is not running (${result.message})`;
+      case "accessDenied":
+        return `kill: access denied for pid ${result.pid} — ${result.message}`;
+      default:
+        return `kill: ${JSON.stringify(result)}`;
+    }
+  }
+
+  async function performKill(project: ProjectEntry, pid: number) {
+    if (killingId) return;
+    killingId = project.id;
+    actionError = null;
+    try {
+      const result = await killUnity(pid);
+      S.appendDrawerLog(formatKillResult(result));
+      if (result.status === "killed" || result.status === "notFound") {
+        // Clear the recorded PID for this project so subsequent Kill
+        // buttons show the "no recent launch" state.
+        const cleared: ProjectEntry = { ...project, lastLaunchPid: undefined };
+        await projectsStore.update(cleared);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      actionError = `kill failed: ${msg}`;
+      S.appendDrawerLog(actionError);
+    } finally {
+      killingId = null;
+    }
+  }
+
+  async function handleKillUnity(project: ProjectEntry) {
+    closeContextMenu();
+    moreMenuOpen = false;
+    const pid = project.lastLaunchPid;
+    if (!pid) {
+      actionError = `no recent Unity launch recorded for ${project.name}`;
+      S.appendDrawerLog(actionError);
+      return;
+    }
+    const confirmKill = projectsStore.settings?.safety.confirmKillUnity ?? true;
+    if (confirmKill) {
+      const ok = await S.confirm(
+        "Kill Unity for this project?",
+        `Send a terminate signal to pid ${pid} (last launched from “${project.name}”). Other Unity instances on this machine are not affected.`
+      );
+      if (!ok) return;
+    }
+    await performKill(project, pid);
   }
 
   function handleAiSetupStub() {
@@ -676,7 +730,16 @@
         >
           Open Folder
         </Button>
-        <Button variant="secondary" disabled onclick={handleKillUnityStub} title="Kill Unity — wired in Plan 3">Kill Unity</Button>
+        <Button
+          variant="secondary"
+          disabled={!selected.lastLaunchPid || killingId === selected.id}
+          title={selected.lastLaunchPid
+            ? `Terminate pid ${selected.lastLaunchPid} (last launched from this project)`
+            : "No recorded Unity PID — launch Unity once to enable Kill"}
+          onclick={() => handleKillUnity(selected)}
+        >
+          {killingId === selected.id ? "Killing…" : "Kill Unity"}
+        </Button>
         <div class="more-wrap">
           <Button
             variant="secondary"
@@ -789,6 +852,20 @@
       }}
     >
       Copy path
+    </button>
+    <button
+      type="button"
+      class="ctx-item ctx-item-destructive"
+      role="menuitem"
+      disabled={!ctxProject?.lastLaunchPid || killingId === ctxId}
+      title={ctxProject?.lastLaunchPid
+        ? `Terminate pid ${ctxProject.lastLaunchPid} (last launched from this project)`
+        : "No recorded Unity PID — launch Unity once to enable Kill"}
+      onclick={() => {
+        if (ctxProject) handleKillUnity(ctxProject);
+      }}
+    >
+      {killingId === ctxId ? "Killing…" : "Kill Unity"}
     </button>
     <div class="ctx-sep"></div>
     <button

@@ -1,3 +1,21 @@
+## 2026-06-10 14:30 MSK
+
+- Completed M1 Plan 3 Tasks 3 & 4 — Tools tab log shortcuts + PID-scoped Kill Unity:
+  - Added `hub/src-tauri/src/config/logs.rs` — platform-aware log path resolution. macOS uses `~/Library/Logs/Unity` (editor) and `~/Library/Logs/DiagnosticReports` (crash); Windows uses `%LOCALAPPDATA%\Unity\Editor` and `%LOCALAPPDATA%\CrashDumps`; Linux falls back to `~/.config/unity3d` for both. Player logs are always the project's own `Logs/` subfolder. New `LogPaths` struct + `log_paths(project_path)` Tauri command. 6 new unit tests covering player-dir subpath, absolute editor/crash dirs, editor-file-in-editor-dir, command/resolver parity, and empty defaults.
+  - Added `hub/src-tauri/src/config/process.rs` — PID-scoped terminate with typed result. `KillUnityStatus` enum (`Killed` | `NotFound` | `AccessDenied`) and `KillUnityResult { pid, status, message }`. macOS/Linux: probes with `kill -0`, sends `SIGTERM` and falls back to `SIGKILL` if needed, then re-probes to distinguish vanished vs. denied. Windows: probes with `tasklist /FI "PID eq <pid>"` and terminates with `taskkill /F /PID <pid>`. PID 0 is rejected outright before any shell-out (would otherwise mean "process group" on Unix and is unused on Windows). New `kill_unity(pid)` Tauri command. 6 new unit tests (unused PID, real running process, second-kill after wait/reap, camelCase serialization for both result and status enum, PID 0 safety).
+  - Registered `log_paths` and `kill_unity` in `hub/src-tauri/src/lib.rs` invoke handler.
+  - Extended `hub/src/lib/services/config.ts` with `LogPaths`, `KillUnityStatus`, `KillUnityResult` types and `getLogPaths(projectPath)` / `killUnity(pid)` invokes.
+  - Extended `ToolsTab.svelte` per `hub-ui.md` §Tools:
+    - **Log shortcuts panel** with three folder buttons (Editor / Player / Crash) plus an Editor.log file link. Each button is disabled with an explanatory title when no project is selected or the path is missing. Opening is gated by a single `openingLog` state to prevent duplicate dialogs, with inline error feedback. The Editor.log file link supports middle-click (`onauxclick` with `button === 1`) per the spec. Per-OS path semantics are documented in the panel hint and the Rust comments.
+    - **Utilities panel** with destructive `Kill Unity` button (PID-scoped, honouring `settings.safety.confirmKillUnity`), plus `Open project folder` and `Copy project path`. A hint line below the buttons shows the last-recorded `lastLaunchPid` and `lastLaunchAt` (or a "no PID recorded yet" message) so the user always knows what the Kill action will target. Successful and stale-`notFound` results both clear the recorded PID so subsequent Kill actions show the right state.
+    - The `$effect` that watches `selected` now also refreshes log paths on project switch; selecting no project (or a project with no path) clears log paths, log errors, and per-field drafts.
+  - Wired real `Kill Unity` in `ProjectsTab.svelte`:
+    - Replaced the Plan 2 stub in the selection detail strip with a real handler. Button is enabled only when `lastLaunchPid` is present; label switches to `Killing…` while in flight; tooltip explains the missing-PID case.
+    - Added a `Kill Unity` item to the right-click context menu between `Copy path` and the destructive separator, matching the new Tasks/Projects/Tools wiring and the spec's "context menu where specified" clause. Same enabled/disabled/tooltip rules as the selection strip.
+    - Shared `performKill` / `handleKillUnity` helpers format `KillUnityResult` into a one-line status drawer message and clear `lastLaunchPid` from the project entry on `killed` or `notFound` outcomes, keeping the UI consistent with the recorded state.
+  - `cargo test`: 74/74 pass (12 new). `npm run check`: 0 errors, 0 warnings. `npm run build` and `cargo build`: clean.
+  - Marked Tasks 3 and 4 as DONE in [execution/M1/execution-plan-3-versions-tools.md](execution/M1/execution-plan-3-versions-tools.md); the last two Plan 3 exit criteria are now DONE.
+
 ## 2026-06-10 14:15 MSK
 
 - Completed M1 Plan 3 Task 2 — Tools tab: launch args + platform intent:

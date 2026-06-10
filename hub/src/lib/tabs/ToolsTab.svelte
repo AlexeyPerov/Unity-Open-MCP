@@ -2,7 +2,14 @@
   import { onMount } from "svelte";
   import { S } from "$lib/state.svelte";
   import { projectsStore } from "$lib/state/projects.svelte";
-  import type { ProjectEntry } from "$lib/services/config";
+  import {
+    getLogPaths,
+    killUnity,
+    type KillUnityResult,
+    type LogPaths,
+    type ProjectEntry,
+  } from "$lib/services/config";
+  import { openPath } from "@tauri-apps/plugin-opener";
   import Button from "$lib/components/shell/Button.svelte";
 
   const BUILD_TARGETS: string[] = [
@@ -32,6 +39,10 @@
   let platformIntentDirty = $state(false);
   let savingIntent = $state(false);
   let actionError = $state<string | null>(null);
+  let logPaths = $state<LogPaths | null>(null);
+  let logPathsError = $state<string | null>(null);
+  let openingLog = $state<string | null>(null);
+  let killing = $state(false);
 
   let selected = $derived<ProjectEntry | null>(
     projectsStore.selectedProjectId
@@ -67,6 +78,8 @@
       argsDirty = false;
       platformIntentDirty = false;
       argsError = null;
+      logPaths = null;
+      logPathsError = null;
       return;
     }
     argsDraft = selected.launchArgs ?? "";
@@ -74,7 +87,19 @@
     argsDirty = false;
     platformIntentDirty = false;
     argsError = null;
+    void refreshLogPaths(selected);
   });
+
+  async function refreshLogPaths(project: ProjectEntry) {
+    logPathsError = null;
+    try {
+      logPaths = await getLogPaths(project.path);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logPathsError = `could not resolve log paths: ${msg}`;
+      logPaths = null;
+    }
+  }
 
   function validateArgs(value: string): string | null {
     const match = value.match(UNSAFE_RE);
@@ -180,6 +205,143 @@
     }
     return BUILD_TARGETS;
   }
+
+  async function openLogTarget(label: string, target: string | undefined) {
+    if (!target || openingLog) return;
+    openingLog = target;
+    actionError = null;
+    try {
+      await openPath(target);
+      S.appendDrawerLog(`opened ${label}: ${target}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      actionError = `open ${label} failed: ${msg}`;
+      S.appendDrawerLog(actionError);
+    } finally {
+      openingLog = null;
+    }
+  }
+
+  function handleEditorLogs() {
+    void openLogTarget("editor logs folder", logPaths?.editorLogsFolder);
+  }
+
+  function handlePlayerLogs() {
+    void openLogTarget("player logs folder", logPaths?.playerLogsFolder);
+  }
+
+  function handleCrashLogs() {
+    void openLogTarget("crash logs folder", logPaths?.crashLogsFolder);
+  }
+
+  function handleEditorLogFile() {
+    void openLogTarget("Editor.log", logPaths?.editorLogFile);
+  }
+
+  function handleEditorLogFileAuxClick(e: MouseEvent) {
+    // Open file on middle-click where the OS supports it. The main click
+    // handler covers left-click; auxclick fires for middle.
+    if (e.button === 1) {
+      e.preventDefault();
+      handleEditorLogFile();
+    }
+  }
+
+  async function handleCopyPath() {
+    if (!selected) return;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(selected.path).then(
+        () => S.appendDrawerLog(`copied path: ${selected!.path}`),
+        () => S.appendDrawerLog("copy failed: clipboard unavailable")
+      );
+    }
+  }
+
+  async function handleOpenProjectFolder() {
+    if (!selected) return;
+    actionError = null;
+    try {
+      await openPath(selected.path);
+      S.appendDrawerLog(`opened project folder: ${selected.path}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      actionError = `open project folder failed: ${msg}`;
+      S.appendDrawerLog(actionError);
+    }
+  }
+
+  function formatKillResult(result: KillUnityResult): string {
+    switch (result.status) {
+      case "killed":
+        return `kill: terminated pid ${result.pid} — ${result.message}`;
+      case "notFound":
+        return `kill: pid ${result.pid} is not running (${result.message})`;
+      case "accessDenied":
+        return `kill: access denied for pid ${result.pid} — ${result.message}`;
+      default:
+        return `kill: ${JSON.stringify(result)}`;
+    }
+  }
+
+  async function performKill(pid: number) {
+    if (!selected || killing) return;
+    killing = true;
+    actionError = null;
+    try {
+      const result = await killUnity(pid);
+      S.appendDrawerLog(formatKillResult(result));
+      if (result.status === "killed") {
+        // Clear the recorded PID so subsequent Kill Unity actions show the
+        // "no recent launch" state until the next launch.
+        const cleared: ProjectEntry = { ...selected, lastLaunchPid: undefined };
+        await projectsStore.update(cleared);
+      } else if (result.status === "notFound") {
+        // PID is stale — clear it so the UI no longer references a dead PID.
+        const cleared: ProjectEntry = { ...selected, lastLaunchPid: undefined };
+        await projectsStore.update(cleared);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      actionError = `kill failed: ${msg}`;
+      S.appendDrawerLog(actionError);
+    } finally {
+      killing = false;
+    }
+  }
+
+  async function handleKillUnity() {
+    if (!selected) return;
+    const pid = selected.lastLaunchPid;
+    if (!pid) {
+      actionError = "no recent Unity launch recorded for this project";
+      S.appendDrawerLog(actionError);
+      return;
+    }
+    const confirmKill = projectsStore.settings?.safety.confirmKillUnity ?? true;
+    if (confirmKill) {
+      const ok = await S.confirm(
+        "Kill Unity for this project?",
+        `Send a terminate signal to pid ${pid} (last launched from “${selected.name}”). Other Unity instances on this machine are not affected.`
+      );
+      if (!ok) return;
+    }
+    await performKill(pid);
+  }
+
+  let killButtonLabel = $derived.by(() => {
+    if (killing) return "Killing…";
+    if (!selected?.lastLaunchPid) return "Kill Unity (no recent launch)";
+    return `Kill Unity (pid ${selected.lastLaunchPid})`;
+  });
+
+  let killDisabled = $derived(!selected || killing);
+  let killTitle = $derived.by(() => {
+    if (!selected) return "Select a project above first";
+    if (!selected.lastLaunchPid) {
+      return "No recorded Unity PID for this project — launch Unity once to enable Kill";
+    }
+    return `Terminate pid ${selected.lastLaunchPid} (last launched from this project)`;
+  });
 </script>
 
 <div class="tools">
@@ -313,6 +475,145 @@
           Current: <strong>{selected.platformIntent && selected.platformIntent.length > 0 ? selected.platformIntent : "—"}</strong>
         </p>
       </div>
+    {/if}
+  </section>
+
+  <section class="panel" aria-labelledby="log-shortcuts-title">
+    <header class="panel-head">
+      <h2 id="log-shortcuts-title" class="panel-title">Log shortcuts</h2>
+      <p class="panel-hint">
+        Platform-aware paths. macOS uses <code>~/Library/Logs/Unity</code>, Windows uses
+        <code>%LOCALAPPDATA%\Unity\Editor</code>. Player logs live under the project's
+        <code>Logs/</code> folder. Crash logs use the OS diagnostic folder.
+      </p>
+    </header>
+
+    {#if !selected}
+      <p class="panel-empty">Select a project above to view its log locations.</p>
+    {:else if logPathsError}
+      <p class="field-error" role="alert">{logPathsError}</p>
+    {:else if !logPaths}
+      <p class="panel-empty">Resolving log paths…</p>
+    {:else}
+      <div class="log-grid">
+        <div class="log-row">
+          <span class="log-label">Editor logs</span>
+          <div class="log-actions">
+            <Button
+              variant="secondary"
+              disabled={!logPaths.editorLogsFolder || openingLog === logPaths.editorLogsFolder}
+              title={logPaths.editorLogsFolder ?? "path unavailable"}
+              onclick={handleEditorLogs}
+            >
+              {openingLog === logPaths.editorLogsFolder ? "Opening…" : "Open folder"}
+            </Button>
+            <span class="log-path" title={logPaths.editorLogsFolder ?? ""}>
+              {logPaths.editorLogsFolder ?? "—"}
+            </span>
+          </div>
+        </div>
+        <div class="log-row">
+          <span class="log-label">Player logs</span>
+          <div class="log-actions">
+            <Button
+              variant="secondary"
+              disabled={!logPaths.playerLogsFolder || openingLog === logPaths.playerLogsFolder}
+              title={logPaths.playerLogsFolder ?? "path unavailable"}
+              onclick={handlePlayerLogs}
+            >
+              {openingLog === logPaths.playerLogsFolder ? "Opening…" : "Open folder"}
+            </Button>
+            <span class="log-path" title={logPaths.playerLogsFolder ?? ""}>
+              {logPaths.playerLogsFolder ?? "—"}
+            </span>
+          </div>
+        </div>
+        <div class="log-row">
+          <span class="log-label">Crash logs</span>
+          <div class="log-actions">
+            <Button
+              variant="secondary"
+              disabled={!logPaths.crashLogsFolder || openingLog === logPaths.crashLogsFolder}
+              title={logPaths.crashLogsFolder ?? "path unavailable"}
+              onclick={handleCrashLogs}
+            >
+              {openingLog === logPaths.crashLogsFolder ? "Opening…" : "Open folder"}
+            </Button>
+            <span class="log-path" title={logPaths.crashLogsFolder ?? ""}>
+              {logPaths.crashLogsFolder ?? "—"}
+            </span>
+          </div>
+        </div>
+        <div class="log-row">
+          <span class="log-label">Editor.log</span>
+          <div class="log-actions">
+            {#if logPaths.editorLogFile}
+              <button
+                type="button"
+                class="link-btn"
+                onclick={handleEditorLogFile}
+                onauxclick={handleEditorLogFileAuxClick}
+                title={`Open ${logPaths.editorLogFile} (middle-click supported)`}
+              >
+                {openingLog === logPaths.editorLogFile ? "Opening…" : "Open file ↗"}
+              </button>
+            {:else}
+              <span class="muted-inline">no file path resolved</span>
+            {/if}
+            <span class="log-path" title={logPaths.editorLogFile ?? ""}>
+              {logPaths.editorLogFile ?? "—"}
+            </span>
+          </div>
+        </div>
+      </div>
+    {/if}
+  </section>
+
+  <section class="panel" aria-labelledby="utilities-title">
+    <header class="panel-head">
+      <h2 id="utilities-title" class="panel-title">Utilities</h2>
+      <p class="panel-hint">
+        One-click actions scoped to the selected project. Kill Unity targets the
+        <code>lastLaunchPid</code> recorded in <code>projects.json</code>; it does not affect other
+        Unity instances.
+      </p>
+    </header>
+
+    {#if !selected}
+      <p class="panel-empty">Select a project above to use utilities.</p>
+    {:else}
+      <div class="utilities-row">
+        <Button
+          variant="destructive"
+          disabled={killDisabled}
+          title={killTitle}
+          onclick={handleKillUnity}
+        >
+          {killButtonLabel}
+        </Button>
+        <Button
+          variant="secondary"
+          onclick={handleOpenProjectFolder}
+          title="Open the project folder in the system file manager"
+        >
+          Open project folder
+        </Button>
+        <Button
+          variant="secondary"
+          onclick={handleCopyPath}
+          title="Copy the project path to the clipboard"
+        >
+          Copy project path
+        </Button>
+      </div>
+      <p class="field-hint utilities-hint">
+        {#if selected.lastLaunchPid}
+          Last recorded launch: pid <code>{selected.lastLaunchPid}</code>
+          {#if selected.lastLaunchAt}at {new Date(selected.lastLaunchAt).toLocaleString()}{/if}
+        {:else}
+          No Unity PID recorded for this project yet. Launch Unity once to enable Kill.
+        {/if}
+      </p>
     {/if}
   </section>
 </div>
@@ -571,5 +872,80 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     color: #c5c7d0;
     font-weight: 500;
+  }
+
+  .log-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .log-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+
+  .log-label {
+    flex: 0 0 7rem;
+    font-size: 0.78rem;
+    color: #c5c7d0;
+    font-weight: 500;
+  }
+
+  .log-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.55rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .log-path {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    color: #8b8d9a;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .link-btn {
+    background: transparent;
+    border: 1px solid #3f4150;
+    border-radius: 6px;
+    padding: 0.4rem 0.7rem;
+    color: #c5c7d0;
+    font-size: 0.82rem;
+    cursor: pointer;
+    line-height: 1.4;
+    flex-shrink: 0;
+  }
+
+  .link-btn:hover {
+    border-color: #5c7cfa;
+    color: #fff;
+  }
+
+  .muted-inline {
+    color: #6f7280;
+    font-size: 0.78rem;
+  }
+
+  .utilities-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+  }
+
+  .utilities-hint {
+    margin-top: 0.2rem;
   }
 </style>

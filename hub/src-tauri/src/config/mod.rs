@@ -6,3 +6,5 @@ pub mod seed;
 pub mod discovery;
 pub mod launch;
 pub mod projects;
+pub mod logs;
+pub mod process;
