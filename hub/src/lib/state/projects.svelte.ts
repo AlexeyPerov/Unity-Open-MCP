@@ -43,6 +43,14 @@ class ProjectsStore {
     await this.persist(next);
   }
 
+  add(entry: ProjectEntry): void {
+    this.projects = [...this.projects, entry];
+  }
+
+  replaceAll(list: ProjectEntry[]): void {
+    this.projects = list;
+  }
+
   async persist(list: ProjectEntry[] = this.projects): Promise<void> {
     const payload: ProjectsFile = {
       version: 1,

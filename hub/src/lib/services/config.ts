@@ -89,6 +89,23 @@ export interface VersionRefreshResult {
   unityVersion?: string;
 }
 
+export type AddProjectError =
+  | { type: "notADirectory"; path: string }
+  | { type: "notAUnityProject"; path: string; reason: string }
+  | { type: "duplicate"; path: string }
+  | { type: "persistFailed"; message: string };
+
+export interface AddProjectResult {
+  project: ProjectEntry;
+  projects: ProjectsFile;
+}
+
+export interface RefreshAllResult {
+  projects: ProjectsFile;
+  updated: string[];
+  skipped: string[];
+}
+
 export async function loadSettings(): Promise<Settings> {
   return invoke<Settings>("load_settings");
 }
@@ -131,4 +148,12 @@ export async function checkPathsExists(
   paths: string[]
 ): Promise<Record<string, boolean>> {
   return invoke<Record<string, boolean>>("check_paths_exists", { paths });
+}
+
+export async function addProject(path: string): Promise<AddProjectResult> {
+  return invoke<AddProjectResult>("add_project", { path });
+}
+
+export async function refreshAllProjects(): Promise<RefreshAllResult> {
+  return invoke<RefreshAllResult>("refresh_all_projects");
 }

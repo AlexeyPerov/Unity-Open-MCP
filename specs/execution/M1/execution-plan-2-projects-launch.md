@@ -96,7 +96,7 @@ Dependencies: Plan 1 Tasks 2–3; Task 2 for launch wiring.
 
 ---
 
-#### Task 4: Search, filter, Add Project folder picker (M1-9) [Score:7] [Agent:medium]
+#### Task 4: Search, filter, Add Project folder picker (M1-9) [Score:7] [Agent:medium] [DONE]
 
 **Required context**
 
@@ -159,9 +159,9 @@ Plan 1 → Task 3 → Task 4 → Task 5
 
 ## Plan 2 exit criteria
 
-- [ ] Unity installs discovered with documented precedence.
-- [ ] Projects launch with correct version, args, and optional `-buildTarget`.
+- [x] Unity installs discovered with documented precedence.
+- [x] Projects launch with correct version, args, and optional `-buildTarget`.
 - [ ] Projects tab supports list, search, filter, add, and core row actions.
-- [ ] Missing-path and missing-version states visible and enforced in UI.
+- [x] Missing-path and missing-version states visible and enforced in UI.
 
 **Next:** [execution-plan-3-versions-tools.md](./execution-plan-3-versions-tools.md)

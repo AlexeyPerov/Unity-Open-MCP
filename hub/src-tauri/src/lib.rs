@@ -6,6 +6,7 @@ use std::sync::Mutex;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
@@ -24,6 +25,8 @@ pub fn run() {
             config::discovery::refresh_discovery,
             config::launch::launch_project,
             config::launch::refresh_project_version,
+            config::projects::add_project,
+            config::projects::refresh_all_projects,
             config::commands::check_paths_exists,
         ])
         .run(tauri::generate_context!())

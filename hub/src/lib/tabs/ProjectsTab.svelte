@@ -3,11 +3,15 @@
   import { S } from "$lib/state.svelte";
   import { projectsStore } from "$lib/state/projects.svelte";
   import {
+    addProject,
     checkPathsExists,
     launchProject,
+    refreshAllProjects,
+    type AddProjectError,
     type LaunchError,
     type ProjectEntry,
   } from "$lib/services/config";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import Button from "$lib/components/shell/Button.svelte";
   import StatusChip from "$lib/components/StatusChip.svelte";
   import RelativeTime from "$lib/components/RelativeTime.svelte";
@@ -39,6 +43,9 @@
   let launching = $state<string | null>(null);
   let contextMenu = $state<{ x: number; y: number; projectId: string } | null>(null);
   let moreMenuOpen = $state(false);
+  let addingProject = $state(false);
+  let refreshing = $state(false);
+  let addError = $state<string | null>(null);
 
   const ROW_HEIGHT = 38;
 
@@ -285,12 +292,73 @@
     }
   }
 
-  function handleAddProjectStub() {
-    S.appendDrawerLog("Add Project — wired in Plan 2 Task 4");
+  async function handleAddProject() {
+    if (addingProject) return;
+    addingProject = true;
+    addError = null;
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Select Unity project root",
+      });
+      if (!selected || typeof selected !== "string") {
+        return;
+      }
+      try {
+        const result = await addProject(selected);
+        projectsStore.add(result.project);
+        await refreshPathExistence();
+        selectedId = result.project.id;
+        S.appendDrawerLog(
+          `added project ${result.project.name} (${result.project.unityVersion ?? "version unknown"})`
+        );
+      } catch (e) {
+        const err = e as AddProjectError;
+        addError = formatAddProjectError(err);
+        S.appendDrawerLog(`add project failed: ${addError}`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendDrawerLog(`folder picker failed: ${msg}`);
+    } finally {
+      addingProject = false;
+    }
   }
 
-  function handleRefreshStub() {
-    S.appendDrawerLog("Refresh — wired in Plan 2 Task 4");
+  function formatAddProjectError(err: AddProjectError): string {
+    switch (err.type) {
+      case "notADirectory":
+        return `not a directory — ${err.path}`;
+      case "notAUnityProject":
+        return `not a Unity project (${err.reason}) — ${err.path}`;
+      case "duplicate":
+        return `already in list — ${err.path}`;
+      case "persistFailed":
+        return `failed to save: ${err.message}`;
+      default:
+        return `unknown error: ${JSON.stringify(err)}`;
+    }
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      const result = await refreshAllProjects();
+      projectsStore.replaceAll(result.projects.projects);
+      await refreshPathExistence();
+      const updatedCount = result.updated.length;
+      const skippedCount = result.skipped.length;
+      S.appendDrawerLog(
+        `refreshed projects (${updatedCount} updated${skippedCount ? `, ${skippedCount} skipped` : ""})`
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendDrawerLog(`refresh failed: ${msg}`);
+    } finally {
+      refreshing = false;
+    }
   }
 
   function handleKillUnityStub() {
@@ -377,9 +445,27 @@
     <Button variant="secondary" onclick={handleAiSetupStub} disabled title="AI Setup — coming soon">
       AI Setup
     </Button>
-    <Button variant="primary" onclick={handleAddProjectStub}>Add Project</Button>
-    <Button variant="secondary" onclick={handleRefreshStub}>Refresh</Button>
+    <Button variant="primary" onclick={handleAddProject} disabled={addingProject}>
+      {addingProject ? "Adding…" : "Add Project"}
+    </Button>
+    <Button variant="secondary" onclick={handleRefresh} disabled={refreshing}>
+      {refreshing ? "Refreshing…" : "Refresh"}
+    </Button>
   </div>
+
+  {#if addError}
+    <div class="inline-error" role="alert">
+      <span class="inline-error-text">{addError}</span>
+      <button
+        type="button"
+        class="inline-error-dismiss"
+        onclick={() => (addError = null)}
+        aria-label="Dismiss error"
+      >
+        ×
+      </button>
+    </div>
+  {/if}
 
   <div
     class="table"
@@ -628,6 +714,37 @@
 
   .toolbar-spacer {
     flex: 1;
+  }
+
+  .inline-error {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.7rem;
+    border: 1px solid #5a2333;
+    border-radius: 6px;
+    background: #2a1320;
+    color: #f0a8b8;
+    font-size: 0.82rem;
+  }
+
+  .inline-error-text {
+    flex: 1;
+  }
+
+  .inline-error-dismiss {
+    background: transparent;
+    border: none;
+    color: #f0a8b8;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.25rem;
+  }
+
+  .inline-error-dismiss:hover {
+    color: #fff;
   }
 
   .search {
