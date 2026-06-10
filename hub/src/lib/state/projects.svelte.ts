@@ -10,6 +10,7 @@ import {
 class ProjectsStore {
   projects = $state<ProjectEntry[]>([]);
   settings = $state<Settings | null>(null);
+  selectedProjectId = $state<string | null>(null);
   loading = $state(false);
   error = $state<string | null>(null);
 
@@ -35,6 +36,14 @@ class ProjectsStore {
     return this.projects.find((p) => p.id === id);
   }
 
+  select(id: string | null): void {
+    if (id !== null && !this.projects.some((p) => p.id === id)) {
+      this.selectedProjectId = null;
+      return;
+    }
+    this.selectedProjectId = id;
+  }
+
   async update(updated: ProjectEntry): Promise<void> {
     const next = this.projects.map((p) =>
       p.id === updated.id ? updated : p
@@ -45,11 +54,13 @@ class ProjectsStore {
 
   add(entry: ProjectEntry): void {
     this.projects = [...this.projects, entry];
+    this.selectedProjectId = entry.id;
   }
 
   async remove(id: string): Promise<void> {
     const next = this.projects.filter((p) => p.id !== id);
     this.projects = next;
+    if (this.selectedProjectId === id) this.selectedProjectId = null;
     await this.persist(next);
   }
 

@@ -1,3 +1,16 @@
+## 2026-06-10 14:15 MSK
+
+- Completed M1 Plan 3 Task 2 — Tools tab: launch args + platform intent:
+  - Lifted the project selection out of `ProjectsTab.svelte` into the shared `projectsStore` (`projects.svelte.ts`) as `selectedProjectId` + `select(id)`. `add()` auto-selects new projects; `remove()` clears the selection when the removed project was selected. `ProjectsTab` now reads/writes through the store, so the Tools tab inherits the user's Projects selection on first open (or falls back to the first project when the user opens Tools directly).
+  - Built out `ToolsTab.svelte` per `hub-ui.md` §Tools and [execution-plan-3 §Task 2](execution/M1/execution-plan-3-versions-tools.md):
+    - **Project context bar** — labelled dropdown listing every project (`name · version`) plus the full path; changing it updates the store-wide selection. Disabled (with explanatory copy) when no projects exist.
+    - **Launch args panel** — multi-line text input bound to the selected project's `launchArgs` draft, Save and Reset buttons. Save is disabled when the draft is empty (Reset is the way to clear) and when the input contains unsafe characters (regex blocks `\n`, `\r`, `\0`, `` ` ``, `$`, `|`, `&`, `;`, `<`, `>`); an inline error names the offending character. Persists via the existing `projectsStore.update()` round-trip. The hint line shows the currently saved value and reminds the user the args are appended on the **next** launch (matches the existing `launch_project` Tauri command, which whitespace-splits and appends after `-projectPath`).
+    - **Platform intent panel** — labelled `<select>` of common `BuildTarget` names (StandaloneWindows64 / StandaloneWindows / StandaloneOSX / StandaloneLinux64 / iOS / Android / WebGL / WSAPlayer / tvOS / VisionOS) plus a "None" option, with a current-value display and Save button. Saving persists the chosen string to `platformIntent` via the same store round-trip; the existing `launch.rs` already appends `-buildTarget <name>` on the next launch, so no backend change was required. The hint copy explicitly states the intent is applied on the next launch only and is not a live switch while the editor is open.
+    - Changing the project in the context bar resets both drafts to the new project's stored values via a `$effect` (and clears both the dirty flag and any pending validation error).
+    - A dismissible inline error banner covers persist failures from the Tauri side, and the status drawer logs every save / reset / clear.
+  - `cargo test`: 62/62 pass (no Rust changes). `npm run check`: 0 errors, 0 warnings. `npm run build` and `cargo check`: clean.
+  - Marked Task 2 as DONE in [execution/M1/execution-plan-3-versions-tools.md](execution/M1/execution-plan-3-versions-tools.md); Plan 3 exit criterion "Tools tab persists launch args and platform intent per project" is now DONE.
+
 ## 2026-06-10 13:45 MSK
 
 - Completed M1 Plan 3 Task 1 — Unity Versions tab:

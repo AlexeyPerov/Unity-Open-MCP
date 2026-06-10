@@ -40,7 +40,6 @@
 
   let search = $state("");
   let filterPreset = $state<FilterPreset>("all");
-  let selectedId = $state<string | null>(null);
   let pathExistsMap = $state<Record<string, boolean>>({});
   let checkingPaths = $state(false);
   let launching = $state<string | null>(null);
@@ -167,13 +166,15 @@
   });
 
   let selected = $derived(
-    selectedId ? projectsStore.projects.find((p) => p.id === selectedId) ?? null : null
+    projectsStore.selectedProjectId
+      ? projectsStore.projects.find((p) => p.id === projectsStore.selectedProjectId) ?? null
+      : null
   );
 
   let selectedStatus = $derived(selected ? statusFor(selected) : null);
 
   function selectRow(id: string) {
-    selectedId = id;
+    projectsStore.select(id);
   }
 
   function closeContextMenu() {
@@ -185,7 +186,7 @@
     const x = e.clientX;
     const y = e.clientY;
     contextMenu = { x, y, projectId };
-    selectedId = projectId;
+    projectsStore.select(projectId);
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
@@ -206,12 +207,14 @@
 
   function moveSelection(delta: number) {
     if (filtered.length === 0) return;
-    const idx = selectedId ? filtered.findIndex((p) => p.id === selectedId) : -1;
+    const idx = projectsStore.selectedProjectId
+      ? filtered.findIndex((p) => p.id === projectsStore.selectedProjectId)
+      : -1;
     let next = idx + delta;
     if (idx === -1) next = delta > 0 ? 0 : filtered.length - 1;
     if (next < 0) next = 0;
     if (next >= filtered.length) next = filtered.length - 1;
-    selectedId = filtered[next].id;
+    projectsStore.select(filtered[next].id);
   }
 
   async function handleLaunch(id: string) {
@@ -274,11 +277,11 @@
         break;
       case "Home":
         e.preventDefault();
-        if (filtered.length > 0) selectedId = filtered[0].id;
+        if (filtered.length > 0) projectsStore.select(filtered[0].id);
         break;
       case "End":
         e.preventDefault();
-        if (filtered.length > 0) selectedId = filtered[filtered.length - 1].id;
+        if (filtered.length > 0) projectsStore.select(filtered[filtered.length - 1].id);
         break;
       case "Enter":
         e.preventDefault();
@@ -289,7 +292,7 @@
         if (contextMenu && contextMenu.projectId === project.id) {
           closeContextMenu();
         } else {
-          selectedId = project.id;
+          projectsStore.select(project.id);
           const row = (e.currentTarget as HTMLElement).getBoundingClientRect();
           contextMenu = {
             x: row.left + 24,
@@ -318,7 +321,6 @@
         const result = await addProject(selected);
         projectsStore.add(result.project);
         await refreshPathExistence();
-        selectedId = result.project.id;
         S.appendDrawerLog(
           `added project ${result.project.name} (${result.project.unityVersion ?? "version unknown"})`
         );
@@ -398,7 +400,6 @@
     try {
       const result = await removeProject(id);
       await projectsStore.remove(id);
-      if (selectedId === id) selectedId = null;
       S.appendDrawerLog(
         `removed ${result.removedName} from list (folder left intact: ${result.removedPath})`
       );
@@ -592,12 +593,12 @@
           {@const s = rowStatus(project)}
           <div
             class="row"
-            class:row-selected={selectedId === project.id}
+            class:row-selected={projectsStore.selectedProjectId === project.id}
             class:row-missing={s.kind === "missingPath"}
             role="row"
             aria-rowindex={index + 2}
-            aria-selected={selectedId === project.id}
-            tabindex={selectedId === project.id ? 0 : -1}
+            aria-selected={projectsStore.selectedProjectId === project.id}
+            tabindex={projectsStore.selectedProjectId === project.id ? 0 : -1}
             style="grid-template-columns: {gridTemplate()};"
             onclick={() => selectRow(project.id)}
             ondblclick={() => handleLaunch(project.id)}
