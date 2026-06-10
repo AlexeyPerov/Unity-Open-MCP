@@ -8,6 +8,7 @@
     "dialog:default",
     "fs:default",
     "opener:default",
+    "opener:allow-open-path",
     "shell:default"
   ]
 }

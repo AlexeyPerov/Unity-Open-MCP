@@ -7,11 +7,14 @@
     checkPathsExists,
     launchProject,
     refreshAllProjects,
+    removeProject,
     type AddProjectError,
     type LaunchError,
     type ProjectEntry,
+    type RemoveProjectError,
   } from "$lib/services/config";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import Button from "$lib/components/shell/Button.svelte";
   import StatusChip from "$lib/components/StatusChip.svelte";
   import RelativeTime from "$lib/components/RelativeTime.svelte";
@@ -45,7 +48,9 @@
   let moreMenuOpen = $state(false);
   let addingProject = $state(false);
   let refreshing = $state(false);
+  let removingId = $state<string | null>(null);
   let addError = $state<string | null>(null);
+  let actionError = $state<string | null>(null);
 
   const ROW_HEIGHT = 38;
 
@@ -369,8 +374,54 @@
     S.appendDrawerLog("AI Setup — coming in a later milestone");
   }
 
-  function handleRemoveStub() {
-    S.appendDrawerLog("Remove project — wired in Plan 2 Task 5");
+  function formatRemoveError(err: RemoveProjectError): string {
+    switch (err.type) {
+      case "projectNotFound":
+        return `project not found (${err.projectId})`;
+      case "persistFailed":
+        return `failed to save: ${err.message}`;
+      default:
+        return `unknown error: ${JSON.stringify(err)}`;
+    }
+  }
+
+  async function performRemove(id: string) {
+    if (removingId) return;
+    const project = projectsStore.find(id);
+    if (!project) return;
+    removingId = id;
+    actionError = null;
+    try {
+      const result = await removeProject(id);
+      await projectsStore.remove(id);
+      if (selectedId === id) selectedId = null;
+      S.appendDrawerLog(
+        `removed ${result.removedName} from list (folder left intact: ${result.removedPath})`
+      );
+    } catch (e) {
+      const err = e as RemoveProjectError;
+      const message = formatRemoveError(err);
+      actionError = `remove failed: ${message}`;
+      S.appendDrawerLog(`remove failed: ${message}`);
+    } finally {
+      removingId = null;
+    }
+  }
+
+  async function handleRemove(id: string) {
+    const project = projectsStore.find(id);
+    if (!project) return;
+    const confirmRemove = projectsStore.settings?.safety.confirmRemoveProject ?? true;
+    if (confirmRemove) {
+      const ok = await S.confirm(
+        "Remove project from list?",
+        `“${project.name}” will be removed from the Hub project list. The project folder on disk and Unity Hub registry will not be touched.`
+      );
+      if (!ok) return;
+    }
+    closeContextMenu();
+    moreMenuOpen = false;
+    await performRemove(id);
   }
 
   function handleCopyPath(project: ProjectEntry) {
@@ -383,13 +434,42 @@
     closeContextMenu();
   }
 
-  function handleRevealStub() {
-    S.appendDrawerLog("Reveal in file manager — wired in Plan 2 Task 5");
+  async function handleOpenFolder(project: ProjectEntry) {
     closeContextMenu();
+    moreMenuOpen = false;
+    const status = statusFor(project);
+    if (status.pathExists === false) {
+      actionError = `cannot open folder: path missing — ${project.path}`;
+      S.appendDrawerLog(actionError);
+      return;
+    }
+    try {
+      await openPath(project.path);
+      S.appendDrawerLog(`opened folder: ${project.path}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      actionError = `open folder failed: ${msg}`;
+      S.appendDrawerLog(actionError);
+    }
   }
 
-  function handleOpenFolderStub() {
-    S.appendDrawerLog("Open project folder — wired in Plan 2 Task 5");
+  async function handleReveal(project: ProjectEntry) {
+    closeContextMenu();
+    moreMenuOpen = false;
+    const status = statusFor(project);
+    if (status.pathExists === false) {
+      actionError = `cannot reveal: path missing — ${project.path}`;
+      S.appendDrawerLog(actionError);
+      return;
+    }
+    try {
+      await revealItemInDir(project.path);
+      S.appendDrawerLog(`revealed in file manager: ${project.path}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      actionError = `reveal failed: ${msg}`;
+      S.appendDrawerLog(actionError);
+    }
   }
 
   function rowStatus(p: ProjectEntry) {
@@ -445,12 +525,15 @@
     <Button variant="secondary" onclick={handleAiSetupStub} disabled title="AI Setup — coming soon">
       AI Setup
     </Button>
-    <Button variant="primary" onclick={handleAddProject} disabled={addingProject}>
-      {addingProject ? "Adding…" : "Add Project"}
-    </Button>
-    <Button variant="secondary" onclick={handleRefresh} disabled={refreshing}>
-      {refreshing ? "Refreshing…" : "Refresh"}
-    </Button>
+        <Button variant="primary" onclick={handleAddProject} disabled={addingProject}>
+          {addingProject ? "Adding…" : "Add Project"}
+        </Button>
+        <Button variant="secondary" onclick={handleRefresh} disabled={refreshing}>
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </Button>
+        {#if removingId}
+          <span class="toolbar-status" aria-live="polite">Removing…</span>
+        {/if}
   </div>
 
   {#if addError}
@@ -460,6 +543,20 @@
         type="button"
         class="inline-error-dismiss"
         onclick={() => (addError = null)}
+        aria-label="Dismiss error"
+      >
+        ×
+      </button>
+    </div>
+  {/if}
+
+  {#if actionError}
+    <div class="inline-error" role="alert">
+      <span class="inline-error-text">{actionError}</span>
+      <button
+        type="button"
+        class="inline-error-dismiss"
+        onclick={() => (actionError = null)}
         aria-label="Dismiss error"
       >
         ×
@@ -566,8 +663,15 @@
         >
           {launching === selected.id ? "Launching…" : "Launch"}
         </Button>
-        <Button variant="secondary" onclick={handleOpenFolderStub}>Open Folder</Button>
-        <Button variant="secondary" disabled onclick={handleKillUnityStub}>Kill Unity</Button>
+        <Button
+          variant="secondary"
+          disabled={s?.pathExists === false}
+          title={s?.pathExists === false ? "Path missing — cannot open folder" : "Open project folder"}
+          onclick={() => handleOpenFolder(selected)}
+        >
+          Open Folder
+        </Button>
+        <Button variant="secondary" disabled onclick={handleKillUnityStub} title="Kill Unity — wired in Plan 3">Kill Unity</Button>
         <div class="more-wrap">
           <Button
             variant="secondary"
@@ -596,23 +700,21 @@
                 type="button"
                 class="more-item"
                 role="menuitem"
-                onclick={() => {
-                  moreMenuOpen = false;
-                  handleRevealStub();
-                }}
+                disabled={s?.pathExists === false}
+                title={s?.pathExists === false ? "Path missing — cannot reveal" : "Reveal in file manager"}
+                onclick={() => handleReveal(selected)}
               >
                 Reveal in file manager
               </button>
+              <div class="more-sep"></div>
               <button
                 type="button"
                 class="more-item more-item-destructive"
                 role="menuitem"
-                onclick={() => {
-                  moreMenuOpen = false;
-                  handleRemoveStub();
-                }}
+                disabled={removingId === selected.id}
+                onclick={() => handleRemove(selected.id)}
               >
-                Remove from list
+                {removingId === selected.id ? "Removing…" : "Remove from list"}
               </button>
             </div>
           {/if}
@@ -624,6 +726,8 @@
 
 {#if contextMenu}
   {@const ctxId = contextMenu.projectId}
+  {@const ctxProject = projectsStore.find(ctxId)}
+  {@const ctxStatus = ctxProject ? statusFor(ctxProject) : null}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_interactive_supports_focus -->
   <div
@@ -637,9 +741,9 @@
       type="button"
       class="ctx-item"
       role="menuitem"
+      disabled={!ctxStatus?.launchable}
       onclick={() => {
-        const project = projectsStore.find(ctxId);
-        if (project) handleLaunch(project.id);
+        if (ctxProject) handleLaunch(ctxProject.id);
         closeContextMenu();
       }}
     >
@@ -649,9 +753,10 @@
       type="button"
       class="ctx-item"
       role="menuitem"
+      disabled={ctxStatus?.pathExists === false}
+      title={ctxStatus?.pathExists === false ? "Path missing — cannot open folder" : "Open project folder"}
       onclick={() => {
-        const project = projectsStore.find(ctxId);
-        if (project) handleOpenFolderStub();
+        if (ctxProject) handleOpenFolder(ctxProject);
         closeContextMenu();
       }}
     >
@@ -661,9 +766,10 @@
       type="button"
       class="ctx-item"
       role="menuitem"
+      disabled={ctxStatus?.pathExists === false}
+      title={ctxStatus?.pathExists === false ? "Path missing — cannot reveal" : "Reveal in file manager"}
       onclick={() => {
-        const project = projectsStore.find(ctxId);
-        if (project) handleRevealStub();
+        if (ctxProject) handleReveal(ctxProject);
         closeContextMenu();
       }}
     >
@@ -674,8 +780,7 @@
       class="ctx-item"
       role="menuitem"
       onclick={() => {
-        const project = projectsStore.find(ctxId);
-        if (project) handleCopyPath(project);
+        if (ctxProject) handleCopyPath(ctxProject);
       }}
     >
       Copy path
@@ -685,12 +790,12 @@
       type="button"
       class="ctx-item ctx-item-destructive"
       role="menuitem"
+      disabled={removingId === ctxId}
       onclick={() => {
-        handleRemoveStub();
-        closeContextMenu();
+        handleRemove(ctxId);
       }}
     >
-      Remove from list
+      {removingId === ctxId ? "Removing…" : "Remove from list"}
     </button>
   </div>
 {/if}
@@ -714,6 +819,11 @@
 
   .toolbar-spacer {
     flex: 1;
+  }
+
+  .toolbar-status {
+    font-size: 0.78rem;
+    color: #8b8d9a;
   }
 
   .inline-error {
@@ -1020,6 +1130,19 @@
     color: #fff;
   }
 
+  .more-item-destructive:disabled,
+  .more-item:disabled {
+    color: #555;
+    cursor: not-allowed;
+    background: transparent;
+  }
+
+  .more-sep {
+    height: 1px;
+    background: #34353f;
+    margin: 0.25rem 0;
+  }
+
   .ctx-menu {
     position: fixed;
     z-index: 100;
@@ -1056,6 +1179,13 @@
   .ctx-item-destructive:hover {
     background: #3a1a25;
     color: #fff;
+  }
+
+  .ctx-item-destructive:disabled,
+  .ctx-item:disabled {
+    color: #555;
+    cursor: not-allowed;
+    background: transparent;
   }
 
   .ctx-sep {

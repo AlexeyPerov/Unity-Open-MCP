@@ -122,7 +122,9 @@ Dependencies: Task 3; Task 1 for refresh.
 
 ---
 
-#### Task 5: Project row actions — launch, folder, reveal, remove (M1-10) [Score:8] [Agent:medium]
+#### Task 5: Project row actions — launch, folder, reveal, remove (M1-10) [Score:8] [Agent:medium] [DONE]
+
+**Status:** DONE 2026-06-10 13:20 MSK.
 
 **Required context**
 
@@ -161,7 +163,7 @@ Plan 1 → Task 3 → Task 4 → Task 5
 
 - [x] Unity installs discovered with documented precedence.
 - [x] Projects launch with correct version, args, and optional `-buildTarget`.
-- [ ] Projects tab supports list, search, filter, add, and core row actions.
+- [x] Projects tab supports list, search, filter, add, and core row actions.
 - [x] Missing-path and missing-version states visible and enforced in UI.
 
 **Next:** [execution-plan-3-versions-tools.md](./execution-plan-3-versions-tools.md)

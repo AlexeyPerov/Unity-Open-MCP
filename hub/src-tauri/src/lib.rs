@@ -27,6 +27,7 @@ pub fn run() {
             config::launch::refresh_project_version,
             config::projects::add_project,
             config::projects::refresh_all_projects,
+            config::projects::remove_project,
             config::commands::check_paths_exists,
         ])
         .run(tauri::generate_context!())

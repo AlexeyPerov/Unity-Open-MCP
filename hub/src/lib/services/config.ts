@@ -106,6 +106,17 @@ export interface RefreshAllResult {
   skipped: string[];
 }
 
+export type RemoveProjectError =
+  | { type: "projectNotFound"; projectId: string }
+  | { type: "persistFailed"; message: string };
+
+export interface RemoveProjectResult {
+  projectId: string;
+  removedName: string;
+  removedPath: string;
+  projects: ProjectsFile;
+}
+
 export async function loadSettings(): Promise<Settings> {
   return invoke<Settings>("load_settings");
 }
@@ -156,4 +167,8 @@ export async function addProject(path: string): Promise<AddProjectResult> {
 
 export async function refreshAllProjects(): Promise<RefreshAllResult> {
   return invoke<RefreshAllResult>("refresh_all_projects");
+}
+
+export async function removeProject(projectId: string): Promise<RemoveProjectResult> {
+  return invoke<RemoveProjectResult>("remove_project", { projectId });
 }

@@ -47,6 +47,12 @@ class ProjectsStore {
     this.projects = [...this.projects, entry];
   }
 
+  async remove(id: string): Promise<void> {
+    const next = this.projects.filter((p) => p.id !== id);
+    this.projects = next;
+    await this.persist(next);
+  }
+
   replaceAll(list: ProjectEntry[]): void {
     this.projects = list;
   }

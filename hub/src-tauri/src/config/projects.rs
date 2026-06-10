@@ -37,6 +37,24 @@ pub struct RefreshOutcome {
     pub skipped: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum RemoveProjectError {
+    #[serde(rename_all = "camelCase")]
+    ProjectNotFound { project_id: String },
+    #[serde(rename_all = "camelCase")]
+    PersistFailed { message: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveProjectResult {
+    pub project_id: String,
+    pub removed_name: String,
+    pub removed_path: String,
+    pub projects: ProjectsFile,
+}
+
 fn is_unity_project_root(path: &Path) -> Result<(), String> {
     if !path.is_dir() {
         return Err(format!("Path is not a directory: {}", path.display()));
@@ -199,6 +217,49 @@ pub fn refresh_all_projects(state: State<AppState>) -> RefreshOutcome {
     }
 }
 
+#[tauri::command]
+pub fn remove_project(
+    state: State<AppState>,
+    project_id: String,
+) -> Result<RemoveProjectResult, RemoveProjectError> {
+    let mut projects = state.projects.lock().unwrap().clone();
+
+    let removed = projects
+        .projects
+        .iter()
+        .find(|p| p.id == project_id)
+        .cloned();
+
+    let removed = match removed {
+        Some(p) => p,
+        None => {
+            return Err(RemoveProjectError::ProjectNotFound {
+                project_id: project_id.clone(),
+            });
+        }
+    };
+
+    projects.projects.retain(|p| p.id != project_id);
+
+    if let Err(e) = persistence::save_projects(&projects) {
+        return Err(RemoveProjectError::PersistFailed {
+            message: e.to_string(),
+        });
+    }
+
+    {
+        let mut guard = state.projects.lock().unwrap();
+        *guard = projects.clone();
+    }
+
+    Ok(RemoveProjectResult {
+        project_id: removed.id.clone(),
+        removed_name: removed.name.clone(),
+        removed_path: removed.path.clone(),
+        projects,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,5 +333,63 @@ mod tests {
         let p = Path::new("/");
         let name = derive_name(p);
         assert!(!name.is_empty());
+    }
+
+    fn entry_with(id: &str, path: &str) -> ProjectEntry {
+        ProjectEntry {
+            id: id.to_string(),
+            name: derive_name(Path::new(path)),
+            path: path.to_string(),
+            unity_version: Some("6000.0.1f1".to_string()),
+            last_opened_at: None,
+            last_modified_at: None,
+            launch_args: None,
+            platform_intent: None,
+            last_launch_pid: None,
+            last_launch_at: None,
+        }
+    }
+
+    #[test]
+    fn remove_project_entry_serializes() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("MyGame");
+        make_unity_project(&project, Some("6000.0.1f1"));
+        let entry = entry_with("abc-123", project.to_str().unwrap());
+
+        let result = RemoveProjectResult {
+            project_id: entry.id.clone(),
+            removed_name: entry.name.clone(),
+            removed_path: entry.path.clone(),
+            projects: ProjectsFile {
+                version: 1,
+                projects: vec![entry.clone()],
+            },
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"projectId\""));
+        assert!(json.contains("\"removedName\""));
+        assert!(json.contains("\"removedPath\""));
+        assert!(json.contains("\"projects\""));
+    }
+
+    #[test]
+    fn remove_project_error_not_found_serializes() {
+        let err = RemoveProjectError::ProjectNotFound {
+            project_id: "missing".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"projectNotFound\""));
+        assert!(json.contains("\"missing\""));
+    }
+
+    #[test]
+    fn remove_project_error_persist_failed_serializes() {
+        let err = RemoveProjectError::PersistFailed {
+            message: "io error".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"persistFailed\""));
+        assert!(json.contains("\"io error\""));
     }
 }
