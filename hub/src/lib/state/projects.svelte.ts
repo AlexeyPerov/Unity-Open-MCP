@@ -1,29 +1,31 @@
 import {
   loadProjects,
-  loadSettings,
   saveProjects,
   type ProjectEntry,
   type ProjectsFile,
   type Settings,
 } from "$lib/services/config";
+import { settingsStore } from "$lib/state/settings.svelte";
 
 class ProjectsStore {
   projects = $state<ProjectEntry[]>([]);
-  settings = $state<Settings | null>(null);
   selectedProjectId = $state<string | null>(null);
   loading = $state(false);
   error = $state<string | null>(null);
+
+  get settings(): Settings | null {
+    return settingsStore.current;
+  }
 
   async load(): Promise<void> {
     this.loading = true;
     this.error = null;
     try {
-      const [projectsFile, settings] = await Promise.all([
+      const [projectsFile] = await Promise.all([
         loadProjects(),
-        loadSettings(),
+        settingsStore.load(),
       ]);
       this.projects = projectsFile.projects;
-      this.settings = settings;
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);
       this.projects = [];

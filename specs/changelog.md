@@ -1,3 +1,20 @@
+## 2026-06-10 15:15 MSK
+
+- Completed M1 Plan 4 Task 1 — Settings tab (prefs, columns, safety, discovery):
+  - Added `hub/src/lib/state/settings.svelte.ts` — shared Svelte 5 `$state` settings store. Owns the in-memory `Settings` object loaded via `loadSettings()` and exposes typed mutators (`setLaunchMode`, `setRememberLastSelection`, `setShowPathColumn`, `setShowModifiedColumn`, `setSearchIncludesPath`, `setConfirmKillUnity`, `setConfirmRemoveProject`, `addDiscoveryFolder`, `removeDiscoveryFolder`) that deep-clone, persist via `saveSettings`, and update the in-memory state. `addDiscoveryFolder` / `removeDiscoveryFolder` compare the previous and new `parentFolders` list and trigger `discoveryStore.refresh()` only when the list actually changed, satisfying "Discovery folder changes trigger background rescan (Plan 2 Task 1)". All mutators are no-ops when the value is unchanged, so toggling a checkbox that's already at the right value never round-trips to disk.
+  - Refactored `hub/src/lib/state/projects.svelte.ts` to delegate settings ownership to the new store: `settings` is now a getter that returns `settingsStore.current` (so the existing `projectsStore.settings?.projectList.searchIncludesPath` reads in `ProjectsTab.svelte` stay reactive without code changes), and `load()` calls `settingsStore.load()` alongside `loadProjects()`. The store no longer maintains its own `Settings` `$state` field.
+  - Added `hub/src/lib/version.ts` with `APP_NAME` and `APP_VERSION` constants (matches `tauri.conf.json` / `package.json` at `0.1.0`) for the Settings tab footer.
+  - Built out `SettingsTab.svelte` per `hub-ui.md` §Settings (Plan 4 Task 1 acceptance surface):
+    - **Launch** — radio group (Open project scene on launch / Open empty editor only, bound to `settings.launch.mode`) plus a "Remember last selected project on startup" checkbox bound to `settings.launch.rememberLastSelection`.
+    - **Project list** — three independent checkboxes (`showPathColumn`, `showModifiedColumn`, `searchIncludesPath`). All apply live to the Projects tab via the existing `projectsStore.settings` reads (no restart needed, no Save button).
+    - **Safety** — two checkboxes (`confirmKillUnity`, `confirmRemoveProject`); Projects tab kill/remove flows already consult these.
+    - **Unity discovery** — scrollable list of `unityDiscovery.parentFolders` with a Remove button per row, plus an Add Folder button that opens a native folder picker via `@tauri-apps/plugin-dialog` and pipes the picked path through `settingsStore.addDiscoveryFolder`. Removing or adding a folder logs a drawer message and triggers a background discovery rescan.
+    - **Diagnostics** — placeholder section noting "coming soon" (Plan 4 Task 2 ships the reveal links and export bundle).
+    - **Sticky footer** — "Changes save automatically" / "Saving…" / "Saved ✓" / "Save failed" status with `aria-live="polite"`, and the read-only `Unity Agent Hub v0.1.0 · build` version label.
+  - All settings are saved through the existing `save_settings` Tauri command (Plan 1 Task 3), so the round-trip through `settings.json` is covered by the existing persistence unit tests; no backend changes were required.
+  - `cargo test`: 74/74 pass. `npm run check`: 0 errors, 0 warnings. `npm run build` and `cargo check`: clean.
+  - Marked Task 1 as DONE in [execution/M1/execution-plan-4-settings-validation.md](execution/M1/execution-plan-4-settings-validation.md); Plan 4 exit criterion "Settings tab complete with auto-save and live UI effects" is now DONE.
+
 ## 2026-06-10 14:30 MSK
 
 - Completed M1 Plan 3 Tasks 3 & 4 — Tools tab log shortcuts + PID-scoped Kill Unity:
