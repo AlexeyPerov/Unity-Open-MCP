@@ -21,6 +21,7 @@
   import StatusChip from "$lib/components/StatusChip.svelte";
   import RelativeTime from "$lib/components/RelativeTime.svelte";
   import VirtualList from "$lib/components/VirtualList.svelte";
+  import { AI_SETUP_ENABLED } from "$lib/features";
 
   type FilterPreset = "all" | "launchable" | "missingVersion" | "missingPath";
   type StatusKind =
@@ -431,6 +432,10 @@
   }
 
   function handleAiSetupStub() {
+    if (AI_SETUP_ENABLED) {
+      S.appendDrawerLog("AI Setup — placeholder for M4 wizard");
+      return;
+    }
     S.appendDrawerLog("AI Setup — coming in a later milestone");
   }
 
@@ -581,9 +586,20 @@
 
     <div class="toolbar-spacer"></div>
 
-    <Button variant="secondary" onclick={handleAiSetupStub} disabled title="AI Setup — coming soon">
-      AI Setup
-    </Button>
+    {#if AI_SETUP_ENABLED}
+      <Button variant="secondary" onclick={handleAiSetupStub} title="AI Setup — coming in M4">
+        AI Setup
+      </Button>
+    {:else}
+      <Button
+        variant="secondary"
+        onclick={handleAiSetupStub}
+        disabled
+        title="AI Setup — coming in a later milestone (reserved slot)"
+      >
+        AI Setup
+      </Button>
+    {/if}
         <Button variant="primary" onclick={handleAddProject} disabled={addingProject}>
           {addingProject ? "Adding…" : "Add Project"}
         </Button>
