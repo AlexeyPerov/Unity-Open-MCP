@@ -76,6 +76,9 @@ fn read_unity_version(project_path: &Path) -> Option<String> {
         .join("ProjectVersion.txt");
     let content = fs::read_to_string(&version_file).ok()?;
     for line in content.lines() {
+        // Strip a UTF-8 BOM if the file was hand-edited in a tool that
+        // prepends one — it would otherwise break the strip_prefix match.
+        let line = line.strip_prefix('\u{FEFF}').unwrap_or(line);
         if let Some(version) = line.strip_prefix("m_EditorVersion:") {
             let trimmed = version.trim();
             if !trimmed.is_empty() {

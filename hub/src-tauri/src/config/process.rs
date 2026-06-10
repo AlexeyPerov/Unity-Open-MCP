@@ -264,8 +264,10 @@ mod tests {
 
     #[test]
     fn not_found_for_unused_pid() {
-        // Pick a high PID unlikely to be in use. u32::MAX is reserved-ish on
-        // most systems and `kill -0` will report ESRCH.
+        // `u32::MAX` is well above `pid_max` on every mainstream OS
+        // (Linux/macOS default 4194304, Windows default ~4M); `kill -0`
+        // and `tasklist` will both report it as missing. Using a fixed
+        // reserved value keeps the test hermetic and deterministic.
         let result = terminate_process(u32::MAX);
         assert_eq!(result.status, KillUnityStatus::NotFound);
     }

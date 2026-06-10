@@ -88,11 +88,7 @@ fn crash_logs_dir() -> PathBuf {
 
 pub fn resolve_log_paths(project_path: &Path) -> LogPaths {
     let editor_dir = editor_logs_dir();
-    let editor_file = editor_dir.join(if cfg!(target_os = "macos") {
-        "Editor.log"
-    } else {
-        "Editor.log"
-    });
+    let editor_file = editor_dir.join("Editor.log");
     let player_dir = project_path.join("Logs");
     let crash_dir = crash_logs_dir();
 

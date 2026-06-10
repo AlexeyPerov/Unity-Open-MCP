@@ -20,13 +20,13 @@
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      S.appendDrawerLog(`discovery refresh failed: ${msg}`);
+      S.appendErrorLog(`discovery refresh failed: ${msg}`);
     }
     try {
       await projectsStore.load();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      S.appendDrawerLog(`projects reload failed: ${msg}`);
+      S.appendErrorLog(`projects reload failed: ${msg}`);
     }
   }
 </script>

@@ -30,6 +30,10 @@ class AppState {
 
   appendDrawerLog(line: string) {
     this.drawerLogs = [...this.drawerLogs, line].slice(-500);
+  }
+
+  appendErrorLog(line: string) {
+    this.appendDrawerLog(line);
     this.drawerExpanded = true;
   }
 

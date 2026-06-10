@@ -10,7 +10,7 @@ Use a copy of this checklist per platform. Record pass/fail notes inline. Critic
 
 | # | Check | Command | Expected | Result |
 |---|-------|---------|----------|--------|
-| 0.1 | Rust unit tests | `cargo test --manifest-path hub/src-tauri/Cargo.toml` | `74+` tests pass; new count grows with each plan (see latest changelog entry) | ☐ |
+| 0.1 | Rust unit tests | `cargo test --manifest-path hub/src-tauri/Cargo.toml` | all tests pass (see the latest `specs/changelog.md` entry for the current count) | ☐ |
 | 0.2 | Frontend typecheck | `npm --prefix hub run check` | `0 errors, 0 warnings` | ☐ |
 | 0.3 | Frontend build | `npm --prefix hub run build` | clean exit, no errors | ☐ |
 | 0.4 | Tauri typecheck | `cargo check --manifest-path hub/src-tauri/Cargo.toml` | clean exit | ☐ |

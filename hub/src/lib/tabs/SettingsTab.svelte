@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { S } from "$lib/state.svelte";
   import { settingsStore } from "$lib/state/settings.svelte";
-  import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import {
     getDiagnosticsPaths,
@@ -33,7 +33,7 @@
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
-        S.appendDrawerLog(`settings load failed: ${msg}`);
+        S.appendErrorLog(`settings load failed: ${msg}`);
       }
       try {
         diagnosticsPaths = await getDiagnosticsPaths();
@@ -41,7 +41,7 @@
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
         diagnosticsError = `config dir lookup failed: ${msg}`;
-        S.appendDrawerLog(diagnosticsError);
+        S.appendErrorLog(diagnosticsError);
       }
     })();
     return () => {
@@ -63,7 +63,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       lastError = `${label}: ${msg}`;
-      S.appendDrawerLog(`${label} failed: ${msg}`);
+      S.appendErrorLog(`${label} failed: ${msg}`);
     }
   }
 
@@ -129,16 +129,19 @@
       if (!picked || typeof picked !== "string") {
         return;
       }
+      // Some platforms can return a trailing separator; trim so equality
+      // checks against existing entries work and the stored path is clean.
+      const normalized = trimTrailingSeparators(picked);
       await withErrorBoundary("add discovery folder", () =>
-        settingsStore.addDiscoveryFolder(picked)
+        settingsStore.addDiscoveryFolder(normalized)
       );
       S.appendDrawerLog(
-        `added discovery folder: ${picked} (rescanning Unity installs…)`
+        `added discovery folder: ${normalized} (rescanning Unity installs…)`
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       lastError = `folder picker failed: ${msg}`;
-      S.appendDrawerLog(lastError);
+      S.appendErrorLog(lastError);
     } finally {
       addingFolder = false;
     }
@@ -161,6 +164,14 @@
     lastError = null;
   }
 
+  function trimTrailingSeparators(path: string): string {
+    let end = path.length;
+    while (end > 1 && (path[end - 1] === "/" || path[end - 1] === "\\")) {
+      end--;
+    }
+    return path.slice(0, end);
+  }
+
   async function handleReveal(label: string, filePath: string | undefined) {
     if (!filePath) return;
     try {
@@ -168,7 +179,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       lastError = `reveal ${label} failed: ${msg}`;
-      S.appendDrawerLog(lastError);
+      S.appendErrorLog(lastError);
     }
   }
 
@@ -198,24 +209,18 @@
     lastError = null;
     try {
       const defaultName = buildDefaultExportName();
-      const target = await saveDialog({
-        title: "Export diagnostics bundle",
-        defaultPath: defaultName,
-        filters: [{ name: "Folder name (Hub will create the folder)", extensions: ["*"] }],
+      const parent = await openDialog({
+        title: "Choose where to create the diagnostics bundle folder",
+        directory: true,
+        multiple: false,
       });
-      if (!target) {
+      if (!parent || typeof parent !== "string") {
         return;
       }
-      let trimmed = target.trim();
-      const lastSlash = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
-      if (lastSlash >= 0) {
-        const ext = trimmed.slice(lastSlash + 1);
-        if (ext.includes(".")) {
-          trimmed = trimmed.slice(0, lastSlash);
-        }
-      }
+      const trimmedParent = trimTrailingSeparators(parent);
+      const target = `${trimmedParent}/${defaultName}`;
       const logTail = buildLogTail();
-      const result = await exportDiagnostics(trimmed, logTail.length > 0 ? logTail : null);
+      const result = await exportDiagnostics(target, logTail.length > 0 ? logTail : null);
       lastExportPath = result.path;
       S.appendDrawerLog(
         `exported diagnostics bundle to ${result.path} ` +
@@ -226,7 +231,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       lastError = `export failed: ${msg}`;
-      S.appendDrawerLog(lastError);
+      S.appendErrorLog(lastError);
     } finally {
       exporting = false;
     }

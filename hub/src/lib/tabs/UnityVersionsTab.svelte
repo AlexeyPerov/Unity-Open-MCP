@@ -98,7 +98,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `refresh failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     } finally {
       refreshing = false;
     }
@@ -133,7 +133,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `open folder failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     }
   }
 
@@ -146,7 +146,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `reveal failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     }
   }
 
@@ -159,7 +159,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `open release notes failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     }
   }
 
@@ -176,7 +176,7 @@
       const err = e as RunUnityError;
       const message = formatRunError(err);
       actionError = message;
-      S.appendDrawerLog(message);
+      S.appendErrorLog(message);
     } finally {
       running = null;
     }

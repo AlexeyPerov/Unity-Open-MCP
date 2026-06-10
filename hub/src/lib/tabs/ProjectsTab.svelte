@@ -60,10 +60,6 @@
   onMount(() => {
     let cancelled = false;
     (async () => {
-      const pendingFilter = S.consumeProjectsFilter();
-      if (pendingFilter) {
-        filterPreset = pendingFilter;
-      }
       await projectsStore.load();
       if (cancelled) return;
       await refreshPathExistence();
@@ -75,6 +71,17 @@
       window.removeEventListener("click", closeContextMenu, true);
       window.removeEventListener("keydown", handleGlobalKeydown, true);
     };
+  });
+
+  // Consume the deep-link filter set by the Unity Versions "Show projects →"
+  // banner. Reactive so it works whether the tab is already mounted or
+  // mounted fresh after the request.
+  $effect(() => {
+    const pending = S.pendingProjectsFilter;
+    if (pending) {
+      filterPreset = pending;
+      S.pendingProjectsFilter = null;
+    }
   });
 
   async function refreshPathExistence() {
@@ -89,7 +96,7 @@
       pathExistsMap = await checkPathsExists(paths);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      S.appendDrawerLog(`path check failed: ${msg}`);
+      S.appendErrorLog(`path check failed: ${msg}`);
     } finally {
       checkingPaths = false;
     }
@@ -227,16 +234,18 @@
     if (!project) return;
     const status = statusFor(project);
     if (status.pathExists === false) {
-      S.appendDrawerLog(`cannot launch: path missing — ${project.path}`);
+      S.appendErrorLog(`cannot launch: path missing — ${project.path}`);
       return;
     }
     launching = id;
     try {
       const result = await launchProject(id);
+      // Rust already records lastLaunchPid and lastLaunchAt on the project
+      // entry; only mirror the version + PID into the local store and let
+      // projectsStore.update round-trip the new fields.
       const updated: ProjectEntry = {
         ...project,
         lastLaunchPid: result.pid,
-        lastLaunchAt: new Date().toISOString(),
         unityVersion: result.unityVersion ?? project.unityVersion,
       };
       await projectsStore.update(updated);
@@ -246,7 +255,7 @@
     } catch (e) {
       const err = e as LaunchError;
       const message = formatLaunchError(err, project);
-      S.appendDrawerLog(message);
+      S.appendErrorLog(message);
     } finally {
       launching = null;
     }
@@ -331,11 +340,11 @@
       } catch (e) {
         const err = e as AddProjectError;
         addError = formatAddProjectError(err);
-        S.appendDrawerLog(`add project failed: ${addError}`);
+        S.appendErrorLog(`add project failed: ${addError}`);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      S.appendDrawerLog(`folder picker failed: ${msg}`);
+      S.appendErrorLog(`folder picker failed: ${msg}`);
     } finally {
       addingProject = false;
     }
@@ -370,7 +379,7 @@
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      S.appendDrawerLog(`refresh failed: ${msg}`);
+      S.appendErrorLog(`refresh failed: ${msg}`);
     } finally {
       refreshing = false;
     }
@@ -395,7 +404,12 @@
     actionError = null;
     try {
       const result = await killUnity(pid);
-      S.appendDrawerLog(formatKillResult(result));
+      const killMessage = formatKillResult(result);
+      if (result.status === "accessDenied") {
+        S.appendErrorLog(killMessage);
+      } else {
+        S.appendDrawerLog(killMessage);
+      }
       if (result.status === "killed" || result.status === "notFound") {
         // Clear the recorded PID for this project so subsequent Kill
         // buttons show the "no recent launch" state.
@@ -405,7 +419,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `kill failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     } finally {
       killingId = null;
     }
@@ -417,7 +431,7 @@
     const pid = project.lastLaunchPid;
     if (!pid) {
       actionError = `no recent Unity launch recorded for ${project.name}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
       return;
     }
     const confirmKill = projectsStore.settings?.safety.confirmKillUnity ?? true;
@@ -466,7 +480,7 @@
       const err = e as RemoveProjectError;
       const message = formatRemoveError(err);
       actionError = `remove failed: ${message}`;
-      S.appendDrawerLog(`remove failed: ${message}`);
+      S.appendErrorLog(`remove failed: ${message}`);
     } finally {
       removingId = null;
     }
@@ -492,7 +506,7 @@
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(project.path).then(
         () => S.appendDrawerLog(`copied path: ${project.path}`),
-        () => S.appendDrawerLog("copy failed: clipboard unavailable")
+        () => S.appendErrorLog("copy failed: clipboard unavailable")
       );
     }
     closeContextMenu();
@@ -504,7 +518,7 @@
     const status = statusFor(project);
     if (status.pathExists === false) {
       actionError = `cannot open folder: path missing — ${project.path}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
       return;
     }
     try {
@@ -513,7 +527,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `open folder failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     }
   }
 
@@ -523,7 +537,7 @@
     const status = statusFor(project);
     if (status.pathExists === false) {
       actionError = `cannot reveal: path missing — ${project.path}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
       return;
     }
     try {
@@ -532,7 +546,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `reveal failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     }
   }
 
@@ -550,14 +564,14 @@
     { id: "missingPath", label: "Missing path" },
   ];
 
-  function gridTemplate(): string {
+  let gridTemplate = $derived.by(() => {
     const cols = ["minmax(8rem, 1.1fr)"];
     if (showPath) cols.push("minmax(10rem, 2.4fr)");
     cols.push("minmax(6rem, 0.9fr)");
     if (showModified) cols.push("minmax(5rem, 0.8fr)");
     cols.push("minmax(11rem, 1.5fr)");
     return cols.join(" ");
-  }
+  });
 </script>
 
 <div class="projects">
@@ -645,7 +659,7 @@
     aria-rowcount={filtered.length + 1}
     aria-colcount={showPath && showModified ? 5 : showPath || showModified ? 4 : 3}
   >
-    <div class="table-head" role="row" style="grid-template-columns: {gridTemplate()};">
+    <div class="table-head" role="row" style="grid-template-columns: {gridTemplate};">
       <div class="th" role="columnheader">Name</div>
       {#if showPath}
         <div class="th" role="columnheader">Path</div>
@@ -669,7 +683,7 @@
             aria-rowindex={index + 2}
             aria-selected={projectsStore.selectedProjectId === project.id}
             tabindex={projectsStore.selectedProjectId === project.id ? 0 : -1}
-            style="grid-template-columns: {gridTemplate()};"
+            style="grid-template-columns: {gridTemplate};"
             onclick={() => selectRow(project.id)}
             ondblclick={() => handleLaunch(project.id)}
             oncontextmenu={(e) => openContextMenu(e, project.id)}

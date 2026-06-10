@@ -89,6 +89,10 @@ fn read_hub_projects() -> Result<(Vec<HubProjectData>, String), String> {
 #[tauri::command]
 pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
     {
+        // Skip on a non-empty list. Note: an empty array also counts as
+        // "already has projects" (the user has explicitly cleared the
+        // list), so the seed will not re-run after a full removal. There
+        // is no M1 UI to re-import from Unity Hub — see backlog.md.
         let guard = state.projects.lock().unwrap();
         if !guard.projects.is_empty() {
             return SeedResult {
@@ -144,6 +148,9 @@ pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
         });
     }
 
+    // Most-recent first. `Option<&String>::cmp` puts `None` last in a
+    // descending sort (since `None < Some(_)`), so projects with a
+    // missing timestamp are pushed to the bottom.
     entries.sort_by(|a, b| {
         b.last_modified_at
             .as_ref()

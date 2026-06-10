@@ -131,7 +131,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `save launch args failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     } finally {
       savingArgs = false;
     }
@@ -151,7 +151,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `reset launch args failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     } finally {
       savingArgs = false;
     }
@@ -181,7 +181,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `save platform intent failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     } finally {
       savingIntent = false;
     }
@@ -216,7 +216,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `open ${label} failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     } finally {
       openingLog = null;
     }
@@ -252,7 +252,7 @@
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(selected.path).then(
         () => S.appendDrawerLog(`copied path: ${selected!.path}`),
-        () => S.appendDrawerLog("copy failed: clipboard unavailable")
+        () => S.appendErrorLog("copy failed: clipboard unavailable")
       );
     }
   }
@@ -266,7 +266,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `open project folder failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     }
   }
 
@@ -289,7 +289,12 @@
     actionError = null;
     try {
       const result = await killUnity(pid);
-      S.appendDrawerLog(formatKillResult(result));
+      const killMessage = formatKillResult(result);
+      if (result.status === "accessDenied") {
+        S.appendErrorLog(killMessage);
+      } else {
+        S.appendDrawerLog(killMessage);
+      }
       if (result.status === "killed") {
         // Clear the recorded PID so subsequent Kill Unity actions show the
         // "no recent launch" state until the next launch.
@@ -303,7 +308,7 @@
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       actionError = `kill failed: ${msg}`;
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
     } finally {
       killing = false;
     }
@@ -314,7 +319,7 @@
     const pid = selected.lastLaunchPid;
     if (!pid) {
       actionError = "no recent Unity launch recorded for this project";
-      S.appendDrawerLog(actionError);
+      S.appendErrorLog(actionError);
       return;
     }
     const confirmKill = projectsStore.settings?.safety.confirmKillUnity ?? true;
