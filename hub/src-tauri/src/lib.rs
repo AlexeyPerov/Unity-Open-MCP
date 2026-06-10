@@ -24,6 +24,7 @@ pub fn run() {
             config::discovery::refresh_discovery,
             config::launch::launch_project,
             config::launch::refresh_project_version,
+            config::commands::check_paths_exists,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

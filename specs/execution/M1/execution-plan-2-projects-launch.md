@@ -68,7 +68,7 @@ Dependencies: Task 1; Plan 1 Task 3.
 
 ---
 
-#### Task 3: Projects tab — table, columns, selection (M1-8) [Score:7] [Agent:medium]
+#### Task 3: Projects tab — table, columns, selection (M1-8) [Score:7] [Agent:medium] [DONE]
 
 **Required context**
 

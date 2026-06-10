@@ -126,3 +126,9 @@ export async function refreshProjectVersion(
 ): Promise<VersionRefreshResult> {
   return invoke<VersionRefreshResult>("refresh_project_version", { projectId });
 }
+
+export async function checkPathsExists(
+  paths: string[]
+): Promise<Record<string, boolean>> {
+  return invoke<Record<string, boolean>>("check_paths_exists", { paths });
+}

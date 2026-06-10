@@ -2,13 +2,17 @@
   let {
     variant = "primary",
     disabled = false,
+    title = undefined,
     onclick,
     children,
+    ...rest
   }: {
     variant?: "primary" | "secondary" | "destructive";
     disabled?: boolean;
+    title?: string;
     onclick?: () => void;
     children?: import("svelte").Snippet;
+    [key: string]: unknown;
   } = $props();
 </script>
 
@@ -16,7 +20,9 @@
   type="button"
   class="btn btn-{variant}"
   {disabled}
+  {title}
   {onclick}
+  {...rest}
 >
   {@render children?.()}
 </button>
