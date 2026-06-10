@@ -2,13 +2,26 @@
   import { onMount } from "svelte";
   import { S } from "$lib/state.svelte";
   import { settingsStore } from "$lib/state/settings.svelte";
-  import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+  import { revealItemInDir } from "@tauri-apps/plugin-opener";
+  import {
+    getDiagnosticsPaths,
+    exportDiagnostics,
+    type DiagnosticsPaths,
+  } from "$lib/services/config";
   import Button from "$lib/components/shell/Button.svelte";
   import { APP_NAME, APP_VERSION } from "$lib/version";
 
   let addingFolder = $state(false);
   let lastError = $state<string | null>(null);
   let savedFlash = $state(false);
+
+  let diagnosticsPaths = $state<DiagnosticsPaths | null>(null);
+  let diagnosticsError = $state<string | null>(null);
+  let exporting = $state(false);
+  let lastExportPath = $state<string | null>(null);
+
+  const LOG_TAIL_LIMIT = 200;
 
   onMount(() => {
     let cancelled = false;
@@ -21,6 +34,14 @@
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
         S.appendDrawerLog(`settings load failed: ${msg}`);
+      }
+      try {
+        diagnosticsPaths = await getDiagnosticsPaths();
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        diagnosticsError = `config dir lookup failed: ${msg}`;
+        S.appendDrawerLog(diagnosticsError);
       }
     })();
     return () => {
@@ -138,6 +159,77 @@
 
   function dismissError() {
     lastError = null;
+  }
+
+  async function handleReveal(label: string, filePath: string | undefined) {
+    if (!filePath) return;
+    try {
+      await revealItemInDir(filePath);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      lastError = `reveal ${label} failed: ${msg}`;
+      S.appendDrawerLog(lastError);
+    }
+  }
+
+  function buildLogTail(): string {
+    const logs = S.drawerLogs;
+    if (logs.length === 0) return "";
+    const tail = logs.length > LOG_TAIL_LIMIT ? logs.slice(-LOG_TAIL_LIMIT) : logs;
+    const header =
+      `# Status / Log drawer tail (last ${tail.length} of ${logs.length} lines)\n` +
+      `# Exported from ${APP_NAME} v${APP_VERSION}\n` +
+      `# Captured at ${new Date().toISOString()}\n\n`;
+    return header + tail.map((line) => line + "\n").join("");
+  }
+
+  function buildDefaultExportName(): string {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const stamp =
+      `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
+      `_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+    return `unity-agent-hub-diagnostics-${stamp}`;
+  }
+
+  async function handleExportBundle() {
+    if (exporting) return;
+    exporting = true;
+    lastError = null;
+    try {
+      const defaultName = buildDefaultExportName();
+      const target = await saveDialog({
+        title: "Export diagnostics bundle",
+        defaultPath: defaultName,
+        filters: [{ name: "Folder name (Hub will create the folder)", extensions: ["*"] }],
+      });
+      if (!target) {
+        return;
+      }
+      let trimmed = target.trim();
+      const lastSlash = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+      if (lastSlash >= 0) {
+        const ext = trimmed.slice(lastSlash + 1);
+        if (ext.includes(".")) {
+          trimmed = trimmed.slice(0, lastSlash);
+        }
+      }
+      const logTail = buildLogTail();
+      const result = await exportDiagnostics(trimmed, logTail.length > 0 ? logTail : null);
+      lastExportPath = result.path;
+      S.appendDrawerLog(
+        `exported diagnostics bundle to ${result.path} ` +
+          `(settings: ${result.settingsCopied ? "yes" : "no"}, ` +
+          `projects: ${result.projectsCopied ? "yes" : "no"}, ` +
+          `log: ${result.logIncluded ? "yes" : "no"})`
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      lastError = `export failed: ${msg}`;
+      S.appendDrawerLog(lastError);
+    } finally {
+      exporting = false;
+    }
   }
 
   let settings = $derived(settingsStore.current);
@@ -314,11 +406,70 @@
         <header class="group-header">
           <h3 id="group-diagnostics" class="group-title">Diagnostics</h3>
           <p class="group-hint">
-            Config directory and export bundle actions ship in the next task.
+            Reveal Hub config files in your file manager, or export a support
+            bundle (settings + projects + log tail + version info) for sharing
+            with support.
           </p>
         </header>
         <div class="group-body">
-          <p class="placeholder-note">Coming soon.</p>
+          {#if diagnosticsError}
+            <p class="placeholder-note placeholder-error" role="alert">
+              {diagnosticsError}
+            </p>
+          {:else if !diagnosticsPaths}
+            <p class="placeholder-note">Loading config paths…</p>
+          {:else}
+            <div class="diag-row">
+              <span class="diag-label">Config dir</span>
+              <code class="diag-path" title={diagnosticsPaths.configDir}>
+                {diagnosticsPaths.configDir}
+              </code>
+              <Button
+                variant="secondary"
+                onclick={() => handleReveal("config dir", diagnosticsPaths!.configDir)}
+              >
+                Reveal
+              </Button>
+            </div>
+            <div class="diag-row">
+              <span class="diag-label">settings.json</span>
+              <code class="diag-path" title={diagnosticsPaths.settingsFile}>
+                {diagnosticsPaths.settingsFile}
+              </code>
+              <Button
+                variant="secondary"
+                onclick={() => handleReveal("settings.json", diagnosticsPaths!.settingsFile)}
+              >
+                Reveal
+              </Button>
+            </div>
+            <div class="diag-row">
+              <span class="diag-label">projects.json</span>
+              <code class="diag-path" title={diagnosticsPaths.projectsFile}>
+                {diagnosticsPaths.projectsFile}
+              </code>
+              <Button
+                variant="secondary"
+                onclick={() => handleReveal("projects.json", diagnosticsPaths!.projectsFile)}
+              >
+                Reveal
+              </Button>
+            </div>
+          {/if}
+          <div class="diag-actions">
+            <Button
+              variant="primary"
+              onclick={handleExportBundle}
+              disabled={exporting}
+            >
+              {exporting ? "Exporting…" : "Export diagnostics bundle…"}
+            </Button>
+            {#if lastExportPath}
+              <span class="diag-last-export" title={lastExportPath}>
+                Last export: {lastExportPath}
+              </span>
+            {/if}
+          </div>
         </div>
       </section>
     {/if}
@@ -524,6 +675,60 @@
     margin: 0;
     color: #6f7280;
     font-size: 0.82rem;
+  }
+
+  .placeholder-error {
+    color: #f0a8b8;
+  }
+
+  .diag-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.25rem 0;
+  }
+
+  .diag-label {
+    flex-shrink: 0;
+    width: 6.5rem;
+    font-size: 0.78rem;
+    color: #c5c7d0;
+    font-weight: 500;
+  }
+
+  .diag-path {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    color: #9ea1ad;
+    background: #14151a;
+    border: 1px solid #2a2b33;
+    border-radius: 4px;
+    padding: 0.25rem 0.45rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .diag-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-top: 0.25rem;
+  }
+
+  .diag-last-export {
+    font-size: 0.72rem;
+    color: #6f7280;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
   }
 
   .inline-error {

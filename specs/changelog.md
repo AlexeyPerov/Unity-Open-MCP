@@ -1,3 +1,19 @@
+## 2026-06-10 15:30 MSK
+
+- Completed M1 Plan 4 Task 2 — Settings diagnostics (reveal + export bundle):
+  - Added `hub/src-tauri/src/config/diagnostics.rs` — typed `DiagnosticsPaths` / `ExportDiagnosticsResult` / `ExportDiagnosticsError` (camelCase) plus two Tauri commands:
+    - `get_diagnostics_paths` returns the config dir + absolute paths to `settings.json` and `projects.json` from the existing `paths` module.
+    - `export_diagnostics(target_dir, log_tail)` creates the target directory, copies `settings.json` and `projects.json` if they exist, writes a `version.txt` (app name, version, target arch, build profile, export timestamp — all from `env!("CARGO_PKG_*")` and `cfg!`), and writes a `log.txt` if the frontend supplies a non-empty log tail. Returns the resolved bundle path plus per-file `copied` flags. Errors are typed (`invalidTarget`, `notADirectory`, `targetExists`, `readFailed`, `createFailed`, `copyFailed`, `writeFailed`, `invalidSource`) so the UI can react to "disk not writable" cleanly. Source paths are passed in by the command so the helper is unit-testable against tempdirs without touching the user's real config dir.
+  - Registered `get_diagnostics_paths` and `export_diagnostics` in `hub/src-tauri/src/lib.rs`.
+  - 10 new unit tests: paths match the `paths` module, full bundle export with log, missing source files are skipped, log file is omitted when the tail is `None`/empty, rejection of empty / file / non-empty target paths, copy failure propagation.
+  - Extended `hub/src/lib/services/config.ts` with `DiagnosticsPaths` / `ExportDiagnosticsResult` / `ExportDiagnosticsError` types and `getDiagnosticsPaths()` / `exportDiagnostics()` invokes.
+  - Replaced the placeholder Diagnostics section in `SettingsTab.svelte` per `hub-ui.md` §Settings:
+    - Loads the config dir / file paths on mount via `getDiagnosticsPaths()` (shows an inline error if the lookup fails, and logs to the status drawer).
+    - Renders the config dir path plus per-file rows (`settings.json`, `projects.json`) with a `Reveal` button that calls `revealItemInDir` from `@tauri-apps/plugin-opener` (covered by the existing `opener:default` capability, which already grants `allow-reveal-item-in-dir`).
+    - Adds an `Export diagnostics bundle…` primary button. It opens a native save dialog (default name `unity-agent-hub-diagnostics-YYYY-MM-DD_HH-MM-SS`), strips any file extension the OS appends, captures the last ≤200 lines of the status drawer (`S.drawerLogs`) into a header-prefixed `log.txt` payload, and invokes `export_diagnostics`. The resulting bundle path is shown inline below the button and logged to the drawer with per-file summary (`settings: yes/no`, `projects: yes/no`, `log: yes/no`). All failures surface as inline errors plus a drawer log entry.
+  - `cargo test`: 84/84 pass (10 new). `npm run check`: 0 errors, 0 warnings. `npm run build` and `cargo check`: clean.
+  - Marked Task 2 as DONE in [execution/M1/execution-plan-4-settings-validation.md](execution/M1/execution-plan-4-settings-validation.md); Plan 4 exit criterion "Diagnostics reveal and export work on both platforms" is now DONE.
+
 ## 2026-06-10 15:15 MSK
 
 - Completed M1 Plan 4 Task 1 — Settings tab (prefs, columns, safety, discovery):

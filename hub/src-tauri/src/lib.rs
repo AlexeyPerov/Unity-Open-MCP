@@ -32,6 +32,8 @@ pub fn run() {
             config::commands::check_paths_exists,
             config::logs::log_paths,
             config::process::kill_unity,
+            config::diagnostics::get_diagnostics_paths,
+            config::diagnostics::export_diagnostics,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

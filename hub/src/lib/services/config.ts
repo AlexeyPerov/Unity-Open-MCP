@@ -144,6 +144,24 @@ export interface RemoveProjectResult {
   projects: ProjectsFile;
 }
 
+export interface DiagnosticsPaths {
+  configDir: string;
+  settingsFile: string;
+  projectsFile: string;
+}
+
+export interface ExportDiagnosticsResult {
+  path: string;
+  settingsCopied: boolean;
+  projectsCopied: boolean;
+  logIncluded: boolean;
+}
+
+export interface ExportDiagnosticsError {
+  kind: string;
+  message: string;
+}
+
 export async function loadSettings(): Promise<Settings> {
   return invoke<Settings>("load_settings");
 }
@@ -210,4 +228,18 @@ export async function getLogPaths(projectPath: string): Promise<LogPaths> {
 
 export async function killUnity(pid: number): Promise<KillUnityResult> {
   return invoke<KillUnityResult>("kill_unity", { pid });
+}
+
+export async function getDiagnosticsPaths(): Promise<DiagnosticsPaths> {
+  return invoke<DiagnosticsPaths>("get_diagnostics_paths");
+}
+
+export async function exportDiagnostics(
+  targetDir: string,
+  logTail: string | null
+): Promise<ExportDiagnosticsResult> {
+  return invoke<ExportDiagnosticsResult>("export_diagnostics", {
+    targetDir,
+    logTail,
+  });
 }

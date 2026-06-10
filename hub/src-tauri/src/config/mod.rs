@@ -8,3 +8,4 @@ pub mod launch;
 pub mod projects;
 pub mod logs;
 pub mod process;
+pub mod diagnostics;
