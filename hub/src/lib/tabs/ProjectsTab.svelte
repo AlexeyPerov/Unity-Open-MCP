@@ -57,6 +57,10 @@
   onMount(() => {
     let cancelled = false;
     (async () => {
+      const pendingFilter = S.consumeProjectsFilter();
+      if (pendingFilter) {
+        filterPreset = pendingFilter;
+      }
       await projectsStore.load();
       if (cancelled) return;
       await refreshPathExistence();

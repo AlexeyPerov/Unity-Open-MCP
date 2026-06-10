@@ -40,7 +40,7 @@ pub struct VersionRefreshResult {
     pub unity_version: Option<String>,
 }
 
-fn get_unity_executable_path(install_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn get_unity_executable_path(install_dir: &Path) -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
         let exe = install_dir
             .join("Unity.app")
@@ -88,7 +88,7 @@ pub fn read_project_version(project_path: &Path) -> Option<String> {
     None
 }
 
-fn resolve_install_for_version(
+pub(crate) fn resolve_install_for_version(
     state: &State<AppState>,
     version: &str,
 ) -> Option<(PathBuf, String)> {
@@ -273,6 +273,59 @@ pub fn refresh_project_version(
     })
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum RunUnityError {
+    #[serde(rename_all = "camelCase")]
+    VersionMissing,
+    #[serde(rename_all = "camelCase")]
+    InstallNotFound { version: String },
+    #[serde(rename_all = "camelCase")]
+    ExecutableMissing { version: String, install_path: String },
+    #[serde(rename_all = "camelCase")]
+    LaunchFailed { version: String, message: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunUnityResult {
+    pub version: String,
+    pub pid: u32,
+    pub executable_path: String,
+}
+
+#[tauri::command]
+pub fn run_unity_install(
+    state: State<AppState>,
+    version: String,
+) -> Result<RunUnityResult, RunUnityError> {
+    if version.trim().is_empty() {
+        return Err(RunUnityError::VersionMissing);
+    }
+
+    let (executable, _install_path) =
+        resolve_install_for_version(&state, &version).ok_or_else(|| {
+            RunUnityError::InstallNotFound {
+                version: version.clone(),
+            }
+        })?;
+
+    let child = Command::new(&executable)
+        .spawn()
+        .map_err(|e| RunUnityError::LaunchFailed {
+            version: version.clone(),
+            message: format!("Failed to spawn Unity: {}", e),
+        })?;
+
+    let pid = child.id();
+
+    Ok(RunUnityResult {
+        version: version.clone(),
+        pid,
+        executable_path: executable.to_string_lossy().to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,5 +467,80 @@ mod tests {
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"projectId\""));
         assert!(json.contains("\"unityVersion\""));
+    }
+
+    #[test]
+    fn run_unity_error_version_missing_serializes() {
+        let err = RunUnityError::VersionMissing;
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"versionMissing\""));
+    }
+
+    #[test]
+    fn run_unity_error_install_not_found_serializes() {
+        let err = RunUnityError::InstallNotFound {
+            version: "6000.0.1f1".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"installNotFound\""));
+        assert!(json.contains("\"version\""));
+    }
+
+    #[test]
+    fn run_unity_error_executable_missing_serializes() {
+        let err = RunUnityError::ExecutableMissing {
+            version: "6000.0.1f1".to_string(),
+            install_path: "/Applications/Unity".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"executableMissing\""));
+        assert!(json.contains("\"installPath\""));
+    }
+
+    #[test]
+    fn run_unity_error_launch_failed_serializes() {
+        let err = RunUnityError::LaunchFailed {
+            version: "6000.0.1f1".to_string(),
+            message: "permission denied".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"launchFailed\""));
+        assert!(json.contains("\"message\""));
+    }
+
+    #[test]
+    fn run_unity_result_serializes_camel_case() {
+        let result = RunUnityResult {
+            version: "6000.0.1f1".to_string(),
+            pid: 9999,
+            executable_path: "/path/to/Unity".to_string(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"version\""));
+        assert!(json.contains("\"pid\""));
+        assert!(json.contains("\"executablePath\""));
+    }
+
+    #[test]
+    fn get_unity_executable_path_finds_macos_bundle() {
+        if !cfg!(target_os = "macos") {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let macos = dir.path().join("Unity.app").join("Contents").join("MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        fs::write(macos.join("Unity"), "").unwrap();
+
+        let found = get_unity_executable_path(dir.path());
+        assert_eq!(
+            found.as_deref().map(|p| p.to_string_lossy().to_string()),
+            Some(macos.join("Unity").to_string_lossy().to_string())
+        );
+    }
+
+    #[test]
+    fn get_unity_executable_path_returns_none_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(get_unity_executable_path(dir.path()).is_none());
     }
 }

@@ -77,6 +77,18 @@ export type LaunchError =
   | { type: "installNotFound"; projectId: string; version: string }
   | { type: "launchFailed"; projectId: string; message: string };
 
+export type RunUnityError =
+  | { type: "versionMissing" }
+  | { type: "installNotFound"; version: string }
+  | { type: "executableMissing"; version: string; installPath: string }
+  | { type: "launchFailed"; version: string; message: string };
+
+export interface RunUnityResult {
+  version: string;
+  pid: number;
+  executablePath: string;
+}
+
 export interface LaunchResult {
   projectId: string;
   pid: number;
@@ -153,6 +165,10 @@ export async function refreshProjectVersion(
   projectId: string
 ): Promise<VersionRefreshResult> {
   return invoke<VersionRefreshResult>("refresh_project_version", { projectId });
+}
+
+export async function runUnityInstall(version: string): Promise<RunUnityResult> {
+  return invoke<RunUnityResult>("run_unity_install", { version });
 }
 
 export async function checkPathsExists(

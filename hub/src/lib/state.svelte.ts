@@ -1,10 +1,13 @@
 export type Tab = "projects" | "unityVersions" | "tools" | "settings";
+export type ProjectsFilter = "all" | "launchable" | "missingVersion" | "missingPath";
 
 class AppState {
   activeTab = $state<Tab>("projects");
   showConfirmationModal = $state(false);
   drawerExpanded = $state(false);
   drawerLogs = $state<string[]>([]);
+
+  pendingProjectsFilter = $state<ProjectsFilter | null>(null);
 
   confirmationTitle = $state("");
   confirmationMessage = $state("");
@@ -32,6 +35,17 @@ class AppState {
 
   clearDrawerLogs() {
     this.drawerLogs = [];
+  }
+
+  requestProjectsFilter(filter: ProjectsFilter) {
+    this.pendingProjectsFilter = filter;
+    this.activeTab = "projects";
+  }
+
+  consumeProjectsFilter(): ProjectsFilter | null {
+    const f = this.pendingProjectsFilter;
+    this.pendingProjectsFilter = null;
+    return f;
   }
 }
 

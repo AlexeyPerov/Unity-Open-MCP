@@ -1,6 +1,8 @@
 <script lang="ts">
   import { S, type Tab } from "$lib/state.svelte";
   import { APP_NAME } from "$lib/tokens";
+  import { projectsStore } from "$lib/state/projects.svelte";
+  import { discoveryStore } from "$lib/state/discovery.svelte";
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "projects", label: "Projects" },
@@ -9,8 +11,23 @@
     { id: "settings", label: "Settings" },
   ];
 
-  function handleRefresh() {
-    // no-op stub — will be wired to rescan logic later
+  async function handleRefresh() {
+    S.appendDrawerLog("refreshing projects and Unity discovery…");
+    try {
+      await discoveryStore.refresh();
+      S.appendDrawerLog(
+        `discovery: ${discoveryStore.installations.length} install${discoveryStore.installations.length === 1 ? "" : "s"}${discoveryStore.errors.length ? `, ${discoveryStore.errors.length} error(s)` : ""}`
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendDrawerLog(`discovery refresh failed: ${msg}`);
+    }
+    try {
+      await projectsStore.load();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendDrawerLog(`projects reload failed: ${msg}`);
+    }
   }
 </script>
 

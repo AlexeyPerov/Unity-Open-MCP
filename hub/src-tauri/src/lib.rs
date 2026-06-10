@@ -25,6 +25,7 @@ pub fn run() {
             config::discovery::refresh_discovery,
             config::launch::launch_project,
             config::launch::refresh_project_version,
+            config::launch::run_unity_install,
             config::projects::add_project,
             config::projects::refresh_all_projects,
             config::projects::remove_project,

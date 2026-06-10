@@ -1,3 +1,23 @@
+## 2026-06-10 13:45 MSK
+
+- Completed M1 Plan 3 Task 1 — Unity Versions tab:
+  - Added `hub/src-tauri/src/config/launch.rs::run_unity_install` Tauri command — spawns the resolved Unity executable for a version with no project (opens the editor). Typed errors: `VersionMissing`, `InstallNotFound`, `ExecutableMissing`, `LaunchFailed` with camelCase serialization. Made `get_unity_executable_path` and `resolve_install_for_version` `pub(crate)` for reuse. Registered the new command in `hub/src-tauri/src/lib.rs`.
+  - 7 new unit tests: 4 `RunUnityError` variants serialize correctly, `RunUnityResult` camelCase serialization, `get_unity_executable_path` finds macOS bundle, returns `None` for missing directory.
+  - Added `opener:allow-open-url` to `hub/src-tauri/capabilities/default.json` (required for release notes link → system browser).
+  - Extended `hub/src/lib/services/config.ts` with `RunUnityError` / `RunUnityResult` types and `runUnityInstall(version)` invoke.
+  - Added `hub/src/lib/state/discovery.svelte.ts` — shared Svelte 5 `$state` discovery store with `load()` / `refresh()` and helpers for per-version project counts, missing-version buckets, and `ok` / `warn` / `missing` health mapping.
+  - Extended `hub/src/lib/state.svelte.ts` with a `pendingProjectsFilter` signal + `requestProjectsFilter()` / `consumeProjectsFilter()` helpers so the Versions tab can deep-link into Projects with the missing-version filter pre-applied.
+  - Built out `UnityVersionsTab.svelte` per `hub-ui.md` §Unity Versions:
+    - Toolbar: search input (filters version + path) and Refresh button (re-runs discovery via `refreshDiscovery`).
+    - Conditional warnings banner listing every `unityVersion` referenced by `projects.json` that has no install, with a "Show projects →" link that switches to the Projects tab and applies the missing-version filter.
+    - Installations table (virtualized): colored health dot + status chip on the version cell (`ok` / `warn` / `missing`), source label, install path, project count, installed date.
+    - Action bar: **Open Install Folder** (`openPath`), **Reveal** (`revealItemInDir`), **Release Notes ↗** (`openUrl` to `https://unity.com/releases/editor/whats-new/<dashes>`), **Run Unity** (new `runUnityInstall` command). All actions disabled with explanatory titles when no row is selected; Run Unity shows "Running…" while in flight.
+    - Keyboard: ↑/↓/Home/End navigate, Enter runs the selected Unity, double-click also runs.
+  - `ProjectsTab.svelte` consumes the pending filter on mount (covers the deep-link from the warnings banner). No change to its existing filter preset semantics.
+  - Wired the global TopBar Refresh button to refresh both `discoveryStore` and `projectsStore` (logs summary to the status drawer).
+  - `cargo test`: 62/62 pass (7 new). `npm run check`: 0 errors, 0 warnings. `cargo check`: clean.
+  - Marked Task 1 as DONE in [execution/M1/execution-plan-3-versions-tools.md](execution/M1/execution-plan-3-versions-tools.md); Plan 3 exit criterion "Unity Versions tab shows installs, warnings, and row actions" is now DONE.
+
 ## 2026-06-10 13:20 MSK
 
 - Completed M1 Plan 2 Task 5 — Project row actions (launch, folder, reveal, remove):

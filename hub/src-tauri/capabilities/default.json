@@ -9,6 +9,7 @@
     "fs:default",
     "opener:default",
     "opener:allow-open-path",
+    "opener:allow-open-url",
     "shell:default"
   ]
 }
