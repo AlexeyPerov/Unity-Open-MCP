@@ -145,6 +145,8 @@ pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
             platform_intent: None,
             last_launch_pid: None,
             last_launch_at: None,
+            frecency: 0,
+            git_branch: None,
         });
     }
 

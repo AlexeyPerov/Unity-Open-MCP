@@ -24,15 +24,22 @@ pub fn run() {
             config::launch::launch_project,
             config::launch::refresh_project_version,
             config::launch::run_unity_install,
+            config::launch_log::get_launch_log_tail,
             config::projects::add_project,
             config::projects::refresh_all_projects,
             config::projects::remove_project,
+            config::projects::relink_project,
             config::commands::check_paths_exists,
             config::logs::log_paths,
+            config::logs::asset_store_paths,
+            config::logs::crash_log_path,
             config::process::kill_unity,
+            config::process::is_pid_alive,
             config::diagnostics::get_diagnostics_paths,
             config::diagnostics::export_diagnostics,
             config::sizes::get_project_sizes,
+            config::build_target::get_default_build_target,
+            config::git_branch::get_git_branches,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

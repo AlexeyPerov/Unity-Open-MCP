@@ -224,6 +224,29 @@ pub fn kill_unity(pid: u32) -> KillUnityResult {
     terminate_process(pid)
 }
 
+/// Pure alive-check: returns `true` when the OS still has the PID, `false`
+/// when it does not (or when the probe itself errors out — the frontend
+/// treats both as "not running"). Used by the platform-intent nudge to
+/// decide whether to surface the "Unity is currently running for this
+/// project" warning before the user saves a new build target. We do not
+/// surface typed errors here on purpose: a probe failure is information
+/// the UI should not act on, and the next launch will re-record the PID
+/// regardless.
+#[tauri::command]
+pub fn is_pid_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        check_unix(pid).unwrap_or(false)
+    }
+    #[cfg(windows)]
+    {
+        check_windows(pid).unwrap_or(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,5 +353,33 @@ mod tests {
         // touch a real process.
         let result = kill_unity(0);
         assert_eq!(result.status, KillUnityStatus::NotFound);
+    }
+
+    #[test]
+    fn is_pid_alive_zero_returns_false() {
+        // Mirrors the kill_unity guard: PID 0 must never be reported
+        // alive, otherwise the platform-intent nudge would warn on a
+        // sentinel PID.
+        assert!(!is_pid_alive(0));
+    }
+
+    #[test]
+    fn is_pid_alive_unused_pid_returns_false() {
+        // `u32::MAX` is well above `pid_max` on every mainstream OS, so
+        // the OS will report it as missing. The helper must never panic
+        // or block; the platform-intent nudge needs a quick yes/no.
+        assert!(!is_pid_alive(u32::MAX));
+    }
+
+    #[test]
+    fn is_pid_alive_running_pid_returns_true() {
+        let (mut child, pid) = spawn_dummy_child_with_handle();
+        assert!(is_pid_alive(pid));
+        // The test child runs `sleep 99999` (or `ping 99999` on Windows)
+        // — terminate it before waiting, otherwise the test waits the
+        // full 99999 seconds. `child.wait()` blocks until the OS reaps
+        // the process; the kill must come first.
+        let _ = kill_unity(pid);
+        let _ = child.wait();
     }
 }

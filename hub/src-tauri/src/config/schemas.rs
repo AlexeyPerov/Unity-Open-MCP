@@ -8,6 +8,20 @@ pub struct Settings {
     pub project_list: ProjectListSettings,
     pub safety: SafetySettings,
     pub unity_discovery: UnityDiscoverySettings,
+    #[serde(default = "default_diagnostics_settings")]
+    pub diagnostics: DiagnosticsSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsSettings {
+    pub auto_open_drawer_on_launch_failure: bool,
+}
+
+fn default_diagnostics_settings() -> DiagnosticsSettings {
+    DiagnosticsSettings {
+        auto_open_drawer_on_launch_failure: true,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,7 +36,24 @@ pub struct LaunchSettings {
 pub struct ProjectListSettings {
     pub show_path_column: bool,
     pub show_modified_column: bool,
+    /// Added in M1.5-6. `#[serde(default)]` keeps legacy `settings.json`
+    /// files (pre-M1.5-4/6) loadable; the default is `true` so the column
+    /// is visible by default per the task acceptance checklist.
+    #[serde(default = "default_true")]
+    pub show_git_branch_column: bool,
     pub search_includes_path: bool,
+    /// `"frecency"` (default) or `"lastModified"`. Unknown values fall back to
+    /// `"frecency"` so a future field addition never bricks the list sort.
+    #[serde(default = "default_project_list_sort_by")]
+    pub sort_by: String,
+}
+
+fn default_project_list_sort_by() -> String {
+    "frecency".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,7 +80,9 @@ impl Default for Settings {
             project_list: ProjectListSettings {
                 show_path_column: true,
                 show_modified_column: true,
+                show_git_branch_column: true,
                 search_includes_path: true,
+                sort_by: default_project_list_sort_by(),
             },
             safety: SafetySettings {
                 confirm_kill_unity: true,
@@ -60,6 +93,9 @@ impl Default for Settings {
                     "/Applications/Unity/Hub/Editor".to_string(),
                     "C:\\Program Files\\Unity\\Hub\\Editor".to_string(),
                 ],
+            },
+            diagnostics: DiagnosticsSettings {
+                auto_open_drawer_on_launch_failure: true,
             },
         }
     }
@@ -92,6 +128,15 @@ pub struct ProjectEntry {
     pub last_launch_pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_launch_at: Option<String>,
+    /// Frecency counter. Incremented on every successful launch; the sort
+    /// score combines this counter with `lastLaunchAt` (14-day half-life).
+    /// Defaulted to 0 for legacy entries via `#[serde(default)]`.
+    #[serde(default)]
+    pub frecency: u32,
+    /// Cached git branch name (`refs/heads/<name>`) or full ref for detached
+    /// HEAD. `None` for non-git projects or when the read is pending.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
 }
 
 impl Default for ProjectsFile {
@@ -131,13 +176,71 @@ mod tests {
         let s = Settings::default();
         assert!(s.project_list.show_path_column);
         assert!(s.project_list.show_modified_column);
+        assert!(s.project_list.show_git_branch_column);
         assert!(s.project_list.search_includes_path);
+        assert_eq!(s.project_list.sort_by, "frecency");
     }
 
     #[test]
     fn settings_default_discovery_has_two_folders() {
         let s = Settings::default();
         assert_eq!(s.unity_discovery.parent_folders.len(), 2);
+    }
+
+    #[test]
+    fn settings_default_diagnostics_auto_open_on() {
+        let s = Settings::default();
+        assert!(s.diagnostics.auto_open_drawer_on_launch_failure);
+    }
+
+    #[test]
+    fn settings_diagnostics_roundtrip() {
+        let mut s = Settings::default();
+        s.diagnostics.auto_open_drawer_on_launch_failure = false;
+        let json = serde_json::to_string_pretty(&s).unwrap();
+        let restored: Settings = serde_json::from_str(&json).unwrap();
+        assert!(!restored.diagnostics.auto_open_drawer_on_launch_failure);
+    }
+
+    #[test]
+    fn settings_loads_without_diagnostics_field() {
+        // Backwards compat: legacy settings.json files written before
+        // M1.5-3 do not carry the `diagnostics` block. The default must
+        // kick in so existing user configs are not rejected.
+        let legacy = r#"{
+            "version": 1,
+            "launch": { "mode": "openProject", "rememberLastSelection": true },
+            "projectList": {
+                "showPathColumn": true,
+                "showModifiedColumn": true,
+                "searchIncludesPath": true
+            },
+            "safety": { "confirmKillUnity": true, "confirmRemoveProject": true },
+            "unityDiscovery": { "parentFolders": [] }
+        }"#;
+        let restored: Settings = serde_json::from_str(legacy).unwrap();
+        assert!(restored.diagnostics.auto_open_drawer_on_launch_failure);
+    }
+
+    #[test]
+    fn settings_loads_legacy_project_list_without_new_fields() {
+        // Pre-M1.5-4/6 settings.json files do not carry `showGitBranchColumn`
+        // or `sortBy`. Both must default in for backwards compatibility so
+        // existing user configs are not rejected.
+        let legacy = r#"{
+            "version": 1,
+            "launch": { "mode": "openProject", "rememberLastSelection": true },
+            "projectList": {
+                "showPathColumn": true,
+                "showModifiedColumn": true,
+                "searchIncludesPath": true
+            },
+            "safety": { "confirmKillUnity": true, "confirmRemoveProject": true },
+            "unityDiscovery": { "parentFolders": [] }
+        }"#;
+        let restored: Settings = serde_json::from_str(legacy).unwrap();
+        assert!(restored.project_list.show_git_branch_column);
+        assert_eq!(restored.project_list.sort_by, "frecency");
     }
 
     #[test]
@@ -187,6 +290,8 @@ mod tests {
                 platform_intent: Some("StandaloneWindows64".to_string()),
                 last_launch_pid: Some(12345),
                 last_launch_at: Some("2026-06-09T11:55:00Z".to_string()),
+                frecency: 3,
+                git_branch: Some("feature/frecency".to_string()),
             }],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -204,6 +309,8 @@ mod tests {
             Some("2026-06-09T12:00:00Z")
         );
         assert_eq!(p.last_launch_pid, Some(12345));
+        assert_eq!(p.frecency, 3);
+        assert_eq!(p.git_branch.as_deref(), Some("feature/frecency"));
     }
 
     #[test]
@@ -229,11 +336,32 @@ mod tests {
             platform_intent: None,
             last_launch_pid: None,
             last_launch_at: None,
+            frecency: 0,
+            git_branch: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(!json.contains("unityVersion"));
         assert!(!json.contains("lastOpenedAt"));
         assert!(!json.contains("lastLaunchPid"));
+        assert!(!json.contains("gitBranch"));
+        // frecency has no `skip_serializing_if`, so it is always emitted;
+        // we keep the disk file compact for legacy fields but the new
+        // counter is part of the public sort contract and must be visible.
+        assert!(json.contains("\"frecency\":0"));
+    }
+
+    #[test]
+    fn project_entry_frecency_defaults_to_zero_for_legacy_json() {
+        // Legacy projects.json files (pre-M1.5-4) have no `frecency` key.
+        // The deserializer must fill in 0 so the sort still works.
+        let legacy = r#"{
+            "id": "abc",
+            "name": "Proj",
+            "path": "/p"
+        }"#;
+        let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
+        assert_eq!(entry.frecency, 0);
+        assert!(entry.git_branch.is_none());
     }
 
     #[test]

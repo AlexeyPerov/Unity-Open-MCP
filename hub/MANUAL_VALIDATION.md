@@ -143,8 +143,8 @@ Notes:
 
 | # | Check | Expected | Result |
 |---|-------|----------|--------|
-| 8.1 | No `drag-and-drop add project` handlers in the Hub UI | Confirmed by reading the source and trying a file drop on the Projects tab — nothing happens | ☐ |
-| 8.2 | No `relink missing path` action; missing-path rows are remove-only | Confirmed via step 2.6 | ☐ |
+| 8.1 | `drag-and-drop add project` is implemented in the Hub UI (M1.5-7) | Drop a valid Unity project folder on the Projects tab — it is added with a new uuid | ☐ |
+| 8.2 | `relink missing path` action is available for missing-path rows (M1.5-8) | Right-click a row with the `missing path` chip — a `Relink…` action appears in the context menu and the popup's More menu | ☐ |
 | 8.3 | No arbitrary Unity.exe path parser — discovery is limited to configured parent folders | Confirmed via the Unity Versions tab and `discovery.rs` | ☐ |
 | 8.4 | No Linux-only code paths exposed; Linux is allowed to render but the manual test matrix is Windows + macOS only | Confirmed by [hub-requirements.md](../../specs/hub/hub-requirements.md) §V1 done criteria + [backlog.md](../../specs/hub/backlog.md) | ☐ |
 | 8.5 | No `template-based new project creation` flow | Confirmed by the Add Project button opening a folder picker only | ☐ |

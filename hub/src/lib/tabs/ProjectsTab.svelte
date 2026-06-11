@@ -5,22 +5,34 @@
   import {
     addProject,
     checkPathsExists,
+    getCrashLogPath,
+    getDefaultBuildTarget,
+    getGitBranches,
+    getLaunchLogTail,
+    getLogPaths,
     getProjectSizes,
+    isPidAlive,
     killUnity,
     launchProject,
     refreshAllProjects,
     refreshProjectVersion,
+    relinkProject,
     removeProject,
-    getLogPaths,
     type AddProjectError,
     type KillUnityResult,
     type LaunchError,
     type LogPaths,
     type ProjectEntry,
+    type RelinkProjectError,
     type RemoveProjectError,
   } from "$lib/services/config";
+  import {
+    compareFrecency,
+    compareLastModified,
+  } from "$lib/frecency";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
-  import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+  import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
   import Button from "$lib/components/shell/Button.svelte";
   import StatusChip from "$lib/components/StatusChip.svelte";
   import RelativeTime from "$lib/components/RelativeTime.svelte";
@@ -61,8 +73,13 @@
   let sizeMap = $state<Record<string, number>>({});
   let loadingSizes = $state(false);
   let logPathsMap = $state<Record<string, LogPaths>>({});
+  let defaultBuildTargetMap = $state<Record<string, string | null>>({});
+  let isDragOver = $state(false);
+  let relinkingId = $state<string | null>(null);
 
   const UNSAFE_RE = /[\n\r\0`$|&;<>]/;
+
+  const LAUNCH_LOG_TAIL_LINES = 200;
 
   const BUILD_TARGETS: string[] = [
     "StandaloneWindows64",
@@ -77,6 +94,34 @@
     "VisionOS",
   ];
 
+  const BUILD_TARGET_LABELS: Record<string, string> = {
+    Standalone: "Standalone (legacy)",
+    StandaloneWindows64: "Windows",
+    StandaloneWindows: "Windows (32-bit)",
+    StandaloneOSX: "macOS",
+    StandaloneOSXIntel: "macOS (Intel)",
+    StandaloneLinux64: "Linux",
+    iOS: "iOS",
+    iPhone: "iOS",
+    Android: "Android",
+    WebGL: "WebGL",
+    WSAPlayer: "UWP",
+    MetroPlayer: "Windows Store",
+    tvOS: "tvOS",
+    VisionOS: "visionOS",
+    Switch: "Nintendo Switch",
+    PS4: "PlayStation 4",
+    PS5: "PlayStation 5",
+    XboxOne: "Xbox One",
+    GameCoreXboxSeries: "Xbox Series X|S",
+    GameCoreXboxOne: "Xbox One (GameCore)",
+  };
+
+  function buildTargetLabel(target: string | null): string {
+    if (!target) return "—";
+    return BUILD_TARGET_LABELS[target] ?? target;
+  }
+
   onMount(() => {
     let cancelled = false;
     (async () => {
@@ -84,15 +129,85 @@
       if (cancelled) return;
       await refreshPathExistence();
       await loadSizes();
+      await loadGitBranches();
     })();
     window.addEventListener("click", closeContextMenu, true);
     window.addEventListener("keydown", handleGlobalKeydown, true);
+
+    // Drag-and-drop a folder onto the Projects tab. Tauri's webview
+    // emits a single `DragDropEvent` stream covering enter/over/leave/drop
+    // for the whole window; we toggle `isDragOver` for the visual
+    // affordance and process the first valid Unity project folder on
+    // drop. The listener is registered only while the Projects tab is
+    // mounted, so dropping files while on the Settings tab is a no-op
+    // (the user lands back here via the add-folder flow or the Relink
+    // action on a missing-path row).
+    let unlistenDrop: (() => void) | null = null;
+    (async () => {
+      try {
+        unlistenDrop = await getCurrentWebview().onDragDropEvent((event) => {
+          if (cancelled) return;
+          switch (event.payload.type) {
+            case "enter":
+            case "over":
+              isDragOver = true;
+              break;
+            case "leave":
+              isDragOver = false;
+              break;
+            case "drop":
+              isDragOver = false;
+              void handleDroppedPaths(event.payload.paths);
+              break;
+          }
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        S.appendErrorLog(`drag-drop listener failed: ${msg}`);
+      }
+    })();
+
     return () => {
       cancelled = true;
       window.removeEventListener("click", closeContextMenu, true);
       window.removeEventListener("keydown", handleGlobalKeydown, true);
+      if (unlistenDrop) unlistenDrop();
     };
   });
+
+  /**
+   * Bulk-resolve git branches for every project whose stored value is
+   * missing (e.g. projects imported from a legacy `projects.json` that
+   * pre-dates the column). The Rust resolver is bounded and async, so
+   * this does not block the Projects tab. Results are written through
+   * the store with a single bulk update; non-git projects resolve to
+   * `null` and we store that explicitly so the column never re-probes
+   * them. Per the task spec, "do not block the Projects tab on a slow
+   * disk" — the read is fast (`read_to_string` on `.git/HEAD`) but the
+   * UI never blocks on its completion.
+   */
+  async function loadGitBranches() {
+    const list = projectsStore.projects;
+    const pending = list.filter((p) => p.gitBranch === undefined);
+    if (pending.length === 0) return;
+    try {
+      const paths = pending.map((p) => p.path);
+      const map = await getGitBranches(paths);
+      // One bulk replace keeps the sort stable; doing per-row
+      // `update` calls would re-render the list once per row.
+      const next = list.map((p) => {
+        if (p.gitBranch !== undefined) return p;
+        const resolved = map[p.path];
+        // Treat `undefined` (resolver didn't return) as `null` so we
+        // don't keep re-probing on every mount.
+        return { ...p, gitBranch: resolved === undefined ? null : resolved };
+      });
+      projectsStore.replaceAll(next);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`git branch read failed: ${msg}`);
+    }
+  }
 
   $effect(() => {
     const pending = S.pendingProjectsFilter;
@@ -139,6 +254,18 @@
     try {
       const paths = await getLogPaths(project.path);
       logPathsMap = { ...logPathsMap, [project.id]: paths };
+    } catch (_e) {
+      // silently skip
+    }
+  }
+
+  async function loadDefaultBuildTarget(project: ProjectEntry) {
+    try {
+      const info = await getDefaultBuildTarget(project.path);
+      defaultBuildTargetMap = {
+        ...defaultBuildTargetMap,
+        [project.id]: info.target,
+      };
     } catch (_e) {
       // silently skip
     }
@@ -196,7 +323,8 @@
   let filtered = $derived.by(() => {
     const q = search.trim().toLowerCase();
     const includePath = projectsStore.settings?.projectList.searchIncludesPath ?? true;
-    return projectsStore.projects.filter((p) => {
+    const sortBy = projectsStore.settings?.projectList.sortBy ?? "frecency";
+    const list = projectsStore.projects.filter((p) => {
       if (q) {
         const nameMatch = p.name.toLowerCase().includes(q);
         const pathMatch = includePath && p.path.toLowerCase().includes(q);
@@ -216,6 +344,16 @@
           return true;
       }
     });
+    // Sort the filtered list before returning. The two comparators are
+    // pure (no side effects) and only depend on project fields, so the
+    // `$derived` is safe to recompute on every store/settings update.
+    const sorted = [...list];
+    if (sortBy === "lastModified") {
+      sorted.sort(compareLastModified);
+    } else {
+      sorted.sort(compareFrecency);
+    }
+    return sorted;
   });
 
   function closeContextMenu() {
@@ -242,6 +380,10 @@
       closeSettingsPopup();
       return;
     }
+    if (launchArgsInfoOpen && e.key === "Escape") {
+      launchArgsInfoOpen = false;
+      return;
+    }
   }
 
   async function handleLaunch(id: string) {
@@ -265,13 +407,82 @@
       S.appendDrawerLog(
         `launched ${project.name} (pid ${result.pid}, ${result.unityVersion ?? "version unknown"})`
       );
+      // A successful launch must never auto-open the drawer.
+      S.clearLastLaunchFailure();
     } catch (e) {
       const err = e as LaunchError;
       const message = formatLaunchError(err, project);
-      S.appendErrorLog(message);
+      const autoOpen =
+        projectsStore.settings?.diagnostics.autoOpenDrawerOnLaunchFailure ?? true;
+      S.appendLaunchLog(message, autoOpen);
+      await handleLaunchFailure(project, err, message, autoOpen);
     } finally {
       launching = null;
     }
+  }
+
+  async function handleLaunchFailure(
+    project: ProjectEntry,
+    err: LaunchError,
+    message: string,
+    autoOpen: boolean,
+  ): Promise<void> {
+    // Tail the on-disk launch log and push its lines into the in-memory
+    // drawer so the user sees the persistent record without clicking
+    // anything. We do this regardless of `autoOpen` so the data is in the
+    // stream either way.
+    let tailPath = "";
+    try {
+      const tail = await getLaunchLogTail(LAUNCH_LOG_TAIL_LINES);
+      tailPath = tail.path;
+      if (tail.content && tail.content.length > 0) {
+        const lines = tail.content.split("\n");
+        S.appendLaunchLog(
+          `--- last ${lines.length} launch log record(s) for ${project.name} ---`,
+          autoOpen,
+        );
+        for (const line of lines) {
+          S.appendLaunchLog(line, autoOpen);
+        }
+        S.appendLaunchLog("--- end launch log tail ---", autoOpen);
+      } else {
+        S.appendLaunchLog(
+          `launch log not yet written for ${project.name} (file: ${tail.path || "<unknown>"})`,
+          autoOpen,
+        );
+      }
+    } catch (tailErr) {
+      const msg = tailErr instanceof Error ? tailErr.message : String(tailErr);
+      S.appendErrorLog(`failed to read launch log: ${msg}`);
+    }
+
+    // If the failure is a Unity spawn failure, surface a quick-action that
+    // opens the platform crash-log folder.
+    let crashLogPath: string | null = null;
+    if (err.type === "launchFailed") {
+      try {
+        crashLogPath = await getCrashLogPath();
+      } catch (crashErr) {
+        // Non-fatal: just skip the crash-button.
+        crashLogPath = null;
+        void crashErr;
+      }
+    }
+
+    S.setLastLaunchFailure({
+      projectId: project.id,
+      projectName: project.name,
+      projectPath: project.path,
+      timestamp: new Date().toISOString(),
+      isLikelyCrash: err.type === "launchFailed",
+      launchLogPath: tailPath,
+      crashLogPath,
+    });
+
+    // The original `message` was already added via `appendLaunchLog`; this
+    // is a no-op in normal flow but keeps the helper self-contained for
+    // future extension.
+    void message;
   }
 
   function formatLaunchError(err: LaunchError, project: ProjectEntry): string {
@@ -337,6 +548,139 @@
         return `failed to save: ${err.message}`;
       default:
         return `unknown error: ${JSON.stringify(err)}`;
+    }
+  }
+
+  function formatRelinkError(err: RelinkProjectError): string {
+    switch (err.type) {
+      case "projectNotFound":
+        return `project not found (${err.projectId})`;
+      case "notADirectory":
+        return `not a directory — ${err.path}`;
+      case "notAUnityProject":
+        return `not a Unity project (${err.reason}) — ${err.path}`;
+      case "duplicate":
+        return `path already used by another project — ${err.path}`;
+      case "persistFailed":
+        return `failed to save: ${err.message}`;
+      default:
+        return `unknown error: ${JSON.stringify(err)}`;
+    }
+  }
+
+  /**
+   * Relink a `pathMissing` row to a new folder. The folder picker is
+   * shown with `directory: true` and `multiple: false`; on selection we
+   * call the Rust `relink_project` command, which validates the
+   * directory, refreshes the Unity version, and bumps `lastModifiedAt`
+   * to now. The frontend then refreshes the in-memory path-existence
+   * map so the missing-path chip disappears on the next render.
+   *
+   * Cancel (no folder selected) returns the row unchanged. Failed
+   * relinks (invalid folder) do not modify the project entry; the
+   * inline error keeps the user on the row.
+   */
+  async function handleRelink(project: ProjectEntry) {
+    if (relinkingId) return;
+    closeContextMenu();
+    moreMenuOpenFor = null;
+    if (settingsPopupFor === project.id) closeSettingsPopup();
+    let selected: string | string[] | null = null;
+    try {
+      selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: `Relink "${project.name}" to a Unity project folder`,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      actionError = `folder picker failed: ${msg}`;
+      S.appendErrorLog(actionError);
+      return;
+    }
+    if (!selected || typeof selected !== "string") {
+      return;
+    }
+    relinkingId = project.id;
+    actionError = null;
+    try {
+      const updated = await relinkProject(project.id, selected);
+      // Replace the in-memory entry; the store's `update` persists
+      // through to the same `projects.json` the Rust command already
+      // wrote, but keeping the two paths in sync prevents the UI from
+      // showing stale fields if the persistence layer ever drifts.
+      await projectsStore.update(updated);
+      // Re-check existence for the new path and the (now stale) old
+      // path so the missing chip clears on the next render.
+      try {
+        const map = await checkPathsExists([updated.path, project.path]);
+        pathExistsMap = { ...pathExistsMap, ...map };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        S.appendErrorLog(`path recheck failed: ${msg}`);
+      }
+      S.appendDrawerLog(
+        `relinked ${project.name} → ${updated.path} (${updated.unityVersion ?? "version unknown"})`
+      );
+    } catch (e) {
+      const err = e as RelinkProjectError;
+      const message = formatRelinkError(err);
+      actionError = `relink failed: ${message}`;
+      S.appendErrorLog(`relink failed: ${message}`);
+    } finally {
+      relinkingId = null;
+    }
+  }
+
+  /**
+   * Process a drag-and-drop payload. The Tauri webview gives us the
+   * platform-resolved paths of the dragged items; the spec is:
+   *
+   *   - Files are rejected with an inline message (we only accept
+   *     folders, matching the Add Project button).
+   *   - Exactly one valid Unity project folder is added.
+   *   - Multiple folders: process the first valid one and surface a
+   *     short note that the rest were ignored.
+   *   - Empty folder / non-Unity folder: same inline error as the
+   *     Add Project button so users get consistent feedback.
+   *   - Duplicate path: a brief inline message; the existing entry is
+   *     preserved.
+   */
+  async function handleDroppedPaths(paths: string[]) {
+    addError = null;
+    if (!paths || paths.length === 0) return;
+    // Tauri delivers the paths in the order the OS reported them; we
+    // simply pick the first item and call it a "drop" for the single-
+    // folder case. Files are detected by the absence of a directory
+    // check — `addProject` returns a typed `notADirectory` error which
+    // we surface in the dedicated file message.
+    const [first, ...rest] = paths;
+    try {
+      const result = await addProject(first);
+      projectsStore.add(result.project);
+      await refreshPathExistence();
+      await loadSizes();
+      S.appendDrawerLog(
+        `added project ${result.project.name} (${result.project.unityVersion ?? "version unknown"})`
+      );
+      if (rest.length > 0) {
+        S.appendDrawerLog(
+          `dropped ${paths.length} items; only the first valid one was added`
+        );
+      }
+    } catch (e) {
+      const err = e as AddProjectError;
+      // Files (vs. folders) come back as `notADirectory` from the
+      // backend; surface a friendlier message so the user knows why
+      // their drag was rejected.
+      if (err.type === "notADirectory") {
+        addError = `only folders can be added — dropped a file: ${err.path}`;
+        S.appendErrorLog(`drop ignored: only folders are accepted (${err.path})`);
+        return;
+      }
+      const message = formatAddProjectError(err);
+      addError = message;
+      S.appendErrorLog(`drop failed: ${message}`);
     }
   }
 
@@ -420,6 +764,7 @@
         ...project,
         unityVersion: result.unityVersion ?? project.unityVersion,
         lastModifiedAt: result.lastModifiedAt ?? project.lastModifiedAt,
+        gitBranch: result.gitBranch !== undefined ? result.gitBranch : project.gitBranch,
       };
       await projectsStore.update(updated);
       S.appendDrawerLog(
@@ -540,36 +885,32 @@
     }
   }
 
-  async function handleReveal(project: ProjectEntry) {
-    closeContextMenu();
-    moreMenuOpenFor = null;
-    const status = statusFor(project);
-    if (status.pathExists === false) {
-      actionError = `cannot reveal: path missing — ${project.path}`;
-      S.appendErrorLog(actionError);
-      return;
-    }
-    try {
-      await revealItemInDir(project.path);
-      S.appendDrawerLog(`revealed in file manager: ${project.path}`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      actionError = `reveal failed: ${msg}`;
-      S.appendErrorLog(actionError);
-    }
-  }
-
   function rowStatus(p: ProjectEntry) {
     return statusFor(p);
   }
 
   let showModified = $derived(projectsStore.settings?.projectList.showModifiedColumn ?? true);
+  let showGitBranch = $derived(projectsStore.settings?.projectList.showGitBranchColumn ?? true);
 
-  let gridTemplate = $derived(
-    showModified
-      ? "minmax(8rem, 1.1fr) minmax(6rem, 0.9fr) minmax(5rem, 0.7fr) minmax(4rem, 0.6fr) minmax(10rem, 1.4fr) 2.6rem"
-      : "minmax(8rem, 1.1fr) minmax(6rem, 0.9fr) minmax(4rem, 0.6fr) minmax(10rem, 1.4fr) 2.6rem"
-  );
+  let gridTemplate = $derived.by(() => {
+    const name = "minmax(8rem, 1.1fr)";
+    const version = "minmax(6rem, 0.9fr)";
+    const modified = "minmax(5rem, 0.7fr)";
+    const gitBranch = "minmax(5rem, 0.7fr)";
+    const size = "minmax(4rem, 0.6fr)";
+    const status = "minmax(10rem, 1.4fr)";
+    const settings = "2.6rem";
+    if (showModified && showGitBranch) {
+      return `${name} ${version} ${modified} ${gitBranch} ${size} ${status} ${settings}`;
+    }
+    if (showModified) {
+      return `${name} ${version} ${modified} ${size} ${status} ${settings}`;
+    }
+    if (showGitBranch) {
+      return `${name} ${version} ${gitBranch} ${size} ${status} ${settings}`;
+    }
+    return `${name} ${version} ${size} ${status} ${settings}`;
+  });
 
   const filterOptions: { id: FilterPreset; label: string }[] = [
     { id: "all", label: "All" },
@@ -600,9 +941,16 @@
     settingsPopupFor ? projectsStore.find(settingsPopupFor) ?? null : null
   );
 
+  let popupDefaultBuildTarget = $derived(
+    popupProject ? defaultBuildTargetMap[popupProject.id] : undefined
+  );
+
   function openSettingsPopup(id: string) {
     const project = projectsStore.find(id);
-    if (project) loadLogPaths(project);
+    if (project) {
+      loadLogPaths(project);
+      loadDefaultBuildTarget(project);
+    }
     settingsPopupFor = id;
     moreMenuOpenFor = null;
   }
@@ -693,6 +1041,23 @@
 
   async function handleSaveIntent(project: ProjectEntry) {
     const next = getIntentDraft(project.id).trim();
+    const previous = project.platformIntent ?? "";
+    // Task 5 (M1.5-5): when the recorded launch PID is still alive, the
+    // new intent will only apply on the next launch. Surface the nudge
+    // before saving so the user can opt out.
+    let proceed = true;
+    if (next !== previous && project.lastLaunchPid) {
+      const alive = await probePidAlive(project.lastLaunchPid);
+      if (alive) {
+        proceed = await S.confirm(
+          "Unity is running for this project",
+          "Unity is currently running for this project. The new platform intent applies to the next launch; live switch is not supported in v1.\n\nSave anyway?",
+        );
+      }
+    }
+    if (!proceed) {
+      return;
+    }
     savingIntentFor = project.id;
     try {
       const updated: ProjectEntry = { ...project, platformIntent: next };
@@ -710,15 +1075,72 @@
     }
   }
 
+  // Probe whether a recorded launch PID is still alive. The OS may have
+  // already reaped the process — the previous launch was the most
+  // recent; if Unity exited in the meantime the nudge is moot and the
+  // save proceeds silently. Errors are non-fatal: a failed probe
+  // (e.g. permission issue) is treated as "not alive" so the user
+  // never gets a false-positive warning.
+  async function probePidAlive(pid: number): Promise<boolean> {
+    try {
+      return await isPidAlive(pid);
+    } catch {
+      return false;
+    }
+  }
+
   function intentOptions(current: string): string[] {
     if (current && !BUILD_TARGETS.includes(current)) {
       return [current, ...BUILD_TARGETS];
     }
     return BUILD_TARGETS;
   }
+
+  let launchArgsInfoOpen = $state(false);
+
+  function toggleLaunchArgsInfo() {
+    launchArgsInfoOpen = !launchArgsInfoOpen;
+  }
+
+  const LAUNCH_ARGS_DOCS_URL =
+    "https://docs.unity3d.com/Manual/CommandLineArguments.html";
+
+  async function openLaunchArgsDocs() {
+    try {
+      await openUrl(LAUNCH_ARGS_DOCS_URL);
+      S.appendDrawerLog(`opened launch args docs: ${LAUNCH_ARGS_DOCS_URL}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`open launch args docs failed: ${msg}`);
+    }
+    launchArgsInfoOpen = false;
+  }
+
+  const LAUNCH_ARGS_EXAMPLES: { args: string; description: string }[] = [
+    {
+      args: "-batchmode -nographics -quit",
+      description:
+        "Run Unity headless in batch mode (no UI) and exit when done. Useful for CI / scripted builds.",
+    },
+    {
+      args: "-logFile -",
+      description:
+        "Write the Editor log to stdout instead of the default log file. Handy for tailing logs in another tool.",
+    },
+    {
+      args: "-username you@example.com -password **** -serial ****",
+      description:
+        "Sign in and activate a license on first launch. Only use in trusted environments — values are stored in plain text.",
+    },
+    {
+      args: "-silent-crashes",
+      description:
+        "Skip the crash-recovery dialog after a hard exit. Useful for unattended runs.",
+    },
+  ];
 </script>
 
-<div class="projects">
+<div class="projects" class:drag-over={isDragOver}>
   <div class="toolbar">
     <input
       type="search"
@@ -791,6 +1213,10 @@
     {/if}
   </div>
 
+  <p class="drop-hint" aria-hidden="true">
+    Drop a Unity project folder here to add it to the list.
+  </p>
+
   {#if addError}
     <div class="inline-error" role="alert">
       <span class="inline-error-text">{addError}</span>
@@ -825,6 +1251,9 @@
       <div class="th" role="columnheader">Editor Version</div>
       {#if showModified}
         <div class="th" role="columnheader">Modified</div>
+      {/if}
+      {#if showGitBranch}
+        <div class="th" role="columnheader" title="Current git branch (detached HEAD shows the SHA on hover)">Branch</div>
       {/if}
       <div class="th" role="columnheader" title="Folder size excluding Library, Temp, Logs, UserSettings and gitignored directories">Size</div>
       <div class="th" role="columnheader">Status</div>
@@ -873,6 +1302,23 @@
               {#if showModified}
                 <div class="cell cell-modified" role="gridcell">
                   <RelativeTime iso={project.lastOpenedAt ?? project.lastModifiedAt} />
+                </div>
+              {/if}
+              {#if showGitBranch}
+                <div class="cell cell-branch" role="gridcell">
+                  {#if project.gitBranch}
+                    {#if project.gitBranch.startsWith("detached:")}
+                      <span
+                        class="branch-chip branch-detached"
+                        title={project.gitBranch}
+                      >detached</span>
+                    {:else}
+                      <span
+                        class="branch-chip"
+                        title={project.gitBranch}
+                      >{project.gitBranch}</span>
+                    {/if}
+                  {/if}
                 </div>
               {/if}
               <div class="cell cell-size" role="gridcell">
@@ -946,18 +1392,6 @@
       type="button"
       class="ctx-item"
       role="menuitem"
-      disabled={ctxStatus?.pathExists === false}
-      onclick={() => {
-        if (ctxProject) handleReveal(ctxProject);
-        closeContextMenu();
-      }}
-    >
-      Reveal in file manager
-    </button>
-    <button
-      type="button"
-      class="ctx-item"
-      role="menuitem"
       onclick={() => {
         if (ctxProject) handleCopyPath(ctxProject);
       }}
@@ -968,18 +1402,34 @@
       type="button"
       class="ctx-item ctx-item-destructive"
       role="menuitem"
+      title={ctxProject?.lastLaunchPid ? `Terminate pid ${ctxProject.lastLaunchPid}` : "No recorded Unity PID"}
       disabled={!ctxProject?.lastLaunchPid || killingId === ctxId}
       onclick={() => {
         if (ctxProject) handleKillUnity(ctxProject);
       }}
     >
-      {killingId === ctxId ? "Killing…" : "Kill Unity"}
+      {killingId === ctxId ? "Terminating…" : "Terminate Unity"}
     </button>
+    {#if ctxStatus?.pathExists === false}
+      <button
+        type="button"
+        class="ctx-item ctx-item-relink"
+        role="menuitem"
+        title="Re-point this project to a new folder on disk"
+        disabled={relinkingId === ctxId}
+        onclick={() => {
+          if (ctxProject) handleRelink(ctxProject);
+        }}
+      >
+        {relinkingId === ctxId ? "Relinking…" : "Relink…"}
+      </button>
+    {/if}
     <div class="ctx-sep"></div>
     <button
       type="button"
       class="ctx-item"
       role="menuitem"
+      title="Refresh project version and size"
       disabled={ctxStatus?.pathExists === false || refreshingId === ctxId}
       onclick={() => {
         if (ctxProject) handleRefreshProject(ctxProject);
@@ -992,6 +1442,7 @@
       type="button"
       class="ctx-item ctx-item-destructive"
       role="menuitem"
+      title="Remove this project from the Hub list"
       disabled={removingId === ctxId}
       onclick={() => {
         handleRemove(ctxId);
@@ -1045,13 +1496,11 @@
           </Button>
           <Button
             variant="secondary"
-            disabled={!popupProject.lastLaunchPid || killingId === popupProject.id}
-            title={popupProject.lastLaunchPid
-              ? `Terminate pid ${popupProject.lastLaunchPid}`
-              : "No recorded Unity PID"}
-            onclick={() => handleKillUnity(popupProject)}
+            disabled={ps.pathExists === false}
+            title={ps.pathExists === false ? "Path missing" : "Copy project path to clipboard"}
+            onclick={() => handleCopyPath(popupProject)}
           >
-            {killingId === popupProject.id ? "Killing…" : "Kill Unity"}
+            Copy Path
           </Button>
           <div class="more-wrap">
             <Button
@@ -1064,23 +1513,33 @@
             </Button>
             {#if popupIsMoreOpen}
               <div class="more-menu" role="menu">
-                <button type="button" class="more-item" role="menuitem"
-                  onclick={() => { moreMenuOpenFor = null; handleCopyPath(popupProject); }}>
-                  Copy path
-                </button>
-                <button type="button" class="more-item" role="menuitem"
-                  disabled={ps.pathExists === false}
-                  onclick={() => handleReveal(popupProject)}>
-                  Reveal in file manager
+                <button type="button" class="more-item more-item-destructive" role="menuitem"
+                  title={popupProject.lastLaunchPid
+                    ? `Terminate pid ${popupProject.lastLaunchPid}`
+                    : "No recorded Unity PID"}
+                  disabled={!popupProject.lastLaunchPid || killingId === popupProject.id}
+                  onclick={() => { moreMenuOpenFor = null; handleKillUnity(popupProject); }}>
+                  {killingId === popupProject.id ? "Terminating…" : "Terminate Unity"}
                 </button>
                 <div class="more-sep"></div>
                 <button type="button" class="more-item" role="menuitem"
+                  title="Refresh project version and size"
                   disabled={ps.pathExists === false || refreshingId === popupProject.id}
                   onclick={() => { moreMenuOpenFor = null; handleRefreshProject(popupProject); }}>
                   {refreshingId === popupProject.id ? "Refreshing…" : "Refresh"}
                 </button>
+                {#if ps.pathExists === false}
+                  <div class="more-sep"></div>
+                  <button type="button" class="more-item more-item-relink" role="menuitem"
+                    title="Re-point this project to a new folder on disk"
+                    disabled={relinkingId === popupProject.id}
+                    onclick={() => { moreMenuOpenFor = null; handleRelink(popupProject); }}>
+                    {relinkingId === popupProject.id ? "Relinking…" : "Relink…"}
+                  </button>
+                {/if}
                 <div class="more-sep"></div>
                 <button type="button" class="more-item more-item-destructive" role="menuitem"
+                  title="Remove this project from the Hub list"
                   disabled={removingId === popupProject.id}
                   onclick={() => handleRemove(popupProject.id)}>
                   {removingId === popupProject.id ? "Removing…" : "Remove from list"}
@@ -1094,38 +1553,52 @@
           <section class="mini-panel">
             <header class="mini-panel-head">
               <h4 class="mini-panel-title">Launch args</h4>
+              <p class="mini-panel-hint">
+                Extra command-line arguments appended after the launch mode and
+                <code>-buildTarget</code>. Most projects can be left empty.
+              </p>
             </header>
-            <div class="args-row">
-              <textarea
-                class="args-input"
-                rows="2"
-                spellcheck="false"
-                placeholder="-logFile -batchmode"
-                value={getArgsDraft(popupProject.id)}
-                oninput={(e) => handleArgsInput(popupProject.id, (e.currentTarget as HTMLTextAreaElement).value)}
-                aria-label="Launch args"
-              ></textarea>
-              <div class="args-actions">
-                <Button variant="primary"
-                  disabled={getArgsDraft(popupProject.id) === (popupProject.launchArgs ?? "") || !getArgsDraft(popupProject.id).trim() || !!argsErrors[popupProject.id] || savingArgsFor === popupProject.id}
-                  onclick={() => handleSaveArgs(popupProject)}>
-                  {savingArgsFor === popupProject.id ? "…" : "Save"}
-                </Button>
-                <Button variant="secondary"
-                  disabled={(popupProject.launchArgs ?? "") === "" || savingArgsFor === popupProject.id}
-                  onclick={() => handleResetArgs(popupProject)}>
-                  Reset
-                </Button>
-              </div>
-            </div>
+            <textarea
+              class="args-input"
+              rows="2"
+              spellcheck="false"
+              placeholder="Optional: additional Unity launch arguments…"
+              value={getArgsDraft(popupProject.id)}
+              oninput={(e) => handleArgsInput(popupProject.id, (e.currentTarget as HTMLTextAreaElement).value)}
+              aria-label="Launch args"
+            ></textarea>
             {#if argsErrors[popupProject.id]}
               <p class="field-error">{argsErrors[popupProject.id]}</p>
             {/if}
+            <div class="args-actions">
+              <Button variant="primary"
+                disabled={getArgsDraft(popupProject.id) === (popupProject.launchArgs ?? "") || !getArgsDraft(popupProject.id).trim() || !!argsErrors[popupProject.id] || savingArgsFor === popupProject.id}
+                onclick={() => handleSaveArgs(popupProject)}>
+                {savingArgsFor === popupProject.id ? "…" : "Save"}
+              </Button>
+              <Button variant="secondary"
+                disabled={(popupProject.launchArgs ?? "") === "" || savingArgsFor === popupProject.id}
+                onclick={() => handleResetArgs(popupProject)}>
+                Reset
+              </Button>
+              <Button variant="secondary"
+                title="Show example launch arguments and a link to the docs"
+                onclick={() => toggleLaunchArgsInfo()}>
+                Info
+              </Button>
+            </div>
           </section>
 
           <section class="mini-panel">
             <header class="mini-panel-head">
               <h4 class="mini-panel-title">Platform intent</h4>
+              <p class="mini-panel-hint">
+                Preferred <code>BuildTarget</code> for the next launch. Hub
+                appends <code>-buildTarget &lt;name&gt;</code> to the Unity
+                command line. Leave as <strong>None</strong> to launch without
+                a target — Unity will use the project's current build settings.
+                Only applied on the next launch; not used for a running Editor.
+              </p>
             </header>
             <div class="intent-row">
               <select class="intent-select"
@@ -1143,7 +1616,19 @@
               </Button>
             </div>
             <p class="intent-status">
-              Current: <strong>{popupProject.platformIntent || "—"}</strong>
+              {#if popupProject.platformIntent}
+                Active: <strong>{popupProject.platformIntent}</strong> (applied on next launch)
+              {:else if popupDefaultBuildTarget}
+                No platform intent set — Unity will use the project's default build target
+                (<strong title={popupDefaultBuildTarget}>{buildTargetLabel(popupDefaultBuildTarget)}</strong>,
+                from <code>ProjectSettings/ProjectSettings.asset</code>).
+              {:else if popupDefaultBuildTarget === null}
+                No platform intent set and no default recorded in
+                <code>ProjectSettings/ProjectSettings.asset</code> — Unity will pick its own default
+                (typically <strong>Standalone</strong>).
+              {:else}
+                No platform intent set — reading default build target…
+              {/if}
             </p>
           </section>
 
@@ -1178,10 +1663,12 @@
                 <div class="log-row">
                   <span class="log-label">Editor.log</span>
                   {#if lp.editorLogFile}
-                    <button type="button" class="link-btn"
+                    <Button variant="secondary"
+                      title={lp.editorLogFile}
+                      disabled={!lp.editorLogFile}
                       onclick={() => openPath(lp.editorLogFile!)}>
                       Open file
-                    </button>
+                    </Button>
                   {:else}
                     <span class="muted-inline">—</span>
                   {/if}
@@ -1197,6 +1684,70 @@
   </div>
 {/if}
 
+{#if launchArgsInfoOpen}
+  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+  <div class="settings-overlay" onclick={toggleLaunchArgsInfo}>
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <div class="settings-modal info-modal" onclick={(e) => e.stopPropagation()}>
+      <div class="settings-modal-header">
+        <div class="settings-modal-titles">
+          <h2>Launch args — examples</h2>
+          <span class="settings-modal-path">Extra arguments appended to the Unity command line</span>
+        </div>
+        <button
+          type="button"
+          class="modal-close-btn"
+          aria-label="Close"
+          onclick={toggleLaunchArgsInfo}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="settings-modal-body">
+        <section class="info-block">
+          <h3 class="info-title">Example</h3>
+          <p class="info-text">
+            Paste one or more space-separated flags. Hub will append them after
+            the launch mode and the <code>-buildTarget</code> flag (if set).
+            For example, to run Unity headless and stream its log to stdout:
+          </p>
+          <pre class="info-code">-batchmode -nographics -logFile -</pre>
+        </section>
+
+        <section class="info-block">
+          <h3 class="info-title">Common arguments</h3>
+          <ul class="info-list">
+            {#each LAUNCH_ARGS_EXAMPLES as ex (ex.args)}
+              <li class="info-item">
+                <code class="info-code-inline">{ex.args}</code>
+                <span class="info-desc">{ex.description}</span>
+              </li>
+            {/each}
+          </ul>
+        </section>
+
+        <section class="info-block">
+          <h3 class="info-title">Documentation</h3>
+          <p class="info-text">
+            The full list of supported command-line arguments lives in the
+            Unity Manual:
+          </p>
+          <button
+            type="button"
+            class="info-link"
+            onclick={openLaunchArgsDocs}
+          >
+            {LAUNCH_ARGS_DOCS_URL} ↗
+          </button>
+        </section>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .projects {
     flex: 1;
@@ -1204,6 +1755,39 @@
     flex-direction: column;
     min-height: 0;
     gap: 0.6rem;
+  }
+
+  /**
+   * Drag-and-drop visual affordance. The Tauri webview fires enter/over
+   * events for any drag entering the window; the project list draws a
+   * dashed accent border and tints the toolbar while a drag is over the
+   * tab. The list itself does not need its position changed — Tauri
+   * blocks the default HTML drop behavior at the window level so the
+   * OS cursor is the only thing the user sees moving.
+   */
+  .projects.drag-over .table {
+    border-color: #5c7cfa;
+    box-shadow: 0 0 0 1px #5c7cfa inset, 0 0 0 4px rgba(92, 124, 250, 0.18);
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+
+  .projects.drag-over .toolbar {
+    outline: 1px dashed #5c7cfa;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  .drop-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem 0.6rem;
+    border: 1px dashed #5c7cfa;
+    border-radius: 6px;
+    background: rgba(92, 124, 250, 0.08);
+    color: #c8d3ff;
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
   }
 
   .toolbar {
@@ -1222,6 +1806,7 @@
     align-self: center;
     width: 2.2rem;
     height: 2.2rem;
+    margin-top: -2px;
     padding: 0;
     border-radius: 6px;
     border: 1px solid #474957;
@@ -1469,6 +2054,28 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .branch-chip {
+    display: inline-block;
+    max-width: 100%;
+    padding: 0.1rem 0.45rem;
+    border: 1px solid #3a4255;
+    border-radius: 999px;
+    background: #1d2330;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+    color: #b6c2d6;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .branch-detached {
+    border-color: #6b4f1a;
+    background: #2a200f;
+    color: #d8b86a;
+  }
+
   .muted { color: #6f7280; }
 
   .chips {
@@ -1525,13 +2132,6 @@
     font-weight: 600;
   }
 
-  .args-row {
-    display: flex;
-    flex-direction: row;
-    gap: 0.4rem;
-    align-items: flex-start;
-  }
-
   .args-input {
     flex: 1;
     min-height: 2.4rem;
@@ -1551,14 +2151,37 @@
 
   .args-actions {
     display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
+    flex-direction: row;
+    gap: 0.4rem;
+    align-items: stretch;
+  }
+
+  .args-actions :global(.btn) {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
   }
 
   .field-error {
     margin: 0;
     font-size: 0.74rem;
     color: #f0a8b8;
+  }
+
+  .mini-panel-hint {
+    margin: 0.2rem 0 0;
+    font-size: 0.7rem;
+    color: #6f7280;
+    line-height: 1.45;
+  }
+
+  .mini-panel-hint code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.7rem;
+    background: #2a2b33;
+    padding: 0 0.25rem;
+    border-radius: 3px;
+    color: #c5c7d0;
   }
 
   .intent-row {
@@ -1607,24 +2230,17 @@
     gap: 0.4rem;
   }
 
+  .log-row :global(.btn) {
+    min-width: 6.5rem;
+    justify-content: center;
+  }
+
   .log-label {
     flex: 0 0 5.5rem;
     font-size: 0.72rem;
     color: #c5c7d0;
     font-weight: 500;
   }
-
-  .link-btn {
-    background: transparent;
-    border: 1px solid #3f4150;
-    border-radius: 4px;
-    padding: 0.25rem 0.5rem;
-    color: #c5c7d0;
-    font-size: 0.74rem;
-    cursor: pointer;
-  }
-
-  .link-btn:hover { border-color: #5c7cfa; color: #fff; }
 
   .muted-inline { color: #6f7280; font-size: 0.74rem; }
 
@@ -1669,6 +2285,10 @@
   .more-item-destructive:disabled,
   .more-item:disabled { color: #555; cursor: not-allowed; background: transparent; }
 
+  .more-item-relink { color: #c8d3ff; }
+  .more-item-relink:hover { background: #243056; color: #fff; }
+  .more-item-relink:disabled { color: #555; cursor: not-allowed; background: transparent; }
+
   .more-sep {
     height: 1px;
     background: #34353f;
@@ -1704,6 +2324,10 @@
   .ctx-item-destructive:hover { background: #3a1a25; color: #fff; }
   .ctx-item-destructive:disabled,
   .ctx-item:disabled { color: #555; cursor: not-allowed; background: transparent; }
+
+  .ctx-item-relink { color: #c8d3ff; }
+  .ctx-item-relink:hover { background: #243056; color: #fff; }
+  .ctx-item-relink:disabled { color: #555; cursor: not-allowed; background: transparent; }
 
   .ctx-sep {
     height: 1px;
@@ -1794,5 +2418,103 @@
     color: #fff;
     border-color: #474957;
     background: #32343f;
+  }
+
+  .info-modal {
+    width: min(34rem, 92vw);
+  }
+
+  .info-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .info-title {
+    margin: 0;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #8b8d9a;
+    font-weight: 600;
+  }
+
+  .info-text {
+    margin: 0;
+    font-size: 0.78rem;
+    color: #c5c7d0;
+    line-height: 1.5;
+  }
+
+  .info-text code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    background: #2a2b33;
+    padding: 0 0.3rem;
+    border-radius: 3px;
+    color: #d7d8e0;
+  }
+
+  .info-code {
+    margin: 0;
+    padding: 0.5rem 0.65rem;
+    background: #14151a;
+    border: 1px solid #2a2b33;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+    color: #d7d8e0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .info-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.4rem 0.55rem;
+    background: #14151a;
+    border: 1px solid #2a2b33;
+    border-radius: 4px;
+  }
+
+  .info-code-inline {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    color: #d7d8e0;
+  }
+
+  .info-desc {
+    font-size: 0.74rem;
+    color: #8b8d9a;
+    line-height: 1.45;
+  }
+
+  .info-link {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px solid #3f4150;
+    border-radius: 4px;
+    padding: 0.35rem 0.6rem;
+    color: #5c7cfa;
+    font-size: 0.78rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .info-link:hover {
+    border-color: #5c7cfa;
+    background: #1a1b21;
+    color: #7c9cfa;
   }
 </style>

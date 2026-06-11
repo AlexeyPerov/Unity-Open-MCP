@@ -8,8 +8,16 @@ export interface LaunchSettings {
 export interface ProjectListSettings {
   showPathColumn: boolean;
   showModifiedColumn: boolean;
+  showGitBranchColumn: boolean;
   searchIncludesPath: boolean;
+  /**
+   * `"frecency"` (default) or `"lastModified"`. Unknown values fall back to
+   * `"frecency"` so a future field addition never bricks the list sort.
+   */
+  sortBy: ProjectListSortBy;
 }
+
+export type ProjectListSortBy = "frecency" | "lastModified";
 
 export interface SafetySettings {
   confirmKillUnity: boolean;
@@ -20,12 +28,17 @@ export interface UnityDiscoverySettings {
   parentFolders: string[];
 }
 
+export interface DiagnosticsSettings {
+  autoOpenDrawerOnLaunchFailure: boolean;
+}
+
 export interface Settings {
   version: number;
   launch: LaunchSettings;
   projectList: ProjectListSettings;
   safety: SafetySettings;
   unityDiscovery: UnityDiscoverySettings;
+  diagnostics: DiagnosticsSettings;
 }
 
 export interface ProjectEntry {
@@ -39,6 +52,18 @@ export interface ProjectEntry {
   platformIntent?: string;
   lastLaunchPid?: number;
   lastLaunchAt?: string;
+  /**
+   * Frecency counter. Incremented on every successful launch; the sort
+   * score combines this counter with `lastLaunchAt` (14-day half-life).
+   * Defaulted to 0 for legacy entries.
+   */
+  frecency?: number;
+  /**
+   * Cached git branch name (short form, e.g. `feature/frecency`) or
+   * `detached:<sha>` for detached HEAD. `null`/omitted for non-git
+   * projects or pending reads.
+   */
+  gitBranch?: string | null;
 }
 
 export interface ProjectsFile {
@@ -96,6 +121,12 @@ export interface LogPaths {
   crashLogsFolder?: string;
 }
 
+export interface AssetStorePaths {
+  folder?: string;
+  versioned: boolean;
+  missingMessage?: string;
+}
+
 export type KillUnityStatus = "killed" | "notFound" | "accessDenied";
 
 export interface KillUnityResult {
@@ -115,6 +146,7 @@ export interface VersionRefreshResult {
   projectId: string;
   unityVersion?: string;
   lastModifiedAt?: string;
+  gitBranch?: string | null;
 }
 
 export type AddProjectError =
@@ -144,6 +176,13 @@ export interface RemoveProjectResult {
   removedPath: string;
   projects: ProjectsFile;
 }
+
+export type RelinkProjectError =
+  | { type: "projectNotFound"; projectId: string }
+  | { type: "notADirectory"; path: string }
+  | { type: "notAUnityProject"; path: string; reason: string }
+  | { type: "duplicate"; path: string }
+  | { type: "persistFailed"; message: string };
 
 export interface DiagnosticsPaths {
   configDir: string;
@@ -223,8 +262,62 @@ export async function removeProject(projectId: string): Promise<RemoveProjectRes
   return invoke<RemoveProjectResult>("remove_project", { projectId });
 }
 
+export async function relinkProject(
+  projectId: string,
+  newPath: string
+): Promise<ProjectEntry> {
+  return invoke<ProjectEntry>("relink_project", { projectId, newPath });
+}
+
 export async function getLogPaths(projectPath: string): Promise<LogPaths> {
   return invoke<LogPaths>("log_paths", { projectPath });
+}
+
+export async function getAssetStorePaths(): Promise<AssetStorePaths> {
+  return invoke<AssetStorePaths>("asset_store_paths");
+}
+
+export async function getCrashLogPath(): Promise<string | null> {
+  return invoke<string | null>("crash_log_path");
+}
+
+export interface LaunchLogTail {
+  path: string;
+  content: string;
+  lineCount: number;
+}
+
+export async function getLaunchLogTail(lineCount: number): Promise<LaunchLogTail> {
+  return invoke<LaunchLogTail>("get_launch_log_tail", { lineCount });
+}
+
+export type DefaultBuildTargetSource = "projectSettings" | "notRecorded";
+
+export interface DefaultBuildTarget {
+  target: string | null;
+  source: DefaultBuildTargetSource;
+}
+
+export async function getDefaultBuildTarget(
+  projectPath: string
+): Promise<DefaultBuildTarget> {
+  return invoke<DefaultBuildTarget>("get_default_build_target", { projectPath });
+}
+
+/**
+ * Bulk-resolve git branches for the given project paths. Returns a map
+ * keyed by the input path so the caller can correlate results back to
+ * each project entry. Values are `null` for non-git projects and
+ * `detached:<sha>` for detached HEAD; see Rust `git_branch::read_git_branch`.
+ */
+export async function getGitBranches(
+  paths: string[]
+): Promise<Record<string, string | null>> {
+  return invoke<Record<string, string | null>>("get_git_branches", { paths });
+}
+
+export async function isPidAlive(pid: number): Promise<boolean> {
+  return invoke<boolean>("is_pid_alive", { pid });
 }
 
 export async function killUnity(pid: number): Promise<KillUnityResult> {

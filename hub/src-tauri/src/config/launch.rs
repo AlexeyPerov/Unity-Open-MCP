@@ -7,6 +7,7 @@ use tauri::State;
 
 use crate::config::commands::AppState;
 use crate::config::discovery;
+use crate::config::launch_log::{self, LaunchOutcome, LaunchRecord};
 use crate::config::persistence;
 use crate::config::projects::read_dir_mtime_iso;
 
@@ -40,6 +41,7 @@ pub struct VersionRefreshResult {
     pub project_id: String,
     pub unity_version: Option<String>,
     pub last_modified_at: Option<String>,
+    pub git_branch: Option<String>,
 }
 
 pub(crate) fn get_unity_executable_path(install_dir: &Path) -> Option<PathBuf> {
@@ -124,11 +126,97 @@ pub(crate) fn resolve_install_for_version(
     Some((exe, install.path.clone()))
 }
 
+/// Write a launch record to the persistent per-launch log. Fire-and-forget
+/// on a background thread so the launch command never blocks on disk I/O.
+fn record_launch(record: LaunchRecord) {
+    launch_log::append_record_async(record);
+}
+
 #[tauri::command]
 pub fn launch_project(
     state: State<AppState>,
     project_id: String,
 ) -> Result<LaunchResult, LaunchError> {
+    match launch_project_inner(&state, &project_id) {
+        Ok(result) => {
+            let record = launch_log::build_record(
+                &result.project_id,
+                &result.project_name,
+                &result.project_path,
+                result.unity_version.as_deref(),
+                Some(&result.executable_path),
+                Some(result.pid),
+                &result.launch_args,
+                result.build_target.as_deref(),
+                LaunchOutcome::Ok {
+                    pid: result.pid,
+                    unity_version: result.unity_version.clone(),
+                    executable_path: result.executable_path.clone(),
+                },
+            );
+            record_launch(record);
+            // Strip the helpers we added to the success path; the public
+            // LaunchResult shape is unchanged for frontend consumers.
+            Ok(LaunchResult {
+                project_id: result.project_id,
+                pid: result.pid,
+                unity_version: result.unity_version,
+                executable_path: result.executable_path,
+            })
+        }
+        Err(err) => {
+            // Re-raise a typed LaunchError after recording context.
+            let typed = err.typed;
+            let record = launch_log::build_record(
+                &err.project_id,
+                &err.project_name,
+                &err.project_path,
+                err.unity_version.as_deref(),
+                err.install_path.as_deref(),
+                None,
+                &err.launch_args,
+                err.build_target.as_deref(),
+                LaunchOutcome::Error {
+                    code: err.code,
+                    message: err.message,
+                },
+            );
+            record_launch(record);
+            Err(typed)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InnerLaunchResult {
+    pub project_id: String,
+    pub project_name: String,
+    pub project_path: String,
+    pub pid: u32,
+    pub unity_version: Option<String>,
+    pub executable_path: String,
+    pub launch_args: Vec<String>,
+    pub build_target: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct InnerLaunchError {
+    typed: LaunchError,
+    project_id: String,
+    project_name: String,
+    project_path: String,
+    unity_version: Option<String>,
+    install_path: Option<String>,
+    launch_args: Vec<String>,
+    build_target: Option<String>,
+    code: String,
+    message: String,
+}
+
+fn launch_project_inner(
+    state: &State<AppState>,
+    project_id: &str,
+) -> Result<InnerLaunchResult, InnerLaunchError> {
     let projects = {
         let guard = state.projects.lock().unwrap();
         guard.clone()
@@ -138,41 +226,99 @@ pub fn launch_project(
         .projects
         .iter()
         .find(|p| p.id == project_id)
-        .ok_or_else(|| LaunchError::ProjectNotFound {
-            project_id: project_id.clone(),
-        })?
-        .clone();
+        .cloned();
 
-    let project_path = Path::new(&project.path);
+    let project = match project {
+        Some(p) => p,
+        None => {
+            return Err(InnerLaunchError {
+                typed: LaunchError::ProjectNotFound {
+                    project_id: project_id.to_string(),
+                },
+                project_id: project_id.to_string(),
+                project_name: String::new(),
+                project_path: String::new(),
+                unity_version: None,
+                install_path: None,
+                launch_args: vec![],
+                build_target: None,
+                code: "projectNotFound".to_string(),
+                message: format!("project not found: {}", project_id),
+            });
+        }
+    };
+
+    let project_path_str = project.path.clone();
+    let project_name = project.name.clone();
+    let project_path = Path::new(&project_path_str);
+
     if !project_path.exists() {
-        return Err(LaunchError::PathInvalid {
-            project_id: project_id.clone(),
-            path: project.path.clone(),
+        return Err(InnerLaunchError {
+            typed: LaunchError::PathInvalid {
+                project_id: project_id.to_string(),
+                path: project.path.clone(),
+            },
+            project_id: project_id.to_string(),
+            project_name,
+            project_path: project_path_str,
+            unity_version: None,
+            install_path: None,
+            launch_args: vec![],
+            build_target: None,
+            code: "pathInvalid".to_string(),
+            message: format!("path invalid: {}", project.path),
         });
     }
 
     let refreshed_version = read_project_version(project_path);
-    let unity_version = refreshed_version
-        .clone()
-        .or(project.unity_version.clone());
+    let unity_version = refreshed_version.clone().or(project.unity_version.clone());
 
-    let version = unity_version
-        .as_ref()
-        .ok_or_else(|| LaunchError::VersionMissing {
-            project_id: project_id.clone(),
-        })?;
+    let version = match unity_version {
+        Some(v) => v,
+        None => {
+            return Err(InnerLaunchError {
+                typed: LaunchError::VersionMissing {
+                    project_id: project_id.to_string(),
+                },
+                project_id: project_id.to_string(),
+                project_name,
+                project_path: project_path_str,
+                unity_version: None,
+                install_path: None,
+                launch_args: vec![],
+                build_target: None,
+                code: "versionMissing".to_string(),
+                message: "unity version missing".to_string(),
+            });
+        }
+    };
 
     let settings = state.settings.lock().unwrap().clone();
     let launch_mode = settings.launch.mode.clone();
 
-    let (executable, _) = resolve_install_for_version(&state, version).ok_or_else(|| {
-        LaunchError::InstallNotFound {
-            project_id: project_id.clone(),
-            version: version.clone(),
+    let (executable, install_path) = match resolve_install_for_version(&state, &version) {
+        Some(v) => v,
+        None => {
+            return Err(InnerLaunchError {
+                typed: LaunchError::InstallNotFound {
+                    project_id: project_id.to_string(),
+                    version: version.clone(),
+                },
+                project_id: project_id.to_string(),
+                project_name,
+                project_path: project_path_str,
+                unity_version: Some(version.clone()),
+                install_path: None,
+                launch_args: vec![],
+                build_target: None,
+                code: "installNotFound".to_string(),
+                message: format!("unity {} is not installed", version),
+            });
         }
-    })?;
+    };
 
     let mut args: Vec<String> = Vec::new();
+    let mut build_target: Option<String> = None;
 
     if launch_mode == "openProject" {
         args.push("-projectPath".to_string());
@@ -191,16 +337,32 @@ pub fn launch_project(
         if !platform_intent.is_empty() {
             args.push("-buildTarget".to_string());
             args.push(platform_intent.clone());
+            build_target = Some(platform_intent.clone());
         }
     }
 
-    let child = Command::new(&executable)
-        .args(&args)
-        .spawn()
-        .map_err(|e| LaunchError::LaunchFailed {
-            project_id: project_id.clone(),
-            message: format!("Failed to spawn Unity: {}", e),
-        })?;
+    let spawn_result = Command::new(&executable).args(&args).spawn();
+
+    let child = match spawn_result {
+        Ok(c) => c,
+        Err(e) => {
+            return Err(InnerLaunchError {
+                typed: LaunchError::LaunchFailed {
+                    project_id: project_id.to_string(),
+                    message: format!("Failed to spawn Unity: {}", e),
+                },
+                project_id: project_id.to_string(),
+                project_name,
+                project_path: project_path_str,
+                unity_version: Some(version),
+                install_path: Some(install_path),
+                launch_args: args,
+                build_target,
+                code: "launchFailed".to_string(),
+                message: format!("Failed to spawn Unity: {}", e),
+            });
+        }
+    };
 
     let pid = child.id();
 
@@ -208,6 +370,11 @@ pub fn launch_project(
     if let Some(p) = projects.projects.iter_mut().find(|p| p.id == project_id) {
         p.last_launch_pid = Some(pid);
         p.last_launch_at = Some(chrono::Utc::now().to_rfc3339());
+        // Increment frecency on every successful launch. The frontend
+        // combines this counter with `lastLaunchAt` (14-day half-life) to
+        // rank the project in the list. Saturate on overflow so a long
+        // session of CLI launches cannot panic on a `u32` wrap.
+        p.frecency = p.frecency.saturating_add(1);
         if refreshed_version.is_some() {
             p.unity_version = refreshed_version.clone();
         }
@@ -222,11 +389,15 @@ pub fn launch_project(
         *guard = projects;
     }
 
-    Ok(LaunchResult {
-        project_id: project_id.clone(),
+    Ok(InnerLaunchResult {
+        project_id: project_id.to_string(),
+        project_name,
+        project_path: project_path_str,
         pid,
-        unity_version,
+        unity_version: Some(version),
         executable_path: executable.to_string_lossy().to_string(),
+        launch_args: args,
+        build_target,
     })
 }
 
@@ -259,11 +430,13 @@ pub fn refresh_project_version(
 
     let unity_version = read_project_version(project_path);
     let last_modified_at = read_dir_mtime_iso(project_path);
+    let git_branch = crate::config::git_branch::read_git_branch(project_path);
 
     let mut projects = projects;
     if let Some(p) = projects.projects.iter_mut().find(|p| p.id == project_id) {
         p.unity_version = unity_version.clone();
         p.last_modified_at = last_modified_at.clone();
+        p.git_branch = git_branch.clone();
     }
 
     if let Err(e) = persistence::save_projects(&projects) {
@@ -279,6 +452,7 @@ pub fn refresh_project_version(
         project_id,
         unity_version,
         last_modified_at,
+        git_branch,
     })
 }
 
@@ -473,11 +647,13 @@ mod tests {
             project_id: "abc".to_string(),
             unity_version: Some("2022.3.48f1".to_string()),
             last_modified_at: Some("2026-06-10T12:00:00+00:00".to_string()),
+            git_branch: Some("main".to_string()),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"projectId\""));
         assert!(json.contains("\"unityVersion\""));
         assert!(json.contains("\"lastModifiedAt\""));
+        assert!(json.contains("\"gitBranch\""));
     }
 
     #[test]

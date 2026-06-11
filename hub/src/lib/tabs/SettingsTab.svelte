@@ -8,6 +8,7 @@
     getDiagnosticsPaths,
     exportDiagnostics,
     type DiagnosticsPaths,
+    type ProjectListSortBy,
   } from "$lib/services/config";
   import Button from "$lib/components/shell/Button.svelte";
   import { APP_NAME, APP_VERSION } from "$lib/version";
@@ -95,6 +96,20 @@
     );
   }
 
+  async function setShowGitBranchColumn(value: boolean) {
+    lastError = null;
+    await withErrorBoundary("save show-git-branch-column", () =>
+      settingsStore.setShowGitBranchColumn(value)
+    );
+  }
+
+  async function setProjectListSortBy(value: ProjectListSortBy) {
+    lastError = null;
+    await withErrorBoundary("save project-list-sort-by", () =>
+      settingsStore.setProjectListSortBy(value)
+    );
+  }
+
   async function setSearchIncludesPath(value: boolean) {
     lastError = null;
     await withErrorBoundary("save search-includes-path", () =>
@@ -113,6 +128,13 @@
     lastError = null;
     await withErrorBoundary("save confirm-remove", () =>
       settingsStore.setConfirmRemoveProject(value)
+    );
+  }
+
+  async function setAutoOpenDrawerOnLaunchFailure(value: boolean) {
+    lastError = null;
+    await withErrorBoundary("save auto-open-drawer-on-launch-failure", () =>
+      settingsStore.setAutoOpenDrawerOnLaunchFailure(value)
     );
   }
 
@@ -274,6 +296,24 @@
       description: "Hub launches Unity without -projectPath.",
     },
   ];
+
+  const sortByOptions: {
+    id: ProjectListSortBy;
+    label: string;
+    description: string;
+  }[] = [
+    {
+      id: "frecency",
+      label: "Frecency (default)",
+      description:
+        "Sort by how often each project was launched, with a 14-day half-life decay. Ties break on last-modified time. Frecency is preserved regardless of this choice.",
+    },
+    {
+      id: "lastModified",
+      label: "Last modified",
+      description: "Pure last-modified-time sort, descending. Frecency is preserved in the background.",
+    },
+  ];
 </script>
 
 <div class="settings">
@@ -371,12 +411,50 @@
             <label class="check-row">
               <input
                 type="checkbox"
+                checked={settings.projectList.showGitBranchColumn}
+                onchange={(e) =>
+                  setShowGitBranchColumn((e.currentTarget as HTMLInputElement).checked)}
+              />
+              <span class="widget-text">
+                <span class="check-label">Show git branch column</span>
+                <span class="check-desc">
+                  Adds a Branch column to the Projects tab. Resolved from
+                  <code>.git/HEAD</code> on Refresh (and on first display).
+                  Non-git projects render an empty cell.
+                </span>
+              </span>
+            </label>
+            <label class="check-row">
+              <input
+                type="checkbox"
                 checked={settings.projectList.searchIncludesPath}
                 onchange={(e) =>
                   setSearchIncludesPath((e.currentTarget as HTMLInputElement).checked)}
               />
               <span class="check-label">Search path in addition to name</span>
             </label>
+            <div
+              class="radio-group"
+              role="radiogroup"
+              aria-labelledby="group-project-list"
+            >
+              <span class="radio-group-label">Default sort</span>
+              {#each sortByOptions as opt (opt.id)}
+                <label class="radio-row">
+                  <input
+                    type="radio"
+                    name="projectListSortBy"
+                    value={opt.id}
+                    checked={settings.projectList.sortBy === opt.id}
+                    onchange={() => setProjectListSortBy(opt.id)}
+                  />
+                  <span class="widget-text">
+                    <span class="radio-label">{opt.label}</span>
+                    <span class="radio-desc">{opt.description}</span>
+                  </span>
+                </label>
+              {/each}
+            </div>
           </div>
         {/if}
       </section>
@@ -500,6 +578,26 @@
         </button>
         {#if openGroups.diagnostics}
           <div id="group-diagnostics-body" class="group-body">
+            <label class="check-row">
+              <input
+                type="checkbox"
+                checked={settings.diagnostics.autoOpenDrawerOnLaunchFailure}
+                onchange={(e) =>
+                  setAutoOpenDrawerOnLaunchFailure(
+                    (e.currentTarget as HTMLInputElement).checked
+                  )}
+              />
+              <span class="widget-text">
+                <span class="check-label">Auto-open status drawer on launch failure</span>
+                <span class="check-desc">
+                  When a Unity launch fails, expand the Status / Log drawer and
+                  tail the last 200 lines from the per-launch log
+                  (<code>~/.config/unity-agent-hub/logs/launches.log</code>).
+                  When off, failures are still logged but the drawer stays as
+                  you left it.
+                </span>
+              </span>
+            </label>
             {#if diagnosticsError}
               <p class="placeholder-note placeholder-error" role="alert">
                 {diagnosticsError}
@@ -707,6 +805,15 @@
     gap: 0.5rem;
   }
 
+  .radio-group-label {
+    font-size: 0.78rem;
+    color: #8b8d9a;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    font-weight: 600;
+    margin-bottom: 0.1rem;
+  }
+
   .radio-row,
   .check-row {
     display: flex;
@@ -747,6 +854,23 @@
     color: #8b8d9a;
     font-size: 0.78rem;
     line-height: 1.45;
+  }
+
+  .check-desc {
+    display: block;
+    color: #8b8d9a;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    margin-top: 0.15rem;
+  }
+
+  .check-desc code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    background: #2a2b33;
+    padding: 0 0.3rem;
+    border-radius: 3px;
+    color: #d7d8e0;
   }
 
   .folder-list {

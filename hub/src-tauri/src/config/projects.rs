@@ -6,6 +6,7 @@ use tauri::State;
 
 use crate::config::commands::AppState;
 use crate::config::discovery;
+use crate::config::git_branch;
 use crate::config::persistence;
 use crate::config::schemas::{ProjectEntry, ProjectsFile};
 
@@ -53,6 +54,23 @@ pub struct RemoveProjectResult {
     pub removed_name: String,
     pub removed_path: String,
     pub projects: ProjectsFile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum RelinkProjectError {
+    #[serde(rename_all = "camelCase")]
+    ProjectNotFound { project_id: String },
+    #[serde(rename_all = "camelCase")]
+    NotADirectory { path: String },
+    #[serde(rename_all = "camelCase")]
+    NotAUnityProject { path: String, reason: String },
+    /// New path collides with another tracked project (excluding the one
+    /// being relinked). Same collision semantics as `AddProjectError::Duplicate`.
+    #[serde(rename_all = "camelCase")]
+    Duplicate { path: String },
+    #[serde(rename_all = "camelCase")]
+    PersistFailed { message: String },
 }
 
 fn is_unity_project_root(path: &Path) -> Result<(), String> {
@@ -156,6 +174,8 @@ pub fn add_project(
         platform_intent: None,
         last_launch_pid: None,
         last_launch_at: None,
+        frecency: 0,
+        git_branch: None,
     };
 
     let mut projects = state.projects.lock().unwrap().clone();
@@ -190,9 +210,14 @@ pub fn refresh_all_projects(state: State<AppState>) -> RefreshOutcome {
         }
         let new_version = read_unity_version(&project_path);
         let new_mtime = read_dir_mtime_iso(&project_path);
-        if new_version != project.unity_version || new_mtime != project.last_modified_at {
+        let new_branch = git_branch::read_git_branch(&project_path);
+        if new_version != project.unity_version
+            || new_mtime != project.last_modified_at
+            || new_branch != project.git_branch
+        {
             project.unity_version = new_version;
             project.last_modified_at = new_mtime;
+            project.git_branch = new_branch;
             updated.push(project.id.clone());
         }
     }
@@ -261,6 +286,102 @@ pub fn remove_project(
         removed_path: removed.path.clone(),
         projects,
     })
+}
+
+/// Relink a `pathMissing` row to a new folder on disk. Validates the
+/// target as a Unity project root, replaces `path` in place, refreshes
+/// the version string, and bumps `lastModifiedAt` to "now" so the row
+/// sorts to the top of any `lastModified` view. The `id` and per-project
+/// fields (`launchArgs`, `platformIntent`, `lastLaunchPid`,
+/// `lastLaunchAt`, `frecency`, `gitBranch`) are preserved.
+///
+/// Idempotency: if the new path canonicalizes to the same as the current
+/// path, the entry is returned unchanged and the on-disk file is not
+/// touched. A duplicate against a *different* project is rejected with
+/// `RelinkProjectError::Duplicate` (matches `add_project` semantics so
+/// the frontend can surface the same inline error for both flows).
+#[tauri::command]
+pub fn relink_project(
+    state: State<AppState>,
+    project_id: String,
+    new_path: String,
+) -> Result<ProjectEntry, RelinkProjectError> {
+    let new_project_path = PathBuf::from(&new_path);
+
+    if !new_project_path.is_dir() {
+        return Err(RelinkProjectError::NotADirectory { path: new_path });
+    }
+
+    if let Err(reason) = is_unity_project_root(&new_project_path) {
+        return Err(RelinkProjectError::NotAUnityProject {
+            path: new_path,
+            reason,
+        });
+    }
+
+    let mut projects = state.projects.lock().unwrap().clone();
+
+    let target_index = projects
+        .projects
+        .iter()
+        .position(|p| p.id == project_id)
+        .ok_or_else(|| RelinkProjectError::ProjectNotFound {
+            project_id: project_id.clone(),
+        })?;
+
+    // Idempotency: re-running relink on the same path is a no-op. We
+    // canonicalize so `/a/b/..//b/c` and `/a/b/c` are treated as the
+    // same path; this matches the `add_project` duplicate check.
+    let current_canonical = canonicalize_for_compare(&projects.projects[target_index].path);
+    let new_canonical = canonicalize_for_compare(&new_path);
+    if current_canonical == new_canonical {
+        return Ok(projects.projects[target_index].clone());
+    }
+
+    // Reject collisions with *other* projects.
+    let collision = projects
+        .projects
+        .iter()
+        .any(|p| p.id != project_id && canonicalize_for_compare(&p.path) == new_canonical);
+    if collision {
+        return Err(RelinkProjectError::Duplicate { path: new_path });
+    }
+
+    let unity_version = read_unity_version(&new_project_path);
+    let new_mtime = read_dir_mtime_iso(&new_project_path)
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+
+    let target = &mut projects.projects[target_index];
+    target.path = new_path.clone();
+    target.name = derive_name(&new_project_path);
+    target.unity_version = unity_version;
+    target.last_modified_at = Some(new_mtime);
+    // Clear any cached state tied to the old path. `gitBranch` is the
+    // only field that depends on the project root; let the next refresh
+    // re-resolve it from the new `.git/HEAD` rather than showing a stale
+    // chip for a directory the user has moved away from.
+    target.git_branch = None;
+
+    if let Err(e) = persistence::save_projects(&projects) {
+        return Err(RelinkProjectError::PersistFailed {
+            message: e.to_string(),
+        });
+    }
+
+    {
+        let mut guard = state.projects.lock().unwrap();
+        *guard = projects.clone();
+    }
+
+    let updated = projects
+        .projects
+        .iter()
+        .find(|p| p.id == project_id)
+        .cloned()
+        .ok_or_else(|| RelinkProjectError::ProjectNotFound {
+            project_id: project_id.clone(),
+        })?;
+    Ok(updated)
 }
 
 #[cfg(test)]
@@ -350,6 +471,8 @@ mod tests {
             platform_intent: None,
             last_launch_pid: None,
             last_launch_at: None,
+            frecency: 0,
+            git_branch: None,
         }
     }
 
@@ -394,5 +517,59 @@ mod tests {
         let json = serde_json::to_string(&err).unwrap();
         assert!(json.contains("\"persistFailed\""));
         assert!(json.contains("\"io error\""));
+    }
+
+    #[test]
+    fn relink_project_error_not_found_serializes() {
+        let err = RelinkProjectError::ProjectNotFound {
+            project_id: "missing".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"projectNotFound\""));
+        assert!(json.contains("\"missing\""));
+    }
+
+    #[test]
+    fn relink_project_error_not_a_unity_project_serializes() {
+        let err = RelinkProjectError::NotAUnityProject {
+            path: "/some/path".to_string(),
+            reason: "Missing 'Assets' folder".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"notAUnityProject\""));
+        assert!(json.contains("\"Missing 'Assets' folder\""));
+    }
+
+    #[test]
+    fn relink_project_error_duplicate_serializes() {
+        let err = RelinkProjectError::Duplicate {
+            path: "/x".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"duplicate\""));
+        assert!(json.contains("\"/x\""));
+    }
+
+    #[test]
+    fn canonicalize_for_compare_handles_missing_path() {
+        // A non-existent path falls back to the input string verbatim so
+        // canonical equality is never panicky; the relink path check
+        // relies on this to keep the idempotency fast-path safe.
+        let original = "/definitely/does/not/exist/qwerty";
+        assert_eq!(canonicalize_for_compare(original), original);
+    }
+
+    #[test]
+    fn relink_idempotency_check_matches_same_path() {
+        // `relink_project` short-circuits when the canonicalized old and
+        // new paths are equal. We exercise the helper here so a future
+        // change to `canonicalize_for_compare` cannot silently break the
+        // idempotency contract.
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("MyGame");
+        make_unity_project(&project, Some("6000.0.1f1"));
+        let canonical = fs::canonicalize(&project).unwrap();
+        let canonical_str = canonical.to_string_lossy().to_string();
+        assert_eq!(canonicalize_for_compare(&canonical_str), canonical_str);
     }
 }

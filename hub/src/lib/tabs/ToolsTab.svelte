@@ -2,7 +2,9 @@
   import { onMount } from "svelte";
   import { S } from "$lib/state.svelte";
   import {
+    getAssetStorePaths,
     getLogPaths,
+    type AssetStorePaths,
     type LogPaths,
   } from "$lib/services/config";
   import { openPath } from "@tauri-apps/plugin-opener";
@@ -10,7 +12,10 @@
 
   let logPaths = $state<LogPaths | null>(null);
   let logPathsError = $state<string | null>(null);
+  let assetStorePaths = $state<AssetStorePaths | null>(null);
+  let assetStoreError = $state<string | null>(null);
   let openingLog = $state<string | null>(null);
+  let openingAssetStore = $state(false);
   let actionError = $state<string | null>(null);
 
   onMount(() => {
@@ -20,6 +25,12 @@
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         logPathsError = `could not resolve log paths: ${msg}`;
+      }
+      try {
+        assetStorePaths = await getAssetStorePaths();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        assetStoreError = `could not resolve asset store path: ${msg}`;
       }
     })();
   });
@@ -37,6 +48,32 @@
       S.appendErrorLog(actionError);
     } finally {
       openingLog = null;
+    }
+  }
+
+  async function openAssetStore() {
+    const target = assetStorePaths?.folder;
+    const missing = assetStorePaths?.missingMessage;
+    if (!target || openingAssetStore) return;
+    openingAssetStore = true;
+    actionError = null;
+    try {
+      await openPath(target);
+      const note = assetStorePaths?.versioned
+        ? ""
+        : " (versioned Asset Store subfolder not found — opened the Unity parent folder)";
+      S.appendDrawerLog(`opened asset store downloads: ${target}${note}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      actionError = `open asset store downloads failed: ${msg}`;
+      S.appendErrorLog(actionError);
+    } finally {
+      openingAssetStore = false;
+    }
+    if (missing && assetStorePaths && !assetStorePaths.versioned) {
+      // Surface the same inline message shown on the button so the drawer
+      // log mirrors what the user sees on the screen.
+      S.appendDrawerLog(missing);
     }
   }
 
@@ -198,6 +235,47 @@
       </div>
     {/if}
   </section>
+
+  <section class="panel" aria-labelledby="asset-store-title">
+    <header class="panel-head">
+      <h2 id="asset-store-title" class="panel-title">Asset Store downloads</h2>
+      <p class="panel-hint">
+        Opens the folder where Unity drops Asset Store packages. macOS uses
+        <code>~/Library/Application Support/Unity/Asset Store-5.x</code>,
+        Windows uses <code>%LOCALAPPDATA%\Unity\Asset Store-5.x</code>. If no
+        versioned subfolder exists yet, falls back to the <code>Unity</code>
+        parent folder.
+      </p>
+    </header>
+
+    {#if assetStoreError}
+      <p class="field-error" role="alert">{assetStoreError}</p>
+    {:else if !assetStorePaths}
+      <p class="panel-empty">Resolving asset store path…</p>
+    {:else}
+      <div class="log-grid">
+        <div class="log-row">
+          <span class="log-label">Asset Store folder</span>
+          <div class="log-actions">
+            <Button
+              variant="secondary"
+              disabled={!assetStorePaths.folder || openingAssetStore}
+              title={assetStorePaths.folder ?? "path unavailable"}
+              onclick={openAssetStore}
+            >
+              {openingAssetStore ? "Opening…" : assetStorePaths.versioned ? "Open folder" : "Open parent folder"}
+            </Button>
+            <span class="log-path" title={assetStorePaths.folder ?? ""}>
+              {assetStorePaths.folder ?? "—"}
+            </span>
+          </div>
+        </div>
+        {#if assetStorePaths.missingMessage}
+          <p class="field-hint" role="status">{assetStorePaths.missingMessage}</p>
+        {/if}
+      </div>
+    {/if}
+  </section>
 </div>
 
 <style>
@@ -286,6 +364,13 @@
     margin: 0;
     font-size: 0.78rem;
     color: #f0a8b8;
+  }
+
+  .field-hint {
+    margin: 0;
+    font-size: 0.76rem;
+    color: #b89e5a;
+    line-height: 1.4;
   }
 
   .log-grid {

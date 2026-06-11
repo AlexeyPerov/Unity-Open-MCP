@@ -174,6 +174,8 @@ mod tests {
                 platform_intent: None,
                 last_launch_pid: None,
                 last_launch_at: None,
+                frecency: 0,
+                git_branch: None,
             }],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();

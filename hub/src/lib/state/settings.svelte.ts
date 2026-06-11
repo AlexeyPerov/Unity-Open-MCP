@@ -1,6 +1,7 @@
 import {
   loadSettings,
   saveSettings,
+  type ProjectListSortBy,
   type Settings,
 } from "$lib/services/config";
 import { discoveryStore } from "$lib/state/discovery.svelte";
@@ -99,6 +100,22 @@ class SettingsStore {
     await this.persist(next);
   }
 
+  async setShowGitBranchColumn(value: boolean): Promise<void> {
+    if (!this.current) return;
+    if (this.current.projectList.showGitBranchColumn === value) return;
+    const next = this.clone();
+    next.projectList.showGitBranchColumn = value;
+    await this.persist(next);
+  }
+
+  async setProjectListSortBy(value: ProjectListSortBy): Promise<void> {
+    if (!this.current) return;
+    if (this.current.projectList.sortBy === value) return;
+    const next = this.clone();
+    next.projectList.sortBy = value;
+    await this.persist(next);
+  }
+
   async setSearchIncludesPath(value: boolean): Promise<void> {
     if (!this.current) return;
     if (this.current.projectList.searchIncludesPath === value) return;
@@ -120,6 +137,14 @@ class SettingsStore {
     if (this.current.safety.confirmRemoveProject === value) return;
     const next = this.clone();
     next.safety.confirmRemoveProject = value;
+    await this.persist(next);
+  }
+
+  async setAutoOpenDrawerOnLaunchFailure(value: boolean): Promise<void> {
+    if (!this.current) return;
+    if (this.current.diagnostics.autoOpenDrawerOnLaunchFailure === value) return;
+    const next = this.clone();
+    next.diagnostics.autoOpenDrawerOnLaunchFailure = value;
     await this.persist(next);
   }
 

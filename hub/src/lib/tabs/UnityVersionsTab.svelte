@@ -552,6 +552,7 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    padding-top: 0.4rem;
   }
 
   .row {

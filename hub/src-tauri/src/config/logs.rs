@@ -11,6 +11,22 @@ pub struct LogPaths {
     pub crash_logs_folder: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetStorePaths {
+    /// The resolved Asset Store downloads folder, if any versioned subfolder
+    /// (`Asset Store-5.x`) exists on disk. `None` when neither the versioned
+    /// subfolder nor a fallback parent can be located.
+    pub folder: Option<String>,
+    /// `true` when `folder` points at the versioned `Asset Store-5.x`
+    /// subfolder; `false` when we fell back to the parent (e.g. opening the
+    /// `Unity` parent directory when no versioned subfolder is installed yet).
+    pub versioned: bool,
+    /// Human-readable inline message used by the UI when the folder is
+    /// missing. `None` when a path was resolved.
+    pub missing_message: Option<String>,
+}
+
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
@@ -105,6 +121,128 @@ pub fn log_paths(project_path: String) -> LogPaths {
     resolve_log_paths(Path::new(&project_path))
 }
 
+/// Unity Asset Store-5.x downloads folder. The exact versioned subfolder name
+/// (e.g. `Asset Store-5.x`) is the Unity convention; macOS and Windows each
+/// resolve `Unity` under the user's per-OS app-data location and then look for
+/// the first matching `Asset Store-*` subfolder. When no versioned subfolder
+/// exists yet (the user has never opened the Asset Store in Unity), the
+/// command falls back to the parent `Unity` directory so the button still has
+/// something to open. Linux is intentionally unsupported in M1.5 — most
+/// developers run the Hub on macOS or Windows.
+fn asset_store_parent_macos() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| {
+        h.join("Library")
+            .join("Application Support")
+            .join("Unity")
+    })
+}
+
+fn asset_store_parent_windows() -> Option<PathBuf> {
+    if let Some(local) = dirs::config_local_dir() {
+        return Some(local.join("Unity"));
+    }
+    if let Some(appdata) = std::env::var_os("LOCALAPPDATA") {
+        return Some(PathBuf::from(appdata).join("Unity"));
+    }
+    Some(PathBuf::from("C:\\Users\\Public\\AppData\\Local\\Unity"))
+}
+
+fn asset_store_parent() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        asset_store_parent_macos()
+    } else if cfg!(target_os = "windows") {
+        asset_store_parent_windows()
+    } else {
+        None
+    }
+}
+
+fn find_versioned_asset_store_dir(parent: &Path) -> Option<PathBuf> {
+    // Unity creates subfolders named `Asset Store-5.0`, `Asset Store-5.1`, …
+    // The versioned subfolder with the highest 5.x number is the one Unity
+    // uses today. We accept any `Asset Store-*` directory — Unity is free to
+    // introduce new minor version folders in the future. We compare on the
+    // full `major.minor` tuple so `5.10` sorts above `5.2`, etc.
+    let entries = std::fs::read_dir(parent).ok()?;
+    let mut best: Option<((u32, u32), PathBuf)> = None;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(rest) = name.strip_prefix("Asset Store-") else {
+            continue;
+        };
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let mut parts = rest.split('.');
+        let major: u32 = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+        let minor: u32 = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+        let key = (major, minor);
+        match &best {
+            Some((p, _)) if *p >= key => {}
+            _ => best = Some((key, entry.path())),
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+pub fn resolve_asset_store_paths() -> AssetStorePaths {
+    let Some(parent) = asset_store_parent() else {
+        return AssetStorePaths {
+            folder: None,
+            versioned: false,
+            missing_message: Some(
+                "Asset Store path is not resolved on this platform yet (Linux support is deferred)"
+                    .to_string(),
+            ),
+        };
+    };
+    if !parent.exists() {
+        return AssetStorePaths {
+            folder: Some(parent.to_string_lossy().to_string()),
+            versioned: false,
+            missing_message: Some(format!(
+                "Unity app-data folder does not exist yet — the Asset Store will create it on first use: {}",
+                parent.display()
+            )),
+        };
+    }
+    if let Some(versioned) = find_versioned_asset_store_dir(&parent) {
+        AssetStorePaths {
+            folder: Some(versioned.to_string_lossy().to_string()),
+            versioned: true,
+            missing_message: None,
+        }
+    } else {
+        AssetStorePaths {
+            folder: Some(parent.to_string_lossy().to_string()),
+            versioned: false,
+            missing_message: Some(format!(
+                "No versioned Asset Store subfolder found under {} — open the Asset Store in Unity once to create it",
+                parent.display()
+            )),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn asset_store_paths() -> AssetStorePaths {
+    resolve_asset_store_paths()
+}
+
+/// Per-OS crash-log directory path. This is the folder where Unity crash
+/// reports (and most other user-mode crashes on macOS) accumulate:
+/// - macOS: `~/Library/Logs/DiagnosticReports`
+/// - Windows: `%LOCALAPPDATA%\CrashDumps`
+/// - Linux: falls back to the editor logs dir (`~/.config/unity3d`).
+///
+/// Returned to the frontend as a plain string (or `null` when the path is
+/// unknown) so the launch-failure quick-action can offer a single button to
+/// reveal the folder in the native file manager.
+#[tauri::command]
+pub fn crash_log_path() -> Option<String> {
+    Some(crash_logs_dir().to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,5 +317,55 @@ mod tests {
         assert!(p.editor_log_file.is_none());
         assert!(p.player_logs_folder.is_none());
         assert!(p.crash_logs_folder.is_none());
+    }
+
+    #[test]
+    fn asset_store_paths_default_is_empty() {
+        let p = AssetStorePaths::default();
+        assert!(p.folder.is_none());
+        assert!(!p.versioned);
+        assert!(p.missing_message.is_none());
+    }
+
+    #[test]
+    fn find_versioned_asset_store_dir_picks_highest_5x() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Asset Store-5.0")).unwrap();
+        std::fs::create_dir_all(dir.path().join("Asset Store-5.3")).unwrap();
+        std::fs::create_dir_all(dir.path().join("Asset Store-5.1")).unwrap();
+        std::fs::create_dir_all(dir.path().join("Unrelated")).unwrap();
+
+        let found = find_versioned_asset_store_dir(dir.path()).expect("found");
+        assert!(found.ends_with("Asset Store-5.3"));
+    }
+
+    #[test]
+    fn find_versioned_asset_store_dir_ignores_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Asset Store-5.0"), "not a dir").unwrap();
+        assert!(find_versioned_asset_store_dir(dir.path()).is_none());
+    }
+
+    #[test]
+    fn find_versioned_asset_store_dir_returns_none_when_no_subdirs() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(find_versioned_asset_store_dir(dir.path()).is_none());
+    }
+
+    #[test]
+    fn asset_store_paths_command_matches_resolver() {
+        let direct = resolve_asset_store_paths();
+        let via_cmd = asset_store_paths();
+        assert_eq!(direct.folder, via_cmd.folder);
+        assert_eq!(direct.versioned, via_cmd.versioned);
+        assert_eq!(direct.missing_message, via_cmd.missing_message);
+    }
+
+    #[test]
+    fn crash_log_path_command_returns_absolute_path() {
+        let p = crash_log_path();
+        if let Some(s) = p {
+            assert!(Path::new(&s).is_absolute());
+        }
     }
 }
