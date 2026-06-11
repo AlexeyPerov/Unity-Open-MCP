@@ -1,3 +1,18 @@
+## 2026-06-11 16:00 MSK
+
+- **M2 Plan 1 Task 2: Main-thread dispatch queue with timeout envelope.** Implemented dispatch infrastructure so all Unity API/mutation work executes on the main thread, with HTTP handlers awaiting completion with `timeout_ms` and returning stable mutation error envelopes on timeout/cancellation/faults:
+  - `Editor/Bridge/MainThreadDispatcher.cs` — added `EnqueueAsync<T>(Func<T>, int timeoutMs)` returning `Task<T>`. Uses `TaskCompletionSource<T>` with `RunContinuationsAsynchronously` and a `System.Threading.Timer` that fires `TimeoutException` after `timeoutMs`. Existing fire-and-forget `Enqueue(Action)` preserved.
+  - `Editor/Bridge/ToolDispatchResult.cs` — new data class carrying `Success`, `Output`, `ErrorCode`, `ErrorMessage`. Factory methods `Ok()` and `Fail(code, message)`.
+  - `Editor/Bridge/BridgeHttpServer.cs` — added `POST /tools/{tool_name}` dispatch:
+    - Routes POST to known tools (`unity_agent_execute_csharp`, `unity_agent_invoke_method`, `unity_agent_execute_menu`, `unity_agent_find_members`) through `HandleToolDispatch`.
+    - Extracts `timeout_ms` (default 30000, clamped 1000–300000) and `gate` mode (default `enforce`) from request body via lightweight JSON scanning.
+    - Enqueues tool execution to `MainThreadDispatcher.EnqueueAsync` and blocks on result.
+    - Timeout returns `mutation.success: false` with `error.code: "timeout"` and actionable `agentNextSteps`.
+    - Faults return `mutation.success: false` with `error.code: "execution_error"`.
+    - All tool responses use the combined mutation+gate envelope per [mcp-tools.md](specs/architecture/mcp-tools.md) §Combined response shape; gate section is M2 stub (`skipped: true`).
+    - Unknown tool names → 404 `tool_not_found`. Non-POST to `/tools/` → 405 `method_not_allowed`.
+- Marked Task 2 DONE in [execution-plan-1-bridge-http.md](specs/execution/M2/execution-plan-1-bridge-http.md).
+
 ## 2026-06-11 14:30 MSK
 
 - **M2 Plan 1 Task 1: Bridge package scaffold + listener lifecycle.** Scaffolded `packages/bridge` UPM package with full directory structure per [bridge.md](specs/packages/bridge.md) layout:

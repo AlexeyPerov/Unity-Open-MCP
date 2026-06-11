@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -14,6 +17,17 @@ namespace UnityAgentBridge
         const string PortArgPrefix = "-UNITY_AGENT_BRIDGE_PORT=";
         const int DefaultPort = 19120;
         const string BindAddress = "127.0.0.1";
+        const int DefaultTimeoutMs = 30000;
+        const int MinTimeoutMs = 1000;
+        const int MaxTimeoutMs = 300000;
+
+        static readonly HashSet<string> KnownTools = new()
+        {
+            "unity_agent_execute_csharp",
+            "unity_agent_invoke_method",
+            "unity_agent_execute_menu",
+            "unity_agent_find_members"
+        };
 
         static HttpListener _listener;
         static Thread _listenerThread;
@@ -141,7 +155,20 @@ namespace UnityAgentBridge
                         break;
                     default:
                         if (path.StartsWith("/tools/"))
-                            SendToolNotFound(context, path.Substring("/tools/".Length));
+                        {
+                            var toolName = path.Substring("/tools/".Length);
+                            if (context.Request.HttpMethod == "POST")
+                            {
+                                if (KnownTools.Contains(toolName))
+                                    HandleToolDispatch(context, toolName);
+                                else
+                                    SendToolNotFound(context, toolName);
+                            }
+                            else
+                            {
+                                SendJsonError(context, 405, "method_not_allowed", "POST required for tool endpoints");
+                            }
+                        }
                         else
                             SendNotFound(context, path);
                         break;
@@ -165,6 +192,146 @@ namespace UnityAgentBridge
         {
             var json = BuildPingJson();
             SendJson(context, 200, json);
+        }
+
+        static void HandleToolDispatch(HttpListenerContext context, string toolName)
+        {
+            var body = ReadRequestBody(context.Request);
+            var timeoutMs = ExtractTimeoutMs(body);
+            var gateMode = ExtractGateMode(body);
+            var sw = Stopwatch.StartNew();
+
+            try
+            {
+                var task = MainThreadDispatcher.EnqueueAsync(
+                    () => DispatchTool(toolName, body), timeoutMs);
+
+                var result = task.Result;
+                sw.Stop();
+                SendJson(context, 200, BuildMutationEnvelope(result, gateMode));
+            }
+            catch (AggregateException ae)
+            {
+                sw.Stop();
+                var inner = ae.InnerException;
+                if (inner is TimeoutException)
+                    SendJson(context, 200, BuildTimeoutEnvelope(toolName, gateMode, timeoutMs));
+                else
+                    SendJson(context, 200, BuildFaultEnvelope(inner, gateMode));
+            }
+            catch (Exception e)
+            {
+                sw.Stop();
+                SendJson(context, 200, BuildFaultEnvelope(e, gateMode));
+            }
+        }
+
+        static ToolDispatchResult DispatchTool(string toolName, string body)
+        {
+            return ToolDispatchResult.Ok();
+        }
+
+        static string ReadRequestBody(HttpListenerRequest request)
+        {
+            using var stream = request.InputStream;
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            return reader.ReadToEnd();
+        }
+
+        static int ExtractTimeoutMs(string body)
+        {
+            if (string.IsNullOrEmpty(body)) return DefaultTimeoutMs;
+
+            const string key = "\"timeout_ms\"";
+            var idx = body.IndexOf(key, StringComparison.Ordinal);
+            if (idx < 0) return DefaultTimeoutMs;
+
+            var colonIdx = body.IndexOf(':', idx + key.Length);
+            if (colonIdx < 0) return DefaultTimeoutMs;
+
+            var start = colonIdx + 1;
+            while (start < body.Length && char.IsWhiteSpace(body[start])) start++;
+
+            var end = start;
+            while (end < body.Length && char.IsDigit(body[end])) end++;
+
+            if (end == start || !int.TryParse(body.Substring(start, end - start), out var ms))
+                return DefaultTimeoutMs;
+
+            return Math.Clamp(ms, MinTimeoutMs, MaxTimeoutMs);
+        }
+
+        static string ExtractGateMode(string body)
+        {
+            if (string.IsNullOrEmpty(body)) return "enforce";
+
+            const string key = "\"gate\"";
+            var idx = body.IndexOf(key, StringComparison.Ordinal);
+            if (idx < 0) return "enforce";
+
+            var colonIdx = body.IndexOf(':', idx + key.Length);
+            if (colonIdx < 0) return "enforce";
+
+            var start = colonIdx + 1;
+            while (start < body.Length && char.IsWhiteSpace(body[start])) start++;
+
+            if (start >= body.Length || body[start] != '"') return "enforce";
+            start++;
+
+            var end = start;
+            while (end < body.Length && body[end] != '"') end++;
+
+            if (end == start) return "enforce";
+
+            var value = body.Substring(start, end - start);
+            return value is "enforce" or "warn" or "off" ? value : "enforce";
+        }
+
+        static string BuildMutationEnvelope(ToolDispatchResult result, string gateMode)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append("{\"mutation\":{\"success\":");
+            sb.Append(result.Success ? "true" : "false");
+            sb.Append(",\"output\":");
+            sb.Append(result.Output != null ? EscapeString(result.Output) : "null");
+            if (result.ErrorCode != null)
+            {
+                sb.Append(",\"error\":{\"code\":\"").Append(EscapeStringContent(result.ErrorCode));
+                sb.Append("\",\"message\":\"").Append(EscapeStringContent(result.ErrorMessage ?? ""));
+                sb.Append("\"}");
+            }
+            else
+            {
+                sb.Append(",\"error\":null");
+            }
+            sb.Append("},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
+            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
+            sb.Append(",\"agentNextSteps\":[]}");
+            return sb.ToString();
+        }
+
+        static string BuildTimeoutEnvelope(string toolName, string gateMode, int timeoutMs)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"timeout\",\"message\":\"Tool '");
+            sb.Append(EscapeStringContent(toolName));
+            sb.Append("' timed out after ");
+            sb.Append(timeoutMs);
+            sb.Append("ms\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
+            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
+            sb.Append(",\"agentNextSteps\":[\"Tool execution timed out. Consider increasing timeout_ms or simplifying the operation.\"]}");
+            return sb.ToString();
+        }
+
+        static string BuildFaultEnvelope(Exception e, string gateMode)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"execution_error\",\"message\":\"");
+            sb.Append(EscapeStringContent(e.Message));
+            sb.Append("\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
+            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
+            sb.Append(",\"agentNextSteps\":[\"Tool execution failed with an unexpected error.\"]}");
+            return sb.ToString();
         }
 
         static string BuildPingJson()

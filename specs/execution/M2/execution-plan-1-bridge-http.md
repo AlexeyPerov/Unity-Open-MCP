@@ -30,7 +30,7 @@ Dependencies: none.
 
 ---
 
-#### Task 2: Main-thread dispatch queue with timeout envelope (M2-2) [Score:8] [Agent:heavy]
+#### Task 2: Main-thread dispatch queue with timeout envelope (M2-2) [Score:8] [Agent:heavy] **DONE**
 
 **Required context**
 
