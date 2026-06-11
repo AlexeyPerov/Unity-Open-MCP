@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using UnityEditor;
 using UnityEngine;
+using UnityAgentBridge.MetaTools;
 
 namespace UnityAgentBridge
 {
@@ -234,7 +235,14 @@ namespace UnityAgentBridge
 
         static ToolDispatchResult DispatchTool(string toolName, string body)
         {
-            return ToolDispatchResult.Ok();
+            return toolName switch
+            {
+                "unity_agent_execute_csharp" => ExecuteCSharpTool.Execute(body),
+                "unity_agent_invoke_method" => InvokeMethodTool.Execute(body),
+                "unity_agent_execute_menu" => ExecuteMenuTool.Execute(body),
+                "unity_agent_find_members" => FindMembersTool.Execute(body),
+                _ => ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
+            };
         }
 
         static string ReadRequestBody(HttpListenerRequest request)
@@ -299,7 +307,7 @@ namespace UnityAgentBridge
             sb.Append("{\"mutation\":{\"success\":");
             sb.Append(result.Success ? "true" : "false");
             sb.Append(",\"output\":");
-            sb.Append(result.Output != null ? EscapeString(result.Output) : "null");
+            sb.Append(result.Output ?? "null");
             if (result.ErrorCode != null)
             {
                 sb.Append(",\"error\":{\"code\":\"").Append(EscapeStringContent(result.ErrorCode));

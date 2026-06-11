@@ -1,3 +1,30 @@
+## 2026-06-11 20:00 MSK
+
+- **M2 Plan 2 Task 1: Implement M2 meta-tool handlers.** Implemented all four meta-tools (`execute_csharp`, `invoke_method`, `execute_menu`, `find_members`) with full dispatch wiring in the bridge package:
+  - `Editor/Bridge/JsonBody.cs` — lightweight JSON body parser extracting strings, string arrays, booleans, integers, raw values, and mixed-type args arrays from request bodies. No external JSON dependency.
+  - `Editor/MetaTools/OutputSerializer.cs` — serializes .NET return values to raw JSON for the mutation envelope. Handles primitives, strings, Unity Objects, dictionaries, enumerables, and fallback `ToString()`.
+  - `Editor/MetaTools/RoslynHost.cs` — discovers and loads Roslyn compiler assemblies (`Microsoft.CodeAnalysis`, `Microsoft.CodeAnalysis.CSharp`) from Unity 6 installation at `{Contents}/DotNetSdkRoslyn/` (fallback: `{Contents}/Tools/roslyn/`). Compiles C# source via reflection-based `CSharpCompilation` pipeline: parse syntax tree → create metadata references from loaded assemblies → emit to `MemoryStream` → return PE bytes or error diagnostics.
+  - `Editor/MetaTools/ExecuteCSharpTool.cs` — wraps user code in a static method with default usings (`System`, `System.IO`, `System.Linq`, `System.Collections`, `System.Collections.Generic`, `UnityEngine`, `UnityEditor`) plus user-specified extras. Compiles via `RoslynHost`, loads the in-memory assembly, invokes the entry point, and returns serialized output. Error codes: `validation_error`, `roslyn_unavailable`, `compilation_error`, `execution_error`.
+  - `Editor/MetaTools/InvokeMethodTool.cs` — finds types via reflection across loaded assemblies (supports fully qualified name, short name, and assembly filter). Converts JSON args to .NET types matching target method parameters. Supports static and instance methods. Error codes: `validation_error`, `type_not_found`, `method_not_found`, `instantiation_error`, `invocation_error`, `execution_error`.
+  - `Editor/MetaTools/ExecuteMenuTool.cs` — executes Unity Editor menu items via `EditorApplication.ExecuteMenuItem`. Includes deny-list for `File/Quit`. Error codes: `validation_error`, `menu_blocked`, `menu_not_found`, `execution_error`.
+  - `Editor/MetaTools/FindMembersTool.cs` — discovers types, methods, and properties across loaded assemblies. Supports query substring filter, kind filter (`type`, `method`, `property`, `all`), assembly filter, include flags for Unity Editor and project assemblies, and `max_results` (capped at 200). Returns structured JSON with `kind`, `name`, `declaring_type`, `signature`, `summary` per member.
+  - `Editor/Bridge/ToolDispatchResult.cs` — unchanged API but `Output` field now carries raw JSON (not a plain string). Tools serialize their output via `OutputSerializer`.
+  - `Editor/Bridge/BridgeHttpServer.cs` — `DispatchTool` routes to actual tool implementations via switch expression. `BuildMutationEnvelope` inserts `Output` as raw JSON (`result.Output ?? "null"`) instead of escaping it as a string. Added `using UnityAgentBridge.MetaTools`.
+- Marked Task 1 DONE in [execution-plan-2-meta-tools-gate.md](specs/execution/M2/execution-plan-2-meta-tools-gate.md).
+
+## 2026-06-11 18:00 MSK
+
+- **M1.5 execution plan + backlog pull-in + UPM-Template-Creator idea.** Created [specs/execution/M1-5/](specs/execution/M1-5/) for the post-M1 polish & v1.1 foundation milestone:
+  - [M1-5-hub-polish.md](specs/execution/M1-5/M1-5-hub-polish.md) — milestone spec: scope, non-scope, task-group → backlog mapping, done-when.
+  - [execution-plan.md](specs/execution/M1-5/execution-plan.md) — index: 4 sub-plans, dependency graph, quick-wins-first ordering rationale, M1.5 exit criteria.
+  - [execution-plan-1-projects-list-ux.md](specs/execution/M1-5/execution-plan-1-projects-list-ux.md) — 8 Phase 1 quick wins: Asset Download shortcut, per-launch log file, crash-log auto-tailing, frecency sort, platform-intent nudge, git branch display, drag-drop add project, relink missing-path row. Sequenced smallest/safest first.
+  - [execution-plan-2-discovery-cli-lifecycle.md](specs/execution/M1-5/execution-plan-2-discovery-cli-lifecycle.md) — CLI mode, running-Unity detection, walk-up directory scan, basic + template-based new-project creation, Unity upgrade assistant, missing-project UX parity (Relink + Hide + Mark stale).
+  - [execution-plan-3-tools-theme.md](specs/execution/M1-5/execution-plan-3-tools-theme.md) — additional log shortcuts, project-level env vars, three-way theme switch, Unity releases viewer.
+  - [execution-plan-4-platform-niche.md](specs/execution/M1-5/execution-plan-4-platform-niche.md) — Linux first-class support, Explorer/Finder context-menu, GitHub token + git init/commit/push, WebGL local server, ADB logcat, build report viewer.
+- **Backlog pruned.** [specs/hub/backlog.md](specs/hub/backlog.md) updated: removed the 24 items pulled into M1.5 (Phase 1, most of Phase 2, Phase 3 P1+P2, selected Phase 4). Kept only items that depend on M2/M4 (project list wizard health badges, wizard defaults settings page, external bridge adapters) and the explicit out-of-scope list. Added an "Active milestone" pointer at the top.
+- **UPM-Template-Creator integration idea added to backlog** as a future-scope idea: project-type variant (`unity-project` | `unity-package`), package create/edit/validate, scan for packages, batch git operations, "update code from source folder" action, settings surface (`packages.templateFolder` / `packages.knownFolders` / `packages.scanRecentRoot`). Recommended for M1.6 / v1.2 ("Hub + UPM author surface"), explicitly **deferred from M1.5**. The Go runtime does not move into Hub; the workflow is reimplemented in TypeScript + Rust.
+- [specs/execution/README.md](specs/execution/README.md) — added M1.5 rows (spec + execution plan).
+
 ## 2026-06-11 17:30 MSK
 
 - **M2 Plan 1 Task 4: Formal bridge HTTP API doc.** Authored [specs/architecture/bridge-http-api.md](specs/architecture/bridge-http-api.md) — the dedicated API contract document for the Unity Agent Bridge HTTP interface:
