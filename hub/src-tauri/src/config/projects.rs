@@ -191,6 +191,7 @@ pub fn add_project(
         source: "manual".to_string(),
         hidden: false,
         stale: false,
+        env_vars: Default::default(),
     };
 
     let mut projects = state.projects.lock().unwrap().clone();
@@ -580,6 +581,7 @@ mod tests {
             source: "manual".to_string(),
             hidden: false,
             stale: false,
+            env_vars: Default::default(),
         }
     }
 

@@ -1,10 +1,36 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Unity AI Hub</title>
+    <!-- M1.5-18: apply the persisted theme before the JS bundle
+         loads so the first paint is already in the right palette
+         (no flash of dark on first launch with a saved "light"
+         preference, and vice versa). The script reads the
+         `hub-theme` localStorage entry, falls back to the OS
+         `prefers-color-scheme` media query, and defaults to dark. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("hub-theme");
+          var resolved = "dark";
+          if (stored === "dark" || stored === "light") {
+            resolved = stored;
+          } else {
+            var mq = window.matchMedia("(prefers-color-scheme: light)");
+            resolved = mq.matches ? "light" : "dark";
+          }
+          document.documentElement.setAttribute("data-theme", resolved);
+        } catch (_e) {
+          // localStorage can throw in private-browsing modes on
+          // some browsers; fall back to the system default and let
+          // the JS bundle re-apply the persisted value once it
+          // loads.
+        }
+      })();
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

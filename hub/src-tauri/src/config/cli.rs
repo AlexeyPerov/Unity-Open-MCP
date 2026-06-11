@@ -36,6 +36,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use crate::config::discovery;
+use crate::config::env_vars;
 use crate::config::launch;
 use crate::config::persistence;
 use crate::config::schemas::ProjectsFile;
@@ -222,19 +223,20 @@ pub fn run_cli_mode(decision: CliDecision) -> ExitCode {
         }
     };
 
-    // `Command::new` inherits the current stdio by default. Detach is
-    // not desired: the user just asked us to launch Unity from a
-    // terminal, so letting stdout/stderr from the editor flow back to
-    // the parent terminal is the expected behavior. We also pass
-    // `-projectPath` as a separate arg so paths with spaces survive
-    // the round trip (a single joined string would not handle quoting
-    // portably on Windows).
-    let spawn_result = Command::new(&executable)
-        .arg("-projectPath")
-        .arg(&path)
-        .spawn();
+    // M1.5-17: layer the project's per-project env vars on top of the
+    // inherited parent-process env. CLI mode reads `projects.json`
+    // directly (the in-memory mirror is not initialised at this point
+    // — Tauri has not been built yet), so a missing projects file is a
+    // no-op rather than a panic. The lookup is best-effort: the
+    // collision-confirmation modal only exists in the GUI, so the CLI
+    // launches the project with whatever env vars are configured.
+    let mut command = Command::new(&executable);
+    command.arg("-projectPath").arg(&path);
+    if let Some(env_vars_map) = load_env_vars_for_project(&path) {
+        env_vars::apply_to_command(&mut command, &env_vars_map);
+    }
 
-    let child = match spawn_result {
+    let child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
             return ExitCode::from(cli_error(format!(
@@ -284,6 +286,21 @@ fn record_cli_launch(path: &str, version: &str, pid: u32) {
             log::warn!("CLI mode: failed to persist launch record: {}", e);
         }
     }
+}
+
+/// Best-effort lookup of the project's per-project env vars from the
+/// on-disk `projects.json` file. Returns `None` when the project is
+/// not in the list, when the file is missing, or when the file fails
+/// to parse — the CLI flow must not panic on a corrupt or absent
+/// projects file. The caller layers the result on top of the
+/// inherited env.
+fn load_env_vars_for_project(path: &str) -> Option<std::collections::BTreeMap<String, String>> {
+    let projects = persistence::load_projects();
+    projects
+        .projects
+        .into_iter()
+        .find(|p| p.path == path)
+        .map(|p| p.env_vars)
 }
 
 #[cfg(test)]

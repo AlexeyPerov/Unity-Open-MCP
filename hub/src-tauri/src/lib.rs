@@ -51,6 +51,9 @@ pub fn run() {
             config::upgrade::upgrade_candidates,
             config::projects::set_project_hidden,
             config::projects::set_project_stale,
+            config::env_vars::env_var_collisions,
+            config::releases::fetch_releases,
+            config::releases::refresh_releases_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -150,6 +150,7 @@ pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
             source: "hub-seed".to_string(),
             hidden: false,
             stale: false,
+            env_vars: Default::default(),
         });
     }
 

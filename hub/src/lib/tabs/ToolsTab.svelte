@@ -1,14 +1,24 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { S } from "$lib/state.svelte";
+  import { projectsStore } from "$lib/state/projects.svelte";
   import {
     getAssetStorePaths,
     getLogPaths,
+    saveProjects,
     type AssetStorePaths,
     type LogPaths,
+    type ProjectEntry,
   } from "$lib/services/config";
   import { openPath } from "@tauri-apps/plugin-opener";
   import Button from "$lib/components/shell/Button.svelte";
+
+  type EnvVarDraft = {
+    /** Stable id for Svelte keyed each blocks (key+value would not be unique). */
+    uid: string;
+    key: string;
+    value: string;
+  };
 
   let logPaths = $state<LogPaths | null>(null);
   let logPathsError = $state<string | null>(null);
@@ -92,6 +102,125 @@
   function handleEditorLogFile() {
     void openLogTarget("Editor.log", logPaths?.editorLogFile);
   }
+
+  function handleEditorPrevLogFile() {
+    void openLogTarget("Editor-prev.log", logPaths?.editorPrevLogFile);
+  }
+
+  function handlePlayerLogFile() {
+    void openLogTarget("Player.log", logPaths?.playerLogFile);
+  }
+
+  function handleUnityPlayerLogFile() {
+    void openLogTarget("standalone Player.log", logPaths?.unityPlayerLogFile);
+  }
+
+  // M1.5-17: env-vars panel state. The draft mirrors the persisted
+  // `envVars` record for the currently selected project; saving writes
+  // the record back to `projects.json` via the same atomic path the
+  // rest of the project mutations use. The draft is a local copy so
+  // the user can add / edit / remove rows before pressing Save.
+  let envVarsDraft = $state<EnvVarDraft[]>([]);
+  let envVarsRevealed = $state<Record<string, boolean>>({});
+  let envVarsSaving = $state(false);
+  let envVarsError = $state<string | null>(null);
+  let envVarsInfo = $state<string | null>(null);
+  let nextDraftUid = 1;
+
+  const envVarsSelectedProject = $derived<ProjectEntry | null>(
+    projectsStore.selectedProjectId
+      ? (projectsStore.find(projectsStore.selectedProjectId) ?? null)
+      : null,
+  );
+
+  $effect(() => {
+    // Re-seed the draft when the user picks a different project (or
+    // clears the selection). Skipping this effect when the project is
+    // null avoids clobbering an in-progress edit if the underlying
+    // store reloads transiently.
+    const project = envVarsSelectedProject;
+    if (!project) {
+      envVarsDraft = [];
+      envVarsError = null;
+      envVarsInfo = null;
+      return;
+    }
+    envVarsDraft = Object.entries(project.envVars ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => ({
+        uid: `seed-${nextDraftUid++}`,
+        key,
+        value,
+      }));
+    envVarsError = null;
+    envVarsInfo = null;
+  });
+
+  function newEnvVarDraft(): EnvVarDraft {
+    return { uid: `draft-${nextDraftUid++}`, key: "", value: "" };
+  }
+
+  function addEnvVarRow() {
+    envVarsDraft = [...envVarsDraft, newEnvVarDraft()];
+  }
+
+  function removeEnvVarRow(uid: string) {
+    envVarsDraft = envVarsDraft.filter((r) => r.uid !== uid);
+  }
+
+  function toggleReveal(uid: string) {
+    envVarsRevealed = { ...envVarsRevealed, [uid]: !envVarsRevealed[uid] };
+  }
+
+  function isValidEnvVarDraft(rows: EnvVarDraft[]): { ok: true; map: Record<string, string> } | { ok: false; error: string } {
+    const map: Record<string, string> = {};
+    for (const row of rows) {
+      const key = row.key.trim();
+      if (key === "") {
+        return { ok: false, error: "env-var keys cannot be empty" };
+      }
+      if (key.includes("=")) {
+        return { ok: false, error: `env-var key cannot contain '=': ${key}` };
+      }
+      if (Object.prototype.hasOwnProperty.call(map, key)) {
+        return { ok: false, error: `duplicate env-var key: ${key}` };
+      }
+      map[key] = row.value;
+    }
+    return { ok: true, map };
+  }
+
+  async function saveEnvVars() {
+    const project = envVarsSelectedProject;
+    if (!project) return;
+    const validation = isValidEnvVarDraft(envVarsDraft);
+    if (!validation.ok) {
+      envVarsError = validation.error;
+      return;
+    }
+    envVarsError = null;
+    envVarsInfo = null;
+    envVarsSaving = true;
+    try {
+      const updated: ProjectEntry = {
+        ...project,
+        envVars: validation.map,
+      };
+      const nextList = projectsStore.projects.map((p) =>
+        p.id === project.id ? updated : p,
+      );
+      await saveProjects({ version: 1, projects: nextList });
+      projectsStore.replaceAll(nextList);
+      envVarsInfo = `saved ${Object.keys(validation.map).length} env var${Object.keys(validation.map).length === 1 ? "" : "s"} for ${project.name}`;
+      S.appendDrawerLog(envVarsInfo);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      envVarsError = `save env vars failed: ${msg}`;
+      S.appendErrorLog(envVarsError);
+    } finally {
+      envVarsSaving = false;
+    }
+  }
 </script>
 
 <div class="tools">
@@ -158,6 +287,88 @@
             {/if}
             <span class="log-path" title={logPaths.editorLogFile ?? ""}>
               {logPaths.editorLogFile ?? "—"}
+            </span>
+          </div>
+        </div>
+        <div class="log-row">
+          <span class="log-label">Editor-prev.log</span>
+          <div class="log-actions">
+            {#if logPaths.editorPrevLogFile}
+              <button
+                type="button"
+                class="link-btn"
+                onclick={handleEditorPrevLogFile}
+                title={`Open ${logPaths.editorPrevLogFile}`}
+              >
+                {openingLog === logPaths.editorPrevLogFile ? "Opening…" : "Open file ↗"}
+              </button>
+            {:else}
+              <span class="muted-inline">no file path resolved</span>
+            {/if}
+            <span class="log-path" title={logPaths.editorPrevLogFile ?? ""}>
+              {logPaths.editorPrevLogFile ?? "—"}
+            </span>
+          </div>
+        </div>
+        <div class="log-row">
+          <span class="log-label">Player.log (editor preview)</span>
+          <div class="log-actions">
+            {#if logPaths.playerLogFile}
+              <button
+                type="button"
+                class="link-btn"
+                onclick={handlePlayerLogFile}
+                title={`Open ${logPaths.playerLogFile}`}
+              >
+                {openingLog === logPaths.playerLogFile ? "Opening…" : "Open file ↗"}
+              </button>
+            {:else}
+              <span class="muted-inline">no file path resolved</span>
+            {/if}
+            <span class="log-path" title={logPaths.playerLogFile ?? ""}>
+              {logPaths.playerLogFile ?? "—"}
+            </span>
+          </div>
+        </div>
+      </div>
+    {/if}
+  </section>
+
+  <section class="panel" aria-labelledby="standalone-player-log-title">
+    <header class="panel-head">
+      <h2 id="standalone-player-log-title" class="panel-title">Standalone Player log</h2>
+      <p class="panel-hint">
+        Per-user <code>Player.log</code> written by standalone Unity Player builds (not
+        the editor preview). macOS uses <code>~/Library/Logs/Unity/Player.log</code>,
+        Windows uses <code>%LOCALAPPDATA%\Unity\Player.log</code>, Linux uses
+        <code>~/.config/unity3d/Player.log</code>. The button is disabled until a
+        standalone build has been run on this machine (the file does not exist yet).
+      </p>
+    </header>
+
+    {#if logPathsError}
+      <p class="field-error" role="alert">{logPathsError}</p>
+    {:else if !logPaths}
+      <p class="panel-empty">Resolving log paths…</p>
+    {:else}
+      <div class="log-grid">
+        <div class="log-row">
+          <span class="log-label">Player.log (standalone)</span>
+          <div class="log-actions">
+            {#if logPaths.unityPlayerLogFile}
+              <button
+                type="button"
+                class="link-btn"
+                onclick={handleUnityPlayerLogFile}
+                title={`Open ${logPaths.unityPlayerLogFile}`}
+              >
+                {openingLog === logPaths.unityPlayerLogFile ? "Opening…" : "Open file ↗"}
+              </button>
+            {:else}
+              <span class="muted-inline">no standalone player log on disk yet</span>
+            {/if}
+            <span class="log-path" title={logPaths.unityPlayerLogFile ?? ""}>
+              {logPaths.unityPlayerLogFile ?? "—"}
             </span>
           </div>
         </div>
@@ -273,6 +484,90 @@
         {#if assetStorePaths.missingMessage}
           <p class="field-hint" role="status">{assetStorePaths.missingMessage}</p>
         {/if}
+      </div>
+    {/if}
+  </section>
+
+  <section class="panel" aria-labelledby="env-vars-title">
+    <header class="panel-head">
+      <h2 id="env-vars-title" class="panel-title">Environment variables</h2>
+      <p class="panel-hint">
+        Per-project environment variables merged into the spawned Unity process.
+        Values in the child override the parent process when keys collide. Manage
+        per-project on this tab; the safety toggle in
+        <code>Settings → Safety</code> controls whether the launch button shows a
+        confirmation modal listing colliding keys.
+      </p>
+    </header>
+
+    {#if !envVarsSelectedProject}
+      <p class="panel-empty">
+        Select a project on the Projects tab to edit its environment variables.
+      </p>
+    {:else}
+      <p class="panel-subhead">
+        Editing: <strong>{envVarsSelectedProject?.name}</strong>
+      </p>
+
+      {#if envVarsError}
+        <p class="field-error" role="alert">{envVarsError}</p>
+      {/if}
+      {#if envVarsInfo}
+        <p class="field-hint" role="status">{envVarsInfo}</p>
+      {/if}
+
+      <div class="env-grid">
+        {#each envVarsDraft as row (row.uid)}
+          <div class="env-row">
+            <input
+              type="text"
+              class="env-key"
+              placeholder="KEY"
+              bind:value={row.key}
+              aria-label="Environment variable name"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <div class="env-value-wrap">
+              <input
+                type={envVarsRevealed[row.uid] ? "text" : "password"}
+                class="env-value"
+                placeholder="value"
+                bind:value={row.value}
+                aria-label="Environment variable value"
+                spellcheck="false"
+                autocomplete="off"
+              />
+              <button
+                type="button"
+                class="link-btn env-reveal"
+                onclick={() => toggleReveal(row.uid)}
+                aria-label={envVarsRevealed[row.uid] ? "Hide value" : "Show value"}
+              >
+                {envVarsRevealed[row.uid] ? "Hide" : "Show"}
+              </button>
+            </div>
+            <button
+              type="button"
+              class="link-btn env-remove"
+              onclick={() => removeEnvVarRow(row.uid)}
+              aria-label="Remove env var row"
+            >
+              Remove
+            </button>
+          </div>
+        {/each}
+      </div>
+
+      <div class="env-actions">
+        <Button variant="secondary" onclick={addEnvVarRow}>+ Add env var</Button>
+        <Button
+          variant="primary"
+          disabled={envVarsSaving}
+          onclick={saveEnvVars}
+        >
+          {envVarsSaving ? "Saving…" : "Save"}
+        </Button>
       </div>
     {/if}
   </section>
@@ -434,5 +729,76 @@
   .muted-inline {
     color: #6f7280;
     font-size: 0.78rem;
+  }
+
+  .panel-subhead {
+    margin: 0;
+    font-size: 0.78rem;
+    color: #c5c7d0;
+  }
+
+  .env-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .env-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .env-key,
+  .env-value {
+    flex: 1 1 8rem;
+    min-width: 0;
+    background: #14151a;
+    color: #e9e9ef;
+    border: 1px solid #34353f;
+    border-radius: 6px;
+    padding: 0.4rem 0.55rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.82rem;
+    line-height: 1.4;
+  }
+
+  .env-key:focus,
+  .env-value:focus {
+    outline: 2px solid #5c7cfa;
+    outline-offset: 0;
+    border-color: #5c7cfa;
+  }
+
+  .env-key {
+    flex: 0 1 12rem;
+  }
+
+  .env-value-wrap {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.4rem;
+    flex: 1 1 12rem;
+    min-width: 0;
+  }
+
+  .env-value {
+    flex: 1;
+  }
+
+  .env-reveal,
+  .env-remove {
+    flex: 0 0 auto;
+  }
+
+  .env-actions {
+    display: flex;
+    flex-direction: row;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.2rem;
   }
 </style>

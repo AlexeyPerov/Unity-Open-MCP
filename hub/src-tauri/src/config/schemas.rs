@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -10,6 +12,17 @@ pub struct Settings {
     pub unity_discovery: UnityDiscoverySettings,
     #[serde(default = "default_diagnostics_settings")]
     pub diagnostics: DiagnosticsSettings,
+    /// M1.5-18: three-way theme switch — `dark` | `light` | `system`
+    /// (default). `#[serde(default = "default_theme")]` keeps legacy
+    /// `settings.json` files loadable; the documented default is
+    /// `system` per the task spec. The frontend drives a
+    /// `[data-theme="…"]` attribute on `<html>` from this field.
+    #[serde(default = "default_theme")]
+    pub theme: String,
+}
+
+fn default_theme() -> String {
+    "system".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +83,14 @@ fn default_true() -> bool {
 pub struct SafetySettings {
     pub confirm_kill_unity: bool,
     pub confirm_remove_project: bool,
+    /// M1.5-17: when `true` (default), a confirmation modal lists
+    /// colliding env-var keys before a launch so the user is warned
+    /// that the spawned Unity will override a parent-process variable.
+    /// `#[serde(default = "default_true")]` keeps legacy `settings.json`
+    /// files loadable; the documented default is `true` per the task
+    /// spec.
+    #[serde(default = "default_true")]
+    pub confirm_env_var_override: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,6 +166,7 @@ impl Default for Settings {
             safety: SafetySettings {
                 confirm_kill_unity: true,
                 confirm_remove_project: true,
+                confirm_env_var_override: true,
             },
             unity_discovery: UnityDiscoverySettings {
                 parent_folders: vec![
@@ -161,6 +183,7 @@ impl Default for Settings {
             diagnostics: DiagnosticsSettings {
                 auto_open_drawer_on_launch_failure: true,
             },
+            theme: default_theme(),
         }
     }
 }
@@ -226,6 +249,15 @@ pub struct ProjectEntry {
     /// keeps legacy entries loadable.
     #[serde(default)]
     pub stale: bool,
+    /// M1.5-17: per-project environment variables merged into the
+    /// spawned Unity process's environment (the child overrides the
+    /// parent when keys collide). Stored as a record of strings; empty
+    /// maps are skipped on serialize so legacy entries stay compact.
+    /// `#[serde(default, skip_serializing_if = "BTreeMap::is_empty")]`
+    /// keeps pre-M1.5-17 `projects.json` files loadable with an empty
+    /// map (the documented default).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env_vars: BTreeMap<String, String>,
 }
 
 fn default_project_source() -> String {
@@ -262,6 +294,7 @@ mod tests {
         let s = Settings::default();
         assert!(s.safety.confirm_kill_unity);
         assert!(s.safety.confirm_remove_project);
+        assert!(s.safety.confirm_env_var_override);
     }
 
     #[test]
@@ -439,6 +472,43 @@ mod tests {
     }
 
     #[test]
+    fn settings_loads_legacy_settings_without_theme() {
+        // M1.5-18: pre-M1.5-18 settings.json files do not carry the
+        // `theme` field. The deserializer must default to `"system"`
+        // (the documented default) so existing user configs are not
+        // rejected and a freshly-updated Hub follows the OS color
+        // scheme on first launch.
+        let legacy = r#"{
+            "version": 1,
+            "launch": { "mode": "openProject", "rememberLastSelection": true },
+            "projectList": {
+                "showPathColumn": true,
+                "showModifiedColumn": true,
+                "searchIncludesPath": true
+            },
+            "safety": { "confirmKillUnity": true, "confirmRemoveProject": true },
+            "unityDiscovery": { "parentFolders": [] }
+        }"#;
+        let restored: Settings = serde_json::from_str(legacy).unwrap();
+        assert_eq!(restored.theme, "system");
+    }
+
+    #[test]
+    fn settings_default_theme_is_system() {
+        let s = Settings::default();
+        assert_eq!(s.theme, "system");
+    }
+
+    #[test]
+    fn settings_theme_roundtrip() {
+        let mut s = Settings::default();
+        s.theme = "light".to_string();
+        let json = serde_json::to_string_pretty(&s).unwrap();
+        let restored: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.theme, "light");
+    }
+
+    #[test]
     fn projects_default_empty() {
         let p = ProjectsFile::default();
         assert_eq!(p.version, 1);
@@ -490,6 +560,10 @@ mod tests {
                 source: "manual".to_string(),
                 hidden: false,
                 stale: false,
+                env_vars: BTreeMap::from([
+                    ("MY_KEY".to_string(), "hello".to_string()),
+                    ("DEBUG_LEVEL".to_string(), "verbose".to_string()),
+                ]),
             }],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -509,6 +583,14 @@ mod tests {
         assert_eq!(p.last_launch_pid, Some(12345));
         assert_eq!(p.frecency, 3);
         assert_eq!(p.git_branch.as_deref(), Some("feature/frecency"));
+        // M1.5-17: env_vars round-trip preserves both keys (BTreeMap
+        // ordering is alphabetical, so the JSON shape is stable).
+        assert_eq!(p.env_vars.len(), 2);
+        assert_eq!(p.env_vars.get("MY_KEY").map(String::as_str), Some("hello"));
+        assert_eq!(
+            p.env_vars.get("DEBUG_LEVEL").map(String::as_str),
+            Some("verbose")
+        );
     }
 
     #[test]
@@ -539,6 +621,7 @@ mod tests {
             source: "manual".to_string(),
             hidden: false,
             stale: false,
+            env_vars: BTreeMap::new(),
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(!json.contains("unityVersion"));
@@ -553,6 +636,24 @@ mod tests {
         // the new fields are part of the persistent on-disk contract.
         assert!(json.contains("\"hidden\":false"));
         assert!(json.contains("\"stale\":false"));
+        // M1.5-17: envVars is skipped on serialize when the map is
+        // empty so the on-disk file stays compact for the common case.
+        assert!(!json.contains("envVars"));
+    }
+
+    #[test]
+    fn project_entry_env_vars_default_to_empty_for_legacy_json() {
+        // Pre-M1.5-17 entries have no `envVars` field. The deserializer
+        // must default to an empty map so legacy projects keep working
+        // and the env-var panel renders an empty add-row on first
+        // open. Persisting after a default load round-trips cleanly.
+        let legacy = r#"{
+            "id": "abc",
+            "name": "Proj",
+            "path": "/p"
+        }"#;
+        let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
+        assert!(entry.env_vars.is_empty());
     }
 
     #[test]

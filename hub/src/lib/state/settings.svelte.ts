@@ -3,9 +3,11 @@ import {
   saveSettings,
   type ProjectListSortBy,
   type Settings,
+  type Theme,
 } from "$lib/services/config";
 import { discoveryStore } from "$lib/state/discovery.svelte";
 import { runningUnityStore } from "$lib/state/running_unity.svelte";
+import { applyTheme } from "$lib/theme.svelte";
 
 class SettingsStore {
   current = $state<Settings | null>(null);
@@ -25,6 +27,11 @@ class SettingsStore {
     // reads the interval off the live settings object on every
     // `applyInterval` call).
     runningUnityStore.applyInterval();
+    // M1.5-18: apply the persisted theme to the document so the
+    // first paint is already in the right palette. The
+    // `applyTheme` helper is a no-op when the document attribute
+    // is already correct, so the cost is one DOM read on startup.
+    applyTheme(settings.theme ?? "system");
   }
 
   isLoaded(): boolean {
@@ -158,6 +165,42 @@ class SettingsStore {
     if (this.current.safety.confirmRemoveProject === value) return;
     const next = this.clone();
     next.safety.confirmRemoveProject = value;
+    await this.persist(next);
+  }
+
+  /**
+   * M1.5-17: when `true` (default), the Launch button on a project with
+   * colliding env vars opens a confirmation modal listing the keys
+   * that would override a parent-process variable. Off = the modal is
+   * skipped and the env vars are applied silently.
+   */
+  async setConfirmEnvVarOverride(value: boolean): Promise<void> {
+    if (!this.current) return;
+    const current = this.current.safety.confirmEnvVarOverride ?? true;
+    if (current === value) return;
+    const next = this.clone();
+    next.safety.confirmEnvVarOverride = value;
+    await this.persist(next);
+  }
+
+  /**
+   * M1.5-18: switch the active theme. The change is applied to the
+   * document *before* the on-disk write so the user sees the new
+   * palette immediately; the persist call updates `settings.json`
+   * so the choice survives a relaunch.
+   */
+  async setTheme(theme: Theme): Promise<void> {
+    if (!this.current) return;
+    const current = this.current.theme ?? "system";
+    if (current === theme) {
+      // Even on a no-op, re-apply so the OS color-scheme listener
+      // is in sync with the latest media-query state.
+      applyTheme(theme);
+      return;
+    }
+    applyTheme(theme);
+    const next = this.clone();
+    next.theme = theme;
     await this.persist(next);
   }
 

@@ -144,6 +144,18 @@
     );
   }
 
+  async function setConfirmEnvVarOverride(value: boolean) {
+    lastError = null;
+    await withErrorBoundary("save confirm-env-var-override", () =>
+      settingsStore.setConfirmEnvVarOverride(value)
+    );
+  }
+
+  async function setTheme(theme: "dark" | "light" | "system") {
+    lastError = null;
+    await withErrorBoundary("save theme", () => settingsStore.setTheme(theme));
+  }
+
   async function setAutoOpenDrawerOnLaunchFailure(value: boolean) {
     lastError = null;
     await withErrorBoundary("save auto-open-drawer-on-launch-failure", () =>
@@ -442,6 +454,7 @@
   type SettingsGroupId =
     | "launch"
     | "projectList"
+    | "appearance"
     | "safety"
     | "discovery"
     | "diagnostics";
@@ -449,6 +462,7 @@
   let openGroups = $state<Record<SettingsGroupId, boolean>>({
     launch: true,
     projectList: true,
+    appearance: true,
     safety: true,
     discovery: true,
     diagnostics: true,
@@ -457,6 +471,28 @@
   function toggleGroup(id: SettingsGroupId) {
     openGroups = { ...openGroups, [id]: !openGroups[id] };
   }
+
+  const themeOptions: {
+    id: "dark" | "light" | "system";
+    label: string;
+    description: string;
+  }[] = [
+    {
+      id: "dark",
+      label: "Dark",
+      description: "Force the dark palette regardless of the OS setting.",
+    },
+    {
+      id: "light",
+      label: "Light",
+      description: "Force the light palette regardless of the OS setting.",
+    },
+    {
+      id: "system",
+      label: "System",
+      description: "Follow the OS color scheme (auto-flips with macOS / Windows).",
+    },
+  ];
 
   const launchModeOptions: {
     id: "openProject" | "openEditor";
@@ -690,6 +726,56 @@
               />
               <span class="check-label">Confirm before removing project from list</span>
             </label>
+            <label class="check-row">
+              <input
+                type="checkbox"
+                checked={settings.safety.confirmEnvVarOverride ?? true}
+                onchange={(e) =>
+                  setConfirmEnvVarOverride((e.currentTarget as HTMLInputElement).checked)}
+              />
+              <span class="check-label">Confirm env-var overrides before launch (M1.5-17)</span>
+            </label>
+          </div>
+        {/if}
+      </section>
+
+      <section class="group" aria-labelledby="group-appearance">
+        <button
+          type="button"
+          class="group-header"
+          aria-expanded={openGroups.appearance}
+          aria-controls="group-appearance-body"
+          onclick={() => toggleGroup("appearance")}
+        >
+          <span class="group-chevron" class:group-chevron-open={openGroups.appearance} aria-hidden="true">▸</span>
+          <span class="group-header-text">
+            <h3 id="group-appearance" class="group-title">Appearance (M1.5-18)</h3>
+            <p class="group-hint">Three-way theme switch — applied live, no restart.</p>
+          </span>
+        </button>
+        {#if openGroups.appearance}
+          <div id="group-appearance-body" class="group-body">
+            <div
+              class="radio-group"
+              role="radiogroup"
+              aria-labelledby="group-appearance"
+            >
+              {#each themeOptions as opt (opt.id)}
+                <label class="radio-row">
+                  <input
+                    type="radio"
+                    name="theme"
+                    value={opt.id}
+                    checked={(settings.theme ?? "system") === opt.id}
+                    onchange={() => setTheme(opt.id)}
+                  />
+                  <span class="radio-stack">
+                    <span class="radio-label">{opt.label}</span>
+                    <span class="radio-description">{opt.description}</span>
+                  </span>
+                </label>
+              {/each}
+            </div>
           </div>
         {/if}
       </section>

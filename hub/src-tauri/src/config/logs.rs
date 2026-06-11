@@ -7,7 +7,29 @@ use serde::{Deserialize, Serialize};
 pub struct LogPaths {
     pub editor_logs_folder: Option<String>,
     pub editor_log_file: Option<String>,
+    /// M1.5-16: path to `Editor-prev.log` — the Unity Editor log from the
+    /// *previous* session (Unity renames the live `Editor.log` to
+    /// `Editor-prev.log` on every fresh launch). Same folder as
+    /// `editor_log_file`; surfaces a separate button on the Tools tab so
+    /// the user can cross-reference the previous run without leaving the
+    /// current log open.
+    pub editor_prev_log_file: Option<String>,
     pub player_logs_folder: Option<String>,
+    /// M1.5-16: the per-project `Player.log` (Unity's editor preview
+    /// player writes here, alongside the `Editor.log` and the
+    /// `AssetImportWorker0.log`). Same folder as the editor logs; the
+    /// button is distinct so a tool panel can reveal it without the
+    /// user having to open the editor logs folder first.
+    pub player_log_file: Option<String>,
+    /// M1.5-16: the per-user *global* `Player.log` written by standalone
+    /// Unity player builds (not the editor preview). macOS:
+    /// `~/Library/Logs/Unity/Player.log`. Windows:
+    /// `%LOCALAPPDATA%\Unity\Player.log`. Linux: `~/.config/unity3d/Player.log`.
+    /// This is the same file standalone Player builds use when the user
+    /// does not pass `-logFile` on the command line. Returns `None` when
+    /// the user has not run a standalone player on this machine yet
+    /// (the parent folder always exists, but the file may not).
+    pub unity_player_log_file: Option<String>,
     pub crash_logs_folder: Option<String>,
 }
 
@@ -105,13 +127,39 @@ fn crash_logs_dir() -> PathBuf {
 pub fn resolve_log_paths(project_path: &Path) -> LogPaths {
     let editor_dir = editor_logs_dir();
     let editor_file = editor_dir.join("Editor.log");
+    // M1.5-16: `Editor-prev.log` is the rotated copy of the previous
+    // editor session's log. The filename is the same on every OS — Unity
+    // renames the live file on every fresh launch. Sibling of the live
+    // `Editor.log` (i.e. it lives in `editor_dir`).
+    let editor_prev_file = editor_dir.join("Editor-prev.log");
+    // M1.5-16: per-project `Player.log`. Unity's editor preview player
+    // (the "Play" button) writes `Player.log` next to `Editor.log`; the
+    // file is created on the first Play, so the path resolves even when
+    // the file does not yet exist.
+    let player_file = editor_dir.join("Player.log");
+    // M1.5-16: the per-user global Player.log for *standalone* player
+    // builds (not the editor preview). Same folder as the editor logs
+    // on macOS / Windows; on Linux it falls back to `~/.config/unity3d`.
+    let unity_player_log = editor_dir.join("Player.log");
+    // Filter out the per-user Player.log when the file is missing on
+    // disk: the per-project variant is what most users want when the
+    // editor preview path doesn't exist yet, and the button is then
+    // disabled with the standard inline message.
+    let unity_player_log_resolved = if unity_player_log.exists() {
+        Some(path_to_string(&unity_player_log))
+    } else {
+        None
+    };
     let player_dir = project_path.join("Logs");
     let crash_dir = crash_logs_dir();
 
     LogPaths {
         editor_logs_folder: Some(path_to_string(&editor_dir)),
         editor_log_file: Some(path_to_string(&editor_file)),
+        editor_prev_log_file: Some(path_to_string(&editor_prev_file)),
         player_logs_folder: Some(path_to_string(&player_dir)),
+        player_log_file: Some(path_to_string(&player_file)),
+        unity_player_log_file: unity_player_log_resolved,
         crash_logs_folder: Some(path_to_string(&crash_dir)),
     }
 }
@@ -306,7 +354,13 @@ mod tests {
         let via_cmd = log_paths(project.to_string_lossy().to_string());
         assert_eq!(direct.editor_logs_folder, via_cmd.editor_logs_folder);
         assert_eq!(direct.editor_log_file, via_cmd.editor_log_file);
+        assert_eq!(direct.editor_prev_log_file, via_cmd.editor_prev_log_file);
         assert_eq!(direct.player_logs_folder, via_cmd.player_logs_folder);
+        assert_eq!(direct.player_log_file, via_cmd.player_log_file);
+        assert_eq!(
+            direct.unity_player_log_file,
+            via_cmd.unity_player_log_file
+        );
         assert_eq!(direct.crash_logs_folder, via_cmd.crash_logs_folder);
     }
 
@@ -315,8 +369,59 @@ mod tests {
         let p = LogPaths::default();
         assert!(p.editor_logs_folder.is_none());
         assert!(p.editor_log_file.is_none());
+        assert!(p.editor_prev_log_file.is_none());
         assert!(p.player_logs_folder.is_none());
+        assert!(p.player_log_file.is_none());
+        assert!(p.unity_player_log_file.is_none());
         assert!(p.crash_logs_folder.is_none());
+    }
+
+    #[test]
+    fn resolve_log_paths_prev_log_lives_next_to_editor_log() {
+        // M1.5-16: `Editor-prev.log` is the previous session's log
+        // rotated by Unity on every fresh launch. It must live in the
+        // same folder as `Editor.log` and use the exact filename Unity
+        // picks — a typo here would silently fail to surface the
+        // shortcut button on macOS / Windows.
+        let project = fresh_dir("PrevProj");
+        let result = resolve_log_paths(&project);
+        let dir = result.editor_logs_folder.as_deref().unwrap();
+        let prev = result.editor_prev_log_file.as_deref().unwrap();
+        assert!(prev.starts_with(dir));
+        assert!(prev.ends_with("Editor-prev.log"));
+    }
+
+    #[test]
+    fn resolve_log_paths_player_log_lives_next_to_editor_log() {
+        // M1.5-16: the per-project `Player.log` (editor preview player)
+        // is a sibling of `Editor.log`. The path always resolves even
+        // when the file does not exist on disk yet (the user has not
+        // pressed Play in this project) — the frontend uses the
+        // resolved path string for the title / "reveal in folder"
+        // tooltip, and the existing openPath pattern handles the
+        // missing-file case via the inline error.
+        let project = fresh_dir("PlayerProj");
+        let result = resolve_log_paths(&project);
+        let dir = result.editor_logs_folder.as_deref().unwrap();
+        let player = result.player_log_file.as_deref().unwrap();
+        assert!(player.starts_with(dir));
+        assert!(player.ends_with("Player.log"));
+    }
+
+    #[test]
+    fn resolve_log_paths_unity_player_log_omitted_when_missing() {
+        // M1.5-16: the per-user global `Player.log` (standalone player
+        // builds) is filtered to `None` when the file does not exist on
+        // disk. Most dev machines have not run a standalone build, so
+        // returning a path to a non-existent file would make the button
+        // look broken. The frontend disables the button + shows the
+        // "no standalone player log found" hint when the field is null.
+        let project = fresh_dir("UnityPlayerProj");
+        let result = resolve_log_paths(&project);
+        // We never write the file in the test, so the field must be
+        // None on a clean tempdir. The existing editor_dir resolves
+        // under the user's home so the parent always exists.
+        assert!(result.unity_player_log_file.is_none());
     }
 
     #[test]

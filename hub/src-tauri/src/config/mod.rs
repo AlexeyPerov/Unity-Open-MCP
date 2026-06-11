@@ -18,3 +18,5 @@ pub mod cli;
 pub mod walk_up_scan;
 pub mod new_project;
 pub mod upgrade;
+pub mod env_vars;
+pub mod releases;

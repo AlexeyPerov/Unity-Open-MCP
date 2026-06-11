@@ -209,6 +209,7 @@ use crate::config::schemas::{ProjectEntry, ProjectsFile, Settings};
                 source: "manual".to_string(),
                 hidden: false,
                 stale: false,
+                env_vars: Default::default(),
             }],
         };
         let json = serde_json::to_string_pretty(&p).unwrap();

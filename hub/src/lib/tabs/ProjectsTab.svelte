@@ -6,10 +6,12 @@
   import { walkUpScanStore } from "$lib/state/walk_up_scan.svelte";
   import { settingsStore } from "$lib/state/settings.svelte";
   import { discoveryStore } from "$lib/state/discovery.svelte";
+  import { activePalette } from "$lib/theme.svelte";
   import {
     addProject,
     checkPathsExists,
     createNewProject,
+    envVarCollisions,
     getCrashLogPath,
     getDefaultBuildTarget,
     getGitBranches,
@@ -601,9 +603,35 @@
       S.appendErrorLog(`cannot launch: path missing — ${project.path}`);
       return;
     }
+    // M1.5-17: when the project has env vars and the safety toggle is
+    // on, list the keys that would override a parent-process variable
+    // and ask the user to confirm. The toggle defaults to on; the
+    // backend command is a pure non-mutating lookup so the prompt is
+    // cheap and synchronous from the user's perspective.
+    const confirmEnvVars =
+      projectsStore.settings?.safety.confirmEnvVarOverride ?? true;
+    const hasEnvVars =
+      !!project.envVars && Object.keys(project.envVars).length > 0;
+    if (confirmEnvVars && hasEnvVars) {
+      try {
+        const collisions = await envVarCollisions(project.id);
+        if (collisions.length > 0) {
+          const ok = await S.confirm(
+            "Override environment variables?",
+            `${project.name} defines env vars that will override variables in the parent process:\n\n${collisions.map((k) => `  • ${k}`).join("\n")}\n\nThe spawned Unity will use the project-level values for these keys. Continue?`,
+          );
+          if (!ok) return;
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        S.appendErrorLog(
+          `failed to check env-var collisions: ${msg} (proceeding without confirmation)`,
+        );
+      }
+    }
     launching = id;
     try {
-      const result = await launchProject(id);
+      const result = await launchProject(id, activePalette());
       const updated: ProjectEntry = {
         ...project,
         lastLaunchPid: result.pid,

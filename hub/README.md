@@ -155,16 +155,115 @@ If the failure is specifically a `launchFailed` (i.e. Unity could not be spawned
 
 ## Tools tab — log shortcuts
 
-The Tools tab exposes the four platform-aware log paths per the hub-ui spec:
+The Tools tab exposes the platform-aware log paths per the hub-ui spec (M1.5-16 extended the M1 set with `Editor-prev.log`, the per-project `Player.log`, and the per-user global `Player.log` for standalone builds):
 
-| Shortcut | macOS | Windows |
-|---|---|---|
-| Editor logs | `~/Library/Logs/Unity` | `%LOCALAPPDATA%\Unity\Editor` |
-| Player logs | `<project>/Logs` (per-project) | `<project>/Logs` (per-project) |
-| Crash logs | `~/Library/Logs/DiagnosticReports` | `%LOCALAPPDATA%\CrashDumps` |
-| **Asset Store downloads** | `~/Library/Application Support/Unity/Asset Store-5.x` | `%LOCALAPPDATA%\Unity\Asset Store-5.x` |
+| Shortcut | macOS | Windows | Linux |
+|---|---|---|---|
+| Editor logs folder | `~/Library/Logs/Unity` | `%LOCALAPPDATA%\Unity\Editor` | `~/.config/unity3d` |
+| `Editor.log` | `<editor logs>/Editor.log` | `<editor logs>/Editor.log` | `<editor logs>/Editor.log` |
+| `Editor-prev.log` (M1.5-16) | `<editor logs>/Editor-prev.log` | `<editor logs>/Editor-prev.log` | `<editor logs>/Editor-prev.log` |
+| `Player.log` (editor preview, M1.5-16) | `<editor logs>/Player.log` | `<editor logs>/Player.log` | `<editor logs>/Player.log` |
+| Player logs folder (per-project) | `<project>/Logs` | `<project>/Logs` | `<project>/Logs` |
+| Standalone `Player.log` (M1.5-16) | `~/Library/Logs/Unity/Player.log` | `%LOCALAPPDATA%\Unity\Player.log` | `~/.config/unity3d/Player.log` |
+| Crash logs | `~/Library/Logs/DiagnosticReports` | `%LOCALAPPDATA%\CrashDumps` | `~/.config/unity3d` |
+| Asset Store downloads | `~/Library/Application Support/Unity/Asset Store-5.x` | `%LOCALAPPDATA%\Unity\Asset Store-5.x` | not resolved yet |
 
 The Asset Store shortcut resolves the newest `Asset Store-5.*` subfolder; if no versioned subfolder exists yet, it falls back to the parent `Unity` folder and shows an inline message so the user knows what to do.
+
+The standalone `Player.log` button is disabled (with the inline message "no standalone player log on disk yet") until a standalone Unity Player build has been run on the machine — the file does not exist on a clean dev box.
+
+## Tools tab — env variables (M1.5-17)
+
+The Tools tab exposes a per-project environment-variables editor
+("Environment variables" panel, below the log shortcuts). Each row
+is a `KEY=value` pair that is merged into the spawned Unity
+process's environment on launch (the child overrides the parent on
+key collision).
+
+- Add / remove rows; values are typed in `password` mode and a
+  "Show" button toggles reveal (so secrets are not displayed in
+  plain text while typing).
+- Validation on save: empty keys are rejected, keys with `=` are
+  rejected, duplicate keys are rejected.
+- Persisted to `projects.json` under a new optional `envVars`
+  field (`Record<string, string>`); legacy projects load with an
+  empty map.
+- Applied to **every launch** — both the GUI launch button and the
+  CLI mode read the same per-project `envVars` and layer them on
+  top of the inherited parent env.
+- Safety toggle: `Settings → Safety → "Confirm env-var overrides
+  before launch"` (default on). When the project has any env vars
+  and the toggle is on, the Launch button shows a confirmation
+  modal listing the keys that would override a parent-process
+  variable; the user can Cancel or Save anyway. The collision
+  lookup is non-mutating and a backend `#[tauri::command]`
+  (`env_var_collisions`) so the modal can be shown without
+  spawning Unity.
+
+## Appearance (M1.5-18)
+
+The Hub ships with a three-way theme switch — `Dark` / `Light` /
+`System` — exposed in `Settings → Appearance` (M1.5-18). The
+choice is persisted to `settings.json` under a new optional
+`theme` field (`"dark" | "light" | "system"`, default `"system"`)
+and is applied live with no app restart.
+
+- `Dark` and `Light` pin the Hub to that palette regardless of the
+  OS setting.
+- `System` follows the OS via the `prefers-color-scheme` media
+  query; the Hub auto-flips when the user toggles the OS setting
+  (macOS System Settings → Appearance; Windows Settings →
+  Personalization → Colors).
+- The choice is mirrored to `localStorage["hub-theme"]` and the
+  `app.html` inline boot script reads it on first paint, so the
+  first frame after relaunch is already in the right palette
+  (no flash of dark when the user picked `Light`).
+- The per-launch log (`~/.config/unity-agent-hub/logs/launches.log`)
+  records the active theme on every launch. The frontend resolves
+  `system` to a concrete `dark` / `light` value before the spawn
+  so the on-disk record is always a concrete palette.
+
+## Unity Versions — All releases sub-section (M1.5-19)
+
+The Unity Versions tab carries a two-way toggle in the toolbar —
+`Installed` (the default; the existing discovered-installations
+table) and `All releases` (the M1.5-19 additions). The `All
+releases` view renders a table of recent Unity release streams
+(LTS / TECH / BETA / ALPHA) with:
+
+- `Version` — the version string (`6000.0.32f1`, …).
+- `Stream` — chip with the release stream.
+- `Released` — ISO `YYYY-MM-DD` date.
+- `Notes` — the documented `unity.com/releases/editor/whats-new/<version>` URL.
+- `Status` — `installed` chip when the version is present in the
+  discovered installations list, `—` otherwise.
+
+Clicking a row opens the release-notes URL in the system
+browser. Right-click exposes `Open release notes`, `Copy version`,
+and `Use as Upgrade target` (the latter selects a project on the
+Projects tab so the user can drop into the upgrade flow).
+
+### Data source and caching
+
+Unity does not publish a public JSON feed of releases that the
+Hub can rely on; the spec explicitly forbids scraping arbitrary
+sites without a documented stable URL. The chosen documented URL
+is the release-notes page, and the Hub ships a static snapshot of
+recent LTS / TECH / BETA / ALPHA releases as the "fetched"
+payload. The infrastructure (cache, stale badge, debounced
+refresh) is fully implemented so the call sites can be swapped to
+a real feed when Unity publishes one:
+
+- Cache file: `<config_dir>/cache/releases.json`.
+- Default TTL: **1 hour** (the spec's "once per hour per user"
+  debounce).
+- `fetch_releases` reads the cache; the response is annotated
+  with `stale: true` when the file is older than the TTL.
+- `refresh_releases` rewrites the cache unconditionally (the
+  Refresh button on the toolbar).
+
+Network / cache failures are non-fatal: the snapshot is always
+served; `stale: true` is the user's signal to click Refresh.
 
 ## CLI mode
 

@@ -57,6 +57,19 @@ pub struct LaunchRecord {
     pub launch_args: Vec<String>,
     pub build_target: Option<String>,
     pub outcome: LaunchOutcome,
+    /// M1.5-18: the active Hub theme at the time of the launch
+    /// (`"dark" | "light" | "system"`). The frontend resolves
+    /// `system` to the concrete `dark` / `light` value before passing
+    /// it in, so the on-disk record always carries a concrete
+    /// palette. `None` for legacy writers (pre-M1.5-18) that did not
+    /// capture the field — the deserializer fills it with
+    /// `default_theme()` via `#[serde(default)]`.
+    #[serde(default = "default_record_theme")]
+    pub theme: Option<String>,
+}
+
+fn default_record_theme() -> Option<String> {
+    Some("system".to_string())
 }
 
 /// Location of the persistent launch log on disk.
@@ -197,6 +210,12 @@ pub fn build_record(
     launch_args: &[String],
     build_target: Option<&str>,
     outcome: LaunchOutcome,
+    // M1.5-18: the active Hub theme at the time of the launch
+    // (`"dark" | "light"` — the frontend has already resolved
+    // `system` to a concrete palette). Defaults to `"system"` for
+    // tests and the upgrade-flow callers so the field is always
+    // present on the wire.
+    theme: Option<&str>,
 ) -> LaunchRecord {
     LaunchRecord {
         timestamp: Utc::now().to_rfc3339(),
@@ -209,6 +228,7 @@ pub fn build_record(
         launch_args: launch_args.to_vec(),
         build_target: build_target.map(str::to_string),
         outcome,
+        theme: theme.map(str::to_string).or_else(default_record_theme),
     }
 }
 
@@ -259,6 +279,7 @@ mod tests {
             &["-projectPath".to_string(), "/path".to_string()],
             Some("StandaloneWindows64"),
             outcome,
+            Some("dark"),
         )
     }
 
@@ -295,6 +316,7 @@ mod tests {
                         code: "launchFailed".to_string(),
                         message: "nope".to_string(),
                     },
+                    Some("light"),
                 );
                 append_record(&r, DEFAULT_MAX_BYTES).unwrap();
             }
@@ -322,6 +344,7 @@ mod tests {
                         unity_version: None,
                         executable_path: "/i".to_string(),
                     },
+                    Some("system"),
                 );
                 append_record(&r, 60).unwrap();
             }
@@ -351,6 +374,7 @@ mod tests {
                         unity_version: None,
                         executable_path: "/i".to_string(),
                     },
+                    Some("dark"),
                 );
                 append_record(&r, 60).unwrap();
             }
@@ -376,6 +400,7 @@ mod tests {
                         unity_version: None,
                         executable_path: "/i".to_string(),
                     },
+                    Some("dark"),
                 );
                 append_record(&r, DEFAULT_MAX_BYTES).unwrap();
             }
@@ -422,6 +447,7 @@ mod tests {
         assert!(json.contains("\"launchArgs\""));
         assert!(json.contains("\"buildTarget\""));
         assert!(json.contains("\"result\":\"error\""));
+        assert!(json.contains("\"theme\""));
     }
 
     #[test]
@@ -480,11 +506,67 @@ mod tests {
                 code: "x".to_string(),
                 message: "y".to_string(),
             },
+            Some("dark"),
         );
         let parsed: chrono::DateTime<Utc> = r.timestamp.parse().expect("parse rfc3339");
         let now = Utc::now();
         let diff = (now - parsed).num_seconds().abs();
         assert!(diff < 5, "timestamp drift too large: {}s", diff);
+    }
+
+    #[test]
+    fn record_includes_theme_field() {
+        // M1.5-18: the per-launch log records the active theme so the
+        // diagnostics export can correlate user-reported issues with
+        // the palette the Hub was rendering in. The on-disk shape is
+        // `theme: "dark" | "light" | "system"`; a None caller falls
+        // back to `"system"`.
+        let r = sample_record(LaunchOutcome::Ok {
+            pid: 1,
+            unity_version: Some("6000.0.1f1".to_string()),
+            executable_path: "/exec".to_string(),
+        });
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("\"theme\":\"dark\""));
+    }
+
+    #[test]
+    fn record_theme_defaults_to_system_when_caller_omits() {
+        // The launch log is append-only and the deserializer must
+        // fill the `theme` field with `"system"` for legacy callers
+        // that did not pass one in (the upgrade flow, the
+        // failure-path test, etc.). We round-trip through JSON to
+        // exercise both the serializer and the deserializer.
+        let r = build_record(
+            "p",
+            "Name",
+            "/path",
+            None,
+            None,
+            None,
+            &[],
+            None,
+            LaunchOutcome::Error {
+                code: "x".to_string(),
+                message: "y".to_string(),
+            },
+            None,
+        );
+        assert_eq!(r.theme.as_deref(), Some("system"));
+        let json = serde_json::to_string(&r).unwrap();
+        let restored: LaunchRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.theme.as_deref(), Some("system"));
+    }
+
+    #[test]
+    fn record_deserializes_without_theme_for_legacy_json() {
+        // Pre-M1.5-18 lines in the on-disk log do not carry `theme`.
+        // The deserializer must default the field to `Some("system")`
+        // so the analytics code that branches on the field never
+        // sees `None` for an existing record.
+        let legacy = r#"{"timestamp":"2026-06-11T19:00:00+00:00","projectId":"p","projectName":"Name","projectPath":"/p","launchArgs":[],"outcome":{"result":"ok","pid":1,"unityVersion":null,"executablePath":"/e"}}"#;
+        let r: LaunchRecord = serde_json::from_str(legacy).unwrap();
+        assert_eq!(r.theme.as_deref(), Some("system"));
     }
 
     #[test]

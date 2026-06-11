@@ -296,6 +296,7 @@ fn walk_dir(
             source: "walk-up".to_string(),
             hidden: false,
             stale: false,
+            env_vars: Default::default(),
         };
         ctx.found.push(entry.clone());
         // Mark the canonical path as seen so nested project roots

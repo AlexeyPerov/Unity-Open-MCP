@@ -4,7 +4,11 @@
   import { projectsStore } from "$lib/state/projects.svelte";
   import { discoveryStore, type VersionHealth } from "$lib/state/discovery.svelte";
   import {
+    fetchReleases,
+    refreshReleases,
     runUnityInstall,
+    type ReleaseEntry,
+    type ReleasesResult,
     type RunUnityError,
     type UnityInstallation,
   } from "$lib/services/config";
@@ -15,11 +19,24 @@
 
   const ROW_HEIGHT = 38;
 
+  type ViewMode = "installed" | "all";
+
   let search = $state("");
   let selectedVersion = $state<string | null>(null);
   let refreshing = $state(false);
   let running = $state<string | null>(null);
   let actionError = $state<string | null>(null);
+
+  // M1.5-19: All releases sub-section state. The toggle lives in
+  // the toolbar; the fetched entries + stale badge are owned here
+  // so the row renderer can mark "installed" rows via a side-by-side
+  // lookup against the discovery store.
+  let viewMode = $state<ViewMode>("installed");
+  let releases = $state<ReleasesResult | null>(null);
+  let releasesError = $state<string | null>(null);
+  let releasesLoading = $state(false);
+  let releasesSearch = $state("");
+  let releasesContext = $state<{ x: number; y: number; entry: ReleaseEntry } | null>(null);
 
   onMount(() => {
     let cancelled = false;
@@ -29,11 +46,135 @@
       }
       if (cancelled) return;
       await discoveryStore.load();
+      if (cancelled) return;
+      // Prefetch the releases snapshot so swapping the view is
+      // instant. Errors are non-fatal — the inline error message
+      // surfaces only when the user opens the "All releases" tab.
+      try {
+        const result = await fetchReleases();
+        if (cancelled) return;
+        releases = result;
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        releasesError = `could not load releases: ${msg}`;
+      }
     })();
     return () => {
       cancelled = true;
     };
   });
+
+  async function loadReleases() {
+    releasesLoading = true;
+    releasesError = null;
+    try {
+      releases = await fetchReleases();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      releasesError = `could not load releases: ${msg}`;
+    } finally {
+      releasesLoading = false;
+    }
+  }
+
+  async function refreshReleasesAction() {
+    releasesLoading = true;
+    releasesError = null;
+    try {
+      releases = await refreshReleases();
+      S.appendDrawerLog(`refreshed Unity releases (cache: ${releases?.cachePath ?? "—"})`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      releasesError = `refresh failed: ${msg}`;
+    } finally {
+      releasesLoading = false;
+    }
+  }
+
+  function setViewMode(mode: ViewMode) {
+    viewMode = mode;
+    if (mode === "all" && !releases && !releasesLoading) {
+      void loadReleases();
+    }
+  }
+
+  function installedVersionSet(): Set<string> {
+    return new Set(discoveryStore.installations.map((i) => i.version));
+  }
+
+  function isInstalled(version: string): boolean {
+    return installedVersionSet().has(version);
+  }
+
+  let filteredReleases = $derived.by(() => {
+    if (!releases) return [];
+    const q = releasesSearch.trim().toLowerCase();
+    if (!q) return releases.entries;
+    return releases.entries.filter((e) => {
+      if (e.version.toLowerCase().includes(q)) return true;
+      if (e.stream.toLowerCase().includes(q)) return true;
+      if (e.releaseDate && e.releaseDate.includes(q)) return true;
+      return false;
+    });
+  });
+
+  function streamLabel(stream: ReleaseEntry["stream"]): string {
+    switch (stream) {
+      case "lts":
+        return "LTS";
+      case "tech":
+        return "TECH";
+      case "beta":
+        return "BETA";
+      case "alpha":
+        return "ALPHA";
+    }
+  }
+
+  function streamTone(stream: ReleaseEntry["stream"]): "ok" | "warn" | "missing" {
+    switch (stream) {
+      case "lts":
+        return "ok";
+      case "tech":
+        return "warn";
+      case "beta":
+      case "alpha":
+        return "missing";
+    }
+  }
+
+  async function openReleaseNotes(url: string) {
+    try {
+      await openUrl(url);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`open release notes failed: ${msg}`);
+    }
+  }
+
+  async function copyVersion(version: string) {
+    try {
+      await navigator.clipboard.writeText(version);
+      S.appendDrawerLog(`copied version: ${version}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`copy version failed: ${msg}`);
+    }
+  }
+
+  function openReleasesContextMenu(e: MouseEvent, entry: ReleaseEntry) {
+    e.preventDefault();
+    releasesContext = { x: e.clientX, y: e.clientY, entry };
+  }
+
+  function closeReleasesContext() {
+    releasesContext = null;
+  }
+
+  function handleBackgroundClick() {
+    if (releasesContext) closeReleasesContext();
+  }
 
   function releaseNotesUrl(version: string): string {
     const dashed = version.replace(/\./g, "-");
@@ -228,11 +369,49 @@
       placeholder="Search versions…"
       bind:value={search}
       aria-label="Search Unity versions"
+      class:hidden={viewMode !== "installed"}
     />
+    <input
+      type="search"
+      class="search"
+      placeholder="Search releases…"
+      bind:value={releasesSearch}
+      aria-label="Search Unity releases"
+      class:hidden={viewMode !== "all"}
+    />
+    <div class="view-toggle" role="tablist" aria-label="Unity Versions view">
+      <button
+        type="button"
+        role="tab"
+        class="view-toggle-btn"
+        class:view-toggle-btn-active={viewMode === "installed"}
+        aria-selected={viewMode === "installed"}
+        onclick={() => setViewMode("installed")}
+      >
+        Installed
+      </button>
+      <button
+        type="button"
+        role="tab"
+        class="view-toggle-btn"
+        class:view-toggle-btn-active={viewMode === "all"}
+        aria-selected={viewMode === "all"}
+        onclick={() => setViewMode("all")}
+      >
+        All releases
+      </button>
+    </div>
     <div class="toolbar-spacer"></div>
-    <Button variant="secondary" onclick={handleRefresh} disabled={refreshing}>
-      {refreshing ? "Refreshing…" : "Refresh"}
-    </Button>
+    <div class:hidden={viewMode !== "installed"}>
+      <Button variant="secondary" onclick={handleRefresh} disabled={refreshing}>
+        {refreshing ? "Refreshing…" : "Refresh"}
+      </Button>
+    </div>
+    <div class:hidden={viewMode !== "all"}>
+      <Button variant="secondary" onclick={refreshReleasesAction} disabled={releasesLoading}>
+        {releasesLoading ? "Refreshing…" : "Refresh"}
+      </Button>
+    </div>
   </div>
 
   {#if actionError}
@@ -274,7 +453,8 @@
     </div>
   {/if}
 
-  <div class="table" role="grid" aria-rowcount={filtered.length + 1} aria-colcount={5}>
+  <div class:hidden={viewMode !== "installed"}>
+    <div class="table" role="grid" aria-rowcount={filtered.length + 1} aria-colcount={5}>
     <div class="table-head" role="row">
       <div class="th" role="columnheader">Version</div>
       <div class="th" role="columnheader">Source</div>
@@ -384,6 +564,149 @@
         {running && selected && running === selected.version ? "Running…" : "Run Unity"}
       </Button>
     </div>
+  </div>
+  </div>
+
+  <!-- M1.5-19: All releases sub-section. Same shell as the
+       installations table, with a "stale" badge + Retry when the
+       on-disk cache is older than the TTL. Clicking a row opens
+       the release-notes URL in the system browser; right-click
+       exposes Copy version / Use as Upgrade target. -->
+  <div class:hidden={viewMode !== "all"} style="display: flex; flex-direction: column; gap: 0.6rem; flex: 1; min-height: 0;">
+    <div class="releases-meta">
+      <span class="releases-meta-text">
+        {filteredReleases.length} release{filteredReleases.length === 1 ? "" : "s"}
+        {#if releases?.stale}
+          <span class="stale-badge" title="Cached data is older than the 1-hour TTL; click Refresh to reload.">stale</span>
+        {/if}
+      </span>
+      {#if releasesError}
+        <span class="releases-error" role="alert">{releasesError}</span>
+      {/if}
+    </div>
+
+    <div class="table" role="grid" aria-rowcount={filteredReleases.length + 1} aria-colcount={5}>
+      <div class="table-head" role="row">
+        <div class="th" role="columnheader">Version</div>
+        <div class="th" role="columnheader">Stream</div>
+        <div class="th" role="columnheader">Released</div>
+        <div class="th" role="columnheader">Notes</div>
+        <div class="th" role="columnheader">Status</div>
+      </div>
+
+      <div class="table-body">
+        {#if !releases}
+          <div class="empty-state">
+            <p>Loading releases…</p>
+          </div>
+        {:else if filteredReleases.length === 0}
+          <div class="empty-state">
+            <p>No releases match the current search.</p>
+          </div>
+        {:else}
+          {#each filteredReleases as entry (entry.version)}
+            <div
+              class="row"
+              role="row"
+              onclick={() => openReleaseNotes(entry.releaseNotesUrl)}
+              oncontextmenu={(e) => openReleasesContextMenu(e, entry)}
+              onkeydown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openReleaseNotes(entry.releaseNotesUrl);
+                }
+              }}
+              tabindex={0}
+              title="Click to open release notes; right-click for more actions."
+            >
+              <div class="cell cell-version" role="gridcell">
+                <div class="version-line">
+                  <span class="version-text">{entry.version}</span>
+                </div>
+              </div>
+              <div class="cell" role="gridcell">
+                <StatusChip tone={streamTone(entry.stream)} label={streamLabel(entry.stream)} />
+              </div>
+              <div class="cell" role="gridcell">
+                <span class="muted">{entry.releaseDate ?? "—"}</span>
+              </div>
+              <div class="cell" role="gridcell" title={entry.releaseNotesUrl}>
+                <span class="path-text">{entry.releaseNotesUrl.replace(/^https?:\/\//, "")}</span>
+              </div>
+              <div class="cell" role="gridcell">
+                {#if isInstalled(entry.version)}
+                  <StatusChip tone="ok" label="installed" />
+                {:else}
+                  <span class="muted">—</span>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    </div>
+
+    {#if releasesContext}
+      {@const ctxEntry = releasesContext.entry}
+      <div
+        class="ctx-menu"
+        style="left: {releasesContext.x}px; top: {releasesContext.y}px;"
+        role="menu"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => {
+          if (e.key === "Escape") closeReleasesContext();
+        }}
+      >
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          onclick={() => {
+            void openReleaseNotes(ctxEntry.releaseNotesUrl);
+            closeReleasesContext();
+          }}
+        >
+          Open release notes ↗
+        </button>
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          onclick={() => {
+            void copyVersion(ctxEntry.version);
+            closeReleasesContext();
+          }}
+        >
+          Copy version
+        </button>
+        <button
+          type="button"
+          class="ctx-item ctx-item-upgrade"
+          role="menuitem"
+          title="Switch to the Projects tab and pre-select a project that could upgrade to this version"
+          disabled={projectsStore.projects.length === 0}
+          onclick={() => {
+            const matching = projectsStore.projects.find(
+              (p) => p.unityVersion && p.unityVersion !== ctxEntry.version,
+            );
+            closeReleasesContext();
+            if (matching) {
+              S.appendDrawerLog(
+                `open ${matching.name} in the Projects tab to upgrade to ${ctxEntry.version}`,
+              );
+              projectsStore.select(matching.id);
+              S.activeTab = "projects";
+            } else {
+              S.appendDrawerLog(
+                `no upgrade target — no project has a Unity version set; open Unity Versions → Installed for the canonical list.`,
+              );
+            }
+          }}
+        >
+          Use as Upgrade target
+        </button>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -727,5 +1050,120 @@
     align-items: center;
     gap: 0.4rem;
     flex-shrink: 0;
+  }
+
+  /* M1.5-19: view toggle (Installed | All releases). */
+  .view-toggle {
+    display: inline-flex;
+    flex-direction: row;
+    border: 1px solid #3f4150;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #1e1f26;
+  }
+
+  .view-toggle-btn {
+    background: transparent;
+    color: #a1a3b0;
+    border: none;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+    line-height: 1.3;
+  }
+
+  .view-toggle-btn:hover {
+    color: #fff;
+    background: #2a2b33;
+  }
+
+  .view-toggle-btn-active {
+    background: #32343f;
+    color: #f2f3f7;
+  }
+
+  .view-toggle-btn-active:hover {
+    background: #32343f;
+  }
+
+  .hidden {
+    display: none !important;
+  }
+
+  /* M1.5-19: All releases meta line + stale badge. */
+  .releases-meta {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.78rem;
+    color: #8b8d9a;
+  }
+
+  .stale-badge {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: #3a2a14;
+    color: #e0bf5a;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border: 1px solid #5a3e1a;
+  }
+
+  .releases-error {
+    color: #f0a8b8;
+    font-size: 0.78rem;
+  }
+
+  /* M1.5-19: releases row hover affordance (rows are clickable). */
+  .row[tabindex="0"] {
+    cursor: pointer;
+  }
+
+  /* M1.5-19: context menu styling (re-uses the .ctx-* vocabulary the
+     Projects tab already uses so the look matches). */
+  .ctx-menu {
+    position: fixed;
+    z-index: 100;
+    min-width: 11rem;
+    background: #1e1f26;
+    border: 1px solid #34353f;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    padding: 0.25rem;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ctx-item {
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: #d7d8e0;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.82rem;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .ctx-item:hover:not(:disabled) {
+    background: #2a2b33;
+    color: #fff;
+  }
+
+  .ctx-item:disabled {
+    color: #555;
+    cursor: not-allowed;
+  }
+
+  .ctx-item-upgrade {
+    color: #5c7cfa;
+  }
+
+  .ctx-item-upgrade:hover:not(:disabled) {
+    color: #fff;
   }
 </style>

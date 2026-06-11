@@ -7,6 +7,7 @@ use tauri::State;
 
 use crate::config::commands::AppState;
 use crate::config::discovery;
+use crate::config::env_vars;
 use crate::config::launch_log::{self, LaunchOutcome, LaunchRecord};
 use crate::config::persistence;
 use crate::config::projects::read_dir_mtime_iso;
@@ -136,7 +137,17 @@ fn record_launch(record: LaunchRecord) {
 pub fn launch_project(
     state: State<AppState>,
     project_id: String,
+    // M1.5-18: the active Hub theme at the time of the launch
+    // (`"dark" | "light"` — the frontend has already resolved
+    // `system` to a concrete palette). Optional; the backend
+    // defaults to `"system"` so legacy callers (CLI mode, the
+    // upgrade flow) keep working without changes.
+    theme: Option<String>,
 ) -> Result<LaunchResult, LaunchError> {
+    let resolved_theme = theme
+        .as_deref()
+        .map(|t| if t == "dark" || t == "light" { t } else { "system" })
+        .unwrap_or("system");
     match launch_project_inner(&state, &project_id) {
         Ok(result) => {
             let record = launch_log::build_record(
@@ -153,6 +164,7 @@ pub fn launch_project(
                     unity_version: result.unity_version.clone(),
                     executable_path: result.executable_path.clone(),
                 },
+                Some(resolved_theme),
             );
             record_launch(record);
             // Strip the helpers we added to the success path; the public
@@ -180,6 +192,7 @@ pub fn launch_project(
                     code: err.code,
                     message: err.message,
                 },
+                Some(resolved_theme),
             );
             record_launch(record);
             Err(typed)
@@ -341,7 +354,16 @@ fn launch_project_inner(
         }
     }
 
-    let spawn_result = Command::new(&executable).args(&args).spawn();
+    let mut command = Command::new(&executable);
+    command.args(&args);
+    // M1.5-17: layer the project's per-project env vars on top of the
+    // inherited parent-process env. `Command::env` replaces the value
+    // for keys that already exist, so the child wins on collisions —
+    // matches the documented "env vars in the child override the
+    // parent where keys collide" contract.
+    env_vars::apply_to_command(&mut command, &project.env_vars);
+
+    let spawn_result = command.spawn();
 
     let child = match spawn_result {
         Ok(c) => c,

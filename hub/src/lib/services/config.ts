@@ -30,6 +30,12 @@ export type ProjectListSortBy = "frecency" | "lastModified";
 export interface SafetySettings {
   confirmKillUnity: boolean;
   confirmRemoveProject: boolean;
+  /**
+   * M1.5-17: when `true` (default), a confirmation modal lists
+   * colliding env-var keys before a launch so the user is warned
+   * that the spawned Unity will override a parent-process variable.
+   */
+  confirmEnvVarOverride?: boolean;
 }
 
 export interface UnityDiscoverySettings {
@@ -79,6 +85,9 @@ export interface DiagnosticsSettings {
   autoOpenDrawerOnLaunchFailure: boolean;
 }
 
+/** M1.5-18: three-way theme switch. */
+export type Theme = "dark" | "light" | "system";
+
 export interface Settings {
   version: number;
   launch: LaunchSettings;
@@ -86,6 +95,9 @@ export interface Settings {
   safety: SafetySettings;
   unityDiscovery: UnityDiscoverySettings;
   diagnostics: DiagnosticsSettings;
+  /** M1.5-18: active theme. Defaults to `"system"`; legacy
+   *  `settings.json` files (pre-M1.5-18) load with `"system"`. */
+  theme?: Theme;
 }
 
 export interface ProjectEntry {
@@ -128,13 +140,19 @@ export interface ProjectEntry {
    */
   hidden?: boolean;
   /**
-   * M1.5-15: when `true`, the row stays visible with a `stale`
+   * M1.5-15: when `true`, the row is kept visible with a `stale`
    * chip (distinct from `missing path`) and is excluded from
    * launch / running-Unity actions. A "Mark stale" toggle on the
    * missing-path chip is the only way to set this field; relinking
    * to a real project root clears it.
    */
   stale?: boolean;
+  /**
+   * M1.5-17: per-project environment variables merged into the
+   * spawned Unity process's environment (the child overrides the
+   * parent on key collision). Empty map for legacy entries.
+   */
+  envVars?: Record<string, string>;
 }
 
 export interface ProjectsFile {
@@ -188,7 +206,17 @@ export interface RunUnityResult {
 export interface LogPaths {
   editorLogsFolder?: string;
   editorLogFile?: string;
+  /** M1.5-16: path to `Editor-prev.log` (the previous session's
+   *  Editor.log, rotated by Unity on every fresh launch). */
+  editorPrevLogFile?: string;
   playerLogsFolder?: string;
+  /** M1.5-16: per-project `Player.log` (the editor preview player's
+   *  log; same folder as the Editor.log). */
+  playerLogFile?: string;
+  /** M1.5-16: per-user global `Player.log` written by standalone
+   *  Unity Player builds. `undefined` when no standalone build has
+   *  been run on this machine yet (the file does not exist). */
+  unityPlayerLogFile?: string;
   crashLogsFolder?: string;
 }
 
@@ -301,8 +329,17 @@ export async function refreshDiscovery(): Promise<DiscoveryResult> {
   return invoke<DiscoveryResult>("refresh_discovery");
 }
 
-export async function launchProject(projectId: string): Promise<LaunchResult> {
-  return invoke<LaunchResult>("launch_project", { projectId });
+export async function launchProject(
+  projectId: string,
+  /**
+   * M1.5-18: the active theme at the time of the launch
+   * (`"dark" | "light"` — the frontend has already resolved
+   * `system` to a concrete palette). The backend stamps the
+   * value on the persistent per-launch log record.
+   */
+  theme: "dark" | "light"
+): Promise<LaunchResult> {
+  return invoke<LaunchResult>("launch_project", { projectId, theme });
 }
 
 export async function refreshProjectVersion(
@@ -640,4 +677,44 @@ export async function setProjectStale(
   stale: boolean
 ): Promise<ProjectEntry> {
   return invoke<ProjectEntry>("set_project_stale", { projectId, stale });
+}
+
+/**
+ * M1.5-17: project-level env vars. Returns the sorted list of keys
+ * that would override a parent-process variable. Empty when the
+ * project is missing, has no env vars, or no env var collides.
+ */
+export async function envVarCollisions(projectId: string): Promise<string[]> {
+  return invoke<string[]>("env_var_collisions", { projectId });
+}
+
+/**
+ * M1.5-19: Unity releases / updates viewer.
+ */
+
+export type ReleaseStream = "lts" | "tech" | "beta" | "alpha";
+
+export interface ReleaseEntry {
+  version: string;
+  stream: ReleaseStream;
+  releaseDate?: string;
+  releaseNotesUrl: string;
+}
+
+export interface ReleasesResult {
+  entries: ReleaseEntry[];
+  /** `true` when the cache on disk is older than the TTL (1h). */
+  stale: boolean;
+  /** Unix-epoch seconds of the cache write. */
+  fetchedAtEpoch: number;
+  /** Path to the on-disk cache file. */
+  cachePath: string;
+}
+
+export async function fetchReleases(): Promise<ReleasesResult> {
+  return invoke<ReleasesResult>("fetch_releases");
+}
+
+export async function refreshReleases(): Promise<ReleasesResult> {
+  return invoke<ReleasesResult>("refresh_releases_command");
 }

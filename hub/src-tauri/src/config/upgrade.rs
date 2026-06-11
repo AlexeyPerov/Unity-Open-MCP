@@ -467,6 +467,12 @@ fn record_upgrade(
                 BundleStrategy::Major => "major".to_string(),
             },
         },
+        // M1.5-18: the theme is captured at the time of the upgrade
+        // event; we default to `"system"` here because the upgrade
+        // flow does not have access to the frontend store. The
+        // frontend can read the active theme off the on-disk record
+        // for analytics / future audit-trail work.
+        theme: Some("system".to_string()),
     };
     launch_log::append_record_async(record);
 }
@@ -1014,6 +1020,7 @@ mod tests {
                 source: "manual".to_string(),
                 hidden: false,
                 stale: false,
+                env_vars: Default::default(),
             },
             unity_version: "6000.0.1f1".to_string(),
             bundle_version: "1.0.1".to_string(),
