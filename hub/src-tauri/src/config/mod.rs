@@ -13,3 +13,4 @@ pub mod diagnostics;
 pub mod sizes;
 pub mod build_target;
 pub mod git_branch;
+pub mod cli;

@@ -22,6 +22,11 @@
   let exporting = $state(false);
   let lastExportPath = $state<string | null>(null);
 
+  // "idle" before the user clicks, "copied" briefly after a successful
+  // write, "error" if the navigator rejects the write. The Button
+  // re-uses the same disabled state for the "Copied ✓" flash.
+  let cliCopyState = $state<"idle" | "copied" | "error">("idle");
+
   const LOG_TAIL_LIMIT = 200;
 
   onMount(() => {
@@ -223,6 +228,58 @@
       `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
       `_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
     return `unity-agent-hub-diagnostics-${stamp}`;
+  }
+
+  const CLI_HELP_TEXT = [
+    "unity-agent-hub - launch a Unity project from the terminal.",
+    "",
+    "USAGE:",
+    "  unity-agent-hub -projectPath <path>",
+    "",
+    "OPTIONS:",
+    "  -projectPath <path>   Open the Unity project at <path> with the matching",
+    "                        installed Unity version and exit. The Hub window does",
+    "                        not open. -projectPath=<path> and --projectPath are",
+    "                        also accepted.",
+    "  -h, --help            Show this help text and exit.",
+    "  -V, --version         Show the version and exit.",
+    "",
+    "EXIT CODES:",
+    "  0   Unity was spawned successfully.",
+    "  1   The path is missing, not a directory, not a Unity project root,",
+    "      the project's Unity version is not installed, or the spawn failed.",
+    "      A one-line 'unity-agent-hub: <reason>' message is written to stderr.",
+    "",
+    "EXAMPLES:",
+    "  unity-agent-hub -projectPath ~/Projects/MyUnityGame",
+    "  unity-agent-hub -projectPath \"C:\\Users\\me\\Unity\\MyProject\"",
+  ].join("\n");
+
+  async function handleCopyCliHelp() {
+    // The webview exposes `navigator.clipboard.writeText` only on
+    // secure contexts; Tauri webviews are secure, but the API still
+    // rejects on permission denial (e.g. when the host blocks the
+    // permission prompt). We surface both shapes via the inline state
+    // so the user can fall back to selecting the visible copy in the
+    // diagnostics panel manually.
+    try {
+      if (typeof navigator === "undefined" || !navigator.clipboard) {
+        throw new Error("clipboard API is not available in this context");
+      }
+      await navigator.clipboard.writeText(CLI_HELP_TEXT);
+      cliCopyState = "copied";
+      S.appendDrawerLog("copied CLI help to clipboard");
+      setTimeout(() => {
+        cliCopyState = "idle";
+      }, 1600);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      cliCopyState = "error";
+      S.appendErrorLog(`copy CLI help failed: ${msg}`);
+      setTimeout(() => {
+        cliCopyState = "idle";
+      }, 2200);
+    }
   }
 
   async function handleExportBundle() {
@@ -642,6 +699,33 @@
                 </Button>
               </div>
             {/if}
+            <div class="cli-help">
+              <span class="cli-help-label">CLI mode</span>
+              <code class="cli-help-cmd" title="unity-agent-hub -projectPath &lt;path&gt;"
+                >unity-agent-hub -projectPath &lt;path&gt;</code
+              >
+              <Button
+                variant="secondary"
+                aria-label="Copy CLI help to clipboard"
+                title="Copy the CLI help block to the clipboard"
+                onclick={handleCopyCliHelp}
+                disabled={cliCopyState === "copied" ? true : false}
+              >
+                {cliCopyState === "copied"
+                  ? "Copied ✓"
+                  : cliCopyState === "error"
+                    ? "Copy failed"
+                    : "Copy CLI help"}
+              </Button>
+            </div>
+            <p class="cli-help-desc">
+              Run from a terminal to launch the project at <code>&lt;path&gt;</code> with the
+              matching installed Unity version. The Hub window does not open; the process
+              records <code>lastLaunchPid</code> / <code>lastLaunchAt</code> in
+              <code>projects.json</code> and exits. Invalid paths print a one-line error
+              to stderr and return a non-zero exit code. The same flag is exposed via
+              <code>tauri-plugin-cli</code> for programmatic access.
+            </p>
             <div class="diag-actions">
               <Button
                 variant="primary"
@@ -989,6 +1073,58 @@
     gap: 0.6rem;
     flex-wrap: wrap;
     margin-top: 0.25rem;
+  }
+
+  .cli-help {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid #2a2b33;
+    border-radius: 6px;
+    background: #14151a;
+    flex-wrap: wrap;
+  }
+
+  .cli-help-label {
+    font-size: 0.78rem;
+    color: #c5c7d0;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    flex-shrink: 0;
+  }
+
+  .cli-help-cmd {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+    color: #c5c7d0;
+    background: #1a1b21;
+    border: 1px solid #2a2b33;
+    border-radius: 4px;
+    padding: 0.25rem 0.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cli-help-desc {
+    margin: 0;
+    color: #8b8d9a;
+    font-size: 0.78rem;
+    line-height: 1.5;
+  }
+
+  .cli-help-desc code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    background: #2a2b33;
+    padding: 0 0.3rem;
+    border-radius: 3px;
+    color: #d7d8e0;
   }
 
   .diag-last-export {

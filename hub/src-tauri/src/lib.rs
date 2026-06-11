@@ -1,4 +1,4 @@
-mod config;
+pub mod config;
 
 use config::commands::AppState;
 use std::sync::Mutex;
@@ -6,6 +6,7 @@ use std::sync::Mutex;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_cli::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {

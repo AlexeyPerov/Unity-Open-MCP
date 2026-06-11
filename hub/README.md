@@ -165,3 +165,66 @@ The Tools tab exposes the four platform-aware log paths per the hub-ui spec:
 | **Asset Store downloads** | `~/Library/Application Support/Unity/Asset Store-5.x` | `%LOCALAPPDATA%\Unity\Asset Store-5.x` |
 
 The Asset Store shortcut resolves the newest `Asset Store-5.*` subfolder; if no versioned subfolder exists yet, it falls back to the parent `Unity` folder and shows an inline message so the user knows what to do.
+
+## CLI mode
+
+Hub ships a small CLI surface for launching Unity from a terminal. The
+binary inspects its own argv at startup; if `-projectPath <path>` is
+present, the same launch resolver the GUI uses resolves the matching
+Unity install and spawns the editor. The Hub window is never opened.
+
+### Usage
+
+```text
+unity-agent-hub -projectPath <path>
+```
+
+`-projectPath=<path>` and `--projectPath <path>` are accepted as
+aliases. From a terminal in the project root:
+
+```bash
+# macOS / Linux
+unity-agent-hub -projectPath "$PWD"
+
+# Windows (PowerShell)
+unity-agent-hub -projectPath "$PWD"
+
+# Windows (cmd)
+unity-agent-hub -projectPath "%CD%"
+```
+
+### Behavior
+
+- The path must be a Unity project root (`Assets/` + `ProjectSettings/`).
+  Invalid paths print `unity-agent-hub: <reason>` to stderr and the
+  process exits with status `1`.
+- The Unity version is read from `ProjectSettings/ProjectVersion.txt`,
+  matched against the same discovery feed the Settings → Unity Versions
+  tab uses (parent folders, OS defaults, `$UNITY_HUB`), and the matching
+  `Unity` / `Unity.exe` is spawned with `-projectPath <path>`.
+- On success a one-line confirmation is written to stdout and the
+  matching `projects.json` entry is updated with `lastLaunchPid` /
+  `lastLaunchAt` (no frecency bump — the GUI is not consulted, so the
+  sort should not be skewed by a terminal script).
+- The same flag is registered with `tauri-plugin-cli` so the JS side
+  can read matches at runtime; the Schema is also available in
+  `tauri.conf.json` under `plugins.cli`.
+- The Settings tab → Diagnostics section carries a "Copy CLI help"
+  button that puts the same usage block on the clipboard.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Unity was spawned successfully. |
+| `1` | The path is missing, not a directory, not a Unity project root, the project's Unity version is not installed, or the spawn failed. A one-line `unity-agent-hub: <reason>` message is written to stderr. |
+
+### macOS .app bundle
+
+When launched from Finder, the macOS bundle does not receive the
+`-projectPath` flag in argv. Use Terminal (`open -a "Unity AI Hub" --args -projectPath /path`)
+or invoke the binary in the bundle directly
+(`/Applications/Unity\ AI\ Hub.app/Contents/MacOS/hub -projectPath /path`).
+The CLI mode does not require single-instance protection for v1: a
+second Finder launch with the same flag would simply spawn Unity again
+and exit.
