@@ -1,3 +1,10 @@
+## 2026-06-11 17:00 MSK
+
+- **M2 Plan 1 Task 3: `/ping` endpoint contract + bridge session state.** Implemented session state caching and domain-reload-safe ping:
+  - `Editor/Bridge/BridgeSession.cs` — rewritten to cache volatile state (`IsCompiling`, `IsPlaying`) on the main thread via `EditorApplication.update` callback, so background HTTP threads never access Unity APIs directly. Static state (`ProjectPath`, `UnityVersion`) cached once on initialize. Added `IsInitialized` flag and `volatile` fields for thread safety. `OnBeforeAssemblyReload` sets `compiling: true` and `connected: false`; `OnAfterAssemblyReload` re-caches static state and resets the initialized flag. Properties now read from cached fields instead of calling `EditorApplication.*` on every access.
+  - `Editor/Bridge/BridgeHttpServer.cs` — `HandlePing` returns HTTP 503 with a safe fallback JSON (`connected: false, compiling: true`) if `BridgeSession.IsInitialized` is false (covers the window during domain reload when the HTTP listener is up but session hasn't re-initialized yet). `BuildPingJson` gates `connected` on both `BridgeSession.Connected` and `BridgeSession.IsInitialized`. Removed unused `using System.Diagnostics` import.
+- Marked Task 3 DONE in [execution-plan-1-bridge-http.md](specs/execution/M2/execution-plan-1-bridge-http.md).
+
 ## 2026-06-11 16:00 MSK
 
 - **M2 Plan 1 Task 2: Main-thread dispatch queue with timeout envelope.** Implemented dispatch infrastructure so all Unity API/mutation work executes on the main thread, with HTTP handlers awaiting completion with `timeout_ms` and returning stable mutation error envelopes on timeout/cancellation/faults:

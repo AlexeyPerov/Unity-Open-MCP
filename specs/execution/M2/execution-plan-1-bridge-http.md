@@ -52,7 +52,7 @@ Dependencies: Task 1.
 
 ---
 
-#### Task 3: `/ping` endpoint contract + bridge session state (M2-3) [Score:6] [Agent:medium]
+#### Task 3: `/ping` endpoint contract + bridge session state (M2-3) [Score:6] [Agent:medium] **DONE**
 
 **Required context**
 

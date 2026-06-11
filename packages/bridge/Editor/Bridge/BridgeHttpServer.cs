@@ -190,6 +190,12 @@ namespace UnityAgentBridge
 
         static void HandlePing(HttpListenerContext context)
         {
+            if (!BridgeSession.IsInitialized)
+            {
+                var fallback = "{\"connected\":false,\"projectPath\":null,\"unityVersion\":null,\"bridgeVersion\":\"0.1.0\",\"mode\":\"live\",\"compiling\":true,\"isPlaying\":false}";
+                SendJson(context, 503, fallback);
+                return;
+            }
             var json = BuildPingJson();
             SendJson(context, 200, json);
         }
@@ -338,7 +344,7 @@ namespace UnityAgentBridge
         {
             var sb = new StringBuilder(256);
             sb.Append('{');
-            sb.Append("\"connected\":").Append(BridgeSession.Connected ? "true" : "false").Append(',');
+            sb.Append("\"connected\":").Append(BridgeSession.Connected && BridgeSession.IsInitialized ? "true" : "false").Append(',');
             sb.Append("\"projectPath\":").Append(EscapeString(BridgeSession.ProjectPath)).Append(',');
             sb.Append("\"unityVersion\":").Append(EscapeString(BridgeSession.UnityVersion)).Append(',');
             sb.Append("\"bridgeVersion\":").Append(EscapeString(BridgeSession.BridgeVersion)).Append(',');
