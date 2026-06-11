@@ -1,0 +1,23 @@
+{
+  "name": "unity-agent-mcp",
+  "version": "0.1.0",
+  "description": "MCP server (stdio) routing tool calls to the live Unity Agent Bridge or batch Unity processes.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "~5.6.2"
+  },
+  "license": "MIT"
+}
