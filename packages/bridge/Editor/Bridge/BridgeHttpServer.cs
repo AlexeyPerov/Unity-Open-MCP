@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -215,9 +216,10 @@ namespace UnityAgentBridge
             var gateMode = ExtractGateMode(body);
             var sw = Stopwatch.StartNew();
 
+            string[] pathsHint = null;
             if (MutatingTools.Contains(toolName))
             {
-                var pathsHint = JsonBody.GetStringArray(body, "paths_hint");
+                pathsHint = JsonBody.GetStringArray(body, "paths_hint");
                 if (pathsHint == null || pathsHint.Length == 0)
                 {
                     bool skipPathsHint = toolName == "unity_agent_execute_menu"
@@ -234,11 +236,11 @@ namespace UnityAgentBridge
             try
             {
                 var task = MainThreadDispatcher.EnqueueAsync(
-                    () => DispatchTool(toolName, body), timeoutMs);
+                    () => DispatchWithGate(toolName, body, gateMode, pathsHint), timeoutMs);
 
                 var result = task.Result;
                 sw.Stop();
-                SendJson(context, 200, BuildMutationEnvelope(result, gateMode));
+                SendJson(context, 200, BuildGateEnvelope(result, gateMode));
             }
             catch (AggregateException ae)
             {
@@ -256,6 +258,57 @@ namespace UnityAgentBridge
             }
         }
 
+        static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint)
+        {
+            if (gateMode == "off" || !MutatingTools.Contains(toolName))
+            {
+                return new GateDispatchResult
+                {
+                    Mutation = DispatchTool(toolName, body),
+                    GateRan = false
+                };
+            }
+
+            if (pathsHint == null || pathsHint.Length == 0)
+            {
+                return new GateDispatchResult
+                {
+                    Mutation = DispatchTool(toolName, body),
+                    GateRan = false
+                };
+            }
+
+            var checkpoint = VerifyGateAdapter.CreateCheckpoint(pathsHint, null);
+            var mutation = DispatchTool(toolName, body);
+
+            if (!mutation.Success)
+            {
+                return new GateDispatchResult
+                {
+                    Mutation = mutation,
+                    GateRan = false,
+                    CheckpointId = checkpoint.CheckpointId
+                };
+            }
+
+            var validation = VerifyGateAdapter.ValidatePaths(pathsHint, null);
+            var delta = VerifyGateAdapter.ComputeDelta(checkpoint, validation);
+            var gateFailed = gateMode == "enforce" && delta.NewErrors > 0;
+            var nextSteps = GenerateAgentNextSteps(delta);
+
+            return new GateDispatchResult
+            {
+                Mutation = mutation,
+                GateRan = true,
+                CheckpointId = checkpoint.CheckpointId,
+                CategoriesRun = validation.CategoriesRun,
+                ValidationDurationMs = validation.DurationMs,
+                Delta = delta,
+                GateFailed = gateFailed,
+                AgentNextSteps = nextSteps
+            };
+        }
+
         static ToolDispatchResult DispatchTool(string toolName, string body)
         {
             return toolName switch
@@ -266,6 +319,31 @@ namespace UnityAgentBridge
                 "unity_agent_find_members" => FindMembersTool.Execute(body),
                 _ => ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };
+        }
+
+        static string[] GenerateAgentNextSteps(DeltaData delta)
+        {
+            var steps = new List<string>();
+
+            if (delta.NewErrors > 0)
+            {
+                var firstIssue = delta.NewIssueKeys.FirstOrDefault() ?? "unknown";
+                steps.Add($"Gate detected {delta.NewErrors} new error(s). First: {firstIssue}");
+                steps.Add("Review the affected asset and fix the introduced issue before retrying.");
+            }
+            else if (delta.NewWarnings > 0)
+            {
+                steps.Add($"Gate detected {delta.NewWarnings} new warning(s). Consider reviewing before proceeding.");
+            }
+            else if (delta.ResolvedErrors > 0)
+            {
+                steps.Add($"Gate passed — {delta.ResolvedErrors} previously reported error(s) resolved.");
+            }
+
+            if (steps.Count == 0)
+                steps.Add("Gate passed — no new issues detected.");
+
+            return steps.ToArray();
         }
 
         static string ReadRequestBody(HttpListenerRequest request)
@@ -324,26 +402,91 @@ namespace UnityAgentBridge
             return value is "enforce" or "warn" or "off" ? value : "enforce";
         }
 
-        static string BuildMutationEnvelope(ToolDispatchResult result, string gateMode)
+        static string BuildGateEnvelope(GateDispatchResult result, string gateMode)
         {
-            var sb = new StringBuilder(512);
+            var sb = new StringBuilder(1024);
+
             sb.Append("{\"mutation\":{\"success\":");
-            sb.Append(result.Success ? "true" : "false");
+            sb.Append(result.Mutation.Success ? "true" : "false");
             sb.Append(",\"output\":");
-            sb.Append(result.Output ?? "null");
-            if (result.ErrorCode != null)
+            sb.Append(result.Mutation.Output ?? "null");
+            if (result.Mutation.ErrorCode != null)
             {
-                sb.Append(",\"error\":{\"code\":\"").Append(EscapeStringContent(result.ErrorCode));
-                sb.Append("\",\"message\":\"").Append(EscapeStringContent(result.ErrorMessage ?? ""));
+                sb.Append(",\"error\":{\"code\":\"").Append(EscapeStringContent(result.Mutation.ErrorCode));
+                sb.Append("\",\"message\":\"").Append(EscapeStringContent(result.Mutation.ErrorMessage ?? ""));
                 sb.Append("\"}");
             }
             else
             {
                 sb.Append(",\"error\":null");
             }
-            sb.Append("},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
-            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
-            sb.Append(",\"agentNextSteps\":[]}");
+            sb.Append('}');
+
+            sb.Append(",\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
+            sb.Append("\"");
+
+            if (!result.GateRan)
+            {
+                if (result.CheckpointId != null)
+                    sb.Append(",\"checkpointId\":\"").Append(EscapeStringContent(result.CheckpointId)).Append("\"");
+                sb.Append(",\"skipped\":true,\"validation\":null,\"delta\":null");
+            }
+            else
+            {
+                sb.Append(",\"checkpointId\":\"").Append(EscapeStringContent(result.CheckpointId));
+                sb.Append("\",\"skipped\":false");
+                sb.Append(",\"validation\":{\"passed\":").Append(!result.GateFailed ? "true" : "false");
+                sb.Append(",\"categoriesRun\":[");
+                if (result.CategoriesRun != null)
+                {
+                    for (int i = 0; i < result.CategoriesRun.Length; i++)
+                    {
+                        if (i > 0) sb.Append(',');
+                        sb.Append('"').Append(EscapeStringContent(result.CategoriesRun[i])).Append('"');
+                    }
+                }
+                sb.Append("],\"durationMs\":").Append(result.ValidationDurationMs);
+                sb.Append('}');
+
+                sb.Append(",\"delta\":{\"newErrors\":").Append(result.Delta.NewErrors);
+                sb.Append(",\"newWarnings\":").Append(result.Delta.NewWarnings);
+                sb.Append(",\"resolvedErrors\":").Append(result.Delta.ResolvedErrors);
+                sb.Append(",\"resolvedWarnings\":").Append(result.Delta.ResolvedWarnings);
+                sb.Append(",\"newIssues\":[");
+                if (result.Delta.NewIssueKeys != null)
+                {
+                    for (int i = 0; i < result.Delta.NewIssueKeys.Length; i++)
+                    {
+                        if (i > 0) sb.Append(',');
+                        sb.Append('"').Append(EscapeStringContent(result.Delta.NewIssueKeys[i])).Append('"');
+                    }
+                }
+                sb.Append("],\"resolvedIssues\":[");
+                if (result.Delta.ResolvedIssueKeys != null)
+                {
+                    for (int i = 0; i < result.Delta.ResolvedIssueKeys.Length; i++)
+                    {
+                        if (i > 0) sb.Append(',');
+                        sb.Append('"').Append(EscapeStringContent(result.Delta.ResolvedIssueKeys[i])).Append('"');
+                    }
+                }
+                sb.Append("]}");
+            }
+
+            sb.Append('}');
+
+            sb.Append(",\"agentNextSteps\":[");
+            var steps = result.AgentNextSteps;
+            if (steps != null)
+            {
+                for (int i = 0; i < steps.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(EscapeStringContent(steps[i])).Append('"');
+                }
+            }
+            sb.Append("]}");
+
             return sb.ToString();
         }
 

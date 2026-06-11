@@ -14,5 +14,7 @@
     "bridge",
     "ai"
   ],
-  "dependencies": {}
+  "dependencies": {
+    "com.alexeyperov.unity-agent-verify": "0.1.0"
+  }
 }

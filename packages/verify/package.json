@@ -1,0 +1,18 @@
+{
+  "name": "com.alexeyperov.unity-agent-verify",
+  "displayName": "Unity Agent Verify",
+  "version": "0.1.0",
+  "unity": "6000.0",
+  "description": "Scoped health checks for Unity Agent Hub gate-first validation.",
+  "author": {
+    "name": "Alexey Perov",
+    "url": "https://github.com/AlexeyPerov/Unity-AI-Hub"
+  },
+  "keywords": [
+    "unity-agent",
+    "verify",
+    "gate",
+    "health-check"
+  ],
+  "dependencies": {}
+}

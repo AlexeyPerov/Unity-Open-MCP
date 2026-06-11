@@ -74,7 +74,7 @@ Dependencies: Tasks 1–2.
 
 ---
 
-#### Task 4: Minimal `packages/verify` skeleton via `VerifyGateAdapter` (M2-8) [Score:8] [Agent:heavy]
+#### Task 4: Minimal `packages/verify` skeleton via `VerifyGateAdapter` (M2-8) [Score:8] [Agent:heavy] — **DONE**
 
 **Required context**
 

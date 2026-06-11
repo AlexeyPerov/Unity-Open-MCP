@@ -1,3 +1,25 @@
+## 2026-06-12 00:30 MSK
+
+- **M2 Plan 2 Task 4: Minimal `packages/verify` skeleton via `VerifyGateAdapter`.** Introduced verify package with `missing_references` baseline/check path and wired bridge gate lifecycle through `VerifyGateAdapter` per [questions-2.md](specs/questions/questions-2.md) Q2 answer B and Q11 answer A:
+  - `packages/verify/package.json` — UPM package `com.alexeyperov.unity-agent-verify` v0.1.0.
+  - `packages/verify/Editor/com.alexeyperov.unity-agent-verify.Editor.asmdef` — Editor-only assembly definition.
+  - `packages/verify/Editor/Core/VerifyIssue.cs` — `VerifyIssue` model (ruleId, severity, assetPath, issueCode, description) and `VerifySeverity` enum (Error/Warning).
+  - `packages/verify/Editor/Core/IssueKey.cs` — `IssueKey.Build()` producing stable `{ruleId}|{severity}|{assetPath}|{issueCode}` keys for gate delta.
+  - `packages/verify/Editor/Core/VerifyScope.cs` — `VerifyScope` (paths array, includeDependents flag).
+  - `packages/verify/Editor/Core/VerifyRunMode.cs` — `VerifyRunMode` enum (Checkpoint/Validate/Full).
+  - `packages/verify/Editor/Core/VerifyResult.cs` — `VerifyResult` (issues list, categoriesRun, durationMs).
+  - `packages/verify/Editor/Core/CheckpointFingerprint.cs` — `CheckpointFingerprint` (checkpointId, per-rule `RuleFingerprint` with error/warn counts + issue key sets).
+  - `packages/verify/Editor/Core/IVerifyRule.cs` — `IVerifyRule` interface (Id, Scan).
+  - `packages/verify/Editor/Core/VerifyRunner.cs` — `VerifyRunner.RunScoped()` orchestrates rule scan; `CreateCheckpoint()` builds fingerprint with stable issue keys.
+  - `packages/verify/Editor/Rules/MissingReferences/MissingReferencesRule.cs` — detects missing scripts (null components) and missing serialized references (null objectReference with non-zero instanceID) on prefab assets.
+  - `packages/bridge/Editor/Gate/GatePolicy.cs` — expanded with `DeltaData` (newErrors/Warnings, resolvedErrors/Warnings, issue key arrays) and `GateDispatchResult` (mutation + gate lifecycle result).
+  - `packages/bridge/Editor/Gate/VerifyGateAdapter.cs` — implemented `CreateCheckpoint`, `ValidatePaths`, `ComputeDelta` as thin facade over `VerifyRunner`.
+  - `packages/bridge/Editor/Bridge/BridgeHttpServer.cs` — replaced stub gate with real lifecycle: checkpoint → mutate → validate → delta → pass/fail/warn. `DispatchWithGate` runs full gate for mutating tools with `gate != off` and non-empty `paths_hint`. `BuildGateEnvelope` produces full gate response with validation results, delta counts, and agent next steps. Enforce mode sets `GateFailed = true` when `delta.newErrors > 0`. Error/timeout cases retain stub gate (skipped: true).
+  - `packages/bridge/package.json` — added dependency on `com.alexeyperov.unity-agent-verify`.
+  - `packages/bridge/Editor/com.alexeyperov.unity-agent-bridge.Editor.asmdef` — added reference to verify assembly.
+  - Scope intentionally minimal: one rule (`missing_references`), no broad M3 rule expansion, no scene scanning, no batch/CI support.
+- Marked Task 4 DONE in [execution-plan-2-meta-tools-gate.md](specs/execution/M2/execution-plan-2-meta-tools-gate.md).
+
 ## 2026-06-11 23:00 MSK
 
 - **M2 Plan 2 Task 3: `execute_menu` allowlist and validate-skip rule.** Implemented read-only menu allowlist per [questions-2.md](specs/questions/questions-2.md) Q6 answer C (skip validate when menu is allowlisted and `paths_hint` empty):

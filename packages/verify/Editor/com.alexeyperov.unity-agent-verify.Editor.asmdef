@@ -1,9 +1,7 @@
 {
-  "name": "com.alexeyperov.unity-agent-bridge.Editor",
-  "rootNamespace": "UnityAgentBridge",
-  "references": [
-    "com.alexeyperov.unity-agent-verify.Editor"
-  ],
+  "name": "com.alexeyperov.unity-agent-verify.Editor",
+  "rootNamespace": "UnityAgentVerify",
+  "references": [],
   "includePlatforms": [
     "Editor"
   ],
