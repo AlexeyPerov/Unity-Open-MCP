@@ -626,19 +626,13 @@
   let savingIntentFor = $state<string | null>(null);
 
   function getArgsDraft(id: string): string {
-    if (!(id in argsDrafts)) {
-      const p = projectsStore.find(id);
-      argsDrafts[id] = p?.launchArgs ?? "";
-    }
-    return argsDrafts[id];
+    if (id in argsDrafts) return argsDrafts[id];
+    return projectsStore.find(id)?.launchArgs ?? "";
   }
 
   function getIntentDraft(id: string): string {
-    if (!(id in intentDrafts)) {
-      const p = projectsStore.find(id);
-      intentDrafts[id] = p?.platformIntent ?? "";
-    }
-    return intentDrafts[id];
+    if (id in intentDrafts) return intentDrafts[id];
+    return projectsStore.find(id)?.platformIntent ?? "";
   }
 
   function handleArgsInput(id: string, value: string) {
@@ -657,7 +651,7 @@
   }
 
   async function handleSaveArgs(project: ProjectEntry) {
-    const draft = argsDrafts[project.id] ?? "";
+    const draft = getArgsDraft(project.id);
     if (draft.trim().length === 0) return;
     const err = validateArgs(draft);
     if (err) {
@@ -698,7 +692,7 @@
   }
 
   async function handleSaveIntent(project: ProjectEntry) {
-    const next = (intentDrafts[project.id] ?? "").trim();
+    const next = getIntentDraft(project.id).trim();
     savingIntentFor = project.id;
     try {
       const updated: ProjectEntry = { ...project, platformIntent: next };
