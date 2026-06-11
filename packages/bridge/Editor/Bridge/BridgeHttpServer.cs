@@ -30,6 +30,13 @@ namespace UnityAgentBridge
             "unity_agent_find_members"
         };
 
+        static readonly HashSet<string> MutatingTools = new()
+        {
+            "unity_agent_execute_csharp",
+            "unity_agent_invoke_method",
+            "unity_agent_execute_menu"
+        };
+
         static HttpListener _listener;
         static Thread _listenerThread;
         static volatile bool _running;
@@ -208,6 +215,16 @@ namespace UnityAgentBridge
             var gateMode = ExtractGateMode(body);
             var sw = Stopwatch.StartNew();
 
+            if (MutatingTools.Contains(toolName))
+            {
+                var pathsHint = JsonBody.GetStringArray(body, "paths_hint");
+                if (pathsHint == null || pathsHint.Length == 0)
+                {
+                    SendJson(context, 200, BuildPathsHintErrorEnvelope(toolName, gateMode));
+                    return;
+                }
+            }
+
             try
             {
                 var task = MainThreadDispatcher.EnqueueAsync(
@@ -345,6 +362,21 @@ namespace UnityAgentBridge
             sb.Append("\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
             sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
             sb.Append(",\"agentNextSteps\":[\"Tool execution failed with an unexpected error.\"]}");
+            return sb.ToString();
+        }
+
+        static string BuildPathsHintErrorEnvelope(string toolName, string gateMode)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"paths_hint_required\",\"message\":\"");
+            sb.Append("Mutating tool '");
+            sb.Append(EscapeStringContent(toolName));
+            sb.Append("' requires a non-empty 'paths_hint' array. ");
+            sb.Append("Provide asset paths likely to be affected (e.g. [\\\"Assets/Prefabs/Player.prefab\\\"]) so the gate can scope validation correctly. ");
+            sb.Append("There is no whole-project fallback in M2 — explicit paths are mandatory.");
+            sb.Append("\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
+            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
+            sb.Append(",\"agentNextSteps\":[\"Add 'paths_hint' with at least one asset path before retrying.\"]}");
             return sb.ToString();
         }
 

@@ -87,7 +87,7 @@ Dispatch an MCP tool call. The request body is the tool's input arguments (match
 |---|---|---|---|---|
 | `timeout_ms` | `integer` | `30000` | `1000`–`300000` | Max wait time in milliseconds for tool execution |
 | `gate` | `string` | `"enforce"` | `"enforce" \| "warn" \| "off"` | Gate validation mode |
-| `paths_hint` | `string[]` | — | recommended non-empty | Asset paths likely touched; drives scoped gate validation |
+| `paths_hint` | `string[]` | — | **required** non-empty for mutating tools | Asset paths likely touched; drives scoped gate validation |
 
 Read-only tools (`unity_agent_find_members`) accept `timeout_ms` but ignore `gate` and `paths_hint`.
 
@@ -240,6 +240,7 @@ Returned when tool execution throws an unhandled exception:
 | `bridge_internal_error` | 500 | Unhandled exception in bridge request handling |
 | `timeout` | 200 (envelope) | Tool execution exceeded `timeout_ms` |
 | `execution_error` | 200 (envelope) | Tool threw an unhandled exception |
+| `paths_hint_required` | 200 (envelope) | Mutating tool called without non-empty `paths_hint` |
 
 ---
 
@@ -260,7 +261,7 @@ When `gate.mode == "off"`: only `mutation.success == false` sets `isError`.
 ## M2 scope notes
 
 - **Gate is stubbed:** `gate.skipped` is always `true`; `validation` and `delta` are `null`. Full gate with `VerifyGateAdapter` lands in M3.
-- **`paths_hint`** is accepted but not yet enforced. M2 recommended behavior: require non-empty `paths_hint` (see [questions-2.md](../questions/questions-2.md) Q1).
+- **`paths_hint`** is strictly enforced for mutating tools (`execute_csharp`, `invoke_method`, `execute_menu`). Missing or empty `paths_hint` returns `mutation.success: false` with error code `paths_hint_required`. Read-only tools (`find_members`) do not require `paths_hint`. There is no whole-project fallback in M2 — agents must always provide explicit asset paths for mutating operations.
 - **Tool implementations are scaffolds:** `DispatchTool` returns a generic success result. Per-tool logic is implemented in Plan 2.
 - **Batch mode** is not supported in M2. `mode` is always `"live"`.
 

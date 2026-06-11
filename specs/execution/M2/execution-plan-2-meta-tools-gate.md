@@ -30,7 +30,7 @@ Dependencies: Plan 1 complete.
 
 ---
 
-#### Task 2: Strict `paths_hint` validation for mutating tools (M2-6) [Score:5] [Agent:easy]
+#### Task 2: Strict `paths_hint` validation for mutating tools (M2-6) [Score:5] [Agent:easy] — **DONE**
 
 **Required context**
 
