@@ -1,3 +1,15 @@
+## 2026-06-12 12:00 MSK
+
+- **M2 Plan 3 Task 3: `isError` mapping and envelope pass-through (M2-11).** Implemented MCP `isError` derivation from mutation/gate results per [gate-policy.md](specs/architecture/gate-policy.md):
+  - New `mcp-server/src/gate-error.ts` — extracted `MutationEnvelope` interface and `deriveIsError()` function implementing the full gate-policy `isError` rules:
+    - `mutation.success === false` → `isError: true` (always)
+    - `gate.mode === "enforce" AND gate.delta.newErrors > 0` → `isError: true`
+    - `gate.mode === "warn"` → always `isError: false` (warnings remain in payload for agent diagnostics)
+    - `gate.mode === "off"` → only mutation failure sets `isError`
+  - Updated `mcp-server/src/live-client.ts` — replaced inline `isError` logic with `deriveIsError()` from `gate-error.ts`. Full bridge envelope is passed through unchanged in the MCP `content` text, preserving `agentNextSteps`, `gate.delta`, and error details for agent loops.
+  - Build + typecheck clean (`npm run build`, `npm run typecheck`).
+- Marked Task 3 DONE in [execution-plan-3-mcp-server-live.md](specs/execution/M2/execution-plan-3-mcp-server-live.md).
+
 ## 2026-06-12 03:00 MSK
 
 - **M2 Plan 3 Task 2: Live HTTP client and routing policy (M2-10).** Implemented the live bridge HTTP client in `mcp-server/src/live-client.ts` with full routing, compile-wait, and offline-error behavior:

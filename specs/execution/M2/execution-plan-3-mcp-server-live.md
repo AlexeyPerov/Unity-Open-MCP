@@ -52,7 +52,7 @@ Dependencies: Task 1.
 
 ---
 
-#### Task 3: `isError` mapping and envelope pass-through (M2-11) [Score:6] [Agent:medium]
+#### Task 3: `isError` mapping and envelope pass-through (M2-11) [Score:6] [Agent:medium] — **DONE**
 
 **Required context**
 

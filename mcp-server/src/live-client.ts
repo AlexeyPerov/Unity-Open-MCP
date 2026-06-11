@@ -1,5 +1,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
+import type { MutationEnvelope } from "./gate-error.js";
+import { deriveIsError } from "./gate-error.js";
 
 const MAX_COMPILE_WAIT_MS = 120_000;
 const COMPILE_POLL_INTERVAL_MS = 2_000;
@@ -13,21 +15,6 @@ interface PingResponse {
   mode: string;
   compiling: boolean;
   isPlaying: boolean;
-}
-
-interface MutationEnvelope {
-  mutation: {
-    success: boolean;
-    output: unknown;
-    error: { code: string; message: string } | null;
-  };
-  gate: {
-    mode: string;
-    skipped: boolean;
-    validation: unknown;
-    delta: Record<string, unknown> | null;
-  };
-  agentNextSteps: string[];
 }
 
 interface HttpErrorBody {
@@ -148,7 +135,7 @@ export class LiveClient implements Router {
       const body = (await res.json()) as MutationEnvelope;
       return {
         content: [{ type: "text", text: JSON.stringify(body) }],
-        isError: body.mutation.success === false,
+        isError: deriveIsError(body),
       };
     } catch {
       return makeErrorResult(
