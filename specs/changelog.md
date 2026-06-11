@@ -1,3 +1,73 @@
+## 2026-06-11 14:30 MSK
+
+- **M2 Plan 1 Task 1: Bridge package scaffold + listener lifecycle.** Scaffolded `packages/bridge` UPM package with full directory structure per [bridge.md](specs/packages/bridge.md) layout:
+  - `package.json` — `com.alexeyperov.unity-agent-bridge` v0.1.0, Unity 6000.0 minimum.
+  - `Editor/com.alexeyperov.unity-agent-bridge.Editor.asmdef` — Editor-only assembly definition.
+  - `Editor/Bridge/BridgeHttpServer.cs` — `[InitializeOnLoad]` HTTP listener using `System.Net.HttpListener`. Binds to `127.0.0.1:19120` (localhost only). Port override via `UNITY_AGENT_BRIDGE_PORT` env var or `-UNITY_AGENT_BRIDGE_PORT=` command-line arg. Starts on domain load, stops on `beforeAssemblyReload` and `quitting`. Background listener thread dispatches requests to `ThreadPool` workers. Implements `GET /ping` returning `connected`, `projectPath`, `unityVersion`, `bridgeVersion`, `mode`, `compiling`, `isPlaying`. Unknown tools return 404 with `tool_not_found` error. Unknown endpoints return 404 with `not_found`. Internal errors return 500 with `bridge_internal_error`.
+  - `Editor/Bridge/BridgeSession.cs` — Static session state holder exposing project path, Unity version, bridge version, compile/play mode, and connected status.
+  - `Editor/Bridge/MainThreadDispatcher.cs` — `ConcurrentQueue<Action>` dispatcher draining on `EditorApplication.update`. Scaffold for Task 2 main-thread dispatch.
+  - `Editor/Gate/GatePolicy.cs` — `GateMode` enum scaffold (Enforce/Warn/Off).
+  - `Editor/Gate/VerifyGateAdapter.cs` — Empty adapter scaffold for M3 verify integration.
+  - `Editor/MetaTools/` — Four empty tool scaffolds (`ExecuteCSharpTool`, `InvokeMethodTool`, `ExecuteMenuTool`, `FindMembersTool`).
+- Marked Task 1 DONE in [execution-plan-1-bridge-http.md](specs/execution/M2/execution-plan-1-bridge-http.md).
+
+## 2026-06-11 13:40 MSK (hub)
+
+- **Platform intent: show the project’s default build target.** When no platform intent is set, the popup used to say “Unity will use the project’s default build settings” without telling the user *which* target that actually is. The active build target Unity will pick is persisted in `ProjectSettings/ProjectSettings.asset` as `m_BuildTarget` (with `m_BuildTargetGroup` as a fallback for older projects), so we now read it on demand and show it in the status line. New module [hub/src-tauri/src/config/build_target.rs](hub/src-tauri/src/config/build_target.rs) (`read_default_build_target` + `get_default_build_target` Tauri command, 8 unit tests) parses the YAML key with a tiny line scanner (no new crate), strips `'…'` / `"…"` quoting, ignores commented lines, and returns `NotRecorded` when the file or key is missing. Frontend: [hub/src/lib/services/config.ts](hub/src/lib/services/config.ts) exposes `getDefaultBuildTarget`; [hub/src/lib/tabs/ProjectsTab.svelte](hub/src/lib/tabs/ProjectsTab.svelte) calls it on `openSettingsPopup`, caches into `defaultBuildTargetMap`, and renders one of three messages — known target (with a friendly label like `iPhone` → `iOS`, `StandaloneOSX` → `macOS`, raw enum on `title` for power users), not recorded (typically a freshly-cloned project that has never been opened in Unity), or `reading default build target…` while the IPC is in flight. Also equalized the four log-shortcut button widths in the same popup. `cargo test config::build_target` → 8/8 pass; `npm run check` → 0 errors.
+
+## 2026-06-11 13:40 MSK
+
+- Added package-level deferred scope tracker: [specs/packages/backlog.md](specs/packages/backlog.md). Seeded with M2 question deferrals (Q3 Unity 2022+ Roslyn feasibility estimate, Q4 token/remote bridge security options, Q7 deny-list hardening) and generic M3+ package hardening placeholders.
+- Updated agent/spec workflow rules for deferrals:
+  - [AGENTS.md](AGENTS.md): new **Backlog** rule mapping hub deferrals to `specs/hub/backlog.md` and package/MCP deferrals to `specs/packages/backlog.md`, plus removal rule when work becomes active.
+  - [specs/questions/README.md](specs/questions/README.md): added explicit deferred-answer routing to hub/packages backlog files.
+- Applied M2 answers in decision docs:
+  - [specs/questions/questions-2.md](specs/questions/questions-2.md): added backlog cross-links for deferred Q4/Q7 options; added Q5 decision note to create `architecture/bridge-http-api.md`; updated "Suggested doc additions/changes" table to match chosen answers (Q2 verify skeleton, Q5 separate API doc, Q7 deferral); updated M2 execution spec path to `execution/M2/M2-bridge-mcp.md`.
+- Added formal bridge API contract doc per Q5:
+  - [specs/architecture/bridge-http-api.md](specs/architecture/bridge-http-api.md): defines `/ping` and `/tools/{tool_name}` request/response patterns, timeout/error behavior, and M2 scope notes.
+  - Linked new API doc from [specs/packages/bridge.md](specs/packages/bridge.md) and [specs/packages/mcp-server.md](specs/packages/mcp-server.md).
+- Created M2 execution folder and split plan structure (mirrors M1 style):
+  - [specs/execution/M2/M2-bridge-mcp.md](specs/execution/M2/M2-bridge-mcp.md) milestone spec.
+  - [specs/execution/M2/execution-plan.md](specs/execution/M2/execution-plan.md) index.
+  - [specs/execution/M2/execution-plan-1-bridge-http.md](specs/execution/M2/execution-plan-1-bridge-http.md).
+  - [specs/execution/M2/execution-plan-2-meta-tools-gate.md](specs/execution/M2/execution-plan-2-meta-tools-gate.md).
+  - [specs/execution/M2/execution-plan-3-mcp-server-live.md](specs/execution/M2/execution-plan-3-mcp-server-live.md).
+  - [specs/execution/M2/execution-plan-4-demo-validation.md](specs/execution/M2/execution-plan-4-demo-validation.md).
+- Updated spec indexes and links for M2 folderization:
+  - [specs/execution/README.md](specs/execution/README.md): M2 plan path moved under `execution/M2/`, plus M2 execution-plan index row.
+  - [specs/README.md](specs/README.md): added `packages/backlog.md`; added M2 milestone + plan rows under Execution.
+  - [specs/execution/M1/execution-plan.md](specs/execution/M1/execution-plan.md): "Next milestone" link now points to `../M2/M2-bridge-mcp.md`.
+
+## 2026-06-11 13:35 MSK
+
+- **Platform intent: show the project's default build target.** When no platform intent is set, the popup used to say "Unity will use the project's default build settings" without telling the user *which* target that actually is. The active build target Unity will pick is persisted in `ProjectSettings/ProjectSettings.asset` as `m_BuildTarget` (with `m_BuildTargetGroup` as a fallback for older projects), so we now read it on demand and show it in the status line. New module [hub/src-tauri/src/config/build_target.rs](hub/src-tauri/src/config/build_target.rs) (`read_default_build_target` + `get_default_build_target` Tauri command, 8 unit tests) parses the YAML key with a tiny line scanner (no new crate), strips `'…'` / `"…"` quoting, ignores commented lines, and returns `NotRecorded` when the file or key is missing. Frontend: [hub/src/lib/services/config.ts](hub/src/lib/services/config.ts) exposes `getDefaultBuildTarget`; [hub/src/lib/tabs/ProjectsTab.svelte](hub/src/lib/tabs/ProjectsTab.svelte) calls it on `openSettingsPopup`, caches into `defaultBuildTargetMap`, and renders one of three messages — known target (with a friendly label like `iPhone` → `iOS`, `StandaloneOSX` → `macOS`, raw enum on `title` for power users), not recorded (typically a freshly-cloned project that has never been opened in Unity), or `reading default build target…` while the IPC is in flight. `cargo test config::build_target` → 8/8 pass; `npm run check` → 0 errors.
+
+## 2026-06-11 13:25 MSK
+
+- **Project settings popup: equal-width log shortcut buttons.** In the **Log shortcuts** panel, the four secondary buttons (3× **Open folder**, 1× **Open file**) had different widths because each sized to its text. Added `.log-row :global(.btn) { min-width: 6.5rem; justify-content: center; }` to [hub/src/lib/tabs/ProjectsTab.svelte](hub/src/lib/tabs/ProjectsTab.svelte) so all buttons share the same width and the labels are centered. The label column (`flex: 0 0 5.5rem`) is unchanged, so row alignment is preserved. `npm run check` → 0 errors.
+
+## 2026-06-11 12:50 MSK
+
+- **Project settings popup cleanup + launch args / platform intent / log shortcuts UX pass** ([hub/src/lib/tabs/ProjectsTab.svelte](hub/src/lib/tabs/ProjectsTab.svelte), [hub/src/lib/components/shell/StatusDrawer.svelte](hub/src/lib/components/shell/StatusDrawer.svelte), [hub/src/lib/tabs/UnityVersionsTab.svelte](hub/src/lib/tabs/UnityVersionsTab.svelte), [hub/src-tauri/capabilities/default.json](hub/src-tauri/capabilities/default.json)):
+  - **Launch args** — placeholder changed from `-logFile -batchmode` (looked like a real value) to `Optional: additional Unity launch arguments…`. The textarea is now full width and the **Save / Reset / Info** buttons sit in a row below it with `flex: 1 1 0` so all three share the row equally. **Info** opens a dedicated modal (`.info-modal`, `min(34rem, 92vw)`) with three sections: an example (`-batchmode -nographics -logFile -`), four common arguments (`-batchmode -nographics -quit`, `-logFile -`, `-username … -password … -serial …`, `-silent-crashes`) with short descriptions, and a button that calls `openUrl(LAUNCH_ARGS_DOCS_URL)` (`https://docs.unity3d.com/Manual/CommandLineArguments.html`) and logs the open in the drawer. Escape and overlay-click both close the info modal. New `mini-panel-hint` style applied to both the Launch args and Platform intent panels.
+  - **Platform intent** — added a description (`mini-panel-hint`) explaining that the value is a `BuildTarget` Hub appends via `-buildTarget <name>` on the next launch, that `None` is the default and uses the project's own build settings, and that the intent is only applied on the next launch (never to a running Editor). The `Current: —` line is gone; the status text now reads `Active: <name> (applied on next launch)` when set or `No platform intent set — Unity will use the project's default build settings.` when empty, so an empty intent no longer looks like a missing field.
+  - **Popup header actions** — **Kill Unity** moved into the **More ▾** menu (renamed **Terminate Unity**, "Terminating…" while in flight, still destructive-styled, tooltip `Terminate pid <pid>` or `No recorded Unity PID`). **Reveal in file manager** removed from the More menu and from the right-click context menu (and the `handleReveal` function / `revealItemInDir` import are gone) — **Open Folder** is the only filesystem action. **Copy path** moved out of the More menu into the header action bar (now **Copy Path**) next to **Open Folder**, with a "Path missing" / "Copy project path to clipboard" tooltip.
+  - **More menu + context menu** — both have Refresh and Remove from list items with `title` tooltips (`Refresh project version and size` / `Remove this project from the Hub list`). The right-click context menu was updated to match the popup (no Reveal, Copy path next to Open folder, Terminate Unity replaces Kill Unity, tooltips on Refresh/Remove).
+  - **Log shortcuts** — the **Editor.log** `Open file` link is now a `<Button variant="secondary">` (was a custom `.link-btn` styled `<button>`) so its chrome matches the other three `Open folder` buttons; the `title` is the resolved file path. The unused `.link-btn` CSS was removed.
+  - **macOS "Open Folder: not allowed"** — root cause was the Tauri v2 opener scope: `opener:allow-open-path` enables the command but the path still has to match an entry in the `Scope::allowed` list, which was empty. Added explicit glob scopes in [hub/src-tauri/capabilities/default.json](hub/src-tauri/capabilities/default.json): `{ "identifier": "opener:allow-open-path", "allow": [{ "path": "**" }] }` and the same for `opener:allow-reveal-item-in-dir` (the `Reveal` buttons in Settings → Diagnostics and Installs action bar were affected by the same scope check). `opener:default` + `opener:allow-open-url` retained for URL opens.
+  - **Status / Log drawer** — chevron is now two distinct SVGs (`▾` for the collapsed state, `▴` for expanded) instead of a single polyline rotated 180°; the `.chevron-up` rule and the transform transition were removed.
+  - **Projects tab toolbar** — refresh icon button nudged up 2px via `margin-top: -2px` on `.icon-btn` (it had been sitting ~2px below the `Add Project` baseline).
+  - **Installs tab** — `.table-body` now has `padding-top: 0.4rem` so the first row has the same vertical offset the Projects tab has had since the per-row foldout rework; no rows themselves are styled differently, so subsequent rows keep their current spacing.
+  - **Verification:** `npm run check` → 0 errors, 5 pre-existing a11y warnings (3 in the old code, 2 from the new info modal — all already silenced with `<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->` following the existing pattern). `npm run build` → clean.
+
+## 2026-06-11 12:05 MSK
+
+- **Fix: project settings popup failed to open (`state_unsafe_mutation`).** Clicking the gear button set `settingsPopupFor` correctly, but rendering the popup called `getArgsDraft` / `getIntentDraft` from template expressions; those helpers lazily wrote into `$state` records during render, which Svelte 5 forbids and aborted the update. Both helpers are now pure reads (return the draft map entry or fall back to the stored project field without mutating). `handleSaveArgs` / `handleSaveIntent` use the same read helpers so saves still work when the user edits without an intermediate map write. [hub/src/lib/tabs/ProjectsTab.svelte](hub/src/lib/tabs/ProjectsTab.svelte).
+
+## 2026-06-11 11:55 MSK
+
+- **Backlog: restructured into 4 phases after parity analysis vs `references/UnityLauncherPro`.** [specs/hub/backlog.md](specs/hub/backlog.md) now opens with a **Phase 1 — Quick wins** section that captures the small (≤ 2 d) ULP parity gaps: drag-and-drop add, CLI mode, per-launch log file, crash-log auto-tailing, frecency sorting, platform-intent UI nudge, relink missing path, Asset Download folder shortcut, and git branch display. The previous post-v1 / v1.1+ / v2+ structure was preserved as Phases 2–4. New Phase 2 P1 items: New project creation (scaffold-only), Theme support (`dark | light | system` with live switching, explicitly *not* ULP's full RGBA editor), and project-level custom env variables. Added an **Out of scope** section listing the ULP patterns hub should deliberately not copy (full theme editor, custom `JsonParser` / `ObservableDictionary`, monolithic XAML grids, Windows-only `App.config`).
+
 ## 2026-06-11 09:40 MSK
 
 - **Projects tab: two-zone row click model + smaller settings icon.**
