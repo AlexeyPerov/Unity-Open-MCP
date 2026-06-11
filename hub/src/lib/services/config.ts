@@ -33,6 +33,30 @@ export interface UnityDiscoverySettings {
    * field is optional in TypeScript for the same reason.
    */
   scanIntervalSeconds?: number;
+  /**
+   * M1.5-11: folder roots the user wants the walk-up directory scan to
+   * recurse into when looking for Unity project roots (a folder that
+   * contains both `Assets/` and `ProjectSettings/`). Empty by default;
+   * the scan button on the Projects tab is a no-op when this is empty.
+   */
+  walkUpRoots: string[];
+  /**
+   * M1.5-11: maximum directory depth the walk-up scan descends from
+   * each root. Default 4, hard cap 8. The Rust mutator clamps incoming
+   * values to `[1, 8]` and the UI input is range-pinned to the same.
+   */
+  walkUpMaxDepth: number;
+  /**
+   * M1.5-11: when true, the walk-up scan follows symbolic links. Off
+   * by default to avoid loops and unintended home-dir traversal.
+   */
+  walkUpFollowSymlinks: boolean;
+  /**
+   * M1.5-11: when true (default), a cancelled walk-up scan keeps the
+   * projects it had already discovered and appended to `projects.json`;
+   * when false, partial results are discarded.
+   */
+  walkUpKeepPartial: boolean;
 }
 
 export interface DiagnosticsSettings {
@@ -71,6 +95,15 @@ export interface ProjectEntry {
    * projects or pending reads.
    */
   gitBranch?: string | null;
+  /**
+   * M1.5-11: where this entry came from. One of:
+   *  - `"hub-seed"` — from the M1 first-run Unity Hub import
+   *  - `"manual"` — user added via the Add Project button / drag-drop / CLI
+   *  - `"walk-up"` — added by the walk-up directory scan
+   * Legacy entries deserialize as `"manual"` so the on-disk file stays
+   * compact; the walk-up chip / filter never matches legacy rows.
+   */
+  source?: string;
 }
 
 export interface ProjectsFile {
@@ -358,4 +391,61 @@ export async function getProjectSizes(
   paths: string[]
 ): Promise<Record<string, number>> {
   return invoke<Record<string, number>>("get_project_sizes", { paths });
+}
+
+/**
+ * M1.5-11 — walk-up directory scan.
+ */
+
+export interface WalkUpStartParams {
+  roots: string[];
+  maxDepth: number;
+  followSymlinks: boolean;
+  keepPartial: boolean;
+}
+
+export interface WalkUpStart {
+  scanId: string;
+  maxDepth: number;
+  followSymlinks: boolean;
+  keepPartial: boolean;
+  roots: string[];
+}
+
+export type WalkUpStatus = "running" | "cancelled" | "completed" | "failed";
+
+export interface WalkUpProgress {
+  scanId: string;
+  currentRoot: string;
+  currentDepth: number;
+  maxDepth: number;
+  foundSoFar: number;
+  visitedDirs: number;
+  status: WalkUpStatus;
+}
+
+export interface WalkUpDone {
+  scanId: string;
+  status: WalkUpStatus;
+  added: ProjectEntry[];
+  skippedExisting: string[];
+  skippedNotUnity: number;
+  skippedInvalidRoot: string[];
+  projects: ProjectsFile;
+  error?: string | null;
+}
+
+export type WalkUpError =
+  | { type: "anotherScanInProgress"; currentScanId: string }
+  | { type: "noRoots" }
+  | { type: "invalidRoot"; path: string; reason: string };
+
+export async function startWalkUpScan(
+  params: WalkUpStartParams
+): Promise<WalkUpStart> {
+  return invoke<WalkUpStart>("start_walk_up_scan", { params });
+}
+
+export async function cancelWalkUpScan(scanId: string): Promise<boolean> {
+  return invoke<boolean>("cancel_walk_up_scan", { scanId });
 }

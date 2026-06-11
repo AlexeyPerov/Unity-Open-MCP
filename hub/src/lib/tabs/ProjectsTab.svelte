@@ -3,6 +3,8 @@
   import { S } from "$lib/state.svelte";
   import { projectsStore } from "$lib/state/projects.svelte";
   import { runningUnityStore } from "$lib/state/running_unity.svelte";
+  import { walkUpScanStore } from "$lib/state/walk_up_scan.svelte";
+  import { settingsStore } from "$lib/state/settings.svelte";
   import {
     addProject,
     checkPathsExists,
@@ -79,6 +81,7 @@
   let defaultBuildTargetMap = $state<Record<string, string | null>>({});
   let isDragOver = $state(false);
   let relinkingId = $state<string | null>(null);
+  let walkUpModalOpen = $state(false);
 
   const UNSAFE_RE = /[\n\r\0`$|&;<>]/;
 
@@ -140,6 +143,11 @@
     // setting. The polling stops on teardown so we don't leak the
     // interval while the user is on another tab.
     void runningUnityStore.start();
+    // M1.5-11: subscribe to walk-up scan progress / done events so the
+    // modal can render the live counter. The store handles listener
+    // re-registration safely; we only need to call `stop()` on
+    // teardown so a navigating tab does not leak event handlers.
+    void walkUpScanStore.start();
     window.addEventListener("click", closeContextMenu, true);
     window.addEventListener("keydown", handleGlobalKeydown, true);
 
@@ -182,6 +190,8 @@
       window.removeEventListener("keydown", handleGlobalKeydown, true);
       if (unlistenDrop) unlistenDrop();
       runningUnityStore.stop();
+      void walkUpScanStore.stop();
+      walkUpModalOpen = false;
     };
   });
 
@@ -769,6 +779,81 @@
     }
   }
 
+  /**
+   * M1.5-11: open the walk-up scan modal. The modal reads the
+   * current `settings.unityDiscovery.walkUp*` configuration and
+   * lets the user start a scan against the configured roots. The
+   * actual scan runs on the Rust side; we just open the modal and
+   * let the user click Start.
+   */
+  function openWalkUpModal() {
+    if (walkUpModalOpen) return;
+    walkUpModalOpen = true;
+  }
+
+  function closeWalkUpModal() {
+    // Close the modal only when no scan is in flight; if a scan is
+    // running the user has to cancel it first (the X button is
+    // hidden / disabled in that case).
+    if (walkUpScanStore.scanning) return;
+    walkUpModalOpen = false;
+  }
+
+  async function startWalkUpFromModal() {
+    const settings = settingsStore.current;
+    if (!settings) {
+      addError = "settings not loaded yet — try again in a moment";
+      return;
+    }
+    const roots = settings.unityDiscovery.walkUpRoots;
+    if (roots.length === 0) {
+      addError =
+        "no walk-up roots configured — add at least one in Settings → Additional parent folders";
+      return;
+    }
+    addError = null;
+    const result = await walkUpScanStore.begin({
+      roots,
+      maxDepth: settings.unityDiscovery.walkUpMaxDepth,
+      followSymlinks: settings.unityDiscovery.walkUpFollowSymlinks,
+      keepPartial: settings.unityDiscovery.walkUpKeepPartial,
+    });
+    if (result) {
+      // Scan is running — modal stays open with the live progress.
+      // The done event in the store clears `scanning` so the user
+      // can close the modal.
+      S.appendDrawerLog(
+        `walk-up scan ${result.scanId} started (${result.roots.length} root(s), max depth ${result.maxDepth})`
+      );
+    } else {
+      const msg = walkUpScanStore.startError;
+      if (msg) {
+        addError = msg;
+        S.appendErrorLog(`walk-up scan failed to start: ${msg}`);
+      }
+    }
+  }
+
+  async function cancelWalkUpFromModal() {
+    await walkUpScanStore.cancel();
+  }
+
+  /**
+   * M1.5-11: summary line for the modal's "done" panel. Reads the
+   * store's `lastResult` so the message survives a tab switch and
+   * is available after the scan closes out. Returns null when no
+   * scan has been run in this session.
+   */
+  function lastScanSummary(): { added: number; skipped: number; status: string } | null {
+    const r = walkUpScanStore.lastResult;
+    if (!r) return null;
+    return {
+      added: r.added.length,
+      skipped: r.skippedExisting.length,
+      status: r.status,
+    };
+  }
+
   async function performKill(project: ProjectEntry, pid: number) {
     if (killingId) return;
     killingId = project.id;
@@ -1232,6 +1317,14 @@
         AI Setup
       </Button>
     {/if}
+    <Button
+      variant="secondary"
+      onclick={openWalkUpModal}
+      disabled={walkUpScanStore.scanning}
+      title="Walk-up directory scan — discover Unity projects under configured roots"
+    >
+      {walkUpScanStore.scanning ? "Scanning…" : "Walk-up Scan…"}
+    </Button>
     <Button variant="primary" onclick={handleAddProject} disabled={addingProject}>
       {addingProject ? "Adding…" : "Add Project"}
     </Button>
@@ -1340,7 +1433,22 @@
             >
               <div class="cell cell-name" role="gridcell">
                 <div class="name-path">
-                  <span class="name-text">{project.name}</span>
+                  <span class="name-text">
+                    {project.name}
+                    {#if project.source === "walk-up"}
+                      <span
+                        class="source-tag source-walkup"
+                        title="Added by walk-up directory scan"
+                        >walk-up</span
+                      >
+                    {:else if project.source === "hub-seed"}
+                      <span
+                        class="source-tag source-hubseed"
+                        title="Imported from Unity Hub on first run"
+                        >hub</span
+                      >
+                    {/if}
+                  </span>
                   <span class="path-text" title={project.path}>{project.path}</span>
                 </div>
               </div>
@@ -1404,6 +1512,157 @@
     </div>
   </div>
 </div>
+
+{#if walkUpModalOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="walkup-overlay"
+    role="dialog"
+    tabindex="-1"
+    aria-modal="true"
+    aria-labelledby="walkup-modal-title"
+    onclick={(e) => { if (e.target === e.currentTarget) closeWalkUpModal(); }}
+    onkeydown={(e) => { if (e.key === "Escape" && !walkUpScanStore.scanning) closeWalkUpModal(); }}
+  >
+    <div class="walkup-modal">
+      <header class="walkup-header">
+        <h2 id="walkup-modal-title" class="walkup-title">Walk-up directory scan</h2>
+        {#if !walkUpScanStore.scanning}
+          <button
+            type="button"
+            class="walkup-close"
+            aria-label="Close walk-up scan"
+            onclick={closeWalkUpModal}
+          >
+            ×
+          </button>
+        {/if}
+      </header>
+
+      <div class="walkup-body">
+        <p class="walkup-desc">
+          Hub will recurse into the configured roots and append every
+          folder that contains both <code>Assets/</code> and
+          <code>ProjectSettings/</code> to the project list as
+          <code>source: walk-up</code>.
+        </p>
+
+        <section class="walkup-config">
+          <h3 class="walkup-section-title">Configured roots</h3>
+          {#if settingsStore.current && settingsStore.current.unityDiscovery.walkUpRoots.length > 0}
+            <ul class="walkup-roots">
+              {#each settingsStore.current.unityDiscovery.walkUpRoots as root (root)}
+                <li class="walkup-root" title={root}>{root}</li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="walkup-empty">
+              No roots configured. Add at least one in
+              <strong>Settings → Additional parent folders → Walk-up directory scan</strong>.
+            </p>
+          {/if}
+          <dl class="walkup-config-list">
+            <div>
+              <dt>Max depth</dt>
+              <dd>{settingsStore.current?.unityDiscovery.walkUpMaxDepth ?? 4}</dd>
+            </div>
+            <div>
+              <dt>Follow symlinks</dt>
+              <dd>
+                {settingsStore.current?.unityDiscovery.walkUpFollowSymlinks ? "yes" : "no"}
+              </dd>
+            </div>
+            <div>
+              <dt>Keep partial on cancel</dt>
+              <dd>
+                {settingsStore.current?.unityDiscovery.walkUpKeepPartial ? "yes" : "no"}
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        {#if walkUpScanStore.scanning}
+          <section class="walkup-progress" aria-live="polite">
+            <h3 class="walkup-section-title">Scanning…</h3>
+            <dl class="walkup-progress-list">
+              <div>
+                <dt>Current root</dt>
+                <dd>{walkUpScanStore.currentRoot ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Current depth</dt>
+                <dd>
+                  {walkUpScanStore.currentDepth ?? 0} / {walkUpScanStore.maxDepth ?? 0}
+                </dd>
+              </div>
+              <div>
+                <dt>Found so far</dt>
+                <dd>{walkUpScanStore.foundSoFar}</dd>
+              </div>
+              <div>
+                <dt>Visited dirs</dt>
+                <dd>{walkUpScanStore.visitedDirs}</dd>
+              </div>
+            </dl>
+          </section>
+        {:else if walkUpScanStore.lastResult}
+          <section class="walkup-done" aria-live="polite">
+            <h3 class="walkup-section-title">
+              {walkUpScanStore.lastResult.status === "cancelled"
+                ? "Cancelled"
+                : walkUpScanStore.lastResult.status === "failed"
+                  ? "Failed"
+                  : "Done"}
+            </h3>
+            {#if lastScanSummary()}
+              {@const s = lastScanSummary()}
+              <p class="walkup-done-line">
+                Added <strong>{s?.added}</strong>
+                {#if s && s.skipped > 0}
+                  , skipped <strong>{s?.skipped}</strong> already in list
+                {/if}.
+              </p>
+              {#if walkUpScanStore.lastResult.error}
+                <p class="walkup-error">{walkUpScanStore.lastResult.error}</p>
+              {/if}
+            {/if}
+          </section>
+        {/if}
+
+        {#if addError && walkUpModalOpen}
+          <p class="walkup-error" role="alert">{addError}</p>
+        {/if}
+      </div>
+
+      <footer class="walkup-footer">
+        {#if walkUpScanStore.scanning}
+          <Button variant="destructive" onclick={cancelWalkUpFromModal}>
+            Cancel scan
+          </Button>
+          <span class="walkup-footer-hint">
+            The scan checks the cancel flag at every directory
+            boundary — it will stop within a few milliseconds.
+          </span>
+        {:else}
+          <Button variant="secondary" onclick={closeWalkUpModal}>
+            Close
+          </Button>
+          <Button
+            variant="primary"
+            onclick={startWalkUpFromModal}
+            disabled={
+              !settingsStore.current ||
+              settingsStore.current.unityDiscovery.walkUpRoots.length === 0
+            }
+          >
+            {walkUpScanStore.lastResult ? "Run again" : "Start scan"}
+          </Button>
+        {/if}
+      </footer>
+    </div>
+  </div>
+{/if}
 
 {#if contextMenu}
   {@const ctxId = contextMenu.projectId}
@@ -2083,6 +2342,35 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .source-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.6rem;
+    font-weight: 600;
+    line-height: 1.5;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+
+  .source-walkup {
+    background: rgba(92, 124, 250, 0.18);
+    color: #9bb3ff;
+    border-color: rgba(92, 124, 250, 0.45);
+  }
+
+  .source-hubseed {
+    background: rgba(110, 118, 140, 0.18);
+    color: #b4b8c5;
+    border-color: rgba(110, 118, 140, 0.45);
   }
 
   .path-text {
@@ -2568,5 +2856,194 @@
     border-color: #5c7cfa;
     background: #1a1b21;
     color: #7c9cfa;
+  }
+
+  .walkup-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 14, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 1rem;
+  }
+
+  .walkup-modal {
+    background: #1a1b21;
+    border: 1px solid #34353f;
+    border-radius: 10px;
+    width: 100%;
+    max-width: 32rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    padding: 1.1rem 1.25rem 1rem;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  .walkup-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .walkup-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #e9e9ef;
+  }
+
+  .walkup-close {
+    background: transparent;
+    border: none;
+    color: #8b8d9a;
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.4rem;
+  }
+
+  .walkup-close:hover {
+    color: #e9e9ef;
+  }
+
+  .walkup-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+
+  .walkup-desc {
+    margin: 0;
+    font-size: 0.82rem;
+    color: #8b8d9a;
+    line-height: 1.5;
+  }
+
+  .walkup-desc code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    background: #2a2b33;
+    color: #d6d8e0;
+    padding: 0 0.25rem;
+    border-radius: 3px;
+  }
+
+  .walkup-section-title {
+    margin: 0;
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: #c5c7d0;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+  }
+
+  .walkup-roots {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    max-height: 6.5rem;
+    overflow-y: auto;
+    border: 1px solid #2a2b33;
+    border-radius: 6px;
+    background: #14151a;
+    padding: 0.4rem 0.5rem;
+  }
+
+  .walkup-root {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    color: #b4b8c5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .walkup-empty {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #f0a8b8;
+    line-height: 1.5;
+  }
+
+  .walkup-config-list,
+  .walkup-progress-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.35rem 0.85rem;
+    margin: 0;
+  }
+
+  .walkup-config-list div,
+  .walkup-progress-list div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .walkup-config-list dt,
+  .walkup-progress-list dt {
+    font-size: 0.7rem;
+    color: #8b8d9a;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+  }
+
+  .walkup-config-list dd,
+  .walkup-progress-list dd {
+    margin: 0;
+    font-size: 0.86rem;
+    color: #e9e9ef;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .walkup-config,
+  .walkup-progress,
+  .walkup-done {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding-top: 0.55rem;
+    border-top: 1px dashed #2a2b33;
+  }
+
+  .walkup-done-line {
+    margin: 0;
+    font-size: 0.86rem;
+    color: #c5c7d0;
+  }
+
+  .walkup-done-line strong {
+    color: #e9e9ef;
+  }
+
+  .walkup-error {
+    margin: 0;
+    color: #f0a8b8;
+    font-size: 0.8rem;
+  }
+
+  .walkup-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    border-top: 1px solid #2a2b33;
+    padding-top: 0.7rem;
+  }
+
+  .walkup-footer-hint {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.74rem;
+    color: #8b8d9a;
+    line-height: 1.45;
   }
 </style>

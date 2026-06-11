@@ -74,10 +74,37 @@ pub struct UnityDiscoverySettings {
     /// the task spec.
     #[serde(default = "default_scan_interval_seconds")]
     pub scan_interval_seconds: u32,
+    /// M1.5-11: walk-up directory scan roots. Each entry is a folder the
+    /// user wants Hub to recursively scan for Unity project roots
+    /// (a folder containing both `Assets/` and `ProjectSettings/`).
+    /// Added in M1.5-11. `#[serde(default)]` keeps legacy `settings.json`
+    /// files loadable; the documented default is an empty list.
+    #[serde(default)]
+    pub walk_up_roots: Vec<String>,
+    /// M1.5-11: maximum directory depth the walk-up scan descends from
+    /// each root. Default 4, hard cap 8. `#[serde(default)]` keeps legacy
+    /// `settings.json` files loadable.
+    #[serde(default = "default_walk_up_max_depth")]
+    pub walk_up_max_depth: u32,
+    /// M1.5-11: when true, the walk-up scan follows symbolic links. Off
+    /// by default to avoid loops and unintended traversal of the user's
+    /// home directory. `#[serde(default)]` keeps legacy files loadable.
+    #[serde(default)]
+    pub walk_up_follow_symlinks: bool,
+    /// M1.5-11: when true (default), a cancelled walk-up scan keeps the
+    /// projects it had already discovered and appended to
+    /// `projects.json`; when false, the partial results are discarded.
+    /// `#[serde(default = "default_true")]` keeps legacy files loadable.
+    #[serde(default = "default_true")]
+    pub walk_up_keep_partial: bool,
 }
 
 fn default_scan_interval_seconds() -> u32 {
     5
+}
+
+fn default_walk_up_max_depth() -> u32 {
+    4
 }
 
 impl Default for Settings {
@@ -105,6 +132,10 @@ impl Default for Settings {
                     "C:\\Program Files\\Unity\\Hub\\Editor".to_string(),
                 ],
                 scan_interval_seconds: default_scan_interval_seconds(),
+                walk_up_roots: Vec::new(),
+                walk_up_max_depth: default_walk_up_max_depth(),
+                walk_up_follow_symlinks: false,
+                walk_up_keep_partial: true,
             },
             diagnostics: DiagnosticsSettings {
                 auto_open_drawer_on_launch_failure: true,
@@ -149,6 +180,19 @@ pub struct ProjectEntry {
     /// HEAD. `None` for non-git projects or when the read is pending.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_branch: Option<String>,
+    /// M1.5-11: where this entry came from. One of:
+    /// - `"hub-seed"` (from the M1 first-run Unity Hub import)
+    /// - `"manual"` (user added via the Add Project button / drag-drop)
+    /// - `"walk-up"` (added by the walk-up directory scan)
+    /// - `"cli"` (added by the CLI mode auto-launch flow)
+    /// Legacy entries deserialize as `"manual"` so the on-disk file
+    /// stays compact.
+    #[serde(default = "default_project_source")]
+    pub source: String,
+}
+
+fn default_project_source() -> String {
+    "manual".to_string()
 }
 
 impl Default for ProjectsFile {
@@ -276,6 +320,30 @@ mod tests {
     }
 
     #[test]
+    fn settings_loads_legacy_discovery_without_walk_up_fields() {
+        // Pre-M1.5-11 settings.json files do not carry any of the
+        // `walkUp*` fields. All four must default in: empty roots, max
+        // depth 4, follow-symlinks off, keep-partial on. This is the
+        // contract that keeps existing user configs loadable.
+        let legacy = r#"{
+            "version": 1,
+            "launch": { "mode": "openProject", "rememberLastSelection": true },
+            "projectList": {
+                "showPathColumn": true,
+                "showModifiedColumn": true,
+                "searchIncludesPath": true
+            },
+            "safety": { "confirmKillUnity": true, "confirmRemoveProject": true },
+            "unityDiscovery": { "parentFolders": [] }
+        }"#;
+        let restored: Settings = serde_json::from_str(legacy).unwrap();
+        assert!(restored.unity_discovery.walk_up_roots.is_empty());
+        assert_eq!(restored.unity_discovery.walk_up_max_depth, 4);
+        assert!(!restored.unity_discovery.walk_up_follow_symlinks);
+        assert!(restored.unity_discovery.walk_up_keep_partial);
+    }
+
+    #[test]
     fn projects_default_empty() {
         let p = ProjectsFile::default();
         assert_eq!(p.version, 1);
@@ -324,6 +392,7 @@ mod tests {
                 last_launch_at: Some("2026-06-09T11:55:00Z".to_string()),
                 frecency: 3,
                 git_branch: Some("feature/frecency".to_string()),
+                source: "manual".to_string(),
             }],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -370,6 +439,7 @@ mod tests {
             last_launch_at: None,
             frecency: 0,
             git_branch: None,
+            source: "manual".to_string(),
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(!json.contains("unityVersion"));
@@ -394,6 +464,21 @@ mod tests {
         let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
         assert_eq!(entry.frecency, 0);
         assert!(entry.git_branch.is_none());
+    }
+
+    #[test]
+    fn project_entry_source_defaults_to_manual_for_legacy_json() {
+        // Pre-M1.5-11 entries have no `source` field. They must default
+        // to "manual" so the walk-up chip / filter does not falsely
+        // match legacy rows. New writes (via add_project, walk_up_scan,
+        // the CLI flow) always set the field explicitly.
+        let legacy = r#"{
+            "id": "abc",
+            "name": "Proj",
+            "path": "/p"
+        }"#;
+        let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
+        assert_eq!(entry.source, "manual");
     }
 
     #[test]

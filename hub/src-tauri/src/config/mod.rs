@@ -15,3 +15,4 @@ pub mod build_target;
 pub mod git_branch;
 pub mod running_unity;
 pub mod cli;
+pub mod walk_up_scan;

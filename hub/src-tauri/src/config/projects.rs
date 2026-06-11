@@ -176,6 +176,7 @@ pub fn add_project(
         last_launch_at: None,
         frecency: 0,
         git_branch: None,
+        source: "manual".to_string(),
     };
 
     let mut projects = state.projects.lock().unwrap().clone();
@@ -473,6 +474,7 @@ mod tests {
             last_launch_at: None,
             frecency: 0,
             git_branch: None,
+            source: "manual".to_string(),
         }
     }
 

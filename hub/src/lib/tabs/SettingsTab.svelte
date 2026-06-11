@@ -14,6 +14,7 @@
   import { APP_NAME, APP_VERSION } from "$lib/version";
 
   let addingFolder = $state(false);
+  let addingWalkUpRoot = $state(false);
   let lastError = $state<string | null>(null);
   let savedFlash = $state(false);
 
@@ -185,6 +186,67 @@
         `removed discovery folder: ${folder} (rescanning Unity installs…)`
       );
     }
+  }
+
+  async function handleAddWalkUpRoot() {
+    if (addingWalkUpRoot) return;
+    addingWalkUpRoot = true;
+    lastError = null;
+    try {
+      const picked = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Select a folder to walk up for Unity projects",
+      });
+      if (!picked || typeof picked !== "string") {
+        return;
+      }
+      const normalized = trimTrailingSeparators(picked);
+      await withErrorBoundary("add walk-up root", () =>
+        settingsStore.addWalkUpRoot(normalized)
+      );
+      S.appendDrawerLog(
+        `added walk-up root: ${normalized} (run "Walk-up scan" from the Projects tab to discover projects)`
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      lastError = `walk-up root picker failed: ${msg}`;
+      S.appendErrorLog(lastError);
+    } finally {
+      addingWalkUpRoot = false;
+    }
+  }
+
+  async function handleRemoveWalkUpRoot(index: number) {
+    lastError = null;
+    const root = settingsStore.current?.unityDiscovery.walkUpRoots[index];
+    await withErrorBoundary("remove walk-up root", () =>
+      settingsStore.removeWalkUpRoot(index)
+    );
+    if (root) {
+      S.appendDrawerLog(`removed walk-up root: ${root}`);
+    }
+  }
+
+  async function setWalkUpMaxDepth(value: number) {
+    lastError = null;
+    await withErrorBoundary("save walk-up max depth", () =>
+      settingsStore.setWalkUpMaxDepth(value)
+    );
+  }
+
+  async function setWalkUpFollowSymlinks(value: boolean) {
+    lastError = null;
+    await withErrorBoundary("save walk-up follow-symlinks", () =>
+      settingsStore.setWalkUpFollowSymlinks(value)
+    );
+  }
+
+  async function setWalkUpKeepPartial(value: boolean) {
+    lastError = null;
+    await withErrorBoundary("save walk-up keep-partial", () =>
+      settingsStore.setWalkUpKeepPartial(value)
+    );
   }
 
   function dismissError() {
@@ -643,6 +705,110 @@
                 <span class="scan-interval-suffix">seconds</span>
               </div>
             </div>
+            <div class="walkup-section">
+              <h4 class="walkup-heading">Walk-up directory scan (M1.5-11)</h4>
+              <p class="walkup-hint">
+                Add folder roots Hub should recurse into to discover
+                Unity project roots (a folder containing both
+                <code>Assets/</code> and <code>ProjectSettings/</code>).
+                Run the scan from the Projects tab — this list only
+                configures the roots.
+              </p>
+              <ul class="folder-list" aria-label="Walk-up roots">
+                {#each settings.unityDiscovery.walkUpRoots as root, i (root + ":w:" + i)}
+                  <li class="folder-item">
+                    <span class="folder-path" title={root}>{root}</span>
+                    <button
+                      type="button"
+                      class="folder-remove"
+                      onclick={() => handleRemoveWalkUpRoot(i)}
+                      aria-label={`Remove walk-up root ${root}`}
+                      title={`Remove ${root}`}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                {:else}
+                  <li class="folder-empty">
+                    No walk-up roots. Use <strong>Add Folder</strong> below
+                    to pick a parent directory.
+                  </li>
+                {/each}
+              </ul>
+              <div class="folder-actions">
+                <Button
+                  variant="secondary"
+                  onclick={handleAddWalkUpRoot}
+                  disabled={addingWalkUpRoot}
+                >
+                  {addingWalkUpRoot ? "Adding…" : "Add Folder"}
+                </Button>
+              </div>
+              <div class="walkup-options">
+                <label class="check-row" for="walkup-max-depth">
+                  <span class="widget-text">
+                    <span class="check-label">Max depth</span>
+                    <span class="check-desc">
+                      How deep the scan descends below each root. Default
+                      4, hard cap 8. Higher values find deeply nested
+                      projects at the cost of slower scans.
+                    </span>
+                  </span>
+                </label>
+                <div class="walkup-depth-input">
+                  <input
+                    id="walkup-max-depth"
+                    type="number"
+                    min="1"
+                    max="8"
+                    step="1"
+                    value={settings.unityDiscovery.walkUpMaxDepth}
+                    onchange={(e) => {
+                      const raw = Number((e.currentTarget as HTMLInputElement).value);
+                      if (Number.isFinite(raw) && raw > 0) {
+                        void setWalkUpMaxDepth(raw);
+                      }
+                    }}
+                  />
+                </div>
+                <label class="check-row">
+                  <input
+                    type="checkbox"
+                    checked={settings.unityDiscovery.walkUpFollowSymlinks}
+                    onchange={(e) =>
+                      setWalkUpFollowSymlinks(
+                        (e.currentTarget as HTMLInputElement).checked
+                      )}
+                  />
+                  <span class="widget-text">
+                    <span class="check-label">Follow symbolic links</span>
+                    <span class="check-desc">
+                      Off by default to avoid loops and accidental
+                      traversal of <code>$HOME</code> and similar. Turn
+                      on only when you know your tree is well-formed.
+                    </span>
+                  </span>
+                </label>
+                <label class="check-row">
+                  <input
+                    type="checkbox"
+                    checked={settings.unityDiscovery.walkUpKeepPartial}
+                    onchange={(e) =>
+                      setWalkUpKeepPartial(
+                        (e.currentTarget as HTMLInputElement).checked
+                      )}
+                  />
+                  <span class="widget-text">
+                    <span class="check-label">Keep partial results on cancel</span>
+                    <span class="check-desc">
+                      When you press <strong>Cancel</strong> mid-scan,
+                      keep the projects the scan had already appended to
+                      <code>projects.json</code>. Off discards them.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
           </div>
         {/if}
       </section>
@@ -1095,6 +1261,68 @@
   .scan-interval-suffix {
     font-size: 0.78rem;
     color: #8a8d97;
+  }
+
+  .walkup-section {
+    margin-top: 0.7rem;
+    padding-top: 0.7rem;
+    border-top: 1px dashed #24252c;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .walkup-heading {
+    margin: 0;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #c5c7d0;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+  }
+
+  .walkup-hint {
+    margin: 0;
+    font-size: 0.78rem;
+    color: #8b8d9a;
+    line-height: 1.5;
+  }
+
+  .walkup-hint code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    background: #2a2b33;
+    color: #d6d8e0;
+    padding: 0 0.25rem;
+    border-radius: 3px;
+  }
+
+  .walkup-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .walkup-depth-input {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .walkup-depth-input input {
+    width: 4.5rem;
+    background: #14151a;
+    border: 1px solid #2a2b33;
+    border-radius: 4px;
+    color: #e0e1e6;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.5rem;
+  }
+
+  .walkup-depth-input input:focus {
+    outline: none;
+    border-color: #5c7cfa;
   }
 
   .placeholder-note {

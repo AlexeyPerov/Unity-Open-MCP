@@ -206,6 +206,64 @@ class SettingsStore {
     await this.persist(next);
     runningUnityStore.applyInterval();
   }
+
+  /**
+   * M1.5-11: walk-up scan roots. Adding a folder here is purely a
+   * settings change — it does **not** trigger a scan. The user starts
+   * the scan explicitly from the Projects tab; the walk-up section on
+   * the Settings tab only manages the configured list.
+   */
+  async addWalkUpRoot(folder: string): Promise<void> {
+    if (!this.current) return;
+    const trimmed = folder.trim();
+    if (!trimmed) return;
+    const next = this.clone();
+    if (next.unityDiscovery.walkUpRoots.includes(trimmed)) return;
+    next.unityDiscovery.walkUpRoots = [
+      ...next.unityDiscovery.walkUpRoots,
+      trimmed,
+    ];
+    await this.persist(next);
+  }
+
+  async removeWalkUpRoot(index: number): Promise<void> {
+    if (!this.current) return;
+    if (index < 0 || index >= this.current.unityDiscovery.walkUpRoots.length) return;
+    const next = this.clone();
+    next.unityDiscovery.walkUpRoots = next.unityDiscovery.walkUpRoots.filter(
+      (_, i) => i !== index
+    );
+    await this.persist(next);
+  }
+
+  /**
+   * M1.5-11: walk-up max depth (clamped to 1..=8 by the UI; the Rust
+   * mutator also clamps so a stale value cannot panic the backend).
+   */
+  async setWalkUpMaxDepth(value: number): Promise<void> {
+    if (!this.current) return;
+    const sanitized = Math.max(1, Math.min(8, Math.round(value)));
+    if (this.current.unityDiscovery.walkUpMaxDepth === sanitized) return;
+    const next = this.clone();
+    next.unityDiscovery.walkUpMaxDepth = sanitized;
+    await this.persist(next);
+  }
+
+  async setWalkUpFollowSymlinks(value: boolean): Promise<void> {
+    if (!this.current) return;
+    if (this.current.unityDiscovery.walkUpFollowSymlinks === value) return;
+    const next = this.clone();
+    next.unityDiscovery.walkUpFollowSymlinks = value;
+    await this.persist(next);
+  }
+
+  async setWalkUpKeepPartial(value: boolean): Promise<void> {
+    if (!this.current) return;
+    if (this.current.unityDiscovery.walkUpKeepPartial === value) return;
+    const next = this.clone();
+    next.unityDiscovery.walkUpKeepPartial = value;
+    await this.persist(next);
+  }
 }
 
 export const settingsStore = new SettingsStore();

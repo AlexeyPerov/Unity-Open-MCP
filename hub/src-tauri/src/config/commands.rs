@@ -6,11 +6,17 @@ use std::sync::Mutex;
 use crate::config::discovery::DiscoveryResult;
 use crate::config::persistence;
 use crate::config::schemas::{ProjectsFile, Settings};
+use crate::config::walk_up_scan::WalkUpRegistry;
 
 pub struct AppState {
     pub settings: Mutex<Settings>,
     pub projects: Mutex<ProjectsFile>,
     pub discovery_cache: Mutex<Option<DiscoveryResult>>,
+    /// M1.5-11: in-process registry of running walk-up directory
+    /// scans. Keyed by `scan_id` so a Cancel on scan A leaves scan B
+    /// untouched when the user starts a second scan before the first
+    /// has settled. See `config::walk_up_scan` for the full design.
+    pub walk_up_registry: Mutex<WalkUpRegistry>,
 }
 
 #[tauri::command]

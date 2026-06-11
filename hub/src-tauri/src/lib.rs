@@ -13,6 +13,7 @@ pub fn run() {
             settings: Mutex::new(config::persistence::load_settings()),
             projects: Mutex::new(config::persistence::load_projects()),
             discovery_cache: Mutex::new(None),
+            walk_up_registry: Mutex::new(config::walk_up_scan::WalkUpRegistry::default()),
         })
         .invoke_handler(tauri::generate_handler![
             config::commands::load_settings,
@@ -42,6 +43,8 @@ pub fn run() {
             config::build_target::get_default_build_target,
             config::git_branch::get_git_branches,
             config::running_unity::scan_running_unity,
+            config::walk_up_scan::start_walk_up_scan,
+            config::walk_up_scan::cancel_walk_up_scan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
