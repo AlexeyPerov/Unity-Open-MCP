@@ -74,7 +74,7 @@ Dependencies: Tasks 1–2.
 
 ---
 
-#### Task 4: Formal bridge HTTP API doc (`architecture/bridge-http-api.md`) (M2-4) [Score:5] [Agent:easy]
+#### Task 4: Formal bridge HTTP API doc (`architecture/bridge-http-api.md`) (M2-4) [Score:5] [Agent:easy] **DONE**
 
 **Required context**
 
@@ -108,6 +108,6 @@ Task 3 → Task 4
 - [ ] Bridge listener lifecycle is stable and localhost-only.
 - [ ] Main-thread dispatch queue and timeout handling are implemented.
 - [ ] `/ping` endpoint returns the agreed schema.
-- [ ] `architecture/bridge-http-api.md` exists and is linked.
+- [x] `architecture/bridge-http-api.md` exists and is linked.
 
 **Next:** [execution-plan-2-meta-tools-gate.md](./execution-plan-2-meta-tools-gate.md)

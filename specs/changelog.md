@@ -1,3 +1,16 @@
+## 2026-06-11 17:30 MSK
+
+- **M2 Plan 1 Task 4: Formal bridge HTTP API doc.** Authored [specs/architecture/bridge-http-api.md](specs/architecture/bridge-http-api.md) — the dedicated API contract document for the Unity Agent Bridge HTTP interface:
+  - `GET /ping` contract: response fields, 200/503 semantics, compile-wait polling guidance.
+  - `POST /tools/{tool_name}` contract: URL parameters, common request body fields (`timeout_ms`, `gate`, `paths_hint`), known M2 tool names.
+  - Response shapes: success mutation envelope, timeout envelope, execution error envelope — all with field-level documentation.
+  - HTTP status code table: 200/404/405/500/503 with error code mapping (`tool_not_found`, `not_found`, `method_not_allowed`, `bridge_internal_error`, `timeout`, `execution_error`).
+  - `isError` mapping rules for MCP server consumption per [gate-policy.md](specs/architecture/gate-policy.md).
+  - M2 scope notes documenting gate stub, `paths_hint` enforcement status, scaffold tool implementations, and batch mode deferral.
+  - Request examples for all five M2 endpoints (ping, execute_csharp, invoke_method, execute_menu, find_members).
+  - Cross-links already present in [bridge.md](specs/packages/bridge.md), [mcp-server.md](specs/packages/mcp-server.md), and execution plan docs.
+- Marked Task 4 DONE in [execution-plan-1-bridge-http.md](specs/execution/M2/execution-plan-1-bridge-http.md); Plan 1 exit criterion for API doc checked off.
+
 ## 2026-06-11 17:00 MSK
 
 - **M2 Plan 1 Task 3: `/ping` endpoint contract + bridge session state.** Implemented session state caching and domain-reload-safe ping:
