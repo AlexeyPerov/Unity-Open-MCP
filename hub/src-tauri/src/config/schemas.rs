@@ -46,6 +46,15 @@ pub struct ProjectListSettings {
     /// `"frecency"` so a future field addition never bricks the list sort.
     #[serde(default = "default_project_list_sort_by")]
     pub sort_by: String,
+    /// M1.5-15: when true, the Projects tab starts in the "Missing or
+    /// stale" filter preset on launch so a freshly-installed Hub does
+    /// not immediately flash every missing path at the user. The
+    /// toolbar's filter chips and the "Show hidden" toggle always
+    /// remain reachable — this only changes the default selection.
+    /// `#[serde(default)]` keeps legacy `settings.json` files loadable
+    /// (default value is `false`).
+    #[serde(default)]
+    pub hide_missing_by_default: bool,
 }
 
 fn default_project_list_sort_by() -> String {
@@ -131,6 +140,7 @@ impl Default for Settings {
                 show_git_branch_column: true,
                 search_includes_path: true,
                 sort_by: default_project_list_sort_by(),
+                hide_missing_by_default: false,
             },
             safety: SafetySettings {
                 confirm_kill_unity: true,
@@ -200,6 +210,22 @@ pub struct ProjectEntry {
     /// stays compact.
     #[serde(default = "default_project_source")]
     pub source: String,
+    /// M1.5-15: when true, the row is soft-deleted from the Projects tab
+    /// list view but the entry is kept on disk so a "Show hidden" toggle
+    /// in the toolbar can reveal it again. The Project Status, M-time,
+    /// frecency, and other fields are preserved untouched. Default
+    /// `false`. `#[serde(default)]` keeps legacy `projects.json` files
+    /// loadable.
+    #[serde(default)]
+    pub hidden: bool,
+    /// M1.5-15: when true, the row is kept visible with a `stale` chip
+    /// (distinct from `missing path`) and is excluded from launch /
+    /// running-Unity actions. A "Mark stale" toggle on the missing-path
+    /// chip is the only way to set this field; relinking to a real
+    /// project root clears it. Default `false`. `#[serde(default)]`
+    /// keeps legacy entries loadable.
+    #[serde(default)]
+    pub stale: bool,
 }
 
 fn default_project_source() -> String {
@@ -308,6 +334,27 @@ mod tests {
         let restored: Settings = serde_json::from_str(legacy).unwrap();
         assert!(restored.project_list.show_git_branch_column);
         assert_eq!(restored.project_list.sort_by, "frecency");
+    }
+
+    #[test]
+    fn settings_loads_legacy_project_list_without_hide_missing_by_default() {
+        // Pre-M1.5-15 settings.json files do not carry
+        // `hideMissingByDefault`. The deserializer must default to
+        // `false` (the documented default) so existing user configs are
+        // not rejected.
+        let legacy = r#"{
+            "version": 1,
+            "launch": { "mode": "openProject", "rememberLastSelection": true },
+            "projectList": {
+                "showPathColumn": true,
+                "showModifiedColumn": true,
+                "searchIncludesPath": true
+            },
+            "safety": { "confirmKillUnity": true, "confirmRemoveProject": true },
+            "unityDiscovery": { "parentFolders": [] }
+        }"#;
+        let restored: Settings = serde_json::from_str(legacy).unwrap();
+        assert!(!restored.project_list.hide_missing_by_default);
     }
 
     #[test]
@@ -441,6 +488,8 @@ mod tests {
                 frecency: 3,
                 git_branch: Some("feature/frecency".to_string()),
                 source: "manual".to_string(),
+                hidden: false,
+                stale: false,
             }],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -488,6 +537,8 @@ mod tests {
             frecency: 0,
             git_branch: None,
             source: "manual".to_string(),
+            hidden: false,
+            stale: false,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(!json.contains("unityVersion"));
@@ -498,6 +549,10 @@ mod tests {
         // we keep the disk file compact for legacy fields but the new
         // counter is part of the public sort contract and must be visible.
         assert!(json.contains("\"frecency\":0"));
+        // hidden and stale default to false; they are emitted because
+        // the new fields are part of the persistent on-disk contract.
+        assert!(json.contains("\"hidden\":false"));
+        assert!(json.contains("\"stale\":false"));
     }
 
     #[test]
@@ -527,6 +582,22 @@ mod tests {
         }"#;
         let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
         assert_eq!(entry.source, "manual");
+    }
+
+    #[test]
+    fn project_entry_hidden_defaults_to_false_for_legacy_json() {
+        // Pre-M1.5-15 entries have no `hidden` / `stale` fields. Both
+        // must default to `false` so legacy projects show up in the
+        // default list view (no rows are silently hidden) and the
+        // "missing or stale" filter does not falsely match them.
+        let legacy = r#"{
+            "id": "abc",
+            "name": "Proj",
+            "path": "/p"
+        }"#;
+        let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
+        assert!(!entry.hidden);
+        assert!(!entry.stale);
     }
 
     #[test]

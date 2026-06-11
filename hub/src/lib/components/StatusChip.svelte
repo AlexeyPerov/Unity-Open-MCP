@@ -1,5 +1,5 @@
 <script lang="ts">
-  type Tone = "ok" | "warn" | "missing" | "running" | "info" | "muted";
+  type Tone = "ok" | "warn" | "missing" | "running" | "stale" | "info" | "muted";
 
   let {
     tone = "info",
@@ -50,6 +50,12 @@
     background: rgba(92, 124, 250, 0.18);
     color: #9bb3ff;
     border-color: rgba(92, 124, 250, 0.45);
+  }
+
+  .chip-stale {
+    background: rgba(201, 162, 39, 0.12);
+    color: #d8b86a;
+    border-color: rgba(201, 162, 39, 0.4);
   }
 
   .chip-info {

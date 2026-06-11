@@ -650,6 +650,8 @@ pub fn create_new_project(
         // walk-up and Hub-seed sources are reserved for the scanner /
         // first-run import.
         source: "manual".to_string(),
+        hidden: false,
+        stale: false,
     };
 
     let mut projects = state.projects.lock().unwrap().clone();
@@ -1216,6 +1218,8 @@ mod tests {
                 frecency: 1,
                 git_branch: None,
                 source: "manual".to_string(),
+                hidden: false,
+                stale: false,
             },
             projects: ProjectsFile {
                 version: 1,

@@ -1,5 +1,11 @@
 export type Tab = "projects" | "unityVersions" | "tools" | "settings";
-export type ProjectsFilter = "all" | "launchable" | "missingVersion" | "missingPath" | "running";
+export type ProjectsFilter =
+  | "all"
+  | "launchable"
+  | "missingVersion"
+  | "missingPath"
+  | "missingOrStale"
+  | "running";
 
 export interface LastLaunchFailure {
   projectId: string;

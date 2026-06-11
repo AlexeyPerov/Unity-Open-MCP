@@ -122,6 +122,21 @@ class SettingsStore {
     await this.persist(next);
   }
 
+  /**
+   * M1.5-15: when true, the Projects tab starts with the "Missing or
+   * stale" filter preset selected on load. The toolbar chips and the
+   * "Show hidden" toggle stay reachable — this only changes the
+   * initial selection. Default false in the Rust layer.
+   */
+  async setHideMissingByDefault(value: boolean): Promise<void> {
+    if (!this.current) return;
+    const current = this.current.projectList.hideMissingByDefault ?? false;
+    if (current === value) return;
+    const next = this.clone();
+    next.projectList.hideMissingByDefault = value;
+    await this.persist(next);
+  }
+
   async setSearchIncludesPath(value: boolean): Promise<void> {
     if (!this.current) return;
     if (this.current.projectList.searchIncludesPath === value) return;

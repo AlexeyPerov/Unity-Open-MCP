@@ -155,6 +155,8 @@ Dependencies: Task 4; M1 Plan 2 Task 1 for the Hub templates discovery.
 
 #### Task 6: Unity upgrade assistant (M1.5-14) [Score:8] [Agent:medium]
 
+**Status:** DONE 2026-06-11 19:35 MSK. See changelog entry.
+
 **Required context**
 
 1. [M1/execution-plan-2-projects-launch.md §Task 1](../M1/execution-plan-2-projects-launch.md) — `unityVersion` resolution
@@ -183,6 +185,8 @@ Dependencies: M1 Plan 2 Task 1; M1.5 Plan 1 Task 2 (per-launch log).
 ---
 
 #### Task 7: Missing project handling UX parity (M1.5-15) [Score:6] [Agent:medium]
+
+**Status:** DONE 2026-06-11 19:35 MSK. See changelog entry.
 
 **Required context**
 
@@ -228,7 +232,7 @@ M1.5 Plan 1 Task 8 + M1 Plan 2 Task 5 → Task 7
 - [x] Walk-up directory scan finds projects up to the configured depth and respects user toggles.
 - [x] New project creation scaffolds a working Unity project for the chosen version.
 - [x] Template-based creation supports Hub default + Empty + Custom folder.
-- [ ] Unity upgrade assistant bumps the version + `bundleVersion` with rollback on error.
-- [ ] Missing project handling supports Relink + Hide + Mark stale with new filter preset.
+- [x] Unity upgrade assistant bumps the version + `bundleVersion` with rollback on error.
+- [x] Missing project handling supports Relink + Hide + Mark stale with new filter preset.
 
 **Next:** [execution-plan-3-tools-theme.md](./execution-plan-3-tools-theme.md)

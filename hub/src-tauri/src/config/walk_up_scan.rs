@@ -294,6 +294,8 @@ fn walk_dir(
             frecency: 0,
             git_branch: None,
             source: "walk-up".to_string(),
+            hidden: false,
+            stale: false,
         };
         ctx.found.push(entry.clone());
         // Mark the canonical path as seen so nested project roots

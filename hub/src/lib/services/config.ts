@@ -15,6 +15,14 @@ export interface ProjectListSettings {
    * `"frecency"` so a future field addition never bricks the list sort.
    */
   sortBy: ProjectListSortBy;
+  /**
+   * M1.5-15: when true, the Projects tab opens with the
+   * "Missing or stale" filter preset selected so a freshly-installed
+   * Hub does not flash every missing-path row at the user. The
+   * toolbar's filter chips and the "Show hidden" toggle remain
+   * reachable — this only changes the default selection on load.
+   */
+  hideMissingByDefault?: boolean;
 }
 
 export type ProjectListSortBy = "frecency" | "lastModified";
@@ -112,6 +120,21 @@ export interface ProjectEntry {
    * compact; the walk-up chip / filter never matches legacy rows.
    */
   source?: string;
+  /**
+   * M1.5-15: when `true`, the row is soft-deleted from the default
+   * list view but the entry is kept on disk; the toolbar's "Show
+   * hidden" toggle reveals it again. Defaulted to `false` for
+   * legacy entries.
+   */
+  hidden?: boolean;
+  /**
+   * M1.5-15: when `true`, the row stays visible with a `stale`
+   * chip (distinct from `missing path`) and is excluded from
+   * launch / running-Unity actions. A "Mark stale" toggle on the
+   * missing-path chip is the only way to set this field; relinking
+   * to a real project root clears it.
+   */
+  stale?: boolean;
 }
 
 export interface ProjectsFile {
@@ -536,4 +559,85 @@ export async function createNewProject(
 
 export async function listHubTemplates(): Promise<HubTemplatesResult> {
   return invoke<HubTemplatesResult>("list_hub_templates");
+}
+
+/**
+ * M1.5-14 — Unity upgrade assistant.
+ */
+
+export type BundleStrategy = "none" | "patch" | "minor" | "major";
+
+export interface UpgradeUnityParams {
+  projectId: string;
+  /** Target Unity version; must be present in the in-memory discovery cache. */
+  targetVersion: string;
+  /**
+   * `bundleVersion` bump strategy. The Rust `#[serde(default)]` makes
+   * this field optional; the backend defaults to `"patch"`.
+   */
+  bundleStrategy?: BundleStrategy;
+}
+
+export type UpgradeUnityError =
+  | { type: "projectNotFound"; projectId: string }
+  | { type: "pathInvalid"; projectId: string; path: string }
+  | { type: "versionNotInstalled"; projectId: string; version: string }
+  | {
+      type: "projectVersionUnreadable";
+      projectId: string;
+      path: string;
+      reason: string;
+    }
+  | {
+      type: "bundleVersionUnwritable";
+      projectId: string;
+      path: string;
+      reason: string;
+    }
+  | { type: "ioError"; projectId: string; message: string }
+  | { type: "persistFailed"; projectId: string; message: string };
+
+export interface UpgradeUnityResult {
+  project: ProjectEntry;
+  /** The new Unity version written to `ProjectVersion.txt`. */
+  unityVersion: string;
+  /** The new `bundleVersion` written to `ProjectManager.asset`. */
+  bundleVersion: string;
+  /** The `bundleVersion` value on disk before the upgrade. */
+  previousBundleVersion: string;
+  /** The Unity version on disk before the upgrade. */
+  previousUnityVersion: string;
+  bundleStrategy: BundleStrategy;
+}
+
+export async function upgradeUnity(
+  params: UpgradeUnityParams
+): Promise<UpgradeUnityResult> {
+  return invoke<UpgradeUnityResult>("upgrade_unity", { params });
+}
+
+export async function upgradeCandidates(projectId: string): Promise<string[]> {
+  return invoke<string[]>("upgrade_candidates", { projectId });
+}
+
+/**
+ * M1.5-15 — Hide / Mark-stale.
+ */
+
+export type SetProjectFlagError =
+  | { type: "projectNotFound"; projectId: string }
+  | { type: "persistFailed"; message: string };
+
+export async function setProjectHidden(
+  projectId: string,
+  hidden: boolean
+): Promise<ProjectEntry> {
+  return invoke<ProjectEntry>("set_project_hidden", { projectId, hidden });
+}
+
+export async function setProjectStale(
+  projectId: string,
+  stale: boolean
+): Promise<ProjectEntry> {
+  return invoke<ProjectEntry>("set_project_stale", { projectId, stale });
 }

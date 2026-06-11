@@ -116,6 +116,13 @@
     );
   }
 
+  async function setHideMissingByDefault(value: boolean) {
+    lastError = null;
+    await withErrorBoundary("save hide-missing-by-default", () =>
+      settingsStore.setHideMissingByDefault(value)
+    );
+  }
+
   async function setSearchIncludesPath(value: boolean) {
     lastError = null;
     await withErrorBoundary("save search-includes-path", () =>
@@ -603,6 +610,25 @@
                   setSearchIncludesPath((e.currentTarget as HTMLInputElement).checked)}
               />
               <span class="check-label">Search path in addition to name</span>
+            </label>
+            <label class="check-row">
+              <input
+                type="checkbox"
+                checked={settings.projectList.hideMissingByDefault ?? false}
+                onchange={(e) =>
+                  setHideMissingByDefault((e.currentTarget as HTMLInputElement).checked)}
+              />
+              <span class="widget-text">
+                <span class="check-label">Open with "Missing or stale" filter selected</span>
+                <span class="check-desc">
+                  M1.5-15: when on, the Projects tab lands on the
+                  <strong>Missing or stale</strong> filter preset on first
+                  load so a freshly-installed Hub does not flash every
+                  missing path at the user. The toolbar chips and the
+                  <strong>Show hidden</strong> toggle stay reachable — this
+                  only changes the default selection.
+                </span>
+              </span>
             </label>
             <div
               class="radio-group"

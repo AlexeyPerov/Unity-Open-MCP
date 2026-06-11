@@ -177,6 +177,8 @@ mod tests {
                 frecency: 0,
                 git_branch: None,
                 source: "manual".to_string(),
+                hidden: false,
+                stale: false,
             }],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();

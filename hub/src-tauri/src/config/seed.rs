@@ -148,6 +148,8 @@ pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
             frecency: 0,
             git_branch: None,
             source: "hub-seed".to_string(),
+            hidden: false,
+            stale: false,
         });
     }
 

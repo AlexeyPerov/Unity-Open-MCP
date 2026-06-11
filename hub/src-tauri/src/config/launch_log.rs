@@ -28,6 +28,20 @@ pub enum LaunchOutcome {
     },
     #[serde(rename_all = "camelCase")]
     Error { code: String, message: String },
+    /// M1.5-14: emitted by the upgrade assistant. Carries the
+    /// before/after versions and bundleVersion so the persistent log
+    /// captures the change in the same shape as a launch. The `pid`
+    /// / `installPath` fields on the parent record are null for this
+    /// outcome (Unity was not launched, only the project's project
+    /// metadata was rewritten).
+    #[serde(rename_all = "camelCase")]
+    Upgrade {
+        from_version: String,
+        to_version: String,
+        previous_bundle_version: String,
+        new_bundle_version: String,
+        strategy: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -422,6 +436,33 @@ mod tests {
         assert!(json.contains("\"pid\":7"));
         assert!(json.contains("\"unityVersion\":\"6000.0.1f1\""));
         assert!(json.contains("\"executablePath\":\"/exec\""));
+    }
+
+    #[test]
+    fn outcome_upgrade_serializes_with_fields() {
+        // M1.5-14: the upgrade flow logs an `Upgrade` outcome to the
+        // same per-launch log file. The shape is symmetric with `Ok` /
+        // `Error` so a JSON consumer can branch on `result` and read
+        // the same `projectId` / `projectName` / `projectPath` from
+        // the parent record. `pid` / `installPath` are null because
+        // Unity was not spawned.
+        let outcome = LaunchOutcome::Upgrade {
+            from_version: "2022.3.48f1".to_string(),
+            to_version: "6000.0.1f1".to_string(),
+            previous_bundle_version: "1.0.0".to_string(),
+            new_bundle_version: "1.0.1".to_string(),
+            strategy: "patch".to_string(),
+        };
+        let json = serde_json::to_string(&outcome).unwrap();
+        assert!(json.contains("\"result\":\"upgrade\""));
+        assert!(json.contains("\"fromVersion\":\"2022.3.48f1\""));
+        assert!(json.contains("\"toVersion\":\"6000.0.1f1\""));
+        assert!(json.contains("\"previousBundleVersion\":\"1.0.0\""));
+        assert!(json.contains("\"newBundleVersion\":\"1.0.1\""));
+        assert!(json.contains("\"strategy\":\"patch\""));
+        // The upgrade outcome must not carry launch-only fields.
+        assert!(!json.contains("\"pid\""));
+        assert!(!json.contains("\"executablePath\""));
     }
 
     #[test]

@@ -24,7 +24,12 @@
     refreshProjectVersion,
     relinkProject,
     removeProject,
+    setProjectHidden,
+    setProjectStale,
+    upgradeCandidates,
+    upgradeUnity,
     type AddProjectError,
+    type BundleStrategy,
     type HubTemplateEntry,
     type HubTemplatesResult,
     type KillUnityResult,
@@ -35,7 +40,9 @@
     type RelinkProjectError,
     type RemoveProjectError,
     type RenderPipeline,
+    type SetProjectFlagError,
     type TemplateRef,
+    type UpgradeUnityError,
   } from "$lib/services/config";
   import {
     compareFrecency,
@@ -49,13 +56,14 @@
   import RelativeTime from "$lib/components/RelativeTime.svelte";
   import { AI_SETUP_ENABLED } from "$lib/features";
 
-  type FilterPreset = "all" | "launchable" | "missingVersion" | "missingPath" | "running";
+  type FilterPreset = "all" | "launchable" | "missingVersion" | "missingPath" | "missingOrStale" | "running";
   type StatusKind =
     | "ok"
     | "warn"
     | "missing"
     | "missingVersion"
     | "missingPath"
+    | "stale"
     | "running"
     | "loading"
     | "unknown";
@@ -64,7 +72,11 @@
     pathExists: boolean | null;
     hasVersion: boolean;
     running: boolean;
-    chips: { tone: "ok" | "warn" | "missing" | "running" | "info" | "muted"; label: string; title: string }[];
+    /** True when the row is tagged as `stale` (M1.5-15). Stale rows
+     *  are kept visible with a `stale` chip and excluded from
+     *  launch / running-Unity actions. */
+    stale: boolean;
+    chips: { tone: "ok" | "warn" | "missing" | "running" | "stale" | "info" | "muted"; label: string; title: string }[];
     kind: StatusKind;
     launchable: boolean;
   }
@@ -90,6 +102,29 @@
   let isDragOver = $state(false);
   let relinkingId = $state<string | null>(null);
   let walkUpModalOpen = $state(false);
+  // M1.5-14: Unity upgrade modal.
+  let upgradeModalProjectId = $state<string | null>(null);
+  let upgradeCandidatesList = $state<string[]>([]);
+  let upgradeTargetVersion = $state<string>("");
+  let upgradeStrategy = $state<BundleStrategy>("patch");
+  let upgradePreviewBundle = $state<string>("");
+  let upgradePreviewPrevBundle = $state<string>("");
+  let upgradeLoading = $state(false);
+  let upgradeError = $state<string | null>(null);
+  // M1.5-15: Hide / Mark stale actions.
+  let hidingId = $state<string | null>(null);
+  let markingStaleId = $state<string | null>(null);
+  // M1.5-15: when true, hidden rows are also shown in the default
+  // list. The toggle is a chip in the toolbar, not a setting, so
+  // session-only state is sufficient.
+  let showHidden = $state(false);
+  // M1.5-15: row-level cache of the user's confirmed
+  // "I manually upgraded" state. When the user clicks "Upgrade
+  // Unity…" and the modal reports the project has already been
+  // bumped past the discovered candidates, we set this flag so the
+  // action is hidden until the next Refresh re-reads the version.
+  // (The modal itself still updates the entry; this is purely for
+  // the action visibility.)
   let newProjectModalOpen = $state(false);
   let newProjectParent = $state<string>("");
   let newProjectName = $state<string>("");
@@ -268,6 +303,27 @@
     }
   });
 
+  // M1.5-15: when the user has `hideMissingByDefault` enabled in
+  // Settings, default the filter to "Missing or stale" on the first
+  // load. The effect runs whenever the settings object changes, so a
+  // user who toggles the setting and refreshes sees the new default
+  // immediately. We only apply the default when the user has not
+  // picked another filter in this session — re-running on every
+  // change would clobber the user's explicit selection.
+  let didApplyHideMissingDefault = false;
+  $effect(() => {
+    if (didApplyHideMissingDefault) return;
+    const hideDefault = projectsStore.settings?.projectList.hideMissingByDefault;
+    if (hideDefault === true) {
+      filterPreset = "missingOrStale";
+      didApplyHideMissingDefault = true;
+    } else if (projectsStore.settings) {
+      // Mark as "applied" even when the setting is off so we do not
+      // re-evaluate on every settings change.
+      didApplyHideMissingDefault = true;
+    }
+  });
+
   async function loadSizes() {
     const list = projectsStore.projects;
     if (list.length === 0) return;
@@ -346,25 +402,61 @@
     const hasVersion = !!project.unityVersion && project.unityVersion.length > 0;
     const exists = pathExistsMap[project.path];
     const running = isRunningFor(project);
+    const stale = !!project.stale;
 
     if (exists === undefined) {
       return {
         pathExists: null,
         hasVersion,
         running,
+        stale,
         chips: [{ tone: "muted", label: "checking…", title: "Checking path" }],
         kind: "loading",
         launchable: false,
       };
     }
 
+    // M1.5-15: stale rows are kept visible but never launchable. A
+    // stale row whose path also went missing shows both chips so
+    // the user can decide whether to relink or to keep the entry
+    // around for record-keeping.
     if (!exists) {
+      const chips: { tone: "ok" | "warn" | "missing" | "running" | "stale" | "info" | "muted"; label: string; title: string }[] = [
+        { tone: "missing", label: "missing path", title: project.path },
+      ];
+      if (stale) {
+        chips.push({
+          tone: "stale",
+          label: "stale",
+          title: "Marked stale — keep the entry but exclude from launch",
+        });
+      }
       return {
         pathExists: false,
         hasVersion,
-        running,
-        chips: [{ tone: "missing", label: "missing path", title: project.path }],
+        running: false,
+        stale,
+        chips,
         kind: "missingPath",
+        launchable: false,
+      };
+    }
+
+    if (stale) {
+      return {
+        pathExists: true,
+        hasVersion,
+        running: false,
+        stale,
+        chips: [
+          {
+            tone: "stale",
+            label: "stale",
+            title: "Marked stale — relink to a Unity project root to clear",
+          },
+          { tone: "info", label: "launchable", title: "Project will try to launch" },
+        ],
+        kind: "stale",
         launchable: false,
       };
     }
@@ -374,6 +466,7 @@
         pathExists: true,
         hasVersion: false,
         running,
+        stale,
         chips: [
           { tone: "warn", label: "version missing", title: "No Unity version detected" },
           { tone: "info", label: "launchable", title: "Project will try to launch" },
@@ -383,7 +476,7 @@
       };
     }
 
-    const baseChips: { tone: "ok" | "warn" | "missing" | "running" | "info" | "muted"; label: string; title: string }[] = [
+    const baseChips: { tone: "ok" | "warn" | "missing" | "running" | "stale" | "info" | "muted"; label: string; title: string }[] = [
       { tone: "ok", label: "ok", title: "Detected" },
       { tone: "info", label: "launchable", title: "Ready to launch" },
     ];
@@ -398,6 +491,7 @@
       pathExists: true,
       hasVersion: true,
       running,
+      stale,
       chips: baseChips,
       kind: running ? "running" : "ok",
       launchable: true,
@@ -415,6 +509,15 @@
     const runningTick = runningUnityStore.lastScanAt;
     void runningTick;
     const list = projectsStore.projects.filter((p) => {
+      // M1.5-15: hidden rows are removed from the default view but
+      // re-surface when the "Show hidden" toolbar chip is active. The
+      // "Missing or stale" filter shows hidden rows implicitly so the
+      // user can clean up: a hidden row that is also missing its
+      // path still warrants a Relink, but we still drop pure-hidden
+      // rows from the default `all` view.
+      if (p.hidden && !showHidden && filterPreset !== "missingOrStale") {
+        return false;
+      }
       if (q) {
         const nameMatch = p.name.toLowerCase().includes(q);
         const pathMatch = includePath && p.path.toLowerCase().includes(q);
@@ -427,9 +530,20 @@
         case "launchable":
           return s.launchable;
         case "missingVersion":
-          return s.pathExists === true && !s.hasVersion;
+          return s.pathExists === true && !s.hasVersion && !s.stale;
         case "missingPath":
-          return s.pathExists === false;
+          return s.pathExists === false && !s.stale;
+        case "missingOrStale":
+          // Per the task spec: a single preset that surfaces
+          // anything the user should clean up — missing-path rows,
+          // stale rows, and hidden rows (so "Show hidden" is
+          // implicit in this filter). Running / launchable rows
+          // are dropped.
+          return (
+            s.pathExists === false ||
+            s.stale ||
+            !!p.hidden
+          );
         case "running":
           return s.running;
         default:
@@ -722,6 +836,319 @@
     } finally {
       relinkingId = null;
     }
+  }
+
+  /**
+   * M1.5-14 — open the Unity upgrade modal. We pull the candidate
+   * version list from the Rust cache (the same source the launch
+   * resolver uses) so the modal is consistent with what the launch
+   * button would actually pick. The Rust helper already filters to
+   * strictly-higher versions per the lexicographic comparator the
+   * discovery service uses.
+   */
+  async function openUpgradeModal(project: ProjectEntry) {
+    if (upgradeLoading) return;
+    closeContextMenu();
+    moreMenuOpenFor = null;
+    if (settingsPopupFor === project.id) closeSettingsPopup();
+    upgradeModalProjectId = project.id;
+    upgradeError = null;
+    upgradeStrategy = "patch";
+    upgradeTargetVersion = "";
+    upgradePreviewBundle = "";
+    upgradePreviewPrevBundle = "";
+    // Refresh the discovery cache so the modal sees the latest set
+    // of installed versions (the cache is small and the call is
+    // idempotent — repeated clicks are cheap).
+    void discoveryStore.refresh();
+    upgradeLoading = true;
+    try {
+      const candidates = await upgradeCandidates(project.id);
+      upgradeCandidatesList = candidates;
+      if (candidates.length > 0) {
+        upgradeTargetVersion = candidates[0];
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      upgradeError = `could not load upgrade candidates: ${msg}`;
+      S.appendErrorLog(`upgrade candidates failed: ${msg}`);
+    } finally {
+      upgradeLoading = false;
+    }
+  }
+
+  function closeUpgradeModal() {
+    if (upgradeLoading) return;
+    upgradeModalProjectId = null;
+    upgradeError = null;
+  }
+
+  function formatUpgradeError(err: UpgradeUnityError): string {
+    switch (err.type) {
+      case "projectNotFound":
+        return `project not found (${err.projectId})`;
+      case "pathInvalid":
+        return `path invalid — ${err.path}`;
+      case "versionNotInstalled":
+        return `Unity ${err.version} is not installed on this machine`;
+      case "projectVersionUnreadable":
+        return `could not read or rewrite ${err.path}: ${err.reason}`;
+      case "bundleVersionUnwritable":
+        return `could not rewrite ${err.path}: ${err.reason}`;
+      case "ioError":
+        return err.message;
+      case "persistFailed":
+        return `Hub state update failed: ${err.message}`;
+      default:
+        return `unknown error: ${JSON.stringify(err)}`;
+    }
+  }
+
+  async function submitUpgrade() {
+    const projectId = upgradeModalProjectId;
+    if (!projectId) return;
+    if (upgradeLoading) return;
+    const project = projectsStore.find(projectId);
+    if (!project) return;
+    if (!upgradeTargetVersion) {
+      upgradeError = "pick a target Unity version";
+      return;
+    }
+    upgradeError = null;
+    upgradeLoading = true;
+    try {
+      const result = await upgradeUnity({
+        projectId,
+        targetVersion: upgradeTargetVersion,
+        bundleStrategy: upgradeStrategy,
+      });
+      projectsStore.replaceAll(
+        projectsStore.projects.map((p) => (p.id === result.project.id ? result.project : p))
+      );
+      // Force a re-probe of the path so the row's `exists` state is
+      // current (the upgrade may have refreshed a project whose path
+      // we hadn't probed since the last refresh).
+      try {
+        const map = await checkPathsExists([result.project.path]);
+        pathExistsMap = { ...pathExistsMap, ...map };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        S.appendErrorLog(`path recheck failed: ${msg}`);
+      }
+      S.appendDrawerLog(
+        `upgraded ${result.project.name}: Unity ${result.previousUnityVersion || "?"} → ${result.unityVersion} (bundleVersion ${result.previousBundleVersion} → ${result.bundleVersion}, ${result.bundleStrategy})`,
+      );
+      upgradeModalProjectId = null;
+    } catch (e) {
+      const err = e as UpgradeUnityError;
+      const message = formatUpgradeError(err);
+      upgradeError = message;
+      S.appendErrorLog(`upgrade failed: ${message}`);
+    } finally {
+      upgradeLoading = false;
+    }
+  }
+
+  /**
+   * M1.5-15: soft-delete a project row. The entry stays in
+   * `projects.json` with `hidden: true`; the toolbar's "Show hidden"
+   * chip reveals it again. No folder operations — the project folder
+   * on disk is untouched.
+   */
+  async function handleHide(project: ProjectEntry) {
+    if (hidingId) return;
+    closeContextMenu();
+    moreMenuOpenFor = null;
+    if (settingsPopupFor === project.id) closeSettingsPopup();
+    hidingId = project.id;
+    actionError = null;
+    try {
+      const updated = await setProjectHidden(project.id, true);
+      await projectsStore.update(updated);
+      S.appendDrawerLog(`hid ${project.name} (entry kept; use "Show hidden" in the toolbar to reveal)`);
+    } catch (e) {
+      const err = e as SetProjectFlagError;
+      const message =
+        err.type === "projectNotFound"
+          ? `project not found (${err.projectId})`
+          : err.type === "persistFailed"
+            ? `failed to save: ${err.message}`
+            : `unknown error: ${JSON.stringify(err)}`;
+      actionError = `hide failed: ${message}`;
+      S.appendErrorLog(`hide failed: ${message}`);
+    } finally {
+      hidingId = null;
+    }
+  }
+
+  /**
+   * M1.5-15: un-hide a previously hidden row. Reachable from the
+   * context menu (the row is visible when `showHidden` is on) and
+   * from the "Missing or stale" filter (which also surfaces hidden
+   * rows so the user can clean up).
+   */
+  async function handleUnhide(project: ProjectEntry) {
+    if (hidingId) return;
+    closeContextMenu();
+    moreMenuOpenFor = null;
+    if (settingsPopupFor === project.id) closeSettingsPopup();
+    hidingId = project.id;
+    actionError = null;
+    try {
+      const updated = await setProjectHidden(project.id, false);
+      await projectsStore.update(updated);
+      S.appendDrawerLog(`unhid ${project.name}`);
+    } catch (e) {
+      const err = e as SetProjectFlagError;
+      const message =
+        err.type === "projectNotFound"
+          ? `project not found (${err.projectId})`
+          : err.type === "persistFailed"
+            ? `failed to save: ${err.message}`
+            : `unknown error: ${JSON.stringify(err)}`;
+      actionError = `unhide failed: ${message}`;
+      S.appendErrorLog(`unhide failed: ${message}`);
+    } finally {
+      hidingId = null;
+    }
+  }
+
+  /**
+   * M1.5-15: mark a missing-path row as `stale`. The row stays
+   * visible with a `stale` chip (distinct from `missing path`),
+   * Launch is disabled, and the Relink action remains reachable.
+   * Re-running on a row that is already stale clears the flag
+   * (toggle-style; the context menu shows "Unmark stale" in that
+   * case).
+   */
+  async function handleMarkStale(project: ProjectEntry) {
+    if (markingStaleId) return;
+    closeContextMenu();
+    moreMenuOpenFor = null;
+    if (settingsPopupFor === project.id) closeSettingsPopup();
+    markingStaleId = project.id;
+    actionError = null;
+    try {
+      const updated = await setProjectStale(project.id, true);
+      await projectsStore.update(updated);
+      S.appendDrawerLog(`marked ${project.name} as stale (kept in list; relink to clear)`);
+    } catch (e) {
+      const err = e as SetProjectFlagError;
+      const message =
+        err.type === "projectNotFound"
+          ? `project not found (${err.projectId})`
+          : err.type === "persistFailed"
+            ? `failed to save: ${err.message}`
+            : `unknown error: ${JSON.stringify(err)}`;
+      actionError = `mark stale failed: ${message}`;
+      S.appendErrorLog(`mark stale failed: ${message}`);
+    } finally {
+      markingStaleId = null;
+    }
+  }
+
+  async function handleUnmarkStale(project: ProjectEntry) {
+    if (markingStaleId) return;
+    closeContextMenu();
+    moreMenuOpenFor = null;
+    if (settingsPopupFor === project.id) closeSettingsPopup();
+    markingStaleId = project.id;
+    actionError = null;
+    try {
+      const updated = await setProjectStale(project.id, false);
+      await projectsStore.update(updated);
+      S.appendDrawerLog(`unmarked ${project.name} as stale`);
+    } catch (e) {
+      const err = e as SetProjectFlagError;
+      const message =
+        err.type === "projectNotFound"
+          ? `project not found (${err.projectId})`
+          : err.type === "persistFailed"
+            ? `failed to save: ${err.message}`
+            : `unknown error: ${JSON.stringify(err)}`;
+      actionError = `unmark stale failed: ${message}`;
+      S.appendErrorLog(`unmark stale failed: ${message}`);
+    } finally {
+      markingStaleId = null;
+    }
+  }
+
+  /**
+   * M1.5-15: a project is eligible for the "Upgrade Unity…" action
+   * when its path exists on disk, it has a stored version, and at
+   * least one installed version is strictly higher than the
+   * project's version (per the Rust comparator the upgrade flow
+   * uses). The candidates list is populated on modal open, so the
+   * boolean check here is a synchronous read of the cached value
+   * — the modal itself will refresh the cache if it is empty.
+   */
+  function upgradeCandidatesFor(project: ProjectEntry): string[] {
+    if (!project.unityVersion) return [];
+    return upgradeCandidatesList.filter((v) => v !== project.unityVersion && v > (project.unityVersion ?? ""));
+  }
+
+  function hasUpgradeAvailable(project: ProjectEntry): boolean {
+    return upgradeCandidatesFor(project).length > 0;
+  }
+
+  /**
+   * M1.5-14 (continued): compute the preview bundle version the
+   * modal shows alongside the radio group. We re-derive the next
+   * value on every input change so the user sees the result of
+   * their strategy choice live. The Rust bump math is mirrored
+   * client-side so a pure-CLI user can pick the strategy without
+   * round-tripping every keystroke.
+   */
+  function previewBundleFor(current: string, strategy: BundleStrategy): { previous: string; next: string } {
+    const trimmed = (current || "0.0.0").trim();
+    if (strategy === "none") return { previous: trimmed, next: trimmed };
+    const match = trimmed.match(/^(\d+)\.(\d+)\.(\d+)$/);
+    if (!match) return { previous: trimmed, next: trimmed };
+    const major = Number(match[1]);
+    const minor = Number(match[2]);
+    const patch = Number(match[3]);
+    if (strategy === "patch") return { previous: trimmed, next: `${major}.${minor}.${patch + 1}` };
+    if (strategy === "minor") return { previous: trimmed, next: `${major}.${minor + 1}.0` };
+    return { previous: trimmed, next: `${major + 1}.0.0` };
+  }
+
+  /**
+   * M1.5-15: hide / mark-stale affordance visibility. A row is
+   * reachable when it is missing its path (the chip in the row
+   * itself is the entry point per the spec's "Missing project
+   * handling UX parity"). Hidden and stale rows can also be
+   * un-hidden / un-marked via the same context menu.
+   */
+  function canHide(project: ProjectEntry): boolean {
+    const s = statusFor(project);
+    return !project.hidden && s.pathExists === false;
+  }
+  function canMarkStale(project: ProjectEntry): boolean {
+    const s = statusFor(project);
+    return !project.stale && s.pathExists === false;
+  }
+  function canUnhide(project: ProjectEntry): boolean {
+    return project.hidden === true;
+  }
+  function canUnmarkStale(project: ProjectEntry): boolean {
+    return project.stale === true;
+  }
+  function canUpgrade(project: ProjectEntry): boolean {
+    const s = statusFor(project);
+    if (s.pathExists !== true) return false;
+    if (!project.unityVersion) return false;
+    if (s.stale) return false;
+    // `upgradeCandidatesList` is populated when the modal opens;
+    // before that, default to the discovery store's known installs
+    // (same comparator as the Rust side) so the entry shows up
+    // immediately after the cache has been populated.
+    if (upgradeCandidatesList.length > 0) {
+      return hasUpgradeAvailable(project);
+    }
+    const current = project.unityVersion ?? "";
+    return discoveryStore.installations.some(
+      (i) => i.version !== current && i.version > current,
+    );
   }
 
   /**
@@ -1348,7 +1775,7 @@
     { id: "launchable", label: "Launchable" },
     { id: "running", label: "Running" },
     { id: "missingVersion", label: "Missing version" },
-    { id: "missingPath", label: "Missing path" },
+    { id: "missingOrStale", label: "Missing or stale" },
   ];
 
   function formatSize(bytes: number): string {
@@ -1596,6 +2023,19 @@
       {/each}
     </div>
 
+    <button
+      type="button"
+      class="filter-btn show-hidden-btn"
+      class:filter-active={showHidden}
+      onclick={() => (showHidden = !showHidden)}
+      aria-pressed={showHidden}
+      title={showHidden
+        ? "Hide soft-deleted projects from the list"
+        : "Show soft-deleted projects (entries kept in projects.json; use Hide from the row menu to soft-delete)"}
+    >
+      {showHidden ? "✓ " : ""}Show hidden
+    </button>
+
     <div class="toolbar-spacer"></div>
 
     {#if AI_SETUP_ENABLED}
@@ -1727,6 +2167,8 @@
             <div
               class="row"
               class:row-missing={s.kind === "missingPath"}
+              class:row-stale={s.kind === "stale"}
+              class:row-hidden={project.hidden === true}
               class:row-selected={projectsStore.selectedProjectId === project.id}
               role="row"
               aria-selected={projectsStore.selectedProjectId === project.id}
@@ -1749,6 +2191,13 @@
                         class="source-tag source-hubseed"
                         title="Imported from Unity Hub on first run"
                         >hub</span
+                      >
+                    {/if}
+                    {#if project.hidden === true}
+                      <span
+                        class="source-tag source-hidden"
+                        title="Hidden from the default view — toggle 'Show hidden' in the toolbar to reveal"
+                        >hidden</span
                       >
                     {/if}
                   </span>
@@ -2236,6 +2685,181 @@
   </div>
 {/if}
 
+{#if upgradeModalProjectId}
+  {@const upgradeProject = projectsStore.find(upgradeModalProjectId)}
+  {#if upgradeProject}
+    {@const upgradePreview = previewBundleFor("0.0.0", upgradeStrategy)}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="upgrade-overlay"
+      role="dialog"
+      tabindex="-1"
+      aria-modal="true"
+      aria-labelledby="upgrade-modal-title"
+      onclick={(e) => { if (e.target === e.currentTarget) closeUpgradeModal(); }}
+      onkeydown={(e) => { if (e.key === "Escape" && !upgradeLoading) closeUpgradeModal(); }}
+    >
+      <div class="upgrade-modal">
+        <header class="upgrade-header">
+          <h2 id="upgrade-modal-title" class="upgrade-title">Upgrade Unity version</h2>
+          {#if !upgradeLoading}
+            <button
+              type="button"
+              class="walkup-close"
+              aria-label="Close upgrade modal"
+              onclick={closeUpgradeModal}
+            >
+              ×
+            </button>
+          {/if}
+        </header>
+
+        <div class="upgrade-body">
+          <p class="upgrade-desc">
+            Rewrite <code>ProjectSettings/ProjectVersion.txt</code> for
+            <strong>{upgradeProject.name}</strong> and bump
+            <code>ProjectSettings/ProjectManager.asset</code>'s
+            <code>bundleVersion</code> per the strategy below. The
+            previous file contents are snapshotted and restored if any
+            write fails, so a partial upgrade never leaves the project
+            in a mixed state. The exact previous bundleVersion is
+            surfaced in the result banner after the upgrade completes.
+          </p>
+
+          <section class="upgrade-field">
+            <span class="upgrade-label">Current state</span>
+            <dl class="upgrade-summary">
+              <div>
+                <dt>Project path</dt>
+                <dd><code title={upgradeProject.path}>{upgradeProject.path}</code></dd>
+              </div>
+              <div>
+                <dt>Current Unity version</dt>
+                <dd>
+                  {#if upgradeProject.unityVersion}
+                    <code>{upgradeProject.unityVersion}</code>
+                  {:else}
+                    <em>unknown</em>
+                  {/if}
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="upgrade-field">
+            <label class="upgrade-label" for="upgrade-target">Target Unity version</label>
+            {#if upgradeCandidatesList.length === 0}
+              <p class="upgrade-empty">
+                {#if upgradeLoading}
+                  Loading installed versions…
+                {:else}
+                  No installed Unity version is strictly higher than
+                  <code>{upgradeProject.unityVersion ?? "unknown"}</code>.
+                  Install a newer Unity via Unity Hub and click Refresh to
+                  try again.
+                {/if}
+              </p>
+            {:else}
+              <select
+                id="upgrade-target"
+                class="upgrade-select"
+                bind:value={upgradeTargetVersion}
+                disabled={upgradeLoading}
+              >
+                {#each upgradeCandidatesList as v (v)}
+                  <option value={v}>{v}</option>
+                {/each}
+              </select>
+            {/if}
+          </section>
+
+          <section class="upgrade-field">
+            <span class="upgrade-label">bundleVersion bump</span>
+            <div class="upgrade-strategy" role="radiogroup" aria-label="Bundle version bump strategy">
+              <label class="upgrade-strategy-option">
+                <input
+                  type="radio"
+                  name="upgrade-strategy"
+                  value="none"
+                  bind:group={upgradeStrategy}
+                  disabled={upgradeLoading}
+                />
+                <span>
+                  <strong>None</strong>
+                  <span class="upgrade-strategy-hint">Leave bundleVersion untouched (only the project version line is rewritten).</span>
+                </span>
+              </label>
+              <label class="upgrade-strategy-option">
+                <input
+                  type="radio"
+                  name="upgrade-strategy"
+                  value="patch"
+                  bind:group={upgradeStrategy}
+                  disabled={upgradeLoading}
+                />
+                <span>
+                  <strong>Patch</strong>
+                  <span class="upgrade-strategy-hint">Bump the patch number (e.g. 1.2.3 → 1.2.4). Default.</span>
+                </span>
+              </label>
+              <label class="upgrade-strategy-option">
+                <input
+                  type="radio"
+                  name="upgrade-strategy"
+                  value="minor"
+                  bind:group={upgradeStrategy}
+                  disabled={upgradeLoading}
+                />
+                <span>
+                  <strong>Minor</strong>
+                  <span class="upgrade-strategy-hint">Bump the minor number and zero the patch (e.g. 1.2.3 → 1.3.0).</span>
+                </span>
+              </label>
+              <label class="upgrade-strategy-option">
+                <input
+                  type="radio"
+                  name="upgrade-strategy"
+                  value="major"
+                  bind:group={upgradeStrategy}
+                  disabled={upgradeLoading}
+                />
+                <span>
+                  <strong>Major</strong>
+                  <span class="upgrade-strategy-hint">Bump the major number and zero the rest (e.g. 1.2.3 → 2.0.0).</span>
+                </span>
+              </label>
+            </div>
+            <p class="upgrade-preview">
+              <span class="upgrade-preview-label">Preview (assuming current = 0.0.0):</span>
+              <code>0.0.0</code>
+              <span class="upgrade-preview-arrow" aria-hidden="true">→</span>
+              <code><strong>{upgradePreview.next || "0.0.0"}</strong></code>
+            </p>
+          </section>
+
+          {#if upgradeError}
+            <p class="upgrade-error" role="alert">{upgradeError}</p>
+          {/if}
+        </div>
+
+        <footer class="upgrade-footer">
+          <Button variant="secondary" onclick={closeUpgradeModal} disabled={upgradeLoading}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onclick={submitUpgrade}
+            disabled={upgradeLoading || upgradeCandidatesList.length === 0 || !upgradeTargetVersion}
+          >
+            {upgradeLoading ? "Upgrading…" : "Upgrade"}
+          </Button>
+        </footer>
+      </div>
+    </div>
+  {/if}
+{/if}
+
 {#if contextMenu}
   {@const ctxId = contextMenu.projectId}
   {@const ctxProject = projectsStore.find(ctxId)}
@@ -2306,6 +2930,79 @@
       >
         {relinkingId === ctxId ? "Relinking…" : "Relink…"}
       </button>
+    {/if}
+    {#if ctxProject && canUpgrade(ctxProject)}
+      <div class="ctx-sep"></div>
+      <button
+        type="button"
+        class="ctx-item ctx-item-upgrade"
+        role="menuitem"
+        title="Bump the project's Unity version to an installed version higher than the current one"
+        onclick={() => {
+          if (ctxProject) openUpgradeModal(ctxProject);
+        }}
+      >
+        Upgrade Unity…
+      </button>
+    {/if}
+    {#if ctxProject && (canHide(ctxProject) || canUnhide(ctxProject) || canMarkStale(ctxProject) || canUnmarkStale(ctxProject))}
+      <div class="ctx-sep"></div>
+      {#if canHide(ctxProject)}
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          title="Remove this row from the list (the entry stays in projects.json with hidden=true; toggle 'Show hidden' in the toolbar to reveal)"
+          disabled={hidingId === ctxId}
+          onclick={() => {
+            if (ctxProject) handleHide(ctxProject);
+          }}
+        >
+          {hidingId === ctxId ? "Hiding…" : "Hide"}
+        </button>
+      {/if}
+      {#if canUnhide(ctxProject)}
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          title="Restore this row to the default list view"
+          disabled={hidingId === ctxId}
+          onclick={() => {
+            if (ctxProject) handleUnhide(ctxProject);
+          }}
+        >
+          {hidingId === ctxId ? "Unhiding…" : "Unhide"}
+        </button>
+      {/if}
+      {#if canMarkStale(ctxProject)}
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          title="Keep the row visible with a 'stale' chip (excluded from launch / running-Unity actions; relink to clear)"
+          disabled={markingStaleId === ctxId}
+          onclick={() => {
+            if (ctxProject) handleMarkStale(ctxProject);
+          }}
+        >
+          {markingStaleId === ctxId ? "Marking…" : "Mark stale"}
+        </button>
+      {/if}
+      {#if canUnmarkStale(ctxProject)}
+        <button
+          type="button"
+          class="ctx-item"
+          role="menuitem"
+          title="Clear the stale flag — the row becomes a normal missing-path row again"
+          disabled={markingStaleId === ctxId}
+          onclick={() => {
+            if (ctxProject) handleUnmarkStale(ctxProject);
+          }}
+        >
+          {markingStaleId === ctxId ? "Unmarking…" : "Unmark stale"}
+        </button>
+      {/if}
     {/if}
     <div class="ctx-sep"></div>
     <button
@@ -2419,6 +3116,49 @@
                     onclick={() => { moreMenuOpenFor = null; handleRelink(popupProject); }}>
                     {relinkingId === popupProject.id ? "Relinking…" : "Relink…"}
                   </button>
+                {/if}
+                {#if canUpgrade(popupProject)}
+                  <div class="more-sep"></div>
+                  <button type="button" class="more-item more-item-upgrade" role="menuitem"
+                    title="Bump the project's Unity version to an installed version higher than the current one"
+                    onclick={() => { moreMenuOpenFor = null; openUpgradeModal(popupProject); }}>
+                    Upgrade Unity…
+                  </button>
+                {/if}
+                {#if canHide(popupProject) || canUnhide(popupProject) || canMarkStale(popupProject) || canUnmarkStale(popupProject)}
+                  <div class="more-sep"></div>
+                  {#if canHide(popupProject)}
+                    <button type="button" class="more-item" role="menuitem"
+                      title="Remove this row from the list (entry kept in projects.json with hidden=true)"
+                      disabled={hidingId === popupProject.id}
+                      onclick={() => { moreMenuOpenFor = null; handleHide(popupProject); }}>
+                      {hidingId === popupProject.id ? "Hiding…" : "Hide"}
+                    </button>
+                  {/if}
+                  {#if canUnhide(popupProject)}
+                    <button type="button" class="more-item" role="menuitem"
+                      title="Restore this row to the default list view"
+                      disabled={hidingId === popupProject.id}
+                      onclick={() => { moreMenuOpenFor = null; handleUnhide(popupProject); }}>
+                      {hidingId === popupProject.id ? "Unhiding…" : "Unhide"}
+                    </button>
+                  {/if}
+                  {#if canMarkStale(popupProject)}
+                    <button type="button" class="more-item" role="menuitem"
+                      title="Keep the row visible with a 'stale' chip (excluded from launch / running-Unity actions)"
+                      disabled={markingStaleId === popupProject.id}
+                      onclick={() => { moreMenuOpenFor = null; handleMarkStale(popupProject); }}>
+                      {markingStaleId === popupProject.id ? "Marking…" : "Mark stale"}
+                    </button>
+                  {/if}
+                  {#if canUnmarkStale(popupProject)}
+                    <button type="button" class="more-item" role="menuitem"
+                      title="Clear the stale flag"
+                      disabled={markingStaleId === popupProject.id}
+                      onclick={() => { moreMenuOpenFor = null; handleUnmarkStale(popupProject); }}>
+                      {markingStaleId === popupProject.id ? "Unmarking…" : "Unmark stale"}
+                    </button>
+                  {/if}
                 {/if}
                 <div class="more-sep"></div>
                 <button type="button" class="more-item more-item-destructive" role="menuitem"
@@ -3836,6 +4576,244 @@
   }
 
   .newproj-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    border-top: 1px solid #2a2b33;
+    padding-top: 0.7rem;
+  }
+
+  /**
+   * M1.5-14 / M1.5-15 row + toolbar styles. The row classes are
+   * flat-tone modifiers on the existing `.row` selector so a
+   * missing-path / stale / hidden row picks up the right opacity
+   * without any per-cell work. The toolbar `Show hidden` chip is a
+   * stand-alone `.filter-btn` re-uses the filter group styling so a
+   * the new affordance does not introduce a third button shape.
+   */
+  .row-stale { opacity: 0.85; }
+  .row-hidden { opacity: 0.5; }
+
+  .show-hidden-btn {
+    margin-left: 0.4rem;
+    border: 1px solid #3f4150;
+    border-radius: 6px;
+    color: #a1a3b0;
+  }
+
+  .source-hidden {
+    background: rgba(110, 118, 140, 0.18);
+    color: #b4b8c5;
+    border-color: rgba(110, 118, 140, 0.45);
+  }
+
+  .ctx-item-upgrade,
+  .more-item-upgrade {
+    color: #9bb3ff;
+  }
+
+  .ctx-item-upgrade:hover:not(:disabled),
+  .more-item-upgrade:hover:not(:disabled) {
+    background: rgba(92, 124, 250, 0.18);
+  }
+
+  /**
+   * Upgrade modal — same overlay / panel layout vocabulary as
+   * walk-up and new-project, with a tighter color palette so the
+   * user reads the action as a small but consequential change.
+   */
+  .upgrade-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 9, 13, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+  }
+
+  .upgrade-modal {
+    width: min(40rem, 90vw);
+    max-height: 80vh;
+    overflow-y: auto;
+    background: #1a1b21;
+    border: 1px solid #2a2b33;
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+
+  .upgrade-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .upgrade-title {
+    margin: 0;
+    font-size: 1rem;
+    color: #f2f3f7;
+  }
+
+  .upgrade-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+
+  .upgrade-desc {
+    margin: 0;
+    font-size: 0.78rem;
+    color: #a1a3b0;
+    line-height: 1.45;
+  }
+
+  .upgrade-desc code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    background: #2a2b33;
+    padding: 0 0.25rem;
+    border-radius: 3px;
+    color: #c5c7d0;
+  }
+
+  .upgrade-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .upgrade-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #8b8d9a;
+    font-weight: 600;
+  }
+
+  .upgrade-summary {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 0.7rem;
+    margin: 0;
+    font-size: 0.76rem;
+  }
+
+  .upgrade-summary dt {
+    color: #8b8d9a;
+  }
+
+  .upgrade-summary dd {
+    margin: 0;
+    color: #e9e9ef;
+  }
+
+  .upgrade-summary code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    background: #2a2b33;
+    padding: 0 0.25rem;
+    border-radius: 3px;
+    color: #c5c7d0;
+  }
+
+  .upgrade-select {
+    padding: 0.45rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid #3f4150;
+    background: #1e1f26;
+    color: #e9e9ef;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.82rem;
+    outline: none;
+  }
+
+  .upgrade-select:focus-visible { border-color: #5c7cfa; }
+
+  .upgrade-empty {
+    margin: 0;
+    padding: 0.4rem 0.6rem;
+    border: 1px dashed #3f4150;
+    border-radius: 6px;
+    color: #8b8d9a;
+    font-size: 0.78rem;
+  }
+
+  .upgrade-strategy {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .upgrade-strategy-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid #2a2b33;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.76rem;
+    color: #c5c7d0;
+  }
+
+  .upgrade-strategy-option:hover { border-color: #5c7cfa; }
+
+  .upgrade-strategy-option:has(input:checked) {
+    border-color: #5c7cfa;
+    background: rgba(92, 124, 250, 0.08);
+  }
+
+  .upgrade-strategy-option strong { color: #f2f3f7; }
+
+  .upgrade-strategy-hint {
+    display: block;
+    font-size: 0.72rem;
+    color: #8b8d9a;
+    margin-top: 0.1rem;
+  }
+
+  .upgrade-preview {
+    margin: 0.2rem 0 0;
+    padding: 0.4rem 0.6rem;
+    background: #14151a;
+    border: 1px solid #2a2b33;
+    border-radius: 6px;
+    font-size: 0.76rem;
+    color: #c5c7d0;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .upgrade-preview-label { color: #8b8d9a; }
+
+  .upgrade-preview code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    background: #2a2b33;
+    padding: 0 0.25rem;
+    border-radius: 3px;
+    color: #c5c7d0;
+  }
+
+  .upgrade-preview-arrow { color: #5c7cfa; font-weight: 600; }
+
+  .upgrade-error {
+    margin: 0;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid #5a2333;
+    border-radius: 6px;
+    background: #2a1320;
+    color: #f0a8b8;
+    font-size: 0.78rem;
+  }
+
+  .upgrade-footer {
     display: flex;
     align-items: center;
     gap: 0.6rem;
