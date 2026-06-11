@@ -26,6 +26,13 @@ export interface SafetySettings {
 
 export interface UnityDiscoverySettings {
   parentFolders: string[];
+  /**
+   * Polling interval (in seconds) for the running-Unity process scan that
+   * powers the `running` chip on the Projects tab. Added in M1.5-10. The
+   * Rust `serde(default)` keeps legacy settings.json files loadable; this
+   * field is optional in TypeScript for the same reason.
+   */
+  scanIntervalSeconds?: number;
 }
 
 export interface DiagnosticsSettings {
@@ -318,6 +325,15 @@ export async function getGitBranches(
 
 export async function isPidAlive(pid: number): Promise<boolean> {
   return invoke<boolean>("is_pid_alive", { pid });
+}
+
+export interface RunningUnity {
+  pid: number;
+  projectPath?: string | null;
+}
+
+export async function scanRunningUnity(): Promise<RunningUnity[]> {
+  return invoke<RunningUnity[]>("scan_running_unity");
 }
 
 export async function killUnity(pid: number): Promise<KillUnityResult> {

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { S } from "$lib/state.svelte";
   import { projectsStore } from "$lib/state/projects.svelte";
+  import { runningUnityStore } from "$lib/state/running_unity.svelte";
   import {
     addProject,
     checkPathsExists,
@@ -38,20 +39,22 @@
   import RelativeTime from "$lib/components/RelativeTime.svelte";
   import { AI_SETUP_ENABLED } from "$lib/features";
 
-  type FilterPreset = "all" | "launchable" | "missingVersion" | "missingPath";
+  type FilterPreset = "all" | "launchable" | "missingVersion" | "missingPath" | "running";
   type StatusKind =
     | "ok"
     | "warn"
     | "missing"
     | "missingVersion"
     | "missingPath"
+    | "running"
     | "loading"
     | "unknown";
 
   interface RowStatus {
     pathExists: boolean | null;
     hasVersion: boolean;
-    chips: { tone: "ok" | "warn" | "missing" | "info" | "muted"; label: string; title: string }[];
+    running: boolean;
+    chips: { tone: "ok" | "warn" | "missing" | "running" | "info" | "muted"; label: string; title: string }[];
     kind: StatusKind;
     launchable: boolean;
   }
@@ -131,6 +134,12 @@
       await loadSizes();
       await loadGitBranches();
     })();
+    // Start the running-Unity polling loop. The cadence is read from
+    // `settings.discovery.scanIntervalSeconds` (default 5s, M1.5-10);
+    // the store internally restarts the timer when the user edits the
+    // setting. The polling stops on teardown so we don't leak the
+    // interval while the user is on another tab.
+    void runningUnityStore.start();
     window.addEventListener("click", closeContextMenu, true);
     window.addEventListener("keydown", handleGlobalKeydown, true);
 
@@ -172,6 +181,7 @@
       window.removeEventListener("click", closeContextMenu, true);
       window.removeEventListener("keydown", handleGlobalKeydown, true);
       if (unlistenDrop) unlistenDrop();
+      runningUnityStore.stop();
     };
   });
 
@@ -271,14 +281,36 @@
     }
   }
 
+  function isRunningFor(project: ProjectEntry): boolean {
+    // Match either by the `-projectPath` argument that the running
+    // Unity process was launched with, or — as a fallback — by the PID
+    // the row recorded for its own previous launch. The PID fallback
+    // covers Unity launched with no parseable `-projectPath` (e.g. via
+    // the Hub's "Open Editor" button) and any future command-line
+    // changes that would defeat the path parser. See M1.5-10 acceptance
+    // checklist: "A row with `lastLaunchPid === scannedPid` is
+    // `running` even if the `-projectPath` argument cannot be parsed".
+    if (runningUnityStore.isRunningForPath(project.path)) return true;
+    if (
+      project.lastLaunchPid !== undefined &&
+      project.lastLaunchPid !== null &&
+      project.lastLaunchPid !== 0
+    ) {
+      return runningUnityStore.isRunningForPid(project.lastLaunchPid);
+    }
+    return false;
+  }
+
   function statusFor(project: ProjectEntry): RowStatus {
     const hasVersion = !!project.unityVersion && project.unityVersion.length > 0;
     const exists = pathExistsMap[project.path];
+    const running = isRunningFor(project);
 
     if (exists === undefined) {
       return {
         pathExists: null,
         hasVersion,
+        running,
         chips: [{ tone: "muted", label: "checking…", title: "Checking path" }],
         kind: "loading",
         launchable: false,
@@ -289,6 +321,7 @@
       return {
         pathExists: false,
         hasVersion,
+        running,
         chips: [{ tone: "missing", label: "missing path", title: project.path }],
         kind: "missingPath",
         launchable: false,
@@ -299,6 +332,7 @@
       return {
         pathExists: true,
         hasVersion: false,
+        running,
         chips: [
           { tone: "warn", label: "version missing", title: "No Unity version detected" },
           { tone: "info", label: "launchable", title: "Project will try to launch" },
@@ -308,14 +342,23 @@
       };
     }
 
+    const baseChips: { tone: "ok" | "warn" | "missing" | "running" | "info" | "muted"; label: string; title: string }[] = [
+      { tone: "ok", label: "ok", title: "Detected" },
+      { tone: "info", label: "launchable", title: "Ready to launch" },
+    ];
+    if (running) {
+      baseChips.push({
+        tone: "running",
+        label: "running",
+        title: "Unity is currently running for this project",
+      });
+    }
     return {
       pathExists: true,
       hasVersion: true,
-      chips: [
-        { tone: "ok", label: "ok", title: "Detected" },
-        { tone: "info", label: "launchable", title: "Ready to launch" },
-      ],
-      kind: "ok",
+      running,
+      chips: baseChips,
+      kind: running ? "running" : "ok",
       launchable: true,
     };
   }
@@ -324,6 +367,12 @@
     const q = search.trim().toLowerCase();
     const includePath = projectsStore.settings?.projectList.searchIncludesPath ?? true;
     const sortBy = projectsStore.settings?.projectList.sortBy ?? "frecency";
+    // Touch the running-Unity store so the `running` filter and the
+    // chip re-render on every scan tick, even if no project field
+    // changes between ticks (e.g. the list is empty, or a still-running
+    // Unity happens to be on a path whose row hasn't been edited).
+    const runningTick = runningUnityStore.lastScanAt;
+    void runningTick;
     const list = projectsStore.projects.filter((p) => {
       if (q) {
         const nameMatch = p.name.toLowerCase().includes(q);
@@ -340,6 +389,8 @@
           return s.pathExists === true && !s.hasVersion;
         case "missingPath":
           return s.pathExists === false;
+        case "running":
+          return s.running;
         default:
           return true;
       }
@@ -915,6 +966,7 @@
   const filterOptions: { id: FilterPreset; label: string }[] = [
     { id: "all", label: "All" },
     { id: "launchable", label: "Launchable" },
+    { id: "running", label: "Running" },
     { id: "missingVersion", label: "Missing version" },
     { id: "missingPath", label: "Missing path" },
   ];

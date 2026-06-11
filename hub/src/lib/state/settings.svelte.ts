@@ -5,6 +5,7 @@ import {
   type Settings,
 } from "$lib/services/config";
 import { discoveryStore } from "$lib/state/discovery.svelte";
+import { runningUnityStore } from "$lib/state/running_unity.svelte";
 
 class SettingsStore {
   current = $state<Settings | null>(null);
@@ -19,6 +20,11 @@ class SettingsStore {
     this.current = settings;
     this.lastDiscoveryFolders = [...settings.unityDiscovery.parentFolders];
     this.saveError = null;
+    // M1.5-10: re-arm the running-Unity polling timer so the cadence
+    // the user picked in Settings actually drives the scan (the store
+    // reads the interval off the live settings object on every
+    // `applyInterval` call).
+    runningUnityStore.applyInterval();
   }
 
   isLoaded(): boolean {
@@ -175,6 +181,30 @@ class SettingsStore {
     await this.persist(next);
     this.lastDiscoveryFolders = [...next.unityDiscovery.parentFolders];
     await this.applyDiscoveryRefresh(prev, this.lastDiscoveryFolders);
+  }
+
+  /**
+   * M1.5-10: the running-Unity scan cadence. The Rust layer defaults
+   * to 5s and tolerates legacy `settings.json` files via
+   * `#[serde(default)]`, so we mirror that on the TS side: the field is
+   * optional in `UnityDiscoverySettings`, and we resolve the effective
+   * interval inside the running-Unity store. Persisting here
+   * additionally tells the store to re-arm its `setInterval` so the
+   * new cadence takes effect on the very next tick.
+   */
+  async setScanIntervalSeconds(value: number): Promise<void> {
+    if (!this.current) return;
+    const sanitized = Math.max(1, Math.min(600, Math.round(value)));
+    if (this.current.unityDiscovery.scanIntervalSeconds === sanitized) {
+      // Even on a no-op write, re-apply so the store picks up a
+      // refreshed settings object after the initial load.
+      runningUnityStore.applyInterval();
+      return;
+    }
+    const next = this.clone();
+    next.unityDiscovery.scanIntervalSeconds = sanitized;
+    await this.persist(next);
+    runningUnityStore.applyInterval();
   }
 }
 

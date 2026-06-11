@@ -41,6 +41,7 @@ pub fn run() {
             config::sizes::get_project_sizes,
             config::build_target::get_default_build_target,
             config::git_branch::get_git_branches,
+            config::running_unity::scan_running_unity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

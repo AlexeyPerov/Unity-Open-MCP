@@ -611,6 +611,38 @@
                 {addingFolder ? "Adding…" : "Add Folder"}
               </Button>
             </div>
+            <div class="scan-interval-row">
+              <label class="check-row scan-interval-label" for="scan-interval-seconds">
+                <span class="widget-text">
+                  <span class="check-label">Running-Unity scan interval</span>
+                  <span class="check-desc">
+                    How often the Projects tab polls the OS for live
+                    <code>Unity</code> processes to drive the
+                    <code>running</code> status chip. Default 5s; lower
+                    values are more responsive at the cost of idle CPU.
+                  </span>
+                </span>
+              </label>
+              <div class="scan-interval-input">
+                <input
+                  id="scan-interval-seconds"
+                  type="number"
+                  min="1"
+                  max="600"
+                  step="1"
+                  value={settings.unityDiscovery.scanIntervalSeconds ?? 5}
+                  onchange={(e) => {
+                    const raw = Number((e.currentTarget as HTMLInputElement).value);
+                    if (Number.isFinite(raw) && raw > 0) {
+                      void withErrorBoundary("save scan interval", () =>
+                        settingsStore.setScanIntervalSeconds(raw)
+                      );
+                    }
+                  }}
+                />
+                <span class="scan-interval-suffix">seconds</span>
+              </div>
+            </div>
           </div>
         {/if}
       </section>
@@ -1019,7 +1051,50 @@
   .folder-actions {
     display: flex;
     flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+  }
+
+  .scan-interval-row {
+    display: flex;
+    flex-direction: column;
     gap: 0.4rem;
+    margin-top: 0.85rem;
+    padding-top: 0.7rem;
+    border-top: 1px dashed #2a2b33;
+  }
+
+  .scan-interval-label {
+    align-items: flex-start;
+  }
+
+  .scan-interval-input {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: 1.4rem;
+  }
+
+  .scan-interval-input input {
+    width: 4.5rem;
+    padding: 0.2rem 0.45rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+    color: #d6d8e0;
+    background: #14151a;
+    border: 1px solid #2a2b33;
+    border-radius: 4px;
+  }
+
+  .scan-interval-input input:focus {
+    outline: none;
+    border-color: #5c7cfa;
+  }
+
+  .scan-interval-suffix {
+    font-size: 0.78rem;
+    color: #8a8d97;
   }
 
   .placeholder-note {

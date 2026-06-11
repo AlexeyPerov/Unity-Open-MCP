@@ -67,6 +67,17 @@ pub struct SafetySettings {
 #[serde(rename_all = "camelCase")]
 pub struct UnityDiscoverySettings {
     pub parent_folders: Vec<String>,
+    /// Polling interval (in seconds) for the running-Unity process scan that
+    /// powers the `running` chip on the Projects tab. Added in M1.5-10.
+    /// `#[serde(default = "default_scan_interval_seconds")]` keeps legacy
+    /// `settings.json` files loadable; the documented default is `5` per
+    /// the task spec.
+    #[serde(default = "default_scan_interval_seconds")]
+    pub scan_interval_seconds: u32,
+}
+
+fn default_scan_interval_seconds() -> u32 {
+    5
 }
 
 impl Default for Settings {
@@ -93,6 +104,7 @@ impl Default for Settings {
                     "/Applications/Unity/Hub/Editor".to_string(),
                     "C:\\Program Files\\Unity\\Hub\\Editor".to_string(),
                 ],
+                scan_interval_seconds: default_scan_interval_seconds(),
             },
             diagnostics: DiagnosticsSettings {
                 auto_open_drawer_on_launch_failure: true,
@@ -241,6 +253,26 @@ mod tests {
         let restored: Settings = serde_json::from_str(legacy).unwrap();
         assert!(restored.project_list.show_git_branch_column);
         assert_eq!(restored.project_list.sort_by, "frecency");
+    }
+
+    #[test]
+    fn settings_loads_legacy_discovery_without_scan_interval() {
+        // Pre-M1.5-10 settings.json files do not carry `scanIntervalSeconds`.
+        // The deserializer must default to 5 so existing configs are not
+        // rejected (the same pattern as `showGitBranchColumn`).
+        let legacy = r#"{
+            "version": 1,
+            "launch": { "mode": "openProject", "rememberLastSelection": true },
+            "projectList": {
+                "showPathColumn": true,
+                "showModifiedColumn": true,
+                "searchIncludesPath": true
+            },
+            "safety": { "confirmKillUnity": true, "confirmRemoveProject": true },
+            "unityDiscovery": { "parentFolders": [] }
+        }"#;
+        let restored: Settings = serde_json::from_str(legacy).unwrap();
+        assert_eq!(restored.unity_discovery.scan_interval_seconds, 5);
     }
 
     #[test]
