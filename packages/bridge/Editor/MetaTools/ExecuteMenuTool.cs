@@ -11,6 +11,38 @@ namespace UnityAgentBridge.MetaTools
             "File/Quit"
         };
 
+        static readonly HashSet<string> ReadOnlyMenuAllowlist = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Assets/Refresh",
+            "Assets/Reimport All",
+            "Assets/Reveal in Finder",
+            "Assets/Show in Explorer",
+            "Edit/Selection",
+            "Edit/Project Settings",
+            "File/Open Scene",
+            "File/Open Project",
+            "GameObject/Align with View",
+            "GameObject/Move to View",
+            "Window/General/Hierarchy",
+            "Window/General/Inspector",
+            "Window/General/Project",
+            "Window/General/Console",
+            "Window/General/Scene",
+            "Window/General/Game",
+            "Window/Layouts"
+        };
+
+        public static bool IsReadOnlyMenu(string menuPath)
+        {
+            if (string.IsNullOrEmpty(menuPath)) return false;
+            foreach (var allowed in ReadOnlyMenuAllowlist)
+            {
+                if (menuPath.StartsWith(allowed, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
         public static ToolDispatchResult Execute(string body)
         {
             var menuPath = JsonBody.GetString(body, "menu_path");

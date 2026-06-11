@@ -62,6 +62,38 @@ All mutating tools (`execute_csharp`, `invoke_method`, `execute_menu`) require a
 - There is no whole-project scan fallback — agents must always declare which assets they intend to affect.
 - Read-only tools (`find_members`) do not require `paths_hint`.
 
+### `execute_menu` allowlist and gate-skip rule (M2)
+
+When `execute_menu` targets a **read-only menu** (on the allowlist below) and `paths_hint` is empty, the bridge **skips the `paths_hint_required` validation** and proceeds directly. The gate still runs in `skipped: true` stub mode (M2), but no asset-path declaration is forced.
+
+Non-allowlisted menus follow normal strict `paths_hint` validation.
+
+**Read-only menu allowlist:**
+
+| Menu path | Notes |
+|---|---|
+| `Assets/Refresh` | Reimports changed assets |
+| `Assets/Reimport All` | Full reimport (non-mutating on source) |
+| `Assets/Reveal in Finder` | Opens OS file browser |
+| `Assets/Show in Explorer` | Opens OS file browser (Windows) |
+| `Edit/Selection` | Selection operations |
+| `Edit/Project Settings` | Opens settings window |
+| `File/Open Scene` | Opens scene in Editor |
+| `File/Open Project` | Opens project switcher |
+| `GameObject/Align with View` | Aligns transform to viewport |
+| `GameObject/Move to View` | Moves transform to viewport center |
+| `Window/General/Hierarchy` | Opens Hierarchy window |
+| `Window/General/Inspector` | Opens Inspector window |
+| `Window/General/Project` | Opens Project browser |
+| `Window/General/Console` | Opens Console window |
+| `Window/General/Scene` | Opens Scene view |
+| `Window/General/Game` | Opens Game view |
+| `Window/Layouts` | Switches layout |
+
+Matching is prefix-based and case-insensitive — e.g. `Assets/Refresh` matches `Assets/Refresh` exactly.
+
+The allowlist is defined in `ExecuteMenuTool.ReadOnlyMenuAllowlist` and can be extended as needed.
+
 ## Gate behavior by milestone
 
 | Milestone | Gate behavior |

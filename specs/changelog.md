@@ -1,3 +1,13 @@
+## 2026-06-11 23:00 MSK
+
+- **M2 Plan 2 Task 3: `execute_menu` allowlist and validate-skip rule.** Implemented read-only menu allowlist per [questions-2.md](specs/questions/questions-2.md) Q6 answer C (skip validate when menu is allowlisted and `paths_hint` empty):
+  - `ExecuteMenuTool.cs` — added `ReadOnlyMenuAllowlist` HashSet with 17 read-only menu paths (`Assets/Refresh`, `Assets/Reimport All`, `Assets/Reveal in Finder`, `Assets/Show in Explorer`, `Edit/Selection`, `Edit/Project Settings`, `File/Open Scene`, `File/Open Project`, `GameObject/Align with View`, `GameObject/Move to View`, `Window/General/Hierarchy`/`Inspector`/`Project`/`Console`/`Scene`/`Game`, `Window/Layouts`). Added public `IsReadOnlyMenu(string)` method with prefix-based case-insensitive matching.
+  - `BridgeHttpServer.cs` — modified `paths_hint` validation in `HandleToolDispatch`: when tool is `unity_agent_execute_menu` and `paths_hint` is empty, checks `ExecuteMenuTool.IsReadOnlyMenu(menu_path)` before rejecting. Allowlisted menus skip the `paths_hint_required` error and proceed to dispatch. Non-allowlisted menus still require strict `paths_hint`.
+  - Non-allowlisted menus follow the normal gate flow with mandatory `paths_hint`.
+- Updated documentation:
+  - [specs/packages/bridge.md](specs/packages/bridge.md) — new §`execute_menu` allowlist and gate-skip rule section with allowlist table and matching behavior notes.
+- Marked Task 3 DONE in [execution-plan-2-meta-tools-gate.md](specs/execution/M2/execution-plan-2-meta-tools-gate.md).
+
 ## 2026-06-11 22:00 MSK
 
 - **M2 Plan 2 Task 2: Strict `paths_hint` validation for mutating tools.** Enforced non-empty `paths_hint` for all mutating meta-tools (`execute_csharp`, `invoke_method`, `execute_menu`) per [questions-2.md](specs/questions/questions-2.md) Q1 answer A (strict mode):

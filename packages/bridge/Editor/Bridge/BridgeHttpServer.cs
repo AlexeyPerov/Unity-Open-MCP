@@ -220,8 +220,14 @@ namespace UnityAgentBridge
                 var pathsHint = JsonBody.GetStringArray(body, "paths_hint");
                 if (pathsHint == null || pathsHint.Length == 0)
                 {
-                    SendJson(context, 200, BuildPathsHintErrorEnvelope(toolName, gateMode));
-                    return;
+                    bool skipPathsHint = toolName == "unity_agent_execute_menu"
+                        && ExecuteMenuTool.IsReadOnlyMenu(JsonBody.GetString(body, "menu_path"));
+
+                    if (!skipPathsHint)
+                    {
+                        SendJson(context, 200, BuildPathsHintErrorEnvelope(toolName, gateMode));
+                        return;
+                    }
                 }
             }
 

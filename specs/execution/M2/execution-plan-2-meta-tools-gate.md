@@ -52,7 +52,7 @@ Dependencies: Task 1.
 
 ---
 
-#### Task 3: `execute_menu` allowlist and validate-skip rule (M2-7) [Score:7] [Agent:medium]
+#### Task 3: `execute_menu` allowlist and validate-skip rule (M2-7) [Score:7] [Agent:medium] — **DONE**
 
 **Required context**
 
