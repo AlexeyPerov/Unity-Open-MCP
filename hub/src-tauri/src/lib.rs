@@ -45,6 +45,8 @@ pub fn run() {
             config::running_unity::scan_running_unity,
             config::walk_up_scan::start_walk_up_scan,
             config::walk_up_scan::cancel_walk_up_scan,
+            config::new_project::create_new_project,
+            config::new_project::list_hub_templates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -249,6 +249,58 @@
     );
   }
 
+  /**
+   * M1.5-13: Custom template folders. Picking a folder here is the
+   * same flow as the discovery-root / walk-up-root buttons; the path
+   * is appended to `settings.unityDiscovery.customTemplateFolders`
+   * and the New Project modal surfaces the list in its "Custom
+   * folder…" picker. We do **not** validate the picked path as a
+   * Unity root at save-time — the New Project modal validates again
+   * at use-time so a stale entry cannot crash a project create; the
+   * Settings tab only rejects entries that do not resolve to a
+   * directory at all (see `handleAddCustomTemplateFolder`).
+   */
+  let addingCustomTemplateFolder = $state(false);
+
+  async function handleAddCustomTemplateFolder() {
+    if (addingCustomTemplateFolder) return;
+    addingCustomTemplateFolder = true;
+    lastError = null;
+    try {
+      const picked = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Select a Unity project root to use as a template",
+      });
+      if (!picked || typeof picked !== "string") {
+        return;
+      }
+      const normalized = trimTrailingSeparators(picked);
+      await withErrorBoundary("add custom template folder", () =>
+        settingsStore.addCustomTemplateFolder(normalized)
+      );
+      S.appendDrawerLog(`added custom template folder: ${normalized}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      lastError = `custom template folder picker failed: ${msg}`;
+      S.appendErrorLog(lastError);
+    } finally {
+      addingCustomTemplateFolder = false;
+    }
+  }
+
+  async function handleRemoveCustomTemplateFolder(index: number) {
+    lastError = null;
+    const folder =
+      settingsStore.current?.unityDiscovery.customTemplateFolders[index];
+    await withErrorBoundary("remove custom template folder", () =>
+      settingsStore.removeCustomTemplateFolder(index)
+    );
+    if (folder) {
+      S.appendDrawerLog(`removed custom template folder: ${folder}`);
+    }
+  }
+
   function dismissError() {
     lastError = null;
   }
@@ -807,6 +859,47 @@
                     </span>
                   </span>
                 </label>
+              </div>
+            </div>
+            <div class="walkup-section">
+              <h4 class="walkup-heading">Custom template folders (M1.5-13)</h4>
+              <p class="walkup-hint">
+                Unity project roots that can be used as a template when
+                creating a new project from the <strong>New project…</strong>
+                modal. Each entry must contain <code>Assets/</code> and
+                <code>ProjectSettings/</code>. Paths persist in
+                <code>settings.json</code> and survive restart.
+              </p>
+              <ul class="folder-list" aria-label="Custom template folders">
+                {#each settings.unityDiscovery.customTemplateFolders as folder, i (folder + ":c:" + i)}
+                  <li class="folder-item">
+                    <span class="folder-path" title={folder}>{folder}</span>
+                    <button
+                      type="button"
+                      class="folder-remove"
+                      onclick={() => handleRemoveCustomTemplateFolder(i)}
+                      aria-label={`Remove custom template folder ${folder}`}
+                      title={`Remove ${folder}`}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                {:else}
+                  <li class="folder-empty">
+                    No custom template folders. Use <strong>Add Folder</strong>
+                    below to pick a Unity project root, or save a path from
+                    the <strong>New project…</strong> modal.
+                  </li>
+                {/each}
+              </ul>
+              <div class="folder-actions">
+                <Button
+                  variant="secondary"
+                  onclick={handleAddCustomTemplateFolder}
+                  disabled={addingCustomTemplateFolder}
+                >
+                  {addingCustomTemplateFolder ? "Adding…" : "Add Folder"}
+                </Button>
               </div>
             </div>
           </div>

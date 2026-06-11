@@ -5,9 +5,11 @@
   import { runningUnityStore } from "$lib/state/running_unity.svelte";
   import { walkUpScanStore } from "$lib/state/walk_up_scan.svelte";
   import { settingsStore } from "$lib/state/settings.svelte";
+  import { discoveryStore } from "$lib/state/discovery.svelte";
   import {
     addProject,
     checkPathsExists,
+    createNewProject,
     getCrashLogPath,
     getDefaultBuildTarget,
     getGitBranches,
@@ -17,17 +19,23 @@
     isPidAlive,
     killUnity,
     launchProject,
+    listHubTemplates,
     refreshAllProjects,
     refreshProjectVersion,
     relinkProject,
     removeProject,
     type AddProjectError,
+    type HubTemplateEntry,
+    type HubTemplatesResult,
     type KillUnityResult,
     type LaunchError,
     type LogPaths,
+    type NewProjectError,
     type ProjectEntry,
     type RelinkProjectError,
     type RemoveProjectError,
+    type RenderPipeline,
+    type TemplateRef,
   } from "$lib/services/config";
   import {
     compareFrecency,
@@ -82,6 +90,22 @@
   let isDragOver = $state(false);
   let relinkingId = $state<string | null>(null);
   let walkUpModalOpen = $state(false);
+  let newProjectModalOpen = $state(false);
+  let newProjectParent = $state<string>("");
+  let newProjectName = $state<string>("");
+  let newProjectVersion = $state<string>("");
+  let newProjectPipeline = $state<RenderPipeline>("none");
+  let newProjectBundleVersion = $state<string>("0.1.0");
+  type NewTemplateKind = "empty" | "hub-default" | "custom";
+  let newProjectTemplateKind = $state<NewTemplateKind>("empty");
+  let newProjectHubTemplatePath = $state<string>("");
+  let newProjectCustomTemplatePath = $state<string>("");
+  let newProjectHubTemplates = $state<HubTemplateEntry[]>([]);
+  let newProjectHubTemplatesAvailable = $state<boolean>(false);
+  let newProjectHubTemplatesFolder = $state<string | null>(null);
+  let newProjectError = $state<string | null>(null);
+  let newProjectCreating = $state(false);
+  let newProjectOverwriteConfirm = $state<string | null>(null);
 
   const UNSAFE_RE = /[\n\r\0`$|&;<>]/;
 
@@ -192,6 +216,13 @@
       runningUnityStore.stop();
       void walkUpScanStore.stop();
       walkUpModalOpen = false;
+      // M1.5-12: force the New Project modal closed so a pending
+      // submit / overwrite prompt does not leak into the next time
+      // the user lands on the tab.
+      newProjectModalOpen = false;
+      newProjectCreating = false;
+      newProjectError = null;
+      newProjectOverwriteConfirm = null;
     };
   });
 
@@ -839,6 +870,270 @@
   }
 
   /**
+   * M1.5-12 / M1.5-13: New project creation. The modal flow:
+   *
+   *   1. user clicks "New project…" in the toolbar
+   *   2. we open the modal, load Hub templates + discovery (so the
+   *      version dropdown is populated), and reset the form
+   *   3. user fills in parent / name / version / pipeline / template
+   *   4. submit calls `create_new_project`; on success we close the
+   *      modal and the new project appears at the top of the list
+   *      (frecency bumped to 1 so the frecency sort surfaces it
+   *      immediately, per the Task 4 acceptance checklist)
+   *   5. errors are surfaced inline; a name collision is non-fatal
+   *      and offers an "Overwrite" affordance after confirmation
+   */
+  async function openNewProjectModal() {
+    if (newProjectModalOpen) return;
+    newProjectError = null;
+    newProjectOverwriteConfirm = null;
+    newProjectName = "";
+    // Reuse the last-used parent if the user has picked one before;
+    // otherwise leave empty so the picker is the only way to fill it.
+    newProjectParent = newProjectParent || "";
+    newProjectPipeline = "none";
+    newProjectBundleVersion = "0.1.0";
+    newProjectTemplateKind = "empty";
+    newProjectHubTemplatePath = "";
+    newProjectCustomTemplatePath = "";
+    newProjectModalOpen = true;
+    // Make sure the Unity version dropdown is populated even if the
+    // user has never opened the Unity Versions tab.
+    void discoveryStore.load();
+    try {
+      const result: HubTemplatesResult = await listHubTemplates();
+      newProjectHubTemplates = result.templates;
+      newProjectHubTemplatesAvailable = result.available;
+      newProjectHubTemplatesFolder = result.folder ?? null;
+      // Preselect the first Hub template if any are available so the
+      // dropdown has a sensible default.
+      if (newProjectHubTemplates.length > 0) {
+        newProjectHubTemplatePath = newProjectHubTemplates[0].path;
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`list Hub templates failed: ${msg}`);
+      newProjectHubTemplates = [];
+      newProjectHubTemplatesAvailable = false;
+      newProjectHubTemplatesFolder = null;
+    }
+  }
+
+  function closeNewProjectModal() {
+    if (newProjectCreating) return;
+    newProjectModalOpen = false;
+    newProjectError = null;
+    newProjectOverwriteConfirm = null;
+  }
+
+  async function pickNewProjectParent() {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Select parent folder for the new project",
+      });
+      if (typeof selected === "string") {
+        newProjectParent = selected;
+        newProjectError = null;
+        newProjectOverwriteConfirm = null;
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`folder picker failed: ${msg}`);
+    }
+  }
+
+  async function pickNewProjectCustomTemplate() {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Select Unity project folder to use as template",
+      });
+      if (typeof selected === "string") {
+        newProjectCustomTemplatePath = selected;
+        newProjectError = null;
+        newProjectOverwriteConfirm = null;
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`folder picker failed: ${msg}`);
+    }
+  }
+
+  /**
+   * Save a path picked from a Custom template picker into the
+   * settings list. Errors are logged to the drawer; the Settings tab
+   * also surfaces the inline error.
+   */
+  async function saveCustomTemplateToSettings(path: string) {
+    try {
+      await settingsStore.addCustomTemplateFolder(path);
+      S.appendDrawerLog(`added custom template folder: ${path}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`save custom template failed: ${msg}`);
+    }
+  }
+
+  function formatNewProjectError(err: NewProjectError): string {
+    switch (err.type) {
+      case "parentNotDirectory":
+        return `parent is not a folder: ${err.path}`;
+      case "nameEmpty":
+        return "project name cannot be empty";
+      case "nameInvalid":
+        return `invalid project name "${err.name}": ${err.reason}`;
+      case "nameCollision":
+        return `a ${err.isDirectory ? "folder" : "file"} already exists at ${err.path} — pick a new name or confirm overwrite`;
+      case "versionUnknown":
+        return `unknown Unity version: ${err.version}`;
+      case "versionNotInstalled":
+        return `Unity ${err.version} is not installed on this machine`;
+      case "pipelineUnsupported":
+        return `the ${err.pipeline} render pipeline is not supported by Unity ${err.version} (URP / HDRP need Unity 2019.3 or newer)`;
+      case "templateNotFound":
+        return `template folder not found: ${err.path}`;
+      case "templateInvalid":
+        return `template is not a Unity project root: ${err.reason} (${err.path})`;
+      case "ioError":
+        return `could not write project files: ${err.message}`;
+      case "persistFailed":
+        return `project was created on disk but Hub failed to register it: ${err.message}`;
+      default:
+        return `unknown error: ${JSON.stringify(err)}`;
+    }
+  }
+
+  function resolveNewProjectTemplate(): TemplateRef | null {
+    if (newProjectTemplateKind === "empty") return null;
+    if (newProjectTemplateKind === "hub-default") {
+      if (!newProjectHubTemplatePath) return null;
+      return { source: "hub-default", path: newProjectHubTemplatePath };
+    }
+    if (!newProjectCustomTemplatePath) return null;
+    return { source: "custom", path: newProjectCustomTemplatePath };
+  }
+
+  /**
+   * URP / HDRP require Unity 2019.3 or newer (the version that
+   * shipped the Scriptable Render Pipeline). We grey the dropdown
+   * options out so the user gets the same hint at click-time as
+   * they would after submitting; the backend enforces the same rule
+   * and returns `pipelineUnsupported` if the user somehow picks
+   * an older version anyway.
+   */
+  let pipelineSupportedForVersion = $derived.by(() => {
+    const v = newProjectVersion.trim();
+    if (!v) return true;
+    const match = v.match(/^(\d+)\.(\d+)/);
+    if (!match) return true;
+    const major = Number(match[1]);
+    const minor = Number(match[2]);
+    return major > 2019 || (major === 2019 && minor >= 3);
+  });
+
+  $effect(() => {
+    if (!pipelineSupportedForVersion && newProjectPipeline !== "none") {
+      newProjectPipeline = "none";
+    }
+  });
+
+  function isNewProjectFormValid(): boolean {
+    if (!newProjectParent.trim()) return false;
+    if (!newProjectName.trim()) return false;
+    if (!newProjectVersion.trim()) return false;
+    if (newProjectTemplateKind === "hub-default" && !newProjectHubTemplatePath) return false;
+    if (newProjectTemplateKind === "custom" && !newProjectCustomTemplatePath) return false;
+    return true;
+  }
+
+  async function submitNewProject() {
+    if (newProjectCreating) return;
+    newProjectError = null;
+    if (!isNewProjectFormValid()) {
+      newProjectError = "Please fill in parent, name, and Unity version.";
+      return;
+    }
+    newProjectCreating = true;
+    try {
+      const result = await createNewProject({
+        parent: newProjectParent.trim(),
+        name: newProjectName.trim(),
+        version: newProjectVersion.trim(),
+        pipeline: newProjectPipeline,
+        bundleVersion: newProjectBundleVersion.trim() || "0.1.0",
+        template: resolveNewProjectTemplate(),
+        overwrite: false,
+      });
+      // Replace the in-memory list with the backend's authoritative
+      // copy so a `frecency=1` re-sort and any other side effects
+      // (de-duplication of a stale entry with the same path) take
+      // effect immediately.
+      projectsStore.replaceAll(result.projects.projects);
+      projectsStore.select(result.project.id);
+      S.appendDrawerLog(
+        `created project ${result.project.name} (${result.project.unityVersion ?? "version unknown"}) at ${result.project.path}`
+      );
+      newProjectModalOpen = false;
+      newProjectOverwriteConfirm = null;
+      // Best-effort: refresh the row-level state the rest of the UI
+      // reads (path existence / sizes / branch) so the new row
+      // renders correctly without a manual Refresh.
+      await refreshPathExistence();
+      await loadSizes();
+    } catch (e) {
+      const err = e as NewProjectError;
+      const message = formatNewProjectError(err);
+      newProjectError = message;
+      if (err.type === "nameCollision") {
+        newProjectOverwriteConfirm = err.path;
+      }
+      S.appendErrorLog(`new project failed: ${message}`);
+    } finally {
+      newProjectCreating = false;
+    }
+  }
+
+  async function submitNewProjectOverwrite() {
+    if (newProjectCreating) return;
+    newProjectError = null;
+    if (!isNewProjectFormValid()) {
+      newProjectError = "Please fill in parent, name, and Unity version.";
+      return;
+    }
+    newProjectCreating = true;
+    try {
+      const result = await createNewProject({
+        parent: newProjectParent.trim(),
+        name: newProjectName.trim(),
+        version: newProjectVersion.trim(),
+        pipeline: newProjectPipeline,
+        bundleVersion: newProjectBundleVersion.trim() || "0.1.0",
+        template: resolveNewProjectTemplate(),
+        overwrite: true,
+      });
+      projectsStore.replaceAll(result.projects.projects);
+      projectsStore.select(result.project.id);
+      S.appendDrawerLog(
+        `replaced existing folder with ${result.project.name} (${result.project.unityVersion ?? "version unknown"}) at ${result.project.path}`
+      );
+      newProjectModalOpen = false;
+      newProjectOverwriteConfirm = null;
+      await refreshPathExistence();
+      await loadSizes();
+    } catch (e) {
+      const err = e as NewProjectError;
+      const message = formatNewProjectError(err);
+      newProjectError = message;
+      S.appendErrorLog(`new project (overwrite) failed: ${message}`);
+    } finally {
+      newProjectCreating = false;
+    }
+  }
+
+  /**
    * M1.5-11: summary line for the modal's "done" panel. Reads the
    * store's `lastResult` so the message survives a tab switch and
    * is available after the scan closes out. Returns null when no
@@ -1325,6 +1620,14 @@
     >
       {walkUpScanStore.scanning ? "Scanning…" : "Walk-up Scan…"}
     </Button>
+    <Button
+      variant="secondary"
+      onclick={openNewProjectModal}
+      disabled={newProjectCreating}
+      title="New project — scaffold a fresh Unity project from a template"
+    >
+      New project…
+    </Button>
     <Button variant="primary" onclick={handleAddProject} disabled={addingProject}>
       {addingProject ? "Adding…" : "Add Project"}
     </Button>
@@ -1659,6 +1962,275 @@
             {walkUpScanStore.lastResult ? "Run again" : "Start scan"}
           </Button>
         {/if}
+      </footer>
+    </div>
+  </div>
+{/if}
+
+{#if newProjectModalOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="newproj-overlay"
+    role="dialog"
+    tabindex="-1"
+    aria-modal="true"
+    aria-labelledby="newproj-modal-title"
+    onclick={(e) => { if (e.target === e.currentTarget) closeNewProjectModal(); }}
+    onkeydown={(e) => { if (e.key === "Escape" && !newProjectCreating) closeNewProjectModal(); }}
+  >
+    <div class="newproj-modal">
+      <header class="newproj-header">
+        <h2 id="newproj-modal-title" class="newproj-title">New project</h2>
+        {#if !newProjectCreating}
+          <button
+            type="button"
+            class="walkup-close"
+            aria-label="Close new project"
+            onclick={closeNewProjectModal}
+          >
+            ×
+          </button>
+        {/if}
+      </header>
+
+      <div class="newproj-body">
+        <p class="newproj-desc">
+          Scaffold a fresh Unity project on disk and register it in
+          Hub. The project will appear at the top of the list once
+          the modal closes.
+        </p>
+
+        <section class="newproj-field">
+          <label class="newproj-label" for="newproj-parent">Parent folder</label>
+          <div class="newproj-input-row">
+            <input
+              id="newproj-parent"
+              type="text"
+              class="newproj-input"
+              placeholder="/Users/you/Projects"
+              bind:value={newProjectParent}
+              disabled={newProjectCreating}
+            />
+            <Button variant="secondary" onclick={pickNewProjectParent} disabled={newProjectCreating}>
+              Browse…
+            </Button>
+          </div>
+        </section>
+
+        <section class="newproj-field">
+          <label class="newproj-label" for="newproj-name">Project name</label>
+          <input
+            id="newproj-name"
+            type="text"
+            class="newproj-input"
+            placeholder="MyGame"
+            bind:value={newProjectName}
+            disabled={newProjectCreating}
+          />
+        </section>
+
+        <section class="newproj-field">
+          <label class="newproj-label" for="newproj-version">Unity version</label>
+          {#if discoveryStore.installations.length > 0}
+            <select
+              id="newproj-version"
+              class="newproj-select"
+              bind:value={newProjectVersion}
+              disabled={newProjectCreating}
+            >
+              <option value="" disabled>Select an installed version</option>
+              {#each discoveryStore.installations as install (install.path)}
+                <option value={install.version}>{install.version}</option>
+              {/each}
+            </select>
+          {:else}
+            <input
+              id="newproj-version"
+              type="text"
+              class="newproj-input"
+              placeholder="2022.3.48f1"
+              bind:value={newProjectVersion}
+              disabled={newProjectCreating}
+            />
+            <p class="newproj-hint">
+              No Unity installations discovered — open the Unity Versions tab to scan,
+              or type a version manually.
+            </p>
+          {/if}
+        </section>
+
+        <section class="newproj-field">
+          <label class="newproj-label" for="newproj-pipeline">Render pipeline</label>
+          <select
+            id="newproj-pipeline"
+            class="newproj-select"
+            bind:value={newProjectPipeline}
+            disabled={newProjectCreating}
+          >
+            <option value="none">None (Built-in)</option>
+            <option value="urp" disabled={!pipelineSupportedForVersion}>
+              URP (Universal Render Pipeline)
+              {#if !pipelineSupportedForVersion}— requires Unity 2019.3+{/if}
+            </option>
+            <option value="hdrp" disabled={!pipelineSupportedForVersion}>
+              HDRP (High Definition Render Pipeline)
+              {#if !pipelineSupportedForVersion}— requires Unity 2019.3+{/if}
+            </option>
+          </select>
+          {#if !pipelineSupportedForVersion}
+            <p class="newproj-hint newproj-hint-warn">
+              URP / HDRP require Unity 2019.3 or newer. Built-in is the
+              only available option for the selected version.
+            </p>
+          {:else}
+            <p class="newproj-hint">
+              Selecting one writes the matching
+              <code>Packages/manifest.json</code> entry.
+            </p>
+          {/if}
+        </section>
+
+        <section class="newproj-field">
+          <label class="newproj-label" for="newproj-bundle">Bundle version</label>
+          <input
+            id="newproj-bundle"
+            type="text"
+            class="newproj-input"
+            placeholder="0.1.0"
+            bind:value={newProjectBundleVersion}
+            disabled={newProjectCreating}
+          />
+        </section>
+
+        <section class="newproj-field">
+          <span class="newproj-label">Template</span>
+          <div class="newproj-template-row" role="radiogroup" aria-label="Template">
+            <label class="newproj-template-option">
+              <input
+                type="radio"
+                name="newproj-template"
+                value="empty"
+                bind:group={newProjectTemplateKind}
+                disabled={newProjectCreating}
+              />
+              <span>Empty</span>
+              <span class="newproj-template-hint">Minimal scaffold (Assets/, ProjectSettings/, Packages/)</span>
+            </label>
+            <label
+              class="newproj-template-option"
+              class:newproj-template-disabled={!newProjectHubTemplatesAvailable}
+              title={newProjectHubTemplatesAvailable
+                ? "Pick a template from Unity Hub's downloaded templates"
+                : "Unity Hub is not installed or no templates are downloaded"}
+            >
+              <input
+                type="radio"
+                name="newproj-template"
+                value="hub-default"
+                bind:group={newProjectTemplateKind}
+                disabled={!newProjectHubTemplatesAvailable || newProjectCreating}
+              />
+              <span>Hub default</span>
+              <span class="newproj-template-hint">
+                {#if newProjectHubTemplatesAvailable}
+                  {#if newProjectHubTemplatesFolder}
+                    <code title={newProjectHubTemplatesFolder}>{newProjectHubTemplatesFolder}</code>
+                  {/if}
+                {:else}
+                  <em>Unity Hub is not installed or no templates are downloaded.</em>
+                {/if}
+              </span>
+            </label>
+            {#if newProjectTemplateKind === "hub-default" && newProjectHubTemplatesAvailable}
+              <select
+                class="newproj-select newproj-template-picker"
+                bind:value={newProjectHubTemplatePath}
+                disabled={newProjectCreating}
+                aria-label="Hub template"
+              >
+                {#each newProjectHubTemplates as tpl (tpl.path)}
+                  <option value={tpl.path}>
+                    {tpl.name}{tpl.unityVersion ? ` (${tpl.unityVersion})` : ""}
+                  </option>
+                {/each}
+              </select>
+            {/if}
+            <label class="newproj-template-option">
+              <input
+                type="radio"
+                name="newproj-template"
+                value="custom"
+                bind:group={newProjectTemplateKind}
+                disabled={newProjectCreating}
+              />
+              <span>Custom folder…</span>
+              <span class="newproj-template-hint">
+                Pick any Unity project root on disk. Manage the saved list in
+                <strong>Settings → Custom template folders</strong>.
+              </span>
+            </label>
+            {#if newProjectTemplateKind === "custom"}
+              <div class="newproj-input-row">
+                <input
+                  type="text"
+                  class="newproj-input"
+                  placeholder="/Users/you/UnityTemplates/Empty"
+                  bind:value={newProjectCustomTemplatePath}
+                  disabled={newProjectCreating}
+                />
+                <Button variant="secondary" onclick={pickNewProjectCustomTemplate} disabled={newProjectCreating}>
+                  Browse…
+                </Button>
+              </div>
+              {#if newProjectCustomTemplatePath && settingsStore.current && !settingsStore.current.unityDiscovery.customTemplateFolders.includes(newProjectCustomTemplatePath)}
+                <div class="newproj-save-hint">
+                  Save this path to Settings so it appears in the
+                  <strong>Custom template folders</strong> list for next time.
+                  <Button
+                    variant="secondary"
+                    onclick={() => saveCustomTemplateToSettings(newProjectCustomTemplatePath)}
+                    disabled={newProjectCreating}
+                  >
+                    Save to Settings
+                  </Button>
+                </div>
+              {/if}
+            {/if}
+          </div>
+        </section>
+
+        {#if newProjectError}
+          <p class="newproj-error" role="alert">{newProjectError}</p>
+          {#if newProjectOverwriteConfirm}
+            <div class="newproj-overwrite">
+              <Button
+                variant="destructive"
+                onclick={submitNewProjectOverwrite}
+                disabled={newProjectCreating}
+              >
+                {newProjectCreating ? "Replacing…" : "Overwrite existing folder"}
+              </Button>
+              <span class="newproj-overwrite-hint">
+                This will delete the existing folder at
+                <code>{newProjectOverwriteConfirm}</code> and replace it.
+              </span>
+            </div>
+          {/if}
+        {/if}
+      </div>
+
+      <footer class="newproj-footer">
+        <Button variant="secondary" onclick={closeNewProjectModal} disabled={newProjectCreating}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          onclick={submitNewProject}
+          disabled={newProjectCreating || !isNewProjectFormValid()}
+        >
+          {newProjectCreating ? "Creating…" : "Create project"}
+        </Button>
       </footer>
     </div>
   </div>
@@ -3045,5 +3617,231 @@
     font-size: 0.74rem;
     color: #8b8d9a;
     line-height: 1.45;
+  }
+
+  /**
+   * M1.5-12 / M1.5-13 — New project modal. Reuses the walk-up
+   * overlay + header / footer style so the two modals feel like the
+   * same family; the body has its own field-level layout.
+   */
+  .newproj-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 14, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 1rem;
+  }
+
+  .newproj-modal {
+    background: #1a1b21;
+    border: 1px solid #34353f;
+    border-radius: 10px;
+    width: 100%;
+    max-width: 34rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    padding: 1.1rem 1.25rem 1rem;
+    max-height: 86vh;
+    overflow-y: auto;
+  }
+
+  .newproj-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .newproj-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #e9e9ef;
+  }
+
+  .newproj-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+
+  .newproj-desc {
+    margin: 0;
+    font-size: 0.82rem;
+    color: #8b8d9a;
+    line-height: 1.5;
+  }
+
+  .newproj-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .newproj-label {
+    font-size: 0.74rem;
+    color: #c5c7d0;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    font-weight: 600;
+  }
+
+  .newproj-input,
+  .newproj-select {
+    background: #14151a;
+    border: 1px solid #2a2b33;
+    border-radius: 6px;
+    color: #e9e9ef;
+    font-size: 0.86rem;
+    font-family: inherit;
+    padding: 0.4rem 0.5rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .newproj-input:focus,
+  .newproj-select:focus {
+    outline: 2px solid #5c7cfa;
+    outline-offset: 0;
+    border-color: #5c7cfa;
+  }
+
+  .newproj-input:disabled,
+  .newproj-select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .newproj-input-row {
+    display: flex;
+    gap: 0.4rem;
+    align-items: stretch;
+  }
+
+  .newproj-input-row .newproj-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .newproj-hint {
+    margin: 0;
+    font-size: 0.74rem;
+    color: #8b8d9a;
+    line-height: 1.4;
+  }
+
+  .newproj-hint code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+    background: #2a2b33;
+    color: #d6d8e0;
+    padding: 0 0.25rem;
+    border-radius: 3px;
+  }
+
+  .newproj-hint-warn {
+    color: #f0a8b8;
+  }
+
+  .newproj-template-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid #2a2b33;
+    border-radius: 6px;
+    background: #14151a;
+  }
+
+  .newproj-template-option {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: start;
+    column-gap: 0.5rem;
+    row-gap: 0.1rem;
+    font-size: 0.85rem;
+    color: #d6d8e0;
+    cursor: pointer;
+  }
+
+  .newproj-template-option input[type="radio"] {
+    margin-top: 0.18rem;
+  }
+
+  .newproj-template-option.newproj-template-disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .newproj-template-hint {
+    grid-column: 2 / 3;
+    font-size: 0.74rem;
+    color: #8b8d9a;
+    line-height: 1.4;
+  }
+
+  .newproj-template-picker {
+    margin-left: 1.4rem;
+    max-width: calc(100% - 1.4rem);
+  }
+
+  .newproj-save-hint {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-left: 1.4rem;
+    font-size: 0.74rem;
+    color: #8b8d9a;
+    line-height: 1.4;
+  }
+
+  .newproj-error {
+    margin: 0;
+    color: #f0a8b8;
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  .newproj-overwrite {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid #5a2333;
+    border-radius: 6px;
+    background: #2a1320;
+    color: #f0a8b8;
+    font-size: 0.78rem;
+  }
+
+  .newproj-overwrite-hint {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.4;
+  }
+
+  .newproj-overwrite-hint code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+    background: #2a2b33;
+    color: #d6d8e0;
+    padding: 0 0.25rem;
+    border-radius: 3px;
+  }
+
+  .newproj-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    border-top: 1px solid #2a2b33;
+    padding-top: 0.7rem;
   }
 </style>

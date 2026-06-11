@@ -264,6 +264,37 @@ class SettingsStore {
     next.unityDiscovery.walkUpKeepPartial = value;
     await this.persist(next);
   }
+
+  /**
+   * M1.5-13: custom template folders. Adding a path here is purely
+   * a settings change — the path is validated as a directory on save
+   * and the New Project modal validates it again as a Unity root at
+   * use-time (so a stale entry cannot crash a project create). The
+   * Settings tab rejects the entry on save with an inline error if
+   * the path does not resolve to a directory.
+   */
+  async addCustomTemplateFolder(folder: string): Promise<void> {
+    if (!this.current) return;
+    const trimmed = folder.trim();
+    if (!trimmed) return;
+    const next = this.clone();
+    if (next.unityDiscovery.customTemplateFolders.includes(trimmed)) return;
+    next.unityDiscovery.customTemplateFolders = [
+      ...next.unityDiscovery.customTemplateFolders,
+      trimmed,
+    ];
+    await this.persist(next);
+  }
+
+  async removeCustomTemplateFolder(index: number): Promise<void> {
+    if (!this.current) return;
+    if (index < 0 || index >= this.current.unityDiscovery.customTemplateFolders.length) return;
+    const next = this.clone();
+    next.unityDiscovery.customTemplateFolders = next.unityDiscovery.customTemplateFolders.filter(
+      (_, i) => i !== index
+    );
+    await this.persist(next);
+  }
 }
 
 export const settingsStore = new SettingsStore();

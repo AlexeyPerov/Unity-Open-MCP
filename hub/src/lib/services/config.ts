@@ -57,6 +57,14 @@ export interface UnityDiscoverySettings {
    * when false, partial results are discarded.
    */
   walkUpKeepPartial: boolean;
+  /**
+   * M1.5-13: absolute paths to user-curated Unity project roots that
+   * can be used as a template when creating a new project (the
+   * "Custom folder…" option in the New Project modal). Each entry is
+   * validated as a Unity project root at create-time. Mirrors the
+   * Rust `#[serde(default)]` so legacy `settings.json` files load.
+   */
+  customTemplateFolders: string[];
 }
 
 export interface DiagnosticsSettings {
@@ -448,4 +456,84 @@ export async function startWalkUpScan(
 
 export async function cancelWalkUpScan(scanId: string): Promise<boolean> {
   return invoke<boolean>("cancel_walk_up_scan", { scanId });
+}
+
+/**
+ * M1.5-12 / M1.5-13 — New project creation.
+ */
+
+export type RenderPipeline = "none" | "urp" | "hdrp";
+
+/**
+ * Resolved template reference for the New Project modal. The backend
+ * does not branch on `source`; it is the label shown next to the
+ * picker ("hub-default" or "custom") so the user can see where the
+ * template came from.
+ */
+export interface TemplateRef {
+  /** `"hub-default"` (Unity Hub's own templates) or `"custom"`. */
+  source: "hub-default" | "custom";
+  /** Absolute path to the template folder on disk. */
+  path: string;
+}
+
+export interface NewProjectParams {
+  /** Absolute path to the parent folder; the new project is created
+   *  as `<parent>/<name>`. */
+  parent: string;
+  /** Project name; must not contain path separators. */
+  name: string;
+  /** Unity version string (e.g. `"6000.0.1f1"`). Must be installed. */
+  version: string;
+  /** Render pipeline to scaffold. */
+  pipeline: RenderPipeline;
+  /** `bundleVersion` written into ProjectManager.asset / ProjectSettings.asset. */
+  bundleVersion: string;
+  /** `undefined` ⇒ Empty template; a value selects Hub default or Custom. */
+  template?: TemplateRef | null;
+  /** When `true`, an existing directory at the target path is replaced. */
+  overwrite?: boolean;
+}
+
+export interface NewProjectResult {
+  project: ProjectEntry;
+  projects: ProjectsFile;
+}
+
+export type NewProjectError =
+  | { type: "parentNotDirectory"; path: string }
+  | { type: "nameEmpty" }
+  | { type: "nameInvalid"; name: string; reason: string }
+  | { type: "nameCollision"; path: string; isDirectory: boolean }
+  | { type: "versionUnknown"; version: string }
+  | { type: "versionNotInstalled"; version: string }
+  | { type: "pipelineUnsupported"; version: string; pipeline: string }
+  | { type: "templateNotFound"; path: string }
+  | { type: "templateInvalid"; path: string; reason: string }
+  | { type: "ioError"; message: string }
+  | { type: "persistFailed"; message: string };
+
+export interface HubTemplateEntry {
+  name: string;
+  path: string;
+  /** Version read from the template's `ProjectVersion.txt`, if present. */
+  unityVersion?: string | null;
+}
+
+export interface HubTemplatesResult {
+  /** `true` when Unity Hub is installed and at least one template is available. */
+  available: boolean;
+  /** Absolute path to the Hub templates folder, when present. */
+  folder?: string | null;
+  templates: HubTemplateEntry[];
+}
+
+export async function createNewProject(
+  params: NewProjectParams
+): Promise<NewProjectResult> {
+  return invoke<NewProjectResult>("create_new_project", { params });
+}
+
+export async function listHubTemplates(): Promise<HubTemplatesResult> {
+  return invoke<HubTemplatesResult>("list_hub_templates");
 }

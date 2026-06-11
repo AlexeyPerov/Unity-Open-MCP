@@ -97,6 +97,16 @@ pub struct UnityDiscoverySettings {
     /// `#[serde(default = "default_true")]` keeps legacy files loadable.
     #[serde(default = "default_true")]
     pub walk_up_keep_partial: bool,
+    /// M1.5-13: absolute paths to user-curated Unity project roots
+    /// that can be used as a template when creating a new project
+    /// ("Custom folder…" in the New Project modal). Each entry is
+    /// validated as a Unity project root (must contain `Assets/` and
+    /// `ProjectSettings/`) when the project is created; the
+    /// Settings UI rejects the entry on save when the path does not
+    /// resolve to a directory.
+    /// `#[serde(default)]` keeps legacy `settings.json` files loadable.
+    #[serde(default)]
+    pub custom_template_folders: Vec<String>,
 }
 
 fn default_scan_interval_seconds() -> u32 {
@@ -136,6 +146,7 @@ impl Default for Settings {
                 walk_up_max_depth: default_walk_up_max_depth(),
                 walk_up_follow_symlinks: false,
                 walk_up_keep_partial: true,
+                custom_template_folders: Vec::new(),
             },
             diagnostics: DiagnosticsSettings {
                 auto_open_drawer_on_launch_failure: true,
@@ -341,6 +352,43 @@ mod tests {
         assert_eq!(restored.unity_discovery.walk_up_max_depth, 4);
         assert!(!restored.unity_discovery.walk_up_follow_symlinks);
         assert!(restored.unity_discovery.walk_up_keep_partial);
+    }
+
+    #[test]
+    fn settings_loads_legacy_discovery_without_custom_template_folders() {
+        // Pre-M1.5-13 settings.json files do not carry
+        // `customTemplateFolders`. The deserializer must default to an
+        // empty list so existing user configs are not rejected
+        // (same pattern as the M1.5-11 walk-up fields).
+        let legacy = r#"{
+            "version": 1,
+            "launch": { "mode": "openProject", "rememberLastSelection": true },
+            "projectList": {
+                "showPathColumn": true,
+                "showModifiedColumn": true,
+                "searchIncludesPath": true
+            },
+            "safety": { "confirmKillUnity": true, "confirmRemoveProject": true },
+            "unityDiscovery": { "parentFolders": [] }
+        }"#;
+        let restored: Settings = serde_json::from_str(legacy).unwrap();
+        assert!(restored.unity_discovery.custom_template_folders.is_empty());
+    }
+
+    #[test]
+    fn custom_template_folders_roundtrip() {
+        let mut s = Settings::default();
+        s.unity_discovery.custom_template_folders = vec![
+            "/Users/dev/UnityTemplates/Empty".to_string(),
+            "C:\\UnityTemplates\\URP".to_string(),
+        ];
+        let json = serde_json::to_string_pretty(&s).unwrap();
+        let restored: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.unity_discovery.custom_template_folders.len(), 2);
+        assert_eq!(
+            restored.unity_discovery.custom_template_folders[0],
+            "/Users/dev/UnityTemplates/Empty"
+        );
     }
 
     #[test]

@@ -97,6 +97,8 @@ Dependencies: M1 Plan 1 Task 4 (seed) for the deduplication shape.
 
 #### Task 4: New project creation — basic scaffold (M1.5-12) [Score:8] [Agent:medium]
 
+**Status:** DONE 2026-06-11 19:13 MSK. See changelog entry.
+
 **Required context**
 
 1. [hub-requirements.md](../../hub/hub-requirements.md) §Explicitly not required for v1 (template-based creation deferred)
@@ -124,6 +126,8 @@ Dependencies: M1 Plan 2 Task 1 (discovery) for the Unity version dropdown; M1.5 
 ---
 
 #### Task 5: Template-based new project creation (M1.5-13) [Score:8] [Agent:medium]
+
+**Status:** DONE 2026-06-11 19:13 MSK. See changelog entry.
 
 **Required context**
 
@@ -222,8 +226,8 @@ M1.5 Plan 1 Task 8 + M1 Plan 2 Task 5 → Task 7
 - [x] CLI mode launches Unity from a terminal and respects Hub's launch resolver.
 - [x] Running-Unity detection tags rows correctly with rate-limited scan.
 - [x] Walk-up directory scan finds projects up to the configured depth and respects user toggles.
-- [ ] New project creation scaffolds a working Unity project for the chosen version.
-- [ ] Template-based creation supports Hub default + Empty + Custom folder.
+- [x] New project creation scaffolds a working Unity project for the chosen version.
+- [x] Template-based creation supports Hub default + Empty + Custom folder.
 - [ ] Unity upgrade assistant bumps the version + `bundleVersion` with rollback on error.
 - [ ] Missing project handling supports Relink + Hide + Mark stale with new filter preset.
 
