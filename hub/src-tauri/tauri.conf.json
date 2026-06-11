@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Unity Agent Hub",
+  "productName": "Unity AI Hub",
   "version": "0.1.0",
   "identifier": "com.alexeyperov.unity-agent-hub",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Unity Agent Hub",
+        "title": "Unity AI Hub",
         "width": 1280,
         "height": 900,
         "resizable": true

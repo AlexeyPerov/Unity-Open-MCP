@@ -76,7 +76,7 @@ Notes:
 |---|------|----------|--------|
 | 4.1 | Open **Unity Versions** tab with default discovery parents | Installations table shows Hub-detected installs on macOS (`/Applications/Unity/Hub/Editor/...`) and Windows (`%ProgramFiles%\Unity\Hub\Editor\...`) labelled `Source: Hub`; sorted descending by version | ☐ |
 | 4.2 | If a project references a Unity version that is **not** installed, the warnings banner appears with the count and a **Show projects** link | Clicking the link switches to Projects tab and applies the `Missing version` filter | ☐ |
-| 4.3 | Settings → Unity discovery → **Add Folder**, pick a directory that contains a Unity install not in the Hub default | After the rescan, the new install appears with `Source: Manual` | ☐ |
+| 4.3 | Settings → Additional parent folders → **Add Folder**, pick a directory that contains a Unity install not in the Hub default | After the rescan, the new install appears with `Source: Manual` | ☐ |
 | 4.4 | **Remove Folder** on a previously added entry | The install disappears from the table; the Hub default installs remain | ☐ |
 | 4.5 | Set `UNITY_HUB=/path/to/alt/hub` and relaunch | Installations under that path appear with `Source: Env` | ☐ |
 | 4.6 | Click **Refresh** with a transient typo in a parent folder (e.g. add `/does/not/exist`) | Hub continues to return the working installs; per-parent error is logged to the drawer | ☐ |
@@ -116,7 +116,7 @@ Notes:
 | 6.4 | Re-enable all three toggles | Columns / search scope come back live | ☐ |
 | 6.5 | Settings → Safety → uncheck *Confirm before Kill Unity*; Projects → Kill Unity | No modal; kill proceeds | ☐ |
 | 6.6 | Uncheck *Confirm before removing project from list*; remove a project | No modal; row removed | ☐ |
-| 6.7 | Settings → Unity discovery → **Add Folder** with the same path that's already in the list | The entry is **not** duplicated; no discovery rescan is triggered (drawer stays quiet) | ☐ |
+| 6.7 | Settings → Additional parent folders → **Add Folder** with the same path that's already in the list | The entry is **not** duplicated; no discovery rescan is triggered (drawer stays quiet) | ☐ |
 | 6.8 | Tweak any toggle and watch the sticky footer | Footer shows `Saving…` → `Saved ✓`; on a forced error (corrupt disk / read-only) footer shows `Save failed` and drawer logs the reason | ☐ |
 | 6.9 | Settings → Diagnostics → **Export diagnostics bundle…** | Native save dialog opens with default name `unity-agent-hub-diagnostics-YYYY-MM-DD_HH-MM-SS`; after confirming, the folder is created and contains `settings.json`, `projects.json`, `version.txt`, and (if the drawer has logs) `log.txt` | ☐ |
 | 6.10 | Open the exported `version.txt` | Contains app name, version (`0.1.0`), target arch, build profile, ISO 8601 timestamp | ☐ |

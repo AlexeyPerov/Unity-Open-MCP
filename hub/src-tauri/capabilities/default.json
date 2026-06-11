@@ -6,10 +6,8 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "fs:default",
     "opener:default",
     "opener:allow-open-path",
-    "opener:allow-open-url",
-    "shell:default"
+    "opener:allow-open-url"
   ]
 }

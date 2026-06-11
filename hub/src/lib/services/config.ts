@@ -114,6 +114,7 @@ export interface LaunchResult {
 export interface VersionRefreshResult {
   projectId: string;
   unityVersion?: string;
+  lastModifiedAt?: string;
 }
 
 export type AddProjectError =
@@ -242,4 +243,10 @@ export async function exportDiagnostics(
     targetDir,
     logTail,
   });
+}
+
+export async function getProjectSizes(
+  paths: string[]
+): Promise<Record<string, number>> {
+  return invoke<Record<string, number>>("get_project_sizes", { paths });
 }

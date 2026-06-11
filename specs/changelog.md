@@ -1,3 +1,95 @@
+## 2026-06-11 09:40 MSK
+
+- **Projects tab: two-zone row click model + smaller settings icon.**
+  - The project row is now divided into two clickable zones by a `1px` left border on the settings cell:
+    1. **Launch zone** — everything from the left border to the settings cell (covers name, version, modified, size, status columns). Clicking anywhere here calls `handleLaunch(project.id)`. The row's `onclick` was changed from `selectRow` to `handleLaunch`.
+    2. **Settings zone** — the rightmost cell, a full-height `<button class="settings-btn">` that calls `openSettingsPopup(project.id)` and stops propagation so the launch zone doesn't fire.
+  - Removed the dedicated `name-path-clickable` clickable `<div>` (its `onclick`, `role="button"`, `tabindex`, `onkeydown`, and per-div hover background) — the launch zone on the row now handles it. The class was renamed to `.name-path` and stripped of `cursor: pointer` and the hover rule (the row provides both).
+  - Removed the now-unused local `selectRow(id)` wrapper. The underlying `projectsStore.select` is still called from `openContextMenu` to select on right-click.
+  - **Icon size** — the gear SVG is now `24x24` (25% smaller than the previous `32x32`); `stroke-width` adjusted from `1.6` to `1.8` to keep the glyph readable at the smaller size. The `<svg>` still carries `pointer-events: none`.
+  - The row keeps its existing hover background (`#1e1f26`) + `cursor: pointer` as the launch-zone hover affordance; the settings button keeps its own distinct hover (`#2a2b33`, lighter text).
+  - [hub/src/lib/tabs/ProjectsTab.svelte](hub/src/lib/tabs/ProjectsTab.svelte) — only file touched.
+  - `npm run check` → 0 errors, 3 pre-existing a11y warnings; `npm run build` → clean.
+
+## 2026-06-11 07:42 MSK
+
+- **Projects tab: replace per-row foldout with a settings popup.**
+  - Removed the `▸/◂` expand button (left column) and the entire inline `.expanded-panel` block (`{#if expanded[project.id]}`), plus all related state (`expanded` record, `toggleExpand`, the debug `$effect`, and the destructure-rest cleanup in `performRemove`).
+  - Added a gear-icon `settings-btn` in a new right-most column of every project row. Clicking it opens a modal popup (`settingsPopupFor`) with the project's name and path in the header, and the same content that used to live in the foldout: Launch / Open Folder / Kill Unity / More menu (Copy path, Reveal, Refresh, Remove) and the Launch args / Platform intent / Log shortcuts mini-panels.
+  - The popup's **Launch** button (`handlePopupLaunch`) closes the popup first, then launches — so launching from the popup behaves the same as clicking the project name.
+  - Escape closes the popup (`handleGlobalKeydown`); clicking the overlay also closes it.
+  - The grid template now ends with a `2.6rem` settings column instead of a leading `2.2rem` expand column.
+  - Added modal styles (`.settings-overlay`, `.settings-modal`, `.settings-modal-header/titles/path/body`, plus `.settings-actions` and `.settings-panels-grid` as the popup-internal replacements for `.expanded-actions`/`.expanded-panels-grid`) and a local `.modal-close-btn` style. Removed `.th-expand`, `.cell-expand`, `.expand-btn`, `.expanded-panel`, `.expanded-actions`, `.expanded-panels-grid` CSS.
+  - The settings button fills the entire cell (vertically stretches to the full row height via `align-items: stretch` + `flex: 1; width: 100%; height: 100%`), giving a large click target that runs the full height of the project row. The settings cell carries a `1px` left border (`#24252c`) to visually separate the settings zone from the launch zone.
+  - The gear icon is rendered at 32x32 (2x the previous icon size) with `stroke-width: 1.6` so it stays visually balanced at the larger size, and the `<svg>` carries `pointer-events: none` so clicks always reach the button regardless of where on the icon the cursor lands.
+  - Simplified the popup guard from a double `{#if settingsPopupFor} {#if popupProject}` chain to a single `{#if popupProject}` driven by a `let popupProject = $derived(settingsPopupFor ? projectsStore.find(settingsPopupFor) ?? null : null)`. Removed the now-unused `settingsPopupProject()` function.
+  - [hub/src/lib/tabs/ProjectsTab.svelte](hub/src/lib/tabs/ProjectsTab.svelte) — only file touched.
+  - `npm run check` → 0 errors, 3 pre-existing-style a11y warnings (already in `ConfirmationModal.svelte`); `npm run build` → clean.
+
+## 2026-06-10 23:40 MSK
+
+- **Fix:** Expand/collapse button on project rows did not respond to clicks (second attempt). Replaced `SvelteSet` (which should have been reactive per Svelte 5 source) with a plain `$state<Record<string, boolean>>({})` that is **reassigned** (`expanded = { ...expanded, [id]: !expanded[id] }`) on every toggle. Variable-level reassignment is the most direct Svelte 5 reactivity trigger and bypasses any proxy / collection-method subtlety. Read sites (`aria-label`, `title`, chevron glyph, `{#if}` guard) updated to `expanded[project.id]`. `handleRemove` cleanup uses destructure-rest to omit the removed id and reassigns.
+
+## 2026-06-10 23:00 MSK
+
+- **Projects tab layout rework:**
+  - Project row now shows path below name (instead of separate Path column). Name + path together are hoverable/clickable and trigger project launch.
+  - Added expand/collapse button (▸/◂) to left side of each project row. Projects collapsed by default.
+  - When expanded: shows Launch, Open Folder, Kill Unity, More menu, plus Launch args, Platform intent, and Log shortcuts panels inline.
+  - Bottom detail-strip removed — all content moved into expanded foldout.
+  - Renamed "Version" column to "Editor Version".
+  - Added "Size" column (folder size excluding Library, Temp, Logs, UserSettings and gitignored dirs). Column header has tooltip explaining exclusions.
+  - Added offset above first item in list (padding-top on table-body).
+  - Removed VirtualList in favor of regular scrollable list (rows now have variable height due to expand/collapse).
+  - [hub/src/lib/tabs/ProjectsTab.svelte](hub/src/lib/tabs/ProjectsTab.svelte) rewritten.
+- **Rust backend: folder size calculation.** Added [hub/src-tauri/src/config/sizes.rs](hub/src-tauri/src/config/sizes.rs) with `get_project_sizes` command. Excludes Library, Temp, Logs, UserSettings directories and parses .gitignore/ignore.conf patterns. 5 new unit tests. Registered in [hub/src-tauri/src/lib.rs](hub/src-tauri/src/lib.rs).
+- **Tools tab simplified.** [hub/src/lib/tabs/ToolsTab.svelte](hub/src/lib/tabs/ToolsTab.svelte) now contains only global tools: Editor logs, Crash logs, Player logs. All project-specific tools (launch args, platform intent, Kill Unity, per-project log shortcuts) moved into the project expand/collapse panel.
+- **Sidebar: Settings tab moved to bottom.** [hub/src/lib/components/shell/TopBar.svelte](hub/src/lib/components/shell/TopBar.svelte) now renders Settings tab below a flex spacer, separated from the main navigation tabs.
+- **Sidebar: "Unity Versions" renamed to "Installs".**
+- **Settings: sections no longer truncate.** Changed `.group` from `overflow: hidden` to `overflow: visible` in [hub/src/lib/tabs/SettingsTab.svelte](hub/src/lib/tabs/SettingsTab.svelte) so collapsible sections render their full content.
+- **Verification:** `cargo test` → 90/90 pass (5 new). `npm run check` → 0 errors, 1 pre-existing warning. `npm run build` → clean.
+
+## 2026-06-10 22:00 MSK
+
+- **Shell layout rework:** Moved the section tabs from the top bar to a fixed-width left sidebar and removed the "Unity AI Hub" title from the header. [hub/src/routes/+page.svelte](hub/src/routes/+page.svelte) is now a row (`flex-direction: row`) containing a 11rem-wide sidebar + the `TabPanel`; the `.app` padding/gap was rebalanced to match. [hub/src/lib/components/shell/TopBar.svelte](hub/src/lib/components/shell/TopBar.svelte) is no longer a header — it renders an `<aside class="sidebar">` with a single `<nav role="tablist">` of equal-width vertical tab buttons (left-aligned, full sidebar width, `align-items: stretch` so each tab fills the column). The `APP_NAME` import and the global refresh button were dropped from `TopBar` (the title is no longer rendered; global refresh is now a tab-scoped icon button — see next bullet). [hub/src/lib/components/shell/TabPanel.svelte](hub/src/lib/components/shell/TabPanel.svelte) gained `min-width: 0` so it can shrink alongside the sidebar inside a flex row.
+- **Refresh button moved into the Projects toolbar as an icon-only control.** In [hub/src/lib/tabs/ProjectsTab.svelte](hub/src/lib/tabs/ProjectsTab.svelte), the text "Refresh" `Button` next to "Add Project" was replaced with a 2.2rem-square icon button using the same SVG (`M3.51 9a9 9 0 0 1 14.85-3.36L23 10…`) that used to live in the top bar. The button is styled to match the `Button` component's chrome (same border, background, radius, font, hover/focus/disabled states) and uses an explicit `height: 2.2rem` so it lines up with the "Add Project" button height. While `refreshing` is true, the SVG gets a `.icon-spin` class that runs a 0.9s linear `rotate(0→360deg)` keyframe animation. `aria-label` swaps to "Refreshing…" during the in-flight state.
+- **Project row height stays uniform.** Rows were already rendered through `VirtualList` with a fixed `ROW_HEIGHT = 38` and `align-items: center` on the grid, so every row is the same height (matching the tallest chip stack). No structural change needed — the new sidebar/row layout preserves the `min-height: 0` chain on `.app → TabPanel → .projects → .table → .table-body → VirtualList`, so virtualization still works.
+- **Settings panel:** Widen, collapsible, scrollable.
+  - [hub/src/lib/tabs/SettingsTab.svelte](hub/src/lib/tabs/SettingsTab.svelte):
+    - Added a `SettingsGroupId` union and an `openGroups: $state<Record<…>>` map (all five groups default to `true`). Each section's `<header>` is now a `<button>` with `aria-expanded` + `aria-controls` that toggles the body in/out. The chevron `▸` is a separate `<span>` that rotates 90° via the `.group-chevron-open` class.
+    - Widgets now fit vertically: `.radio-row` wraps the label and description in a `.widget-text` column (label on top, description on its own line below) instead of a cramped horizontal label→desc pair. `.diag-row` switched from `flex-direction: row` to `flex-direction: column` with a dashed bottom divider — label on top, full-width `<code>` path, then the Reveal button on its own line. The check rows keep their inline layout (label-only) but gain a bit more breathing room.
+    - The settings container gained `width: 100%; max-width: 56rem; align-self: center; min-width: 0` so the centered column has a wide enough canvas for the vertical widgets without crowding the sidebar.
+    - `.body` already had `overflow-y: auto`; reinforced with `min-height: 0` so it actually scrolls when the expanded groups exceed the viewport. The Settings footer (status / version) sits outside `.body` so it stays pinned.
+  - The discovery section's `Additional parent folders` hint is long; the new vertical hint sizing (`.group-hint` font-size bumped 0.74 → 0.78rem, line-height 1.4 → 1.5) keeps it readable inside the wider panel.
+- **Verification:** `npm run check` → 0 errors, 0 warnings (one pre-existing `a11y_no_noninteractive_element_to_interactive_role` warning on the new `<nav role="tablist">` was silenced with an inline `<!-- svelte-ignore -->`). `npm run build` → clean (adapter-static wrote `build/`). Files touched: `hub/src/routes/+page.svelte`, `hub/src/lib/components/shell/TopBar.svelte`, `hub/src/lib/components/shell/TabPanel.svelte`, `hub/src/lib/tabs/ProjectsTab.svelte`, `hub/src/lib/tabs/SettingsTab.svelte`.
+
+## 2026-06-10 21:27 MSK
+
+- **Branding:** Set custom app icon from `unity-ai-hub-icon.png` — upscaled the 600×595 source to a centered 1024×1024 RGBA master (transparent padding preserved), then regenerated all Tauri bundle icons (`icon.icns`, `icon.ico`, PNG sizes, Appx/Store logos) via `npm run tauri icon`. Master source kept at [hub/src-tauri/icons/icon-source-1024.png](hub/src-tauri/icons/icon-source-1024.png).
+- **App name:** Renamed display name from "Unity Agent Hub" to **"Unity AI Hub"** in [hub/src/lib/tokens.ts](hub/src/lib/tokens.ts) (top bar title + footer via `APP_NAME`), [hub/src-tauri/tauri.conf.json](hub/src-tauri/tauri.conf.json) (`productName` for macOS dock tooltip / `.app` bundle name + window `title`), [hub/src/app.html](hub/src/app.html), and [hub/src/routes/+page.svelte](hub/src/routes/+page.svelte) (`aria-label`). Bundle identifier (`com.alexeyperov.unity-agent-hub`) and config dir (`~/.config/unity-agent-hub/`) unchanged.
+
+## 2026-06-10 18:47 MSK
+
+- M1 review follow-up — closed all three high-priority issues per user clarifications:
+  - **High #1 (discovery UX):** Renamed the Settings tab section from "Unity discovery" to **"Additional parent folders"** and rewrote the section hint + aria labels to make the additive-scan behavior explicit. The new hint states: OS-default Hub paths (`/Applications/Unity/Hub/Editor` on macOS, `%ProgramFiles%\Unity\Hub\Editor` on Windows) and the `$UNITY_HUB` environment variable are **always scanned** regardless of this list; entries here are extra scan roots layered on top. The empty-state copy and the Remove button aria label were updated to match. Spec updates: [specs/hub/hub-ui.md](specs/hub/hub-ui.md) Settings zones table row + the wireframe ASCII box (`Additional folders` + `Extra scan roots (OS defaults + $UNITY_HUB always on):`) and the mermaid node renamed `UnityDiscoveryGroup` → `AdditionalFoldersGroup`; [specs/hub/hub-data.md](specs/hub/hub-data.md) `settings.json` description updated. [hub/MANUAL_VALIDATION.md](hub/MANUAL_VALIDATION.md) steps 4.3 and 6.7 cross-references updated. The Rust scan logic in [hub/src-tauri/src/config/discovery.rs](hub/src-tauri/src/config/discovery.rs) is unchanged — the additive model is now correctly framed in the UI.
+  - **High #2 (unused plugins):** Removed `tauri-plugin-fs` and `tauri-plugin-shell` entirely:
+    - [hub/src-tauri/Cargo.toml](hub/src-tauri/Cargo.toml): dropped both `[dependencies]` entries.
+    - [hub/src-tauri/src/lib.rs](hub/src-tauri/src/lib.rs): dropped the two `.plugin(tauri_plugin_fs::init())` / `.plugin(tauri_plugin_shell::init())` calls.
+    - [hub/src-tauri/capabilities/default.json](hub/src-tauri/capabilities/default.json): dropped `"fs:default"` and `"shell:default"`. The granted permission set is now `core:default`, `dialog:default`, `opener:default`, `opener:allow-open-path`, `opener:allow-open-url` — only what the Hub actually exercises.
+    - [hub/package.json](hub/package.json): dropped `@tauri-apps/plugin-fs` and `@tauri-apps/plugin-shell`. Ran `npm install` in `hub/` and `cargo build` to refresh both lockfiles (`hub/package-lock.json` shrank by 22 lines, `hub/src-tauri/Cargo.lock` by 74).
+    - Verified zero references in `hub/src` or `hub/src-tauri/src` (`grep` returns nothing). Reduces the runtime attack surface and removes two unused crates from the rebuild graph.
+  - **High #3 (per-row Refresh):**
+    - **Rust:** Made [hub/src-tauri/src/config/projects.rs::read_dir_mtime_iso](hub/src-tauri/src/config/projects.rs) `pub(crate)`. Extended `VersionRefreshResult` in [hub/src-tauri/src/config/launch.rs](hub/src-tauri/src/config/launch.rs) with a `last_modified_at: Option<String>` field. Rewrote `refresh_project_version` to: resolve the project (return `ProjectNotFound` if missing), check path existence (return `PathInvalid` if missing), re-read `ProjectVersion.txt` via `read_project_version`, re-read the directory mtime via `read_dir_mtime_iso`, update **both** fields on the project entry, persist via `save_projects`, update in-memory state, and return the result. Imports the helper via `use crate::config::projects::read_dir_mtime_iso`.
+    - **Tests:** Updated `version_refresh_result_serializes` to assert the new `lastModifiedAt` field appears in the JSON. Added a new `refresh_readers_return_version_and_fresh_mtime` test that exercises the two readers (the unit-testable core of the command) against a `tempfile` directory and asserts the mtime is fresh and not a 1970 sentinel — guards against a future refactor silently returning the stored value instead of re-reading from disk.
+    - **Frontend service:** Updated [hub/src/lib/services/config.ts](hub/src/lib/services/config.ts) `VersionRefreshResult` to include `lastModifiedAt?: string`.
+    - **UI:** In [hub/src/lib/tabs/ProjectsTab.svelte](hub/src/lib/tabs/ProjectsTab.svelte):
+      - Imported `refreshProjectVersion`.
+      - Added a `refreshingId: $state<string | null>(null)` per-row busy state.
+      - Added `handleRefreshProject(project)`: guards on `refreshingId` and missing-path status, calls `refreshProjectVersion(id)`, then re-checks path existence via `checkPathsExists([project.path])` (with its own error-boundary that uses `appendErrorLog` so a failed recheck doesn't abort the whole refresh), then writes the new `unityVersion` + `lastModifiedAt` through `projectsStore.update`. Drawer logs success at info level and failures at error level (`appendErrorLog`).
+      - Added a **Refresh** item to the **More ▾** menu, between the existing filesystem actions and the destructive `Remove from list`, with its own separator on each side. Disabled when the path is missing or while a refresh is in flight (shows "Refreshing…").
+      - Added the same **Refresh** item to the right-click context menu (which mirrors the More menu per [specs/hub/hub-ui.md](specs/hub/hub-ui.md)). The two menus stay in lockstep.
+  - **Verification:** `cargo test` → 85/85 pass (84 + 1 new). `npm run check` → 0 errors, 0 warnings. `npm run build` → clean. 12 files changed, +141/−119 (excludes the lockfile shrinkage of 22 + 74 = 96 lines). Reverted one stray `hub/README.md` diff that appeared during the session but was unrelated to this work.
+
 ## 2026-06-10 17:30 MSK
 
 - M1 review follow-up — fixed all medium + low issues called out in the review (high-priority issues #1–#3 left for a separate pass):

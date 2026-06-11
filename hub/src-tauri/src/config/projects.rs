@@ -89,7 +89,7 @@ fn read_unity_version(project_path: &Path) -> Option<String> {
     None
 }
 
-fn read_dir_mtime_iso(dir: &Path) -> Option<String> {
+pub(crate) fn read_dir_mtime_iso(dir: &Path) -> Option<String> {
     let meta = fs::metadata(dir).ok()?;
     let time = meta.modified().ok().or_else(|| meta.created().ok())?;
     let duration = time.duration_since(std::time::SystemTime::UNIX_EPOCH).ok()?;

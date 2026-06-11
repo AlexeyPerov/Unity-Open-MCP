@@ -7,9 +7,7 @@ use std::sync::Mutex;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_shell::init())
         .manage(AppState {
             settings: Mutex::new(config::persistence::load_settings()),
             projects: Mutex::new(config::persistence::load_projects()),
@@ -34,6 +32,7 @@ pub fn run() {
             config::process::kill_unity,
             config::diagnostics::get_diagnostics_paths,
             config::diagnostics::export_diagnostics,
+            config::sizes::get_project_sizes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

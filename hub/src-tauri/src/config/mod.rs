@@ -9,3 +9,4 @@ pub mod projects;
 pub mod logs;
 pub mod process;
 pub mod diagnostics;
+pub mod sizes;

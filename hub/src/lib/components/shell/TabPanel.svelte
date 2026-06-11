@@ -18,5 +18,7 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
+    overflow: hidden;
   }
 </style>

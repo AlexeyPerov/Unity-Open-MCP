@@ -8,6 +8,7 @@ use tauri::State;
 use crate::config::commands::AppState;
 use crate::config::discovery;
 use crate::config::persistence;
+use crate::config::projects::read_dir_mtime_iso;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -38,6 +39,7 @@ pub struct LaunchResult {
 pub struct VersionRefreshResult {
     pub project_id: String,
     pub unity_version: Option<String>,
+    pub last_modified_at: Option<String>,
 }
 
 pub(crate) fn get_unity_executable_path(install_dir: &Path) -> Option<PathBuf> {
@@ -244,7 +246,8 @@ pub fn refresh_project_version(
         .find(|p| p.id == project_id)
         .ok_or_else(|| LaunchError::ProjectNotFound {
             project_id: project_id.clone(),
-        })?;
+        })?
+        .clone();
 
     let project_path = Path::new(&project.path);
     if !project_path.exists() {
@@ -254,11 +257,13 @@ pub fn refresh_project_version(
         });
     }
 
-    let version = read_project_version(project_path);
+    let unity_version = read_project_version(project_path);
+    let last_modified_at = read_dir_mtime_iso(project_path);
 
     let mut projects = projects;
     if let Some(p) = projects.projects.iter_mut().find(|p| p.id == project_id) {
-        p.unity_version = version.clone();
+        p.unity_version = unity_version.clone();
+        p.last_modified_at = last_modified_at.clone();
     }
 
     if let Err(e) = persistence::save_projects(&projects) {
@@ -271,8 +276,9 @@ pub fn refresh_project_version(
     }
 
     Ok(VersionRefreshResult {
-        project_id: project_id.clone(),
-        unity_version: version,
+        project_id,
+        unity_version,
+        last_modified_at,
     })
 }
 
@@ -466,10 +472,41 @@ mod tests {
         let result = VersionRefreshResult {
             project_id: "abc".to_string(),
             unity_version: Some("2022.3.48f1".to_string()),
+            last_modified_at: Some("2026-06-10T12:00:00+00:00".to_string()),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"projectId\""));
         assert!(json.contains("\"unityVersion\""));
+        assert!(json.contains("\"lastModifiedAt\""));
+    }
+
+    #[test]
+    fn refresh_readers_return_version_and_fresh_mtime() {
+        // Covers the two helpers that `refresh_project_version` composes
+        // without needing a Tauri State (which the unit test cannot easily
+        // construct). The command itself wires these reads into the same
+        // `Ok(VersionRefreshResult { ... })` payload.
+        let dir = tempfile::tempdir().unwrap();
+        let ps_dir = dir.path().join("ProjectSettings");
+        fs::create_dir_all(&ps_dir).unwrap();
+        fs::write(
+            ps_dir.join("ProjectVersion.txt"),
+            "m_EditorVersion: 6000.0.1f1\n",
+        )
+        .unwrap();
+
+        let version = read_project_version(dir.path());
+        assert_eq!(version.as_deref(), Some("6000.0.1f1"));
+
+        let mtime = read_dir_mtime_iso(dir.path());
+        assert!(mtime.is_some(), "mtime should resolve for a real dir");
+        // A 1970 sentinel must differ from the real mtime — guards against
+        // the readers silently returning the stored value instead of
+        // re-reading from disk.
+        assert_ne!(
+            mtime.as_deref(),
+            Some("1970-01-01T00:00:00+00:00")
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-export const APP_NAME = "Unity Agent Hub";
+export const APP_NAME = "Unity AI Hub";
 
 export const STATUS_COLORS = {
   ok: "#2f6f4a",

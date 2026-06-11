@@ -5,13 +5,17 @@
   import {
     addProject,
     checkPathsExists,
+    getProjectSizes,
     killUnity,
     launchProject,
     refreshAllProjects,
+    refreshProjectVersion,
     removeProject,
+    getLogPaths,
     type AddProjectError,
     type KillUnityResult,
     type LaunchError,
+    type LogPaths,
     type ProjectEntry,
     type RemoveProjectError,
   } from "$lib/services/config";
@@ -20,7 +24,6 @@
   import Button from "$lib/components/shell/Button.svelte";
   import StatusChip from "$lib/components/StatusChip.svelte";
   import RelativeTime from "$lib/components/RelativeTime.svelte";
-  import VirtualList from "$lib/components/VirtualList.svelte";
   import { AI_SETUP_ENABLED } from "$lib/features";
 
   type FilterPreset = "all" | "launchable" | "missingVersion" | "missingPath";
@@ -47,15 +50,32 @@
   let checkingPaths = $state(false);
   let launching = $state<string | null>(null);
   let contextMenu = $state<{ x: number; y: number; projectId: string } | null>(null);
-  let moreMenuOpen = $state(false);
+  let moreMenuOpenFor = $state<string | null>(null);
   let addingProject = $state(false);
   let refreshing = $state(false);
+  let refreshingId = $state<string | null>(null);
   let removingId = $state<string | null>(null);
   let killingId = $state<string | null>(null);
   let addError = $state<string | null>(null);
   let actionError = $state<string | null>(null);
+  let sizeMap = $state<Record<string, number>>({});
+  let loadingSizes = $state(false);
+  let logPathsMap = $state<Record<string, LogPaths>>({});
 
-  const ROW_HEIGHT = 38;
+  const UNSAFE_RE = /[\n\r\0`$|&;<>]/;
+
+  const BUILD_TARGETS: string[] = [
+    "StandaloneWindows64",
+    "StandaloneWindows",
+    "StandaloneOSX",
+    "StandaloneLinux64",
+    "iOS",
+    "Android",
+    "WebGL",
+    "WSAPlayer",
+    "tvOS",
+    "VisionOS",
+  ];
 
   onMount(() => {
     let cancelled = false;
@@ -63,6 +83,7 @@
       await projectsStore.load();
       if (cancelled) return;
       await refreshPathExistence();
+      await loadSizes();
     })();
     window.addEventListener("click", closeContextMenu, true);
     window.addEventListener("keydown", handleGlobalKeydown, true);
@@ -73,9 +94,6 @@
     };
   });
 
-  // Consume the deep-link filter set by the Unity Versions "Show projects →"
-  // banner. Reactive so it works whether the tab is already mounted or
-  // mounted fresh after the request.
   $effect(() => {
     const pending = S.pendingProjectsFilter;
     if (pending) {
@@ -83,6 +101,21 @@
       S.pendingProjectsFilter = null;
     }
   });
+
+  async function loadSizes() {
+    const list = projectsStore.projects;
+    if (list.length === 0) return;
+    loadingSizes = true;
+    try {
+      const paths = list.map((p) => p.path);
+      sizeMap = await getProjectSizes(paths);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`size check failed: ${msg}`);
+    } finally {
+      loadingSizes = false;
+    }
+  }
 
   async function refreshPathExistence() {
     const list = projectsStore.projects;
@@ -99,6 +132,15 @@
       S.appendErrorLog(`path check failed: ${msg}`);
     } finally {
       checkingPaths = false;
+    }
+  }
+
+  async function loadLogPaths(project: ProjectEntry) {
+    try {
+      const paths = await getLogPaths(project.path);
+      logPathsMap = { ...logPathsMap, [project.id]: paths };
+    } catch (_e) {
+      // silently skip
     }
   }
 
@@ -176,27 +218,13 @@
     });
   });
 
-  let selected = $derived(
-    projectsStore.selectedProjectId
-      ? projectsStore.projects.find((p) => p.id === projectsStore.selectedProjectId) ?? null
-      : null
-  );
-
-  let selectedStatus = $derived(selected ? statusFor(selected) : null);
-
-  function selectRow(id: string) {
-    projectsStore.select(id);
-  }
-
   function closeContextMenu() {
     contextMenu = null;
   }
 
   function openContextMenu(e: MouseEvent, projectId: string) {
     e.preventDefault();
-    const x = e.clientX;
-    const y = e.clientY;
-    contextMenu = { x, y, projectId };
+    contextMenu = { x: e.clientX, y: e.clientY, projectId };
     projectsStore.select(projectId);
   }
 
@@ -210,22 +238,10 @@
       closeContextMenu();
       return;
     }
-    if (moreMenuOpen && e.key === "Escape") {
-      moreMenuOpen = false;
+    if (settingsPopupFor && e.key === "Escape") {
+      closeSettingsPopup();
       return;
     }
-  }
-
-  function moveSelection(delta: number) {
-    if (filtered.length === 0) return;
-    const idx = projectsStore.selectedProjectId
-      ? filtered.findIndex((p) => p.id === projectsStore.selectedProjectId)
-      : -1;
-    let next = idx + delta;
-    if (idx === -1) next = delta > 0 ? 0 : filtered.length - 1;
-    if (next < 0) next = 0;
-    if (next >= filtered.length) next = filtered.length - 1;
-    projectsStore.select(filtered[next].id);
   }
 
   async function handleLaunch(id: string) {
@@ -240,9 +256,6 @@
     launching = id;
     try {
       const result = await launchProject(id);
-      // Rust already records lastLaunchPid and lastLaunchAt on the project
-      // entry; only mirror the version + PID into the local store and let
-      // projectsStore.update round-trip the new fields.
       const updated: ProjectEntry = {
         ...project,
         lastLaunchPid: result.pid,
@@ -278,45 +291,6 @@
     }
   }
 
-  function handleRowKeydown(e: KeyboardEvent, project: ProjectEntry) {
-    switch (e.key) {
-      case "ArrowDown":
-        e.preventDefault();
-        moveSelection(1);
-        break;
-      case "ArrowUp":
-        e.preventDefault();
-        moveSelection(-1);
-        break;
-      case "Home":
-        e.preventDefault();
-        if (filtered.length > 0) projectsStore.select(filtered[0].id);
-        break;
-      case "End":
-        e.preventDefault();
-        if (filtered.length > 0) projectsStore.select(filtered[filtered.length - 1].id);
-        break;
-      case "Enter":
-        e.preventDefault();
-        if (statusFor(project).launchable) handleLaunch(project.id);
-        break;
-      case "ContextMenu":
-        e.preventDefault();
-        if (contextMenu && contextMenu.projectId === project.id) {
-          closeContextMenu();
-        } else {
-          projectsStore.select(project.id);
-          const row = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          contextMenu = {
-            x: row.left + 24,
-            y: row.top + 8,
-            projectId: project.id,
-          };
-        }
-        break;
-    }
-  }
-
   async function handleAddProject() {
     if (addingProject) return;
     addingProject = true;
@@ -334,6 +308,7 @@
         const result = await addProject(selected);
         projectsStore.add(result.project);
         await refreshPathExistence();
+        await loadSizes();
         S.appendDrawerLog(
           `added project ${result.project.name} (${result.project.unityVersion ?? "version unknown"})`
         );
@@ -372,6 +347,7 @@
       const result = await refreshAllProjects();
       projectsStore.replaceAll(result.projects.projects);
       await refreshPathExistence();
+      await loadSizes();
       const updatedCount = result.updated.length;
       const skippedCount = result.skipped.length;
       S.appendDrawerLog(
@@ -411,8 +387,6 @@
         S.appendDrawerLog(killMessage);
       }
       if (result.status === "killed" || result.status === "notFound") {
-        // Clear the recorded PID for this project so subsequent Kill
-        // buttons show the "no recent launch" state.
         const cleared: ProjectEntry = { ...project, lastLaunchPid: undefined };
         await projectsStore.update(cleared);
       }
@@ -425,9 +399,44 @@
     }
   }
 
+  async function handleRefreshProject(project: ProjectEntry) {
+    if (refreshingId) return;
+    const status = statusFor(project);
+    if (status.pathExists === false) {
+      return;
+    }
+    refreshingId = project.id;
+    actionError = null;
+    try {
+      const result = await refreshProjectVersion(project.id);
+      try {
+        const exists = await checkPathsExists([project.path]);
+        pathExistsMap = { ...pathExistsMap, ...exists };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        S.appendErrorLog(`path recheck failed: ${msg}`);
+      }
+      const updated: ProjectEntry = {
+        ...project,
+        unityVersion: result.unityVersion ?? project.unityVersion,
+        lastModifiedAt: result.lastModifiedAt ?? project.lastModifiedAt,
+      };
+      await projectsStore.update(updated);
+      S.appendDrawerLog(
+        `refreshed ${project.name} (${result.unityVersion ?? "version unknown"})`
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      actionError = `refresh failed: ${msg}`;
+      S.appendErrorLog(actionError);
+    } finally {
+      refreshingId = null;
+    }
+  }
+
   async function handleKillUnity(project: ProjectEntry) {
     closeContextMenu();
-    moreMenuOpen = false;
+    moreMenuOpenFor = null;
     const pid = project.lastLaunchPid;
     if (!pid) {
       actionError = `no recent Unity launch recorded for ${project.name}`;
@@ -438,7 +447,7 @@
     if (confirmKill) {
       const ok = await S.confirm(
         "Kill Unity for this project?",
-        `Send a terminate signal to pid ${pid} (last launched from “${project.name}”). Other Unity instances on this machine are not affected.`
+        `Send a terminate signal to pid ${pid} (last launched from "${project.name}"). Other Unity instances on this machine are not affected.`
       );
       if (!ok) return;
     }
@@ -493,12 +502,12 @@
     if (confirmRemove) {
       const ok = await S.confirm(
         "Remove project from list?",
-        `“${project.name}” will be removed from the Hub project list. The project folder on disk and Unity Hub registry will not be touched.`
+        `"${project.name}" will be removed from the Hub project list. The project folder on disk and Unity Hub registry will not be touched.`
       );
       if (!ok) return;
     }
     closeContextMenu();
-    moreMenuOpen = false;
+    moreMenuOpenFor = null;
     await performRemove(id);
   }
 
@@ -514,7 +523,7 @@
 
   async function handleOpenFolder(project: ProjectEntry) {
     closeContextMenu();
-    moreMenuOpen = false;
+    moreMenuOpenFor = null;
     const status = statusFor(project);
     if (status.pathExists === false) {
       actionError = `cannot open folder: path missing — ${project.path}`;
@@ -533,7 +542,7 @@
 
   async function handleReveal(project: ProjectEntry) {
     closeContextMenu();
-    moreMenuOpen = false;
+    moreMenuOpenFor = null;
     const status = statusFor(project);
     if (status.pathExists === false) {
       actionError = `cannot reveal: path missing — ${project.path}`;
@@ -554,8 +563,13 @@
     return statusFor(p);
   }
 
-  let showPath = $derived(projectsStore.settings?.projectList.showPathColumn ?? true);
   let showModified = $derived(projectsStore.settings?.projectList.showModifiedColumn ?? true);
+
+  let gridTemplate = $derived(
+    showModified
+      ? "minmax(8rem, 1.1fr) minmax(6rem, 0.9fr) minmax(5rem, 0.7fr) minmax(4rem, 0.6fr) minmax(10rem, 1.4fr) 2.6rem"
+      : "minmax(8rem, 1.1fr) minmax(6rem, 0.9fr) minmax(4rem, 0.6fr) minmax(10rem, 1.4fr) 2.6rem"
+  );
 
   const filterOptions: { id: FilterPreset; label: string }[] = [
     { id: "all", label: "All" },
@@ -564,14 +578,150 @@
     { id: "missingPath", label: "Missing path" },
   ];
 
-  let gridTemplate = $derived.by(() => {
-    const cols = ["minmax(8rem, 1.1fr)"];
-    if (showPath) cols.push("minmax(10rem, 2.4fr)");
-    cols.push("minmax(6rem, 0.9fr)");
-    if (showModified) cols.push("minmax(5rem, 0.8fr)");
-    cols.push("minmax(11rem, 1.5fr)");
-    return cols.join(" ");
-  });
+  function formatSize(bytes: number): string {
+    if (bytes === 0) return "—";
+    const units = ["B", "KB", "MB", "GB"];
+    let i = 0;
+    let size = bytes;
+    while (size >= 1024 && i < units.length - 1) {
+      size /= 1024;
+      i++;
+    }
+    return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+  }
+
+  function toggleMoreMenu(id: string) {
+    moreMenuOpenFor = moreMenuOpenFor === id ? null : id;
+  }
+
+  let settingsPopupFor = $state<string | null>(null);
+
+  let popupProject = $derived(
+    settingsPopupFor ? projectsStore.find(settingsPopupFor) ?? null : null
+  );
+
+  function openSettingsPopup(id: string) {
+    const project = projectsStore.find(id);
+    if (project) loadLogPaths(project);
+    settingsPopupFor = id;
+    moreMenuOpenFor = null;
+  }
+
+  function closeSettingsPopup() {
+    settingsPopupFor = null;
+  }
+
+  async function handlePopupLaunch() {
+    if (!settingsPopupFor) return;
+    const id = settingsPopupFor;
+    closeSettingsPopup();
+    await handleLaunch(id);
+  }
+
+  // --- Expanded panel: launch args helpers ---
+  let argsDrafts = $state<Record<string, string>>({});
+  let argsErrors = $state<Record<string, string | null>>({});
+  let savingArgsFor = $state<string | null>(null);
+  let intentDrafts = $state<Record<string, string>>({});
+  let savingIntentFor = $state<string | null>(null);
+
+  function getArgsDraft(id: string): string {
+    if (!(id in argsDrafts)) {
+      const p = projectsStore.find(id);
+      argsDrafts[id] = p?.launchArgs ?? "";
+    }
+    return argsDrafts[id];
+  }
+
+  function getIntentDraft(id: string): string {
+    if (!(id in intentDrafts)) {
+      const p = projectsStore.find(id);
+      intentDrafts[id] = p?.platformIntent ?? "";
+    }
+    return intentDrafts[id];
+  }
+
+  function handleArgsInput(id: string, value: string) {
+    argsDrafts = { ...argsDrafts, [id]: value };
+    const err = validateArgs(value);
+    if (err) argsErrors = { ...argsErrors, [id]: err };
+    else if (argsErrors[id]) argsErrors = { ...argsErrors, [id]: null };
+  }
+
+  function validateArgs(value: string): string | null {
+    const match = value.match(UNSAFE_RE);
+    if (match) {
+      return `unsafe character "${match[0]}"`;
+    }
+    return null;
+  }
+
+  async function handleSaveArgs(project: ProjectEntry) {
+    const draft = argsDrafts[project.id] ?? "";
+    if (draft.trim().length === 0) return;
+    const err = validateArgs(draft);
+    if (err) {
+      argsErrors = { ...argsErrors, [project.id]: err };
+      return;
+    }
+    savingArgsFor = project.id;
+    try {
+      const updated: ProjectEntry = { ...project, launchArgs: draft };
+      await projectsStore.update(updated);
+      S.appendDrawerLog(`saved launch args for ${project.name}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`save launch args failed: ${msg}`);
+    } finally {
+      savingArgsFor = null;
+    }
+  }
+
+  async function handleResetArgs(project: ProjectEntry) {
+    savingArgsFor = project.id;
+    try {
+      const updated: ProjectEntry = { ...project, launchArgs: "" };
+      await projectsStore.update(updated);
+      argsDrafts = { ...argsDrafts, [project.id]: "" };
+      argsErrors = { ...argsErrors, [project.id]: null };
+      S.appendDrawerLog(`cleared launch args for ${project.name}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`reset launch args failed: ${msg}`);
+    } finally {
+      savingArgsFor = null;
+    }
+  }
+
+  function handleIntentChange(id: string, value: string) {
+    intentDrafts = { ...intentDrafts, [id]: value };
+  }
+
+  async function handleSaveIntent(project: ProjectEntry) {
+    const next = (intentDrafts[project.id] ?? "").trim();
+    savingIntentFor = project.id;
+    try {
+      const updated: ProjectEntry = { ...project, platformIntent: next };
+      await projectsStore.update(updated);
+      S.appendDrawerLog(
+        next
+          ? `set platform intent for ${project.name} to ${next}`
+          : `cleared platform intent for ${project.name}`
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`save platform intent failed: ${msg}`);
+    } finally {
+      savingIntentFor = null;
+    }
+  }
+
+  function intentOptions(current: string): string[] {
+    if (current && !BUILD_TARGETS.includes(current)) {
+      return [current, ...BUILD_TARGETS];
+    }
+    return BUILD_TARGETS;
+  }
 </script>
 
 <div class="projects">
@@ -614,15 +764,37 @@
         AI Setup
       </Button>
     {/if}
-        <Button variant="primary" onclick={handleAddProject} disabled={addingProject}>
-          {addingProject ? "Adding…" : "Add Project"}
-        </Button>
-        <Button variant="secondary" onclick={handleRefresh} disabled={refreshing}>
-          {refreshing ? "Refreshing…" : "Refresh"}
-        </Button>
-        {#if removingId}
-          <span class="toolbar-status" aria-live="polite">Removing…</span>
-        {/if}
+    <Button variant="primary" onclick={handleAddProject} disabled={addingProject}>
+      {addingProject ? "Adding…" : "Add Project"}
+    </Button>
+    <button
+      type="button"
+      class="icon-btn"
+      onclick={handleRefresh}
+      disabled={refreshing}
+      title={refreshing ? "Refreshing…" : "Refresh"}
+      aria-label={refreshing ? "Refreshing…" : "Refresh"}
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class:icon-spin={refreshing}
+        aria-hidden="true"
+      >
+        <polyline points="23 4 23 10 17 10"/>
+        <polyline points="1 20 1 14 7 14"/>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+      </svg>
+    </button>
+    {#if removingId}
+      <span class="toolbar-status" aria-live="polite">Removing…</span>
+    {/if}
   </div>
 
   {#if addError}
@@ -653,181 +825,98 @@
     </div>
   {/if}
 
-  <div
-    class="table"
-    role="grid"
-    aria-rowcount={filtered.length + 1}
-    aria-colcount={showPath && showModified ? 5 : showPath || showModified ? 4 : 3}
-  >
+  <div class="table" role="grid">
     <div class="table-head" role="row" style="grid-template-columns: {gridTemplate};">
-      <div class="th" role="columnheader">Name</div>
-      {#if showPath}
-        <div class="th" role="columnheader">Path</div>
-      {/if}
-      <div class="th" role="columnheader">Version</div>
+      <div class="th th-name" role="columnheader">Name</div>
+      <div class="th" role="columnheader">Editor Version</div>
       {#if showModified}
         <div class="th" role="columnheader">Modified</div>
       {/if}
+      <div class="th" role="columnheader" title="Folder size excluding Library, Temp, Logs, UserSettings and gitignored directories">Size</div>
       <div class="th" role="columnheader">Status</div>
+      <div class="th th-settings" role="columnheader"></div>
     </div>
 
     <div class="table-body">
-      <VirtualList items={filtered} itemHeight={ROW_HEIGHT}>
-        {#snippet children(project: ProjectEntry, index: number)}
-          {@const s = rowStatus(project)}
-          <div
-            class="row"
-            class:row-selected={projectsStore.selectedProjectId === project.id}
-            class:row-missing={s.kind === "missingPath"}
-            role="row"
-            aria-rowindex={index + 2}
-            aria-selected={projectsStore.selectedProjectId === project.id}
-            tabindex={projectsStore.selectedProjectId === project.id ? 0 : -1}
-            style="grid-template-columns: {gridTemplate};"
-            onclick={() => selectRow(project.id)}
-            ondblclick={() => handleLaunch(project.id)}
-            oncontextmenu={(e) => openContextMenu(e, project.id)}
-            onkeydown={(e) => handleRowKeydown(e, project)}
-          >
-            <div class="cell cell-name" role="gridcell" title={project.name}>
-              <span class="name-text">{project.name}</span>
-            </div>
-            {#if showPath}
-              <div class="cell cell-path" role="gridcell" title={project.path}>
-                <span class="path-text">{project.path}</span>
-              </div>
-            {/if}
-            <div class="cell cell-version" role="gridcell">
-              {#if project.unityVersion}
-                <span class="version-text">{project.unityVersion}</span>
-              {:else}
-                <span class="muted">—</span>
-              {/if}
-            </div>
-            {#if showModified}
-              <div class="cell cell-modified" role="gridcell">
-                <RelativeTime iso={project.lastOpenedAt ?? project.lastModifiedAt} />
-              </div>
-            {/if}
-            <div class="cell cell-status" role="gridcell">
-              <div class="chips">
-                {#each s.chips as chip}
-                  <StatusChip tone={chip.tone} label={chip.label} title={chip.title} />
-                {/each}
-              </div>
-            </div>
-          </div>
-        {/snippet}
-        {#snippet empty()}
-          <div class="empty-state">
-            {#if projectsStore.projects.length === 0}
-              <p>No projects yet.</p>
-              <p class="empty-hint">Use <strong>Add Project</strong> to register a Unity project folder.</p>
-            {:else}
-              <p>No projects match the current filter.</p>
-            {/if}
-          </div>
-        {/snippet}
-      </VirtualList>
-    </div>
-  </div>
-
-  {#if selected}
-    {@const s = selectedStatus}
-    <div class="detail-strip" role="region" aria-label="Selected project actions">
-      <div class="detail-summary">
-        <span class="detail-name">{selected.name}</span>
-        {#if selected.unityVersion}
-          <span class="detail-sep">·</span>
-          <span class="detail-version">{selected.unityVersion}</span>
-        {/if}
-        <span class="detail-sep">·</span>
-        <span class="detail-path" title={selected.path}>{selected.path}</span>
-      </div>
-      <div class="detail-actions">
-        <Button
-          variant="primary"
-          disabled={!s?.launchable || launching === selected.id}
-          onclick={() => handleLaunch(selected.id)}
-        >
-          {launching === selected.id ? "Launching…" : "Launch"}
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={s?.pathExists === false}
-          title={s?.pathExists === false ? "Path missing — cannot open folder" : "Open project folder"}
-          onclick={() => handleOpenFolder(selected)}
-        >
-          Open Folder
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={!selected.lastLaunchPid || killingId === selected.id}
-          title={selected.lastLaunchPid
-            ? `Terminate pid ${selected.lastLaunchPid} (last launched from this project)`
-            : "No recorded Unity PID — launch Unity once to enable Kill"}
-          onclick={() => handleKillUnity(selected)}
-        >
-          {killingId === selected.id ? "Killing…" : "Kill Unity"}
-        </Button>
-        <div class="more-wrap">
-          <Button
-            variant="secondary"
-            onclick={() => (moreMenuOpen = !moreMenuOpen)}
-            aria-haspopup="menu"
-            aria-expanded={moreMenuOpen}
-          >
-            More ▾
-          </Button>
-          {#if moreMenuOpen}
-            <!-- svelte-ignore a11y_interactive_supports_focus -->
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <div class="more-menu" role="menu">
-              <button
-                type="button"
-                class="more-item"
-                role="menuitem"
-                onclick={() => {
-                  moreMenuOpen = false;
-                  handleCopyPath(selected);
-                }}
-              >
-                Copy path
-              </button>
-              <button
-                type="button"
-                class="more-item"
-                role="menuitem"
-                disabled={s?.pathExists === false}
-                title={s?.pathExists === false ? "Path missing — cannot reveal" : "Reveal in file manager"}
-                onclick={() => handleReveal(selected)}
-              >
-                Reveal in file manager
-              </button>
-              <div class="more-sep"></div>
-              <button
-                type="button"
-                class="more-item more-item-destructive"
-                role="menuitem"
-                disabled={removingId === selected.id}
-                onclick={() => handleRemove(selected.id)}
-              >
-                {removingId === selected.id ? "Removing…" : "Remove from list"}
-              </button>
-            </div>
+      {#if filtered.length === 0}
+        <div class="empty-state">
+          {#if projectsStore.projects.length === 0}
+            <p>No projects yet.</p>
+            <p class="empty-hint">Use <strong>Add Project</strong> to register a Unity project folder.</p>
+          {:else}
+            <p>No projects match the current filter.</p>
           {/if}
         </div>
-      </div>
+      {:else}
+        {#each filtered as project, index (project.id)}
+          {@const s = rowStatus(project)}
+          <div class="row-wrapper">
+            <!-- svelte-ignore a11y_interactive_supports_focus -->
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <div
+              class="row"
+              class:row-missing={s.kind === "missingPath"}
+              class:row-selected={projectsStore.selectedProjectId === project.id}
+              role="row"
+              aria-selected={projectsStore.selectedProjectId === project.id}
+              style="grid-template-columns: {gridTemplate};"
+              onclick={() => handleLaunch(project.id)}
+              oncontextmenu={(e) => openContextMenu(e, project.id)}
+            >
+              <div class="cell cell-name" role="gridcell">
+                <div class="name-path">
+                  <span class="name-text">{project.name}</span>
+                  <span class="path-text" title={project.path}>{project.path}</span>
+                </div>
+              </div>
+              <div class="cell cell-version" role="gridcell">
+                {#if project.unityVersion}
+                  <span class="version-text">{project.unityVersion}</span>
+                {:else}
+                  <span class="muted">—</span>
+                {/if}
+              </div>
+              {#if showModified}
+                <div class="cell cell-modified" role="gridcell">
+                  <RelativeTime iso={project.lastOpenedAt ?? project.lastModifiedAt} />
+                </div>
+              {/if}
+              <div class="cell cell-size" role="gridcell">
+                <span class="size-text">{formatSize(sizeMap[project.path] ?? 0)}</span>
+              </div>
+              <div class="cell cell-status" role="gridcell">
+                <div class="chips">
+                  {#each s.chips as chip}
+                    <StatusChip tone={chip.tone} label={chip.label} title={chip.title} />
+                  {/each}
+                </div>
+              </div>
+              <div class="cell cell-settings" role="gridcell">
+                <button
+                  type="button"
+                  class="settings-btn"
+                  onclick={(e: MouseEvent) => { e.stopPropagation(); openSettingsPopup(project.id); }}
+                  aria-label="Project settings"
+                  title="Project settings"
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="pointer-events: none;">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        {/each}
+      {/if}
     </div>
-  {/if}
+  </div>
 </div>
 
 {#if contextMenu}
   {@const ctxId = contextMenu.projectId}
   {@const ctxProject = projectsStore.find(ctxId)}
   {@const ctxStatus = ctxProject ? statusFor(ctxProject) : null}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_interactive_supports_focus -->
   <div
     class="ctx-menu"
     role="menu"
@@ -852,7 +941,6 @@
       class="ctx-item"
       role="menuitem"
       disabled={ctxStatus?.pathExists === false}
-      title={ctxStatus?.pathExists === false ? "Path missing — cannot open folder" : "Open project folder"}
       onclick={() => {
         if (ctxProject) handleOpenFolder(ctxProject);
         closeContextMenu();
@@ -865,7 +953,6 @@
       class="ctx-item"
       role="menuitem"
       disabled={ctxStatus?.pathExists === false}
-      title={ctxStatus?.pathExists === false ? "Path missing — cannot reveal" : "Reveal in file manager"}
       onclick={() => {
         if (ctxProject) handleReveal(ctxProject);
         closeContextMenu();
@@ -888,14 +975,23 @@
       class="ctx-item ctx-item-destructive"
       role="menuitem"
       disabled={!ctxProject?.lastLaunchPid || killingId === ctxId}
-      title={ctxProject?.lastLaunchPid
-        ? `Terminate pid ${ctxProject.lastLaunchPid} (last launched from this project)`
-        : "No recorded Unity PID — launch Unity once to enable Kill"}
       onclick={() => {
         if (ctxProject) handleKillUnity(ctxProject);
       }}
     >
       {killingId === ctxId ? "Killing…" : "Kill Unity"}
+    </button>
+    <div class="ctx-sep"></div>
+    <button
+      type="button"
+      class="ctx-item"
+      role="menuitem"
+      disabled={ctxStatus?.pathExists === false || refreshingId === ctxId}
+      onclick={() => {
+        if (ctxProject) handleRefreshProject(ctxProject);
+      }}
+    >
+      {refreshingId === ctxId ? "Refreshing…" : "Refresh"}
     </button>
     <div class="ctx-sep"></div>
     <button
@@ -909,6 +1005,201 @@
     >
       {removingId === ctxId ? "Removing…" : "Remove from list"}
     </button>
+  </div>
+{/if}
+
+{#if popupProject}
+  {@const ps = statusFor(popupProject)}
+  {@const popupIsMoreOpen = moreMenuOpenFor === popupProject.id}
+  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+  <div class="settings-overlay" onclick={closeSettingsPopup}>
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <div class="settings-modal" onclick={(e) => e.stopPropagation()}>
+      <div class="settings-modal-header">
+        <div class="settings-modal-titles">
+          <h2>{popupProject.name}</h2>
+          <span class="settings-modal-path" title={popupProject.path}>{popupProject.path}</span>
+        </div>
+        <button
+          type="button"
+          class="modal-close-btn"
+          aria-label="Close"
+          onclick={closeSettingsPopup}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="settings-modal-body">
+        <div class="settings-actions">
+          <Button
+            variant="primary"
+            disabled={!ps.launchable || launching === popupProject.id}
+            onclick={handlePopupLaunch}
+          >
+            {launching === popupProject.id ? "Launching…" : "Launch"}
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={ps.pathExists === false}
+            title={ps.pathExists === false ? "Path missing" : "Open project folder"}
+            onclick={() => handleOpenFolder(popupProject)}
+          >
+            Open Folder
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!popupProject.lastLaunchPid || killingId === popupProject.id}
+            title={popupProject.lastLaunchPid
+              ? `Terminate pid ${popupProject.lastLaunchPid}`
+              : "No recorded Unity PID"}
+            onclick={() => handleKillUnity(popupProject)}
+          >
+            {killingId === popupProject.id ? "Killing…" : "Kill Unity"}
+          </Button>
+          <div class="more-wrap">
+            <Button
+              variant="secondary"
+              onclick={() => toggleMoreMenu(popupProject.id)}
+              aria-haspopup="menu"
+              aria-expanded={popupIsMoreOpen}
+            >
+              More ▾
+            </Button>
+            {#if popupIsMoreOpen}
+              <div class="more-menu" role="menu">
+                <button type="button" class="more-item" role="menuitem"
+                  onclick={() => { moreMenuOpenFor = null; handleCopyPath(popupProject); }}>
+                  Copy path
+                </button>
+                <button type="button" class="more-item" role="menuitem"
+                  disabled={ps.pathExists === false}
+                  onclick={() => handleReveal(popupProject)}>
+                  Reveal in file manager
+                </button>
+                <div class="more-sep"></div>
+                <button type="button" class="more-item" role="menuitem"
+                  disabled={ps.pathExists === false || refreshingId === popupProject.id}
+                  onclick={() => { moreMenuOpenFor = null; handleRefreshProject(popupProject); }}>
+                  {refreshingId === popupProject.id ? "Refreshing…" : "Refresh"}
+                </button>
+                <div class="more-sep"></div>
+                <button type="button" class="more-item more-item-destructive" role="menuitem"
+                  disabled={removingId === popupProject.id}
+                  onclick={() => handleRemove(popupProject.id)}>
+                  {removingId === popupProject.id ? "Removing…" : "Remove from list"}
+                </button>
+              </div>
+            {/if}
+          </div>
+        </div>
+
+        <div class="settings-panels-grid">
+          <section class="mini-panel">
+            <header class="mini-panel-head">
+              <h4 class="mini-panel-title">Launch args</h4>
+            </header>
+            <div class="args-row">
+              <textarea
+                class="args-input"
+                rows="2"
+                spellcheck="false"
+                placeholder="-logFile -batchmode"
+                value={getArgsDraft(popupProject.id)}
+                oninput={(e) => handleArgsInput(popupProject.id, (e.currentTarget as HTMLTextAreaElement).value)}
+                aria-label="Launch args"
+              ></textarea>
+              <div class="args-actions">
+                <Button variant="primary"
+                  disabled={getArgsDraft(popupProject.id) === (popupProject.launchArgs ?? "") || !getArgsDraft(popupProject.id).trim() || !!argsErrors[popupProject.id] || savingArgsFor === popupProject.id}
+                  onclick={() => handleSaveArgs(popupProject)}>
+                  {savingArgsFor === popupProject.id ? "…" : "Save"}
+                </Button>
+                <Button variant="secondary"
+                  disabled={(popupProject.launchArgs ?? "") === "" || savingArgsFor === popupProject.id}
+                  onclick={() => handleResetArgs(popupProject)}>
+                  Reset
+                </Button>
+              </div>
+            </div>
+            {#if argsErrors[popupProject.id]}
+              <p class="field-error">{argsErrors[popupProject.id]}</p>
+            {/if}
+          </section>
+
+          <section class="mini-panel">
+            <header class="mini-panel-head">
+              <h4 class="mini-panel-title">Platform intent</h4>
+            </header>
+            <div class="intent-row">
+              <select class="intent-select"
+                onchange={(e) => handleIntentChange(popupProject.id, (e.currentTarget as HTMLSelectElement).value)}
+                value={getIntentDraft(popupProject.id)}>
+                <option value="">None (default)</option>
+                {#each intentOptions(popupProject.platformIntent ?? "") as target}
+                  <option value={target}>{target}</option>
+                {/each}
+              </select>
+              <Button variant="primary"
+                disabled={getIntentDraft(popupProject.id) === (popupProject.platformIntent ?? "") || savingIntentFor === popupProject.id}
+                onclick={() => handleSaveIntent(popupProject)}>
+                {savingIntentFor === popupProject.id ? "…" : "Save"}
+              </Button>
+            </div>
+            <p class="intent-status">
+              Current: <strong>{popupProject.platformIntent || "—"}</strong>
+            </p>
+          </section>
+
+          <section class="mini-panel">
+            <header class="mini-panel-head">
+              <h4 class="mini-panel-title">Log shortcuts</h4>
+            </header>
+            {#if logPathsMap[popupProject.id]}
+              {@const lp = logPathsMap[popupProject.id]}
+              <div class="log-grid">
+                <div class="log-row">
+                  <span class="log-label">Editor logs</span>
+                  <Button variant="secondary" disabled={!lp.editorLogsFolder}
+                    onclick={() => { if (lp.editorLogsFolder) openPath(lp.editorLogsFolder); }}>
+                    Open folder
+                  </Button>
+                </div>
+                <div class="log-row">
+                  <span class="log-label">Player logs</span>
+                  <Button variant="secondary" disabled={!lp.playerLogsFolder}
+                    onclick={() => { if (lp.playerLogsFolder) openPath(lp.playerLogsFolder); }}>
+                    Open folder
+                  </Button>
+                </div>
+                <div class="log-row">
+                  <span class="log-label">Crash logs</span>
+                  <Button variant="secondary" disabled={!lp.crashLogsFolder}
+                    onclick={() => { if (lp.crashLogsFolder) openPath(lp.crashLogsFolder); }}>
+                    Open folder
+                  </Button>
+                </div>
+                <div class="log-row">
+                  <span class="log-label">Editor.log</span>
+                  {#if lp.editorLogFile}
+                    <button type="button" class="link-btn"
+                      onclick={() => openPath(lp.editorLogFile!)}>
+                      Open file
+                    </button>
+                  {:else}
+                    <span class="muted-inline">—</span>
+                  {/if}
+                </div>
+              </div>
+            {:else}
+              <p class="panel-empty">Loading log paths…</p>
+            {/if}
+          </section>
+        </div>
+      </div>
+    </div>
   </div>
 {/if}
 
@@ -933,6 +1224,49 @@
     flex: 1;
   }
 
+  .icon-btn {
+    align-self: center;
+    width: 2.2rem;
+    height: 2.2rem;
+    padding: 0;
+    border-radius: 6px;
+    border: 1px solid #474957;
+    background: #32343f;
+    color: #d7d8e0;
+    cursor: pointer;
+    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.82rem;
+    font-weight: 500;
+    font-family: inherit;
+  }
+
+  .icon-btn:hover:not(:disabled) {
+    border-color: #5c7cfa;
+    color: #fff;
+  }
+
+  .icon-btn:focus-visible {
+    outline: 2px solid #5c7cfa;
+    outline-offset: 1px;
+  }
+
+  .icon-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .icon-btn .icon-spin {
+    animation: icon-spin 0.9s linear infinite;
+  }
+
+  @keyframes icon-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
   .toolbar-status {
     font-size: 0.78rem;
     color: #8b8d9a;
@@ -951,9 +1285,7 @@
     font-size: 0.82rem;
   }
 
-  .inline-error-text {
-    flex: 1;
-  }
+  .inline-error-text { flex: 1; }
 
   .inline-error-dismiss {
     background: transparent;
@@ -965,9 +1297,7 @@
     padding: 0 0.25rem;
   }
 
-  .inline-error-dismiss:hover {
-    color: #fff;
-  }
+  .inline-error-dismiss:hover { color: #fff; }
 
   .search {
     flex: 0 1 18rem;
@@ -980,13 +1310,8 @@
     outline: none;
   }
 
-  .search::placeholder {
-    color: #6f7280;
-  }
-
-  .search:focus-visible {
-    border-color: #5c7cfa;
-  }
+  .search::placeholder { color: #6f7280; }
+  .search:focus-visible { border-color: #5c7cfa; }
 
   .filter-group {
     display: inline-flex;
@@ -1007,19 +1332,9 @@
     line-height: 1.4;
   }
 
-  .filter-btn:last-child {
-    border-right: none;
-  }
-
-  .filter-btn:hover {
-    color: #fff;
-    background: #2a2b33;
-  }
-
-  .filter-btn.filter-active {
-    background: #32343f;
-    color: #f2f3f7;
-  }
+  .filter-btn:last-child { border-right: none; }
+  .filter-btn:hover { color: #fff; background: #2a2b33; }
+  .filter-btn.filter-active { background: #32343f; color: #f2f3f7; }
 
   .table {
     flex: 1;
@@ -1032,14 +1347,8 @@
     overflow: hidden;
   }
 
-  .table-head,
-  .row {
-    display: grid;
-    gap: 0;
-    align-items: center;
-  }
-
   .table-head {
+    display: grid;
     flex-shrink: 0;
     background: #1e1f26;
     border-bottom: 1px solid #34353f;
@@ -1054,43 +1363,39 @@
     color: #8b8d9a;
     font-weight: 600;
     user-select: none;
+    cursor: default;
   }
+
+  .th-settings { padding: 0.55rem 0.3rem; }
 
   .table-body {
     flex: 1;
     min-height: 0;
-    display: flex;
-    flex-direction: column;
+    overflow-y: auto;
+    padding-top: 0.4rem;
   }
 
-  .row {
+  .row-wrapper {
     border-bottom: 1px solid #24252c;
+  }
+
+  .row-wrapper:last-child { border-bottom: none; }
+
+  .row {
+    display: grid;
+    align-items: center;
     padding: 0 0.25rem;
     cursor: pointer;
     transition: background 0.08s ease;
-    outline: none;
   }
 
-  .row:hover {
-    background: #1e1f26;
-  }
-
-  .row:focus-visible {
-    background: #1e1f26;
-    box-shadow: inset 2px 0 0 #5c7cfa;
-  }
+  .row:hover { background: #1e1f26; }
 
   .row-selected {
     background: #242a3a !important;
   }
 
-  .row-selected:focus-visible {
-    box-shadow: inset 2px 0 0 #5c7cfa;
-  }
-
-  .row-missing {
-    opacity: 0.72;
-  }
+  .row-missing { opacity: 0.72; }
 
   .cell {
     padding: 0 0.7rem;
@@ -1100,15 +1405,62 @@
     white-space: nowrap;
   }
 
-  .cell-name .name-text {
-    font-weight: 500;
+  .cell-settings {
+    padding: 0;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+    border-left: 1px solid #24252c;
+  }
+
+  .settings-btn {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: transparent;
+    color: #8b8d9a;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+    border-radius: 0;
+  }
+
+  .settings-btn:hover {
+    background: #2a2b33;
     color: #e9e9ef;
   }
 
-  .cell-path .path-text {
+  .cell-name {
+    padding: 0.45rem 0.7rem;
+    overflow: visible;
+  }
+
+  .name-path {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .name-text {
+    font-weight: 500;
+    color: #e9e9ef;
+    font-size: 0.88rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .path-text {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.74rem;
-    color: #8b8d9a;
+    font-size: 0.7rem;
+    color: #6f7280;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .cell-version .version-text {
@@ -1117,9 +1469,13 @@
     color: #c5c7d0;
   }
 
-  .muted {
-    color: #6f7280;
+  .cell-size .size-text {
+    font-size: 0.78rem;
+    color: #a1a3b0;
+    font-variant-numeric: tabular-nums;
   }
+
+  .muted { color: #6f7280; }
 
   .chips {
     display: inline-flex;
@@ -1131,76 +1487,160 @@
   .empty-state {
     text-align: center;
     color: #8b8d9a;
+    padding: 2rem 0;
   }
 
-  .empty-state p {
-    margin: 0.2rem 0;
-    font-size: 0.88rem;
-  }
+  .empty-state p { margin: 0.2rem 0; font-size: 0.88rem; }
+  .empty-state .empty-hint { font-size: 0.78rem; color: #6f7280; }
 
-  .empty-state .empty-hint {
-    font-size: 0.78rem;
-    color: #6f7280;
-  }
-
-  .detail-strip {
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.6rem 0.85rem;
-    border: 1px solid #34353f;
-    border-radius: 8px;
-    background: #1e1f26;
-  }
-
-  .detail-summary {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 0.45rem;
-    min-width: 0;
-    flex: 1;
-    overflow: hidden;
-  }
-
-  .detail-name {
-    font-weight: 600;
-    color: #f2f3f7;
-  }
-
-  .detail-version {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.78rem;
-    color: #c5c7d0;
-  }
-
-  .detail-sep {
-    color: #555;
-  }
-
-  .detail-path {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.78rem;
-    color: #8b8d9a;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .detail-actions {
+  .settings-actions {
     display: flex;
     flex-direction: row;
     align-items: center;
     gap: 0.4rem;
-    flex-shrink: 0;
+    flex-wrap: wrap;
   }
 
-  .more-wrap {
-    position: relative;
+  .settings-panels-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
   }
+
+  .mini-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid #2a2b33;
+    border-radius: 6px;
+    background: #1a1b21;
+  }
+
+  .mini-panel-head {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mini-panel-title {
+    margin: 0;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #8b8d9a;
+    font-weight: 600;
+  }
+
+  .args-row {
+    display: flex;
+    flex-direction: row;
+    gap: 0.4rem;
+    align-items: flex-start;
+  }
+
+  .args-input {
+    flex: 1;
+    min-height: 2.4rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid #3f4150;
+    background: #14151a;
+    color: #e9e9ef;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.76rem;
+    line-height: 1.3;
+    resize: vertical;
+    outline: none;
+  }
+
+  .args-input:focus-visible { border-color: #5c7cfa; }
+
+  .args-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .field-error {
+    margin: 0;
+    font-size: 0.74rem;
+    color: #f0a8b8;
+  }
+
+  .intent-row {
+    display: flex;
+    flex-direction: row;
+    gap: 0.35rem;
+    align-items: center;
+  }
+
+  .intent-select {
+    flex: 1;
+    padding: 0.3rem 0.4rem;
+    border-radius: 4px;
+    border: 1px solid #3f4150;
+    background: #14151a;
+    color: #e9e9ef;
+    font-size: 0.78rem;
+    outline: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .intent-select:focus-visible { border-color: #5c7cfa; }
+
+  .intent-status {
+    margin: 0;
+    font-size: 0.72rem;
+    color: #8b8d9a;
+  }
+
+  .intent-status strong {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: #c5c7d0;
+    font-weight: 500;
+  }
+
+  .log-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .log-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .log-label {
+    flex: 0 0 5.5rem;
+    font-size: 0.72rem;
+    color: #c5c7d0;
+    font-weight: 500;
+  }
+
+  .link-btn {
+    background: transparent;
+    border: 1px solid #3f4150;
+    border-radius: 4px;
+    padding: 0.25rem 0.5rem;
+    color: #c5c7d0;
+    font-size: 0.74rem;
+    cursor: pointer;
+  }
+
+  .link-btn:hover { border-color: #5c7cfa; color: #fff; }
+
+  .muted-inline { color: #6f7280; font-size: 0.74rem; }
+
+  .panel-empty {
+    margin: 0;
+    font-size: 0.74rem;
+    color: #6f7280;
+  }
+
+  .more-wrap { position: relative; }
 
   .more-menu {
     position: absolute;
@@ -1228,26 +1668,12 @@
     cursor: pointer;
   }
 
-  .more-item:hover {
-    background: #2a2b33;
-    color: #fff;
-  }
+  .more-item:hover { background: #2a2b33; color: #fff; }
 
-  .more-item-destructive {
-    color: #f0a8b8;
-  }
-
-  .more-item-destructive:hover {
-    background: #3a1a25;
-    color: #fff;
-  }
-
+  .more-item-destructive { color: #f0a8b8; }
+  .more-item-destructive:hover { background: #3a1a25; color: #fff; }
   .more-item-destructive:disabled,
-  .more-item:disabled {
-    color: #555;
-    cursor: not-allowed;
-    background: transparent;
-  }
+  .more-item:disabled { color: #555; cursor: not-allowed; background: transparent; }
 
   .more-sep {
     height: 1px;
@@ -1279,30 +1705,100 @@
     cursor: pointer;
   }
 
-  .ctx-item:hover {
-    background: #2a2b33;
-    color: #fff;
-  }
-
-  .ctx-item-destructive {
-    color: #f0a8b8;
-  }
-
-  .ctx-item-destructive:hover {
-    background: #3a1a25;
-    color: #fff;
-  }
-
+  .ctx-item:hover { background: #2a2b33; color: #fff; }
+  .ctx-item-destructive { color: #f0a8b8; }
+  .ctx-item-destructive:hover { background: #3a1a25; color: #fff; }
   .ctx-item-destructive:disabled,
-  .ctx-item:disabled {
-    color: #555;
-    cursor: not-allowed;
-    background: transparent;
-  }
+  .ctx-item:disabled { color: #555; cursor: not-allowed; background: transparent; }
 
   .ctx-sep {
     height: 1px;
     background: #34353f;
     margin: 0.25rem 0;
+  }
+
+  .settings-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .settings-modal {
+    background: #24252c;
+    border: 1px solid #3f4150;
+    border-radius: 12px;
+    width: min(40rem, 92vw);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  }
+
+  .settings-modal-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid #34353f;
+  }
+
+  .settings-modal-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+  }
+
+  .settings-modal-header h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #f2f3f7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .settings-modal-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.7rem;
+    color: #6f7280;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .settings-modal-body {
+    padding: 0.85rem 1rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    overflow-y: auto;
+  }
+
+  .modal-close-btn {
+    padding: 0.3rem;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #8b8d9a;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .modal-close-btn:hover {
+    color: #fff;
+    border-color: #474957;
+    background: #32343f;
   }
 </style>

@@ -10,7 +10,7 @@
   import SettingsTab from "$lib/tabs/SettingsTab.svelte";
 </script>
 
-<div class="shell" role="application" aria-label="Unity Agent Hub">
+<div class="shell" role="application" aria-label="Unity AI Hub">
   <div class="app">
     <TopBar />
 
@@ -67,12 +67,12 @@
   .app {
     flex: 1;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
+    min-width: 0;
+    overflow: hidden;
     box-sizing: border-box;
-    padding: 1rem 1.25rem 0.5rem;
-    gap: 1rem;
+    padding: 0.75rem;
+    gap: 0.75rem;
   }
 </style>
