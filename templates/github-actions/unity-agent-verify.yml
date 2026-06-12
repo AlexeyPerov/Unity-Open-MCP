@@ -1,0 +1,41 @@
+name: unity-agent-verify
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install MCP dependencies
+        working-directory: mcp-server
+        run: npm ci
+
+      - name: Build MCP server
+        working-directory: mcp-server
+        run: npm run build
+
+      # Replace with your preferred Unity setup action and license strategy.
+      - name: Baseline create (example command)
+        env:
+          UNITY_PROJECT_PATH: demo
+          UNITY_PATH: /opt/unity/Editor/Unity
+        run: |
+          node mcp-server/dist/index.js --help || true
+          echo "Run unity_agent_baseline_create via your MCP client or batch wrapper here."
+
+      - name: Regression check (example command)
+        env:
+          UNITY_PROJECT_PATH: demo
+          UNITY_PATH: /opt/unity/Editor/Unity
+        run: |
+          echo "Run unity_agent_regression_check and fail on non-zero exit."

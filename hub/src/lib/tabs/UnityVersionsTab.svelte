@@ -51,16 +51,6 @@
       }
       if (cancelled) return;
       await discoveryStore.load();
-      if (cancelled) return;
-      try {
-        const result = await fetchReleases(includeArchived);
-        if (cancelled) return;
-        releases = result;
-      } catch (e) {
-        if (cancelled) return;
-        const msg = e instanceof Error ? e.message : String(e);
-        releasesError = `could not load releases: ${msg}`;
-      }
     })();
     window.addEventListener("click", closeReleasesContext, true);
 
