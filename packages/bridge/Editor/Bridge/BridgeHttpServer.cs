@@ -30,14 +30,18 @@ namespace UnityAgentBridge
             "unity_agent_find_members",
             "unity_agent_validate_edit",
             "unity_agent_checkpoint_create",
-            "unity_agent_delta"
+            "unity_agent_delta",
+            "unity_agent_find_references",
+            "unity_agent_scan_paths"
         };
 
         static readonly HashSet<string> DirectResponseTools = new()
         {
             "unity_agent_validate_edit",
             "unity_agent_checkpoint_create",
-            "unity_agent_delta"
+            "unity_agent_delta",
+            "unity_agent_find_references",
+            "unity_agent_scan_paths"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -343,6 +347,8 @@ namespace UnityAgentBridge
                 "unity_agent_validate_edit" => ValidateEditTool.Execute(body),
                 "unity_agent_checkpoint_create" => CheckpointCreateTool.Execute(body),
                 "unity_agent_delta" => DeltaTool.Execute(body),
+                "unity_agent_find_references" => FindReferencesTool.Execute(body),
+                "unity_agent_scan_paths" => ScanPathsTool.Execute(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

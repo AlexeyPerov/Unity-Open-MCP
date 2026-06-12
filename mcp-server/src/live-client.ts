@@ -11,6 +11,8 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_agent_validate_edit",
   "unity_agent_checkpoint_create",
   "unity_agent_delta",
+  "unity_agent_find_references",
+  "unity_agent_scan_paths",
 ]);
 
 interface PingResponse {
