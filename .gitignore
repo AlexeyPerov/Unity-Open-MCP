@@ -1,4 +1,4 @@
-**/specs/**
+/specs/
 /references/
 node_modules/
 dist/
