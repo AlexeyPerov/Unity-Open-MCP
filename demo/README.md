@@ -69,6 +69,23 @@ These assets are designed for controlled broken/fixed reference checks:
 - **Break a reference**: Remove or rename the prefab file while the scene references it → `missing_references` rule detects the broken reference.
 - **Fix a reference**: Restore the prefab file → gate delta shows `resolvedErrors: 1`.
 
+## Gate Test Fixtures (M3)
+
+Located in `Assets/Fixtures/`. These prefabs provide controlled break/fix scenarios for EditMode tests and manual E2E checklists.
+
+| Fixture | Path | Scenario |
+|---|---|---|
+| **HealthyFixture** | `Assets/Fixtures/HealthyFixture.prefab` | Minimal prefab with no issues. Used as the "clean" baseline for gate pass checks and delta comparisons. |
+| **MissingScriptFixture** | `Assets/Fixtures/MissingScriptFixture.prefab` | Prefab with a MonoBehaviour whose `m_Script` GUID (`deadbeef…`) points to a nonexistent script. Triggers `missing_references` / `missing_script` issue. Fixable via `apply_fix` (remove missing script). |
+| **BrokenRefFixture** | `Assets/Fixtures/BrokenRefFixture.prefab` | Prefab with a MeshFilter whose `m_Mesh` GUID (`aaaaaaaa…`) points to a nonexistent asset. Triggers `missing_references` / `missing_guid` issue. |
+| **RestorableRefFixture** | `Assets/Fixtures/RestorableRefFixture.prefab` | Healthy prefab referencing Unity built-in Cube mesh. Edit the `m_Mesh` GUID to a fake value to break → gate fails; restore the original GUID (`0000000000000000e000000000000000`) → gate passes. Used for checkpoint → mutate → delta workflows. |
+
+### Usage in tests
+
+- **EditMode tests** in `packages/verify/Tests~/Editor/` reference these fixture paths for reproducible rule testing.
+- **Manual E2E checklist** (`specs/execution/M3/m3-manual-e2e-checklist.md`) uses these paths in curl commands.
+- **Bridge `file:` wiring**: demo `manifest.json` includes both `bridge` and `verify` packages so fixtures are scanned by M3 rules.
+
 ## Package References
 
 The demo uses local `file:` references in `Packages/manifest.json`:
