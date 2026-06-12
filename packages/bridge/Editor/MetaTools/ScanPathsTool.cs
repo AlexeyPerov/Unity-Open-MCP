@@ -1,5 +1,6 @@
 using System.Text;
 using UnityAgentVerify;
+using UnityAgentVerify.Fixes;
 
 namespace UnityAgentBridge.MetaTools
 {
@@ -63,6 +64,11 @@ namespace UnityAgentBridge.MetaTools
                 sb.Append("\"assetPath\":\"").Append(Esc(issue.AssetPath)).Append("\",");
                 sb.Append("\"description\":\"").Append(Esc(issue.Description)).Append("\",");
                 sb.Append("\"ruleId\":\"").Append(Esc(issue.RuleId)).Append("\"");
+                if (FixProviderRegistry.TryGetFixInfo(issue.RuleId, issue.IssueCode, out var fixId, out var safe))
+                {
+                    sb.Append(",\"fixId\":\"").Append(Esc(fixId)).Append("\"");
+                    sb.Append(",\"fixSafe\":").Append(safe ? "true" : "false");
+                }
                 sb.Append('}');
             }
             sb.Append(']');

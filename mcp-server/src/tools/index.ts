@@ -10,6 +10,7 @@ import { checkpointCreate } from "./checkpoint-create.js";
 import { delta } from "./delta.js";
 import { findReferences } from "./find-references.js";
 import { scanPaths } from "./scan-paths.js";
+import { applyFix } from "./apply-fix.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -21,6 +22,6 @@ export const M2_TOOLS: Tool[] = [
 
 export const M2_5_TOOLS: Tool[] = [editorStatus];
 
-export const M3_TOOLS: Tool[] = [validateEdit, checkpointCreate, delta, findReferences, scanPaths];
+export const M3_TOOLS: Tool[] = [validateEdit, checkpointCreate, delta, findReferences, scanPaths, applyFix];
 
 export const ALL_TOOLS: Tool[] = [...M2_TOOLS, ...M2_5_TOOLS, ...M3_TOOLS];

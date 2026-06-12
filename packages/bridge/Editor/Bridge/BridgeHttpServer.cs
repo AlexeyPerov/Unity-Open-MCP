@@ -32,7 +32,8 @@ namespace UnityAgentBridge
             "unity_agent_checkpoint_create",
             "unity_agent_delta",
             "unity_agent_find_references",
-            "unity_agent_scan_paths"
+            "unity_agent_scan_paths",
+            "unity_agent_apply_fix"
         };
 
         static readonly HashSet<string> DirectResponseTools = new()
@@ -48,7 +49,8 @@ namespace UnityAgentBridge
         {
             "unity_agent_execute_csharp",
             "unity_agent_invoke_method",
-            "unity_agent_execute_menu"
+            "unity_agent_execute_menu",
+            "unity_agent_apply_fix"
         };
 
         static HttpListener _listener;
@@ -278,13 +280,22 @@ namespace UnityAgentBridge
                 pathsHint = JsonBody.GetStringArray(body, "paths_hint");
                 if (pathsHint == null || pathsHint.Length == 0)
                 {
-                    bool skipPathsHint = toolName == "unity_agent_execute_menu"
-                        && ExecuteMenuTool.IsReadOnlyMenu(JsonBody.GetString(body, "menu_path"));
-
-                    if (!skipPathsHint)
+                    if (toolName == "unity_agent_apply_fix")
                     {
-                        SendJson(context, 200, BuildPathsHintErrorEnvelope(toolName, effectiveGateMode));
-                        return;
+                        var issueId = JsonBody.GetString(body, "issue_id");
+                        pathsHint = PathsFromIssueId(issueId);
+                    }
+
+                    if (pathsHint == null || pathsHint.Length == 0)
+                    {
+                        bool skipPathsHint = toolName == "unity_agent_execute_menu"
+                            && ExecuteMenuTool.IsReadOnlyMenu(JsonBody.GetString(body, "menu_path"));
+
+                        if (!skipPathsHint)
+                        {
+                            SendJson(context, 200, BuildPathsHintErrorEnvelope(toolName, effectiveGateMode));
+                            return;
+                        }
                     }
                 }
             }
@@ -349,6 +360,7 @@ namespace UnityAgentBridge
                 "unity_agent_delta" => DeltaTool.Execute(body),
                 "unity_agent_find_references" => FindReferencesTool.Execute(body),
                 "unity_agent_scan_paths" => ScanPathsTool.Execute(body),
+                "unity_agent_apply_fix" => ApplyFixTool.Execute(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };
@@ -443,6 +455,16 @@ namespace UnityAgentBridge
 
             var value = body.Substring(start, end - start);
             return value is "enforce" or "warn" or "off" ? value : "enforce";
+        }
+
+        static string[] PathsFromIssueId(string issueId)
+        {
+            if (string.IsNullOrEmpty(issueId)) return null;
+            var parts = issueId.Split('|');
+            if (parts.Length < 3) return null;
+            var assetPath = parts[2];
+            if (string.IsNullOrEmpty(assetPath)) return null;
+            return new[] { assetPath };
         }
 
         static string BuildGateEnvelope(GateDispatchResult result, string gateMode)

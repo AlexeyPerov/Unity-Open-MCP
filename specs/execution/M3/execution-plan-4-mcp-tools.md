@@ -94,7 +94,7 @@ Dependencies: Plan 1 complete; Plan 3 stable.
 
 ---
 
-#### Task 5: `unity_agent_apply_fix` — minimal safe fix (M3-20) [Score:7] [Agent:medium]
+#### Task 5: `unity_agent_apply_fix` — minimal safe fix (M3-20) [Score:7] [Agent:medium] ~~DONE~~
 
 **Required context**
 
@@ -116,7 +116,7 @@ Dependencies: Plans 1–3; Tasks 1–4 for issue `fixId` wiring.
 
 ---
 
-#### Task 6: MCP `isError` mapping regression (M3-21) [Score:4] [Agent:easy]
+#### Task 6: MCP `isError` mapping regression (M3-21) [Score:4] [Agent:easy] ~~DONE~~
 
 **Required context**
 
