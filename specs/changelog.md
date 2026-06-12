@@ -1,3 +1,7 @@
+## 2026-06-13 23:00 MSK (bridge)
+
+- **M3 Plan 3 Task 1: Bridge hard dependency on verify package.** Bridge `package.json` already listed `com.alexeyperov.unity-agent-verify` as a UPM dependency. Demo `manifest.json` already wired both packages via `file:`. No soft-degraded gate path exists — `VerifyGateAdapter` uses direct `using` statements, so compilation fails if verify is absent (Q8 A). Added "Hard dependency on verify package (M3+)" section to [bridge.md](specs/packages/bridge.md) documenting the hard dependency, compile-time failure behavior, and demo wiring.
+
 ## 2026-06-13 22:00 MSK (verify + bridge)
 
 - **M3 Plan 2 Task 3: ReferenceGraph EditMode tests.** Created test assemblies and EditMode tests for reverse dependency lookup and `max_results` truncation.
