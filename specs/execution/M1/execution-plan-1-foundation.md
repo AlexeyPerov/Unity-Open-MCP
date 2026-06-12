@@ -47,7 +47,7 @@ Dependencies: none.
   - button variants (primary/secondary/destructive)
   - confirmation modal overlay skeleton
   - status/log drawer shell (collapsible, empty state)
-- Apply Hub branding ("Unity Agent Hub") and semantic status color tokens per hub-ui.
+- Apply Hub branding ("Unity Hub Pro") and semantic status color tokens per hub-ui.
 - Wire tab routing/state so each tab renders a placeholder panel.
 - Global Refresh button in top bar (no-op handler stub).
 
@@ -71,8 +71,8 @@ Dependencies: Task 1.
 3. Task 1 Tauri scaffold — filesystem API permissions
 
 - Implement config path resolver:
-  - macOS/Linux: `~/.config/unity-agent-hub/`
-  - Windows: `%APPDATA%\unity-agent-hub\`
+  - macOS/Linux: `~/.config/unity-hub-pro/`
+  - Windows: `%APPDATA%\unity-hub-pro\`
 - Define typed schemas for `settings.json` and `projects.json` (version field, safe defaults).
 - Implement read/write layer with:
   - atomic write (temp file + rename) or equivalent safe pattern

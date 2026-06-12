@@ -379,14 +379,14 @@
     const stamp =
       `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
       `_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-    return `unity-agent-hub-diagnostics-${stamp}`;
+    return `unity-hub-pro-diagnostics-${stamp}`;
   }
 
   const CLI_HELP_TEXT = [
-    "unity-agent-hub - launch a Unity project from the terminal.",
+    "unity-hub-pro - launch a Unity project from the terminal.",
     "",
     "USAGE:",
-    "  unity-agent-hub -projectPath <path>",
+    "  unity-hub-pro -projectPath <path>",
     "",
     "OPTIONS:",
     "  -projectPath <path>   Open the Unity project at <path> with the matching",
@@ -400,11 +400,11 @@
     "  0   Unity was spawned successfully.",
     "  1   The path is missing, not a directory, not a Unity project root,",
     "      the project's Unity version is not installed, or the spawn failed.",
-    "      A one-line 'unity-agent-hub: <reason>' message is written to stderr.",
+    "      A one-line 'unity-hub-pro: <reason>' message is written to stderr.",
     "",
     "EXAMPLES:",
-    "  unity-agent-hub -projectPath ~/Projects/MyUnityGame",
-    "  unity-agent-hub -projectPath \"C:\\Users\\me\\Unity\\MyProject\"",
+    "  unity-hub-pro -projectPath ~/Projects/MyUnityGame",
+    "  unity-hub-pro -projectPath \"C:\\Users\\me\\Unity\\MyProject\"",
   ].join("\n");
 
   async function handleCopyCliHelp() {
@@ -999,7 +999,7 @@
                 <span class="check-desc">
                   When a Unity launch fails, expand the Status / Log drawer and
                   tail the last 200 lines from the per-launch log
-                  (<code>~/.config/unity-agent-hub/logs/launches.log</code>).
+                  (<code>~/.config/unity-hub-pro/logs/launches.log</code>).
                   When off, failures are still logged but the drawer stays as
                   you left it.
                 </span>
@@ -1051,8 +1051,8 @@
             {/if}
             <div class="cli-help">
               <span class="cli-help-label">CLI mode</span>
-              <code class="cli-help-cmd" title="unity-agent-hub -projectPath &lt;path&gt;"
-                >unity-agent-hub -projectPath &lt;path&gt;</code
+              <code class="cli-help-cmd" title="unity-hub-pro -projectPath &lt;path&gt;"
+                >unity-hub-pro -projectPath &lt;path&gt;</code
               >
               <Button
                 variant="secondary"

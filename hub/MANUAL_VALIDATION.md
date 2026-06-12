@@ -1,4 +1,4 @@
-# Unity Agent Hub — M1 Manual Validation Checklist
+# Unity Hub Pro — M1 Manual Validation Checklist
 
 **Scope:** [specs/hub/hub-requirements.md](../../specs/hub/hub-requirements.md) §V1 done criteria, executed on Windows + macOS.
 **Plan:** [specs/execution/M1/execution-plan-4-settings-validation.md](../../specs/execution/M1/execution-plan-4-settings-validation.md) Task 4.
@@ -23,7 +23,7 @@ Notes:
 
 | # | Step | Expected | Result |
 |---|------|----------|--------|
-| 1.1 | Launch Hub with no prior config (delete or rename `~/.config/unity-agent-hub/` on macOS/Linux; `%APPDATA%\unity-agent-hub\` on Windows) | App opens with default Settings; Projects tab shows imported Unity Hub projects (or empty state if Hub not installed) | ☐ |
+| 1.1 | Launch Hub with no prior config (delete or rename `~/.config/unity-hub-pro/` on macOS/Linux; `%APPDATA%\unity-hub-pro\` on Windows) | App opens with default Settings; Projects tab shows imported Unity Hub projects (or empty state if Hub not installed) | ☐ |
 | 1.2 | Open Settings → Diagnostics → Reveal `settings.json` | OS file manager opens at the right path with both files visible | ☐ |
 | 1.3 | Open Settings → Diagnostics → Reveal `projects.json` | OS file manager opens at the right path; if Unity Hub was installed, file contains seeded entries with stable `id` UUIDs and ISO 8601 timestamps | ☐ |
 | 1.4 | Quit and relaunch | Projects list is unchanged; no duplicate entries appear | ☐ |
@@ -118,10 +118,10 @@ Notes:
 | 6.6 | Uncheck *Confirm before removing project from list*; remove a project | No modal; row removed | ☐ |
 | 6.7 | Settings → Additional parent folders → **Add Folder** with the same path that's already in the list | The entry is **not** duplicated; no discovery rescan is triggered (drawer stays quiet) | ☐ |
 | 6.8 | Tweak any toggle and watch the sticky footer | Footer shows `Saving…` → `Saved ✓`; on a forced error (corrupt disk / read-only) footer shows `Save failed` and drawer logs the reason | ☐ |
-| 6.9 | Settings → Diagnostics → **Export diagnostics bundle…** | Native save dialog opens with default name `unity-agent-hub-diagnostics-YYYY-MM-DD_HH-MM-SS`; after confirming, the folder is created and contains `settings.json`, `projects.json`, `version.txt`, and (if the drawer has logs) `log.txt` | ☐ |
+| 6.9 | Settings → Diagnostics → **Export diagnostics bundle…** | Native save dialog opens with default name `unity-hub-pro-diagnostics-YYYY-MM-DD_HH-MM-SS`; after confirming, the folder is created and contains `settings.json`, `projects.json`, `version.txt`, and (if the drawer has logs) `log.txt` | ☐ |
 | 6.10 | Open the exported `version.txt` | Contains app name, version (`0.1.0`), target arch, build profile, ISO 8601 timestamp | ☐ |
 | 6.11 | Force an unwritable target (e.g. choose a read-only location) | Inline error appears; drawer logs `export failed: <reason>`; no partial bundle left behind | ☐ |
-| 6.12 | Set the version label in the footer | Reads `Unity Agent Hub v0.1.0 · build` (matches [hub/src/lib/version.ts](src/lib/version.ts) and `tauri.conf.json`) | ☐ |
+| 6.12 | Set the version label in the footer | Reads `Unity Hub Pro v0.1.0 · build` (matches [hub/src/lib/version.ts](src/lib/version.ts) and `tauri.conf.json`) | ☐ |
 
 Notes:
 

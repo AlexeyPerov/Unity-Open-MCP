@@ -1,4 +1,4 @@
-# Unity Agent Hub (`hub/`)
+# Unity Hub Pro (`hub/`)
 
 Greenfield desktop scaffold for Hub v1 using Tauri 2 + SvelteKit + Svelte 5.
 
@@ -25,7 +25,7 @@ Versions match `vibe-launcher` as required by M1 scaffold specs:
 
 ## Current scope
 
-- Empty main window with branded app metadata (`Unity Agent Hub`).
+- Empty main window with branded app metadata (`Unity Hub Pro`).
 - Baseline Tauri capabilities for upcoming M1 work:
   - `core:default`
   - `fs:default`
@@ -37,9 +37,9 @@ Versions match `vibe-launcher` as required by M1 scaffold specs:
 
 All Hub state lives in a platform-specific config directory:
 
-- **macOS:** `~/.config/unity-agent-hub/`
-- **Windows:** `%APPDATA%\unity-agent-hub\`
-- **Linux:** `~/.config/unity-agent-hub/`
+- **macOS:** `~/.config/unity-hub-pro/`
+- **Windows:** `%APPDATA%\unity-hub-pro\`
+- **Linux:** `~/.config/unity-hub-pro/`
 
 Both JSON files are created with safe defaults on first access. Corrupt or missing files are restored to defaults with a `.json.corrupt` backup of the original.
 
@@ -62,7 +62,7 @@ These call Tauri commands that handle atomic writes (temp file + rename) and cor
 ### Verifying config persistence
 
 1. `npm run tauri dev` to launch the app.
-2. Check `~/.config/unity-agent-hub/` (macOS) — both `settings.json` and `projects.json` should exist with default content.
+2. Check `~/.config/unity-hub-pro/` (macOS) — both `settings.json` and `projects.json` should exist with default content.
 3. Call `saveSettings` with modified data, then reload — changes should persist.
 4. Manually truncate `settings.json` and restart — app should recover with defaults and a `.json.corrupt` backup.
 
@@ -112,10 +112,10 @@ The seed reads `projects-v1.json` from the Unity Hub data directory. This file h
 The Hub writes a per-launch record (one JSON object per line) to:
 
 ```
-~/.config/unity-agent-hub/logs/launches.log
+~/.config/unity-hub-pro/logs/launches.log
 ```
 
-On Windows the same file lives under `%LOCALAPPDATA%\unity-agent-hub\logs\launches.log`.
+On Windows the same file lives under `%LOCALAPPDATA%\unity-hub-pro\logs\launches.log`.
 
 ### Record fields
 
@@ -252,7 +252,7 @@ Unity install and spawns the editor. The Hub window is never opened.
 ### Usage
 
 ```text
-unity-agent-hub -projectPath <path>
+unity-hub-pro -projectPath <path>
 ```
 
 `-projectPath=<path>` and `--projectPath <path>` are accepted as
@@ -260,19 +260,19 @@ aliases. From a terminal in the project root:
 
 ```bash
 # macOS / Linux
-unity-agent-hub -projectPath "$PWD"
+unity-hub-pro -projectPath "$PWD"
 
 # Windows (PowerShell)
-unity-agent-hub -projectPath "$PWD"
+unity-hub-pro -projectPath "$PWD"
 
 # Windows (cmd)
-unity-agent-hub -projectPath "%CD%"
+unity-hub-pro -projectPath "%CD%"
 ```
 
 ### Behavior
 
 - The path must be a Unity project root (`Assets/` + `ProjectSettings/`).
-  Invalid paths print `unity-agent-hub: <reason>` to stderr and the
+  Invalid paths print `unity-hub-pro: <reason>` to stderr and the
   process exits with status `1`.
 - The Unity version is read from `ProjectSettings/ProjectVersion.txt`,
   matched against the same discovery feed the Settings → Unity Versions
@@ -293,12 +293,12 @@ unity-agent-hub -projectPath "%CD%"
 | Code | Meaning |
 |---|---|
 | `0` | Unity was spawned successfully. |
-| `1` | The path is missing, not a directory, not a Unity project root, the project's Unity version is not installed, or the spawn failed. A one-line `unity-agent-hub: <reason>` message is written to stderr. |
+| `1` | The path is missing, not a directory, not a Unity project root, the project's Unity version is not installed, or the spawn failed. A one-line `unity-hub-pro: <reason>` message is written to stderr. |
 
 ### macOS .app bundle
 
 When launched from Finder, the macOS bundle does not receive the
-`-projectPath` flag in argv. Use Terminal (`open -a "Unity AI Hub" --args -projectPath /path`)
+`-projectPath` flag in argv. Use Terminal (`open -a "Unity Hub Pro" --args -projectPath /path`)
 or invoke the binary in the bundle directly
 (`/Applications/Unity\ AI\ Hub.app/Contents/MacOS/hub -projectPath /path`).
 The CLI mode does not require single-instance protection for v1: a

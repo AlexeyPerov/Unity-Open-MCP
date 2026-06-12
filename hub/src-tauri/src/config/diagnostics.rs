@@ -219,7 +219,7 @@ use crate::config::schemas::{ProjectEntry, ProjectsFile, Settings};
     #[test]
     fn diagnostics_paths_uses_config_dir() {
         let p = get_diagnostics_paths();
-        assert!(p.config_dir.ends_with("unity-agent-hub"));
+        assert!(p.config_dir.ends_with("unity-hub-pro"));
         assert!(p.settings_file.ends_with("settings.json"));
         assert!(p.projects_file.ends_with("projects.json"));
     }

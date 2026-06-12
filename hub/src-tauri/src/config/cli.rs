@@ -58,9 +58,9 @@ pub enum CliDecision {
 /// from both GUI and CLI flows.
 pub fn print_help() {
     println!(
-        "unity-agent-hub {version}\n\n\
+        "unity-hub-pro {version}\n\n\
          USAGE:\n  \
-           unity-agent-hub -projectPath <path>\n\n\
+           unity-hub-pro -projectPath <path>\n\n\
          OPTIONS:\n  \
            -projectPath <path>   Open the Unity project at <path> with the\n  \
                                  matching installed Unity version and exit.\n  \
@@ -143,13 +143,13 @@ fn is_unity_project_root(path: &Path) -> Result<(), String> {
 }
 
 /// Print a one-line error to stderr and return the exit code. Centralised
-/// so all CLI failure paths produce the same `unity-agent-hub: <message>`
+/// so all CLI failure paths produce the same `unity-hub-pro: <message>`
 /// shape on stderr (matches GNU coreutils' convention). Always exits
 /// with status `1` — the launch flow does not currently distinguish
 /// failure categories in the exit code, so the user can rely on
-/// `if unity-agent-hub -projectPath …; then …` to mean "Unity opened".
+/// `if unity-hub-pro -projectPath …; then …` to mean "Unity opened".
 fn cli_error(message: impl AsRef<str>) -> u8 {
-    eprintln!("unity-agent-hub: {}", message.as_ref());
+    eprintln!("unity-hub-pro: {}", message.as_ref());
     1
 }
 
@@ -250,7 +250,7 @@ pub fn run_cli_mode(decision: CliDecision) -> ExitCode {
     record_cli_launch(&project_path.to_string_lossy(), &version, pid);
 
     println!(
-        "unity-agent-hub: launched Unity {} (pid {}) for {}",
+        "unity-hub-pro: launched Unity {} (pid {}) for {}",
         version,
         pid,
         project_path.display()

@@ -18,7 +18,7 @@ How to use this plan: each task lists **Required context** — read only those d
 2. `tauri-plugin-cli` documentation
 3. [hub/README.md](../../../hub/README.md) — distribution / install path notes
 
-- Integrate `tauri-plugin-cli` and parse `unity-agent-hub -projectPath "<path>"` at startup.
+- Integrate `tauri-plugin-cli` and parse `unity-hub-pro -projectPath "<path>"` at startup.
 - If `projectPath` is provided and the path is a valid Unity project root:
   - resolve the matching Unity version using the M1 discovery service
   - spawn Unity with the same command builder as a normal launch
@@ -29,7 +29,7 @@ How to use this plan: each task lists **Required context** — read only those d
 
 **Acceptance checklist**
 
-- `unity-agent-hub -projectPath "<path>"` from a terminal launches the matching Unity on Windows and macOS.
+- `unity-hub-pro -projectPath "<path>"` from a terminal launches the matching Unity on Windows and macOS.
 - Invalid path produces a non-zero exit code and a one-line error.
 - The Hub window does not appear when `projectPath` is provided (verify on both platforms).
 - The M1 launch resolver is reused as-is; no duplicated launch path.

@@ -739,7 +739,7 @@ No new MCP tools or resources. Documentation and skill templates for using **ext
 | **Unity official MCP** | Optional verify-only sidecar — mutate with official tools, validate with Hub |
 | **IvanMurzak MCP** | Optional verify-only sidecar — same pattern |
 
-Pattern: **act with any bridge, verify with Unity Agent Hub stack.**
+Pattern: **act with any bridge, verify with Unity Hub Pro stack.**
 
 Deliverables: adapter docs in `specs/` or `skills/`, example post-mutation scripts, no duplicate typed tools in `unity-agent-mcp`.
 

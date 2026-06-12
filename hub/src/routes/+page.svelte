@@ -10,7 +10,7 @@
   import SettingsTab from "$lib/tabs/SettingsTab.svelte";
 </script>
 
-<div class="shell" role="application" aria-label="Unity AI Hub">
+<div class="shell" role="application" aria-label="Unity Hub Pro">
   <div class="app">
     <TopBar />
 

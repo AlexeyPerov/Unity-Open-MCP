@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-const CONFIG_DIR_NAME: &str = "unity-agent-hub";
+const CONFIG_DIR_NAME: &str = "unity-hub-pro";
 
 pub fn config_dir() -> PathBuf {
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));

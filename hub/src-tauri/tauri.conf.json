@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Unity AI Hub",
+  "productName": "Unity Hub Pro",
   "version": "0.1.0",
-  "identifier": "com.alexeyperov.unity-agent-hub",
+  "identifier": "com.alexeyperov.unity-hub-pro",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Unity AI Hub",
+        "title": "Unity Hub Pro",
         "width": 1280,
         "height": 900,
         "resizable": true
@@ -24,7 +24,7 @@
   },
   "plugins": {
     "cli": {
-      "description": "Unity AI Hub — manage and launch Unity projects. In CLI mode, pass -projectPath to launch a project and exit without opening the Hub window.",
+      "description": "Unity Hub Pro — manage and launch Unity projects. In CLI mode, pass -projectPath to launch a project and exit without opening the Hub window.",
       "args": [
         {
           "name": "projectPath",
