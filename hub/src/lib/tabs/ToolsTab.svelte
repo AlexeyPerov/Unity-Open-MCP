@@ -357,10 +357,10 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.45rem 0.7rem;
-    border: 1px solid #5a2333;
+    border: 1px solid var(--hub-error-fg);
     border-radius: 6px;
-    background: #2a1320;
-    color: #f0a8b8;
+    background: var(--hub-error-bg);
+    color: var(--hub-error-fg);
     font-size: 0.82rem;
   }
 
@@ -369,23 +369,23 @@
   .inline-error-dismiss {
     background: transparent;
     border: none;
-    color: #f0a8b8;
+    color: var(--hub-error-fg);
     cursor: pointer;
     font-size: 1rem;
     line-height: 1;
     padding: 0 0.25rem;
   }
 
-  .inline-error-dismiss:hover { color: #fff; }
+  .inline-error-dismiss:hover { color: var(--hub-text-bright); }
 
   .panel {
     display: flex;
     flex-direction: column;
     gap: 0.45rem;
     padding: 0.7rem 0.85rem;
-    border: 1px solid #34353f;
+    border: 1px solid var(--hub-border);
     border-radius: 8px;
-    background: #1a1b21;
+    background: var(--hub-bg);
   }
 
   .panel-head {
@@ -399,41 +399,41 @@
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    color: #c5c7d0;
+    color: var(--hub-text-dim);
     font-weight: 600;
   }
 
   .panel-hint {
     margin: 0;
     font-size: 0.78rem;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
   }
 
   .panel-hint code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.76rem;
-    background: #2a2b33;
+    background: var(--hub-bg);
     padding: 0 0.3rem;
     border-radius: 3px;
-    color: #d7d8e0;
+    color: var(--hub-text);
   }
 
   .panel-empty {
     margin: 0;
     font-size: 0.82rem;
-    color: #6f7280;
+    color: var(--hub-text-placeholder);
   }
 
   .field-error {
     margin: 0;
     font-size: 0.78rem;
-    color: #f0a8b8;
+    color: var(--hub-error-fg);
   }
 
   .field-hint {
     margin: 0;
     font-size: 0.76rem;
-    color: #b89e5a;
+    color: var(--hub-warning);
     line-height: 1.4;
   }
 
@@ -454,7 +454,7 @@
   .log-label {
     flex: 0 0 7rem;
     font-size: 0.78rem;
-    color: #c5c7d0;
+    color: var(--hub-text-dim);
     font-weight: 500;
   }
 
@@ -472,7 +472,7 @@
     min-width: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.74rem;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -480,10 +480,10 @@
 
   .link-btn {
     background: transparent;
-    border: 1px solid #3f4150;
+    border: 1px solid var(--hub-border-light);
     border-radius: 6px;
     padding: 0.4rem 0.7rem;
-    color: #c5c7d0;
+    color: var(--hub-text-dim);
     font-size: 0.82rem;
     cursor: pointer;
     line-height: 1.4;
@@ -491,12 +491,12 @@
   }
 
   .link-btn:hover {
-    border-color: #5c7cfa;
-    color: #fff;
+    border-color: var(--hub-accent);
+    color: var(--hub-text-bright);
   }
 
   .muted-inline {
-    color: #6f7280;
+    color: var(--hub-text-placeholder);
     font-size: 0.78rem;
   }
 </style>

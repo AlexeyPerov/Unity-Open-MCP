@@ -1152,14 +1152,14 @@
   .loading {
     padding: 1.5rem 0;
     text-align: center;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     font-size: 0.88rem;
   }
 
   .group {
-    border: 1px solid #34353f;
+    border: 1px solid var(--hub-border);
     border-radius: 8px;
-    background: #1a1b21;
+    background: var(--hub-bg);
     overflow: visible;
   }
 
@@ -1171,8 +1171,8 @@
     gap: 0.55rem;
     padding: 0.6rem 0.85rem;
     border: none;
-    border-bottom: 1px solid #24252c;
-    background: #1e1f26;
+    border-bottom: 1px solid var(--hub-card);
+    background: var(--hub-surface);
     color: inherit;
     font: inherit;
     text-align: left;
@@ -1180,11 +1180,11 @@
   }
 
   .group-header:hover {
-    background: #23242d;
+    background: var(--hub-card);
   }
 
   .group-header:focus-visible {
-    outline: 2px solid #5c7cfa;
+    outline: 2px solid var(--hub-accent);
     outline-offset: -2px;
   }
 
@@ -1193,7 +1193,7 @@
     flex-shrink: 0;
     width: 0.9rem;
     margin-top: 0.15rem;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     font-size: 0.7rem;
     transition: transform 0.15s ease;
   }
@@ -1215,14 +1215,14 @@
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.07em;
-    color: #c5c7d0;
+    color: var(--hub-text-dim);
     font-weight: 600;
   }
 
   .group-hint {
     margin: 0;
     font-size: 0.78rem;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     line-height: 1.5;
   }
 
@@ -1241,7 +1241,7 @@
 
   .radio-group-label {
     font-size: 0.78rem;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.07em;
     font-weight: 600;
@@ -1255,7 +1255,7 @@
     align-items: flex-start;
     gap: 0.6rem;
     font-size: 0.88rem;
-    color: #d7d8e0;
+    color: var(--hub-text);
     cursor: pointer;
     line-height: 1.4;
   }
@@ -1267,7 +1267,7 @@
   .radio-row input,
   .check-row input {
     margin-top: 0.2rem;
-    accent-color: #5c7cfa;
+    accent-color: var(--hub-accent);
     flex-shrink: 0;
   }
 
@@ -1285,14 +1285,14 @@
   }
 
   .radio-desc {
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     font-size: 0.78rem;
     line-height: 1.45;
   }
 
   .check-desc {
     display: block;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     font-size: 0.78rem;
     line-height: 1.45;
     margin-top: 0.15rem;
@@ -1301,19 +1301,19 @@
   .check-desc code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.74rem;
-    background: #2a2b33;
+    background: var(--hub-bg);
     padding: 0 0.3rem;
     border-radius: 3px;
-    color: #d7d8e0;
+    color: var(--hub-text);
   }
 
   .folder-list {
     list-style: none;
     margin: 0;
     padding: 0;
-    border: 1px solid #34353f;
+    border: 1px solid var(--hub-border);
     border-radius: 6px;
-    background: #14151a;
+    background: var(--hub-bg);
     max-height: 14rem;
     overflow-y: auto;
   }
@@ -1324,7 +1324,7 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.45rem 0.65rem;
-    border-bottom: 1px solid #24252c;
+    border-bottom: 1px solid var(--hub-card);
   }
 
   .folder-item:last-child {
@@ -1336,7 +1336,7 @@
     min-width: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.78rem;
-    color: #c5c7d0;
+    color: var(--hub-text-dim);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1345,10 +1345,10 @@
   .folder-remove {
     flex-shrink: 0;
     background: transparent;
-    border: 1px solid #3f4150;
+    border: 1px solid var(--hub-border-light);
     border-radius: 4px;
     padding: 0.2rem 0.55rem;
-    color: #a1a3b0;
+    color: var(--hub-text-dim);
     font-size: 0.74rem;
     cursor: pointer;
     line-height: 1.3;
@@ -1359,10 +1359,10 @@
     display: inline-flex;
     align-items: center;
     padding: 0.15rem 0.55rem;
-    border: 1px solid #3a4255;
+    border: 1px solid var(--hub-branch-chip-border);
     border-radius: 999px;
-    background: #1d2330;
-    color: #b6c2d6;
+    background: var(--hub-branch-chip-bg);
+    color: var(--hub-branch-chip-fg);
     font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -1370,13 +1370,13 @@
   }
 
   .folder-remove:hover {
-    border-color: #7a2a3a;
-    color: #f0a8b8;
+    border-color: var(--hub-error);
+    color: var(--hub-error-fg);
   }
 
   .folder-empty {
     padding: 0.6rem 0.7rem;
-    color: #6f7280;
+    color: var(--hub-text-placeholder);
     font-size: 0.78rem;
     text-align: center;
   }
@@ -1395,7 +1395,7 @@
     gap: 0.4rem;
     margin-top: 0.85rem;
     padding-top: 0.7rem;
-    border-top: 1px dashed #2a2b33;
+    border-top: 1px dashed var(--hub-border-light);
   }
 
   .scan-interval-label {
@@ -1414,26 +1414,26 @@
     padding: 0.2rem 0.45rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.78rem;
-    color: #d6d8e0;
-    background: #14151a;
-    border: 1px solid #2a2b33;
+    color: var(--hub-text);
+    background: var(--hub-bg);
+    border: 1px solid var(--hub-border-light);
     border-radius: 4px;
   }
 
   .scan-interval-input input:focus {
     outline: none;
-    border-color: #5c7cfa;
+    border-color: var(--hub-accent);
   }
 
   .scan-interval-suffix {
     font-size: 0.78rem;
-    color: #8a8d97;
+    color: var(--hub-text-muted);
   }
 
   .walkup-section {
     margin-top: 0.7rem;
     padding-top: 0.7rem;
-    border-top: 1px dashed #24252c;
+    border-top: 1px dashed var(--hub-card);
     display: flex;
     flex-direction: column;
     gap: 0.55rem;
@@ -1443,7 +1443,7 @@
     margin: 0;
     font-size: 0.82rem;
     font-weight: 600;
-    color: #c5c7d0;
+    color: var(--hub-text-dim);
     text-transform: uppercase;
     letter-spacing: 0.07em;
   }
@@ -1451,27 +1451,27 @@
   .walkup-hint {
     margin: 0;
     font-size: 0.78rem;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     line-height: 1.5;
   }
 
   .walkup-hint code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.74rem;
-    background: #2a2b33;
-    color: #d6d8e0;
+    background: var(--hub-bg);
+    color: var(--hub-text);
     padding: 0 0.25rem;
     border-radius: 3px;
   }
 
   .placeholder-note {
     margin: 0;
-    color: #6f7280;
+    color: var(--hub-text-placeholder);
     font-size: 0.82rem;
   }
 
   .placeholder-error {
-    color: #f0a8b8;
+    color: var(--hub-error-fg);
   }
 
   .diag-row {
@@ -1480,7 +1480,7 @@
     align-items: stretch;
     gap: 0.35rem;
     padding: 0.3rem 0;
-    border-bottom: 1px dashed #24252c;
+    border-bottom: 1px dashed var(--hub-card);
   }
 
   .diag-row:last-of-type {
@@ -1489,7 +1489,7 @@
 
   .diag-label {
     font-size: 0.82rem;
-    color: #c5c7d0;
+    color: var(--hub-text-dim);
     font-weight: 500;
   }
 
@@ -1498,9 +1498,9 @@
     min-width: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.74rem;
-    color: #9ea1ad;
-    background: #14151a;
-    border: 1px solid #2a2b33;
+    color: var(--hub-text-dim);
+    background: var(--hub-bg);
+    border: 1px solid var(--hub-border-light);
     border-radius: 4px;
     padding: 0.25rem 0.45rem;
     overflow: hidden;
@@ -1523,15 +1523,15 @@
     align-items: center;
     gap: 0.55rem;
     padding: 0.5rem 0.65rem;
-    border: 1px solid #2a2b33;
+    border: 1px solid var(--hub-border-light);
     border-radius: 6px;
-    background: #14151a;
+    background: var(--hub-bg);
     flex-wrap: wrap;
   }
 
   .cli-help-label {
     font-size: 0.78rem;
-    color: #c5c7d0;
+    color: var(--hub-text-dim);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.07em;
@@ -1543,9 +1543,9 @@
     min-width: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.78rem;
-    color: #c5c7d0;
-    background: #1a1b21;
-    border: 1px solid #2a2b33;
+    color: var(--hub-text-dim);
+    background: var(--hub-bg);
+    border: 1px solid var(--hub-border-light);
     border-radius: 4px;
     padding: 0.25rem 0.5rem;
     overflow: hidden;
@@ -1555,7 +1555,7 @@
 
   .cli-help-desc {
     margin: 0;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     font-size: 0.78rem;
     line-height: 1.5;
   }
@@ -1563,15 +1563,15 @@
   .cli-help-desc code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.74rem;
-    background: #2a2b33;
+    background: var(--hub-bg);
     padding: 0 0.3rem;
     border-radius: 3px;
-    color: #d7d8e0;
+    color: var(--hub-text);
   }
 
   .diag-last-export {
     font-size: 0.72rem;
-    color: #6f7280;
+    color: var(--hub-text-placeholder);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1585,10 +1585,10 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.45rem 0.7rem;
-    border: 1px solid #5a2333;
+    border: 1px solid var(--hub-error-fg);
     border-radius: 6px;
-    background: #2a1320;
-    color: #f0a8b8;
+    background: var(--hub-error-bg);
+    color: var(--hub-error-fg);
     font-size: 0.82rem;
   }
 
@@ -1599,7 +1599,7 @@
   .inline-error-dismiss {
     background: transparent;
     border: none;
-    color: #f0a8b8;
+    color: var(--hub-error-fg);
     cursor: pointer;
     font-size: 1rem;
     line-height: 1;
@@ -1607,7 +1607,7 @@
   }
 
   .inline-error-dismiss:hover {
-    color: #fff;
+    color: var(--hub-text-bright);
   }
 
   .footer {
@@ -1618,24 +1618,24 @@
     justify-content: space-between;
     gap: 1rem;
     padding: 0.5rem 0.85rem;
-    border-top: 1px solid #34353f;
-    background: #1a1b21;
+    border-top: 1px solid var(--hub-border);
+    background: var(--hub-bg);
     border-radius: 6px;
   }
 
   .footer-status {
     font-size: 0.76rem;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
   }
 
   .footer-status-error {
-    color: #f0a8b8;
+    color: var(--hub-error-fg);
   }
 
   .footer-version {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.74rem;
-    color: #6f7280;
+    color: var(--hub-text-placeholder);
     user-select: none;
   }
 </style>

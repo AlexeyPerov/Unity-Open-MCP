@@ -32,9 +32,9 @@
     align-self: flex-start;
     padding: 0.45rem 0.85rem;
     border-radius: 6px;
-    border: 1px solid #474957;
-    background: #32343f;
-    color: #d7d8e0;
+    border: 1px solid var(--hub-border-hover);
+    background: var(--hub-selected);
+    color: var(--hub-text);
     font-size: 0.82rem;
     font-weight: 500;
     cursor: pointer;
@@ -45,12 +45,12 @@
   }
 
   .btn:hover:not(:disabled) {
-    border-color: #5c7cfa;
-    color: #fff;
+    border-color: var(--hub-accent);
+    color: var(--hub-text-bright);
   }
 
   .btn:focus-visible {
-    outline: 2px solid #5c7cfa;
+    outline: 2px solid var(--hub-accent);
     outline-offset: 1px;
   }
 
@@ -60,25 +60,25 @@
   }
 
   .btn-secondary {
-    border-color: #3f4150;
-    background: #2a2b33;
-    color: #a1a3b0;
+    border-color: var(--hub-border-light);
+    background: var(--hub-card);
+    color: var(--hub-text-dim);
   }
 
   .btn-secondary:hover:not(:disabled) {
-    border-color: #5c7cfa;
-    color: #d7d8e0;
+    border-color: var(--hub-accent);
+    color: var(--hub-text);
   }
 
   .btn-destructive {
-    border-color: #7a2a3a;
-    background: #3a1a25;
-    color: #f0a8b8;
+    border-color: var(--hub-error);
+    background: var(--hub-error-bg);
+    color: var(--hub-error-fg);
   }
 
   .btn-destructive:hover:not(:disabled) {
-    border-color: #de3576;
-    background: #4a1a2a;
-    color: #fff;
+    border-color: var(--hub-error);
+    background: var(--hub-error-bg);
+    color: var(--hub-text-bright);
   }
 </style>

@@ -57,8 +57,8 @@
   }
 
   .modal {
-    background: #24252c;
-    border: 1px solid #3f4150;
+    background: var(--hub-card);
+    border: 1px solid var(--hub-border-light);
     border-radius: 12px;
     width: min(28rem, 90vw);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
@@ -70,14 +70,14 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.85rem 1rem;
-    border-bottom: 1px solid #34353f;
+    border-bottom: 1px solid var(--hub-border);
   }
 
   .modal-header h2 {
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
-    color: #f2f3f7;
+    color: var(--hub-text-bright);
   }
 
   .modal-close-btn {
@@ -85,7 +85,7 @@
     border-radius: 4px;
     border: 1px solid transparent;
     background: transparent;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -94,9 +94,9 @@
   }
 
   .modal-close-btn:hover {
-    color: #fff;
-    border-color: #474957;
-    background: #32343f;
+    color: var(--hub-text-bright);
+    border-color: var(--hub-border-hover);
+    background: var(--hub-selected);
   }
 
   .modal-body {
@@ -110,7 +110,7 @@
     margin: 0;
     font-size: 0.88rem;
     line-height: 1.5;
-    color: #b4b6c2;
+    color: var(--hub-text);
   }
 
   .modal-actions {

@@ -42,9 +42,9 @@
     flex-direction: column;
     min-height: 0;
     padding: 0.4rem;
-    border: 1px solid #34353f;
+    border: 1px solid var(--hub-border);
     border-radius: 8px;
-    background: #1a1b21;
+    background: var(--hub-surface);
   }
 
   .tabs {
@@ -64,7 +64,7 @@
     border: 1px solid transparent;
     border-radius: 6px;
     background: transparent;
-    color: #a1a3b0;
+    color: var(--hub-text-dim);
     font-size: 0.85rem;
     padding: 0.55rem 0.65rem;
     cursor: pointer;
@@ -73,18 +73,18 @@
   }
 
   .tab:hover {
-    color: #fff;
-    background: #1e1f26;
+    color: var(--hub-text-bright);
+    background: var(--hub-bg);
   }
 
   .tab:focus-visible {
-    outline: 2px solid #5c7cfa;
+    outline: 2px solid var(--hub-accent);
     outline-offset: 1px;
   }
 
   .tab.tab-active {
-    background: #32343f;
-    color: #f2f3f7;
-    border-color: #474957;
+    background: var(--hub-selected);
+    color: var(--hub-text-bright);
+    border-color: var(--hub-border-hover);
   }
 </style>

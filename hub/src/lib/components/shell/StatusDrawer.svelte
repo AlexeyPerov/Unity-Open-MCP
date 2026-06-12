@@ -118,8 +118,8 @@
 <style>
   .drawer {
     flex-shrink: 0;
-    border-top: 1px solid #34353f;
-    background: #1a1b21;
+    border-top: 1px solid var(--hub-border);
+    background: var(--hub-surface);
   }
 
   .drawer-bar {
@@ -134,7 +134,7 @@
   }
 
   .drawer-bar:hover {
-    background: #1e1f26;
+    background: var(--hub-bg);
   }
 
   .drawer-bar-left {
@@ -158,14 +158,14 @@
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     font-weight: 600;
     white-space: nowrap;
   }
 
   .drawer-tail {
     font-size: 0.72rem;
-    color: #555;
+    color: var(--hub-text-disabled);
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -183,47 +183,47 @@
   }
 
   .chip-info {
-    background: #1e2a4a;
-    color: #7c9cfa;
-    border: 1px solid #2a3a6a;
+    background: var(--hub-info-bg);
+    color: var(--hub-info-fg);
+    border: 1px solid var(--hub-info-fg);
   }
 
   .chip-warn {
-    background: #4a3a1e;
-    color: #f0c87a;
-    border: 1px solid #6a4a2a;
+    background: var(--hub-warn-bg);
+    color: var(--hub-warn-fg);
+    border: 1px solid var(--hub-warn-fg);
   }
 
   .drawer-action {
     padding: 0.15rem 0.45rem;
     font-size: 0.68rem;
     border-radius: 4px;
-    border: 1px solid #474957;
-    background: #32343f;
-    color: #c5c7d0;
+    border: 1px solid var(--hub-border-hover);
+    background: var(--hub-selected);
+    color: var(--hub-text);
     cursor: pointer;
   }
 
   .drawer-action:hover {
-    border-color: #5c7cfa;
-    color: #fff;
+    border-color: var(--hub-accent);
+    color: var(--hub-text-bright);
   }
 
   .drawer-chevron {
-    color: #8b8d9a;
+    color: var(--hub-text-muted);
     display: flex;
     align-items: center;
   }
 
   .drawer-body {
     padding: 0.45rem 0.65rem 0.65rem;
-    border-top: 1px solid #2a2b33;
+    border-top: 1px solid var(--hub-border-light);
   }
 
   .drawer-empty {
     margin: 0;
     font-size: 0.78rem;
-    color: #555;
+    color: var(--hub-text-disabled);
   }
 
   .drawer-log-scroll {
@@ -241,7 +241,7 @@
     line-height: 1.4;
     white-space: pre-wrap;
     word-break: break-word;
-    color: #9ea1ad;
+    color: var(--hub-text-dim);
   }
 
   .failure-card {
@@ -250,9 +250,9 @@
     gap: 0.35rem;
     padding: 0.45rem 0.55rem;
     margin-bottom: 0.45rem;
-    border: 1px solid #5a2333;
+    border: 1px solid var(--hub-error-fg);
     border-radius: 6px;
-    background: #2a1320;
+    background: var(--hub-error-bg);
   }
 
   .failure-head {
@@ -274,7 +274,7 @@
 
   .failure-project {
     font-size: 0.78rem;
-    color: #f0d8b8;
+    color: var(--hub-warn-fg);
     font-weight: 600;
     overflow: hidden;
     white-space: nowrap;
@@ -283,7 +283,7 @@
 
   .failure-time {
     font-size: 0.7rem;
-    color: #b89e5a;
+    color: var(--hub-warning);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
 
@@ -297,7 +297,7 @@
 
   .failure-hint {
     font-size: 0.7rem;
-    color: #b89e5a;
+    color: var(--hub-warning);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     overflow: hidden;
     white-space: nowrap;

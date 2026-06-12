@@ -1,3 +1,11 @@
+## 2026-06-12 11:26 MSK (hub)
+
+- **Light theme: all component styles now use CSS variables instead of hardcoded hex values.** The `data-theme` attribute on `<html>` was already wired up to flip the global CSS variable palette, but per-component styles throughout the codebase used literal dark-palette hex codes, so the sidebar, buttons, main panels, tabs, status drawer, and modals all stayed dark regardless of theme setting. All hardcoded colors have been replaced with their `--hub-*` CSS variable counterparts.
+  - **`hub/src/routes/+page.svelte`**: Added new theme variables for info/warn/error background+foreground pairs (`--hub-info-bg/fg`, `--hub-warn-bg/fg`, `--hub-error-bg/fg`), text-placeholder, text-disabled, selected, branch-chip, branch-detached, source-tag, and relink variants.
+  - **`hub/src/lib/components/shell/TopBar.svelte`**, **`Button.svelte`**, **`ConfirmationModal.svelte`**, **`StatusDrawer.svelte`**: All hardcoded hex colors → CSS variables.
+  - **`hub/src/lib/tabs/ProjectsTab.svelte`**, **`UnityVersionsTab.svelte`**, **`ToolsTab.svelte`**, **`SettingsTab.svelte`**: Same migration across all tab style blocks.
+  - Build (`npm run build`) passes with 0 errors.
+
 ## 2026-06-12 10:26 MSK (hub + specs)
 
 - **App renamed: "Unity Agent Hub" / "Unity AI Hub" → "Unity Hub Pro".** Cosmetic-only rename across the Hub app and its specs; product scope, milestones, packages, and persisted data layouts are unchanged. Per AGENTS.md, no data migration / compatibility shim was added — the new config dir and bundle identifier start fresh on the next launch.
