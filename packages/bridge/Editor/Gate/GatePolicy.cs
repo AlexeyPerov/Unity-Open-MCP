@@ -153,19 +153,13 @@ namespace UnityAgentBridge
             switch (outcome)
             {
                 case GateOutcome.Failed:
-                    steps.Add($"Gate detected {delta.NewErrors} new error(s). First: {delta.NewIssueKeys.FirstOrDefault() ?? "unknown"}");
-                    steps.Add("Review the affected asset and fix the introduced issue before retrying.");
+                    AddIssueHints(steps, delta.NewIssueKeys, delta.NewErrors, delta.NewWarnings, isFailed: true);
                     break;
                 case GateOutcome.Warned:
                     if (delta.NewErrors > 0)
-                    {
-                        steps.Add($"Gate detected {delta.NewErrors} new error(s) (warn mode). First: {delta.NewIssueKeys.FirstOrDefault() ?? "unknown"}");
-                        steps.Add("Consider fixing before committing.");
-                    }
+                        AddIssueHints(steps, delta.NewIssueKeys, delta.NewErrors, delta.NewWarnings, isFailed: false);
                     else
-                    {
-                        steps.Add($"Gate detected {delta.NewWarnings} new warning(s). Consider reviewing before proceeding.");
-                    }
+                        steps.Add($"Gate detected {delta.NewWarnings} new warning(s). Consider reviewing with unity_agent_validate_edit before proceeding.");
                     break;
                 case GateOutcome.Passed:
                     if (delta.ResolvedErrors > 0)
@@ -178,9 +172,60 @@ namespace UnityAgentBridge
             return steps.ToArray();
         }
 
+        static void AddIssueHints(List<string> steps, string[] issueKeys, int newErrors, int newWarnings, bool isFailed)
+        {
+            var firstKey = issueKeys != null && issueKeys.Length > 0 ? issueKeys[0] : null;
+            var parsed = ParseIssueKey(firstKey);
+
+            var modeLabel = isFailed ? "" : " (warn mode)";
+            steps.Add($"Gate detected {newErrors} new error(s){modeLabel}. First: {FormatIssue(parsed, firstKey)}");
+
+            if (parsed != null)
+            {
+                if (TryFixIdForIssue(parsed.Value.CategoryId, parsed.Value.IssueCode, out var fixId))
+                    steps.Add($"Consider unity_agent_apply_fix with fix_id {fixId} (dry_run first)");
+
+                steps.Add($"Use unity_agent_find_references for {parsed.Value.AssetPath} to assess downstream impact");
+            }
+            else
+            {
+                steps.Add("Review the affected asset and fix the introduced issue before retrying.");
+            }
+
+            if (isFailed)
+                steps.Add("Fix the issue and retry; use unity_agent_validate_edit to verify without mutation.");
+        }
+
+        static string FormatIssue(IssueKeyParts? parsed, string rawKey)
+        {
+            if (parsed == null) return rawKey ?? "unknown";
+            var p = parsed.Value;
+            return $"{p.IssueCode} on {p.AssetPath}";
+        }
+
+        static bool TryFixIdForIssue(string categoryId, string issueCode, out string fixId)
+        {
+            if (categoryId == "missing_references" && issueCode == "MISSING_SCRIPT")
+            {
+                fixId = "remove_missing_script";
+                return true;
+            }
+
+            fixId = null;
+            return false;
+        }
+
+        static IssueKeyParts? ParseIssueKey(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return null;
+            var parts = key.Split('|');
+            if (parts.Length < 4) return null;
+            return new IssueKeyParts(parts[0], parts[1], parts[2], parts[3]);
+        }
+
         static string[] BuildNextSteps()
         {
-            return new[] { "Gate passed — no new issues detected." };
+            return new[] { "Mutation failed before gate could validate. Fix the mutation error and retry." };
         }
 
         public static GateMode ParseMode(string mode)
@@ -191,6 +236,22 @@ namespace UnityAgentBridge
                 "off" => GateMode.Off,
                 _ => GateMode.Enforce
             };
+        }
+    }
+
+    internal readonly struct IssueKeyParts
+    {
+        public readonly string CategoryId;
+        public readonly string Severity;
+        public readonly string AssetPath;
+        public readonly string IssueCode;
+
+        public IssueKeyParts(string categoryId, string severity, string assetPath, string issueCode)
+        {
+            CategoryId = categoryId;
+            Severity = severity;
+            AssetPath = assetPath;
+            IssueCode = issueCode;
         }
     }
 
