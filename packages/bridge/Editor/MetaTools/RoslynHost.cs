@@ -15,6 +15,7 @@ namespace UnityAgentBridge.MetaTools
         static bool _initAttempted;
 
         public static bool IsAvailable { get; private set; }
+        public static string LastInitError { get; private set; }
 
         public static bool Initialize()
         {
@@ -22,53 +23,83 @@ namespace UnityAgentBridge.MetaTools
             if (_initAttempted) return false;
             _initAttempted = true;
 
+            var contentsPath = EditorApplication.applicationContentsPath;
+            foreach (var roslynDir in GetRoslynDirectoryCandidates(contentsPath))
+            {
+                if (TryLoadRoslyn(roslynDir))
+                {
+                    IsAvailable = true;
+                    LastInitError = null;
+                    return true;
+                }
+            }
+
+            if (string.IsNullOrEmpty(LastInitError))
+                LastInitError = "Roslyn directory not found in Unity installation";
+
+            Debug.LogWarning($"[Unity Agent Bridge] {LastInitError}");
+            return false;
+        }
+
+        static IEnumerable<string> GetRoslynDirectoryCandidates(string contentsPath)
+        {
+            yield return Path.Combine(contentsPath, "Resources", "Scripting", "MonoBleedingEdge", "lib", "mono", "msbuild", "Current", "bin", "Roslyn");
+            yield return Path.Combine(contentsPath, "DotNetSdkRoslyn");
+            yield return Path.Combine(contentsPath, "Tools", "roslyn");
+        }
+
+        static bool TryLoadRoslyn(string roslynDir)
+        {
+            if (!Directory.Exists(roslynDir))
+                return false;
+
+            var codeAnalysisPath = Path.Combine(roslynDir, "Microsoft.CodeAnalysis.dll");
+            var codeAnalysisCSharpPath = Path.Combine(roslynDir, "Microsoft.CodeAnalysis.CSharp.dll");
+            if (!File.Exists(codeAnalysisPath) || !File.Exists(codeAnalysisCSharpPath))
+                return false;
+
             try
             {
-                var contentsPath = EditorApplication.applicationContentsPath;
-                var roslynDir = FindRoslynDirectory(contentsPath);
-                if (roslynDir == null)
+                foreach (var dep in Directory.GetFiles(roslynDir, "*.dll"))
                 {
-                    Debug.LogWarning("[Unity Agent Bridge] Roslyn directory not found in Unity installation");
-                    return false;
-                }
+                    var fileName = Path.GetFileName(dep);
+                    if (fileName.StartsWith("Microsoft.CodeAnalysis", StringComparison.OrdinalIgnoreCase))
+                        continue;
 
-                foreach (var dep in Directory.GetFiles(roslynDir, "System.*.dll"))
-                {
                     try { Assembly.LoadFrom(dep); } catch { }
                 }
 
-                _ca = Assembly.LoadFrom(Path.Combine(roslynDir, "Microsoft.CodeAnalysis.dll"));
-                _cacs = Assembly.LoadFrom(Path.Combine(roslynDir, "Microsoft.CodeAnalysis.CSharp.dll"));
-                IsAvailable = true;
+                _ca = Assembly.LoadFrom(codeAnalysisPath);
+                _cacs = Assembly.LoadFrom(codeAnalysisCSharpPath);
                 return true;
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[Unity Agent Bridge] Roslyn init failed: {e.Message}");
+                _ca = null;
+                _cacs = null;
+                LastInitError = $"Roslyn init failed for {roslynDir}: {e.Message}";
+                Debug.LogWarning($"[Unity Agent Bridge] {LastInitError}");
                 return false;
             }
         }
 
-        static string FindRoslynDirectory(string contentsPath)
+        public static (byte[] pe, string errors) Compile(string source)
         {
-            var candidates = new[]
+            try
             {
-                Path.Combine(contentsPath, "DotNetSdkRoslyn"),
-                Path.Combine(contentsPath, "Tools", "roslyn"),
-            };
-
-            foreach (var dir in candidates)
-            {
-                if (Directory.Exists(dir) &&
-                    File.Exists(Path.Combine(dir, "Microsoft.CodeAnalysis.dll")) &&
-                    File.Exists(Path.Combine(dir, "Microsoft.CodeAnalysis.CSharp.dll")))
-                    return dir;
+                return CompileInternal(source);
             }
-
-            return null;
+            catch (TargetInvocationException tie)
+            {
+                return (null, tie.InnerException?.Message ?? tie.Message);
+            }
+            catch (Exception e)
+            {
+                return (null, e.Message);
+            }
         }
 
-        public static (byte[] pe, string errors) Compile(string source)
+        static (byte[] pe, string errors) CompileInternal(string source)
         {
             var syntaxTreeType = _ca.GetType("Microsoft.CodeAnalysis.SyntaxTree");
             var metadataRefType = _ca.GetType("Microsoft.CodeAnalysis.MetadataReference");
@@ -77,66 +108,31 @@ namespace UnityAgentBridge.MetaTools
             var cSharpCompilationOptionsType = _cacs.GetType("Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions");
             var outputKindType = _ca.GetType("Microsoft.CodeAnalysis.OutputKind");
 
-            var sf = _cacs.GetType("Microsoft.CodeAnalysis.CSharp.SyntaxFactory");
-            var parseText = sf.GetMethods()
-                .FirstOrDefault(m => m.Name == "ParseText" &&
-                                     m.GetParameters().Length >= 1 &&
-                                     m.GetParameters()[0].ParameterType == typeof(string));
+            var (syntaxTree, parseError) = ParseSyntaxTree(source, syntaxTreeType);
+            if (syntaxTree == null)
+                return (null, parseError ?? "Could not parse C# source");
 
-            if (parseText == null)
-                return (null, "Could not find SyntaxFactory.ParseText method");
-
-            object syntaxTree;
-            if (parseText.GetParameters().Length == 1)
-                syntaxTree = parseText.Invoke(null, new object[] { source });
-            else
-            {
-                var defaultParams = new object[parseText.GetParameters().Length];
-                defaultParams[0] = source;
-                for (int p = 1; p < defaultParams.Length; p++)
-                    defaultParams[p] = Type.Missing;
-                syntaxTree = parseText.Invoke(null, defaultParams);
-            }
-
-            var createFromFile = metadataRefType.GetMethod("CreateFromFile", new[] { typeof(string) });
-            if (createFromFile == null)
-                return (null, "Could not find MetadataReference.CreateFromFile method");
-
-            var references = new List<object>();
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                if (asm.IsDynamic) continue;
-                try
-                {
-                    if (string.IsNullOrEmpty(asm.Location)) continue;
-                    references.Add(createFromFile.Invoke(null, new object[] { asm.Location }));
-                }
-                catch { }
-            }
+            var references = BuildMetadataReferences(metadataRefType);
+            if (references == null)
+                return (null, "Could not find MetadataReference.CreateFromAssembly or CreateFromFile method");
 
             var dllOutput = Enum.Parse(outputKindType, "DynamicallyLinkedLibrary");
             object options;
-            var ctors = cSharpCompilationOptionsType.GetConstructors();
-            var ctor = ctors.FirstOrDefault(c => c.GetParameters().Length >= 1 && c.GetParameters()[0].ParameterType == outputKindType);
+            var ctor = cSharpCompilationOptionsType.GetConstructors()
+                .Where(c => c.GetParameters().Length >= 1 && c.GetParameters()[0].ParameterType == outputKindType)
+                .OrderByDescending(c => c.GetParameters().Count(p => p.IsOptional))
+                .FirstOrDefault();
             if (ctor != null)
-            {
-                var cparams = new object[ctor.GetParameters().Length];
-                cparams[0] = dllOutput;
-                for (int p = 1; p < cparams.Length; p++)
-                    cparams[p] = Type.Missing;
-                options = ctor.Invoke(cparams);
-            }
+                options = InvokeWithOptionalDefaults(ctor, null, dllOutput);
             else
-            {
                 options = Activator.CreateInstance(cSharpCompilationOptionsType);
-            }
 
             var compType = _cacs.GetType("Microsoft.CodeAnalysis.CSharp.CSharpCompilation");
-            var createMethod = compType.GetMethod("Create", new[] { typeof(string) });
+            var createMethod = FindStaticMethod(compType, "Create", typeof(string));
             if (createMethod == null)
                 return (null, "Could not find CSharpCompilation.Create method");
 
-            var compilation = createMethod.Invoke(null, new object[] { "UnityAgentSnippet" });
+            var compilation = InvokeWithOptionalDefaults(createMethod, null, "UnityAgentSnippet");
 
             var syntaxTrees = Array.CreateInstance(syntaxTreeType, 1);
             syntaxTrees.SetValue(syntaxTree, 0);
@@ -158,11 +154,11 @@ namespace UnityAgentBridge.MetaTools
                 compilation = withOptions.Invoke(compilation, new object[] { options });
 
             var peStream = new MemoryStream();
-            var emitMethod = compType.GetMethod("Emit", new[] { typeof(Stream) });
+            var emitMethod = FindInstanceMethod(compType, "Emit", p => typeof(Stream).IsAssignableFrom(p.ParameterType));
             if (emitMethod == null)
                 return (null, "Could not find compilation Emit method");
 
-            var emitResult = emitMethod.Invoke(compilation, new object[] { peStream });
+            var emitResult = InvokeWithOptionalDefaults(emitMethod, compilation, peStream);
 
             var emitResultType = _ca.GetType("Microsoft.CodeAnalysis.Emit.EmitResult");
             var successProp = emitResultType.GetProperty("Success");
@@ -176,22 +172,14 @@ namespace UnityAgentBridge.MetaTools
                 var diagnosticType = _ca.GetType("Microsoft.CodeAnalysis.Diagnostic");
                 var severityProp = diagnosticType.GetProperty("Severity");
 
+                var getMessage = diagnosticType.GetMethod("GetMessage", Type.EmptyTypes);
                 foreach (var d in diags)
                 {
                     var severity = severityProp.GetValue(d);
                     if (severity.ToString() == "Error")
                     {
-                        var toString = diagnosticType.GetProperty("ToString");
-                        if (toString != null)
-                        {
-                            var msg = toString.GetValue(d);
-                            errorMessages.Add(msg?.ToString() ?? "Unknown error");
-                        }
-                        else
-                        {
-                            var getter = diagnosticType.GetMethod("GetMessage", Type.EmptyTypes);
-                            errorMessages.Add(getter?.Invoke(d, null)?.ToString() ?? "Unknown error");
-                        }
+                        var msg = getMessage?.Invoke(d, null)?.ToString() ?? d?.ToString();
+                        errorMessages.Add(string.IsNullOrEmpty(msg) ? "Unknown error" : msg);
                     }
                 }
 
@@ -199,6 +187,121 @@ namespace UnityAgentBridge.MetaTools
             }
 
             return (peStream.ToArray(), null);
+        }
+
+        static (object syntaxTree, string error) ParseSyntaxTree(string source, Type syntaxTreeType)
+        {
+            var cstType = _cacs.GetType("Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree");
+            var parseText = FindStaticMethod(cstType, "ParseText", typeof(string));
+            if (parseText != null)
+                return (InvokeWithOptionalDefaults(parseText, null, source), null);
+
+            var sourceTextType = _ca.GetType("Microsoft.CodeAnalysis.Text.SourceText");
+            var from = FindStaticMethod(sourceTextType, "From", typeof(string));
+            if (from == null)
+                return (null, "Could not find CSharpSyntaxTree.ParseText or SourceText.From method");
+
+            var sourceText = InvokeWithOptionalDefaults(from, null, source);
+            parseText = FindStaticMethod(cstType, "ParseText", sourceTextType);
+            if (parseText == null)
+                return (null, "Could not find CSharpSyntaxTree.ParseText method");
+
+            var tree = InvokeWithOptionalDefaults(parseText, null, sourceText);
+            if (tree != null && !syntaxTreeType.IsInstanceOfType(tree))
+                return (null, "CSharpSyntaxTree.ParseText returned unexpected type");
+
+            return (tree, null);
+        }
+
+        static List<object> BuildMetadataReferences(Type metadataRefType)
+        {
+            var createFromAssembly = FindStaticMethodMinimal(metadataRefType, "CreateFromAssembly", typeof(Assembly));
+            var createFromFile = FindStaticMethod(metadataRefType, "CreateFromFile", typeof(string));
+            if (createFromAssembly == null && createFromFile == null)
+                return null;
+
+            var references = new List<object>();
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic) continue;
+
+                object reference = null;
+                if (createFromAssembly != null)
+                {
+                    try { reference = InvokeWithOptionalDefaults(createFromAssembly, null, asm); }
+                    catch { }
+                }
+
+                if (reference == null && createFromFile != null && !string.IsNullOrEmpty(asm.Location))
+                {
+                    try { reference = InvokeWithOptionalDefaults(createFromFile, null, asm.Location); }
+                    catch { }
+                }
+
+                if (reference != null)
+                    references.Add(reference);
+            }
+
+            return references;
+        }
+
+        static MethodInfo FindStaticMethod(Type type, string name, Type firstParamType)
+        {
+            return type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .Where(m => m.Name == name &&
+                            m.GetParameters().Length >= 1 &&
+                            ParameterTypeMatches(m.GetParameters()[0].ParameterType, firstParamType))
+                .OrderByDescending(m => m.GetParameters().Count(p => p.IsOptional))
+                .ThenBy(m => m.GetParameters().Length)
+                .FirstOrDefault();
+        }
+
+        static MethodInfo FindStaticMethodMinimal(Type type, string name, Type firstParamType)
+        {
+            return type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .Where(m => m.Name == name &&
+                            m.GetParameters().Length >= 1 &&
+                            ParameterTypeMatches(m.GetParameters()[0].ParameterType, firstParamType))
+                .OrderBy(m => m.GetParameters().Length)
+                .FirstOrDefault();
+        }
+
+        static MethodInfo FindInstanceMethod(Type type, string name, Func<ParameterInfo, bool> firstParamMatches)
+        {
+            return type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .Where(m => m.Name == name &&
+                            m.GetParameters().Length >= 1 &&
+                            firstParamMatches(m.GetParameters()[0]))
+                .OrderByDescending(m => m.GetParameters().Count(p => p.IsOptional))
+                .ThenBy(m => m.GetParameters().Length)
+                .FirstOrDefault();
+        }
+
+        static bool ParameterTypeMatches(Type parameterType, Type expectedType)
+        {
+            return parameterType == expectedType ||
+                   string.Equals(parameterType.FullName, expectedType.FullName, StringComparison.Ordinal);
+        }
+
+        static object InvokeWithOptionalDefaults(MethodBase method, object target, params object[] providedArgs)
+        {
+            var parameters = method.GetParameters();
+            var args = new object[parameters.Length];
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                if (i < providedArgs.Length)
+                    args[i] = providedArgs[i];
+                else if (parameters[i].IsOptional)
+                    args[i] = parameters[i].HasDefaultValue ? parameters[i].DefaultValue ?? Type.Missing : Type.Missing;
+                else
+                    throw new TargetParameterCountException(
+                        $"Required parameter '{parameters[i].Name}' was not provided for {method.DeclaringType?.Name}.{method.Name}");
+            }
+
+            if (method is ConstructorInfo constructor)
+                return constructor.Invoke(args);
+
+            return method.Invoke(target, args);
         }
     }
 }

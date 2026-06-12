@@ -37,8 +37,8 @@ namespace UnityAgentBridge.MetaTools
             if (!RoslynHost.Initialize())
                 return ToolDispatchResult.Fail("roslyn_unavailable",
                     "Could not load Roslyn compiler assemblies from Unity installation. " +
-                    "Ensure Unity 6+ is installed with the .NET SDK. " +
-                    "Expected path: {Unity.app}/Contents/DotNetSdkRoslyn/");
+                    (RoslynHost.LastInitError ??
+                     "Expected Mono-compatible Roslyn under {Unity.app}/Contents/Resources/Scripting/MonoBleedingEdge/.../Roslyn/"));
 
             var source = BuildSource(code, allUsings);
 

@@ -3,3 +3,4 @@
 specs/changelog.md
 node_modules/
 dist/
+**/.idea/**

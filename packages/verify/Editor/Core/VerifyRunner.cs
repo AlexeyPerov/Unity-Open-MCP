@@ -9,7 +9,7 @@ namespace UnityAgentVerify
     {
         static readonly List<IVerifyRule> RegisteredRules = new();
 
-        [UnityEngine.InitializeOnLoadMethod]
+        [UnityEditor.InitializeOnLoadMethod]
         static void RegisterDefaults()
         {
             if (RegisteredRules.Count == 0)

@@ -96,11 +96,11 @@ namespace UnityAgentBridge
                 };
                 _listenerThread.Start();
 
-                Debug.Log($"[Unity Agent Bridge] Listening on http://{BindAddress}:{_port}/");
+                UnityEngine.Debug.Log($"[Unity Agent Bridge] Listening on http://{BindAddress}:{_port}/");
             }
-            catch (Exception e)
+            catch (System.Exception e)
             {
-                Debug.LogError($"[Unity Agent Bridge] Failed to start listener: {e.Message}");
+                UnityEngine.Debug.LogError($"[Unity Agent Bridge] Failed to start listener: {e.Message}");
                 _running = false;
                 BridgeSession.SetConnected(false);
             }
@@ -116,9 +116,9 @@ namespace UnityAgentBridge
             {
                 _listener?.Stop();
             }
-            catch (Exception e)
+            catch (System.Exception e)
             {
-                Debug.LogWarning($"[Unity Agent Bridge] Error stopping listener: {e.Message}");
+                UnityEngine.Debug.LogWarning($"[Unity Agent Bridge] Error stopping listener: {e.Message}");
             }
 
             _listener = null;
@@ -130,7 +130,7 @@ namespace UnityAgentBridge
             catch { }
 
             _listenerThread = null;
-            Debug.Log("[Unity Agent Bridge] Stopped.");
+            UnityEngine.Debug.Log("[Unity Agent Bridge] Stopped.");
         }
 
         static void ListenLoop()
@@ -144,10 +144,10 @@ namespace UnityAgentBridge
                 }
                 catch (HttpListenerException) { }
                 catch (ObjectDisposedException) { }
-                catch (Exception e)
+                catch (System.Exception e)
                 {
                     if (_running)
-                        Debug.LogError($"[Unity Agent Bridge] Listener error: {e.Message}");
+                        UnityEngine.Debug.LogError($"[Unity Agent Bridge] Listener error: {e.Message}");
                 }
             }
         }
@@ -251,7 +251,7 @@ namespace UnityAgentBridge
                 else
                     SendJson(context, 200, BuildFaultEnvelope(inner, gateMode));
             }
-            catch (Exception e)
+            catch (System.Exception e)
             {
                 sw.Stop();
                 SendJson(context, 200, BuildFaultEnvelope(e, gateMode));
@@ -503,7 +503,7 @@ namespace UnityAgentBridge
             return sb.ToString();
         }
 
-        static string BuildFaultEnvelope(Exception e, string gateMode)
+        static string BuildFaultEnvelope(System.Exception e, string gateMode)
         {
             var sb = new StringBuilder(512);
             sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"execution_error\",\"message\":\"");
