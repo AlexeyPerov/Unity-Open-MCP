@@ -1,3 +1,13 @@
+## 2026-06-13 (verify)
+
+- **M3 Plan 1 Task 1: EXTRACTION.md baseline and shared Internals.** Created [packages/verify/EXTRACTION.md](packages/verify/EXTRACTION.md) with Unity-Scanner commit `4baafb08`. Ported 4 shared utility files to `packages/verify/Editor/Internals/`: `Serialization/YamlUtilities.cs`, `RegexPatterns/SharedRegex.cs`, `AssetDatabase/PathFilterUtilities.cs`, `AssetDatabase/AssetTypeUtilities.cs`. Namespace `UnityAgentVerify.Internals.*`; extraction headers applied. No UI, orchestrator, MCP, batch, or cache dependencies.
+
+## 2026-06-13 (specs)
+
+- **M3: agent execution plans (sub-plans 1–6).** Added [execution/M3/execution-plan.md](execution/M3/execution-plan.md) index and six sub-plans: verify rules + Unity-Scanner extraction, ReferenceGraph, gate swap + GatePolicy, M3 MCP tools + minimal `apply_fix`, agent skill, demo/E2E validation. [m3-manual-e2e-checklist.md](execution/M3/m3-manual-e2e-checklist.md) for gate loop sign-off. Linked from [M3-verify-gate.md](execution/M3-verify-gate.md); [execution/README.md](execution/README.md) updated. Recorded all [questions-3.md](questions/questions-3.md) answers in plan index (including Q1 A: `apply_fix` required with one safe fix). Added §M3 deferrals to [packages/backlog.md](packages/backlog.md) (security deny-lists, additional rules, graph cache, expanded fix providers, M4/M5/M7 items).
+
+- **M3: resolved questions + execution plan.** Merged pre-start review into [questions-3.md](questions/questions-3.md): added Q0 (M2.5 gate), clarified Q3/Q9, added Q12 (Checkpoint perf budget 2000 ms); recorded all answers (Q3 → copy from local Unity-Scanner at `/Users/alexeyperov/Projects/Unity-Scanner`, pin commit in `EXTRACTION.md`). Expanded [execution/M3-verify-gate.md](execution/M3-verify-gate.md) with Unity-Scanner source table, task order, and agent read/copy instructions. [verify.md](packages/verify.md) §Unity-Scanner source checkout; [gate-policy.md](architecture/gate-policy.md) MCP row aligned with Q4 (bridge generates `agentNextSteps`).
+
 ## 2026-06-13 01:30 MSK (bridge + mcp-server)
 
 - **M2.5: Attribute-based tool & resource registration.** Implemented per [execution-plan.md](execution/M2.5/execution-plan.md) and [M2.5-attribute-registration.md](execution/M2.5/M2.5-attribute-registration.md). All 7 tasks complete. MCP server builds clean (`npm run build` in `mcp-server/`).
