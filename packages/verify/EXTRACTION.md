@@ -25,6 +25,7 @@ Extraction baseline for porting scanner algorithms into `packages/verify`.
 | 8 | `Editor/Categories/ScenePrefabHealth/ScenePrefabHealthScanner.cs` | `Editor/Rules/ScenePrefabHealth/Scanner.cs` | Scene & prefab health scanner, scoped to paths, no coroutine/yield |
 | 9 | `Editor/Categories/ScenePrefabHealth/ScenePrefabHealthIssueMapper.cs` | `Editor/Rules/ScenePrefabHealth/IssueMapper.cs` | Maps scanner results to VerifyIssue with aligned issue codes |
 | 10 | `Editor/Categories/ScenePrefabHealth/ScenePrefabHealthResultModels.cs` | `Editor/Rules/ScenePrefabHealth/Models.cs` | Scene/Prefab data models + ScanSettings (replaces USItemDataBase) |
+| 11 | `Editor/UI/Window/FindReferencesWindow.cs` (RefsMapBuilder) + `Editor/Categories/Dependencies/DependenciesScanner.cs` | `Editor/References/ReferenceGraph.cs` | Headless reverse-dependency graph; excludes EditorWindow, prefs UI, context menus, progress bars |
 
 ## Adapt-on-copy rules
 
