@@ -55,6 +55,7 @@
   import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import Button from "$lib/components/shell/Button.svelte";
+  import Select from "$lib/components/shell/Select.svelte";
   import StatusChip from "$lib/components/StatusChip.svelte";
   import RelativeTime from "$lib/components/RelativeTime.svelte";
   import { AI_SETUP_ENABLED } from "$lib/features";
@@ -2184,16 +2185,13 @@
         aria-label="Search projects"
       />
 
-      <select
-        class="filter-select"
-        bind:value={filterPreset}
+      <Select
+        options={filterOptions.map((o) => ({ value: o.id, label: o.label }))}
+        value={filterPreset}
+        onchange={(v) => (filterPreset = v as FilterPreset)}
         aria-label="Filter projects"
         title="Filter projects"
-      >
-        {#each filterOptions as opt}
-          <option value={opt.id}>{opt.label}</option>
-        {/each}
-      </select>
+      />
 
       <button
         type="button"
@@ -2658,17 +2656,17 @@
         <section class="newproj-field">
           <label class="newproj-label" for="newproj-version">Unity version</label>
           {#if discoveryStore.installations.length > 0}
-            <select
-              id="newproj-version"
-              class="newproj-select"
-              bind:value={newProjectVersion}
-              disabled={newProjectCreating}
-            >
-              <option value="" disabled>Select an installed version</option>
-              {#each discoveryStore.installations as install (install.path)}
-                <option value={install.version}>{install.version}</option>
-              {/each}
-            </select>
+          <Select
+            id="newproj-version"
+            options={[
+              { value: "", label: "Select an installed version", disabled: true },
+              ...discoveryStore.installations.map((i) => ({ value: i.version, label: i.version })),
+            ]}
+            value={newProjectVersion}
+            onchange={(v) => (newProjectVersion = v)}
+            disabled={newProjectCreating}
+            placeholder="Select an installed version"
+          />
           {:else}
             <input
               id="newproj-version"
@@ -2687,22 +2685,17 @@
 
         <section class="newproj-field">
           <label class="newproj-label" for="newproj-pipeline">Render pipeline</label>
-          <select
+          <Select
             id="newproj-pipeline"
-            class="newproj-select"
-            bind:value={newProjectPipeline}
+            options={[
+              { value: "none", label: "None (Built-in)" },
+              { value: "urp", label: "URP (Universal Render Pipeline)" + (!pipelineSupportedForVersion ? " — requires Unity 2019.3+" : ""), disabled: !pipelineSupportedForVersion },
+              { value: "hdrp", label: "HDRP (High Definition Render Pipeline)" + (!pipelineSupportedForVersion ? " — requires Unity 2019.3+" : ""), disabled: !pipelineSupportedForVersion },
+            ]}
+            value={newProjectPipeline}
+            onchange={(v) => (newProjectPipeline = v as RenderPipeline)}
             disabled={newProjectCreating}
-          >
-            <option value="none">None (Built-in)</option>
-            <option value="urp" disabled={!pipelineSupportedForVersion}>
-              URP (Universal Render Pipeline)
-              {#if !pipelineSupportedForVersion}— requires Unity 2019.3+{/if}
-            </option>
-            <option value="hdrp" disabled={!pipelineSupportedForVersion}>
-              HDRP (High Definition Render Pipeline)
-              {#if !pipelineSupportedForVersion}— requires Unity 2019.3+{/if}
-            </option>
-          </select>
+          />
           {#if !pipelineSupportedForVersion}
             <p class="newproj-hint newproj-hint-warn">
               URP / HDRP require Unity 2019.3 or newer. Built-in is the
@@ -2768,18 +2761,16 @@
               </span>
             </label>
             {#if newProjectTemplateKind === "hub-default" && newProjectHubTemplatesAvailable}
-              <select
-                class="newproj-select newproj-template-picker"
-                bind:value={newProjectHubTemplatePath}
+              <Select
+                class="newproj-template-picker"
+                options={newProjectHubTemplates.map((tpl) => ({
+                  value: tpl.path,
+                  label: tpl.name + (tpl.unityVersion ? ` (${tpl.unityVersion})` : ""),
+                }))}
+                value={newProjectHubTemplatePath}
+                onchange={(v) => (newProjectHubTemplatePath = v)}
                 disabled={newProjectCreating}
-                aria-label="Hub template"
-              >
-                {#each newProjectHubTemplates as tpl (tpl.path)}
-                  <option value={tpl.path}>
-                    {tpl.name}{tpl.unityVersion ? ` (${tpl.unityVersion})` : ""}
-                  </option>
-                {/each}
-              </select>
+              />
             {/if}
             <label class="newproj-template-option">
               <input
@@ -2937,16 +2928,13 @@
                 {/if}
               </p>
             {:else}
-              <select
+              <Select
                 id="upgrade-target"
-                class="upgrade-select"
-                bind:value={upgradeTargetVersion}
+                options={upgradeCandidatesList.map((v) => ({ value: v, label: v }))}
+                value={upgradeTargetVersion}
+                onchange={(v) => (upgradeTargetVersion = v)}
                 disabled={upgradeLoading}
-              >
-                {#each upgradeCandidatesList as v (v)}
-                  <option value={v}>{v}</option>
-                {/each}
-              </select>
+              />
             {/if}
           </section>
 
@@ -3400,14 +3388,18 @@
               </p>
             </header>
             <div class="intent-row">
-              <select class="intent-select"
-                onchange={(e) => handleIntentChange(popupProject.id, (e.currentTarget as HTMLSelectElement).value)}
-                value={getIntentDraft(popupProject.id)}>
-                <option value="">None (default)</option>
-                {#each intentOptions(popupProject.platformIntent ?? "") as target}
-                  <option value={target}>{target}</option>
-                {/each}
-              </select>
+              <Select
+                class="intent-select"
+                options={[
+                  { value: "", label: "None (default)" },
+                  ...intentOptions(popupProject.platformIntent ?? "").map((target) => ({
+                    value: target,
+                    label: BUILD_TARGET_LABELS[target] ?? target,
+                  })),
+                ]}
+                value={getIntentDraft(popupProject.id)}
+                onchange={(v) => handleIntentChange(popupProject.id, v)}
+              />
               <Button variant="primary"
                 disabled={getIntentDraft(popupProject.id) === (popupProject.platformIntent ?? "") || savingIntentFor === popupProject.id}
                 onclick={() => handleSaveIntent(popupProject)}>
@@ -3755,22 +3747,6 @@
 
   .search::placeholder { color: var(--hub-text-placeholder); }
   .search:focus-visible {     border-color: var(--hub-accent); }
-
-  .filter-select {
-    flex: 0 0 auto;
-    padding: 0.45rem 0.6rem;
-    border-radius: 6px;
-    border: 1px solid var(--hub-border-light);
-    background: var(--hub-surface);
-    color: var(--hub-text);
-    font-size: 0.82rem;
-    font-family: inherit;
-    cursor: pointer;
-    outline: none;
-    min-width: 8.5rem;
-  }
-
-  .filter-select:focus-visible {     border-color: var(--hub-accent); }
 
   .filter-btn {
     padding: 0.4rem 0.7rem;
@@ -4168,20 +4144,6 @@
     gap: 0.35rem;
     align-items: center;
   }
-
-  .intent-select {
-    flex: 1;
-    padding: 0.3rem 0.4rem;
-    border-radius: 4px;
-    border: 1px solid var(--hub-border-light);
-    background: var(--hub-bg);
-    color: var(--hub-text);
-    font-size: 0.78rem;
-    outline: none;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  }
-
-  .intent-select:focus-visible {     border-color: var(--hub-accent); }
 
   .intent-status {
     margin: 0;
@@ -4756,8 +4718,7 @@
     font-weight: 600;
   }
 
-  .newproj-input,
-  .newproj-select {
+  .newproj-input {
     background: var(--hub-bg);
     border: 1px solid var(--hub-border-light);
     border-radius: 6px;
@@ -4769,15 +4730,13 @@
     box-sizing: border-box;
   }
 
-  .newproj-input:focus,
-  .newproj-select:focus {
+  .newproj-input:focus {
     outline: 2px solid var(--hub-accent);
     outline-offset: 0;
     border-color: var(--hub-accent);
   }
 
-  .newproj-input:disabled,
-  .newproj-select:disabled {
+  .newproj-input:disabled {
     opacity: 0.55;
     cursor: not-allowed;
   }
@@ -5046,19 +5005,6 @@
     border-radius: 3px;
     color: var(--hub-text-dim);
   }
-
-  .upgrade-select {
-    padding: 0.45rem 0.6rem;
-    border-radius: 6px;
-    border: 1px solid var(--hub-border-light);
-    background: var(--hub-surface);
-    color: var(--hub-text);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.82rem;
-    outline: none;
-  }
-
-  .upgrade-select:focus-visible {     border-color: var(--hub-accent); }
 
   .upgrade-empty {
     margin: 0;

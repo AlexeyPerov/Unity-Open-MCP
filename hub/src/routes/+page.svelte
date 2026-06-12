@@ -11,6 +11,7 @@
 </script>
 
 <div class="shell" role="application" aria-label="Unity Hub Pro">
+  <div class="titlebar" data-tauri-drag-region></div>
   <div class="app">
     <TopBar />
 
@@ -142,6 +143,14 @@
     overflow: hidden;
   }
 
+  .titlebar {
+    flex-shrink: 0;
+    height: 32px;
+    background: var(--hub-surface);
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+
   .app {
     flex: 1;
     display: flex;
@@ -150,7 +159,7 @@
     min-width: 0;
     overflow: hidden;
     box-sizing: border-box;
-    padding: 0.75rem;
+    padding: 0 0.75rem 0.75rem 0.75rem;
     gap: 0.75rem;
   }
 </style>

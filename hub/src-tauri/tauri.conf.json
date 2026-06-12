@@ -15,7 +15,11 @@
         "title": "Unity Hub Pro",
         "width": 1280,
         "height": 900,
-        "resizable": true
+        "resizable": true,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 12, "y": 10 }
       }
     ],
     "security": {

@@ -73,7 +73,7 @@ Dependencies: Plan 3 Task 4; Task 1 (install uses catalog metadata).
 
 ---
 
-#### Task 3: macOS integrated title bar with native window controls (M1.5-22) [Score:6] [Agent:medium]
+#### Task 3: macOS integrated title bar with native window controls (M1.5-22) [Score:6] [Agent:medium] — DONE
 
 **Required context**
 
@@ -106,7 +106,7 @@ Dependencies: Plan 3 Task 3 (theme tokens); M1 Plan 1 Task 2 (shell layout).
 
 ---
 
-#### Task 4: Custom Select component matching Button styling (M1.5-23) [Score:5] [Agent:easy]
+#### Task 4: Custom Select component matching Button styling (M1.5-23) [Score:5] [Agent:easy] — DONE
 
 **Required context**
 

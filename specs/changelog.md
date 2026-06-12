@@ -1,3 +1,10 @@
+## 2026-06-12 23:45 MSK (hub)
+
+- **M1.5 Plan 3.5 Tasks 3 & 4: macOS overlay title bar + custom Select component.** Implemented per [execution-plan-3-5-improvements.md](execution/M1-5/execution-plan-3-5-improvements.md). Validation: `npm run check` 0 errors / 9 warnings (1 new `app-region` CSS warning + 8 pre-existing), `npm run build` clean, `cargo build --lib` clean, `cargo test --lib` 316/316 pass.
+  - **Task 3 (M1.5-22)** — macOS overlay title bar with native traffic-light controls. Tauri config: `decorations: true`, `titleBarStyle: "Overlay"`, `hiddenTitle: true`, `trafficLightPosition: { x: 12, y: 10 }`. Added `core:window:allow-start-dragging` permission. New `.titlebar` div in `+page.svelte` (32px, `--hub-surface` background, `data-tauri-drag-region`) sits above `.app`; `.app` top padding removed. Windows/Linux unaffected (Tauri ignores overlay config on non-macOS).
+  - **Task 4 (M1.5-23)** — New `hub/src/lib/components/shell/Select.svelte` custom dropdown component: trigger reuses Button secondary styles (border, radius, padding, hover, focus-visible, disabled), popover panel matches Hub surface styling (`--hub-surface`, `--hub-border`, row hover), keyboard nav (ArrowUp/Down, Enter, Escape), ARIA (`aria-expanded`, `role="listbox"` / `role="option"`). Migrated six native `<select>` elements: Projects toolbar filter, new-project modal (Unity version, render pipeline, Hub template picker), upgrade-modal version picker, platform-intent picker. Dead CSS (`.filter-select`, `.newproj-select`, `.upgrade-select`, `.intent-select`) removed.
+- Marked Tasks 3 and 4 DONE in [execution-plan-3-5-improvements.md](execution/M1-5/execution-plan-3-5-improvements.md).
+
 ## 2026-06-12 (specs)
 
 - **M2.5: resolved pre-start decisions.** Recorded four decisions in [execution-plan.md](execution/M2.5/execution-plan.md) and [M2.5-attribute-registration.md](execution/M2.5/M2.5-attribute-registration.md):
