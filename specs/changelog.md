@@ -1,3 +1,7 @@
+## 2026-06-14 12:00 MSK (bridge)
+
+- **M3 Plan 3 Task 2: Expand `VerifyGateAdapter` — checkpoint, validate, delta.** Added `SelectRuleIds(string[] paths)` to `VerifyGateAdapter` implementing the gate-policy path-mapping table — auto-selects verify rule IDs from `paths_hint` extensions. For `*.prefab`/`*.unity` both M3 rules (`missing_references` + `scene_prefab_health`) are selected. For other extensions the table entries are encoded for future rules (`asmdef_audit`, `materials`, `shader_analysis`, etc.). `CreateCheckpoint` and `ValidatePaths` now use `SelectRuleIds` when no explicit `ruleIds` are provided. `ComputeDelta` compares issue keys between checkpoint fingerprint and post-mutation validate result. Adapter remains a thin facade — no gate policy logic inside verify.
+
 ## 2026-06-13 23:00 MSK (bridge)
 
 - **M3 Plan 3 Task 1: Bridge hard dependency on verify package.** Bridge `package.json` already listed `com.alexeyperov.unity-agent-verify` as a UPM dependency. Demo `manifest.json` already wired both packages via `file:`. No soft-degraded gate path exists — `VerifyGateAdapter` uses direct `using` statements, so compilation fails if verify is absent (Q8 A). Added "Hard dependency on verify package (M3+)" section to [bridge.md](specs/packages/bridge.md) documenting the hard dependency, compile-time failure behavior, and demo wiring.

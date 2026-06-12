@@ -30,7 +30,7 @@ Dependencies: Plan 1 complete.
 
 ---
 
-#### Task 2: Expand `VerifyGateAdapter` — checkpoint, validate, delta (M3-10) [Score:8] [Agent:heavy]
+#### Task 2: Expand `VerifyGateAdapter` — checkpoint, validate, delta (M3-10) [Score:8] [Agent:heavy] ~~DONE~~
 
 **Required context**
 

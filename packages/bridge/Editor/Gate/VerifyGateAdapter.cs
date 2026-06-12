@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using UnityAgentVerify;
 using UnityAgentVerify.References;
@@ -8,19 +9,81 @@ namespace UnityAgentBridge
 {
     public static class VerifyGateAdapter
     {
-        static readonly string[] DefaultRuleIds = { "missing_references" };
+        static readonly string[] FallbackRuleIds = { "missing_references" };
+
+        public static string[] SelectRuleIds(string[] paths)
+        {
+            if (paths == null || paths.Length == 0)
+                return FallbackRuleIds;
+
+            var ruleSet = new HashSet<string>();
+            var hasKnownExtension = false;
+
+            foreach (var path in paths)
+            {
+                var ext = Path.GetExtension(path).ToLowerInvariant();
+                switch (ext)
+                {
+                    case ".prefab":
+                    case ".unity":
+                        ruleSet.Add("missing_references");
+                        ruleSet.Add("scene_prefab_health");
+                        hasKnownExtension = true;
+                        break;
+                    case ".cs":
+                    case ".asmdef":
+                        ruleSet.Add("missing_references");
+                        ruleSet.Add("asmdef_audit");
+                        hasKnownExtension = true;
+                        break;
+                    case ".mat":
+                    case ".shader":
+                    case ".shadergraph":
+                        ruleSet.Add("missing_references");
+                        ruleSet.Add("materials");
+                        ruleSet.Add("shader_analysis");
+                        hasKnownExtension = true;
+                        break;
+                    case ".png":
+                    case ".jpg":
+                    case ".jpeg":
+                    case ".tga":
+                        ruleSet.Add("textures");
+                        ruleSet.Add("sprite_2d_analysis");
+                        hasKnownExtension = true;
+                        break;
+                    case ".controller":
+                    case ".anim":
+                        ruleSet.Add("animation_analysis");
+                        ruleSet.Add("missing_references");
+                        hasKnownExtension = true;
+                        break;
+                    case ".wav":
+                    case ".mp3":
+                    case ".ogg":
+                        ruleSet.Add("audio_analysis");
+                        hasKnownExtension = true;
+                        break;
+                }
+            }
+
+            if (!hasKnownExtension || ruleSet.Count == 0)
+                return FallbackRuleIds;
+
+            return ruleSet.ToArray();
+        }
 
         public static CheckpointFingerprint CreateCheckpoint(string[] paths, string[] ruleIds)
         {
             var scope = new VerifyScope(paths);
-            var ids = ruleIds ?? DefaultRuleIds;
+            var ids = ruleIds ?? SelectRuleIds(paths);
             return VerifyRunner.CreateCheckpoint(scope, ids);
         }
 
         public static VerifyResult ValidatePaths(string[] paths, string[] ruleIds)
         {
             var scope = new VerifyScope(paths);
-            var ids = ruleIds ?? DefaultRuleIds;
+            var ids = ruleIds ?? SelectRuleIds(paths);
             return VerifyRunner.RunScoped(scope, ids, VerifyRunMode.Validate);
         }
 
