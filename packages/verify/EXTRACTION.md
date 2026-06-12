@@ -22,6 +22,9 @@ Extraction baseline for porting scanner algorithms into `packages/verify`.
 | 5 | `Editor/Categories/MissingReferences/MissingReferencesScanner.cs` | `Editor/Rules/MissingReferences/Scanner.cs` | YAML-based missing reference scanner, scoped to paths, no coroutine/yield |
 | 6 | `Editor/Categories/MissingReferences/MissingReferencesIssueMapper.cs` | `Editor/Rules/MissingReferences/IssueMapper.cs` | Maps scanner results to VerifyIssue with aligned issue codes |
 | 7 | `Editor/Categories/MissingReferences/MissingReferencesResultModels.cs` | `Editor/Rules/MissingReferences/Models.cs` | Reference data models (ExternalReferenceRegistry, AssetReferencesData, etc.) |
+| 8 | `Editor/Categories/ScenePrefabHealth/ScenePrefabHealthScanner.cs` | `Editor/Rules/ScenePrefabHealth/Scanner.cs` | Scene & prefab health scanner, scoped to paths, no coroutine/yield |
+| 9 | `Editor/Categories/ScenePrefabHealth/ScenePrefabHealthIssueMapper.cs` | `Editor/Rules/ScenePrefabHealth/IssueMapper.cs` | Maps scanner results to VerifyIssue with aligned issue codes |
+| 10 | `Editor/Categories/ScenePrefabHealth/ScenePrefabHealthResultModels.cs` | `Editor/Rules/ScenePrefabHealth/Models.cs` | Scene/Prefab data models + ScanSettings (replaces USItemDataBase) |
 
 ## Adapt-on-copy rules
 

@@ -13,7 +13,10 @@ namespace UnityAgentVerify
         static void RegisterDefaults()
         {
             if (RegisteredRules.Count == 0)
+            {
                 RegisteredRules.Add(new Rules.MissingReferencesRule());
+                RegisteredRules.Add(new Rules.ScenePrefabHealthRule());
+            }
         }
 
         public static void RegisterRule(IVerifyRule rule)

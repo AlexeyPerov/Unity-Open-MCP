@@ -1,5 +1,9 @@
 ## 2026-06-13 (verify)
 
+- **M3 Plan 1 Task 3: Port `scene_prefab_health` from Unity-Scanner.** Created [packages/verify/Editor/Rules/ScenePrefabHealth/](packages/verify/Editor/Rules/ScenePrefabHealth/) with 4 files: `Scanner.cs` (scoped scene & prefab analysis — broken references, object counts, nesting depth, prefab overrides, inactive object patterns), `IssueMapper.cs` (maps scanner data to `VerifyIssue` with 8 issue codes aligned to Unity-Scanner category IDs), `Models.cs` (SceneData, PrefabData, ScanSettings — no UI base classes), `ScenePrefabHealthRule.cs` (IVerifyRule implementation). Rule registered in `VerifyRunner`. Full rule logic scoped to `paths_hint` only (Q6 A). Updated [EXTRACTION.md](packages/verify/EXTRACTION.md) with 3 additional ported files.
+
+## 2026-06-13 (verify)
+
 - **M3 Plan 1 Task 2: Port `missing_references` from Unity-Scanner.** Replaced greenfield stub in [packages/verify/Editor/Rules/MissingReferences/](packages/verify/Editor/Rules/MissingReferences/) with YAML-based scanner ported from Unity-Scanner. Three new files: `Scanner.cs` (scoped YAML scanning — external GUID/FileID resolution, missing scripts, Unity events, duplicate components, invalid layers), `IssueMapper.cs` (maps scanner data to `VerifyIssue` with 10 issue codes aligned to Unity-Scanner category IDs), `Models.cs` (reference data models). `MissingReferencesRule.cs` rewritten to delegate to Scanner+IssueMapper. `VerifyRunMode.Checkpoint` skips expensive sub-scans (events, duplicate components, layers); `Validate`/`Full` runs all checks. Issue key format: `{ruleId}|{severity}|{assetPath}|{issueCode}`. Updated [EXTRACTION.md](packages/verify/EXTRACTION.md) with 3 additional ported files.
 
 ## 2026-06-13 (verify)

@@ -55,7 +55,7 @@ Dependencies: Task 1.
 
 ---
 
-#### Task 3: Port `scene_prefab_health` from Unity-Scanner (M3-3) [Score:9] [Agent:heavy]
+#### Task 3: Port `scene_prefab_health` from Unity-Scanner (M3-3) [Score:9] [Agent:heavy] **DONE**
 
 **Required context**
 
