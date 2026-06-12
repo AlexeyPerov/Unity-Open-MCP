@@ -48,6 +48,9 @@ namespace UnityAgentBridge
 
         static BridgeHttpServer()
         {
+            BridgeToolRegistry.Scan();
+            BridgeResourceRegistry.Scan();
+
             _port = ResolvePort();
             Start();
 
@@ -162,13 +165,19 @@ namespace UnityAgentBridge
                     case "/ping":
                         HandlePing(context);
                         break;
+                    case "/resources":
+                        if (context.Request.HttpMethod == "GET")
+                            HandleResourceList(context);
+                        else
+                            SendJsonError(context, 405, "method_not_allowed", "GET required for resource endpoints");
+                        break;
                     default:
                         if (path.StartsWith("/tools/"))
                         {
                             var toolName = path.Substring("/tools/".Length);
                             if (context.Request.HttpMethod == "POST")
                             {
-                                if (KnownTools.Contains(toolName))
+                                if (KnownTools.Contains(toolName) || BridgeToolRegistry.Contains(toolName))
                                     HandleToolDispatch(context, toolName);
                                 else
                                     SendToolNotFound(context, toolName);
@@ -177,6 +186,16 @@ namespace UnityAgentBridge
                             {
                                 SendJsonError(context, 405, "method_not_allowed", "POST required for tool endpoints");
                             }
+                        }
+                        else if (path.StartsWith("/resources/"))
+                        {
+                            if (context.Request.HttpMethod == "GET")
+                            {
+                                var route = path.Substring("/resources/".Length);
+                                HandleResourceDispatch(context, route);
+                            }
+                            else
+                                SendJsonError(context, 405, "method_not_allowed", "GET required for resource endpoints");
                         }
                         else
                             SendNotFound(context, path);
@@ -216,8 +235,25 @@ namespace UnityAgentBridge
             var gateMode = ExtractGateMode(body);
             var sw = Stopwatch.StartNew();
 
+            bool isRegistryTool = BridgeToolRegistry.TryGet(toolName, out var registryEntry);
+            bool isMutating = MutatingTools.Contains(toolName) || (isRegistryTool && registryEntry.IsMutating);
+            string effectiveGateMode = gateMode;
+
+            bool runtimeGateSpecified = !string.IsNullOrEmpty(body) && body.Contains("\"gate\"");
+            if (isRegistryTool && !runtimeGateSpecified)
+            {
+                var attrGate = registryEntry.Gate;
+                effectiveGateMode = attrGate switch
+                {
+                    GateMode.Enforce => "enforce",
+                    GateMode.Warn => "warn",
+                    GateMode.Off => "off",
+                    _ => "enforce"
+                };
+            }
+
             string[] pathsHint = null;
-            if (MutatingTools.Contains(toolName))
+            if (isMutating)
             {
                 pathsHint = JsonBody.GetStringArray(body, "paths_hint");
                 if (pathsHint == null || pathsHint.Length == 0)
@@ -227,7 +263,7 @@ namespace UnityAgentBridge
 
                     if (!skipPathsHint)
                     {
-                        SendJson(context, 200, BuildPathsHintErrorEnvelope(toolName, gateMode));
+                        SendJson(context, 200, BuildPathsHintErrorEnvelope(toolName, effectiveGateMode));
                         return;
                     }
                 }
@@ -236,31 +272,34 @@ namespace UnityAgentBridge
             try
             {
                 var task = MainThreadDispatcher.EnqueueAsync(
-                    () => DispatchWithGate(toolName, body, gateMode, pathsHint), timeoutMs);
+                    () => DispatchWithGate(toolName, body, effectiveGateMode, pathsHint), timeoutMs);
 
                 var result = task.Result;
                 sw.Stop();
-                SendJson(context, 200, BuildGateEnvelope(result, gateMode));
+                SendJson(context, 200, BuildGateEnvelope(result, effectiveGateMode));
             }
             catch (AggregateException ae)
             {
                 sw.Stop();
                 var inner = ae.InnerException;
                 if (inner is TimeoutException)
-                    SendJson(context, 200, BuildTimeoutEnvelope(toolName, gateMode, timeoutMs));
+                    SendJson(context, 200, BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs));
                 else
-                    SendJson(context, 200, BuildFaultEnvelope(inner, gateMode));
+                    SendJson(context, 200, BuildFaultEnvelope(inner, effectiveGateMode));
             }
             catch (System.Exception e)
             {
                 sw.Stop();
-                SendJson(context, 200, BuildFaultEnvelope(e, gateMode));
+                SendJson(context, 200, BuildFaultEnvelope(e, effectiveGateMode));
             }
         }
 
         static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint)
         {
-            if (gateMode == "off" || !MutatingTools.Contains(toolName))
+            bool isMutating = MutatingTools.Contains(toolName)
+                || (BridgeToolRegistry.TryGet(toolName, out var regEntry) && regEntry.IsMutating);
+
+            if (gateMode == "off" || !isMutating)
             {
                 return new GateDispatchResult
                 {
@@ -317,7 +356,8 @@ namespace UnityAgentBridge
                 "unity_agent_invoke_method" => InvokeMethodTool.Execute(body),
                 "unity_agent_execute_menu" => ExecuteMenuTool.Execute(body),
                 "unity_agent_find_members" => FindMembersTool.Execute(body),
-                _ => ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
+                _ => BridgeToolRegistry.TryDispatch(toolName, body)
+                     ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };
         }
 
@@ -542,6 +582,59 @@ namespace UnityAgentBridge
             sb.Append("\"isPlaying\":").Append(BridgeSession.IsPlaying ? "true" : "false");
             sb.Append('}');
             return sb.ToString();
+        }
+
+        static void HandleResourceList(HttpListenerContext context)
+        {
+            var resources = BridgeResourceRegistry.All();
+            var sb = new StringBuilder(512);
+            sb.Append('[');
+            for (int i = 0; i < resources.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                var r = resources[i];
+                sb.Append('{');
+                sb.Append("\"name\":").Append(EscapeString(r.Name)).Append(',');
+                sb.Append("\"route\":").Append(EscapeString(r.Route)).Append(',');
+                sb.Append("\"mimeType\":").Append(EscapeString(r.MimeType)).Append(',');
+                sb.Append("\"description\":").Append(r.Description != null ? EscapeString(r.Description) : "null");
+                sb.Append('}');
+            }
+            sb.Append(']');
+            SendJson(context, 200, sb.ToString());
+        }
+
+        static void HandleResourceDispatch(HttpListenerContext context, string route)
+        {
+            var entry = BridgeResourceRegistry.FindByRoute(route);
+            if (entry == null)
+            {
+                var json = $"{{\"error\":{{\"code\":\"resource_not_found\",\"message\":\"Unknown resource route: {EscapeStringContent(route)}\"}}}}";
+                SendJson(context, 404, json);
+                return;
+            }
+
+            try
+            {
+                var task = MainThreadDispatcher.EnqueueAsync(() =>
+                {
+                    var instance = entry.GetInstance();
+                    var result = entry.Method.Invoke(instance, null);
+                    return result?.ToString() ?? "";
+                }, 30000);
+
+                var content = task.Result;
+                var bytes = Encoding.UTF8.GetBytes(content);
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = entry.MimeType + "; charset=utf-8";
+                context.Response.ContentLength64 = bytes.Length;
+                context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+            }
+            catch (System.Exception e)
+            {
+                var inner = e is AggregateException ae ? ae.InnerException?.Message : e.Message;
+                SendJsonError(context, 500, "execution_error", inner ?? e.Message);
+            }
         }
 
         static void SendToolNotFound(HttpListenerContext context, string toolName)

@@ -6,7 +6,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { M2_TOOLS } from "./tools/index.js";
+import { ALL_TOOLS } from "./tools/index.js";
 import { LiveClient } from "./live-client.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
@@ -37,7 +37,7 @@ async function main() {
   const liveClient = new LiveClient(port);
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: M2_TOOLS,
+    tools: ALL_TOOLS,
   }));
 
   server.setRequestHandler(
