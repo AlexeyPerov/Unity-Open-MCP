@@ -1,5 +1,7 @@
 ## 2026-06-12 (verify)
 
+- **M3 Plan 2 Task 2: Wire `VerifyGateAdapter.FindReferences`.** Added `FindReferences(string assetPathOrGuid, int maxResults = 100)` to `VerifyGateAdapter` — thin facade over `ReferenceGraph.Find()`. Returns `FindReferencesResult` with `QueriedAssetPath`, `QueriedAssetGuid`, `ReferencedBy` entries (each with `AssetPath` + `Guid`), and `TotalCount`. Supports `max_results` truncation per MCP schema. Response shape matches `unity_agent_find_references` expectations. No gate logic in verify; bridge can call adapter directly.
+
 - **M3 Plan 2 Task 1: Port `ReferenceGraph` from Unity-Scanner.** Created [packages/verify/Editor/References/ReferenceGraph.cs](packages/verify/Editor/References/ReferenceGraph.cs) — headless reverse-dependency graph built on demand per request (Q7 A). API: `ReferenceGraph.Find(assetPathOrGuid, options)` returns `QueriedAssetPath`, `QueriedAssetGuid`, `ReferencedByPaths`. Supports Addressable `AssetReference` scanning (text + binary serialization) and terrain data references via `ReferenceGraphOptions`. No UI dependencies (no EditorWindow, progress bars, prefs, context menus). Synchronous per call; incremental index deferred to M7. Updated [EXTRACTION.md](packages/verify/EXTRACTION.md) with ported file entry.
 
 ## 2026-06-13 (verify)

@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityAgentVerify;
+using UnityAgentVerify.References;
+using UnityEditor;
 
 namespace UnityAgentBridge
 {
@@ -68,6 +70,35 @@ namespace UnityAgentBridge
                 ResolvedWarnings = resolvedWarnings,
                 NewIssueKeys = newKeys.ToArray(),
                 ResolvedIssueKeys = resolvedKeys.ToArray()
+            };
+        }
+
+        public static FindReferencesResult FindReferences(string assetPathOrGuid, int maxResults = 100)
+        {
+            var graph = ReferenceGraph.Find(assetPathOrGuid);
+
+            var allPaths = graph.ReferencedByPaths;
+            var totalCount = allPaths.Count;
+            var truncated = allPaths;
+            if (maxResults > 0 && totalCount > maxResults)
+                truncated = allPaths.GetRange(0, maxResults);
+
+            var entries = new List<ReferencedByEntry>(truncated.Count);
+            foreach (var path in truncated)
+            {
+                entries.Add(new ReferencedByEntry
+                {
+                    AssetPath = path,
+                    Guid = AssetDatabase.AssetPathToGUID(path)
+                });
+            }
+
+            return new FindReferencesResult
+            {
+                QueriedAssetPath = graph.QueriedAssetPath,
+                QueriedAssetGuid = graph.QueriedAssetGuid,
+                ReferencedBy = entries.ToArray(),
+                TotalCount = totalCount
             };
         }
     }

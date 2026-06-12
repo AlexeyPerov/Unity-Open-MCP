@@ -28,4 +28,18 @@ namespace UnityAgentBridge
         public bool GateFailed;
         public string[] AgentNextSteps;
     }
+
+    public class FindReferencesResult
+    {
+        public string QueriedAssetPath;
+        public string QueriedAssetGuid;
+        public ReferencedByEntry[] ReferencedBy;
+        public int TotalCount;
+    }
+
+    public class ReferencedByEntry
+    {
+        public string AssetPath;
+        public string Guid;
+    }
 }

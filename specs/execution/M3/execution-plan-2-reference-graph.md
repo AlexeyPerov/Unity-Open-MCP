@@ -31,7 +31,7 @@ Dependencies: Plan 1 Task 1.
 
 ---
 
-#### Task 2: Wire `VerifyGateAdapter.FindReferences` (M3-7) [Score:5] [Agent:easy]
+#### Task 2: Wire `VerifyGateAdapter.FindReferences` (M3-7) [Score:5] [Agent:easy] — **DONE**
 
 **Required context**
 
