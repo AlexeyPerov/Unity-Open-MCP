@@ -83,9 +83,9 @@ Plan 2 Task 4 → Task 3
 
 ## Plan 3 exit criteria
 
-- [ ] MCP server live mode works end-to-end against bridge HTTP.
-- [ ] M2 tools are registered with correct schemas.
-- [ ] `isError` mapping matches GatePolicy semantics.
-- [ ] Compile-wait/retry behavior is documented and implemented.
+- [x] MCP server live mode works end-to-end against bridge HTTP.
+- [x] M2 tools are registered with correct schemas.
+- [x] `isError` mapping matches GatePolicy semantics.
+- [x] Compile-wait/retry behavior is documented and implemented.
 
 **Next:** [execution-plan-4-demo-validation.md](./execution-plan-4-demo-validation.md)

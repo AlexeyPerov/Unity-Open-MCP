@@ -26,6 +26,7 @@
     refreshProjectVersion,
     relinkProject,
     removeProject,
+    saveProjects,
     setProjectHidden,
     setProjectStale,
     upgradeCandidates,
@@ -104,6 +105,7 @@
   let isDragOver = $state(false);
   let relinkingId = $state<string | null>(null);
   let walkUpModalOpen = $state(false);
+  let pickingWalkUpFolder = $state(false);
   // M1.5-14: Unity upgrade modal.
   let upgradeModalProjectId = $state<string | null>(null);
   let upgradeCandidatesList = $state<string[]>([]);
@@ -1294,7 +1296,7 @@
     const roots = settings.unityDiscovery.walkUpRoots;
     if (roots.length === 0) {
       addError =
-        "no walk-up roots configured — add at least one in Settings → Additional parent folders";
+        "no folder selected — click “Select folder” to pick a parent directory";
       return;
     }
     addError = null;
@@ -1322,6 +1324,44 @@
 
   async function cancelWalkUpFromModal() {
     await walkUpScanStore.cancel();
+  }
+
+  /**
+   * Open a folder picker and store the picked path as the single
+   * walk-up scan root. Replaces any previously selected root so the
+   * "Selected Folder" section always shows at most one entry.
+   */
+  async function handleWalkUpSelectFolder() {
+    if (pickingWalkUpFolder) return;
+    pickingWalkUpFolder = true;
+    addError = null;
+    try {
+      const picked = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "Select a parent folder to scan for Unity projects",
+      });
+      if (!picked || typeof picked !== "string") {
+        return;
+      }
+      const normalized = picked.replace(/[\\/]+$/, "");
+      try {
+        await settingsStore.setWalkUpRoots([normalized]);
+        S.appendDrawerLog(
+          `walk-up scan root set to ${normalized} — click “Start scan” to discover projects`
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        addError = `set walk-up folder failed: ${msg}`;
+        S.appendErrorLog(addError);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      addError = `folder picker failed: ${msg}`;
+      S.appendErrorLog(addError);
+    } finally {
+      pickingWalkUpFolder = false;
+    }
   }
 
   /**
@@ -1832,6 +1872,112 @@
     popupProject ? defaultBuildTargetMap[popupProject.id] : undefined
   );
 
+  // Per-project environment variables editor — moved out of the Tools
+  // tab so the user always edits the project whose settings popup is
+  // open. Drafts mirror `project.envVars` and save through the same
+  // atomic `saveProjects` path the rest of the project mutations use.
+  type EnvVarDraft = {
+    uid: string;
+    key: string;
+    value: string;
+  };
+  let envVarsDraft = $state<EnvVarDraft[]>([]);
+  let envVarsRevealed = $state<Record<string, boolean>>({});
+  let envVarsSaving = $state(false);
+  let envVarsError = $state<string | null>(null);
+  let envVarsInfo = $state<string | null>(null);
+  let nextEnvDraftUid = 1;
+  let envVarsSeededFor = $state<string | null>(null);
+
+  function newEnvVarDraft(): EnvVarDraft {
+    return { uid: `draft-${nextEnvDraftUid++}`, key: "", value: "" };
+  }
+
+  $effect(() => {
+    const project = popupProject;
+    if (!project) {
+      envVarsDraft = [];
+      envVarsError = null;
+      envVarsInfo = null;
+      envVarsSeededFor = null;
+      return;
+    }
+    if (envVarsSeededFor === project.id) return;
+    envVarsDraft = Object.entries(project.envVars ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => ({
+        uid: `seed-${nextEnvDraftUid++}`,
+        key,
+        value,
+      }));
+    envVarsError = null;
+    envVarsInfo = null;
+    envVarsSeededFor = project.id;
+  });
+
+  function addEnvVarRow() {
+    if (!popupProject) return;
+    envVarsDraft = [...envVarsDraft, newEnvVarDraft()];
+  }
+
+  function removeEnvVarRow(uid: string) {
+    envVarsDraft = envVarsDraft.filter((r) => r.uid !== uid);
+  }
+
+  function toggleEnvReveal(uid: string) {
+    envVarsRevealed = { ...envVarsRevealed, [uid]: !envVarsRevealed[uid] };
+  }
+
+  function isValidEnvVarDraft(rows: EnvVarDraft[]): { ok: true; map: Record<string, string> } | { ok: false; error: string } {
+    const map: Record<string, string> = {};
+    for (const row of rows) {
+      const key = row.key.trim();
+      if (key === "") {
+        return { ok: false, error: "env-var keys cannot be empty" };
+      }
+      if (key.includes("=")) {
+        return { ok: false, error: `env-var key cannot contain '=': ${key}` };
+      }
+      if (Object.prototype.hasOwnProperty.call(map, key)) {
+        return { ok: false, error: `duplicate env-var key: ${key}` };
+      }
+      map[key] = row.value;
+    }
+    return { ok: true, map };
+  }
+
+  async function saveEnvVars() {
+    const project = popupProject;
+    if (!project) return;
+    const validation = isValidEnvVarDraft(envVarsDraft);
+    if (!validation.ok) {
+      envVarsError = validation.error;
+      return;
+    }
+    envVarsError = null;
+    envVarsInfo = null;
+    envVarsSaving = true;
+    try {
+      const updated: ProjectEntry = { ...project, envVars: validation.map };
+      const nextList = projectsStore.projects.map((p) =>
+        p.id === project.id ? updated : p,
+      );
+      await saveProjects({ version: 1, projects: nextList });
+      projectsStore.replaceAll(nextList);
+      envVarsSeededFor = project.id;
+      envVarsInfo = `saved ${Object.keys(validation.map).length} env var${Object.keys(validation.map).length === 1 ? "" : "s"}`;
+      S.appendDrawerLog(
+        `${envVarsInfo} for ${project.name}`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      envVarsError = `save env vars failed: ${msg}`;
+      S.appendErrorLog(envVarsError);
+    } finally {
+      envVarsSaving = false;
+    }
+  }
+
   function openSettingsPopup(id: string) {
     const project = projectsStore.find(id);
     if (project) {
@@ -2029,109 +2175,107 @@
 
 <div class="projects" class:drag-over={isDragOver}>
   <div class="toolbar">
-    <input
-      type="search"
-      class="search"
-      placeholder="Search projects…"
-      bind:value={search}
-      aria-label="Search projects"
-    />
+    <div class="toolbar-row">
+      <input
+        type="search"
+        class="search"
+        placeholder="Search projects…"
+        bind:value={search}
+        aria-label="Search projects"
+      />
 
-    <div class="filter-group" role="group" aria-label="Filter projects">
-      {#each filterOptions as opt}
-        <button
-          type="button"
-          class="filter-btn"
-          class:filter-active={filterPreset === opt.id}
-          onclick={() => (filterPreset = opt.id)}
-          aria-pressed={filterPreset === opt.id}
+      <select
+        class="filter-select"
+        bind:value={filterPreset}
+        aria-label="Filter projects"
+        title="Filter projects"
+      >
+        {#each filterOptions as opt}
+          <option value={opt.id}>{opt.label}</option>
+        {/each}
+      </select>
+
+      <button
+        type="button"
+        class="filter-btn show-hidden-btn"
+        class:filter-active={showHidden}
+        onclick={() => (showHidden = !showHidden)}
+        aria-pressed={showHidden}
+        title={showHidden
+          ? "Hide soft-deleted projects from the list"
+          : "Show soft-deleted projects (entries kept in projects.json; use Hide from the row menu to soft-delete)"}
+      >
+        {showHidden ? "✓ " : ""}Show hidden
+      </button>
+
+      <div class="toolbar-spacer"></div>
+
+      {#if AI_SETUP_ENABLED}
+        <Button variant="secondary" onclick={handleAiSetupStub} title="AI Setup — coming in M4">
+          AI Setup
+        </Button>
+      {:else}
+        <Button
+          variant="secondary"
+          onclick={handleAiSetupStub}
+          disabled
+          title="AI Setup — coming in a later milestone (reserved slot)"
         >
-          {opt.label}
-        </button>
-      {/each}
+          AI Setup
+        </Button>
+      {/if}
     </div>
-
-    <button
-      type="button"
-      class="filter-btn show-hidden-btn"
-      class:filter-active={showHidden}
-      onclick={() => (showHidden = !showHidden)}
-      aria-pressed={showHidden}
-      title={showHidden
-        ? "Hide soft-deleted projects from the list"
-        : "Show soft-deleted projects (entries kept in projects.json; use Hide from the row menu to soft-delete)"}
-    >
-      {showHidden ? "✓ " : ""}Show hidden
-    </button>
-
-    <div class="toolbar-spacer"></div>
-
-    {#if AI_SETUP_ENABLED}
-      <Button variant="secondary" onclick={handleAiSetupStub} title="AI Setup — coming in M4">
-        AI Setup
-      </Button>
-    {:else}
+    <div class="toolbar-row">
+      <div class="toolbar-spacer"></div>
       <Button
         variant="secondary"
-        onclick={handleAiSetupStub}
-        disabled
-        title="AI Setup — coming in a later milestone (reserved slot)"
+        onclick={openNewProjectModal}
+        disabled={newProjectCreating}
+        title="New project — scaffold a fresh Unity project from a template"
       >
-        AI Setup
+        New project…
       </Button>
-    {/if}
-    <Button
-      variant="secondary"
-      onclick={openWalkUpModal}
-      disabled={walkUpScanStore.scanning}
-      title="Walk-up directory scan — discover Unity projects under configured roots"
-    >
-      {walkUpScanStore.scanning ? "Scanning…" : "Walk-up Scan…"}
-    </Button>
-    <Button
-      variant="secondary"
-      onclick={openNewProjectModal}
-      disabled={newProjectCreating}
-      title="New project — scaffold a fresh Unity project from a template"
-    >
-      New project…
-    </Button>
-    <Button variant="primary" onclick={handleAddProject} disabled={addingProject}>
-      {addingProject ? "Adding…" : "Add Project"}
-    </Button>
-    <button
-      type="button"
-      class="icon-btn"
-      onclick={handleRefresh}
-      disabled={refreshing}
-      title={refreshing ? "Refreshing…" : "Refresh"}
-      aria-label={refreshing ? "Refreshing…" : "Refresh"}
-    >
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class:icon-spin={refreshing}
-        aria-hidden="true"
+      <Button variant="primary" onclick={handleAddProject} disabled={addingProject}>
+        {addingProject ? "Adding…" : "Add Project"}
+      </Button>
+      <Button
+        variant="secondary"
+        onclick={openWalkUpModal}
+        disabled={walkUpScanStore.scanning}
+        title="Add Multiple Projects — pick a parent folder and discover Unity projects underneath"
       >
-        <polyline points="23 4 23 10 17 10"/>
-        <polyline points="1 20 1 14 7 14"/>
-        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-      </svg>
-    </button>
-    {#if removingId}
-      <span class="toolbar-status" aria-live="polite">Removing…</span>
-    {/if}
+        {walkUpScanStore.scanning ? "Scanning…" : "Add Multiple Projects"}
+      </Button>
+      <button
+        type="button"
+        class="icon-btn"
+        onclick={handleRefresh}
+        disabled={refreshing}
+        title={refreshing ? "Refreshing…" : "Refresh"}
+        aria-label={refreshing ? "Refreshing…" : "Refresh"}
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class:icon-spin={refreshing}
+          aria-hidden="true"
+        >
+          <polyline points="23 4 23 10 17 10"/>
+          <polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </button>
+      {#if removingId}
+        <span class="toolbar-status" aria-live="polite">Removing…</span>
+      {/if}
+    </div>
   </div>
-
-  <p class="drop-hint" aria-hidden="true">
-    Drop a Unity project folder here to add it to the list.
-  </p>
 
   {#if addError}
     <div class="inline-error" role="alert">
@@ -2307,12 +2451,12 @@
   >
     <div class="walkup-modal">
       <header class="walkup-header">
-        <h2 id="walkup-modal-title" class="walkup-title">Walk-up directory scan</h2>
+        <h2 id="walkup-modal-title" class="walkup-title">Add Multiple Projects</h2>
         {#if !walkUpScanStore.scanning}
           <button
             type="button"
             class="walkup-close"
-            aria-label="Close walk-up scan"
+            aria-label="Close add multiple projects"
             onclick={closeWalkUpModal}
           >
             ×
@@ -2322,14 +2466,14 @@
 
       <div class="walkup-body">
         <p class="walkup-desc">
-          Hub will recurse into the configured roots and append every
+          Hub will recurse into the selected folder and append every
           folder that contains both <code>Assets/</code> and
           <code>ProjectSettings/</code> to the project list as
           <code>source: walk-up</code>.
         </p>
 
         <section class="walkup-config">
-          <h3 class="walkup-section-title">Configured roots</h3>
+          <h3 class="walkup-section-title">Selected Folder</h3>
           {#if settingsStore.current && settingsStore.current.unityDiscovery.walkUpRoots.length > 0}
             <ul class="walkup-roots">
               {#each settingsStore.current.unityDiscovery.walkUpRoots as root (root)}
@@ -2337,10 +2481,7 @@
               {/each}
             </ul>
           {:else}
-            <p class="walkup-empty">
-              No roots configured. Add at least one in
-              <strong>Settings → Additional parent folders → Walk-up directory scan</strong>.
-            </p>
+            <p class="walkup-empty">No folder selected</p>
           {/if}
           <dl class="walkup-config-list">
             <div>
@@ -2427,6 +2568,13 @@
         {:else}
           <Button variant="secondary" onclick={closeWalkUpModal}>
             Close
+          </Button>
+          <Button
+            variant="secondary"
+            onclick={handleWalkUpSelectFolder}
+            disabled={pickingWalkUpFolder}
+          >
+            {pickingWalkUpFolder ? "Selecting…" : "Select folder"}
           </Button>
           <Button
             variant="primary"
@@ -3329,6 +3477,78 @@
               <p class="panel-empty">Loading log paths…</p>
             {/if}
           </section>
+
+          <section class="mini-panel">
+            <header class="mini-panel-head">
+              <h4 class="mini-panel-title">Environment variables</h4>
+              <p class="mini-panel-hint">
+                Merged into the spawned Unity process for this project.
+                Values in the child override the parent process when
+                keys collide. The safety toggle in
+                <code>Settings → Safety</code> controls whether the
+                Launch button shows a confirmation listing colliding
+                keys.
+              </p>
+            </header>
+            {#if envVarsError}
+              <p class="field-error" role="alert">{envVarsError}</p>
+            {/if}
+            {#if envVarsInfo}
+              <p class="field-hint" role="status">{envVarsInfo}</p>
+            {/if}
+            <div class="env-grid">
+              {#each envVarsDraft as row (row.uid)}
+                <div class="env-row">
+                  <input
+                    type="text"
+                    class="env-key"
+                    placeholder="KEY"
+                    bind:value={row.key}
+                    aria-label="Environment variable name"
+                    spellcheck="false"
+                    autocomplete="off"
+                  />
+                  <div class="env-value-wrap">
+                    <input
+                      type={envVarsRevealed[row.uid] ? "text" : "password"}
+                      class="env-value"
+                      placeholder="value"
+                      bind:value={row.value}
+                      aria-label="Environment variable value"
+                      spellcheck="false"
+                      autocomplete="off"
+                    />
+                    <button
+                      type="button"
+                      class="link-btn env-reveal"
+                      onclick={() => toggleEnvReveal(row.uid)}
+                      aria-label={envVarsRevealed[row.uid] ? "Hide value" : "Show value"}
+                    >
+                      {envVarsRevealed[row.uid] ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    class="link-btn env-remove"
+                    onclick={() => removeEnvVarRow(row.uid)}
+                    aria-label="Remove env var row"
+                  >
+                    Remove
+                  </button>
+                </div>
+              {/each}
+            </div>
+            <div class="env-actions">
+              <Button variant="secondary" onclick={addEnvVarRow}>+ Add env var</Button>
+              <Button
+                variant="primary"
+                disabled={envVarsSaving}
+                onclick={saveEnvVars}
+              >
+                {envVarsSaving ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -3428,20 +3648,13 @@
     border-radius: 6px;
   }
 
-  .drop-hint {
+  .toolbar {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.4rem 0.6rem;
-    border: 1px dashed #5c7cfa;
-    border-radius: 6px;
-    background: rgba(92, 124, 250, 0.08);
-    color: #c8d3ff;
-    font-size: 0.78rem;
-    letter-spacing: 0.02em;
+    flex-direction: column;
+    gap: 0.45rem;
   }
 
-  .toolbar {
+  .toolbar-row {
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -3457,7 +3670,7 @@
     align-self: center;
     width: 2.2rem;
     height: 2.2rem;
-    margin-top: -2px;
+    margin-top: 0px;
     padding: 0;
     border-radius: 6px;
     border: 1px solid #474957;
@@ -3543,26 +3756,32 @@
   .search::placeholder { color: #6f7280; }
   .search:focus-visible { border-color: #5c7cfa; }
 
-  .filter-group {
-    display: inline-flex;
-    border: 1px solid #3f4150;
+  .filter-select {
+    flex: 0 0 auto;
+    padding: 0.45rem 0.6rem;
     border-radius: 6px;
-    overflow: hidden;
+    border: 1px solid #3f4150;
     background: #1e1f26;
+    color: #e9e9ef;
+    font-size: 0.82rem;
+    font-family: inherit;
+    cursor: pointer;
+    outline: none;
+    min-width: 8.5rem;
   }
+
+  .filter-select:focus-visible { border-color: #5c7cfa; }
 
   .filter-btn {
     padding: 0.4rem 0.7rem;
     background: transparent;
     color: #a1a3b0;
     border: none;
-    border-right: 1px solid #3f4150;
     font-size: 0.78rem;
     cursor: pointer;
     line-height: 1.4;
   }
 
-  .filter-btn:last-child { border-right: none; }
   .filter-btn:hover { color: #fff; background: #2a2b33; }
   .filter-btn.filter-active { background: #32343f; color: #f2f3f7; }
 
@@ -3847,6 +4066,85 @@
     font-size: 0.74rem;
     color: #f0a8b8;
   }
+
+  .field-hint {
+    margin: 0;
+    font-size: 0.74rem;
+    color: #8b8d9a;
+  }
+
+  .env-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .env-row {
+    display: grid;
+    grid-template-columns: minmax(6rem, 0.8fr) 1fr auto;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .env-key,
+  .env-value {
+    background: #14151a;
+    border: 1px solid #2a2b33;
+    border-radius: 4px;
+    color: #e9e9ef;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.76rem;
+    padding: 0.3rem 0.45rem;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .env-key:focus,
+  .env-value:focus {
+    border-color: #5c7cfa;
+  }
+
+  .env-value-wrap {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    gap: 0.25rem;
+  }
+
+  .env-value-wrap .env-value { flex: 1; min-width: 0; }
+
+  .env-reveal {
+    flex-shrink: 0;
+  }
+
+  .env-remove {
+    flex-shrink: 0;
+    color: #f0a8b8;
+  }
+
+  .env-remove:hover { color: #fff; }
+
+  .env-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .link-btn {
+    background: transparent;
+    border: 1px solid #2a2b33;
+    border-radius: 4px;
+    padding: 0.25rem 0.55rem;
+    color: #a1a3b0;
+    font-size: 0.74rem;
+    cursor: pointer;
+    line-height: 1.3;
+    font-family: inherit;
+  }
+
+  .link-btn:hover { color: #fff; border-color: #5c7cfa; }
 
   .mini-panel-hint {
     margin: 0.2rem 0 0;

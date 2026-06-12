@@ -6,6 +6,7 @@
   import { revealItemInDir } from "@tauri-apps/plugin-opener";
   import {
     getDiagnosticsPaths,
+    getOsDefaultHubPaths,
     exportDiagnostics,
     type DiagnosticsPaths,
     type ProjectListSortBy,
@@ -22,6 +23,15 @@
   let diagnosticsError = $state<string | null>(null);
   let exporting = $state(false);
   let lastExportPath = $state<string | null>(null);
+
+  // OS-default Unity Hub paths. Loaded once on mount so the Settings
+  // tab can mark the matching "additional parent folder" rows as
+  // non-removable (they are seeded by the OS and the discovery layer
+  // always scans them, so removing them would be misleading). We
+  // also use this list to filter the rendered list to the current
+  // OS — cross-platform defaults that may have been written by a
+  // previous Hub version are not re-shown here.
+  let osDefaultHubPaths = $state<string[]>([]);
 
   // "idle" before the user clicks, "copied" briefly after a successful
   // write, "error" if the navigator rejects the write. The Button
@@ -49,6 +59,15 @@
         const msg = e instanceof Error ? e.message : String(e);
         diagnosticsError = `config dir lookup failed: ${msg}`;
         S.appendErrorLog(diagnosticsError);
+      }
+      try {
+        const defaults = await getOsDefaultHubPaths();
+        if (cancelled) return;
+        osDefaultHubPaths = defaults.map((p) => trimTrailingSeparators(p));
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        S.appendErrorLog(`OS default hub paths lookup failed: ${msg}`);
       }
     })();
     return () => {
@@ -451,6 +470,28 @@
 
   let settings = $derived(settingsStore.current);
 
+  // Only show additional parent folders that are not already covered
+  // by an OS-default Hub path. Cross-platform entries that may have
+  // been seeded by an older Hub version (or that happen to match a
+  // different OS's default) are hidden — the discovery layer always
+  // scans the current OS's defaults regardless of this list, so
+  // surfacing them here would be confusing on a Mac user seeing a
+  // `C:\Program Files\…` row.
+  let visibleParentFolders = $derived.by(() => {
+    const list = settings?.unityDiscovery.parentFolders ?? [];
+    if (osDefaultHubPaths.length === 0) return list;
+    return list.filter((folder) => {
+      const normalized = trimTrailingSeparators(folder);
+      return !osDefaultHubPaths.includes(normalized);
+    });
+  });
+
+  function isOsDefault(folder: string): boolean {
+    if (osDefaultHubPaths.length === 0) return false;
+    const normalized = trimTrailingSeparators(folder);
+    return osDefaultHubPaths.includes(normalized);
+  }
+
   type SettingsGroupId =
     | "launch"
     | "projectList"
@@ -480,17 +521,17 @@
     {
       id: "dark",
       label: "Dark",
-      description: "Force the dark palette regardless of the OS setting.",
+      description: "",
     },
     {
       id: "light",
       label: "Light",
-      description: "Force the light palette regardless of the OS setting.",
+      description: "",
     },
     {
       id: "system",
       label: "System",
-      description: "Follow the OS color scheme (auto-flips with macOS / Windows).",
+      description: "",
     },
   ];
 
@@ -749,8 +790,8 @@
         >
           <span class="group-chevron" class:group-chevron-open={openGroups.appearance} aria-hidden="true">▸</span>
           <span class="group-header-text">
-            <h3 id="group-appearance" class="group-title">Appearance (M1.5-18)</h3>
-            <p class="group-hint">Three-way theme switch — applied live, no restart.</p>
+            <h3 id="group-appearance" class="group-title">Themes</h3>
+            <p class="group-hint">Theme switch — applied live, no restart.</p>
           </span>
         </button>
         {#if openGroups.appearance}
@@ -808,18 +849,28 @@
               class="folder-list"
               aria-label="Additional parent folders"
             >
-              {#each settings.unityDiscovery.parentFolders as folder, i (folder + ":" + i)}
+              {#each visibleParentFolders as folder (folder)}
+                {@const originalIndex = (settings?.unityDiscovery.parentFolders ?? []).indexOf(folder)}
                 <li class="folder-item">
                   <span class="folder-path" title={folder}>{folder}</span>
-                  <button
-                    type="button"
-                    class="folder-remove"
-                    onclick={() => handleRemoveFolder(i)}
-                    aria-label={`Remove additional folder ${folder}`}
-                    title={`Remove ${folder}`}
-                  >
-                    Remove
-                  </button>
+                  {#if isOsDefault(folder)}
+                    <span
+                      class="folder-default-tag"
+                      title="OS default — always scanned by Hub; not user-removable"
+                    >
+                      default
+                    </span>
+                  {:else}
+                    <button
+                      type="button"
+                      class="folder-remove"
+                      onclick={() => handleRemoveFolder(originalIndex)}
+                      aria-label={`Remove additional folder ${folder}`}
+                      title={`Remove ${folder}`}
+                    >
+                      Remove
+                    </button>
+                  {/if}
                 </li>
               {:else}
                 <li class="folder-empty">
@@ -867,110 +918,6 @@
                   }}
                 />
                 <span class="scan-interval-suffix">seconds</span>
-              </div>
-            </div>
-            <div class="walkup-section">
-              <h4 class="walkup-heading">Walk-up directory scan (M1.5-11)</h4>
-              <p class="walkup-hint">
-                Add folder roots Hub should recurse into to discover
-                Unity project roots (a folder containing both
-                <code>Assets/</code> and <code>ProjectSettings/</code>).
-                Run the scan from the Projects tab — this list only
-                configures the roots.
-              </p>
-              <ul class="folder-list" aria-label="Walk-up roots">
-                {#each settings.unityDiscovery.walkUpRoots as root, i (root + ":w:" + i)}
-                  <li class="folder-item">
-                    <span class="folder-path" title={root}>{root}</span>
-                    <button
-                      type="button"
-                      class="folder-remove"
-                      onclick={() => handleRemoveWalkUpRoot(i)}
-                      aria-label={`Remove walk-up root ${root}`}
-                      title={`Remove ${root}`}
-                    >
-                      Remove
-                    </button>
-                  </li>
-                {:else}
-                  <li class="folder-empty">
-                    No walk-up roots. Use <strong>Add Folder</strong> below
-                    to pick a parent directory.
-                  </li>
-                {/each}
-              </ul>
-              <div class="folder-actions">
-                <Button
-                  variant="secondary"
-                  onclick={handleAddWalkUpRoot}
-                  disabled={addingWalkUpRoot}
-                >
-                  {addingWalkUpRoot ? "Adding…" : "Add Folder"}
-                </Button>
-              </div>
-              <div class="walkup-options">
-                <label class="check-row" for="walkup-max-depth">
-                  <span class="widget-text">
-                    <span class="check-label">Max depth</span>
-                    <span class="check-desc">
-                      How deep the scan descends below each root. Default
-                      4, hard cap 8. Higher values find deeply nested
-                      projects at the cost of slower scans.
-                    </span>
-                  </span>
-                </label>
-                <div class="walkup-depth-input">
-                  <input
-                    id="walkup-max-depth"
-                    type="number"
-                    min="1"
-                    max="8"
-                    step="1"
-                    value={settings.unityDiscovery.walkUpMaxDepth}
-                    onchange={(e) => {
-                      const raw = Number((e.currentTarget as HTMLInputElement).value);
-                      if (Number.isFinite(raw) && raw > 0) {
-                        void setWalkUpMaxDepth(raw);
-                      }
-                    }}
-                  />
-                </div>
-                <label class="check-row">
-                  <input
-                    type="checkbox"
-                    checked={settings.unityDiscovery.walkUpFollowSymlinks}
-                    onchange={(e) =>
-                      setWalkUpFollowSymlinks(
-                        (e.currentTarget as HTMLInputElement).checked
-                      )}
-                  />
-                  <span class="widget-text">
-                    <span class="check-label">Follow symbolic links</span>
-                    <span class="check-desc">
-                      Off by default to avoid loops and accidental
-                      traversal of <code>$HOME</code> and similar. Turn
-                      on only when you know your tree is well-formed.
-                    </span>
-                  </span>
-                </label>
-                <label class="check-row">
-                  <input
-                    type="checkbox"
-                    checked={settings.unityDiscovery.walkUpKeepPartial}
-                    onchange={(e) =>
-                      setWalkUpKeepPartial(
-                        (e.currentTarget as HTMLInputElement).checked
-                      )}
-                  />
-                  <span class="widget-text">
-                    <span class="check-label">Keep partial results on cancel</span>
-                    <span class="check-desc">
-                      When you press <strong>Cancel</strong> mid-scan,
-                      keep the projects the scan had already appended to
-                      <code>projects.json</code>. Off discards them.
-                    </span>
-                  </span>
-                </label>
               </div>
             </div>
             <div class="walkup-section">
@@ -1407,6 +1354,21 @@
     line-height: 1.3;
   }
 
+  .folder-default-tag {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.55rem;
+    border: 1px solid #3a4255;
+    border-radius: 999px;
+    background: #1d2330;
+    color: #b6c2d6;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+
   .folder-remove:hover {
     border-color: #7a2a3a;
     color: #f0a8b8;
@@ -1500,34 +1462,6 @@
     color: #d6d8e0;
     padding: 0 0.25rem;
     border-radius: 3px;
-  }
-
-  .walkup-options {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .walkup-depth-input {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-
-  .walkup-depth-input input {
-    width: 4.5rem;
-    background: #14151a;
-    border: 1px solid #2a2b33;
-    border-radius: 4px;
-    color: #e0e1e6;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.85rem;
-    padding: 0.3rem 0.5rem;
-  }
-
-  .walkup-depth-input input:focus {
-    outline: none;
-    border-color: #5c7cfa;
   }
 
   .placeholder-note {

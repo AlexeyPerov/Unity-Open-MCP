@@ -106,9 +106,9 @@ Tasks 1–3 → Task 4
 
 ## Plan 2 exit criteria
 
-- [ ] All four M2 meta-tools are implemented and callable.
-- [ ] Mutating tools enforce strict `paths_hint` behavior.
-- [ ] `execute_menu` allowlist + skip-validate rule works as specified.
-- [ ] Minimal verify skeleton is active through `VerifyGateAdapter`.
+- [x] All four M2 meta-tools are implemented and callable.
+- [x] Mutating tools enforce strict `paths_hint` behavior.
+- [x] `execute_menu` allowlist + skip-validate rule works as specified.
+- [x] Minimal verify skeleton is active through `VerifyGateAdapter`.
 
 **Next:** [execution-plan-3-mcp-server-live.md](./execution-plan-3-mcp-server-live.md)

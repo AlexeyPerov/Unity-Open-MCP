@@ -358,6 +358,10 @@ export async function checkPathsExists(
   return invoke<Record<string, boolean>>("check_paths_exists", { paths });
 }
 
+export async function getOsDefaultHubPaths(): Promise<string[]> {
+  return invoke<string[]>("get_os_default_hub_paths");
+}
+
 export async function addProject(path: string): Promise<AddProjectResult> {
   return invoke<AddProjectResult>("add_project", { path });
 }

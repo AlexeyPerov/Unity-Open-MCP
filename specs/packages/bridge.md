@@ -137,11 +137,78 @@ packages/bridge/
 "com.alexeyperov.unity-agent-bridge": "file:../../packages/bridge"
 ```
 
+## Attribute-based registration (M2.5)
+
+Attribute system for registering typed tools and resources via C# attributes with reflection-based discovery. New typed tools are added by decorating a method — zero changes to `BridgeHttpServer.cs`.
+
+See [M2.5 execution plan](../execution/M2.5/M2.5-attribute-registration.md) for full spec.
+
+### Two-path dispatch
+
+Hardcoded meta-tools (`execute_csharp`, `invoke_method`, `execute_menu`, `find_members`) dispatch via the existing `switch` in `BridgeHttpServer`. Attribute-discovered typed tools dispatch via `BridgeToolRegistry`. Both paths share the same gate flow for mutating tools.
+
+### Attributes
+
+| Attribute | Target | Purpose |
+|---|---|---|
+| `[BridgeToolType]` | class | Marks a container class for tool methods |
+| `[BridgeTool]` | method | Registers method as MCP tool (Name, IsMutating, Gate, hints) |
+| `[BridgeResourceType]` | class | Marks a container class for resource methods |
+| `[BridgeResource]` | method | Registers method as MCP resource (Name, Route, MimeType) |
+| `[Description]` | parameter | AI-readable parameter description (System.ComponentModel) |
+
+`GateMode` enum: `Enforce`, `Warn`, `Off` — sets default gate behavior for mutating tools; runtime `gate` param overrides.
+
+### Registry
+
+| Component | Role |
+|---|---|
+| `BridgeToolRegistry` | Scans assemblies for `[BridgeTool]` methods at startup; keyed by tool name |
+| `BridgeResourceRegistry` | Scans assemblies for `[BridgeResource]` methods at startup; keyed by route |
+
+### Package layout (updated)
+
+```
+packages/bridge/
+├── package.json
+└── Editor/
+    ├── Bridge/
+    │   ├── BridgeHttpServer.cs
+    │   ├── BridgeSession.cs
+    │   ├── MainThreadDispatcher.cs
+    │   ├── JsonBody.cs
+    │   ├── ToolDispatchResult.cs
+    │   ├── Attributes/
+    │   │   ├── BridgeToolTypeAttribute.cs
+    │   │   ├── BridgeToolAttribute.cs
+    │   │   ├── BridgeResourceTypeAttribute.cs
+    │   │   ├── BridgeResourceAttribute.cs
+    │   │   └── GateMode.cs
+    │   └── Registry/
+    │       ├── BridgeToolRegistry.cs
+    │       ├── BridgeResourceRegistry.cs
+    │       ├── BridgeToolEntry.cs
+    │       └── BridgeResourceEntry.cs
+    ├── MetaTools/
+    │   ├── ExecuteCSharpTool.cs
+    │   ├── InvokeMethodTool.cs
+    │   ├── ExecuteMenuTool.cs
+    │   ├── FindMembersTool.cs
+    │   ├── RoslynHost.cs
+    │   └── OutputSerializer.cs
+    ├── TypedTools/
+    │   └── Tool_Editor.cs
+    └── Gate/
+        ├── GatePolicy.cs
+        └── VerifyGateAdapter.cs
+```
+
 ## Milestones
 
 | Phase | Deliverable |
 |---|---|
 | **M2** | HTTP listener, 4 meta-tools, gate stub, `/ping` |
+| **M2.5** | Attribute system, registry, typed tool dispatch, resource endpoint skeleton |
 | **M3** | Full GatePolicy + `VerifyGateAdapter` integration |
 | **M4** | Hub wizard installs bridge package |
 | **M5** | Batch entry points for headless Editor (limited meta-tool parity) |

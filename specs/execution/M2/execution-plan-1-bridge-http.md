@@ -105,9 +105,9 @@ Task 3 → Task 4
 
 ## Plan 1 exit criteria
 
-- [ ] Bridge listener lifecycle is stable and localhost-only.
-- [ ] Main-thread dispatch queue and timeout handling are implemented.
-- [ ] `/ping` endpoint returns the agreed schema.
+- [x] Bridge listener lifecycle is stable and localhost-only.
+- [x] Main-thread dispatch queue and timeout handling are implemented.
+- [x] `/ping` endpoint returns the agreed schema.
 - [x] `architecture/bridge-http-api.md` exists and is linked.
 
 **Next:** [execution-plan-2-meta-tools-gate.md](./execution-plan-2-meta-tools-gate.md)

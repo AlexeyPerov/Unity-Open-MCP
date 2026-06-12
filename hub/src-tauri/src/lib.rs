@@ -32,6 +32,7 @@ pub fn run() {
             config::projects::remove_project,
             config::projects::relink_project,
             config::commands::check_paths_exists,
+            config::commands::get_os_default_hub_paths,
             config::logs::log_paths,
             config::logs::asset_store_paths,
             config::logs::crash_log_path,

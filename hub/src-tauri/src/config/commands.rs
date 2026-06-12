@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use crate::config::discovery::DiscoveryResult;
 use crate::config::persistence;
-use crate::config::schemas::{ProjectsFile, Settings};
+use crate::config::schemas::{os_default_hub_paths, ProjectsFile, Settings};
 use crate::config::walk_up_scan::WalkUpRegistry;
 
 pub struct AppState {
@@ -59,6 +59,15 @@ pub fn check_paths_exists(paths: Vec<String>) -> HashMap<String, bool> {
         result.insert(path, exists);
     }
     result
+}
+
+/// Returns the OS-default Unity Hub editor folders for the current
+/// host. The Settings tab compares each "additional parent folder"
+/// row against this list to decide whether to render a Remove button
+/// (default paths are informational and not user-removable).
+#[tauri::command]
+pub fn get_os_default_hub_paths() -> Vec<String> {
+    os_default_hub_paths()
 }
 
 #[cfg(test)]

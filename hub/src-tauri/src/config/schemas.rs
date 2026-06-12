@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -147,6 +148,34 @@ fn default_walk_up_max_depth() -> u32 {
     4
 }
 
+/// Seed the "additional parent folders" list with the OS-default Unity
+/// Hub editor folder for the current host. We only seed the *current*
+/// OS's default — the Settings UI is per-machine and showing
+/// cross-platform paths (e.g. a Mac user seeing
+/// `C:\Program Files\Unity\Hub\Editor`) is confusing and a no-op for
+/// discovery, which always scans the current OS's defaults regardless
+/// of what is stored here.
+fn default_parent_folders() -> Vec<String> {
+    let path: PathBuf = if cfg!(target_os = "macos") {
+        PathBuf::from("/Applications/Unity/Hub/Editor")
+    } else if cfg!(target_os = "windows") {
+        PathBuf::from("C:\\Program Files\\Unity\\Hub\\Editor")
+    } else {
+        dirs::home_dir()
+            .map(|h| h.join("Unity/Hub/Editor"))
+            .unwrap_or_else(|| PathBuf::from("Unity/Hub/Editor"))
+    };
+    vec![path.to_string_lossy().to_string()]
+}
+
+/// Returns the OS-default Unity Hub editor folders for the current
+/// host. The frontend uses this to mark the matching rows in
+/// "Additional parent folders" as non-removable (the Settings tab
+/// shows them as informational entries that ship with the OS).
+pub fn os_default_hub_paths() -> Vec<String> {
+    default_parent_folders()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -169,10 +198,7 @@ impl Default for Settings {
                 confirm_env_var_override: true,
             },
             unity_discovery: UnityDiscoverySettings {
-                parent_folders: vec![
-                    "/Applications/Unity/Hub/Editor".to_string(),
-                    "C:\\Program Files\\Unity\\Hub\\Editor".to_string(),
-                ],
+                parent_folders: default_parent_folders(),
                 scan_interval_seconds: default_scan_interval_seconds(),
                 walk_up_roots: Vec::new(),
                 walk_up_max_depth: default_walk_up_max_depth(),
@@ -308,9 +334,13 @@ mod tests {
     }
 
     #[test]
-    fn settings_default_discovery_has_two_folders() {
+    fn settings_default_discovery_has_one_os_folder() {
         let s = Settings::default();
-        assert_eq!(s.unity_discovery.parent_folders.len(), 2);
+        // We only seed the *current* OS's default Hub path; the
+        // discovery layer always scans it regardless of this list, so
+        // stuffing cross-platform defaults here is just noise on
+        // machines that will never use them.
+        assert_eq!(s.unity_discovery.parent_folders.len(), 1);
     }
 
     #[test]

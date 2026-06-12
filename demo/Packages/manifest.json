@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "com.alexeyperov.unity-agent-bridge": "file:../../packages/bridge",
+    "com.alexeyperov.unity-agent-verify": "file:../../packages/verify",
+    "com.unity.render-pipelines.universal": "17.0.3"
+  },
+  "scopedRegistries": [],
+  "testables": []
+}

@@ -29,7 +29,6 @@
         {
           "name": "projectPath",
           "short": "p",
-          "long": "projectPath",
           "description": "Open the Unity project at <path> with the matching installed Unity version and exit.",
           "index": 1,
           "takesValue": true

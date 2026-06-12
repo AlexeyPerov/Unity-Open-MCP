@@ -236,11 +236,13 @@ Returned when tool execution throws an unhandled exception:
 |---|---|---|
 | `tool_not_found` | 404 | Unknown `tool_name` in URL |
 | `not_found` | 404 | Unknown endpoint path |
+| `resource_not_found` | 404 | Unknown resource route |
 | `method_not_allowed` | 405 | Non-POST request to `/tools/*` |
 | `bridge_internal_error` | 500 | Unhandled exception in bridge request handling |
 | `timeout` | 200 (envelope) | Tool execution exceeded `timeout_ms` |
 | `execution_error` | 200 (envelope) | Tool threw an unhandled exception |
 | `paths_hint_required` | 200 (envelope) | Mutating tool called without non-empty `paths_hint` |
+| `missing_parameter` | 200 (envelope) | Attribute-discovered tool called without a required parameter |
 
 ---
 
@@ -264,6 +266,61 @@ When `gate.mode == "off"`: only `mutation.success == false` sets `isError`.
 - **`paths_hint`** is strictly enforced for mutating tools (`execute_csharp`, `invoke_method`, `execute_menu`). Missing or empty `paths_hint` returns `mutation.success: false` with error code `paths_hint_required`. Read-only tools (`find_members`) do not require `paths_hint`. There is no whole-project fallback in M2 — agents must always provide explicit asset paths for mutating operations.
 - **Tool implementations are scaffolds:** `DispatchTool` returns a generic success result. Per-tool logic is implemented in Plan 2.
 - **Batch mode** is not supported in M2. `mode` is always `"live"`.
+
+---
+
+## Resource endpoints (M2.5)
+
+Read-only MCP resource endpoints. Populated by `[BridgeResource]`-decorated methods discovered at startup. Full MCP resource protocol integration deferred to M7.
+
+### `GET /resources`
+
+List all registered resources.
+
+**Response (200 OK):**
+
+```json
+[
+  {
+    "name": "Bridge status",
+    "route": "unity-agent://bridge/status",
+    "mimeType": "application/json",
+    "description": "Live bridge connection info"
+  }
+]
+```
+
+**Fields per entry:**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `string` | Display name from `[BridgeResource]` |
+| `route` | `string` | URI template |
+| `mimeType` | `string` | Content type (default `"application/json"`) |
+| `description` | `string \| null` | Resource description |
+
+### `GET /resources/{route}`
+
+Read a specific resource by route.
+
+**URL parameters:**
+
+| Parameter | Description |
+|---|---|
+| `route` | Resource URI, e.g. `unity-agent://bridge/status` |
+
+**Response (200 OK):** Content returned by the `[BridgeResource]` method, with `Content-Type` matching the resource's `MimeType`.
+
+**Response (404 Not Found):**
+
+```json
+{
+  "error": {
+    "code": "resource_not_found",
+    "message": "Unknown resource route: unity-agent://nonexistent"
+  }
+}
+```
 
 ---
 
@@ -336,4 +393,18 @@ Content-Type: application/json
   "max_results": 20,
   "timeout_ms": 10000
 }
+```
+
+### List resources
+
+```http
+GET /resources HTTP/1.1
+Host: 127.0.0.1:19120
+```
+
+### Read resource
+
+```http
+GET /resources/unity-agent://bridge/status HTTP/1.1
+Host: 127.0.0.1:19120
 ```

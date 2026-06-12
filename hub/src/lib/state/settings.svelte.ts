@@ -295,6 +295,29 @@ class SettingsStore {
   }
 
   /**
+   * Replace the entire walk-up roots list with `folders`. Used by the
+   * "Add Multiple Projects" modal: the "Select folder" picker always
+   * sets the single selected folder, so a previous pick is replaced
+   * rather than appended. Empty input clears the list.
+   */
+  async setWalkUpRoots(folders: string[]): Promise<void> {
+    if (!this.current) return;
+    const cleaned = folders
+      .map((f) => f.trim())
+      .filter((f) => f.length > 0);
+    const current = this.current.unityDiscovery.walkUpRoots;
+    if (
+      current.length === cleaned.length &&
+      current.every((v, i) => v === cleaned[i])
+    ) {
+      return;
+    }
+    const next = this.clone();
+    next.unityDiscovery.walkUpRoots = cleaned;
+    await this.persist(next);
+  }
+
+  /**
    * M1.5-11: walk-up max depth (clamped to 1..=8 by the UI; the Rust
    * mutator also clamps so a stale value cannot panic the backend).
    */

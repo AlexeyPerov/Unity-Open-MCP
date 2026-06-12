@@ -60,8 +60,14 @@
         releasesError = `could not load releases: ${msg}`;
       }
     })();
+    // Close the releases context menu on any window click. The menu
+    // itself calls `stopPropagation`, so this fires only for clicks
+    // outside the open menu (matching the Projects-tab context menu
+    // behavior).
+    window.addEventListener("click", closeReleasesContext, true);
     return () => {
       cancelled = true;
+      window.removeEventListener("click", closeReleasesContext, true);
     };
   });
 
@@ -170,10 +176,6 @@
 
   function closeReleasesContext() {
     releasesContext = null;
-  }
-
-  function handleBackgroundClick() {
-    if (releasesContext) closeReleasesContext();
   }
 
   function releaseNotesUrl(version: string): string {

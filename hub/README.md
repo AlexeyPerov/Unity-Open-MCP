@@ -200,29 +200,6 @@ key collision).
   (`env_var_collisions`) so the modal can be shown without
   spawning Unity.
 
-## Appearance (M1.5-18)
-
-The Hub ships with a three-way theme switch — `Dark` / `Light` /
-`System` — exposed in `Settings → Appearance` (M1.5-18). The
-choice is persisted to `settings.json` under a new optional
-`theme` field (`"dark" | "light" | "system"`, default `"system"`)
-and is applied live with no app restart.
-
-- `Dark` and `Light` pin the Hub to that palette regardless of the
-  OS setting.
-- `System` follows the OS via the `prefers-color-scheme` media
-  query; the Hub auto-flips when the user toggles the OS setting
-  (macOS System Settings → Appearance; Windows Settings →
-  Personalization → Colors).
-- The choice is mirrored to `localStorage["hub-theme"]` and the
-  `app.html` inline boot script reads it on first paint, so the
-  first frame after relaunch is already in the right palette
-  (no flash of dark when the user picked `Light`).
-- The per-launch log (`~/.config/unity-agent-hub/logs/launches.log`)
-  records the active theme on every launch. The frontend resolves
-  `system` to a concrete `dark` / `light` value before the spawn
-  so the on-disk record is always a concrete palette.
-
 ## Unity Versions — All releases sub-section (M1.5-19)
 
 The Unity Versions tab carries a two-way toggle in the toolbar —
