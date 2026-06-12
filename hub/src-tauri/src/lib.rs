@@ -14,6 +14,7 @@ pub fn run() {
             projects: Mutex::new(config::persistence::load_projects()),
             discovery_cache: Mutex::new(None),
             walk_up_registry: Mutex::new(config::walk_up_scan::WalkUpRegistry::default()),
+            install_in_progress: Mutex::new(false),
         })
         .invoke_handler(tauri::generate_handler![
             config::commands::load_settings,
@@ -55,6 +56,8 @@ pub fn run() {
             config::env_vars::env_var_collisions,
             config::releases::fetch_releases,
             config::releases::refresh_releases_command,
+            config::hub_install::install_unity_version,
+            config::hub_install::check_install_in_progress,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -703,6 +703,7 @@ export interface ReleaseEntry {
   stream: ReleaseStream;
   releaseDate?: string;
   releaseNotesUrl: string;
+  changeset?: string;
 }
 
 export interface ReleasesResult {
@@ -715,10 +716,35 @@ export interface ReleasesResult {
   cachePath: string;
 }
 
-export async function fetchReleases(): Promise<ReleasesResult> {
-  return invoke<ReleasesResult>("fetch_releases");
+export async function fetchReleases(includeArchived?: boolean): Promise<ReleasesResult> {
+  return invoke<ReleasesResult>("fetch_releases", { includeArchived: includeArchived ?? false });
 }
 
-export async function refreshReleases(): Promise<ReleasesResult> {
-  return invoke<ReleasesResult>("refresh_releases_command");
+export async function refreshReleases(includeArchived?: boolean): Promise<ReleasesResult> {
+  return invoke<ReleasesResult>("refresh_releases_command", { includeArchived: includeArchived ?? false });
+}
+
+/**
+ * M1.5-20: Unity Editor install via Unity Hub CLI.
+ */
+
+export type InstallError =
+  | { type: "hubNotFound" }
+  | { type: "installInProgress" }
+  | { type: "versionEmpty" }
+  | { type: "installFailed"; message: string };
+
+export interface InstallResult {
+  version: string;
+}
+
+export async function installUnityVersion(
+  version: string,
+  changeset?: string
+): Promise<InstallResult> {
+  return invoke<InstallResult>("install_unity_version", { version, changeset });
+}
+
+export async function checkInstallInProgress(): Promise<boolean> {
+  return invoke<boolean>("check_install_in_progress");
 }

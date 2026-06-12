@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { S } from "$lib/state.svelte";
   import { projectsStore } from "$lib/state/projects.svelte";
   import { discoveryStore, type VersionHealth } from "$lib/state/discovery.svelte";
@@ -7,10 +8,12 @@
     fetchReleases,
     refreshReleases,
     runUnityInstall,
+    installUnityVersion,
     type ReleaseEntry,
     type ReleasesResult,
     type RunUnityError,
     type UnityInstallation,
+    type InstallError,
   } from "$lib/services/config";
   import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
   import Button from "$lib/components/shell/Button.svelte";
@@ -27,16 +30,18 @@
   let running = $state<string | null>(null);
   let actionError = $state<string | null>(null);
 
-  // M1.5-19: All releases sub-section state. The toggle lives in
-  // the toolbar; the fetched entries + stale badge are owned here
-  // so the row renderer can mark "installed" rows via a side-by-side
-  // lookup against the discovery store.
   let viewMode = $state<ViewMode>("installed");
   let releases = $state<ReleasesResult | null>(null);
   let releasesError = $state<string | null>(null);
   let releasesLoading = $state(false);
   let releasesSearch = $state("");
   let releasesContext = $state<{ x: number; y: number; entry: ReleaseEntry } | null>(null);
+  let includeArchived = $state(false);
+  let installingVersion = $state<string | null>(null);
+  let installError = $state<string | null>(null);
+
+  let unlistenInstallLog: UnlistenFn | null = null;
+  let unlistenInstallComplete: UnlistenFn | null = null;
 
   onMount(() => {
     let cancelled = false;
@@ -47,11 +52,8 @@
       if (cancelled) return;
       await discoveryStore.load();
       if (cancelled) return;
-      // Prefetch the releases snapshot so swapping the view is
-      // instant. Errors are non-fatal — the inline error message
-      // surfaces only when the user opens the "All releases" tab.
       try {
-        const result = await fetchReleases();
+        const result = await fetchReleases(includeArchived);
         if (cancelled) return;
         releases = result;
       } catch (e) {
@@ -60,14 +62,26 @@
         releasesError = `could not load releases: ${msg}`;
       }
     })();
-    // Close the releases context menu on any window click. The menu
-    // itself calls `stopPropagation`, so this fires only for clicks
-    // outside the open menu (matching the Projects-tab context menu
-    // behavior).
     window.addEventListener("click", closeReleasesContext, true);
+
+    (async () => {
+      unlistenInstallLog = await listen<string>("install-log", (event) => {
+        S.appendDrawerLog(`[install] ${event.payload}`);
+      });
+      unlistenInstallComplete = await listen<string>("install-complete", async (event) => {
+        S.appendDrawerLog(`install complete: ${event.payload}`);
+        installingVersion = null;
+        installError = null;
+        await discoveryStore.refresh();
+        await loadReleases();
+      });
+    })();
+
     return () => {
       cancelled = true;
       window.removeEventListener("click", closeReleasesContext, true);
+      unlistenInstallLog?.();
+      unlistenInstallComplete?.();
     };
   });
 
@@ -75,7 +89,7 @@
     releasesLoading = true;
     releasesError = null;
     try {
-      releases = await fetchReleases();
+      releases = await fetchReleases(includeArchived);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       releasesError = `could not load releases: ${msg}`;
@@ -88,7 +102,7 @@
     releasesLoading = true;
     releasesError = null;
     try {
-      releases = await refreshReleases();
+      releases = await refreshReleases(includeArchived);
       S.appendDrawerLog(`refreshed Unity releases (cache: ${releases?.cachePath ?? "—"})`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -103,6 +117,11 @@
     if (mode === "all" && !releases && !releasesLoading) {
       void loadReleases();
     }
+  }
+
+  async function toggleArchived() {
+    includeArchived = !includeArchived;
+    await loadReleases();
   }
 
   function installedVersionSet(): Set<string> {
@@ -267,6 +286,38 @@
     }
   }
 
+  function formatInstallError(err: InstallError): string {
+    switch (err.type) {
+      case "hubNotFound":
+        return "Unity Hub is not installed. Install Unity Hub or add the editor manually.";
+      case "installInProgress":
+        return "Another install is already in progress.";
+      case "versionEmpty":
+        return "No version specified.";
+      case "installFailed":
+        return err.message;
+      default:
+        return `unknown error: ${JSON.stringify(err)}`;
+    }
+  }
+
+  async function handleInstall(entry: ReleaseEntry) {
+    if (installingVersion) return;
+    installingVersion = entry.version;
+    installError = null;
+    S.drawerExpanded = true;
+    S.appendDrawerLog(`installing Unity ${entry.version}${entry.changeset ? ` (changeset: ${entry.changeset})` : ""}…`);
+    try {
+      await installUnityVersion(entry.version, entry.changeset);
+    } catch (e) {
+      const err = e as InstallError;
+      const msg = formatInstallError(err);
+      installError = msg;
+      installingVersion = null;
+      S.appendErrorLog(`install failed: ${msg}`);
+    }
+  }
+
   async function handleOpenFolder() {
     if (!selected) return;
     actionError = null;
@@ -410,6 +461,10 @@
       </Button>
     </div>
     <div class:hidden={viewMode !== "all"}>
+      <label class="archived-toggle">
+        <input type="checkbox" bind:checked={includeArchived} onchange={toggleArchived} />
+        <span class="archived-label">Include archived</span>
+      </label>
       <Button variant="secondary" onclick={refreshReleasesAction} disabled={releasesLoading}>
         {releasesLoading ? "Refreshing…" : "Refresh"}
       </Button>
@@ -575,6 +630,20 @@
        the release-notes URL in the system browser; right-click
        exposes Copy version / Use as Upgrade target. -->
   <div class:hidden={viewMode !== "all"} style="display: flex; flex-direction: column; gap: 0.6rem; flex: 1; min-height: 0;">
+    {#if installError}
+      <div class="inline-error" role="alert">
+        <span class="inline-error-text">{installError}</span>
+        <button
+          type="button"
+          class="inline-error-dismiss"
+          onclick={() => (installError = null)}
+          aria-label="Dismiss error"
+        >
+          ×
+        </button>
+      </div>
+    {/if}
+
     <div class="releases-meta">
       <span class="releases-meta-text">
         {filteredReleases.length} release{filteredReleases.length === 1 ? "" : "s"}
@@ -638,8 +707,18 @@
               <div class="cell" role="gridcell">
                 {#if isInstalled(entry.version)}
                   <StatusChip tone="ok" label="installed" />
+                {:else if installingVersion === entry.version}
+                  <span class="install-status">Installing…</span>
                 {:else}
-                  <span class="muted">—</span>
+                  <button
+                    type="button"
+                    class="install-btn"
+                    disabled={!!installingVersion}
+                    onclick={(e) => { e.stopPropagation(); handleInstall(entry); }}
+                    title={installingVersion ? "Another install is in progress" : `Install Unity ${entry.version} via Unity Hub`}
+                  >
+                    Install
+                  </button>
                 {/if}
               </div>
             </div>
@@ -681,6 +760,21 @@
         >
           Copy version
         </button>
+        {#if !isInstalled(ctxEntry.version)}
+          <button
+            type="button"
+            class="ctx-item ctx-item-install"
+            role="menuitem"
+            disabled={!!installingVersion}
+            title={installingVersion ? "Another install is in progress" : `Install Unity ${ctxEntry.version}`}
+            onclick={() => {
+              handleInstall(ctxEntry);
+              closeReleasesContext();
+            }}
+          >
+            Install
+          </button>
+        {/if}
         <button
           type="button"
           class="ctx-item ctx-item-upgrade"
@@ -1167,5 +1261,62 @@
 
   .ctx-item-upgrade:hover:not(:disabled) {
     color: var(--hub-text-bright);
+  }
+
+  .install-btn {
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    border: 1px solid var(--hub-accent);
+    background: transparent;
+    color: var(--hub-accent);
+    font-size: 0.72rem;
+    font-weight: 500;
+    cursor: pointer;
+    line-height: 1.3;
+  }
+
+  .install-btn:hover:not(:disabled) {
+    background: var(--hub-accent);
+    color: var(--hub-bg);
+  }
+
+  .install-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .install-status {
+    font-size: 0.72rem;
+    color: var(--hub-text-muted);
+    font-style: italic;
+  }
+
+  .ctx-item-install {
+    color: var(--hub-accent);
+  }
+
+  .ctx-item-install:hover:not(:disabled) {
+    color: var(--hub-text-bright);
+  }
+
+  .archived-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    cursor: pointer;
+    font-size: 0.78rem;
+    color: var(--hub-text-dim);
+    user-select: none;
+  }
+
+  .archived-toggle input[type="checkbox"] {
+    accent-color: var(--hub-accent);
+    width: 0.85rem;
+    height: 0.85rem;
+    cursor: pointer;
+  }
+
+  .archived-label {
+    font-size: 0.78rem;
   }
 </style>

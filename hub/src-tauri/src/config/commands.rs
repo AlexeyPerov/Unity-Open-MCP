@@ -12,11 +12,11 @@ pub struct AppState {
     pub settings: Mutex<Settings>,
     pub projects: Mutex<ProjectsFile>,
     pub discovery_cache: Mutex<Option<DiscoveryResult>>,
-    /// M1.5-11: in-process registry of running walk-up directory
-    /// scans. Keyed by `scan_id` so a Cancel on scan A leaves scan B
-    /// untouched when the user starts a second scan before the first
-    /// has settled. See `config::walk_up_scan` for the full design.
     pub walk_up_registry: Mutex<WalkUpRegistry>,
+    /// M1.5-20: tracks whether a Unity Hub CLI install is
+    /// currently in progress so the frontend can disable the
+    /// Install button and surface an inline message.
+    pub install_in_progress: Mutex<bool>,
 }
 
 #[tauri::command]

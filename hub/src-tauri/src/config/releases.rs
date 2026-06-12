@@ -78,6 +78,11 @@ pub struct ReleaseEntry {
     /// frontend opens this in the system browser when the user
     /// clicks the row.
     pub release_notes_url: String,
+    /// Changeset hash for the Unity build. Required for installing
+    /// some archived versions via the Hub CLI. Populated from the
+    /// CLI releases output; absent from the static snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changeset: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -128,88 +133,96 @@ fn release_notes_url(version: &str) -> String {
 /// filtered by stream if the user wants a narrower view.
 fn snapshot_entries() -> Vec<ReleaseEntry> {
     let mut entries: Vec<ReleaseEntry> = vec![
-        // Unity 6 LTS line.
         ReleaseEntry {
             version: "6000.0.32f1".to_string(),
             stream: ReleaseStream::Lts,
             release_date: Some("2026-05-14".to_string()),
             release_notes_url: release_notes_url("6000.0.32f1"),
+            changeset: None,
         },
         ReleaseEntry {
             version: "6000.0.23f1".to_string(),
             stream: ReleaseStream::Lts,
             release_date: Some("2026-02-10".to_string()),
             release_notes_url: release_notes_url("6000.0.23f1"),
+            changeset: None,
         },
         ReleaseEntry {
             version: "6000.0.18f1".to_string(),
             stream: ReleaseStream::Lts,
             release_date: Some("2025-12-12".to_string()),
             release_notes_url: release_notes_url("6000.0.18f1"),
+            changeset: None,
         },
         ReleaseEntry {
             version: "6000.0.10f1".to_string(),
             stream: ReleaseStream::Lts,
             release_date: Some("2025-10-21".to_string()),
             release_notes_url: release_notes_url("6000.0.10f1"),
+            changeset: None,
         },
         ReleaseEntry {
             version: "6000.0.0f1".to_string(),
             stream: ReleaseStream::Lts,
             release_date: Some("2025-06-17".to_string()),
             release_notes_url: release_notes_url("6000.0.0f1"),
+            changeset: None,
         },
-        // 2022 LTS line.
         ReleaseEntry {
             version: "2022.3.62f2".to_string(),
             stream: ReleaseStream::Lts,
             release_date: Some("2025-05-29".to_string()),
             release_notes_url: release_notes_url("2022.3.62f2"),
+            changeset: None,
         },
         ReleaseEntry {
             version: "2022.3.50f1".to_string(),
             stream: ReleaseStream::Lts,
             release_date: Some("2024-11-13".to_string()),
             release_notes_url: release_notes_url("2022.3.50f1"),
+            changeset: None,
         },
-        // TECH stream (yearly non-LTS).
         ReleaseEntry {
             version: "2023.3.20f1".to_string(),
             stream: ReleaseStream::Tech,
             release_date: Some("2025-05-08".to_string()),
             release_notes_url: release_notes_url("2023.3.20f1"),
+            changeset: None,
         },
         ReleaseEntry {
             version: "2023.2.20f1".to_string(),
             stream: ReleaseStream::Tech,
             release_date: Some("2024-11-14".to_string()),
             release_notes_url: release_notes_url("2023.2.20f1"),
+            changeset: None,
         },
-        // BETA stream.
         ReleaseEntry {
             version: "6000.0.0b16".to_string(),
             stream: ReleaseStream::Beta,
             release_date: Some("2025-04-09".to_string()),
             release_notes_url: release_notes_url("6000.0.0b16"),
+            changeset: None,
         },
         ReleaseEntry {
             version: "6000.0.0b1".to_string(),
             stream: ReleaseStream::Beta,
             release_date: Some("2024-10-02".to_string()),
             release_notes_url: release_notes_url("6000.0.0b1"),
+            changeset: None,
         },
-        // ALPHA stream.
         ReleaseEntry {
             version: "6000.0.0a25".to_string(),
             stream: ReleaseStream::Alpha,
             release_date: Some("2024-08-21".to_string()),
             release_notes_url: release_notes_url("6000.0.0a25"),
+            changeset: None,
         },
         ReleaseEntry {
             version: "6000.0.0a1".to_string(),
             stream: ReleaseStream::Alpha,
             release_date: Some("2024-03-13".to_string()),
             release_notes_url: release_notes_url("6000.0.0a1"),
+            changeset: None,
         },
     ];
     // Sort newest-first by ISO date (lex order matches chronological
@@ -330,13 +343,77 @@ pub fn refresh_releases() -> ReleasesResult {
 }
 
 #[tauri::command]
-pub fn fetch_releases() -> ReleasesResult {
-    resolve_releases()
+pub async fn fetch_releases(include_archived: Option<bool>) -> ReleasesResult {
+    let include_archived = include_archived.unwrap_or(false);
+    let cached = read_cache();
+    if let Some(ref file) = cached {
+        if !file.entries.is_empty() {
+            let mtime = fs::metadata(cache_path())
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let stale =
+                mtime == 0 || now_epoch().saturating_sub(mtime) >= CACHE_TTL_SECONDS;
+            if !stale {
+                let path_str = cache_path().to_string_lossy().to_string();
+                return ReleasesResult {
+                    entries: file.entries.clone(),
+                    stale: false,
+                    fetched_at_epoch: mtime,
+                    cache_path: path_str,
+                };
+            }
+        }
+    }
+    let cli_result = tauri::async_runtime::spawn_blocking(move || {
+        crate::config::hub_install::fetch_releases_from_hub_cli(include_archived)
+    })
+    .await;
+    if let Ok(Some(entries)) = cli_result {
+        let path_str = cache_path().to_string_lossy().to_string();
+        let epoch = write_cache(&entries).unwrap_or_else(|e| {
+            log::warn!("Failed to write releases cache: {}", e);
+            now_epoch()
+        });
+        return ReleasesResult {
+            entries,
+            stale: false,
+            fetched_at_epoch: epoch,
+            cache_path: path_str,
+        };
+    }
+    let mut result = resolve_releases();
+    result.stale = true;
+    result
 }
 
 #[tauri::command]
-pub fn refresh_releases_command() -> ReleasesResult {
-    refresh_releases()
+pub async fn refresh_releases_command(
+    include_archived: Option<bool>,
+) -> ReleasesResult {
+    let include_archived = include_archived.unwrap_or(false);
+    let cli_result = tauri::async_runtime::spawn_blocking(move || {
+        crate::config::hub_install::fetch_releases_from_hub_cli(include_archived)
+    })
+    .await;
+    if let Ok(Some(entries)) = cli_result {
+        let path_str = cache_path().to_string_lossy().to_string();
+        let epoch = write_cache(&entries).unwrap_or_else(|e| {
+            log::warn!("Failed to refresh releases cache: {}", e);
+            now_epoch()
+        });
+        return ReleasesResult {
+            entries,
+            stale: false,
+            fetched_at_epoch: epoch,
+            cache_path: path_str,
+        };
+    }
+    let mut result = refresh_releases();
+    result.stale = true;
+    result
 }
 
 /// Pure helper for the upgrade flow: look up the matching
