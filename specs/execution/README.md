@@ -17,7 +17,11 @@ Volatile milestone task lists — *how* we build, not *what* we build. Design tr
 | [M2.5/execution-plan.md](M2.5/execution-plan.md) | M2.5 — agent execution plan | ready |
 | [M3-verify-gate.md](M3-verify-gate.md) | M3 — Verify gate | **DONE** |
 | [M3/execution-plan.md](M3/execution-plan.md) | M3 — agent execution plans (1–6) | ready |
-| [M4-hub-wizard.md](M4-hub-wizard.md) | M4 — Hub wizard | pending |
-| [M5-batch-ci.md](M5-batch-ci.md) | M5 — Batch + CI | pending |
-| [M6-byo-bridge.md](M6-byo-bridge.md) | M6 — Bring-your-own-bridge | pending |
-| [M7-mcp-resources.md](M7-mcp-resources.md) | M7 — MCP Resources | pending |
+| [M4-hub-wizard.md](M4-hub-wizard.md) | M4 — Hub wizard | pending (questions resolved) |
+| [M4/execution-plan.md](M4/execution-plan.md) | M4 — agent execution plans (1–5) | ready |
+| [M5-batch-ci.md](M5-batch-ci.md) | M5 — Batch + CI | pending (questions resolved) |
+| [M5/execution-plan.md](M5/execution-plan.md) | M5 — agent execution plans (1–6) | ready |
+| [M6-mcp-resources.md](M6-mcp-resources.md) | M6 — MCP Resources | pending (questions resolved) |
+| [M6/execution-plan.md](M6/execution-plan.md) | M6 — agent execution plans (1–4) | ready |
+| [M7-byo-skills.md](M7-byo-skills.md) | M7 — Bring-your-own-bridge skills | pending |
+| [M8-adapter-docs.md](M8-adapter-docs.md) | M8 — BYO bridge adapter docs | pending |

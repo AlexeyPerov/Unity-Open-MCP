@@ -158,6 +158,6 @@ Tasks 3 and 4 may run in parallel with Tasks 1–2. Task 2 should not start unti
 - [ ] macOS shows a theme-integrated overlay title bar with native traffic-light controls; other platforms unchanged.
 - [ ] Shared `Select` component replaces native `<select>` on Projects toolbar and new-project / upgrade modals.
 - [ ] `hub/MANUAL_VALIDATION.md` extended with sections for install, archived catalog, title bar (macOS), and select styling.
-- [ ] No M2/M4/M5/M6/M7 code paths introduced.
+- [ ] No M2/M4/M5/M6/M7/M8 code paths introduced.
 
 **Next:** [execution-plan-4-platform-niche.md](./execution-plan-4-platform-niche.md) (or ship Plan 3.5 items before Plan 4 niche work)

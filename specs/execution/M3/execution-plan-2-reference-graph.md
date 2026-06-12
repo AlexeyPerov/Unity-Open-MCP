@@ -25,7 +25,7 @@ How to use this plan: each task lists **Required context** — read only those d
 
 - Headless reverse-dependency lookup by asset path or GUID.
 - No UI dependencies; compiles in verify package only.
-- Graph build is synchronous per call (optimize in M7 if needed — backlog).
+- Graph build is synchronous per call (optimize in M6 if needed — backlog).
 
 Dependencies: Plan 1 Task 1.
 

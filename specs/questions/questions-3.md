@@ -86,9 +86,9 @@ Upstream repo: `**/Users/alexeyperov/Projects/Unity-Scanner`** (local checkout; 
 
 - **A)** Build graph on demand per request (M3).
 - **B)** Incremental project index cached in memory after first call.
-- **C)** Persist graph cache under `.unity-agent/` (M7 overlap).
+- **C)** Persist graph cache under `.unity-agent/` (M6 overlap).
 
-**Recommended: A** — simplest correct behavior; optimize in M7 if perf issues appear.
+**Recommended: A** — simplest correct behavior; optimize in M6 if perf issues appear.
 
 **Answer: A**
 

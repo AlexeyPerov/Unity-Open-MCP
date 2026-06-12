@@ -1,3 +1,42 @@
+## 2026-06-12 (specs)
+
+- **M4 Q2 revised for MVP simplification.** Changed [questions-4.md](questions/questions-4.md) Q2 answer from A (Tauri sidecar) to **B** (dev monorepo `mcp-server/dist/index.js`) with **user-editable MCP path in Step 4**. Updated [M4-hub-wizard.md](execution/M4-hub-wizard.md), [execution/M4/execution-plan.md](execution/M4/execution-plan.md), [execution-plan-1-mcp-bundling.md](execution/M4/execution-plan-1-mcp-bundling.md), [execution-plan-4-mcp-config.md](execution/M4/execution-plan-4-mcp-config.md), [m4-manual-e2e-checklist.md](execution/M4/m4-manual-e2e-checklist.md), [hub-wizard.md](hub/hub-wizard.md), [mcp-server.md](packages/mcp-server.md), and [mcp-tools.md](architecture/mcp-tools.md). Added P1 backlog item **Shipped Hub MCP distribution (sidecar or npm)** to [hub/backlog.md](hub/backlog.md) for deferred sidecar bundling or `@alexeyperov/unity-agent-mcp` npm publish.
+
+## 2026-06-12 23:15 MSK (hub)
+
+- **Stop spawning Unity Hub on Installs tab mount.** Removed the unconditional `fetchReleases(includeArchived)` call from `UnityVersionsTab.svelte`'s `onMount` (was at `hub/src/lib/tabs/UnityVersionsTab.svelte:55-63`). On macOS, that call invokes the real Unity Hub CLI at `/Applications/Unity Hub.app/Contents/MacOS/Unity Hub` via `hub/src-tauri/src/config/hub_install.rs:71-84`, which activates the Unity Hub GUI app every time the user opened the Installs tab. The `setViewMode("all")` path at `hub/src/lib/tabs/UnityVersionsTab.svelte:115-120` already lazy-loads releases on first switch to the All-releases sub-tab, and the `install-complete` event handler (line 66) refreshes the catalog after a real install — both intentional and user-gated. The Releases sub-tab now loads on demand; the Installed sub-tab never spawns the Hub binary. The explicit "Refresh" toolbar button (line 468) still calls `refreshReleases` for users who want to bypass the cache.
+
+## 2026-06-12 22:40 MSK (specs)
+
+- **M4/M5/M6 questions resolved with final answers.** Marked [questions-4.md](questions/questions-4.md), [questions-5.md](questions/questions-5.md), and [questions-6.md](questions/questions-6.md) as resolved (all recommended answers accepted) and added explicit `Answer:` entries per question. Updated [questions/README.md](questions/README.md) statuses for M4-M6.
+
+- **M4/M5/M6 execution milestone files expanded.** Reworked [M4-hub-wizard.md](execution/M4-hub-wizard.md), [M5-batch-ci.md](execution/M5-batch-ci.md), and [M6-mcp-resources.md](execution/M6-mcp-resources.md) into full milestone docs aligned with the M3 style (prerequisites, execution-plan links, task order, out-of-scope, done criteria).
+
+- **Created M4 execution plan set.** Added [execution/M4/execution-plan.md](execution/M4/execution-plan.md) and sub-plans: [execution-plan-1-mcp-bundling.md](execution/M4/execution-plan-1-mcp-bundling.md), [execution-plan-2-wizard-shell.md](execution/M4/execution-plan-2-wizard-shell.md), [execution-plan-3-detect-packages.md](execution/M4/execution-plan-3-detect-packages.md), [execution-plan-4-mcp-config.md](execution/M4/execution-plan-4-mcp-config.md), [execution-plan-5-launch-done-validation.md](execution/M4/execution-plan-5-launch-done-validation.md), plus [m4-manual-e2e-checklist.md](execution/M4/m4-manual-e2e-checklist.md).
+
+- **Created M5 execution plan set.** Added [execution/M5/execution-plan.md](execution/M5/execution-plan.md) and sub-plans: [execution-plan-1-verify-batch-entry.md](execution/M5/execution-plan-1-verify-batch-entry.md), [execution-plan-2-batch-scan-tools.md](execution/M5/execution-plan-2-batch-scan-tools.md), [execution-plan-3-mcp-batch-routing.md](execution/M5/execution-plan-3-mcp-batch-routing.md), [execution-plan-4-meta-tool-batch.md](execution/M5/execution-plan-4-meta-tool-batch.md), [execution-plan-5-ci-templates.md](execution/M5/execution-plan-5-ci-templates.md), [execution-plan-6-validation.md](execution/M5/execution-plan-6-validation.md).
+
+- **Created M6 execution plan set.** Added [execution/M6/execution-plan.md](execution/M6/execution-plan.md) and sub-plans: [execution-plan-1-mcp-resources-spec.md](execution/M6/execution-plan-1-mcp-resources-spec.md), [execution-plan-2-verify-cache.md](execution/M6/execution-plan-2-verify-cache.md), [execution-plan-3-mcp-resources.md](execution/M6/execution-plan-3-mcp-resources.md), [execution-plan-4-validation.md](execution/M6/execution-plan-4-validation.md), plus [m6-manual-e2e-checklist.md](execution/M6/m6-manual-e2e-checklist.md).
+
+- **Spec updates for resolved M4-M6 decisions.**
+  - Updated [hub-wizard.md](hub/hub-wizard.md) with M4 decisions: Step 6 hidden, modal-first presentation, hard Node 18+/Unity 6 blocks, Step 3 merge semantics, Step 4 client behavior, Step 5 HTTP ping verification, skill copy behavior, and sidecar path resolution notes.
+  - Updated [hub-data.md](hub/hub-data.md) to state wizard progress is not persisted.
+  - Updated [hub-ui.md](hub/hub-ui.md) with AI Setup states and wizard relationship wording.
+  - Updated [verify.md](packages/verify.md) with `VerifyBatchEntry` contract, exit codes, baseline schema v1, and `VerifyCacheService` notes.
+  - Updated [mcp-server.md](packages/mcp-server.md) with live-first batch fallback wording, `UNITY_PATH` requirement, Hub bundling notes, and M6 resource registration references.
+  - Updated [mcp-tools.md](architecture/mcp-tools.md) to clarify M5 `platform_profile` semantics and point M6 schema details to canonical resource docs.
+  - Updated [bridge.md](packages/bridge.md) with M5 limited meta-tool batch fallback guidance.
+
+- **New resource architecture spec and CI templates.** Added [architecture/mcp-resources.md](architecture/mcp-resources.md). Added `templates/github-actions/` with [README.md](../templates/github-actions/README.md) and [unity-agent-verify.yml](../templates/github-actions/unity-agent-verify.yml) stub template.
+
+- **Backlog updates from deferrals.** Added deferred items to [packages/backlog.md](packages/backlog.md) for M6 subscriptions and terrain/Addressables graph extensions, and to [hub/backlog.md](hub/backlog.md) for standalone MCP distribution without Node requirement.
+
+- **Execution index updated.** Added M4/M5/M6 execution-plan entries and status updates in [execution/README.md](execution/README.md).
+
+## 2026-06-12 22:00 MSK (specs)
+
+- **Roadmap: swap M6/M7 and split BYO bridge into M7 + M8.** Swapped milestone order so **M6 — MCP Resources** (was M7) ships before BYO bridge work. Split former **M6 — Bring-your-own-bridge** into **M7 — BYO skills** (skill templates, example scripts, `agent-skill.md` §BYO) and **M8 — Adapter docs** (per-adapter runnable docs — last milestone). Added [execution/M6-mcp-resources.md](execution/M6-mcp-resources.md), [execution/M7-byo-skills.md](execution/M7-byo-skills.md), [execution/M8-adapter-docs.md](execution/M8-adapter-docs.md); removed [execution/M6-byo-bridge.md](execution/M6-byo-bridge.md) and [execution/M7-mcp-resources.md](execution/M7-mcp-resources.md). Renumbered [questions-6.md](questions/questions-6.md) (MCP Resources), [questions-7.md](questions/questions-7.md) (BYO skills), added [questions-8.md](questions/questions-8.md) (adapter docs). Updated [idea.md](idea.md), [architecture/mcp-tools.md](architecture/mcp-tools.md) §M6–M8, [packages/verify.md](packages/verify.md), cross-refs in M2.5/M3/M4/M1-5 plans.
+
 ## 2026-06-12 20:00 MSK (verify)
 
 - **Fix CS0117 in RemoveMissingScriptFix.** Changed `GameObjectUtility.RemoveMonoComponentsWithMissingScript` to `GameObjectUtility.RemoveMonoBehavioursWithMissingScript` in `packages/verify/Editor/Fixes/RemoveMissingScriptFix.cs:138` — the correct Unity 6 API name. This also resolved the cascading Burst assembly resolution error for `com.alexeyperov.unity-agent-verify.Editor.Tests`.

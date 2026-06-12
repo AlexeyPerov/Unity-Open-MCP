@@ -112,7 +112,7 @@ Dependencies: Plans 1–3.
 
 - Backlog entries exist for each deferred M3 decision.
 - M3 execution plans remain internally consistent with questions-3 answers.
-- No hidden M4/M5/M7 scope mislabeled as M3 required.
+- No hidden M4/M5/M6 scope mislabeled as M3 required.
 
 Dependencies: Task 3.
 

@@ -63,7 +63,7 @@ Residual uncertainties:
 
 1. Unity-Scanner port fidelity — scoped `VerifyScope` + `VerifyRunMode` may diverge from Scanner's project-wide loops; EditMode fixture tests are critical.
 2. `scene_prefab_health` scoped gate cost — full rule logic on `paths_hint` may approach the 2000 ms budget on large prefab trees (Q12).
-3. `ReferenceGraph` on-demand build may be slow on first call for large projects; M7 cache is backlog-tracked (Q7).
+3. `ReferenceGraph` on-demand build may be slow on first call for large projects; M6 cache is backlog-tracked (Q7).
 4. `apply_fix` safe-fix scope — one fix path is required (Q1 A); broader fix-provider porting is explicitly deferred.
 
 ## Agent Level Legend

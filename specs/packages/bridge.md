@@ -215,3 +215,14 @@ packages/bridge/
 | **M3** | Full GatePolicy + `VerifyGateAdapter` integration |
 | **M4** | Hub wizard installs bridge package |
 | **M5** | Batch entry points for headless Editor (limited meta-tool parity) |
+## M5 meta-tool batch fallback
+
+M5 scan/baseline/regression operations run through `packages/verify/Editor/Batch/VerifyBatchEntry.cs`.
+
+For meta-tool fallback, bridge supports a limited batch path:
+
+- `find_members`: supported in batch (reflection on loaded assemblies).
+- `invoke_method`, `execute_menu`, `execute_csharp`: limited/partial and documented as best-effort only in batch.
+
+If a dedicated bridge batch entry point is needed (`packages/bridge/Editor/Batch/BridgeBatchEntry.cs`), it should remain narrowly scoped to these meta-tool fallback scenarios and avoid duplicating verify batch responsibilities.
+

@@ -67,7 +67,7 @@ Dependencies: Plan 3 Tasks 2, 5.
 **Acceptance checklist**
 
 - Reverse deps returned for known fixture asset.
-- On-demand graph build (no M7 cache).
+- On-demand graph build (no M6 cache).
 - MCP live client can call tool successfully.
 
 Dependencies: Plan 2 complete; Plan 3 stable.
