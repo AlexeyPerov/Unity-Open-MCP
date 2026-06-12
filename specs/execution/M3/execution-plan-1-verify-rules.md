@@ -31,7 +31,7 @@ Dependencies: M3 start.
 
 ---
 
-#### Task 2: Port `missing_references` from Unity-Scanner (M3-2) [Score:9] [Agent:heavy]
+#### Task 2: Port `missing_references` from Unity-Scanner (M3-2) [Score:9] [Agent:heavy] **DONE**
 
 **Required context**
 

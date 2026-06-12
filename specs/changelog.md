@@ -1,5 +1,9 @@
 ## 2026-06-13 (verify)
 
+- **M3 Plan 1 Task 2: Port `missing_references` from Unity-Scanner.** Replaced greenfield stub in [packages/verify/Editor/Rules/MissingReferences/](packages/verify/Editor/Rules/MissingReferences/) with YAML-based scanner ported from Unity-Scanner. Three new files: `Scanner.cs` (scoped YAML scanning — external GUID/FileID resolution, missing scripts, Unity events, duplicate components, invalid layers), `IssueMapper.cs` (maps scanner data to `VerifyIssue` with 10 issue codes aligned to Unity-Scanner category IDs), `Models.cs` (reference data models). `MissingReferencesRule.cs` rewritten to delegate to Scanner+IssueMapper. `VerifyRunMode.Checkpoint` skips expensive sub-scans (events, duplicate components, layers); `Validate`/`Full` runs all checks. Issue key format: `{ruleId}|{severity}|{assetPath}|{issueCode}`. Updated [EXTRACTION.md](packages/verify/EXTRACTION.md) with 3 additional ported files.
+
+## 2026-06-13 (verify)
+
 - **M3 Plan 1 Task 1: EXTRACTION.md baseline and shared Internals.** Created [packages/verify/EXTRACTION.md](packages/verify/EXTRACTION.md) with Unity-Scanner commit `4baafb08`. Ported 4 shared utility files to `packages/verify/Editor/Internals/`: `Serialization/YamlUtilities.cs`, `RegexPatterns/SharedRegex.cs`, `AssetDatabase/PathFilterUtilities.cs`, `AssetDatabase/AssetTypeUtilities.cs`. Namespace `UnityAgentVerify.Internals.*`; extraction headers applied. No UI, orchestrator, MCP, batch, or cache dependencies.
 
 ## 2026-06-13 (specs)

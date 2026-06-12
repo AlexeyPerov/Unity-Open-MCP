@@ -19,6 +19,9 @@ Extraction baseline for porting scanner algorithms into `packages/verify`.
 | 2 | `Editor/Utilities/RegexPatterns/USSharedRegex.cs` | `Editor/Internals/RegexPatterns/SharedRegex.cs` | Compiled regex patterns for GUID, fileID, script, layer, event parsing |
 | 3 | `Editor/Utilities/AssetDatabase/USPathFilterUtilities.cs` | `Editor/Internals/AssetDatabase/PathFilterUtilities.cs` | Path filtering and ignore-pattern matching |
 | 4 | `Editor/Utilities/AssetDatabase/USAssetTypeUtilities.cs` | `Editor/Internals/AssetDatabase/AssetTypeUtilities.cs` | Asset type validation and classification |
+| 5 | `Editor/Categories/MissingReferences/MissingReferencesScanner.cs` | `Editor/Rules/MissingReferences/Scanner.cs` | YAML-based missing reference scanner, scoped to paths, no coroutine/yield |
+| 6 | `Editor/Categories/MissingReferences/MissingReferencesIssueMapper.cs` | `Editor/Rules/MissingReferences/IssueMapper.cs` | Maps scanner results to VerifyIssue with aligned issue codes |
+| 7 | `Editor/Categories/MissingReferences/MissingReferencesResultModels.cs` | `Editor/Rules/MissingReferences/Models.cs` | Reference data models (ExternalReferenceRegistry, AssetReferencesData, etc.) |
 
 ## Adapt-on-copy rules
 
