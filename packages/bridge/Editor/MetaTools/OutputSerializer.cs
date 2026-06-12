@@ -60,7 +60,7 @@ namespace UnityAgentBridge.MetaTools
         {
             var name = EscapeJsonString(obj.name);
             var typeName = EscapeJsonString(obj.GetType().FullName);
-            return $"{{\"name\":\"{name}\",\"type\":\"{typeName}\",\"instanceID\":{obj.GetInstanceID()}}}";
+            return $"{{\"name\":\"{name}\",\"type\":\"{typeName}\",\"entityId\":\"{obj.GetEntityId()}\"}}";
         }
 
         static string SerializeDictionary(IDictionary dict)

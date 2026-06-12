@@ -31,7 +31,7 @@ namespace UnityAgentVerify.Fixes
     {
         static readonly List<IFixProvider> _providers = new();
 
-        [UnityEngine.InitializeOnLoadMethod]
+        [UnityEditor.InitializeOnLoadMethod]
         static void RegisterDefaults()
         {
             if (_providers.Count == 0)

@@ -1,6 +1,7 @@
 using System.Linq;
 using NUnit.Framework;
 using UnityEditor;
+using UnityEngine;
 
 namespace UnityAgentBridge.Tests
 {

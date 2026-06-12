@@ -135,7 +135,7 @@ namespace UnityAgentVerify.Fixes
 
         static int RemoveMissingScriptsRecursive(GameObject go)
         {
-            var total = GameObjectUtility.RemoveMonoComponentsWithMissingScript(go);
+            var total = GameObjectUtility.RemoveMonoBehavioursWithMissingScript(go);
             foreach (Transform child in go.transform)
                 total += RemoveMissingScriptsRecursive(child.gameObject);
             return total;

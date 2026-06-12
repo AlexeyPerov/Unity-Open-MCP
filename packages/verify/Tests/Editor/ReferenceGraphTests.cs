@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityAgentVerify.References;
 using UnityEditor;
+using UnityEngine;
 
 namespace UnityAgentVerify.Tests
 {

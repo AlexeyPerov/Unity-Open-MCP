@@ -1,3 +1,11 @@
+## 2026-06-12 20:00 MSK (verify)
+
+- **Fix CS0117 in RemoveMissingScriptFix.** Changed `GameObjectUtility.RemoveMonoComponentsWithMissingScript` to `GameObjectUtility.RemoveMonoBehavioursWithMissingScript` in `packages/verify/Editor/Fixes/RemoveMissingScriptFix.cs:138` — the correct Unity 6 API name. This also resolved the cascading Burst assembly resolution error for `com.alexeyperov.unity-agent-verify.Editor.Tests`.
+
+- **Fix CS7036/CS0200/CS0117 in GatePolicy.** Changed `new ToolDispatchResult { Success = false, Error = ... }` object initializer to `ToolDispatchResult.Fail(...)` in `packages/bridge/Editor/Gate/GatePolicy.cs:97` — `ToolDispatchResult` has readonly properties and no `Error` field; the static factory method is the intended API.
+
+- **Fix CS0618 in OutputSerializer.** Replaced deprecated `Object.GetInstanceID()` with `GetEntityId()` in `packages/bridge/Editor/MetaTools/OutputSerializer.cs:63`, changed JSON field from `instanceID` (int) to `entityId` (string).
+
 ## 2026-06-17 12:00 MSK (demo + verify + specs)
 
 - **M3 Plan 6 Task 1: Demo fixture prefabs for gate scenarios (M3-24).** Created `demo/Assets/Fixtures/` with four controlled break/fix prefabs: `HealthyFixture.prefab` (minimal clean baseline), `MissingScriptFixture.prefab` (MonoBehaviour with nonexistent script GUID — triggers `missing_script`), `BrokenRefFixture.prefab` (MeshFilter with nonexistent mesh GUID — triggers `missing_guid`), `RestorableRefFixture.prefab` (healthy cube referencing Unity built-in mesh — edit GUID to break, revert to fix). Updated [demo/README.md](demo/README.md) with fixture table documenting paths, scenarios, and test/E2E usage. All fixtures wired via demo `manifest.json` `file:` references to bridge + verify packages.

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using UnityAgentVerify;
 
 namespace UnityAgentBridge
 {
@@ -93,7 +94,7 @@ namespace UnityAgentBridge
                 UnityEngine.Debug.LogError($"[GatePolicy] Checkpoint key validation failed: {e.Message}");
                 return new GateDispatchResult
                 {
-                    Mutation = new ToolDispatchResult { Success = false, Error = $"Checkpoint key validation failed: {e.Message}" },
+                    Mutation = ToolDispatchResult.Fail("checkpoint_validation", $"Checkpoint key validation failed: {e.Message}"),
                     GateRan = true,
                     Outcome = GateOutcome.Failed,
                     GateFailed = true,
