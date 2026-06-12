@@ -7,6 +7,12 @@ const MAX_COMPILE_WAIT_MS = 120_000;
 const COMPILE_POLL_INTERVAL_MS = 2_000;
 const PING_TIMEOUT_MS = 5_000;
 
+const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
+  "unity_agent_validate_edit",
+  "unity_agent_checkpoint_create",
+  "unity_agent_delta",
+]);
+
 interface PingResponse {
   connected: boolean;
   projectPath: string | null;
@@ -130,6 +136,22 @@ export class LiveClient implements Router {
             },
           },
         );
+      }
+
+      if (DIRECT_RESPONSE_TOOLS.has(toolName)) {
+        const directBody = (await res.json().catch(() => null)) as Record<
+          string,
+          unknown
+        > | null;
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(directBody ?? {}),
+            },
+          ],
+          isError: directBody?.error != null,
+        };
       }
 
       const body = (await res.json()) as MutationEnvelope;

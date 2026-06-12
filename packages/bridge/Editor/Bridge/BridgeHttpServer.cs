@@ -27,7 +27,17 @@ namespace UnityAgentBridge
             "unity_agent_execute_csharp",
             "unity_agent_invoke_method",
             "unity_agent_execute_menu",
-            "unity_agent_find_members"
+            "unity_agent_find_members",
+            "unity_agent_validate_edit",
+            "unity_agent_checkpoint_create",
+            "unity_agent_delta"
+        };
+
+        static readonly HashSet<string> DirectResponseTools = new()
+        {
+            "unity_agent_validate_edit",
+            "unity_agent_checkpoint_create",
+            "unity_agent_delta"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -231,6 +241,13 @@ namespace UnityAgentBridge
         {
             var body = ReadRequestBody(context.Request);
             var timeoutMs = ExtractTimeoutMs(body);
+
+            if (DirectResponseTools.Contains(toolName))
+            {
+                HandleDirectResponseTool(context, toolName, body, timeoutMs);
+                return;
+            }
+
             var gateMode = ExtractGateMode(body);
             var sw = Stopwatch.StartNew();
 
@@ -323,9 +340,47 @@ namespace UnityAgentBridge
                 "unity_agent_invoke_method" => InvokeMethodTool.Execute(body),
                 "unity_agent_execute_menu" => ExecuteMenuTool.Execute(body),
                 "unity_agent_find_members" => FindMembersTool.Execute(body),
+                "unity_agent_validate_edit" => ValidateEditTool.Execute(body),
+                "unity_agent_checkpoint_create" => CheckpointCreateTool.Execute(body),
+                "unity_agent_delta" => DeltaTool.Execute(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };
+        }
+
+        static void HandleDirectResponseTool(HttpListenerContext context, string toolName, string body, int timeoutMs)
+        {
+            try
+            {
+                var task = MainThreadDispatcher.EnqueueAsync(
+                    () => DispatchTool(toolName, body), timeoutMs);
+
+                var result = task.Result;
+
+                if (result.Success && result.Output != null)
+                    SendJson(context, 200, result.Output);
+                else if (!result.Success)
+                    SendJson(context, 200, BuildDirectToolErrorJson(result));
+                else
+                    SendJson(context, 200, "{\"error\":{\"code\":\"empty_output\",\"message\":\"Tool returned empty output\"}}");
+            }
+            catch (AggregateException ae)
+            {
+                var inner = ae.InnerException;
+                if (inner is TimeoutException)
+                    SendJson(context, 200, $"{{\"error\":{{\"code\":\"timeout\",\"message\":\"Tool '{EscapeStringContent(toolName)}' timed out after {timeoutMs}ms\"}}}}");
+                else
+                    SendJson(context, 200, $"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{EscapeStringContent(inner?.Message ?? ae.Message)}\"}}}}");
+            }
+            catch (System.Exception e)
+            {
+                SendJson(context, 200, $"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{EscapeStringContent(e.Message)}\"}}}}");
+            }
+        }
+
+        static string BuildDirectToolErrorJson(ToolDispatchResult result)
+        {
+            return $"{{\"error\":{{\"code\":\"{EscapeStringContent(result.ErrorCode)}\",\"message\":\"{EscapeStringContent(result.ErrorMessage)}\"}}}}";
         }
 
         static string ReadRequestBody(HttpListenerRequest request)
