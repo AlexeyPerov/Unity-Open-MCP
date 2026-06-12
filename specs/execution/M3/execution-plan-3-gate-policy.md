@@ -115,7 +115,7 @@ Dependencies: Task 2.
 
 ---
 
-#### Task 6: Strict issue key validation on delta (M3-14) [Score:5] [Agent:medium]
+#### Task 6: Strict issue key validation on delta (M3-14) [Score:5] [Agent:medium] ~~DONE~~
 
 **Required context**
 
@@ -134,7 +134,7 @@ Dependencies: Tasks 2–3.
 
 ---
 
-#### Task 7: Checkpoint perf budget logging (M3-15) [Score:4] [Agent:easy]
+#### Task 7: Checkpoint perf budget logging (M3-15) [Score:4] [Agent:easy] ~~DONE~~
 
 **Required context**
 

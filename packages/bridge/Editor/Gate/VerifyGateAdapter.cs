@@ -91,9 +91,20 @@ namespace UnityAgentBridge
         {
             var beforeKeys = new HashSet<string>();
             foreach (var fp in before.Fingerprints.Values)
-                beforeKeys.UnionWith(fp.IssueKeys);
+            {
+                foreach (var key in fp.IssueKeys)
+                {
+                    IssueKey.ValidateKey(key);
+                    beforeKeys.Add(key);
+                }
+            }
 
-            var afterKeys = new HashSet<string>(after.Issues.Select(IssueKey.Build));
+            var afterKeys = new HashSet<string>();
+            foreach (var issue in after.Issues)
+            {
+                var key = IssueKey.Build(issue);
+                afterKeys.Add(key);
+            }
 
             var newKeys = new HashSet<string>(afterKeys);
             newKeys.ExceptWith(beforeKeys);

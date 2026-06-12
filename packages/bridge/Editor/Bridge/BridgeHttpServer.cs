@@ -430,12 +430,12 @@ namespace UnityAgentBridge
                 sb.Append("],\"durationMs\":").Append(result.ValidationDurationMs);
                 sb.Append('}');
 
-                sb.Append(",\"delta\":{\"newErrors\":").Append(result.Delta.NewErrors);
-                sb.Append(",\"newWarnings\":").Append(result.Delta.NewWarnings);
-                sb.Append(",\"resolvedErrors\":").Append(result.Delta.ResolvedErrors);
-                sb.Append(",\"resolvedWarnings\":").Append(result.Delta.ResolvedWarnings);
+                sb.Append(",\"delta\":{\"newErrors\":").Append(result.Delta?.NewErrors ?? 0);
+                sb.Append(",\"newWarnings\":").Append(result.Delta?.NewWarnings ?? 0);
+                sb.Append(",\"resolvedErrors\":").Append(result.Delta?.ResolvedErrors ?? 0);
+                sb.Append(",\"resolvedWarnings\":").Append(result.Delta?.ResolvedWarnings ?? 0);
                 sb.Append(",\"newIssues\":[");
-                if (result.Delta.NewIssueKeys != null)
+                if (result.Delta?.NewIssueKeys != null)
                 {
                     for (int i = 0; i < result.Delta.NewIssueKeys.Length; i++)
                     {
@@ -444,7 +444,7 @@ namespace UnityAgentBridge
                     }
                 }
                 sb.Append("],\"resolvedIssues\":[");
-                if (result.Delta.ResolvedIssueKeys != null)
+                if (result.Delta?.ResolvedIssueKeys != null)
                 {
                     for (int i = 0; i < result.Delta.ResolvedIssueKeys.Length; i++)
                     {

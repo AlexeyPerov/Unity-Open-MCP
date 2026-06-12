@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 
 namespace UnityAgentBridge
@@ -36,7 +37,9 @@ namespace UnityAgentBridge
         public GateOutcome Outcome;
         public string CheckpointId;
         public string[] CategoriesRun;
+        public long CheckpointDurationMs;
         public long ValidationDurationMs;
+        public long TotalGateDurationMs;
         public DeltaData Delta;
         public bool GateFailed;
         public string[] AgentNextSteps;
@@ -44,6 +47,8 @@ namespace UnityAgentBridge
 
     public static class GatePolicy
     {
+        const long GateBudgetMs = 2000;
+
         public static GateDispatchResult Execute(
             GateMode mode,
             string[] pathsHint,
@@ -73,18 +78,42 @@ namespace UnityAgentBridge
                 };
             }
 
-            var checkpoint = VerifyGateAdapter.CreateCheckpoint(pathsHint, null);
+            var gateSw = Stopwatch.StartNew();
+
+            CheckpointFingerprint checkpoint;
+            long checkpointMs;
+            try
+            {
+                var cpSw = Stopwatch.StartNew();
+                checkpoint = VerifyGateAdapter.CreateCheckpoint(pathsHint, null);
+                checkpointMs = cpSw.ElapsedMilliseconds;
+            }
+            catch (FormatException e)
+            {
+                UnityEngine.Debug.LogError($"[GatePolicy] Checkpoint key validation failed: {e.Message}");
+                return new GateDispatchResult
+                {
+                    Mutation = new ToolDispatchResult { Success = false, Error = $"Checkpoint key validation failed: {e.Message}" },
+                    GateRan = true,
+                    Outcome = GateOutcome.Failed,
+                    GateFailed = true,
+                    AgentNextSteps = new[] { $"Checkpoint key validation failed: {e.Message}" }
+                };
+            }
 
             var mutationResult = mutation();
 
             if (!mutationResult.Success)
             {
+                gateSw.Stop();
                 return new GateDispatchResult
                 {
                     Mutation = mutationResult,
                     GateRan = true,
                     Outcome = GateOutcome.Failed,
                     CheckpointId = checkpoint.CheckpointId,
+                    CheckpointDurationMs = checkpointMs,
+                    TotalGateDurationMs = gateSw.ElapsedMilliseconds,
                     GateFailed = true,
                     AgentNextSteps = BuildNextSteps()
                 };
@@ -97,18 +126,52 @@ namespace UnityAgentBridge
             }
             catch (Exception e)
             {
+                gateSw.Stop();
                 return new GateDispatchResult
                 {
                     Mutation = mutationResult,
                     GateRan = true,
                     Outcome = GateOutcome.Failed,
                     CheckpointId = checkpoint.CheckpointId,
+                    CheckpointDurationMs = checkpointMs,
+                    TotalGateDurationMs = gateSw.ElapsedMilliseconds,
                     GateFailed = true,
                     AgentNextSteps = new[] { $"Validation scan exception: {e.Message}" }
                 };
             }
 
-            var delta = VerifyGateAdapter.ComputeDelta(checkpoint, validation);
+            DeltaData delta;
+            try
+            {
+                delta = VerifyGateAdapter.ComputeDelta(checkpoint, validation);
+            }
+            catch (FormatException e)
+            {
+                gateSw.Stop();
+                UnityEngine.Debug.LogError($"[GatePolicy] Delta key validation failed: {e.Message}");
+                return new GateDispatchResult
+                {
+                    Mutation = mutationResult,
+                    GateRan = true,
+                    Outcome = GateOutcome.Failed,
+                    CheckpointId = checkpoint.CheckpointId,
+                    CheckpointDurationMs = checkpointMs,
+                    ValidationDurationMs = validation.DurationMs,
+                    TotalGateDurationMs = gateSw.ElapsedMilliseconds,
+                    GateFailed = true,
+                    AgentNextSteps = new[] { $"Delta key validation failed: {e.Message}" }
+                };
+            }
+
+            gateSw.Stop();
+
+            if (gateSw.ElapsedMilliseconds > GateBudgetMs)
+            {
+                UnityEngine.Debug.LogWarning(
+                    $"[GatePolicy] Total gate path took {gateSw.ElapsedMilliseconds}ms " +
+                    $"(budget: {GateBudgetMs}ms, checkpoint: {checkpointMs}ms, validate: {validation.DurationMs}ms) " +
+                    $"for paths: {string.Join(", ", pathsHint)}");
+            }
 
             var (outcome, gateFailed) = ResolveOutcome(mode, delta);
             var nextSteps = GenerateAgentNextSteps(delta, outcome);
@@ -120,7 +183,9 @@ namespace UnityAgentBridge
                 Outcome = outcome,
                 CheckpointId = checkpoint.CheckpointId,
                 CategoriesRun = validation.CategoriesRun,
+                CheckpointDurationMs = checkpointMs,
                 ValidationDurationMs = validation.DurationMs,
+                TotalGateDurationMs = gateSw.ElapsedMilliseconds,
                 Delta = delta,
                 GateFailed = gateFailed,
                 AgentNextSteps = nextSteps
