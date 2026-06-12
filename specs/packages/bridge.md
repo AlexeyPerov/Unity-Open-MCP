@@ -64,7 +64,7 @@ All mutating tools (`execute_csharp`, `invoke_method`, `execute_menu`) require a
 
 ### `execute_menu` allowlist and gate-skip rule (M2)
 
-When `execute_menu` targets a **read-only menu** (on the allowlist below) and `paths_hint` is empty, the bridge **skips the `paths_hint_required` validation** and proceeds directly. The gate still runs in `skipped: true` stub mode (M2), but no asset-path declaration is forced.
+When `execute_menu` targets a **read-only menu** (on the allowlist below) and `paths_hint` is empty, the bridge **skips the `paths_hint_required` validation** and proceeds directly. The gate runs with `GateRan: false` (no paths to validate), but no asset-path declaration is forced.
 
 Non-allowlisted menus follow normal strict `paths_hint` validation.
 
@@ -94,12 +94,9 @@ Matching is prefix-based and case-insensitive — e.g. `Assets/Refresh` matches 
 
 The allowlist is defined in `ExecuteMenuTool.ReadOnlyMenuAllowlist` and can be extended as needed.
 
-## Gate behavior by milestone
+## Gate behavior
 
-| Milestone | Gate behavior |
-|---|---|
-| **M2** | Stub: checkpoint + fixed `missing_references` on `paths_hint`; empty/missing `paths_hint` on mutating tools returns `paths_hint_required` error (strict mode — no whole-project fallback) |
-| **M3** | Full GatePolicy via `VerifyGateAdapter` and `packages/verify` |
+Bridge runs the full `GatePolicy` state machine (M3) via `VerifyGateAdapter` and `packages/verify`. All mutating tools with `gate: enforce` go through checkpoint → mutate → validate → delta. The M2 inline stub has been removed — there is no dual-path maintenance.
 
 See [gate-policy.md](../architecture/gate-policy.md) for state machine and response contract.
 

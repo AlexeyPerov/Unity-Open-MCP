@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -299,53 +298,21 @@ namespace UnityAgentBridge
             bool isMutating = MutatingTools.Contains(toolName)
                 || (BridgeToolRegistry.TryGet(toolName, out var regEntry) && regEntry.IsMutating);
 
-            if (gateMode == "off" || !isMutating)
+            var mode = GatePolicy.ParseMode(gateMode);
+
+            if (!isMutating)
             {
+                var nonMutatingResult = DispatchTool(toolName, body);
                 return new GateDispatchResult
                 {
-                    Mutation = DispatchTool(toolName, body),
-                    GateRan = false
-                };
-            }
-
-            if (pathsHint == null || pathsHint.Length == 0)
-            {
-                return new GateDispatchResult
-                {
-                    Mutation = DispatchTool(toolName, body),
-                    GateRan = false
-                };
-            }
-
-            var checkpoint = VerifyGateAdapter.CreateCheckpoint(pathsHint, null);
-            var mutation = DispatchTool(toolName, body);
-
-            if (!mutation.Success)
-            {
-                return new GateDispatchResult
-                {
-                    Mutation = mutation,
+                    Mutation = nonMutatingResult,
                     GateRan = false,
-                    CheckpointId = checkpoint.CheckpointId
+                    Outcome = nonMutatingResult.Success ? GateOutcome.Skipped : GateOutcome.Failed,
+                    GateFailed = !nonMutatingResult.Success
                 };
             }
 
-            var validation = VerifyGateAdapter.ValidatePaths(pathsHint, null);
-            var delta = VerifyGateAdapter.ComputeDelta(checkpoint, validation);
-            var gateFailed = gateMode == "enforce" && delta.NewErrors > 0;
-            var nextSteps = GenerateAgentNextSteps(delta);
-
-            return new GateDispatchResult
-            {
-                Mutation = mutation,
-                GateRan = true,
-                CheckpointId = checkpoint.CheckpointId,
-                CategoriesRun = validation.CategoriesRun,
-                ValidationDurationMs = validation.DurationMs,
-                Delta = delta,
-                GateFailed = gateFailed,
-                AgentNextSteps = nextSteps
-            };
+            return GatePolicy.Execute(mode, pathsHint, () => DispatchTool(toolName, body));
         }
 
         static ToolDispatchResult DispatchTool(string toolName, string body)
@@ -359,31 +326,6 @@ namespace UnityAgentBridge
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };
-        }
-
-        static string[] GenerateAgentNextSteps(DeltaData delta)
-        {
-            var steps = new List<string>();
-
-            if (delta.NewErrors > 0)
-            {
-                var firstIssue = delta.NewIssueKeys.FirstOrDefault() ?? "unknown";
-                steps.Add($"Gate detected {delta.NewErrors} new error(s). First: {firstIssue}");
-                steps.Add("Review the affected asset and fix the introduced issue before retrying.");
-            }
-            else if (delta.NewWarnings > 0)
-            {
-                steps.Add($"Gate detected {delta.NewWarnings} new warning(s). Consider reviewing before proceeding.");
-            }
-            else if (delta.ResolvedErrors > 0)
-            {
-                steps.Add($"Gate passed — {delta.ResolvedErrors} previously reported error(s) resolved.");
-            }
-
-            if (steps.Count == 0)
-                steps.Add("Gate passed — no new issues detected.");
-
-            return steps.ToArray();
         }
 
         static string ReadRequestBody(HttpListenerRequest request)
@@ -475,7 +417,7 @@ namespace UnityAgentBridge
             {
                 sb.Append(",\"checkpointId\":\"").Append(EscapeStringContent(result.CheckpointId));
                 sb.Append("\",\"skipped\":false");
-                sb.Append(",\"validation\":{\"passed\":").Append(!result.GateFailed ? "true" : "false");
+                sb.Append(",\"validation\":{\"passed\":").Append(result.Outcome == GateOutcome.Passed ? "true" : "false");
                 sb.Append(",\"categoriesRun\":[");
                 if (result.CategoriesRun != null)
                 {
@@ -562,7 +504,7 @@ namespace UnityAgentBridge
             sb.Append(EscapeStringContent(toolName));
             sb.Append("' requires a non-empty 'paths_hint' array. ");
             sb.Append("Provide asset paths likely to be affected (e.g. [\\\"Assets/Prefabs/Player.prefab\\\"]) so the gate can scope validation correctly. ");
-            sb.Append("There is no whole-project fallback in M2 — explicit paths are mandatory.");
+            sb.Append("There is no whole-project fallback — explicit paths are mandatory.");
             sb.Append("\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
             sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
             sb.Append(",\"agentNextSteps\":[\"Add 'paths_hint' with at least one asset path before retrying.\"]}");

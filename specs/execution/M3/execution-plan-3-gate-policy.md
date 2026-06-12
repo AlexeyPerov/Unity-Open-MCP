@@ -52,7 +52,7 @@ Dependencies: Plan 1 complete.
 
 ---
 
-#### Task 3: Full `GatePolicy` state machine in bridge (M3-11) [Score:8] [Agent:heavy]
+#### Task 3: Full `GatePolicy` state machine in bridge (M3-11) [Score:8] [Agent:heavy] ~~DONE~~
 
 **Required context**
 
