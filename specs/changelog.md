@@ -1,3 +1,10 @@
+## 2026-06-13 22:00 MSK (verify + bridge)
+
+- **M3 Plan 2 Task 3: ReferenceGraph EditMode tests.** Created test assemblies and EditMode tests for reverse dependency lookup and `max_results` truncation.
+  - `packages/verify/Tests/Editor/ReferenceGraphTests.cs` (7 tests): find by path, find by GUID, invalid path/GUID returns empty, prefab referenced by scene (using demo `GateTestCube.prefab` ← `Main.unity`), reverse lookup by GUID, shader referenced by programmatically-created test materials.
+  - `packages/bridge/Tests/Editor/VerifyGateAdapterFindReferencesTests.cs` (5 tests): adapter sets queried fields, find by GUID, default maxResults reports TotalCount, maxResults=1 truncates ReferencedBy while preserving TotalCount, ReferencedBy entries have valid path + GUID pairs.
+  - Test fixtures: `[OneTimeSetUp]` creates `Assets/__RefGraphTestTmp/` with two Standard-shader materials; `[OneTimeTearDown]` deletes the folder. Demo prefab/scene tests use `Assert.Ignore` when demo assets are absent.
+
 ## 2026-06-12 (verify)
 
 - **M3 Plan 2 Task 2: Wire `VerifyGateAdapter.FindReferences`.** Added `FindReferences(string assetPathOrGuid, int maxResults = 100)` to `VerifyGateAdapter` — thin facade over `ReferenceGraph.Find()`. Returns `FindReferencesResult` with `QueriedAssetPath`, `QueriedAssetGuid`, `ReferencedBy` entries (each with `AssetPath` + `Guid`), and `TotalCount`. Supports `max_results` truncation per MCP schema. Response shape matches `unity_agent_find_references` expectations. No gate logic in verify; bridge can call adapter directly.

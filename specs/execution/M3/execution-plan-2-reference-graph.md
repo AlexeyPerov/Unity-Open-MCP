@@ -51,7 +51,7 @@ Dependencies: Task 1.
 
 ---
 
-#### Task 3: ReferenceGraph EditMode tests (M3-8) [Score:5] [Agent:medium]
+#### Task 3: ReferenceGraph EditMode tests (M3-8) [Score:5] [Agent:medium] — **DONE**
 
 **Required context**
 
