@@ -78,7 +78,7 @@ Dependencies: Task 1.
 
 ---
 
-#### Task 4: `VerifyRunner`, rule registry, and core types (M3-4) [Score:7] [Agent:medium]
+#### Task 4: `VerifyRunner`, rule registry, and core types (M3-4) [Score:7] [Agent:medium] **DONE**
 
 **Required context**
 
@@ -101,7 +101,7 @@ Dependencies: Tasks 2–3.
 
 ---
 
-#### Task 5: EditMode tests for M3 rules (M3-5) [Score:7] [Agent:medium]
+#### Task 5: EditMode tests for M3 rules (M3-5) [Score:7] [Agent:medium] **DONE**
 
 **Required context**
 

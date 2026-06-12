@@ -7,7 +7,11 @@ namespace UnityAgentVerify
 {
     public static class VerifyRunner
     {
+        const long CheckpointBudgetMs = 2000;
+
         static readonly List<IVerifyRule> RegisteredRules = new();
+
+        public static IReadOnlyList<IVerifyRule> Rules => RegisteredRules;
 
         [UnityEditor.InitializeOnLoadMethod]
         static void RegisterDefaults()
@@ -25,14 +29,34 @@ namespace UnityAgentVerify
                 RegisteredRules.Add(rule);
         }
 
+        public static void ClearRules()
+        {
+            RegisteredRules.Clear();
+        }
+
         public static VerifyResult RunScoped(VerifyScope scope, string[] ruleIds, VerifyRunMode mode)
         {
             var sw = Stopwatch.StartNew();
             var issues = new List<VerifyIssue>();
 
-            var rulesToRun = ruleIds != null && ruleIds.Length > 0
-                ? RegisteredRules.Where(r => ruleIds.Contains(r.Id)).ToList()
-                : RegisteredRules.ToList();
+            string[] unknownRuleIds;
+            string[] availableRuleIds;
+            List<IVerifyRule> rulesToRun;
+
+            if (ruleIds != null && ruleIds.Length > 0)
+            {
+                var requested = new HashSet<string>(ruleIds);
+                var known = new HashSet<string>(RegisteredRules.Select(r => r.Id));
+                unknownRuleIds = requested.Where(id => !known.Contains(id)).ToArray();
+                availableRuleIds = RegisteredRules.Select(r => r.Id).ToArray();
+                rulesToRun = RegisteredRules.Where(r => requested.Contains(r.Id)).ToList();
+            }
+            else
+            {
+                unknownRuleIds = Array.Empty<string>();
+                availableRuleIds = Array.Empty<string>();
+                rulesToRun = RegisteredRules.ToList();
+            }
 
             var categoriesRun = rulesToRun.Select(r => r.Id).ToArray();
 
@@ -49,7 +73,15 @@ namespace UnityAgentVerify
             }
 
             sw.Stop();
-            return new VerifyResult(issues, categoriesRun, sw.ElapsedMilliseconds);
+
+            if (mode == VerifyRunMode.Checkpoint && sw.ElapsedMilliseconds > CheckpointBudgetMs)
+            {
+                UnityEngine.Debug.LogWarning(
+                    $"[VerifyRunner] Checkpoint took {sw.ElapsedMilliseconds}ms " +
+                    $"(budget: {CheckpointBudgetMs}ms) for paths: {string.Join(", ", scope.Paths ?? Array.Empty<string>())}");
+            }
+
+            return new VerifyResult(issues, categoriesRun, sw.ElapsedMilliseconds, unknownRuleIds, availableRuleIds);
         }
 
         public static CheckpointFingerprint CreateCheckpoint(VerifyScope scope, string[] ruleIds)
