@@ -85,6 +85,23 @@ export interface DiagnosticsSettings {
   autoOpenDrawerOnLaunchFailure: boolean;
 }
 
+/**
+ * M4: AI toolkit root + advanced MCP override (questions-4 Q2 = B).
+ * `rootPath` is the absolute path to the cloned Unity-AI-Hub
+ * monorepo; the wizard Step 2 collects it and persists it here on
+ * successful fingerprint validation. `mcpIndexOverride` is the Step 4
+ * advanced escape hatch for a custom-built `mcp-server/dist/index.js`
+ * only — packages and skills always use `rootPath`.
+ *
+ * Both fields default to `""` so legacy `settings.json` files
+ * (pre-M4) deserialize cleanly and the wizard Step 2 hard-blocks
+ * downstream steps until `rootPath` is set and validated.
+ */
+export interface AiToolkitSettings {
+  rootPath: string;
+  mcpIndexOverride: string;
+}
+
 /** M1.5-18: three-way theme switch. */
 export type Theme = "dark" | "light" | "system";
 
@@ -95,6 +112,10 @@ export interface Settings {
   safety: SafetySettings;
   unityDiscovery: UnityDiscoverySettings;
   diagnostics: DiagnosticsSettings;
+  /** M4: AI toolkit root + advanced MCP override. See
+   *  `AiToolkitSettings` for field semantics. Defaulted to an empty
+   *  record in the Rust layer so legacy `settings.json` files load. */
+  aiToolkit?: AiToolkitSettings;
   /** M1.5-18: active theme. Defaults to `"system"`; legacy
    *  `settings.json` files (pre-M1.5-18) load with `"system"`. */
   theme?: Theme;
@@ -747,4 +768,56 @@ export async function installUnityVersion(
 
 export async function checkInstallInProgress(): Promise<boolean> {
   return invoke<boolean>("check_install_in_progress");
+}
+
+/**
+ * M4: AI toolkit root validation. The wizard Step 2 calls this
+ * whenever the user picks a folder or edits the path. Pure
+ * function — does not mutate `settings.json`; the wizard's Step 2
+ * save handler is responsible for persisting `aiToolkit.rootPath`
+ * on a successful `ToolkitValidation.ok`.
+ */
+export type ToolkitFingerprintKind = "file" | "dir";
+
+export interface ToolkitFingerprintResult {
+  relativePath: string;
+  kind: ToolkitFingerprintKind;
+  required: boolean;
+  exists: boolean;
+  /**
+   * `true` when the entry exists and matches the expected kind.
+   * `false` when it exists but is the wrong kind (a file where a
+   * directory is required, or vice versa). `null` when the entry
+   * does not exist at all.
+   */
+  kindOk: boolean | null;
+  resolved: string | null;
+}
+
+export interface ToolkitValidation {
+  ok: boolean;
+  root: string | null;
+  fingerprints: ToolkitFingerprintResult[];
+  /** `true` when `mcp-server/dist/index.js` is missing while every
+   *  other required fingerprint is fine — the UI surfaces a focused
+   *  "run `npm run build`" remediation in that case. */
+  mcpDistMissing: boolean;
+}
+
+export interface NodeProbe {
+  ok: boolean;
+  version: string | null;
+  major: number | null;
+  requiredMajor: number;
+  error: string | null;
+}
+
+export async function validateToolkitRoot(
+  path: string
+): Promise<ToolkitValidation> {
+  return invoke<ToolkitValidation>("validate_toolkit_root", { path });
+}
+
+export async function checkNodeVersion(): Promise<NodeProbe> {
+  return invoke<NodeProbe>("check_node_version");
 }

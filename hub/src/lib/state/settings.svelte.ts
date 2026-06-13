@@ -1,6 +1,7 @@
 import {
   loadSettings,
   saveSettings,
+  type AiToolkitSettings,
   type ProjectListSortBy,
   type Settings,
   type Theme,
@@ -374,6 +375,54 @@ class SettingsStore {
     next.unityDiscovery.customTemplateFolders = next.unityDiscovery.customTemplateFolders.filter(
       (_, i) => i !== index
     );
+    await this.persist(next);
+  }
+
+  /**
+   * M4: resolved view of `aiToolkit` from the current settings.
+   * Defaults to an empty record so legacy `settings.json` files
+   * (pre-M4) keep working without a migration step. Wizard Step 2
+   * is the only writer of these fields.
+   */
+  get aiToolkit(): AiToolkitSettings {
+    return (
+      this.current?.aiToolkit ?? {
+        rootPath: "",
+        mcpIndexOverride: "",
+      }
+    );
+  }
+
+  /**
+   * M4: persist the AI toolkit root after Step 2 fingerprint
+   * validation succeeds. The caller is expected to have called
+   * `validateToolkitRoot` first; this method does not re-validate.
+   * An empty `rootPath` clears the persisted value (used by the
+   * Step 2 "clear" affordance).
+   */
+  async setAiToolkitRoot(rootPath: string): Promise<void> {
+    if (!this.current) return;
+    const trimmed = rootPath.trim();
+    const next = this.clone();
+    const current = next.aiToolkit ?? { rootPath: "", mcpIndexOverride: "" };
+    if (current.rootPath === trimmed) return;
+    next.aiToolkit = { ...current, rootPath: trimmed };
+    await this.persist(next);
+  }
+
+  /**
+   * M4 Step 4 advanced override: custom `mcp-server/dist/index.js`
+   * path. An empty string clears the override and falls back to
+   * the path derived from `aiToolkit.rootPath`. Packages and
+   * skills always use `rootPath` regardless of this value.
+   */
+  async setAiToolkitMcpIndexOverride(override: string): Promise<void> {
+    if (!this.current) return;
+    const trimmed = override.trim();
+    const next = this.clone();
+    const current = next.aiToolkit ?? { rootPath: "", mcpIndexOverride: "" };
+    if (current.mcpIndexOverride === trimmed) return;
+    next.aiToolkit = { ...current, mcpIndexOverride: trimmed };
     await this.persist(next);
   }
 }

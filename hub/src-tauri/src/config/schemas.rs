@@ -13,6 +13,16 @@ pub struct Settings {
     pub unity_discovery: UnityDiscoverySettings,
     #[serde(default = "default_diagnostics_settings")]
     pub diagnostics: DiagnosticsSettings,
+    /// M4: AI toolkit root + advanced MCP override (Q2=B). The wizard
+    /// Step 2 collects the cloned Unity-AI-Hub monorepo path and
+    /// persists it here; the MCP path, package URLs, and skill copy
+    /// sources are all derived from `aiToolkit.rootPath`. The
+    /// advanced override is the per-M4 Step 4 escape hatch for a
+    /// custom-built `mcp-server/dist/index.js` only — packages and
+    /// skills remain rooted at `rootPath`. `#[serde(default)]` keeps
+    /// legacy `settings.json` files loadable with empty defaults.
+    #[serde(default)]
+    pub ai_toolkit: AiToolkitSettings,
     /// M1.5-18: three-way theme switch — `dark` | `light` | `system`
     /// (default). `#[serde(default = "default_theme")]` keeps legacy
     /// `settings.json` files loadable; the documented default is
@@ -24,6 +34,24 @@ pub struct Settings {
 
 fn default_theme() -> String {
     "system".to_string()
+}
+
+/// M4: AI toolkit root + advanced MCP override. `#[serde(default)]`
+/// keeps legacy `settings.json` files loadable with empty defaults
+/// (the wizard prompts for the root before any derived path is used).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiToolkitSettings {
+    /// Absolute path to the cloned Unity-AI-Hub monorepo root.
+    /// Empty when the wizard has not yet collected a valid root;
+    /// downstream steps (3/4) hard-block until this is set.
+    #[serde(default)]
+    pub root_path: String,
+    /// Optional Step 4 advanced override for `mcp-server/dist/index.js`.
+    /// Empty means "use the path derived from `rootPath`". Packages
+    /// and skill copy always use `rootPath` regardless of this value.
+    #[serde(default)]
+    pub mcp_index_override: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +237,7 @@ impl Default for Settings {
             diagnostics: DiagnosticsSettings {
                 auto_open_drawer_on_launch_failure: true,
             },
+            ai_toolkit: AiToolkitSettings::default(),
             theme: default_theme(),
         }
     }

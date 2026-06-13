@@ -21,3 +21,4 @@ pub mod upgrade;
 pub mod env_vars;
 pub mod releases;
 pub mod hub_install;
+pub mod ai_toolkit;

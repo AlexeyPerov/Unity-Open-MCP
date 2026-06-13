@@ -58,6 +58,8 @@ pub fn run() {
             config::releases::refresh_releases_command,
             config::hub_install::install_unity_version,
             config::hub_install::check_install_in_progress,
+            config::ai_toolkit::validate_toolkit_root,
+            config::ai_toolkit::check_node_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

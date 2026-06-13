@@ -1,0 +1,121 @@
+/**
+ * Node:test harness for the M4 AI-toolkit env-var builders.
+ * Run with: `node --test --experimental-strip-types --no-warnings src/lib/services/ai_toolkit.test.ts`
+ * (Node 22+ has built-in TypeScript stripping; Hub itself requires
+ *  Node 18+, so the harness uses Node 22 when available.)
+ */
+
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  buildCursorMcpEntry,
+  buildMcpEnv,
+  buildOpenCodeMcpEntry,
+  DEFAULT_BRIDGE_PORT,
+  MCP_SERVER_KEY,
+  mcpClientConfigTarget,
+  type McpClientId,
+} from "./ai_toolkit.ts";
+
+test("buildMcpEnv always includes required vars", () => {
+  const env = buildMcpEnv({ unityProjectPath: "/games/MyGame" });
+  assert.equal(env.UNITY_PROJECT_PATH, "/games/MyGame");
+  assert.equal(env.UNITY_AGENT_BRIDGE_PORT, DEFAULT_BRIDGE_PORT);
+  assert.equal(env.UNITY_PATH, undefined);
+});
+
+test("buildMcpEnv honors custom bridge port", () => {
+  const env = buildMcpEnv({
+    unityProjectPath: "/games/MyGame",
+    bridgePort: "19199",
+  });
+  assert.equal(env.UNITY_AGENT_BRIDGE_PORT, "19199");
+});
+
+test("buildMcpEnv omits UNITY_PATH when blank", () => {
+  const env = buildMcpEnv({
+    unityProjectPath: "/games/MyGame",
+    unityPath: "   ",
+  });
+  assert.equal(env.UNITY_PATH, undefined);
+});
+
+test("buildMcpEnv trims and includes UNITY_PATH when set", () => {
+  const env = buildMcpEnv({
+    unityProjectPath: "/games/MyGame",
+    unityPath: "  /Applications/Unity  ",
+  });
+  assert.equal(env.UNITY_PATH, "/Applications/Unity");
+});
+
+test("buildCursorMcpEntry uses command+args+env envelope", () => {
+  const entry = buildCursorMcpEntry("/repos/uai/mcp-server/dist/index.js", {
+    unityProjectPath: "/games/MyGame",
+  });
+  assert.equal(entry.command, "node");
+  assert.deepEqual(entry.args, ["/repos/uai/mcp-server/dist/index.js"]);
+  assert.equal(entry.env.UNITY_PROJECT_PATH, "/games/MyGame");
+  assert.equal(entry.env.UNITY_AGENT_BRIDGE_PORT, DEFAULT_BRIDGE_PORT);
+});
+
+test("buildOpenCodeMcpEntry uses command-array+environment envelope", () => {
+  const entry = buildOpenCodeMcpEntry(
+    "/repos/uai/mcp-server/dist/index.js",
+    { unityProjectPath: "/games/MyGame" }
+  );
+  assert.equal(entry.type, "local");
+  assert.equal(entry.enabled, true);
+  assert.deepEqual(entry.command, [
+    "node",
+    "/repos/uai/mcp-server/dist/index.js",
+  ]);
+  // OpenCode env field is `environment`, not `env`.
+  assert.equal("env" in entry, false);
+  assert.equal(entry.environment.UNITY_PROJECT_PATH, "/games/MyGame");
+});
+
+test("mcpClientConfigTarget resolves cursor to ~/.cursor/mcp.json", () => {
+  const t = mcpClientConfigTarget("cursor", "/home/dev");
+  assert.equal(t.path, "/home/dev/.cursor/mcp.json");
+  assert.equal(t.scope, "global");
+  assert.equal(t.mergeKey, "mcpServers.unity-agent");
+});
+
+test("mcpClientConfigTarget resolves opencode-global to ~/.config/opencode/opencode.json", () => {
+  const t = mcpClientConfigTarget("opencode-global", "/home/dev");
+  assert.equal(t.path, "/home/dev/.config/opencode/opencode.json");
+  assert.equal(t.mergeKey, "mcp.unity-agent");
+});
+
+test("mcpClientConfigTarget returns null path for claude-code (CLI-only)", () => {
+  const t = mcpClientConfigTarget("claude-code", "/home/dev");
+  assert.equal(t.path, null);
+  assert.equal(t.scope, "none");
+});
+
+test("mcpClientConfigTarget returns null path for manual (clipboard-only)", () => {
+  const t = mcpClientConfigTarget("manual", "/home/dev");
+  assert.equal(t.path, null);
+  assert.equal(t.scope, "none");
+});
+
+test("MCP_SERVER_KEY is unity-agent (matches Rust AiToolkitSettings convention)", () => {
+  assert.equal(MCP_SERVER_KEY, "unity-agent");
+});
+
+test("mcpClientConfigTarget covers all McpClientId values", () => {
+  const ids: McpClientId[] = [
+    "cursor",
+    "claude-desktop",
+    "claude-code",
+    "opencode-global",
+    "opencode-project",
+    "manual",
+  ];
+  for (const id of ids) {
+    const t = mcpClientConfigTarget(id, "/home/dev");
+    // All targets must have a string mergeKey, even when path is null.
+    assert.equal(typeof t.mergeKey, "string");
+  }
+});
