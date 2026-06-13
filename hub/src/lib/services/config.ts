@@ -821,3 +821,127 @@ export async function validateToolkitRoot(
 export async function checkNodeVersion(): Promise<NodeProbe> {
   return invoke<NodeProbe>("check_node_version");
 }
+
+/**
+ * M4 Plan 3: wizard Step 1 + Done screen detection snapshot.
+ * Mirrors the Rust `wizard::ProjectState` struct.
+ */
+export type BridgeStatusKind = "notChecked";
+
+export interface McpConfigHeuristic {
+  cursor: boolean;
+  claudeDesktop: boolean;
+  opencodeGlobal: boolean;
+  opencodeProject: boolean;
+}
+
+export interface ProjectState {
+  path: string;
+  name: string;
+  isValidUnityProject: boolean;
+  /** Raw `m_EditorVersion` from `ProjectSettings/ProjectVersion.txt`. */
+  unityVersion: string | null;
+  /** `true` when `unityVersion` parses to a major ≥ 6000 (Unity 6). */
+  meetsMinUnityVersion: boolean;
+  manifestPresent: boolean;
+  bridgeInstalled: boolean;
+  verifyInstalled: boolean;
+  mcpConfigured: McpConfigHeuristic;
+  /** `true` when `Packages/manifest.json` (or its parent) is writable. */
+  manifestWritable: boolean;
+  /** `true` when any path segment contains a space — Step 2 warning. */
+  hasSpacesInPath: boolean;
+  /** Always `notChecked` in M4; Step 5 `/ping` would rewrite this. */
+  bridgeStatus: BridgeStatusKind;
+}
+
+export async function detectProjectState(
+  projectPath: string
+): Promise<ProjectState> {
+  return invoke<ProjectState>("detect_project_state", { projectPath });
+}
+
+/**
+ * M4 Plan 3: wizard Step 3 manifest read / merge.
+ * Mirrors the Rust `wizard::{ManifestRead, ManifestMergePlan, …}` types.
+ */
+
+export type ChangeKind = "add" | "upgrade" | "unchanged";
+
+export interface ManifestRead {
+  projectPath: string;
+  present: boolean;
+  readable: boolean;
+  parseError: string | null;
+  raw: unknown | null;
+  dependencies: Record<string, string>;
+}
+
+export interface PackageInstallEntry {
+  id: string;
+  url: string;
+  tag: string;
+  packagePath: string;
+}
+
+export interface DerivedPackageUrls {
+  toolkitRoot: string;
+  gitRemote: string;
+  bridge: PackageInstallEntry;
+  verify: PackageInstallEntry;
+}
+
+export interface PackageChange {
+  id: string;
+  before: string | null;
+  after: string;
+  kind: ChangeKind;
+}
+
+export interface ManifestMergeParams {
+  projectPath: string;
+  toolkitRoot: string;
+  installBridge: boolean;
+  installVerify: boolean;
+  versionPin: string;
+  customUrl: string;
+  confirmUpgrades: boolean;
+}
+
+export interface ManifestMergePlan {
+  projectPath: string;
+  derivedUrls: DerivedPackageUrls;
+  changes: PackageChange[];
+  proposedDependencies: Record<string, string>;
+  manifestRead: ManifestRead;
+  hasUpgrades: boolean;
+}
+
+export interface ManifestWriteResult {
+  projectPath: string;
+  manifestPath: string;
+  backupPath: string;
+  changes: PackageChange[];
+  dependencies: Record<string, string>;
+}
+
+export interface ManifestError {
+  kind: string;
+  message: string;
+}
+
+export async function readManifest(projectPath: string): Promise<ManifestRead> {
+  return invoke<ManifestRead>("read_manifest", { projectPath });
+}
+
+export async function planManifestMerge(
+  params: ManifestMergeParams
+): Promise<ManifestMergePlan> {
+  return invoke<ManifestMergePlan>("plan_manifest_merge", { params });
+}
+
+export async function writeManifestMerge(
+  params: ManifestMergeParams
+): Promise<ManifestWriteResult> {
+  return invoke<ManifestWriteResult>("write_manifest_merge", { params });
+}

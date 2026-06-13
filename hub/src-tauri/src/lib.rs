@@ -60,6 +60,10 @@ pub fn run() {
             config::hub_install::check_install_in_progress,
             config::ai_toolkit::validate_toolkit_root,
             config::ai_toolkit::check_node_version,
+            config::wizard::detect_project_state,
+            config::wizard::read_manifest,
+            config::wizard::plan_manifest_merge,
+            config::wizard::write_manifest_merge,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
