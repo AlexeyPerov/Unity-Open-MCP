@@ -248,6 +248,12 @@ namespace UnityAgentBridge
             var body = ReadRequestBody(context.Request);
             var timeoutMs = ExtractTimeoutMs(body);
 
+            if (BridgeToolTogglePolicy.IsDisabled(toolName))
+            {
+                SendJson(context, 200, BridgeToolTogglePolicy.BuildDisabledErrorJson(toolName));
+                return;
+            }
+
             if (DirectResponseTools.Contains(toolName))
             {
                 HandleDirectResponseTool(context, toolName, body, timeoutMs);
