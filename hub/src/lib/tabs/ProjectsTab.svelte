@@ -3116,6 +3116,9 @@
     tabindex="-1"
     style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
     onclick={(e) => e.stopPropagation()}
+    onkeydown={(e) => {
+      if (e.key === "Escape") closeContextMenu();
+    }}
   >
     <button
       type="button"
@@ -3311,10 +3314,24 @@
 {#if popupProject}
   {@const ps = statusFor(popupProject)}
   {@const popupIsMoreOpen = moreMenuOpenFor === popupProject.id}
-  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-  <div class="settings-overlay" onclick={closeSettingsPopup}>
-    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-    <div class="settings-modal" onclick={(e) => e.stopPropagation()}>
+  <div
+    class="settings-overlay"
+    role="presentation"
+    onclick={closeSettingsPopup}
+    onkeydown={(e) => {
+      if (e.key === "Escape") closeSettingsPopup();
+    }}
+  >
+    <div
+      class="settings-modal"
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => {
+        if (e.key === "Escape") closeSettingsPopup();
+      }}
+    >
       <div class="settings-modal-header">
         <div class="settings-modal-titles">
           <h2>{popupProject.name}</h2>
@@ -3677,10 +3694,24 @@
 {/if}
 
 {#if launchArgsInfoOpen}
-  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-  <div class="settings-overlay" onclick={toggleLaunchArgsInfo}>
-    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-    <div class="settings-modal info-modal" onclick={(e) => e.stopPropagation()}>
+  <div
+    class="settings-overlay"
+    role="presentation"
+    onclick={toggleLaunchArgsInfo}
+    onkeydown={(e) => {
+      if (e.key === "Escape") toggleLaunchArgsInfo();
+    }}
+  >
+    <div
+      class="settings-modal info-modal"
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => {
+        if (e.key === "Escape") toggleLaunchArgsInfo();
+      }}
+    >
       <div class="settings-modal-header">
         <div class="settings-modal-titles">
           <h2>Launch args — examples</h2>
@@ -4938,7 +4969,7 @@
     line-height: 1.4;
   }
 
-  .newproj-template-picker {
+  :global(.newproj-template-picker) {
     margin-left: 1.4rem;
     max-width: calc(100% - 1.4rem);
   }

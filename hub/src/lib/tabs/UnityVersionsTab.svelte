@@ -723,6 +723,7 @@
         class="ctx-menu"
         style="left: {releasesContext.x}px; top: {releasesContext.y}px;"
         role="menu"
+        tabindex="-1"
         onclick={(e) => e.stopPropagation()}
         onkeydown={(e) => {
           if (e.key === "Escape") closeReleasesContext();

@@ -122,8 +122,15 @@
           class:select-option-disabled={opt.disabled}
           aria-selected={opt.value === value}
           aria-disabled={opt.disabled}
+          tabindex="-1"
           onclick={() => selectOption(opt)}
           onmouseenter={() => { activeIndex = i; }}
+          onkeydown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              selectOption(opt);
+            }
+          }}
         >
           {opt.label}
         </li>

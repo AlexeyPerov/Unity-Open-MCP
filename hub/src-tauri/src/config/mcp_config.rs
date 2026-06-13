@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use super::wizard::{contains_mcp_key, claude_desktop_config_path};
+use super::wizard::claude_desktop_config_path;
 use crate::config::ai_toolkit::derived_mcp_index_path;
 
 /// Local alias for [`derived_mcp_index_path`]. The wizard Step 4
@@ -255,7 +255,7 @@ pub fn write_mcp_config(
 fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfigPlan, McpConfigError> {
     let scope = match resolve_scope(params) {
         Ok(s) => s,
-        Err(McpScopeSkip::CliOnly { command: _ }) => {
+        Err(McpScopeSkip::CliOnly) => {
             let resolved = resolve_mcp_index_path(&params.toolkit_root, &params.mcp_index_override)
                 .ok_or_else(|| {
                     McpConfigError::new(
@@ -452,7 +452,7 @@ fn write_mcp_config_at(
 }
 
 enum McpScopeSkip {
-    CliOnly { command: String },
+    CliOnly,
     Manual,
 }
 
@@ -466,9 +466,7 @@ fn resolve_scope(params: &McpConfigParams) -> Result<McpScope, McpScopeSkip> {
         McpClientId::ClaudeDesktop => Ok(McpScope::ClaudeDesktopGlobal),
         McpClientId::OpencodeGlobal => Ok(McpScope::OpencodeGlobal),
         McpClientId::OpencodeProject => Ok(McpScope::OpencodeProject),
-        McpClientId::ClaudeCode => Err(McpScopeSkip::CliOnly {
-            command: String::new(),
-        }),
+        McpClientId::ClaudeCode => Err(McpScopeSkip::CliOnly),
         McpClientId::Manual => Err(McpScopeSkip::Manual),
     }
 }
@@ -934,6 +932,7 @@ fn copy_skill_files_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::wizard::contains_mcp_key;
     use std::fs;
     use tempfile::tempdir;
 
