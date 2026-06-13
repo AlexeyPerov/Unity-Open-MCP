@@ -1,8 +1,8 @@
 // Minimal project-level runtime settings store for the bridge UI.
 //
 // Backed by `.unity-agent/settings.json` at the project root. The schema is intentionally
-// small in M4.5 Plan 2 (only `disabledTools` for runtime tool toggles); Plan 4 will extend
-// the same store with gate default, auto-start, verbose-log, and other v1 runtime settings.
+// small in M4.5 (disabledTools + defaultGateMode for v1); Plan 4 extends the same store
+// with auto-start, verbose-log, and other v1 runtime settings.
 //
 // The store is read once at static init and rewritten on every mutation. Writes are
 // atomic via a `.tmp` rename. Missing / unreadable files produce an empty default — the
@@ -19,6 +19,7 @@ namespace UnityAgentBridge
     public class BridgeProjectSettingsData
     {
         public string[] disabledTools = Array.Empty<string>();
+        public string defaultGateMode = "enforce";
     }
 
     public static class BridgeProjectSettings
@@ -70,6 +71,8 @@ namespace UnityAgentBridge
                     _data = parsed;
                     if (_data.disabledTools == null)
                         _data.disabledTools = Array.Empty<string>();
+                    if (string.IsNullOrEmpty(_data.defaultGateMode))
+                        _data.defaultGateMode = "enforce";
                 }
             }
             catch (Exception e)

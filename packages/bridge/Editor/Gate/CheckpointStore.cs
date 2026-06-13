@@ -22,6 +22,16 @@ namespace UnityAgentBridge
 
         public static int Count => _entries.Count;
 
+        public static IReadOnlyList<CheckpointStoreEntry> Recent
+        {
+            get
+            {
+                // Returned in chronological order (oldest first) so the UI can render
+                // the latest entry at the bottom; reverse as needed at the call site.
+                return _entries.AsReadOnly();
+            }
+        }
+
         public static void Store(CheckpointStoreEntry entry)
         {
             if (entry == null) throw new ArgumentNullException(nameof(entry));

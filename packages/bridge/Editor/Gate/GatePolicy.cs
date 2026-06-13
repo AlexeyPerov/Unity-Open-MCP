@@ -88,6 +88,26 @@ namespace UnityAgentBridge
                 var cpSw = Stopwatch.StartNew();
                 checkpoint = VerifyGateAdapter.CreateCheckpoint(pathsHint, null);
                 checkpointMs = cpSw.ElapsedMilliseconds;
+
+                // Mirror the gate-run checkpoint into the in-memory store so the
+                // bridge window Gate tab can surface recent history (M4.5-9).
+                // Best-effort; storage failures must not break the gate path.
+                try
+                {
+                    CheckpointStore.Store(new CheckpointStoreEntry
+                    {
+                        CheckpointId = checkpoint.CheckpointId,
+                        Timestamp = DateTime.UtcNow.ToString("o"),
+                        Label = null,
+                        Paths = pathsHint,
+                        Categories = null,
+                        Fingerprint = checkpoint
+                    });
+                }
+                catch
+                {
+                    // ignored — checkpoint history capture is non-essential
+                }
             }
             catch (FormatException e)
             {

@@ -276,7 +276,7 @@ namespace UnityAgentBridge
                     GateMode.Enforce => "enforce",
                     GateMode.Warn => "warn",
                     GateMode.Off => "off",
-                    _ => "enforce"
+                    _ => BridgeGateDefaultPolicy.GetDefault()
                 };
             }
 
@@ -313,6 +313,7 @@ namespace UnityAgentBridge
 
                 var result = task.Result;
                 sw.Stop();
+                RecordGateRun(toolName, effectiveGateMode, result);
                 SendJson(context, 200, BuildGateEnvelope(result, effectiveGateMode));
             }
             catch (AggregateException ae)
@@ -328,6 +329,38 @@ namespace UnityAgentBridge
             {
                 sw.Stop();
                 SendJson(context, 200, BuildFaultEnvelope(e, effectiveGateMode));
+            }
+        }
+
+        static void RecordGateRun(string toolName, string effectiveMode, GateDispatchResult result)
+        {
+            try
+            {
+                var record = new BridgeGateRunRecord
+                {
+                    ToolName = toolName,
+                    RequestedMode = effectiveMode,
+                    EffectiveMode = effectiveMode,
+                    Outcome = result.Outcome,
+                    GateRan = result.GateRan,
+                    GateFailed = result.GateFailed,
+                    NewErrors = result.Delta?.NewErrors ?? 0,
+                    NewWarnings = result.Delta?.NewWarnings ?? 0,
+                    ResolvedErrors = result.Delta?.ResolvedErrors ?? 0,
+                    ResolvedWarnings = result.Delta?.ResolvedWarnings ?? 0,
+                    CheckpointDurationMs = result.CheckpointDurationMs,
+                    ValidationDurationMs = result.ValidationDurationMs,
+                    TotalGateDurationMs = result.TotalGateDurationMs,
+                    CategoriesRun = result.CategoriesRun,
+                    AgentNextSteps = result.AgentNextSteps,
+                    MutationError = result.Mutation?.ErrorMessage,
+                    Timestamp = DateTime.Now
+                };
+                BridgeGateRunHistory.Record(record);
+            }
+            catch
+            {
+                // History capture is best-effort; never let it break the response.
             }
         }
 
@@ -439,28 +472,32 @@ namespace UnityAgentBridge
 
         static string ExtractGateMode(string body)
         {
-            if (string.IsNullOrEmpty(body)) return "enforce";
+            // Precedence per architecture/gate-policy.md:
+            //   1. Request body `gate` value
+            //   2. Project default from `.unity-agent/settings.json`
+            //   3. Tool-level default (caller-provided)
+            if (string.IsNullOrEmpty(body)) return BridgeGateDefaultPolicy.GetDefault();
 
             const string key = "\"gate\"";
             var idx = body.IndexOf(key, StringComparison.Ordinal);
-            if (idx < 0) return "enforce";
+            if (idx < 0) return BridgeGateDefaultPolicy.GetDefault();
 
             var colonIdx = body.IndexOf(':', idx + key.Length);
-            if (colonIdx < 0) return "enforce";
+            if (colonIdx < 0) return BridgeGateDefaultPolicy.GetDefault();
 
             var start = colonIdx + 1;
             while (start < body.Length && char.IsWhiteSpace(body[start])) start++;
 
-            if (start >= body.Length || body[start] != '"') return "enforce";
+            if (start >= body.Length || body[start] != '"') return BridgeGateDefaultPolicy.GetDefault();
             start++;
 
             var end = start;
             while (end < body.Length && body[end] != '"') end++;
 
-            if (end == start) return "enforce";
+            if (end == start) return BridgeGateDefaultPolicy.GetDefault();
 
             var value = body.Substring(start, end - start);
-            return value is "enforce" or "warn" or "off" ? value : "enforce";
+            return BridgeGateDefaultPolicy.IsValid(value) ? value : BridgeGateDefaultPolicy.GetDefault();
         }
 
         static string[] PathsFromIssueId(string issueId)

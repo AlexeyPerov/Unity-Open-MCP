@@ -1,5 +1,5 @@
 // Bridge runtime dashboard window (M4.5-1 shell, M4.5-2 status panel, M4.5-3 helper baseline,
-// M4.5-4 tools catalog, M4.5-5/6 runtime toggles + filter UX).
+// M4.5-4 tools catalog, M4.5-5/6 runtime toggles + filter UX, M4.5-7/8/9 gate tab).
 // Tab navigation pattern adapted from
 //   /Users/alexeyperov/Projects/Unity-Scanner/Editor/UI/Window/UnityScannerWindow.cs
 // (copy/adapt only; no scanner orchestrator / categories / MCP glue imported).
@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityAgentBridge.UI.Controls;
+using UnityAgentVerify;
 
 namespace UnityAgentBridge
 {
@@ -55,6 +56,19 @@ namespace UnityAgentBridge
         [NonSerialized] Vector2 _toolListScroll;
         [NonSerialized] readonly HashSet<string> _toolFoldoutExpanded = new HashSet<string>();
 
+        // Gate tab state (M4.5-7/8/9)
+        [NonSerialized] string _manualValidateInput = "";
+        [NonSerialized] Vector2 _gateTabScroll;
+        [NonSerialized] Vector2 _gateLatestScroll;
+        [NonSerialized] Vector2 _gateCheckpointScroll;
+        [NonSerialized] Vector2 _gateManualResultScroll;
+        [NonSerialized] bool _validateInFlight;
+        [NonSerialized] BridgeManualValidateResult _lastManualResult;
+        [NonSerialized] readonly HashSet<string> _manualAssetFoldoutExpanded = new HashSet<string>();
+        [NonSerialized] bool _gateLatestFoldout = true;
+        [NonSerialized] bool _gateCheckpointFoldout = true;
+        [NonSerialized] bool _gateManualFoldout = true;
+
         void OnEnable()
         {
             _currentTab = (BridgeWindowTab)EditorPrefs.GetInt(SelectedTabPref, (int)BridgeWindowTab.Status);
@@ -62,12 +76,18 @@ namespace UnityAgentBridge
             EditorApplication.update += RepaintTick;
             BridgeToolTogglePolicy.Changed -= RepaintTick;
             BridgeToolTogglePolicy.Changed += RepaintTick;
+            BridgeGateDefaultPolicy.Changed -= RepaintTick;
+            BridgeGateDefaultPolicy.Changed += RepaintTick;
+            BridgeGateRunHistory.Changed -= RepaintTick;
+            BridgeGateRunHistory.Changed += RepaintTick;
         }
 
         void OnDisable()
         {
             EditorApplication.update -= RepaintTick;
             BridgeToolTogglePolicy.Changed -= RepaintTick;
+            BridgeGateDefaultPolicy.Changed -= RepaintTick;
+            BridgeGateRunHistory.Changed -= RepaintTick;
             EditorPrefs.SetInt(SelectedTabPref, (int)_currentTab);
         }
 
@@ -141,7 +161,7 @@ namespace UnityAgentBridge
                     DrawToolsTab();
                     break;
                 case BridgeWindowTab.Gate:
-                    DrawPlaceholderTab("Gate default policy and manual verify land in M4.5 Plan 3.");
+                    DrawGateTab();
                     break;
                 case BridgeWindowTab.Activity:
                     DrawPlaceholderTab("Activity log lands in M4.5 Plan 4.");
@@ -584,6 +604,387 @@ namespace UnityAgentBridge
             if (item.DestructiveHint) parts.Add("destructive");
             if (item.Mutability == BridgeToolMutability.Mutating) parts.Add($"gate default: {item.GateMode}");
             return parts.Count == 0 ? "" : string.Join(", ", parts);
+        }
+
+        // ---------- Gate tab (M4.5-7/8/9) ----------
+
+        void DrawGateTab()
+        {
+            _gateTabScroll = EditorGUILayout.BeginScrollView(_gateTabScroll);
+            DrawGateDefaultPolicySection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawGateLatestResultSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawGateCheckpointHistorySection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawGateManualValidateSection();
+            EditorGUILayout.EndScrollView();
+        }
+
+        void DrawGateDefaultPolicySection()
+        {
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("Project default gate mode", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Sets the project-wide default for the gate policy. " +
+                "Applies to all mutating tool calls that do not supply an explicit request-level `gate`. " +
+                "Persists in `.unity-agent/settings.json`.",
+                MessageType.None);
+
+            var current = BridgeGateDefaultPolicy.GetDefault();
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Default mode", GUILayout.Width(120));
+            var newMode = EditorGUILayout.Popup(IndexOfMode(current), ModeLabels());
+            EditorGUILayout.EndHorizontal();
+            if (newMode != IndexOfMode(current))
+            {
+                BridgeGateDefaultPolicy.SetDefault(BridgeGateDefaultPolicy.ValidModes[newMode]);
+            }
+
+            EditorGUILayout.LabelField("Effective policy", ModeDescriptor(current), EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("Precedence", BridgeGateDefaultPolicy.DescribePrecedence(), EditorStyles.miniLabel);
+            EditorGUILayout.LabelField("Storage", BridgeProjectSettings.SettingsPath ?? "(no project root)", EditorStyles.miniLabel);
+        }
+
+        static GUIContent[] ModeLabels()
+        {
+            var labels = new GUIContent[BridgeGateDefaultPolicy.ValidModes.Length];
+            for (int i = 0; i < labels.Length; i++)
+            {
+                labels[i] = new GUIContent(ModeDescriptor(BridgeGateDefaultPolicy.ValidModes[i]));
+            }
+            return labels;
+        }
+
+        static int IndexOfMode(string mode)
+        {
+            for (int i = 0; i < BridgeGateDefaultPolicy.ValidModes.Length; i++)
+            {
+                if (BridgeGateDefaultPolicy.ValidModes[i] == mode) return i;
+            }
+            return 0;
+        }
+
+        static string ModeDescriptor(string mode)
+        {
+            return mode switch
+            {
+                "enforce" => "enforce  (default — MCP errors on new errors)",
+                "warn"    => "warn  (new errors surface as warnings, not MCP errors)",
+                "off"     => "off  (no checkpoint/validate — explicit opt-in only)",
+                _ => mode ?? BridgeGateDefaultPolicy.Default
+            };
+        }
+
+        void DrawGateLatestResultSection()
+        {
+            EditorGUILayout.Space(6);
+            _gateLatestFoldout = EditorGUILayout.Foldout(_gateLatestFoldout, "Latest gate result (session, in-memory)", true);
+            if (!_gateLatestFoldout) return;
+
+            var latest = BridgeGateRunHistory.Latest;
+            if (latest == null)
+            {
+                BridgeGUIUtilities.DrawLabelAtCenterHorizontally(
+                    "No gate results captured in this session yet. Trigger a mutating tool call to populate.",
+                    new Color(0.7f, 0.7f, 0.7f));
+                return;
+            }
+
+            _gateLatestScroll = EditorGUILayout.BeginScrollView(_gateLatestScroll, GUILayout.MinHeight(80));
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Tool", latest.ToolName ?? "(unknown)", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Mode", GUILayout.Width(120));
+            EditorGUILayout.LabelField(latest.EffectiveMode ?? "(unknown)");
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Outcome", GUILayout.Width(120));
+            var outcomeColor = OutcomeColor(latest.Outcome);
+            var prev = GUI.color;
+            GUI.color = outcomeColor;
+            EditorGUILayout.LabelField(OutcomeLabel(latest.Outcome), EditorStyles.boldLabel);
+            GUI.color = prev;
+            EditorGUILayout.EndHorizontal();
+
+            if (!string.IsNullOrEmpty(latest.MutationError))
+            {
+                EditorGUILayout.HelpBox($"Mutation error: {latest.MutationError}", MessageType.Error);
+            }
+
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+
+            EditorGUILayout.LabelField("Delta",
+                $"new errors: {latest.NewErrors}    new warnings: {latest.NewWarnings}    resolved errors: {latest.ResolvedErrors}    resolved warnings: {latest.ResolvedWarnings}");
+
+            EditorGUILayout.LabelField("Durations (ms)",
+                $"checkpoint: {latest.CheckpointDurationMs}    validation: {latest.ValidationDurationMs}    total: {latest.TotalGateDurationMs}");
+
+            if (latest.CategoriesRun != null && latest.CategoriesRun.Length > 0)
+            {
+                EditorGUILayout.LabelField("Categories", string.Join(", ", latest.CategoriesRun));
+            }
+            else
+            {
+                EditorGUILayout.LabelField("Categories", "(none — gate skipped or off)");
+            }
+
+            if (latest.AgentNextSteps != null && latest.AgentNextSteps.Length > 0)
+            {
+                EditorGUILayout.Space(2);
+                EditorGUILayout.LabelField("Next steps", EditorStyles.miniBoldLabel);
+                for (int i = 0; i < latest.AgentNextSteps.Length; i++)
+                {
+                    EditorGUILayout.LabelField($"  • {latest.AgentNextSteps[i]}", EditorStyles.wordWrappedMiniLabel);
+                }
+            }
+
+            EditorGUILayout.LabelField("Captured", latest.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"), EditorStyles.miniLabel);
+
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndScrollView();
+
+            EditorGUILayout.Space(2);
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Clear", EditorStyles.miniButton, GUILayout.Width(80)))
+            {
+                BridgeGateRunHistory.Clear();
+            }
+            EditorGUILayout.LabelField("In-memory only — not persisted to disk in v1.", EditorStyles.miniLabel);
+            EditorGUILayout.EndHorizontal();
+        }
+
+        static string OutcomeLabel(GateOutcome outcome)
+        {
+            return outcome switch
+            {
+                GateOutcome.Passed => "Passed",
+                GateOutcome.Failed => "Failed",
+                GateOutcome.Warned => "Warned",
+                GateOutcome.Skipped => "Skipped (no gate ran)",
+                _ => outcome.ToString()
+            };
+        }
+
+        static Color OutcomeColor(GateOutcome outcome)
+        {
+            return outcome switch
+            {
+                GateOutcome.Passed => new Color(0.6f, 0.9f, 0.6f),
+                GateOutcome.Warned => new Color(1f, 0.9f, 0.4f),
+                GateOutcome.Failed => new Color(1f, 0.5f, 0.5f),
+                _ => new Color(0.7f, 0.7f, 0.7f)
+            };
+        }
+
+        void DrawGateCheckpointHistorySection()
+        {
+            EditorGUILayout.Space(6);
+            _gateCheckpointFoldout = EditorGUILayout.Foldout(_gateCheckpointFoldout, "Checkpoint history (in-memory ring buffer)", true);
+            if (!_gateCheckpointFoldout) return;
+
+            EditorGUILayout.HelpBox(
+                "Session-scoped ring buffer (capacity " + BridgeGateRunHistory.Capacity + "). " +
+                "Populated by gate runs and by the `unity_agent_checkpoint_create` tool. " +
+                "In-memory only — no on-disk persistence in v1.",
+                MessageType.None);
+
+            var count = CheckpointStore.Count;
+            if (count == 0)
+            {
+                BridgeGUIUtilities.DrawLabelAtCenterHorizontally(
+                    "No checkpoints captured in this session yet.",
+                    new Color(0.7f, 0.7f, 0.7f));
+                return;
+            }
+
+            _gateCheckpointScroll = EditorGUILayout.BeginScrollView(_gateCheckpointScroll, GUILayout.MinHeight(80));
+            var recent = CheckpointStore.Recent;
+            // Display most-recent first for readability.
+            for (int i = recent.Count - 1; i >= 0; i--)
+            {
+                var entry = recent[i];
+                if (entry == null) continue;
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+                EditorGUILayout.LabelField(entry.CheckpointId ?? "(no id)", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField("Captured", entry.Timestamp ?? "(no timestamp)", EditorStyles.miniLabel);
+                if (entry.Paths != null && entry.Paths.Length > 0)
+                {
+                    EditorGUILayout.LabelField("Paths", string.Join(", ", entry.Paths), EditorStyles.wordWrappedMiniLabel);
+                }
+                if (entry.Categories != null && entry.Categories.Length > 0)
+                {
+                    EditorGUILayout.LabelField("Categories", string.Join(", ", entry.Categories), EditorStyles.miniLabel);
+                }
+                if (entry.Fingerprint?.Fingerprints != null)
+                {
+                    int totalErrors = 0, totalWarnings = 0;
+                    foreach (var fp in entry.Fingerprint.Fingerprints.Values)
+                    {
+                        if (fp == null) continue;
+                        totalErrors += fp.Errors;
+                        totalWarnings += fp.Warnings;
+                    }
+                    EditorGUILayout.LabelField("Fingerprint", $"errors: {totalErrors}    warnings: {totalWarnings}", EditorStyles.miniLabel);
+                }
+                EditorGUILayout.EndVertical();
+            }
+            EditorGUILayout.EndScrollView();
+        }
+
+        void DrawGateManualValidateSection()
+        {
+            EditorGUILayout.Space(6);
+            _gateManualFoldout = EditorGUILayout.Foldout(_gateManualFoldout, "Manual validate (scoped, non-mutating)", true);
+            if (!_gateManualFoldout) return;
+
+            EditorGUILayout.HelpBox(
+                "Run a scoped verify pass without dispatching through the MCP server. " +
+                "Default source is the current Project window selection; the text area accepts " +
+                "comma/newline separated `Assets/...` paths. No mutation occurs, no checkpoint " +
+                "is created, and gate defaults are not consulted.",
+                MessageType.None);
+
+            var selection = BridgeManualVerifyRunner.GetSelectionAssetPaths();
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Selection paths", GUILayout.Width(110));
+            EditorGUILayout.LabelField(selection.Length == 0 ? "(no assets selected)" : string.Join(", ", selection), EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.LabelField("Custom paths (optional, one per line)");
+            _manualValidateInput = EditorGUILayout.TextArea(_manualValidateInput ?? "", GUILayout.MinHeight(48));
+
+            var customPaths = BridgeManualVerifyRunner.ParsePathList(_manualValidateInput);
+            var effectivePaths = selection.Length > 0 ? selection : customPaths;
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUI.BeginDisabledGroup(_validateInFlight);
+            if (GUILayout.Button(_validateInFlight ? "Validating…" : "Validate selection / paths", GUILayout.Width(220)))
+            {
+                _lastManualResult = BridgeManualVerifyRunner.Run(effectivePaths);
+                Repaint();
+            }
+            if (GUILayout.Button("Use selection", GUILayout.Width(110)))
+            {
+                _manualValidateInput = "";
+                GUIUtility.keyboardControl = 0;
+            }
+            if (GUILayout.Button("Clear result", EditorStyles.miniButton, GUILayout.Width(90)))
+            {
+                _lastManualResult = null;
+                _manualAssetFoldoutExpanded.Clear();
+            }
+            EditorGUI.EndDisabledGroup();
+            EditorGUILayout.EndHorizontal();
+
+            if (effectivePaths.Length == 0)
+            {
+                EditorGUILayout.HelpBox("Select assets in the Project window or enter paths above to validate.", MessageType.None);
+            }
+
+            DrawGateManualResult();
+        }
+
+        void DrawGateManualResult()
+        {
+            var result = _lastManualResult;
+            if (result == null)
+            {
+                BridgeGUIUtilities.DrawLabelAtCenterHorizontally(
+                    "No manual validate run yet.",
+                    new Color(0.7f, 0.7f, 0.7f));
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(result.ErrorMessage))
+            {
+                EditorGUILayout.HelpBox($"Validate run failed: {result.ErrorMessage}", MessageType.Error);
+                return;
+            }
+
+            if (!result.Ran)
+            {
+                EditorGUILayout.HelpBox("No paths supplied — provide selection or custom paths to validate.", MessageType.None);
+                return;
+            }
+
+            var passColor = result.TotalErrors == 0
+                ? new Color(0.6f, 0.9f, 0.6f)
+                : new Color(1f, 0.5f, 0.5f);
+            var prev = GUI.color;
+            GUI.color = passColor;
+            EditorGUILayout.LabelField(
+                result.TotalErrors == 0 ? "PASS  " : "FAIL  ",
+                EditorStyles.boldLabel);
+            GUI.color = prev;
+
+            EditorGUILayout.LabelField(
+                $"paths: {result.InputPaths.Length}    assets with issues: {result.TotalAssets}    " +
+                $"errors: {result.TotalErrors}    warnings: {result.TotalWarnings}    duration: {result.DurationMs} ms");
+
+            if (result.CategoriesRun != null && result.CategoriesRun.Length > 0)
+                EditorGUILayout.LabelField("Categories run", string.Join(", ", result.CategoriesRun), EditorStyles.miniLabel);
+
+            if (result.Groups == null || result.Groups.Count == 0)
+            {
+                EditorGUILayout.HelpBox("No issues detected for the supplied paths.", MessageType.Info);
+                return;
+            }
+
+            _gateManualResultScroll = EditorGUILayout.BeginScrollView(_gateManualResultScroll, GUILayout.MinHeight(120));
+            foreach (var group in result.Groups)
+            {
+                if (group == null) continue;
+                DrawManualAssetGroup(group);
+            }
+            EditorGUILayout.EndScrollView();
+        }
+
+        void DrawManualAssetGroup(BridgeManualAssetGroup group)
+        {
+            var expanded = _manualAssetFoldoutExpanded.Contains(group.AssetPath);
+            var header = $"{group.AssetPath}    errors: {group.ErrorCount}    warnings: {group.WarningCount}";
+
+            Color headerColor;
+            if (group.ErrorCount > 0) headerColor = new Color(1f, 0.55f, 0.55f);
+            else if (group.WarningCount > 0) headerColor = new Color(1f, 0.9f, 0.4f);
+            else headerColor = new Color(0.7f, 0.85f, 1f);
+
+            var prev = GUI.color;
+            GUI.color = headerColor;
+            var nowExpanded = EditorGUILayout.Foldout(expanded, header, true);
+            GUI.color = prev;
+
+            if (nowExpanded != expanded)
+            {
+                if (nowExpanded) _manualAssetFoldoutExpanded.Add(group.AssetPath);
+                else _manualAssetFoldoutExpanded.Remove(group.AssetPath);
+            }
+
+            if (nowExpanded)
+            {
+                EditorGUI.indentLevel++;
+                foreach (var issue in group.Issues)
+                {
+                    if (issue == null) continue;
+                    Color sevColor = issue.Severity == "error"
+                        ? new Color(1f, 0.55f, 0.55f)
+                        : new Color(1f, 0.9f, 0.4f);
+                    var sprev = GUI.color;
+                    GUI.color = sevColor;
+                    EditorGUILayout.LabelField(
+                        $"[{issue.Severity.ToUpperInvariant()}] {issue.RuleId} / {issue.IssueCode}",
+                        EditorStyles.boldLabel);
+                    GUI.color = sprev;
+                    if (!string.IsNullOrEmpty(issue.Description))
+                        EditorGUILayout.LabelField(issue.Description, EditorStyles.wordWrappedMiniLabel);
+                }
+                EditorGUI.indentLevel--;
+                BridgeGUIUtilities.HorizontalLine(1, 2);
+            }
         }
     }
 }
