@@ -64,6 +64,10 @@ pub fn run() {
             config::wizard::read_manifest,
             config::wizard::plan_manifest_merge,
             config::wizard::write_manifest_merge,
+            config::mcp_config::plan_mcp_config,
+            config::mcp_config::write_mcp_config,
+            config::mcp_config::plan_skill_copy,
+            config::mcp_config::copy_skill_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

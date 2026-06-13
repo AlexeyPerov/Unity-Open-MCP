@@ -959,7 +959,7 @@ fn read_mcp_heuristic(project: &Path) -> McpConfigHeuristic {
     }
 }
 
-fn claude_desktop_config_path(home: &Path) -> PathBuf {
+pub fn claude_desktop_config_path(home: &Path) -> PathBuf {
     if cfg!(target_os = "macos") {
         home.join("Library")
             .join("Application Support")
@@ -986,7 +986,7 @@ fn claude_desktop_config_path(home: &Path) -> PathBuf {
 /// `unity-agent` MCP server entry under either `mcpServers` or
 /// `mcp`. Unparsable files are treated as "not configured" so a
 /// malformed config does not falsely report as set up.
-fn contains_mcp_key(path: &Path) -> bool {
+pub fn contains_mcp_key(path: &Path) -> bool {
     if !path.exists() {
         return false;
     }

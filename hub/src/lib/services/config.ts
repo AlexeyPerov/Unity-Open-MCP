@@ -945,3 +945,131 @@ export async function writeManifestMerge(
 ): Promise<ManifestWriteResult> {
   return invoke<ManifestWriteResult>("write_manifest_merge", { params });
 }
+
+/**
+ * M4 Plan 4: wizard Step 4 MCP client config plan / write.
+ * Mirrors the Rust `wizard::{McpConfigParams, McpConfigPlan, …}` types.
+ */
+export type McpClientIdWire =
+  | "cursor"
+  | "claudeDesktop"
+  | "claudeCode"
+  | "opencodeGlobal"
+  | "opencodeProject"
+  | "manual";
+
+export interface McpConfigParamsWire {
+  projectPath: string;
+  toolkitRoot: string;
+  mcpIndexOverride: string;
+  unityProjectPath: string;
+  bridgePort: string;
+  includeUnityPath: boolean;
+  unityPath: string;
+  client: McpClientIdWire;
+  cursorProjectScope: boolean;
+}
+
+export interface McpConfigPlan {
+  client: McpClientIdWire;
+  targetPath: string | null;
+  fileExists: boolean;
+  wouldWrite: boolean;
+  preservedKeys: string[];
+  proposedJson: string | null;
+  command: string | null;
+  resolvedMcpIndex: string;
+}
+
+export interface McpConfigWriteResult {
+  client: McpClientIdWire;
+  targetPath: string;
+  backupPath: string;
+  wouldWrite: boolean;
+  proposedJson: string;
+}
+
+export interface McpConfigError {
+  kind: string;
+  message: string;
+}
+
+/**
+ * Tauri command: compute a Step 4 MCP config merge plan
+ * without writing anything. The wizard Step 4 calls this on
+ * every form-state change so the diff preview is always live.
+ */
+export async function planMcpConfig(
+  params: McpConfigParamsWire
+): Promise<McpConfigPlan> {
+  return invoke<McpConfigPlan>("plan_mcp_config", { params });
+}
+
+/**
+ * Tauri command: apply the Step 4 MCP config merge. Refuses
+ * when the MCP index path is missing, when the target client
+ * is CLI-only (`claude-code`) or clipboard-only (`manual`),
+ * and when the parent folder is not writable.
+ */
+export async function writeMcpConfig(
+  params: McpConfigParamsWire
+): Promise<McpConfigWriteResult> {
+  return invoke<McpConfigWriteResult>("write_mcp_config", { params });
+}
+
+/**
+ * M4 Plan 4: wizard Done-time skill copy plan / write.
+ * Mirrors the Rust `mcp_config::{SkillCopyParams, SkillCopyPlan, …}` types.
+ */
+export type SkillCopyKind = "claude" | "opencode";
+
+export interface SkillCopyTarget {
+  kind: SkillCopyKind;
+  targetPath: string;
+  relativePath: string;
+  sourcePath: string | null;
+  exists: boolean;
+}
+
+export interface SkillCopyPlan {
+  projectPath: string;
+  toolkitRoot: string;
+  sourcePath: string | null;
+  targets: SkillCopyTarget[];
+}
+
+export interface SkillCopyParamsWire {
+  projectPath: string;
+  toolkitRoot: string;
+  opencodeSelected: boolean;
+}
+
+export interface SkillCopyResult {
+  projectPath: string;
+  copied: SkillCopyTarget[];
+  /** Targets that existed and were skipped (no overwrite). */
+  skipped: SkillCopyTarget[];
+  /** Targets the writer replaced after the user confirmed. */
+  overwritten: SkillCopyTarget[];
+}
+
+export interface SkillCopyError {
+  kind: string;
+  message: string;
+}
+
+export async function planSkillCopy(
+  params: SkillCopyParamsWire
+): Promise<SkillCopyPlan> {
+  return invoke<SkillCopyPlan>("plan_skill_copy", { params });
+}
+
+export async function copySkillFiles(
+  params: SkillCopyParamsWire,
+  overwriteExisting: boolean
+): Promise<SkillCopyResult> {
+  return invoke<SkillCopyResult>("copy_skill_files", {
+    params,
+    overwriteExisting,
+  });
+}

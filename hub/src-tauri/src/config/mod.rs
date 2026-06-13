@@ -23,3 +23,4 @@ pub mod releases;
 pub mod hub_install;
 pub mod ai_toolkit;
 pub mod wizard;
+pub mod mcp_config;

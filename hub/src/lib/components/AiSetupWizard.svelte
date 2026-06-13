@@ -21,16 +21,28 @@
   import { settingsStore } from "$lib/state/settings.svelte";
   import {
     checkNodeVersion,
+    copySkillFiles,
     detectProjectState,
     planManifestMerge,
+    planMcpConfig,
+    planSkillCopy,
     validateToolkitRoot,
     writeManifestMerge,
+    writeMcpConfig,
     type ManifestError,
     type ManifestMergePlan,
     type ManifestWriteResult,
+    type McpConfigError,
     type McpConfigHeuristic,
+    type McpConfigParamsWire,
+    type McpConfigPlan,
+    type McpConfigWriteResult,
     type NodeProbe,
     type ProjectState,
+    type SkillCopyError,
+    type SkillCopyParamsWire,
+    type SkillCopyPlan,
+    type SkillCopyResult,
     type ToolkitValidation,
   } from "$lib/services/config";
   import {
@@ -43,13 +55,19 @@
     summarizeChanges,
   } from "$lib/services/manifest";
   import {
-    buildCursorMcpEntry,
-    buildMcpEnv,
-    buildOpenCodeMcpEntry,
     DEFAULT_BRIDGE_PORT,
-    MCP_SERVER_KEY,
     type McpClientId,
   } from "$lib/services/ai_toolkit";
+  // The pure-function `buildCursorMcpEntry` / `buildOpenCodeMcpEntry` /
+  // `buildMcpEnv` helpers in `ai_toolkit.ts` still back the
+  // `ai_toolkit.test.ts` Node:test suite. The wizard Step 4
+  // now calls `plan_mcp_config` / `write_mcp_config` from the
+  // Rust backend instead of building the JSON client-side, so
+  // the live preview is guaranteed to match what the writer
+  // will emit (the `mcpServers.unity-agent` merge key, the
+  // OpenCode `mcp.unity-agent` + `environment` envelope, the
+  // OS-resolved Claude Desktop path, and the `claude mcp add`
+  // command for Claude Code all live in Rust).
   import Button from "$lib/components/shell/Button.svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
@@ -135,6 +153,19 @@
   let cursorProjectScope = $state(false);
   let bridgePort = $state(DEFAULT_BRIDGE_PORT);
   let copyToast = $state<string | null>(null);
+  let mcpPlan = $state<McpConfigPlan | null>(null);
+  let mcpPlanning = $state(false);
+  let mcpWriteResult = $state<McpConfigWriteResult | null>(null);
+  let mcpWriting = $state(false);
+  let mcpWriteError = $state<McpConfigError | null>(null);
+
+  // Done — skill copy state.
+  let skillPlan = $state<SkillCopyPlan | null>(null);
+  let skillPlanning = $state(false);
+  let skillResult = $state<SkillCopyResult | null>(null);
+  let skillCopying = $state(false);
+  let skillError = $state<SkillCopyError | null>(null);
+  let skillOverwriteAck = $state(false);
 
   // Step 5 — launch/verify state.
   let launchInFlight = $state(false);
@@ -456,40 +487,180 @@
     };
   });
 
-  let generatedMcpJson = $derived.by(() => {
-    if (!resolvedMcpPath) return "";
-    const env = buildMcpEnv({
-      unityProjectPath: project.path,
-      bridgePort,
-    });
-    if (mcpClient === "opencode-global" || mcpClient === "opencode-project") {
-      const entry = buildOpenCodeMcpEntry(resolvedMcpPath, {
-        unityProjectPath: project.path,
-        bridgePort,
-      });
-      return JSON.stringify(
-        {
-          mcp: {
-            [MCP_SERVER_KEY]: entry,
-          },
-        },
-        null,
-        2
-      );
+  // Live Step 4 plan: re-call `plan_mcp_config` whenever the
+  // form state changes so the diff preview + write button
+  // always reflect what the Rust writer would produce. The
+  // MCP path is the upstream gate; the planner still runs
+  // with a stale path so the UI can surface a focused
+  // `mcpPathInvalid` error rather than a blank preview.
+  $effect(() => {
+    const projectPath = project.path;
+    const root = toolkitRoot;
+    const client = mcpClient;
+    const projectScope = cursorProjectScope;
+    const port = bridgePort;
+    const override = mcpIndexOverride;
+    if (!projectPath || !root) {
+      mcpPlan = null;
+      return;
     }
-    const entry = buildCursorMcpEntry(resolvedMcpPath, {
-      unityProjectPath: project.path,
-      bridgePort,
-    });
-    return JSON.stringify(
-      {
-        mcpServers: {
-          [MCP_SERVER_KEY]: entry,
-        },
-      },
-      null,
-      2
-    );
+    mcpPlanning = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params: McpConfigParamsWire = {
+          projectPath,
+          toolkitRoot: root,
+          mcpIndexOverride: override,
+          unityProjectPath: projectPath,
+          bridgePort: port,
+          includeUnityPath: false,
+          unityPath: "",
+          client: clientToWire(client),
+          cursorProjectScope: projectScope,
+        };
+        const plan = await planMcpConfig(params);
+        if (!cancelled) {
+          mcpPlan = plan;
+          mcpWriteResult = null;
+          mcpWriteError = null;
+        }
+      } catch (e) {
+        if (!cancelled) {
+          mcpWriteError = toMcpConfigError(e);
+          mcpPlan = null;
+        }
+      } finally {
+        if (!cancelled) mcpPlanning = false;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  // Live Step 4 Skill copy plan: runs on every Done entry so
+  // the wizard surfaces the per-target preview + "file
+  // exists" flags before the user clicks the copy action.
+  $effect(() => {
+    if (currentStep !== "done") return;
+    const root = toolkitRoot;
+    const projectPath = project.path;
+    if (!projectPath || !root) {
+      skillPlan = null;
+      return;
+    }
+    skillPlanning = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const params: SkillCopyParamsWire = {
+          projectPath,
+          toolkitRoot: root,
+          opencodeSelected: isOpencodeClient(mcpClient),
+        };
+        const plan = await planSkillCopy(params);
+        if (!cancelled) {
+          skillPlan = plan;
+          // Reset confirmation + result so the user re-acks
+          // the overwrite toggle when the plan shape changes.
+          if (!plan.targets.some((t) => t.exists)) {
+            skillOverwriteAck = false;
+          }
+          skillResult = null;
+          skillError = null;
+        }
+      } catch (e) {
+        if (!cancelled) {
+          skillError = toSkillCopyError(e);
+          skillPlan = null;
+        }
+      } finally {
+        if (!cancelled) skillPlanning = false;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  function clientToWire(id: McpClientId): McpConfigParamsWire["client"] {
+    switch (id) {
+      case "cursor":
+        return "cursor";
+      case "claude-desktop":
+        return "claudeDesktop";
+      case "claude-code":
+        return "claudeCode";
+      case "opencode-global":
+        return "opencodeGlobal";
+      case "opencode-project":
+        return "opencodeProject";
+      case "manual":
+        return "manual";
+    }
+  }
+
+  function isOpencodeClient(id: McpClientId): boolean {
+    return id === "opencode-global" || id === "opencode-project";
+  }
+
+  function toMcpConfigError(e: unknown): McpConfigError {
+    if (e && typeof e === "object" && "kind" in e && "message" in e) {
+      return e as McpConfigError;
+    }
+    return { kind: "unknown", message: e instanceof Error ? e.message : String(e) };
+  }
+
+  function toSkillCopyError(e: unknown): SkillCopyError {
+    if (e && typeof e === "object" && "kind" in e && "message" in e) {
+      return e as SkillCopyError;
+    }
+    return { kind: "unknown", message: e instanceof Error ? e.message : String(e) };
+  }
+
+  function describeMcpConfigError(err: McpConfigError): string {
+    switch (err.kind) {
+      case "mcpPathInvalid":
+        return `MCP server entry point does not exist on disk. Run \`npm run build\` in the toolkit's mcp-server/ folder.`;
+      case "homeMissing":
+        return "Cannot resolve the home directory for a global MCP config target.";
+      case "noFileTarget":
+        return "This client does not back a writable config file.";
+      case "invalidJson":
+        return `Existing config is not valid JSON: ${err.message}`;
+      case "readFailed":
+        return `Cannot read existing config: ${err.message}`;
+      case "writeFailed":
+        return `Failed to write config: ${err.message}. Check folder permissions.`;
+      case "backupFailed":
+        return `Cannot create backup: ${err.message}`;
+      default:
+        return `${err.kind}: ${err.message}`;
+    }
+  }
+
+  function describeSkillCopyError(err: SkillCopyError): string {
+    switch (err.kind) {
+      case "sourceMissing":
+        return `Toolkit source skill file is missing. Run the wizard with a valid toolkit root.`;
+      case "writeFailed":
+        return `Failed to copy skill: ${err.message}. Check folder permissions.`;
+      case "backupFailed":
+        return `Cannot create backup: ${err.message}`;
+      case "notAUnityProject":
+        return `Project path is not a directory.`;
+      default:
+        return `${err.kind}: ${err.message}`;
+    }
+  }
+
+  // Display text: prefer the `claude mcp add` command for
+  // Claude Code (which never touches a file), the merged
+  // JSON proposal for every other client.
+  let mcpPreviewText = $derived.by(() => {
+    if (!mcpPlan) return "";
+    return mcpPlan.command ?? mcpPlan.proposedJson ?? "";
   });
 
   function clientKind(id: McpClientId): "file" | "cli" | "clipboard" {
@@ -500,23 +671,134 @@
     if (clientKind(mcpClient) !== "file") return false;
     if (resolvedMcpPathValid !== true) return false;
     if (!toolkitValidation?.ok) return false;
+    if (!mcpPlan?.targetPath) return false;
     return true;
   }
 
+  function primaryActionLabel(): string {
+    if (clientKind(mcpClient) === "file") return "Write config";
+    if (clientKind(mcpClient) === "cli") return "Copy command";
+    return "Copy to clipboard";
+  }
+
+  function secondaryActionLabel(): string {
+    if (mcpPlan?.command) return "Copy command";
+    return "Copy JSON";
+  }
+
   async function copyMcpJson() {
+    const text = mcpPreviewText;
+    if (!text) {
+      copyToast = "nothing to copy yet";
+      return;
+    }
     if (typeof navigator === "undefined" || !navigator.clipboard) {
       copyToast = "clipboard unavailable";
       return;
     }
     try {
-      await navigator.clipboard.writeText(generatedMcpJson);
-      copyToast = "Copied MCP config JSON to clipboard";
-      S.appendDrawerLog("copied MCP config JSON to clipboard");
+      await navigator.clipboard.writeText(text);
+      copyToast = mcpPlan?.command
+        ? "Copied claude mcp add command to clipboard"
+        : "Copied MCP config JSON to clipboard";
+      S.appendDrawerLog(
+        mcpPlan?.command
+          ? "copied claude mcp add command to clipboard"
+          : "copied MCP config JSON to clipboard"
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       copyToast = `copy failed: ${msg}`;
     } finally {
       setTimeout(() => (copyToast = null), 2000);
+    }
+  }
+
+  async function primaryMcpAction() {
+    if (clientKind(mcpClient) === "file") {
+      await writeMcpConfigClick();
+    } else {
+      await copyMcpJson();
+    }
+  }
+
+  async function writeMcpConfigClick() {
+    if (!canWriteMcpConfig() || mcpWriting) return;
+    const root = toolkitRoot;
+    const projectPath = project.path;
+    if (!projectPath || !root) return;
+    mcpWriting = true;
+    mcpWriteError = null;
+    try {
+      const params: McpConfigParamsWire = {
+        projectPath,
+        toolkitRoot: root,
+        mcpIndexOverride: mcpIndexOverride,
+        unityProjectPath: projectPath,
+        bridgePort,
+        includeUnityPath: false,
+        unityPath: "",
+        client: clientToWire(mcpClient),
+        cursorProjectScope,
+      };
+      const result = await writeMcpConfig(params);
+      mcpWriteResult = result;
+      copyToast = result.wouldWrite
+        ? `Wrote MCP config to ${result.targetPath}`
+        : "MCP config already up to date — no write needed";
+      S.appendDrawerLog(
+        result.wouldWrite
+          ? `AI Setup: wrote MCP config to ${result.targetPath} for ${project.name}`
+          : `AI Setup: MCP config already up to date for ${project.name}`
+      );
+      // Refresh Step 1 detection so the Done screen reflects
+      // the freshly-merged MCP heuristic flag.
+      void refreshDetection();
+    } catch (e) {
+      mcpWriteError = toMcpConfigError(e);
+      S.appendErrorLog(
+        `MCP config write failed: ${describeMcpConfigError(mcpWriteError)}`
+      );
+    } finally {
+      mcpWriting = false;
+      setTimeout(() => (copyToast = null), 2500);
+    }
+  }
+
+  async function copySkillFilesClick() {
+    if (skillCopying) return;
+    const root = toolkitRoot;
+    const projectPath = project.path;
+    if (!projectPath || !root || !skillPlan) return;
+    const hasExisting = skillPlan.targets.some((t) => t.exists);
+    if (hasExisting && !skillOverwriteAck) {
+      skillError = {
+        kind: "overwriteNotConfirmed",
+        message:
+          "One or more target files already exist. Check the overwrite box to replace them.",
+      };
+      return;
+    }
+    skillCopying = true;
+    skillError = null;
+    try {
+      const params: SkillCopyParamsWire = {
+        projectPath,
+        toolkitRoot: root,
+        opencodeSelected: isOpencodeClient(mcpClient),
+      };
+      const result = await copySkillFiles(params, skillOverwriteAck);
+      skillResult = result;
+      S.appendDrawerLog(
+        `AI Setup: copied ${result.copied.length} skill file(s), skipped ${result.skipped.length} for ${project.name}`
+      );
+    } catch (e) {
+      skillError = toSkillCopyError(e);
+      S.appendErrorLog(
+        `Skill copy failed: ${describeSkillCopyError(skillError)}`
+      );
+    } finally {
+      skillCopying = false;
     }
   }
 
@@ -1121,9 +1403,14 @@
         <section class="wiz-section">
           <p class="wiz-desc">
             Step 4 writes a <code>unity-agent</code> MCP server
-            entry to your client config. Plan 4 owns the actual file
-            merge; this shell step previews the JSON the wizard will
-            write and exposes the write / copy actions.
+            entry to your client config. The wizard calls the
+            Rust planner on every form-state change so the live
+            preview matches exactly what the writer will emit:
+            <code>mcpServers.unity-agent</code> for Cursor /
+            Claude Desktop, <code>mcp.unity-agent</code> for
+            OpenCode, a <code>claude mcp add</code> command for
+            Claude Code, and a copyable snippet for Manual.
+            Unrelated MCP servers are merged through unchanged.
           </p>
 
           <div class="wiz-field">
@@ -1174,13 +1461,50 @@
           </div>
 
           <div class="wiz-field">
-            <span class="wiz-label">Generated config</span>
-            <pre class="wiz-codeblock" aria-label="Generated MCP config">{generatedMcpJson || "—"}</pre>
-            {#if !resolvedMcpPath}
+            <span class="wiz-label">
+              {mcpPlan?.command ? "Claude Code command" : "Generated config"}
+            </span>
+            {#if mcpPlanning && !mcpPlan}
+              <p class="wiz-hint">Planning…</p>
+            {:else if !mcpPlan}
               <p class="wiz-hint wiz-hint-warn">
                 Set the toolkit root in Step 2 to generate a config.
               </p>
-            {:else if resolvedMcpPathValid === false}
+            {:else}
+              <pre class="wiz-codeblock" aria-label={mcpPlan.command ? "Claude Code command" : "Generated MCP config"}>{mcpPreviewText || "—"}</pre>
+              {#if mcpPlan.targetPath}
+                <p class="wiz-hint">
+                  Target: <code>{mcpPlan.targetPath}</code>
+                  {#if mcpPlan.fileExists}
+                    <span class="wiz-tag wiz-tag-warn">file exists</span>
+                  {:else}
+                    <span class="wiz-tag wiz-tag-ok">new file</span>
+                  {/if}
+                  {#if !mcpPlan.wouldWrite && mcpPlan.fileExists}
+                    <span class="wiz-tag wiz-tag-ok">already up to date</span>
+                  {/if}
+                </p>
+              {/if}
+              {#if mcpPlan.preservedKeys.length > 0}
+                <p class="wiz-hint">
+                  Preserved top-level keys: {mcpPlan.preservedKeys
+                    .filter((k) => !["mcpServers", "mcp"].includes(k))
+                    .map((k) => `<code>${k}</code>`)
+                    .join(", ") || "<em>none</em>"}
+                  {#if mcpPlan.preservedKeys.some((k) => ["mcpServers", "mcp"].includes(k))}
+                    ; other servers under <code>mcpServers</code> / <code>mcp</code> are also kept.
+                  {/if}
+                </p>
+              {/if}
+              {#if mcpPlan.command}
+                <p class="wiz-hint">
+                  Claude Code is CLI-only in M4 — the wizard
+                  renders the <code>claude mcp add</code> command
+                  and never writes a config file (questions-4 Q9 = A).
+                </p>
+              {/if}
+            {/if}
+            {#if resolvedMcpPathValid === false}
               <p class="wiz-hint wiz-hint-warn">
                 Resolved MCP path does not exist on disk:
                 <code>{resolvedMcpPath}</code>.
@@ -1190,16 +1514,51 @@
             {/if}
           </div>
 
+          {#if mcpWriteResult?.wouldWrite}
+            <div class="wiz-block wiz-block-ok" role="status">
+              <strong>MCP config written.</strong>
+              Saved to <code>{mcpWriteResult.targetPath}</code>.
+              {#if mcpWriteResult.backupPath}
+                Backup at <code>{mcpWriteResult.backupPath}</code>.
+              {/if}
+            </div>
+          {:else if mcpWriteResult && !mcpWriteResult.wouldWrite}
+            <div class="wiz-block wiz-block-ok" role="status">
+              <strong>Already up to date.</strong>
+              Existing <code>{mcpWriteResult.targetPath}</code> already
+              matches the proposed <code>unity-agent</code> entry — no
+              write or backup was needed.
+            </div>
+          {/if}
+          {#if mcpWriteError}
+            <div class="wiz-block wiz-block-error" role="alert">
+              {describeMcpConfigError(mcpWriteError)}
+            </div>
+          {/if}
+
           <div class="wiz-actions-row">
             <Button
               variant="primary"
-              disabled={!canWriteMcpConfig()}
-              title={canWriteMcpConfig() ? "Write config" : "Pick a client + valid MCP path first"}
+              onclick={primaryMcpAction}
+              disabled={
+                (clientKind(mcpClient) === "file" && (!canWriteMcpConfig() || mcpWriting)) ||
+                (clientKind(mcpClient) !== "file" && !mcpPreviewText)
+              }
+              title={
+                clientKind(mcpClient) === "file" && canWriteMcpConfig()
+                  ? "Write config"
+                  : clientKind(mcpClient) === "file"
+                    ? "Pick a client + valid MCP path first"
+                    : "Copy to clipboard"
+              }
             >
-              {clientKind(mcpClient) === "file" ? "Write config" : "Copy to clipboard"}
+              {mcpWriting ? "Writing…" : primaryActionLabel()}
             </Button>
-            <Button variant="secondary" onclick={copyMcpJson} disabled={!generatedMcpJson}>
-              Copy JSON
+            {#if clientKind(mcpClient) === "file" && mcpPlan?.command === null}
+              <!-- noop placeholder so the next button is the only secondary when CLI/Manual -->
+            {/if}
+            <Button variant="secondary" onclick={copyMcpJson} disabled={!mcpPreviewText}>
+              {secondaryActionLabel()}
             </Button>
             {#if copyToast}
               <span class="wiz-toast" role="status">{copyToast}</span>
@@ -1304,6 +1663,109 @@
               </dd>
             </div>
           </dl>
+
+          <div class="wiz-field">
+            <span class="wiz-label">Skill copy</span>
+            <p class="wiz-desc">
+              On Done, the wizard copies
+              <code>{toolkitRoot || "<toolkit>"}/skills/unity-agent/SKILL.md</code>
+              into the project's Claude-compatible skill folder, and
+              {#if isOpencodeClient(mcpClient)}
+                (because OpenCode was selected) the OpenCode mirror too.
+              {:else}
+                also into the OpenCode mirror when OpenCode is the selected client.
+              {/if}
+              Existing files are only overwritten after you tick the
+              confirmation box.
+            </p>
+            {#if skillPlanning && !skillPlan}
+              <p class="wiz-hint">Planning skill copy…</p>
+            {:else if skillError}
+              <div class="wiz-block wiz-block-error" role="alert">
+                {describeSkillCopyError(skillError)}
+              </div>
+            {:else if skillPlan}
+              {#if !skillPlan.sourcePath}
+                <div class="wiz-block wiz-block-error" role="alert">
+                  Source skill file is missing in the toolkit root. Run
+                  the wizard again with a valid toolkit checkout.
+                </div>
+              {:else}
+                <ul class="wiz-fingerprints" aria-label="Skill copy targets">
+                  {#each skillPlan.targets as target (target.targetPath)}
+                    {@const tone = target.exists ? "warn" : "ok"}
+                    <li class="wiz-fp wiz-fp-{tone}">
+                      <span class="wiz-fp-name">
+                        <code>{target.relativePath}</code>
+                      </span>
+                      <span class="wiz-fp-status">
+                        {#if target.exists}exists — will be overwritten only with confirmation{:else}will create{/if}
+                      </span>
+                    </li>
+                  {/each}
+                </ul>
+                {#if skillPlan.targets.some((t) => t.exists)}
+                  <label class="wiz-toggle wiz-toggle-confirm">
+                    <input type="checkbox" bind:checked={skillOverwriteAck} />
+                    <span>
+                      <strong>Overwrite existing skill files.</strong>
+                      <small>The targets above already exist; the wizard will back them up to <code>*.bak</code> and replace them only when this is checked.</small>
+                    </span>
+                  </label>
+                {/if}
+                <div class="wiz-actions-row">
+                  <Button
+                    variant="primary"
+                    onclick={copySkillFilesClick}
+                    disabled={
+                      skillCopying ||
+                      (skillPlan.targets.some((t) => t.exists) && !skillOverwriteAck)
+                    }
+                    title={
+                      skillPlan.targets.some((t) => t.exists) && !skillOverwriteAck
+                        ? "Confirm overwrite first"
+                        : "Copy skill files"
+                    }
+                  >
+                    {skillCopying ? "Copying…" : "Copy skill files"}
+                  </Button>
+                </div>
+              {/if}
+            {/if}
+            {#if skillResult}
+              <div class="wiz-block wiz-block-ok" role="status">
+                <strong>Skill copy complete.</strong>
+                Copied {skillResult.copied.length} file(s)
+                {#if skillResult.overwritten.length > 0}
+                  ({skillResult.overwritten.length} replaced existing)
+                {/if}
+                {#if skillResult.skipped.length > 0}
+                  · skipped {skillResult.skipped.length} (already present)
+                {/if}
+              </div>
+              {#if skillResult.copied.length > 0}
+                <ul class="wiz-fingerprints" aria-label="Copied skill files">
+                  {#each skillResult.copied as t (t.targetPath)}
+                    <li class="wiz-fp wiz-fp-ok">
+                      <span class="wiz-fp-name"><code>{t.relativePath}</code></span>
+                      <span class="wiz-fp-status">copied</span>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+              {#if skillResult.skipped.length > 0}
+                <ul class="wiz-fingerprints" aria-label="Skipped skill files">
+                  {#each skillResult.skipped as t (t.targetPath)}
+                    <li class="wiz-fp wiz-fp-warn">
+                      <span class="wiz-fp-name"><code>{t.relativePath}</code></span>
+                      <span class="wiz-fp-status">skipped (not overwritten)</span>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            {/if}
+          </div>
+
           <div class="wiz-actions-row">
             <Button variant="primary" onclick={handleClose}>Close</Button>
             <Button variant="secondary" onclick={handleClose}>Re-run wizard</Button>
