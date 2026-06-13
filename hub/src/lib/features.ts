@@ -1,1 +1,1 @@
-export const AI_SETUP_ENABLED = false;
+export const AI_SETUP_ENABLED = true;

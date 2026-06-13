@@ -58,6 +58,7 @@
   import Select from "$lib/components/shell/Select.svelte";
   import StatusChip from "$lib/components/StatusChip.svelte";
   import RelativeTime from "$lib/components/RelativeTime.svelte";
+  import AiSetupWizard from "$lib/components/AiSetupWizard.svelte";
   import { AI_SETUP_ENABLED } from "$lib/features";
 
   type FilterPreset = "all" | "launchable" | "missingVersion" | "missingPath" | "missingOrStale" | "running";
@@ -146,6 +147,13 @@
   let newProjectError = $state<string | null>(null);
   let newProjectCreating = $state(false);
   let newProjectOverwriteConfirm = $state<string | null>(null);
+  // M4 Plan 2 (M4-4 / M4-5): AI Setup wizard. The wizard's own state
+  // lives entirely inside `AiSetupWizard.svelte`; the Projects tab
+  // only owns the "open / close" handle and the live project
+  // pointer. Wizard progress is never written to `projects.json`
+  // (questions-4 Q11 = A) — reopening the modal always restarts at
+  // Step 1 by way of the wizard's local `$state`.
+  let aiSetupWizardProjectId = $state<string | null>(null);
 
   const UNSAFE_RE = /[\n\r\0`$|&;<>]/;
 
@@ -263,6 +271,11 @@
       newProjectCreating = false;
       newProjectError = null;
       newProjectOverwriteConfirm = null;
+      // M4 Plan 2: close the AI Setup wizard on tab unmount so a
+      // pending Step 5 verification does not leak into another tab
+      // session. The wizard's internal state is local; closing the
+      // modal re-mounts it next time with a fresh Step 1 (Task 3).
+      aiSetupWizardProjectId = null;
     };
   });
 
@@ -1726,12 +1739,82 @@
     await performKill(project, pid);
   }
 
-  function handleAiSetupStub() {
-    if (AI_SETUP_ENABLED) {
-      S.appendDrawerLog("AI Setup — placeholder for M4 wizard");
-      return;
+  /**
+   * M4 Plan 2 (M4-4): AI Setup toolbar button entry point. The
+   * button is bound to the currently selected project; when no row
+   * is selected the button is disabled (state = "disabled"), when
+   * the selected row is launchable it lights up (state = "ready"),
+   * and a project whose last detected state was incomplete (e.g.
+   * a previous run that skipped Step 5) shows the "incomplete"
+   * state. The wizard itself is a modal opened by
+   * `AiSetupWizard.svelte`; this handler just kicks the open.
+   */
+  function openAiSetup() {
+    if (!AI_SETUP_ENABLED) return;
+    const id = projectsStore.selectedProjectId;
+    if (!id) return;
+    const project = projectsStore.find(id);
+    if (!project) return;
+    aiSetupWizardProjectId = project.id;
+  }
+
+  /**
+   * Open the AI Setup wizard for a specific project (called from
+   * the row context menu — "Configure Agent Bridge"). The button
+   * in the toolbar uses the currently selected row; the context
+   * menu entry always operates on the right-clicked row, so the
+   * two paths are explicit.
+   */
+  function openAiSetupFor(project: ProjectEntry) {
+    if (!AI_SETUP_ENABLED) return;
+    if (!project) return;
+    projectsStore.select(project.id);
+    aiSetupWizardProjectId = project.id;
+  }
+
+  function closeAiSetup() {
+    aiSetupWizardProjectId = null;
+  }
+
+  /**
+   * The AI Setup button has three visual states per hub-ui.md
+   * §Projects toolbar:
+   *   - disabled: no row selected, OR the selected row is not a
+   *     valid Unity project (missing path / unknown version).
+   *   - ready: selected row is launchable.
+   *   - incomplete: selected row previously went through a partial
+   *     run (we currently treat any selected row whose path exists
+   *     but whose AI Setup is unknown as "incomplete" — Step 1's
+   *     live detection in Plan 3 will tighten this once we have
+   *     a stored detect snapshot).
+   * Selection is mirrored in real time so right-click → context
+   * menu / keyboard nav all share the same underlying button
+   * state without duplicate state.
+   */
+  type AiSetupButtonState = "disabled" | "ready" | "incomplete";
+  function aiSetupButtonState(): AiSetupButtonState {
+    if (!AI_SETUP_ENABLED) return "disabled";
+    const id = projectsStore.selectedProjectId;
+    if (!id) return "disabled";
+    const project = projectsStore.find(id);
+    if (!project) return "disabled";
+    const s = statusFor(project);
+    if (s.pathExists !== true) return "disabled";
+    if (!s.hasVersion) return "disabled";
+    if (s.stale) return "disabled";
+    if (s.launchable) return "ready";
+    return "incomplete";
+  }
+
+  function aiSetupButtonTitle(state: AiSetupButtonState): string {
+    switch (state) {
+      case "disabled":
+        return "AI Setup — select a project first";
+      case "ready":
+        return "AI Setup — install / configure the Unity AI agent for this project";
+      case "incomplete":
+        return "AI Setup — previous run was incomplete; resume from Step 1";
     }
-    S.appendDrawerLog("AI Setup — coming in a later milestone");
   }
 
   function formatRemoveError(err: RemoveProjectError): string {
@@ -2209,15 +2292,14 @@
       <div class="toolbar-spacer"></div>
 
       {#if AI_SETUP_ENABLED}
-        <Button variant="secondary" onclick={handleAiSetupStub} title="AI Setup — coming in M4">
-          AI Setup
-        </Button>
-      {:else}
+        {@const aiState = aiSetupButtonState()}
         <Button
           variant="secondary"
-          onclick={handleAiSetupStub}
-          disabled
-          title="AI Setup — coming in a later milestone (reserved slot)"
+          class="ai-setup-btn ai-setup-{aiState}"
+          onclick={openAiSetup}
+          disabled={aiState === "disabled"}
+          title={aiSetupButtonTitle(aiState)}
+          data-state={aiState}
         >
           AI Setup
         </Button>
@@ -3109,6 +3191,20 @@
         Upgrade Unity…
       </button>
     {/if}
+    {#if AI_SETUP_ENABLED && ctxProject && ctxStatus?.pathExists === true && ctxStatus.hasVersion}
+      <div class="ctx-sep"></div>
+      <button
+        type="button"
+        class="ctx-item ctx-item-ai-setup"
+        role="menuitem"
+        title="Install / configure the Unity AI agent for this project"
+        onclick={() => {
+          if (ctxProject) openAiSetupFor(ctxProject);
+        }}
+      >
+        Configure Agent Bridge…
+      </button>
+    {/if}
     {#if ctxProject && (canHide(ctxProject) || canUnhide(ctxProject) || canMarkStale(ctxProject) || canUnmarkStale(ctxProject))}
       <div class="ctx-sep"></div>
       {#if canHide(ctxProject)}
@@ -3197,6 +3293,21 @@
   </div>
 {/if}
 
+{#if AI_SETUP_ENABLED && aiSetupWizardProjectId}
+  {@const aiSetupProject = projectsStore.find(aiSetupWizardProjectId)}
+  {#if aiSetupProject}
+    <AiSetupWizard
+      project={{
+        id: aiSetupProject.id,
+        name: aiSetupProject.name,
+        path: aiSetupProject.path,
+        unityVersion: aiSetupProject.unityVersion,
+      }}
+      onClose={closeAiSetup}
+    />
+  {/if}
+{/if}
+
 {#if popupProject}
   {@const ps = statusFor(popupProject)}
   {@const popupIsMoreOpen = moreMenuOpenFor === popupProject.id}
@@ -3246,6 +3357,16 @@
           >
             Copy Path
           </Button>
+          {#if AI_SETUP_ENABLED && ps.pathExists === true && ps.hasVersion && !ps.stale}
+            <Button
+              variant="secondary"
+              class="ai-setup-btn ai-setup-{ps.launchable ? 'ready' : 'incomplete'}"
+              title="AI Setup — install / configure the Unity AI agent for this project"
+              onclick={() => openAiSetupFor(popupProject)}
+            >
+              AI Setup
+            </Button>
+          {/if}
           <div class="more-wrap">
             <Button
               variant="secondary"
@@ -3287,6 +3408,14 @@
                     title="Bump the project's Unity version to an installed version higher than the current one"
                     onclick={() => { moreMenuOpenFor = null; openUpgradeModal(popupProject); }}>
                     Upgrade Unity…
+                  </button>
+                {/if}
+                {#if AI_SETUP_ENABLED && popupProject && statusFor(popupProject).pathExists === true && statusFor(popupProject).hasVersion}
+                  <div class="more-sep"></div>
+                  <button type="button" class="more-item more-item-ai-setup" role="menuitem"
+                    title="Install / configure the Unity AI agent for this project"
+                    onclick={() => { moreMenuOpenFor = null; openAiSetupFor(popupProject); }}>
+                    Configure Agent Bridge…
                   </button>
                 {/if}
                 {#if canHide(popupProject) || canUnhide(popupProject) || canMarkStale(popupProject) || canUnmarkStale(popupProject)}
@@ -5093,5 +5222,44 @@
     justify-content: flex-end;
     border-top: 1px solid var(--hub-border-light);
     padding-top: 0.7rem;
+  }
+
+  /**
+   * M4 Plan 2 (M4-4): AI Setup button visual states. The same
+   * classes apply whether the button lives in the toolbar or the
+   * settings-popup action bar; we just need three tones to match
+   * hub-ui.md §Projects toolbar (disabled / ready / incomplete).
+   * The disabled state is the same as the regular disabled button
+   * and is rendered through the Button component's `disabled` prop
+   * — we only style the active states here.
+   */
+  :global(.ai-setup-btn) {
+    position: relative;
+  }
+  :global(.ai-setup-btn.ai-setup-ready) {
+    border-color: var(--hub-accent);
+    color: var(--hub-text-bright);
+    background: rgba(92, 124, 250, 0.16);
+  }
+  :global(.ai-setup-btn.ai-setup-ready:hover:not(:disabled)) {
+    background: rgba(92, 124, 250, 0.28);
+  }
+  :global(.ai-setup-btn.ai-setup-incomplete) {
+    border-color: #fbbf24;
+    color: #fde68a;
+    background: rgba(251, 191, 36, 0.10);
+  }
+  :global(.ai-setup-btn.ai-setup-incomplete:hover:not(:disabled)) {
+    background: rgba(251, 191, 36, 0.18);
+  }
+
+  .ctx-item-ai-setup,
+  .more-item-ai-setup {
+    color: var(--hub-source-walkup-fg);
+  }
+
+  .ctx-item-ai-setup:hover:not(:disabled),
+  .more-item-ai-setup:hover:not(:disabled) {
+    background: rgba(92, 124, 250, 0.18);
   }
 </style>
