@@ -58,6 +58,13 @@ namespace UnityAgentBridge
         static volatile bool _running;
         static int _port;
 
+        // Per-request activity record. Set on the listener worker thread at the start
+        // of HandleRequest and read by nested handlers (e.g. HandleToolDispatch) before
+        // FinishActivity records it to the ring buffer. Thread-static because each
+        // request runs on a ThreadPool worker.
+        [ThreadStatic] static BridgeActivityEvent _currentActivity;
+        static BridgeActivityEvent CurrentActivity => _currentActivity;
+
         public static int Port => _port;
         public static bool IsRunning => _running;
 
@@ -172,33 +179,54 @@ namespace UnityAgentBridge
 
         static void HandleRequest(HttpListenerContext context)
         {
+            var activity = BeginActivity(context);
+            _currentActivity = activity;
             try
             {
                 var path = context.Request.Url.AbsolutePath.TrimEnd('/');
                 switch (path)
                 {
                     case "/ping":
+                        activity.Kind = BridgeActivityKind.Ping;
                         HandlePing(context);
                         break;
                     case "/resources":
                         if (context.Request.HttpMethod == "GET")
+                        {
+                            activity.Kind = BridgeActivityKind.ResourceRequest;
                             HandleResourceList(context);
+                        }
                         else
+                        {
+                            activity.Kind = BridgeActivityKind.ResourceRequest;
                             SendJsonError(context, 405, "method_not_allowed", "GET required for resource endpoints");
+                        }
                         break;
                     default:
                         if (path.StartsWith("/tools/"))
                         {
                             var toolName = path.Substring("/tools/".Length);
+                            activity.ToolName = toolName;
                             if (context.Request.HttpMethod == "POST")
                             {
                                 if (KnownTools.Contains(toolName) || BridgeToolRegistry.Contains(toolName))
+                                {
+                                    activity.Kind = BridgeActivityKind.ToolRequest;
                                     HandleToolDispatch(context, toolName);
+                                }
                                 else
+                                {
+                                    activity.Kind = BridgeActivityKind.ToolError;
+                                    activity.Outcome = BridgeActivityOutcome.Failed;
+                                    activity.ErrorCode = "tool_not_found";
                                     SendToolNotFound(context, toolName);
+                                }
                             }
                             else
                             {
+                                activity.Kind = BridgeActivityKind.ToolError;
+                                activity.Outcome = BridgeActivityOutcome.Failed;
+                                activity.ErrorCode = "method_not_allowed";
                                 SendJsonError(context, 405, "method_not_allowed", "POST required for tool endpoints");
                             }
                         }
@@ -207,13 +235,20 @@ namespace UnityAgentBridge
                             if (context.Request.HttpMethod == "GET")
                             {
                                 var route = path.Substring("/resources/".Length);
+                                activity.Kind = BridgeActivityKind.ResourceRequest;
                                 HandleResourceDispatch(context, route);
                             }
                             else
+                            {
+                                activity.Kind = BridgeActivityKind.ResourceRequest;
                                 SendJsonError(context, 405, "method_not_allowed", "GET required for resource endpoints");
+                            }
                         }
                         else
+                        {
+                            activity.Kind = BridgeActivityKind.UnknownPath;
                             SendNotFound(context, path);
+                        }
                         break;
                 }
             }
@@ -221,14 +256,69 @@ namespace UnityAgentBridge
             {
                 try
                 {
+                    activity.Kind = activity.Kind == BridgeActivityKind.ToolRequest
+                        ? BridgeActivityKind.ToolError
+                        : (activity.Kind == BridgeActivityKind.ResourceRequest
+                            ? BridgeActivityKind.ResourceError
+                            : activity.Kind);
+                    activity.Outcome = BridgeActivityOutcome.Failed;
+                    activity.ErrorCode = "bridge_internal_error";
                     SendJsonError(context, 500, "bridge_internal_error", "Unhandled bridge exception");
                 }
                 catch { }
             }
             finally
             {
+                FinishActivity(context, activity);
                 try { context.Response.Close(); } catch { }
             }
+        }
+
+        static BridgeActivityEvent BeginActivity(HttpListenerContext context)
+        {
+            var evt = new BridgeActivityEvent
+            {
+                Timestamp = DateTime.Now,
+                Kind = BridgeActivityKind.UnknownPath,
+                ToolName = null,
+                GateMode = null,
+                Outcome = BridgeActivityOutcome.Unknown,
+                DurationMs = 0,
+                HttpStatus = 0,
+                RequestBodyLength = SafeContentLength(context?.Request),
+                ErrorCode = null,
+                ErrorMessage = null
+            };
+            return evt;
+        }
+
+        static int SafeContentLength(HttpListenerRequest request)
+        {
+            if (request == null) return 0;
+            try
+            {
+                var cl = request.ContentLength64;
+                if (cl > 0 && cl < int.MaxValue) return (int)cl;
+                return 0;
+            }
+            catch { return 0; }
+        }
+
+        static void FinishActivity(HttpListenerContext context, BridgeActivityEvent activity)
+        {
+            if (activity == null) return;
+            try
+            {
+                activity.HttpStatus = context?.Response?.StatusCode ?? 0;
+                if (activity.Outcome == BridgeActivityOutcome.Unknown)
+                {
+                    if (activity.HttpStatus >= 500) activity.Outcome = BridgeActivityOutcome.Failed;
+                    else if (activity.HttpStatus >= 400) activity.Outcome = BridgeActivityOutcome.Failed;
+                    else if (activity.HttpStatus > 0) activity.Outcome = BridgeActivityOutcome.Success;
+                }
+            }
+            catch { }
+            try { BridgeActivityLog.Record(activity); } catch { }
         }
 
         static void HandlePing(HttpListenerContext context)
@@ -247,9 +337,21 @@ namespace UnityAgentBridge
         {
             var body = ReadRequestBody(context.Request);
             var timeoutMs = ExtractTimeoutMs(body);
+            var activity = CurrentActivity;
+
+            if (BridgeActivityLog.Verbose && activity != null && !string.IsNullOrEmpty(body))
+            {
+                activity.RequestSnippet = BridgeActivityLog.TruncateSnippet(body);
+            }
 
             if (BridgeToolTogglePolicy.IsDisabled(toolName))
             {
+                if (activity != null)
+                {
+                    activity.Kind = BridgeActivityKind.ToolDisabled;
+                    activity.Outcome = BridgeActivityOutcome.Skipped;
+                    activity.ErrorCode = BridgeToolTogglePolicy.DisabledErrorCode;
+                }
                 SendJson(context, 200, BridgeToolTogglePolicy.BuildDisabledErrorJson(toolName));
                 return;
             }
@@ -266,6 +368,11 @@ namespace UnityAgentBridge
             bool isRegistryTool = BridgeToolRegistry.TryGet(toolName, out var registryEntry);
             bool isMutating = MutatingTools.Contains(toolName) || (isRegistryTool && registryEntry.IsMutating);
             string effectiveGateMode = gateMode;
+
+            if (activity != null)
+            {
+                activity.GateMode = effectiveGateMode;
+            }
 
             bool runtimeGateSpecified = !string.IsNullOrEmpty(body) && body.Contains("\"gate\"");
             if (isRegistryTool && !runtimeGateSpecified)
@@ -299,6 +406,12 @@ namespace UnityAgentBridge
 
                         if (!skipPathsHint)
                         {
+                            if (activity != null)
+                            {
+                                activity.Outcome = BridgeActivityOutcome.Failed;
+                                activity.ErrorCode = "paths_hint_required";
+                                activity.DurationMs = sw.ElapsedMilliseconds;
+                            }
                             SendJson(context, 200, BuildPathsHintErrorEnvelope(toolName, effectiveGateMode));
                             return;
                         }
@@ -314,6 +427,7 @@ namespace UnityAgentBridge
                 var result = task.Result;
                 sw.Stop();
                 RecordGateRun(toolName, effectiveGateMode, result);
+                ApplyToolResultToActivity(activity, result, sw.ElapsedMilliseconds);
                 SendJson(context, 200, BuildGateEnvelope(result, effectiveGateMode));
             }
             catch (AggregateException ae)
@@ -321,15 +435,59 @@ namespace UnityAgentBridge
                 sw.Stop();
                 var inner = ae.InnerException;
                 if (inner is TimeoutException)
+                {
+                    ApplyToolFailureToActivity(activity, "timeout", inner.Message, sw.ElapsedMilliseconds);
                     SendJson(context, 200, BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs));
+                }
                 else
+                {
+                    ApplyToolFailureToActivity(activity, "execution_error", inner?.Message, sw.ElapsedMilliseconds);
                     SendJson(context, 200, BuildFaultEnvelope(inner, effectiveGateMode));
+                }
             }
             catch (System.Exception e)
             {
                 sw.Stop();
+                ApplyToolFailureToActivity(activity, "execution_error", e.Message, sw.ElapsedMilliseconds);
                 SendJson(context, 200, BuildFaultEnvelope(e, effectiveGateMode));
             }
+        }
+
+        static void ApplyToolResultToActivity(BridgeActivityEvent activity, GateDispatchResult result, long durationMs)
+        {
+            if (activity == null) return;
+            activity.DurationMs = durationMs;
+            activity.Outcome = result.Outcome switch
+            {
+                GateOutcome.Passed => BridgeActivityOutcome.Success,
+                GateOutcome.Warned => BridgeActivityOutcome.Success,
+                GateOutcome.Skipped => BridgeActivityOutcome.Skipped,
+                GateOutcome.Failed => result.Mutation != null && !result.Mutation.Success
+                    ? BridgeActivityOutcome.Failed
+                    : BridgeActivityOutcome.Failed,
+                _ => BridgeActivityOutcome.Unknown
+            };
+            if (result.Mutation != null && !result.Mutation.Success && !string.IsNullOrEmpty(result.Mutation.ErrorCode))
+            {
+                activity.ErrorCode = result.Mutation.ErrorCode;
+                activity.ErrorMessage = TruncateMessage(result.Mutation.ErrorMessage);
+            }
+        }
+
+        static void ApplyToolFailureToActivity(BridgeActivityEvent activity, string code, string message, long durationMs)
+        {
+            if (activity == null) return;
+            activity.DurationMs = durationMs;
+            activity.Outcome = code == "timeout" ? BridgeActivityOutcome.Timeout : BridgeActivityOutcome.Failed;
+            activity.ErrorCode = code;
+            activity.ErrorMessage = TruncateMessage(message);
+        }
+
+        static string TruncateMessage(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return null;
+            const int max = 200;
+            return message.Length <= max ? message : message.Substring(0, max) + "…";
         }
 
         static void RecordGateRun(string toolName, string effectiveMode, GateDispatchResult result)

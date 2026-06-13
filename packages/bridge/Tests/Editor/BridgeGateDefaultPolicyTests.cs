@@ -1,4 +1,6 @@
-// Unit tests for M4.5-7 (project default gate mode) and M4.5-9 (gate run history).
+// Unit tests for M4.5-7 (project default gate mode), M4.5-9 (gate run history),
+// M4.5-10 (activity ring buffer + verbose mode), and M4.5-11 (project settings schema
+// extension: autoStart + verboseActivityLog).
 using NUnit.Framework;
 using UnityAgentBridge;
 
@@ -111,6 +113,181 @@ namespace UnityAgentBridge.Tests
             BridgeGateRunHistory.Clear();
             Assert.AreEqual(0, BridgeGateRunHistory.Count);
             Assert.IsNull(BridgeGateRunHistory.Latest);
+        }
+    }
+
+    public class BridgeActivityLogTests
+    {
+        [SetUp]
+        public void SetUp()
+        {
+            BridgeActivityLog.Clear();
+            BridgeProjectSettings.SetVerboseActivityLog(false);
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            BridgeActivityLog.Clear();
+            BridgeProjectSettings.SetVerboseActivityLog(false);
+        }
+
+        [Test]
+        public void Record_StoresMetadata()
+        {
+            var evt = new BridgeActivityEvent
+            {
+                Kind = BridgeActivityKind.ToolRequest,
+                ToolName = "unity_agent_execute_csharp",
+                GateMode = "enforce",
+                Outcome = BridgeActivityOutcome.Success,
+                HttpStatus = 200,
+                DurationMs = 42
+            };
+            BridgeActivityLog.Record(evt);
+            Assert.AreEqual(1, BridgeActivityLog.Count);
+            var stored = BridgeActivityLog.Events[0];
+            Assert.AreEqual("unity_agent_execute_csharp", stored.ToolName);
+            Assert.AreEqual("enforce", stored.GateMode);
+            Assert.AreEqual(BridgeActivityOutcome.Success, stored.Outcome);
+        }
+
+        [Test]
+        public void Record_StripsVerboseSnippets_WhenVerboseOff()
+        {
+            var evt = new BridgeActivityEvent
+            {
+                Kind = BridgeActivityKind.ToolRequest,
+                ToolName = "t",
+                RequestSnippet = "{\"code\":\"x\"}",
+                ResponseSnippet = "should-not-keep"
+            };
+            BridgeActivityLog.Record(evt);
+            Assert.IsNull(BridgeActivityLog.Events[0].RequestSnippet);
+            Assert.IsNull(BridgeActivityLog.Events[0].ResponseSnippet);
+        }
+
+        [Test]
+        public void Record_KeepsVerboseSnippets_WhenVerboseOn()
+        {
+            BridgeActivityLog.Verbose = true;
+            var snippet = "{\"code\":\"hello world\"}";
+            var evt = new BridgeActivityEvent
+            {
+                Kind = BridgeActivityKind.ToolRequest,
+                ToolName = "t",
+                RequestSnippet = BridgeActivityLog.TruncateSnippet(snippet)
+            };
+            BridgeActivityLog.Record(evt);
+            Assert.IsNotNull(BridgeActivityLog.Events[0].RequestSnippet);
+            StringAssert.Contains("hello world", BridgeActivityLog.Events[0].RequestSnippet);
+        }
+
+        [Test]
+        public void TruncateSnippet_CapsAtMax()
+        {
+            var big = new string('x', BridgeActivityLog.SnippetMaxChars + 50);
+            var truncated = BridgeActivityLog.TruncateSnippet(big);
+            Assert.IsNotNull(truncated);
+            Assert.IsTrue(truncated.Length <= BridgeActivityLog.SnippetMaxChars + 1,
+                "Truncated snippet must be capped (plus ellipsis).");
+            StringAssert.EndsWith("…", truncated);
+        }
+
+        [Test]
+        public void TruncateSnippet_StripsControlChars()
+        {
+            var raw = "hello\nworld\tfoo\rbar";
+            var truncated = BridgeActivityLog.TruncateSnippet(raw);
+            StringAssert.DoesNotContain("\n", truncated);
+            StringAssert.DoesNotContain("\t", truncated);
+            StringAssert.DoesNotContain("\r", truncated);
+        }
+
+        [Test]
+        public void Record_TrimsToCapacity()
+        {
+            for (int i = 0; i < BridgeActivityLog.Capacity + 5; i++)
+            {
+                BridgeActivityLog.Record(new BridgeActivityEvent
+                {
+                    Kind = BridgeActivityKind.ToolRequest,
+                    ToolName = "tool_" + i
+                });
+            }
+            Assert.AreEqual(BridgeActivityLog.Capacity, BridgeActivityLog.Count);
+            Assert.AreEqual(BridgeActivityLog.Capacity + 5, BridgeActivityLog.TotalRecorded);
+            Assert.GreaterOrEqual(BridgeActivityLog.TotalDroppedTrim, 5);
+        }
+
+        [Test]
+        public void Clear_ResetsState()
+        {
+            BridgeActivityLog.Record(new BridgeActivityEvent { Kind = BridgeActivityKind.Ping });
+            BridgeActivityLog.Clear();
+            Assert.AreEqual(0, BridgeActivityLog.Count);
+            Assert.AreEqual(0, BridgeActivityLog.TotalRecorded);
+            Assert.AreEqual(0, BridgeActivityLog.TotalDroppedTrim);
+        }
+    }
+
+    public class BridgeProjectSettingsM45Plan4Tests
+    {
+        [SetUp]
+        public void SetUp()
+        {
+            var data = BridgeProjectSettings.Data;
+            data.autoStart = true;
+            data.verboseActivityLog = false;
+            data.disabledTools = System.Array.Empty<string>();
+            data.defaultGateMode = "enforce";
+            BridgeProjectSettings.Save();
+        }
+
+        [Test]
+        public void AutoStart_DefaultsToTrue()
+        {
+            // Fresh settings file (set in SetUp) → autoStart stays true.
+            Assert.IsTrue(BridgeProjectSettings.AutoStart);
+        }
+
+        [Test]
+        public void SetAutoStart_PersistsAndReloads()
+        {
+            BridgeProjectSettings.SetAutoStart(false);
+            Assert.IsFalse(BridgeProjectSettings.AutoStart);
+            BridgeProjectSettings.Load();
+            Assert.IsFalse(BridgeProjectSettings.AutoStart);
+
+            BridgeProjectSettings.SetAutoStart(true);
+            BridgeProjectSettings.Load();
+            Assert.IsTrue(BridgeProjectSettings.AutoStart);
+        }
+
+        [Test]
+        public void VerboseActivityLog_DefaultsToFalse()
+        {
+            Assert.IsFalse(BridgeProjectSettings.VerboseActivityLog);
+        }
+
+        [Test]
+        public void SetVerboseActivityLog_PersistsAndReloads()
+        {
+            BridgeProjectSettings.SetVerboseActivityLog(true);
+            Assert.IsTrue(BridgeProjectSettings.VerboseActivityLog);
+            BridgeProjectSettings.Load();
+            Assert.IsTrue(BridgeProjectSettings.VerboseActivityLog);
+        }
+
+        [Test]
+        public void BridgeActivityLog_VerboseDelegatesToSettings()
+        {
+            BridgeProjectSettings.SetVerboseActivityLog(true);
+            Assert.IsTrue(BridgeActivityLog.Verbose);
+
+            BridgeActivityLog.Verbose = false;
+            Assert.IsFalse(BridgeProjectSettings.VerboseActivityLog);
+            Assert.IsFalse(BridgeActivityLog.Verbose);
         }
     }
 }

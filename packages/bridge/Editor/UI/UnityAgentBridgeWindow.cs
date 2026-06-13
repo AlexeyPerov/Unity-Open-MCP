@@ -1,5 +1,6 @@
 // Bridge runtime dashboard window (M4.5-1 shell, M4.5-2 status panel, M4.5-3 helper baseline,
-// M4.5-4 tools catalog, M4.5-5/6 runtime toggles + filter UX, M4.5-7/8/9 gate tab).
+// M4.5-4 tools catalog, M4.5-5/6 runtime toggles + filter UX, M4.5-7/8/9 gate tab,
+// M4.5-10/11/12 activity log + settings tab + passive batch hint).
 // Tab navigation pattern adapted from
 //   /Users/alexeyperov/Projects/Unity-Scanner/Editor/UI/Window/UnityScannerWindow.cs
 // (copy/adapt only; no scanner orchestrator / categories / MCP glue imported).
@@ -69,6 +70,19 @@ namespace UnityAgentBridge
         [NonSerialized] bool _gateCheckpointFoldout = true;
         [NonSerialized] bool _gateManualFoldout = true;
 
+        // Activity tab state (M4.5-10)
+        [NonSerialized] Vector2 _activityTabScroll;
+        [NonSerialized] bool _activityVerboseFoldout = false;
+        [NonSerialized] bool _activityFilterToolRequests = true;
+        [NonSerialized] bool _activityFilterDisabled = true;
+        [NonSerialized] bool _activityFilterErrors = true;
+        [NonSerialized] bool _activityFilterPing = false;
+        [NonSerialized] bool _activityFilterResources = false;
+        [NonSerialized] string _activitySearch = "";
+
+        // Settings tab state (M4.5-11)
+        [NonSerialized] Vector2 _settingsTabScroll;
+
         void OnEnable()
         {
             _currentTab = (BridgeWindowTab)EditorPrefs.GetInt(SelectedTabPref, (int)BridgeWindowTab.Status);
@@ -80,6 +94,10 @@ namespace UnityAgentBridge
             BridgeGateDefaultPolicy.Changed += RepaintTick;
             BridgeGateRunHistory.Changed -= RepaintTick;
             BridgeGateRunHistory.Changed += RepaintTick;
+            BridgeActivityLog.Changed -= RepaintTick;
+            BridgeActivityLog.Changed += RepaintTick;
+            BridgeProjectSettings.Changed -= RepaintTick;
+            BridgeProjectSettings.Changed += RepaintTick;
         }
 
         void OnDisable()
@@ -88,6 +106,8 @@ namespace UnityAgentBridge
             BridgeToolTogglePolicy.Changed -= RepaintTick;
             BridgeGateDefaultPolicy.Changed -= RepaintTick;
             BridgeGateRunHistory.Changed -= RepaintTick;
+            BridgeActivityLog.Changed -= RepaintTick;
+            BridgeProjectSettings.Changed -= RepaintTick;
             EditorPrefs.SetInt(SelectedTabPref, (int)_currentTab);
         }
 
@@ -164,10 +184,10 @@ namespace UnityAgentBridge
                     DrawGateTab();
                     break;
                 case BridgeWindowTab.Activity:
-                    DrawPlaceholderTab("Activity log lands in M4.5 Plan 4.");
+                    DrawActivityTab();
                     break;
                 case BridgeWindowTab.Settings:
-                    DrawPlaceholderTab("Settings persistence lands in M4.5 Plan 4 (.unity-agent/settings.json).");
+                    DrawSettingsTab();
                     break;
             }
             EditorGUILayout.EndScrollView();
@@ -985,6 +1005,400 @@ namespace UnityAgentBridge
                 EditorGUI.indentLevel--;
                 BridgeGUIUtilities.HorizontalLine(1, 2);
             }
+        }
+
+        // ---------- Activity tab (M4.5-10) ----------
+
+        const string ActivityPrivacyNote =
+            "Default capture is metadata only (no request/response bodies). " +
+            "Verbose mode adds a truncated request snippet for debugging.";
+
+        void DrawActivityTab()
+        {
+            _activityTabScroll = EditorGUILayout.BeginScrollView(_activityTabScroll);
+
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("Activity log (in-memory ring buffer)", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Session-scoped ring buffer (capacity " + BridgeActivityLog.Capacity + ") of bridge HTTP events. " +
+                "In-memory only — cleared on domain reload or Editor restart. " +
+                ActivityPrivacyNote,
+                MessageType.None);
+
+            DrawActivityControls();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawActivityFilters();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawActivityList();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawActivityPassiveBatchHint();
+
+            EditorGUILayout.EndScrollView();
+        }
+
+        void DrawActivityControls()
+        {
+            EditorGUILayout.Space(2);
+            EditorGUILayout.BeginHorizontal();
+
+            var prevVerbose = BridgeActivityLog.Verbose;
+            var newVerbose = EditorGUILayout.ToggleLeft(
+                "Verbose mode (captures truncated request snippet, ≤ " + BridgeActivityLog.SnippetMaxChars + " chars)",
+                prevVerbose, GUILayout.Width(420));
+            if (newVerbose != prevVerbose)
+            {
+                BridgeActivityLog.Verbose = newVerbose;
+            }
+
+            GUILayout.FlexibleSpace();
+
+            if (GUILayout.Button("Clear", EditorStyles.miniButton, GUILayout.Width(80)))
+            {
+                BridgeActivityLog.Clear();
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.LabelField(
+                $"buffer: {BridgeActivityLog.Count} / {BridgeActivityLog.Capacity}    " +
+                $"recorded: {BridgeActivityLog.TotalRecorded}    trimmed: {BridgeActivityLog.TotalDroppedTrim}",
+                EditorStyles.miniLabel);
+
+            if (_activityVerboseFoldout != newVerbose)
+            {
+                _activityVerboseFoldout = newVerbose;
+            }
+        }
+
+        void DrawActivityFilters()
+        {
+            EditorGUILayout.Space(2);
+            EditorGUILayout.LabelField("Filters", EditorStyles.miniBoldLabel);
+            EditorGUILayout.BeginHorizontal();
+            _activityFilterToolRequests = EditorGUILayout.ToggleLeft("Tool requests", _activityFilterToolRequests, GUILayout.Width(120));
+            _activityFilterDisabled = EditorGUILayout.ToggleLeft("Tool disabled", _activityFilterDisabled, GUILayout.Width(110));
+            _activityFilterErrors = EditorGUILayout.ToggleLeft("Errors", _activityFilterErrors, GUILayout.Width(80));
+            _activityFilterPing = EditorGUILayout.ToggleLeft("/ping", _activityFilterPing, GUILayout.Width(70));
+            _activityFilterResources = EditorGUILayout.ToggleLeft("Resources", _activityFilterResources, GUILayout.Width(90));
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.LabelField("Search", GUILayout.Width(50));
+            var newSearch = EditorGUILayout.TextField(_activitySearch ?? "", EditorStyles.toolbarSearchField, GUILayout.Width(160));
+            if (newSearch != _activitySearch)
+            {
+                _activitySearch = newSearch ?? "";
+                GUIUtility.keyboardControl = 0;
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+
+        void DrawActivityList()
+        {
+            var all = BridgeActivityLog.Events;
+            if (all == null || all.Count == 0)
+            {
+                BridgeGUIUtilities.DrawLabelAtCenterHorizontally(
+                    "No activity captured in this session yet. Trigger a /ping or tool call to populate.",
+                    new Color(0.7f, 0.7f, 0.7f));
+                return;
+            }
+
+            // Display most-recent first.
+            var search = (_activitySearch ?? "").Trim();
+            int shown = 0;
+            for (int i = all.Count - 1; i >= 0; i--)
+            {
+                var evt = all[i];
+                if (evt == null) continue;
+                if (!PassesActivityFilter(evt)) continue;
+                if (!string.IsNullOrEmpty(search) && !MatchesActivitySearch(evt, search)) continue;
+                DrawActivityRow(evt);
+                shown++;
+            }
+
+            if (shown == 0)
+            {
+                EditorGUILayout.Space(4);
+                BridgeGUIUtilities.DrawLabelAtCenterHorizontally(
+                    "No events match the current filter / search.",
+                    new Color(0.7f, 0.7f, 0.7f));
+            }
+        }
+
+        bool PassesActivityFilter(BridgeActivityEvent evt)
+        {
+            return evt.Kind switch
+            {
+                BridgeActivityKind.ToolRequest => _activityFilterToolRequests,
+                BridgeActivityKind.ToolDisabled => _activityFilterDisabled,
+                BridgeActivityKind.ToolError => _activityFilterErrors,
+                BridgeActivityKind.Ping => _activityFilterPing,
+                BridgeActivityKind.ResourceRequest => _activityFilterResources,
+                BridgeActivityKind.ResourceError => _activityFilterResources || _activityFilterErrors,
+                BridgeActivityKind.UnknownPath => _activityFilterErrors,
+                _ => true
+            };
+        }
+
+        bool MatchesActivitySearch(BridgeActivityEvent evt, string search)
+        {
+            if (evt == null || string.IsNullOrEmpty(search)) return true;
+            if (Contains(evt.ToolName, search)) return true;
+            if (Contains(evt.ErrorCode, search)) return true;
+            if (Contains(evt.ErrorMessage, search)) return true;
+            if (Contains(evt.GateMode, search)) return true;
+            return false;
+        }
+
+        void DrawActivityRow(BridgeActivityEvent evt)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(evt.Timestamp.ToString("HH:mm:ss"), GUILayout.Width(70));
+            BridgeGUIUtilities.DrawColoredLabel(ActivityKindLabel(evt.Kind), ActivityKindColor(evt.Kind), 110);
+            if (!string.IsNullOrEmpty(evt.ToolName))
+            {
+                EditorGUILayout.LabelField(evt.ToolName, EditorStyles.boldLabel, GUILayout.Width(220));
+            }
+            else
+            {
+                EditorGUILayout.LabelField("-", GUILayout.Width(220));
+            }
+            if (!string.IsNullOrEmpty(evt.GateMode))
+            {
+                EditorGUILayout.LabelField($"gate: {evt.GateMode}", GUILayout.Width(110));
+            }
+            BridgeGUIUtilities.DrawColoredLabel(
+                ActivityOutcomeLabel(evt.Outcome),
+                ActivityOutcomeColor(evt.Outcome), 80);
+            EditorGUILayout.LabelField($"HTTP {evt.HttpStatus}", GUILayout.Width(70));
+            EditorGUILayout.LabelField($"{evt.DurationMs} ms", GUILayout.Width(80));
+            if (evt.RequestBodyLength > 0)
+            {
+                EditorGUILayout.LabelField($"body: {evt.RequestBodyLength}b", GUILayout.Width(90));
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (!string.IsNullOrEmpty(evt.ErrorCode) || !string.IsNullOrEmpty(evt.ErrorMessage))
+            {
+                var msg = string.IsNullOrEmpty(evt.ErrorCode)
+                    ? evt.ErrorMessage
+                    : $"{evt.ErrorCode}: {evt.ErrorMessage}";
+                EditorGUILayout.HelpBox(msg, evt.Outcome == BridgeActivityOutcome.Success ? MessageType.None : MessageType.Warning);
+            }
+
+            if (BridgeActivityLog.Verbose && !string.IsNullOrEmpty(evt.RequestSnippet))
+            {
+                EditorGUILayout.LabelField("Request snippet", EditorStyles.miniBoldLabel);
+                EditorGUILayout.SelectableLabel(
+                    evt.RequestSnippet, EditorStyles.textArea,
+                    GUILayout.Height(EditorGUIUtility.singleLineHeight * 2));
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        static string ActivityKindLabel(BridgeActivityKind kind)
+        {
+            return kind switch
+            {
+                BridgeActivityKind.Ping => "/ping",
+                BridgeActivityKind.ToolRequest => "tool",
+                BridgeActivityKind.ToolDisabled => "disabled",
+                BridgeActivityKind.ToolError => "tool-err",
+                BridgeActivityKind.ResourceRequest => "resource",
+                BridgeActivityKind.ResourceError => "resource-err",
+                BridgeActivityKind.UnknownPath => "404",
+                _ => kind.ToString()
+            };
+        }
+
+        static Color ActivityKindColor(BridgeActivityKind kind)
+        {
+            return kind switch
+            {
+                BridgeActivityKind.Ping => new Color(0.7f, 0.85f, 1f),
+                BridgeActivityKind.ToolRequest => new Color(0.7f, 0.85f, 1f),
+                BridgeActivityKind.ToolDisabled => new Color(1f, 0.9f, 0.4f),
+                BridgeActivityKind.ToolError => new Color(1f, 0.5f, 0.5f),
+                BridgeActivityKind.ResourceRequest => new Color(0.7f, 0.7f, 0.7f),
+                BridgeActivityKind.ResourceError => new Color(1f, 0.5f, 0.5f),
+                BridgeActivityKind.UnknownPath => new Color(0.85f, 0.55f, 0.55f),
+                _ => new Color(0.7f, 0.7f, 0.7f)
+            };
+        }
+
+        static string ActivityOutcomeLabel(BridgeActivityOutcome outcome)
+        {
+            return outcome switch
+            {
+                BridgeActivityOutcome.Success => "ok",
+                BridgeActivityOutcome.Failed => "fail",
+                BridgeActivityOutcome.Timeout => "timeout",
+                BridgeActivityOutcome.Skipped => "skip",
+                _ => "-"
+            };
+        }
+
+        static Color ActivityOutcomeColor(BridgeActivityOutcome outcome)
+        {
+            return outcome switch
+            {
+                BridgeActivityOutcome.Success => new Color(0.6f, 0.9f, 0.6f),
+                BridgeActivityOutcome.Failed => new Color(1f, 0.5f, 0.5f),
+                BridgeActivityOutcome.Timeout => new Color(1f, 0.9f, 0.4f),
+                BridgeActivityOutcome.Skipped => new Color(0.7f, 0.7f, 0.7f),
+                _ => new Color(0.7f, 0.7f, 0.7f)
+            };
+        }
+
+        // ---------- Passive batch hint (M4.5-12) ----------
+
+        void DrawActivityPassiveBatchHint()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Batch (M5 follow-up)", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "Batch scan / baseline / regression workflows live in M5 and run via `unity-agent-mcp` " +
+                "fallback (or headless Editor CLI). The full batch panel — entry points, filters, " +
+                "regression threshold controls — is not part of v1 and will land after M5 closes. " +
+                "Use the Gate tab's Manual validate for ad-hoc scoped scans in the meantime.",
+                MessageType.None);
+        }
+
+        // ---------- Settings tab (M4.5-11) ----------
+
+        const string SettingsPersistenceNote =
+            "Project-level runtime settings persist in `.unity-agent/settings.json` at the project root. " +
+            "Changes are saved immediately. v1 surface only — no Project Settings provider.";
+
+        void DrawSettingsTab()
+        {
+            _settingsTabScroll = EditorGUILayout.BeginScrollView(_settingsTabScroll);
+
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("Bridge runtime settings", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(SettingsPersistenceNote, MessageType.None);
+
+            DrawAutoStartSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawDefaultGateModeSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawActivityLogSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawSettingsStorageSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawSettingsPassiveBatchHint();
+
+            EditorGUILayout.EndScrollView();
+        }
+
+        void DrawAutoStartSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Auto-start bridge listener", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "When ON (default for new projects), the bridge listener auto-starts on Editor load. " +
+                "Turn OFF to require a manual Start from the Status tab. Effective on the next " +
+                "Editor domain reload / restart.",
+                MessageType.None);
+
+            var prev = BridgeProjectSettings.AutoStart;
+            var next = EditorGUILayout.ToggleLeft(
+                "Auto-start bridge HTTP listener on Editor load", prev);
+            if (next != prev)
+            {
+                BridgeProjectSettings.SetAutoStart(next);
+            }
+        }
+
+        void DrawDefaultGateModeSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Project default gate mode", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "Used when an incoming mutating tool request omits a `gate` value. " +
+                "Per-request `gate` always wins (see Gate tab for full precedence).",
+                MessageType.None);
+
+            var current = BridgeGateDefaultPolicy.GetDefault();
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Default mode", GUILayout.Width(120));
+            var newIndex = EditorGUILayout.Popup(IndexOfMode(current), ModeLabels());
+            EditorGUILayout.EndHorizontal();
+            if (newIndex != IndexOfMode(current))
+            {
+                BridgeGateDefaultPolicy.SetDefault(BridgeGateDefaultPolicy.ValidModes[newIndex]);
+            }
+        }
+
+        void DrawActivityLogSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Activity log", EditorStyles.miniBoldLabel);
+            var prev = BridgeActivityLog.Verbose;
+            var next = EditorGUILayout.ToggleLeft(
+                "Verbose mode (truncated request snippet, ≤ " + BridgeActivityLog.SnippetMaxChars + " chars)",
+                prev);
+            if (next != prev)
+            {
+                BridgeActivityLog.Verbose = next;
+            }
+            EditorGUILayout.HelpBox(
+                "Default mode captures metadata only (tool name, gate mode, outcome, duration, HTTP status, body byte count). " +
+                "Verbose mode additionally stores a truncated request body snippet for debugging. " +
+                "Response bodies are never captured in v1.",
+                MessageType.None);
+        }
+
+        void DrawSettingsStorageSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Storage", EditorStyles.miniBoldLabel);
+
+            var path = BridgeProjectSettings.SettingsPath ?? "(no project root)";
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Settings file", GUILayout.Width(100));
+            EditorGUILayout.SelectableLabel(path, EditorStyles.textField);
+            if (GUILayout.Button("Reveal", EditorStyles.miniButton, GUILayout.Width(70)))
+            {
+                RevealSettingsFile();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.HelpBox(
+                "v1 schema (`.unity-agent/settings.json`):\n" +
+                "  - disabledTools: string[]\n" +
+                "  - defaultGateMode: \"enforce\" | \"warn\" | \"off\"\n" +
+                "  - autoStart: bool\n" +
+                "  - verboseActivityLog: bool\n" +
+                "Future fields can extend this schema in place without breaking v1 readers.",
+                MessageType.None);
+        }
+
+        void RevealSettingsFile()
+        {
+            var path = BridgeProjectSettings.SettingsPath;
+            if (string.IsNullOrEmpty(path)) return;
+            if (!System.IO.File.Exists(path))
+            {
+                // Persist current defaults so the file is created, then reveal.
+                BridgeProjectSettings.Save();
+            }
+            if (!System.IO.File.Exists(path)) return;
+            EditorUtility.RevealInFinder(path);
+        }
+
+        // Passive batch hint shared between the Activity and Settings tabs (M4.5-12).
+        void DrawSettingsPassiveBatchHint()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Batch (M5 follow-up)", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "Batch scan / baseline / regression workflows are owned by M5 and will land " +
+                "in a dedicated batch panel after M5 closes. v1 ships a passive hint only " +
+                "— no batch execution controls are exposed in the bridge window.",
+                MessageType.None);
         }
     }
 }

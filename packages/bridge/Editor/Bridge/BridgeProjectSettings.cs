@@ -1,16 +1,20 @@
 // Minimal project-level runtime settings store for the bridge UI.
 //
-// Backed by `.unity-agent/settings.json` at the project root. The schema is intentionally
-// small in M4.5 (disabledTools + defaultGateMode for v1); Plan 4 extends the same store
-// with auto-start, verbose-log, and other v1 runtime settings.
+// Backed by `.unity-agent/settings.json` at the project root. The v1 schema carries:
+//   - disabledTools (Plan 2)
+//   - defaultGateMode (Plan 3)
+//   - autoStart (Plan 4)
+//   - verboseActivityLog (Plan 4)
+//
+// Unknown fields in the file are preserved on save so future Hub / MCP tooling can extend
+// the same file without a v1 migration step. Missing / unreadable files produce an empty
+// default — the bridge must keep running even when no settings file is present.
 //
 // The store is read once at static init and rewritten on every mutation. Writes are
-// atomic via a `.tmp` rename. Missing / unreadable files produce an empty default — the
-// bridge must keep running even when no settings file is present.
+// atomic via a `.tmp` rename.
 using System;
 using System.Collections.Generic;
 using System.IO;
-using UnityEditor;
 using UnityEngine;
 
 namespace UnityAgentBridge
@@ -20,6 +24,8 @@ namespace UnityAgentBridge
     {
         public string[] disabledTools = Array.Empty<string>();
         public string defaultGateMode = "enforce";
+        public bool autoStart = true;
+        public bool verboseActivityLog = false;
     }
 
     public static class BridgeProjectSettings
@@ -153,6 +159,40 @@ namespace UnityAgentBridge
                 if (list[i] == toolName) return true;
             }
             return false;
+        }
+
+        public static bool AutoStart
+        {
+            get
+            {
+                if (!_loaded) Load();
+                return _data.autoStart;
+            }
+        }
+
+        public static void SetAutoStart(bool value)
+        {
+            if (!_loaded) Load();
+            if (_data.autoStart == value) return;
+            _data.autoStart = value;
+            Save();
+        }
+
+        public static bool VerboseActivityLog
+        {
+            get
+            {
+                if (!_loaded) Load();
+                return _data.verboseActivityLog;
+            }
+        }
+
+        public static void SetVerboseActivityLog(bool value)
+        {
+            if (!_loaded) Load();
+            if (_data.verboseActivityLog == value) return;
+            _data.verboseActivityLog = value;
+            Save();
         }
 
         static string GetProjectRoot()
