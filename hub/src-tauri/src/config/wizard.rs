@@ -62,15 +62,46 @@ pub const VERIFY_PACKAGE_PATH: &str = "packages/verify";
 pub const PATH_QUERY_PREFIX: &str = "?path=";
 pub const TAG_FRAGMENT_PREFIX: &str = "#";
 
-/// Bridge status reported by Step 1 and the Done screen. The
-/// `/ping` check happens in Step 5 (Plan 5); until then the
-/// status is always `NotChecked`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// Bridge status reported by Step 1 / detect and consumed by the
+/// Done screen. The detect snapshot always reports `NotChecked`
+/// (the `detect_project_state` command does not perform a `/ping`)
+/// — the actual `/ping` result lives in the wizard's own
+/// `Step 5` state and is rendered next to the live detect copy
+/// on Done.
+///
+/// The variants are kept in lock-step with the Step 5 ping
+/// surface defined in [`crate::config::launch_verify`]. The
+/// `Ok` variant carries the structured fields the bridge
+/// `/ping` JSON advertises so the Done screen can render
+/// `connected`, `compiling`, and project-path chips without
+/// having to keep a second copy of the data in the frontend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BridgeStatusKind {
-    /// No `/ping` has been run yet in this wizard session. Step 1
-    /// and the Done checklist both render this as "Not checked".
+    /// No `/ping` has been run in this wizard session. Step 1
+    /// and the detect-driven Done row render this as "Not checked".
     NotChecked,
+    /// Bridge `/ping` responded 200 with a parseable body.
+    #[serde(rename_all = "camelCase")]
+    Ok {
+        /// `true` when the bridge reports the connector is live.
+        connected: bool,
+        /// Bridge-reported project path (when present).
+        #[serde(default)]
+        project_path: Option<String>,
+        /// `true` while Unity is mid-compile. The Done screen
+        /// surfaces this as a "compiling" hint so the user can
+        /// tell compile errors from a hung bridge.
+        compiling: bool,
+        /// `true` when the Editor is in play mode.
+        is_playing: bool,
+    },
+    /// Bridge `/ping` failed — connection refused, timeout,
+    /// non-200 status, malformed body, or compile error. The
+    /// Done chip renders this as "failed" with the message
+    /// surfaced inline.
+    #[serde(rename_all = "camelCase")]
+    Failed { message: String },
 }
 
 /// Per-client MCP configuration heuristic. Each flag is `true`

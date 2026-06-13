@@ -826,7 +826,16 @@ export async function checkNodeVersion(): Promise<NodeProbe> {
  * M4 Plan 3: wizard Step 1 + Done screen detection snapshot.
  * Mirrors the Rust `wizard::ProjectState` struct.
  */
-export type BridgeStatusKind = "notChecked";
+export type BridgeStatusKind =
+  | { kind: "notChecked" }
+  | {
+      kind: "ok";
+      connected: boolean;
+      projectPath?: string | null;
+      compiling: boolean;
+      isPlaying: boolean;
+    }
+  | { kind: "failed"; message: string };
 
 export interface McpConfigHeuristic {
   cursor: boolean;
@@ -1072,4 +1081,105 @@ export async function copySkillFiles(
     params,
     overwriteExisting,
   });
+}
+
+/**
+ * M4 Plan 5: wizard Step 5 launch + HTTP `/ping` verification.
+ * Mirrors the Rust `launch_verify::{BridgePingResult, LaunchForVerifyParams, …}`
+ * types.
+ */
+
+export interface LaunchForVerifyParamsWire {
+  projectId: string;
+  bridgePort: number;
+  theme?: "dark" | "light" | "system";
+}
+
+export interface LaunchForVerifyResult {
+  projectId: string;
+  pid: number;
+  unityVersion?: string | null;
+  executablePath: string;
+  bridgePort: number;
+}
+
+export type LaunchForVerifyError =
+  | { kind: "projectNotFound"; projectId: string }
+  | { kind: "pathInvalid"; projectId: string; path: string }
+  | { kind: "versionMissing"; projectId: string }
+  | { kind: "installNotFound"; projectId: string; version: string }
+  | { kind: "launchFailed"; projectId: string; message: string }
+  | { kind: "portInvalid"; port: number };
+
+export interface BridgePingResult {
+  port: number;
+  durationMs: number;
+  ok: boolean;
+  connected: boolean;
+  compiling: boolean;
+  isPlaying: boolean;
+  projectPath?: string | null;
+  unityVersion?: string | null;
+  raw?: string | null;
+  errorKind: string;
+  errorMessage: string;
+}
+
+/**
+ * Default bridge HTTP port (numeric form). Mirrors
+ * `DEFAULT_BRIDGE_PORT` in `launch_verify.rs` and the default
+ * documented in `packages/bridge.md` §HTTP API. The Step 4
+ * env-var builder (`ai_toolkit.ts`) uses the string form
+ * (`"19120"`) for the MCP config; the Step 5 verifier needs
+ * the numeric form for `poll_bridge_ping` and
+ * `launch_for_verify`.
+ */
+export const DEFAULT_BRIDGE_PORT_NUM = 19120;
+
+/**
+ * Parse the Step 4 bridge port input (a free-text string) into
+ * the numeric value the Rust commands consume. Returns the
+ * `DEFAULT_BRIDGE_PORT_NUM` when the input is blank or
+ * unparsable so the wizard always has a usable port to poll
+ * and pass to Unity.
+ */
+export function bridgePortFromString(raw: string): number {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return DEFAULT_BRIDGE_PORT_NUM;
+  const n = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+    return DEFAULT_BRIDGE_PORT_NUM;
+  }
+  return n;
+}
+
+/**
+ * Tauri command: launch Unity with the bridge port pinned via
+ * `-UNITY_AGENT_BRIDGE_PORT` and the `UNITY_AGENT_BRIDGE_PORT`
+ * env var, so the in-Editor bridge listens on the port the
+ * wizard Step 5 is about to poll. Reuses the regular launch
+ * pipeline (install resolution, version refresh, env-var
+ * layering, `last_launch_pid` bookkeeping) and writes the
+ * same `LaunchOutcome::Ok | LaunchOutcome::Error` record to
+ * the per-launch log.
+ */
+export async function launchForVerify(
+  params: LaunchForVerifyParamsWire
+): Promise<LaunchForVerifyResult> {
+  return invoke<LaunchForVerifyResult>("launch_for_verify", { params });
+}
+
+/**
+ * Tauri command: GET `127.0.0.1:{port}/ping` with a per-request
+ * timeout and return the parsed bridge body. The wizard Step 5
+ * calls this on a 2-3 s cadence until the bridge responds 200
+ * with a parseable body or until the 120 s overall budget
+ * elapses. The ping call never spawns a separate
+ * `unity-agent-mcp` subprocess (questions-4 Q8 = B).
+ */
+export async function pollBridgePing(
+  port: number,
+  timeoutMs: number
+): Promise<BridgePingResult> {
+  return invoke<BridgePingResult>("poll_bridge_ping", { port, timeoutMs });
 }

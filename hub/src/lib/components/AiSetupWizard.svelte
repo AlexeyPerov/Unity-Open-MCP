@@ -10,25 +10,29 @@
    *   - AI toolkit root hard block (Plan 1 fingerprint validation)
    *   - Write access to `Packages/manifest.json` hard block
    *   - Path with spaces / MCP client warnings only
-   * Plan 4 owns Step 4. Plan 5 owns Step 5 + the real Done screen;
-   * this component renders a placeholder Done body that surfaces
-   * the Plan 3 detection state (install flags, MCP heuristic,
-   * bridge status) so the checklist is reproducible from live
-   * detection rather than saved checkpoints (questions-4 Q11 = A).
+   * Plan 4 owns Step 4. Plan 5 wires Step 5's real
+   * `launch_for_verify` + `poll_bridge_ping` flow plus the
+   * StatusChip-driven Done screen.
    */
   import { onMount } from "svelte";
   import { S } from "$lib/state.svelte";
   import { settingsStore } from "$lib/state/settings.svelte";
   import {
+    bridgePortFromString,
     checkNodeVersion,
     copySkillFiles,
     detectProjectState,
+    launchForVerify,
     planManifestMerge,
     planMcpConfig,
     planSkillCopy,
+    pollBridgePing,
     validateToolkitRoot,
     writeManifestMerge,
     writeMcpConfig,
+    type BridgePingResult,
+    type BridgeStatusKind,
+    type LaunchForVerifyError,
     type ManifestError,
     type ManifestMergePlan,
     type ManifestWriteResult,
@@ -69,7 +73,9 @@
   // OS-resolved Claude Desktop path, and the `claude mcp add`
   // command for Claude Code all live in Rust).
   import Button from "$lib/components/shell/Button.svelte";
+  import StatusChip from "$lib/components/StatusChip.svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
+  import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
   type StepId = "step1" | "step2" | "step3" | "step4" | "step5" | "done";
 
@@ -167,10 +173,32 @@
   let skillError = $state<SkillCopyError | null>(null);
   let skillOverwriteAck = $state(false);
 
-  // Step 5 — launch/verify state.
-  let launchInFlight = $state(false);
-  let launchStatus = $state<"idle" | "launched" | "skipped" | "failed">("idle");
-  let launchMessage = $state<string | null>(null);
+  // Step 5 — launch/verify state. The wizard drives the
+  // launch + `/ping` polling itself; the Done screen reads
+  // these values (plus the live detection snapshot) to render
+  // the StatusChip checklist.
+  type Step5ItemId = "launch" | "compile" | "ping" | "confirm";
+  type Step5ItemState = "pending" | "running" | "ok" | "failed";
+
+  let step5Running = $state(false);
+  let step5Items = $state<Record<Step5ItemId, Step5ItemState>>({
+    launch: "pending",
+    compile: "pending",
+    ping: "pending",
+    confirm: "pending",
+  });
+  let step5LaunchPid = $state<number | null>(null);
+  let step5BridgePort = $state<number | null>(null);
+  let step5BridgeStatus = $state<BridgeStatusKind>({ kind: "notChecked" });
+  let step5PingResult = $state<BridgePingResult | null>(null);
+  let step5Error = $state<string | null>(null);
+  let step5StartedAt = $state<number | null>(null);
+  let step5DeadlineAt = $state<number | null>(null);
+  let step5LastTick = $state<number | null>(null);
+
+  const STEP5_TOTAL_BUDGET_MS = 120_000;
+  const STEP5_POLL_INTERVAL_MS = 2_000;
+  const STEP5_PING_TIMEOUT_MS = 5_000;
 
   onMount(() => {
     const stored = settingsStore.aiToolkit;
@@ -840,21 +868,382 @@
     }
   }
 
-  function fakeLaunch() {
-    if (launchInFlight) return;
-    launchInFlight = true;
-    launchStatus = "launched";
-    launchMessage = "Launch is a placeholder in this milestone — Plan 5 wires the real Unity + bridge ping.";
-    S.appendDrawerLog(`AI Setup: simulated launch for ${project.name}`);
-    setTimeout(() => {
-      launchInFlight = false;
-    }, 400);
+  function resetStep5State() {
+    step5Items = {
+      launch: "pending",
+      compile: "pending",
+      ping: "pending",
+      confirm: "pending",
+    };
+    step5LaunchPid = null;
+    step5BridgePort = null;
+    step5BridgeStatus = { kind: "notChecked" };
+    step5PingResult = null;
+    step5Error = null;
+    step5StartedAt = null;
+    step5DeadlineAt = null;
+    step5LastTick = null;
   }
 
-  function skipVerify() {
-    launchStatus = "skipped";
-    launchMessage = "Skipped — you can re-run the wizard and retry from Step 5.";
+  async function runStep5Verify() {
+    if (step5Running) return;
+    resetStep5State();
+    step5Running = true;
+    const port = bridgePortFromString(String(bridgePort));
+    step5BridgePort = port;
+    step5StartedAt = Date.now();
+    step5DeadlineAt = step5StartedAt + STEP5_TOTAL_BUDGET_MS;
+    step5Items = {
+      launch: "running",
+      compile: "pending",
+      ping: "pending",
+      confirm: "pending",
+    };
+    let launched = false;
+    try {
+      const result = await launchForVerify({
+        projectId: project.id,
+        bridgePort: port,
+        theme: (settingsStore.current?.theme as "dark" | "light" | "system" | undefined) ?? "system",
+      });
+      step5LaunchPid = result.pid;
+      launched = true;
+      step5Items = {
+        ...step5Items,
+        launch: "ok",
+        compile: "running",
+      };
+      S.appendDrawerLog(
+        `AI Setup: launched Unity (pid ${result.pid}) with bridge port ${port} for ${project.name}`,
+      );
+      // Phase 2 — poll the bridge `/ping` endpoint every
+      // STEP5_POLL_INTERVAL_MS until the bridge responds 200
+      // with a parseable body, or the 120 s overall budget
+      // elapses, or the user clicks Stop. The compile step is
+      // considered "ok" the moment the bridge reports
+      // `compiling: false` (or once we've seen at least one
+      // response, since the spec treats compile errors as
+      // `ping: failed` rather than `compile: failed`).
+      await pollBridgeUntilReady(port);
+    } catch (e) {
+      const message = describeLaunchForVerifyError(e);
+      step5Error = message;
+      S.appendErrorLog(`AI Setup: Step 5 launch failed: ${message}`);
+      if (launched) {
+        // Launch succeeded but the poll loop never returned
+        // (probably a programming error); still mark the
+        // individual steps accordingly.
+        step5Items = {
+          ...step5Items,
+          launch: "ok",
+          compile: "failed",
+          ping: "failed",
+        };
+        step5BridgeStatus = { kind: "failed", message };
+      } else {
+        step5Items = {
+          ...step5Items,
+          launch: "failed",
+          compile: "failed",
+          ping: "failed",
+        };
+        step5BridgeStatus = { kind: "failed", message };
+      }
+    } finally {
+      step5Running = false;
+    }
   }
+
+  async function pollBridgeUntilReady(port: number) {
+    while (Date.now() < (step5DeadlineAt ?? Date.now())) {
+      step5LastTick = Date.now();
+      try {
+        const result = await pollBridgePing(port, STEP5_PING_TIMEOUT_MS);
+        step5PingResult = result;
+        if (result.ok) {
+          step5Items = {
+            ...step5Items,
+            compile: result.compiling ? "running" : "ok",
+            ping: "ok",
+            confirm: "ok",
+          };
+          step5BridgeStatus = {
+            kind: "ok",
+            connected: result.connected,
+            projectPath: result.projectPath ?? null,
+            compiling: result.compiling,
+            isPlaying: result.isPlaying,
+          };
+          S.appendDrawerLog(
+            `AI Setup: bridge /ping ok on port ${port} (connected=${result.connected})`,
+          );
+          return;
+        }
+        // Got an HTTP response but not 2xx — treat as compile
+        // error / bridge not ready. Per the spec table, this
+        // is a "Compile errors" row in the user-visible UX.
+        if (result.errorKind === "httpError" || result.errorKind === "malformedBody") {
+          step5Items = {
+            ...step5Items,
+            compile: "failed",
+            ping: "failed",
+          };
+          step5BridgeStatus = {
+            kind: "failed",
+            message: result.errorMessage,
+          };
+          // Do not return — keep polling until the bridge
+          // recovers (Unity may be mid-recompile).
+        } else if (result.errorKind === "connectionRefused") {
+          // Bridge not yet up; just keep the compile step
+          // running and try again.
+          step5Items = { ...step5Items, compile: "running" };
+        } else {
+          // timeout / unreachable — keep the steps pending
+          // so the user sees a "still waiting" state, not a
+          // hard failure.
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        S.appendErrorLog(`AI Setup: bridge /ping threw: ${msg}`);
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, STEP5_POLL_INTERVAL_MS),
+      );
+    }
+    // Deadline elapsed without a successful ping.
+    if (step5BridgeStatus.kind !== "ok") {
+      step5Items = {
+        ...step5Items,
+        compile: "failed",
+        ping: "failed",
+      };
+      step5BridgeStatus = {
+        kind: "failed",
+        message: `Bridge /ping did not respond within ${STEP5_TOTAL_BUDGET_MS / 1000}s on port ${port}.`,
+      };
+    }
+  }
+
+  function stopStep5Polling() {
+    if (!step5Running) return;
+    step5DeadlineAt = Date.now();
+    S.appendDrawerLog(
+      `AI Setup: user stopped Step 5 verification for ${project.name}`,
+    );
+  }
+
+  function skipStep5Verify() {
+    if (step5Running) return;
+    resetStep5State();
+    step5BridgeStatus = { kind: "notChecked" };
+    S.appendDrawerLog(
+      `AI Setup: skipped Step 5 verify for ${project.name} — wizard marked incomplete on Done`,
+    );
+  }
+
+  function describeLaunchForVerifyError(e: unknown): string {
+    if (
+      e &&
+      typeof e === "object" &&
+      "kind" in e &&
+      typeof (e as LaunchForVerifyError).kind === "string"
+    ) {
+      const err = e as LaunchForVerifyError;
+      switch (err.kind) {
+        case "projectNotFound":
+          return `Project ${err.projectId} is no longer in the Hub project list. Reopen the wizard.`;
+        case "pathInvalid":
+          return `Project path is invalid: ${err.path}.`;
+        case "versionMissing":
+          return `Unity version is unknown. Open the project once in the Editor to refresh the version, then retry.`;
+        case "installNotFound":
+          return `Unity ${err.version} is not installed on this machine. Open the Installs tab to add it.`;
+        case "launchFailed":
+          return `Failed to launch Unity: ${err.message}. Open the launch log from the Status drawer.`;
+        case "portInvalid":
+          return `Bridge port ${err.port} is not a valid TCP port. Pick a port in 1..65535.`;
+        default:
+          return `${(e as { kind?: string }).kind ?? "unknown"}: ${(e as { message?: string }).message ?? "unknown error"}`;
+      }
+    }
+    return e instanceof Error ? e.message : String(e);
+  }
+
+  function describePingErrorMessage(result: BridgePingResult | null): string {
+    if (!result) return "—";
+    if (result.ok) return `connected=${result.connected} in ${result.durationMs} ms`;
+    if (result.errorMessage) return `${result.errorKind}: ${result.errorMessage}`;
+    return result.errorKind || "failed";
+  }
+
+  function pingStatusTone(
+    state: Step5ItemState
+  ): "ok" | "warn" | "muted" | "info" {
+    if (state === "ok") return "ok";
+    if (state === "failed") return "warn";
+    if (state === "running") return "info";
+    return "muted";
+  }
+
+  function pingDurationSuffix(): string {
+    if (!step5PingResult) return "";
+    return ` (${step5PingResult.durationMs}ms)`;
+  }
+
+  function openProjectFolder() {
+    if (!project.path) return;
+    void openPath(project.path);
+  }
+
+  function revealProjectFolder() {
+    if (!project.path) return;
+    void revealItemInDir(project.path);
+  }
+
+  async function openMcpConfigTarget() {
+    if (!mcpPlan?.targetPath) return;
+    try {
+      await openPath(mcpPlan.targetPath);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`AI Setup: cannot open ${mcpPlan.targetPath}: ${msg}`);
+    }
+  }
+
+  async function openToolkitSkill() {
+    if (!toolkitRoot.trim()) return;
+    const target = `${toolkitRoot.replace(/[\\/]+$/, "")}/skills/unity-agent/SKILL.md`;
+    try {
+      await openPath(target);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`AI Setup: cannot open ${target}: ${msg}`);
+    }
+  }
+
+  async function openCopiedSkill() {
+    if (!skillResult || skillResult.copied.length === 0) return;
+    const target = skillResult.copied[0].targetPath;
+    try {
+      await openPath(target);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`AI Setup: cannot open ${target}: ${msg}`);
+    }
+  }
+
+  function packagesSummary(d: ProjectState | null): {
+    tone: "ok" | "warn" | "missing";
+    label: string;
+  } {
+    if (!d) return { tone: "missing", label: "unknown" };
+    if (d.bridgeInstalled && d.verifyInstalled) {
+      return { tone: "ok", label: "installed" };
+    }
+    if (d.bridgeInstalled || d.verifyInstalled) {
+      return { tone: "warn", label: "partial" };
+    }
+    return { tone: "missing", label: "not installed" };
+  }
+
+  function mcpSummary(): { tone: "ok" | "warn" | "muted"; label: string } {
+    const h = detection?.mcpConfigured;
+    if (!h) return { tone: "muted", label: "not detected" };
+    if (h.cursor || h.claudeDesktop || h.opencodeGlobal || h.opencodeProject) {
+      return { tone: "ok", label: "configured" };
+    }
+    if (mcpWriteResult?.wouldWrite) {
+      return { tone: "ok", label: "written" };
+    }
+    if (mcpClient === "claude-code") {
+      return { tone: "warn", label: "cli command" };
+    }
+    if (mcpClient === "manual") {
+      return { tone: "warn", label: "manual" };
+    }
+    return { tone: "warn", label: "not configured" };
+  }
+
+  function launchSummary(): { tone: "ok" | "warn" | "muted"; label: string } {
+    if (step5Items.launch === "ok" && step5Items.ping === "ok") {
+      return { tone: "ok", label: "ok" };
+    }
+    if (step5Items.launch === "ok") {
+      return { tone: "warn", label: "ok · bridge pending" };
+    }
+    if (step5Items.launch === "failed") {
+      return { tone: "warn", label: "failed" };
+    }
+    if (step5BridgeStatus.kind === "notChecked" && step5LaunchPid === null) {
+      return { tone: "muted", label: "not run" };
+    }
+    return { tone: "muted", label: "pending" };
+  }
+
+  function bridgeSummary(): { tone: "ok" | "warn" | "muted"; label: string } {
+    if (step5BridgeStatus.kind === "ok") {
+      return {
+        tone: "ok",
+        label: step5BridgeStatus.connected ? "connected" : "responded",
+      };
+    }
+    if (step5BridgeStatus.kind === "failed") {
+      return { tone: "warn", label: "failed" };
+    }
+    return { tone: "muted", label: "not checked" };
+  }
+
+  function reRunWizard() {
+    // Reset the per-step state to Step 1 without touching the
+    // persisted settings (toolkit root + MCP override stay
+    // pre-filled in Step 2). Per questions-4 Q11 = A, no
+    // wizard progress is persisted, so the next entry would
+    // already start at Step 1 — this function just makes the
+    // reset explicit and immediate.
+    resetStep5State();
+    mcpWriteResult = null;
+    mcpWriteError = null;
+    mcpPlan = null;
+    mergeResult = null;
+    mergeError = null;
+    upgradeAcknowledged = false;
+    skillResult = null;
+    skillError = null;
+    skillOverwriteAck = false;
+    step5BridgeStatus = { kind: "notChecked" };
+    currentStep = "step1";
+    void refreshDetection();
+  }
+
+  function openInCursor() {
+    if (!project.path) return;
+    // The Hub doesn't track a Cursor install path; the
+    // `code`-style CLI behavior on macOS / Linux is to launch
+    // Cursor with the project folder. We use the OS opener so
+    // the platform decides how to handle the .app / .exe
+    // association — same approach as the regular project
+    // toolbar's "Open" action.
+    void openPath(project.path);
+  }
+
+  function openInOpencode() {
+    if (!project.path) return;
+    // OpenCode's TUI is CLI-first; opening the project folder
+    // via the OS opener is the lowest-friction path that does
+    // not require us to ship an OpenCode install detection
+    // step in M4. A future M7+ task can wire `opencode <path>`
+    // once we have an OpenCode install probe.
+    void openPath(project.path);
+  }
+
+  let canOpenInCursor = $derived(
+    mcpClient === "cursor" && Boolean(project.path),
+  );
+  let canOpenInOpencode = $derived(
+    (mcpClient === "opencode-global" || mcpClient === "opencode-project") &&
+      Boolean(project.path),
+  );
 
   // Re-render the wizard's progress segments. We highlight the
   // current step and dim completed/pending steps so the user has a
@@ -1568,28 +1957,74 @@
       {:else if currentStep === "step5"}
         <section class="wiz-section">
           <p class="wiz-desc">
-            Step 5 launches Unity for this project and confirms the
-            bridge HTTP <code>/ping</code> endpoint. Plan 5 wires the
-            real launch + polling; this shell step renders the
-            checklist and surfaces the placeholder status.
+            Step 5 launches Unity with the bridge port pinned via
+            <code>-UNITY_AGENT_BRIDGE_PORT={step5BridgePort ?? bridgePortFromString(String(bridgePort))}</code>
+            and polls the bridge HTTP <code>/ping</code> endpoint
+            for up to 120 s. The wizard never spawns a separate
+            <code>unity-agent-mcp</code> subprocess — questions-4
+            Q8 = B keeps the verify path to a direct HTTP GET. The
+            Done screen re-runs detection on entry and pairs the
+            live snapshot with this step's bridge result.
           </p>
           <ol class="wiz-checklist">
-            <li class:done={launchStatus !== "idle"}>
-              Launch Unity (Hub launcher flow)
-              {#if launchStatus !== "idle"}<span class="wiz-check-done">— ok</span>{/if}
+            <li class:done={step5Items.launch === "ok"} class:running={step5Items.launch === "running"}>
+              Launch Unity (pid {step5LaunchPid ?? "—"})
+              {#if step5Items.launch === "ok"}<span class="wiz-check-done">— ok</span>{:else if step5Items.launch === "running"}<span class="wiz-check-running">— launching…</span>{:else if step5Items.launch === "failed"}<span class="wiz-check-failed">— failed</span>{/if}
             </li>
-            <li>Wait for project compile</li>
-            <li>Wait for bridge HTTP <code>/ping</code> (timeout 120s)</li>
-            <li>Confirm response fields (<code>connected</code>, project path, compile/play state)</li>
+            <li class:done={step5Items.compile === "ok"} class:running={step5Items.compile === "running"} class:failed={step5Items.compile === "failed"}>
+              Wait for project compile
+              {#if step5Items.compile === "ok"}<span class="wiz-check-done">— ok</span>{:else if step5Items.compile === "running"}<span class="wiz-check-running">— compiling…</span>{:else if step5Items.compile === "failed"}<span class="wiz-check-failed">— compile error</span>{/if}
+            </li>
+            <li class:done={step5Items.ping === "ok"} class:running={step5Items.ping === "running"} class:failed={step5Items.ping === "failed"}>
+              Wait for bridge HTTP <code>/ping</code> (timeout 120s)
+              {#if step5Items.ping === "ok"}
+                <span class="wiz-check-done">— ok{pingDurationSuffix()}</span>
+              {:else if step5Items.ping === "running"}
+                <span class="wiz-check-running">— polling…</span>
+              {:else if step5Items.ping === "failed"}
+                <span class="wiz-check-failed">— failed</span>
+              {/if}
+            </li>
+            <li class:done={step5Items.confirm === "ok"} class:failed={step5Items.confirm === "failed"}>
+              Confirm response fields (<code>connected</code>, project path, compile/play state)
+              {#if step5Items.confirm === "ok" && step5BridgeStatus.kind === "ok"}
+                <span class="wiz-check-done">
+                  — connected={step5BridgeStatus.connected}{step5BridgeStatus.projectPath ? `, project=${step5BridgeStatus.projectPath}` : ""}
+                </span>
+              {:else if step5Items.confirm === "failed"}
+                <span class="wiz-check-failed">— {describePingErrorMessage(step5PingResult)}</span>
+              {/if}
+            </li>
           </ol>
-          {#if launchMessage}
-            <p class="wiz-hint">{launchMessage}</p>
+          {#if step5BridgePort !== null}
+            <p class="wiz-hint">
+              Bridge port: <code>{step5BridgePort}</code>
+              {#if step5LastTick}
+                · last poll {Math.max(0, Math.round((Date.now() - step5LastTick) / 100) / 10)}s ago
+              {/if}
+            </p>
+          {/if}
+          {#if step5Error}
+            <div class="wiz-block wiz-block-error" role="alert">
+              {step5Error}
+            </div>
           {/if}
           <div class="wiz-actions-row">
-            <Button variant="primary" onclick={fakeLaunch} disabled={launchInFlight}>
-              {launchInFlight ? "Launching…" : "Launch Unity"}
+            {#if step5Items.launch !== "ok"}
+              <Button variant="primary" onclick={runStep5Verify} disabled={step5Running}>
+                {step5Running ? "Launching…" : "Launch Unity"}
+              </Button>
+            {:else}
+              <Button variant="primary" onclick={runStep5Verify} disabled={step5Running}>
+                {step5Running ? "Re-verifying…" : "Re-verify"}
+              </Button>
+            {/if}
+            {#if step5Running}
+              <Button variant="secondary" onclick={stopStep5Polling}>Stop polling</Button>
+            {/if}
+            <Button variant="secondary" onclick={skipStep5Verify} disabled={step5Running}>
+              Skip to Done
             </Button>
-            <Button variant="secondary" onclick={skipVerify}>Skip to Done</Button>
           </div>
         </section>
       {:else if currentStep === "done"}
@@ -1599,7 +2034,11 @@
             the live project state — no per-step progress is
             persisted (questions-4 Q11 = A), so re-running the
             wizard always restarts at Step 1 and the Done screen
-            always reflects the latest on-disk manifest.
+            always reflects the latest on-disk manifest. The
+            bridge <code>/ping</code> row carries the Step 5
+            result; the live detection snapshot below it shows
+            the freshest manifest / MCP heuristic the wizard
+            could read.
           </p>
           <dl class="wiz-summary">
             <div>
@@ -1614,9 +2053,9 @@
                 {#if detection?.unityVersion}
                   <code>{detection.unityVersion}</code>
                   {#if detection.meetsMinUnityVersion}
-                    <span class="wiz-tag wiz-tag-ok">meets minimum</span>
+                    <StatusChip tone="ok" label="meets minimum" />
                   {:else}
-                    <span class="wiz-tag wiz-tag-warn">below minimum</span>
+                    <StatusChip tone="warn" label="below minimum" />
                   {/if}
                 {:else}
                   <em>unknown</em>
@@ -1624,19 +2063,16 @@
               </dd>
             </div>
             <div>
-              <dt>Packages</dt>
+              <dt>Packages installed</dt>
               <dd>
-                bridge:
-                {#if detection?.bridgeInstalled}
-                  <span class="wiz-tag wiz-tag-ok">installed</span>
+                {#if detection}
+                  {@const pkg = packagesSummary(detection)}
+                  <StatusChip tone={pkg.tone} label={pkg.label} />
+                  <small class="wiz-summary-small">
+                    bridge: {detection.bridgeInstalled ? "yes" : "no"} · verify: {detection.verifyInstalled ? "yes" : "no"}
+                  </small>
                 {:else}
-                  <span class="wiz-tag wiz-tag-warn">not installed</span>
-                {/if}
-                · verify:
-                {#if detection?.verifyInstalled}
-                  <span class="wiz-tag wiz-tag-ok">installed</span>
-                {:else}
-                  <span class="wiz-tag wiz-tag-warn">not installed</span>
+                  <StatusChip tone="muted" label="unknown" />
                 {/if}
                 {#if mergeResult}
                   <br />
@@ -1645,24 +2081,88 @@
               </dd>
             </div>
             <div>
-              <dt>MCP</dt>
-              <dd>{mcpConfiguredSummary(detection?.mcpConfigured ?? { cursor: false, claudeDesktop: false, opencodeGlobal: false, opencodeProject: false })}</dd>
+              <dt>MCP configured</dt>
+              <dd>
+                {#if true}
+                  {@const mcp = mcpSummary()}
+                  <StatusChip tone={mcp.tone} label={mcp.label} />
+                  <small class="wiz-summary-small">
+                    {mcpConfiguredSummary(detection?.mcpConfigured ?? { cursor: false, claudeDesktop: false, opencodeGlobal: false, opencodeProject: false })}
+                  </small>
+                {/if}
+              </dd>
             </div>
             <div>
-              <dt>Bridge status</dt>
-              <dd><em>not checked</em> (Step 5 verifies in Plan 5)</dd>
+              <dt>Unity launched</dt>
+              <dd>
+                {#if true}
+                  {@const launch = launchSummary()}
+                  <StatusChip tone={launch.tone} label={launch.label} />
+                  {#if step5LaunchPid !== null}
+                    <small class="wiz-summary-small">pid {step5LaunchPid}</small>
+                  {/if}
+                {/if}
+              </dd>
+            </div>
+            <div>
+              <dt>Bridge verified</dt>
+              <dd>
+                {#if true}
+                  {@const br = bridgeSummary()}
+                  <StatusChip tone={br.tone} label={br.label} />
+                  {#if step5BridgeStatus.kind === "ok"}
+                    <small class="wiz-summary-small">
+                      {#if step5BridgeStatus.projectPath}project: {step5BridgeStatus.projectPath}{/if}
+                      {#if step5BridgeStatus.isPlaying} · in play mode{/if}
+                    </small>
+                  {:else if step5BridgeStatus.kind === "failed"}
+                    <small class="wiz-summary-small">{step5BridgeStatus.message}</small>
+                  {/if}
+                {/if}
+              </dd>
             </div>
             <div>
               <dt>Toolkit root</dt>
               <dd><code>{toolkitRoot || "<not set>"}</code></dd>
             </div>
-            <div>
-              <dt>Launch</dt>
-              <dd>
-                {#if launchStatus === "launched"}ok{:else if launchStatus === "skipped"}skipped{:else}not run{/if}
-              </dd>
-            </div>
           </dl>
+
+          <div class="wiz-field">
+            <span class="wiz-label">Links</span>
+            <div class="wiz-actions-row">
+              <Button variant="secondary" onclick={openProjectFolder} disabled={!project.path}>
+                Open project folder
+              </Button>
+              <Button variant="secondary" onclick={revealProjectFolder} disabled={!project.path}>
+                Reveal in Finder / Explorer
+              </Button>
+              <Button
+                variant="secondary"
+                onclick={openMcpConfigTarget}
+                disabled={!mcpPlan?.targetPath}
+                title={mcpPlan?.targetPath ? `Open ${mcpPlan.targetPath}` : "No MCP config target was written"}
+              >
+                Open MCP config file
+              </Button>
+              <Button variant="secondary" onclick={openToolkitSkill} disabled={!toolkitRoot.trim()}>
+                Open toolkit skill
+              </Button>
+              <Button
+                variant="secondary"
+                onclick={openCopiedSkill}
+                disabled={!skillResult || skillResult.copied.length === 0}
+              >
+                Open copied skill
+              </Button>
+            </div>
+            <p class="wiz-hint">
+              The M7 Advanced BYO-bridge section is intentionally
+              hidden in M4 (questions-4 Q1 = A — re-enable after
+              the M5 batch criteria are met). Step 6 baseline
+              creation is also M5-follow-up; the wizard renders
+              only Steps 1-5 plus this Done screen.
+            </p>
+          </div>
 
           <div class="wiz-field">
             <span class="wiz-label">Skill copy</span>
@@ -1768,7 +2268,17 @@
 
           <div class="wiz-actions-row">
             <Button variant="primary" onclick={handleClose}>Close</Button>
-            <Button variant="secondary" onclick={handleClose}>Re-run wizard</Button>
+            <Button variant="secondary" onclick={reRunWizard}>Re-run wizard</Button>
+            {#if canOpenInCursor}
+              <Button variant="secondary" onclick={openInCursor}>
+                Open in Cursor
+              </Button>
+            {/if}
+            {#if canOpenInOpencode}
+              <Button variant="secondary" onclick={openInOpencode}>
+                Open in OpenCode
+              </Button>
+            {/if}
           </div>
         </section>
       {/if}
@@ -2280,6 +2790,36 @@
     color: #4ade80;
     font-size: 0.74rem;
     margin-left: 0.4rem;
+  }
+
+  .wiz-check-running {
+    color: #9bb3ff;
+    font-size: 0.74rem;
+    margin-left: 0.4rem;
+  }
+
+  .wiz-check-failed {
+    color: var(--hub-error-fg);
+    font-size: 0.74rem;
+    margin-left: 0.4rem;
+  }
+
+  .wiz-checklist li.running {
+    border-color: rgba(92, 124, 250, 0.45);
+    background: rgba(92, 124, 250, 0.08);
+  }
+
+  .wiz-checklist li.failed {
+    border-color: rgba(248, 113, 113, 0.45);
+    background: rgba(248, 113, 113, 0.08);
+    color: var(--hub-error-fg);
+  }
+
+  .wiz-summary-small {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--hub-text-muted);
+    margin-top: 0.15rem;
   }
 
   .wiz-footer {

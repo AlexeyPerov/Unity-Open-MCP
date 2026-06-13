@@ -68,6 +68,8 @@ pub fn run() {
             config::mcp_config::write_mcp_config,
             config::mcp_config::plan_skill_copy,
             config::mcp_config::copy_skill_files,
+            config::launch_verify::launch_for_verify,
+            config::launch_verify::poll_bridge_ping,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
