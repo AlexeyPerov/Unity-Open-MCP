@@ -36,7 +36,6 @@
   let releasesLoading = $state(false);
   let releasesSearch = $state("");
   let releasesContext = $state<{ x: number; y: number; entry: ReleaseEntry } | null>(null);
-  let includeArchived = $state(false);
   let installingVersion = $state<string | null>(null);
   let installError = $state<string | null>(null);
 
@@ -79,7 +78,7 @@
     releasesLoading = true;
     releasesError = null;
     try {
-      releases = await fetchReleases(includeArchived);
+      releases = await fetchReleases();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       releasesError = `could not load releases: ${msg}`;
@@ -92,7 +91,7 @@
     releasesLoading = true;
     releasesError = null;
     try {
-      releases = await refreshReleases(includeArchived);
+      releases = await refreshReleases();
       S.appendDrawerLog(`refreshed Unity releases (cache: ${releases?.cachePath ?? "—"})`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -107,11 +106,6 @@
     if (mode === "all" && !releases && !releasesLoading) {
       void loadReleases();
     }
-  }
-
-  async function toggleArchived() {
-    includeArchived = !includeArchived;
-    await loadReleases();
   }
 
   function installedVersionSet(): Set<string> {
@@ -451,10 +445,6 @@
       </Button>
     </div>
     <div class:hidden={viewMode !== "all"}>
-      <label class="archived-toggle">
-        <input type="checkbox" bind:checked={includeArchived} onchange={toggleArchived} />
-        <span class="archived-label">Include archived</span>
-      </label>
       <Button variant="secondary" onclick={refreshReleasesAction} disabled={releasesLoading}>
         {releasesLoading ? "Refreshing…" : "Refresh"}
       </Button>
@@ -1288,26 +1278,5 @@
 
   .ctx-item-install:hover:not(:disabled) {
     color: var(--hub-text-bright);
-  }
-
-  .archived-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    cursor: pointer;
-    font-size: 0.78rem;
-    color: var(--hub-text-dim);
-    user-select: none;
-  }
-
-  .archived-toggle input[type="checkbox"] {
-    accent-color: var(--hub-accent);
-    width: 0.85rem;
-    height: 0.85rem;
-    cursor: pointer;
-  }
-
-  .archived-label {
-    font-size: 0.78rem;
   }
 </style>

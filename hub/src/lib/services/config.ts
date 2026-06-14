@@ -737,12 +737,12 @@ export interface ReleasesResult {
   cachePath: string;
 }
 
-export async function fetchReleases(includeArchived?: boolean): Promise<ReleasesResult> {
-  return invoke<ReleasesResult>("fetch_releases", { includeArchived: includeArchived ?? false });
+export async function fetchReleases(): Promise<ReleasesResult> {
+  return invoke<ReleasesResult>("fetch_releases");
 }
 
-export async function refreshReleases(includeArchived?: boolean): Promise<ReleasesResult> {
-  return invoke<ReleasesResult>("refresh_releases_command", { includeArchived: includeArchived ?? false });
+export async function refreshReleases(): Promise<ReleasesResult> {
+  return invoke<ReleasesResult>("refresh_releases_command");
 }
 
 /**

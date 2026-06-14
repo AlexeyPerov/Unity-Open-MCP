@@ -343,8 +343,7 @@ pub fn refresh_releases() -> ReleasesResult {
 }
 
 #[tauri::command]
-pub async fn fetch_releases(include_archived: Option<bool>) -> ReleasesResult {
-    let include_archived = include_archived.unwrap_or(false);
+pub async fn fetch_releases() -> ReleasesResult {
     let cached = read_cache();
     if let Some(ref file) = cached {
         if !file.entries.is_empty() {
@@ -367,50 +366,13 @@ pub async fn fetch_releases(include_archived: Option<bool>) -> ReleasesResult {
             }
         }
     }
-    let cli_result = tauri::async_runtime::spawn_blocking(move || {
-        crate::config::hub_install::fetch_releases_from_hub_cli(include_archived)
-    })
-    .await;
-    if let Ok(Some(entries)) = cli_result {
-        let path_str = cache_path().to_string_lossy().to_string();
-        let epoch = write_cache(&entries).unwrap_or_else(|e| {
-            log::warn!("Failed to write releases cache: {}", e);
-            now_epoch()
-        });
-        return ReleasesResult {
-            entries,
-            stale: false,
-            fetched_at_epoch: epoch,
-            cache_path: path_str,
-        };
-    }
     let mut result = resolve_releases();
     result.stale = true;
     result
 }
 
 #[tauri::command]
-pub async fn refresh_releases_command(
-    include_archived: Option<bool>,
-) -> ReleasesResult {
-    let include_archived = include_archived.unwrap_or(false);
-    let cli_result = tauri::async_runtime::spawn_blocking(move || {
-        crate::config::hub_install::fetch_releases_from_hub_cli(include_archived)
-    })
-    .await;
-    if let Ok(Some(entries)) = cli_result {
-        let path_str = cache_path().to_string_lossy().to_string();
-        let epoch = write_cache(&entries).unwrap_or_else(|e| {
-            log::warn!("Failed to refresh releases cache: {}", e);
-            now_epoch()
-        });
-        return ReleasesResult {
-            entries,
-            stale: false,
-            fetched_at_epoch: epoch,
-            cache_path: path_str,
-        };
-    }
+pub async fn refresh_releases_command() -> ReleasesResult {
     let mut result = refresh_releases();
     result.stale = true;
     result

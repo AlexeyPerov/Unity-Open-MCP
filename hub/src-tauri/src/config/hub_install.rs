@@ -3,7 +3,6 @@
 //! Provides:
 //! - Hub CLI executable path resolution (macOS, Windows, Linux)
 //! - `install_unity_version` Tauri command for headless editor installs
-//! - `fetch_releases_from_hub_cli` helper for the live releases catalog
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -13,7 +12,6 @@ use tauri::{Emitter, State};
 
 use crate::config::commands::AppState;
 use crate::config::discovery;
-use crate::config::releases::{ReleaseEntry, ReleaseStream};
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -64,115 +62,6 @@ pub fn resolve_hub_cli_path() -> Option<PathBuf> {
         }
     }
     None
-}
-
-// ── Releases CLI fetch ─────────────────────────────────────────────
-
-pub fn fetch_releases_from_hub_cli(include_archived: bool) -> Option<Vec<ReleaseEntry>> {
-    let hub_path = resolve_hub_cli_path()?;
-    let mut cmd = std::process::Command::new(&hub_path);
-    cmd.arg("--")
-        .arg("--headless")
-        .arg("editors")
-        .arg("-r");
-    if include_archived {
-        cmd.arg("--all");
-    }
-    cmd.stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
-
-    let output = cmd.output().ok()?;
-    if !output.status.success() {
-        log::warn!(
-            "Unity Hub CLI editors -r exited with {:?}",
-            output.status.code()
-        );
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let entries = parse_releases_output(&stdout);
-    if entries.is_empty() {
-        log::warn!("Unity Hub CLI returned empty releases output");
-        return None;
-    }
-    Some(entries)
-}
-
-fn parse_releases_output(output: &str) -> Vec<ReleaseEntry> {
-    let mut entries: Vec<ReleaseEntry> = output
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                return None;
-            }
-            parse_release_line(line)
-        })
-        .collect();
-    entries.sort_by(|a, b| {
-        b.release_date
-            .as_deref()
-            .unwrap_or("")
-            .cmp(a.release_date.as_deref().unwrap_or(""))
-    });
-    entries
-}
-
-fn parse_release_line(line: &str) -> Option<ReleaseEntry> {
-    let parts: Vec<&str> = if line.contains(',') {
-        line.splitn(4, ',').collect()
-    } else {
-        line.split_whitespace().take(4).collect()
-    };
-    if parts.is_empty() {
-        return None;
-    }
-    let version = parts[0].trim().to_string();
-    if version.is_empty() {
-        return None;
-    }
-    let changeset = parts
-        .get(1)
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let release_date = parts
-        .get(2)
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let stream = parts
-        .get(3)
-        .and_then(|s| parse_stream(s.trim()))
-        .unwrap_or_else(|| infer_stream(&version));
-    Some(ReleaseEntry {
-        version: version.clone(),
-        stream,
-        release_date,
-        release_notes_url: format!(
-            "https://unity.com/releases/editor/whats-new/{}",
-            version
-        ),
-        changeset,
-    })
-}
-
-fn parse_stream(s: &str) -> Option<ReleaseStream> {
-    match s.to_lowercase().as_str() {
-        "lts" | "ltsrelease" | "stable" => Some(ReleaseStream::Lts),
-        "tech" | "techstream" | "release" => Some(ReleaseStream::Tech),
-        "beta" => Some(ReleaseStream::Beta),
-        "alpha" => Some(ReleaseStream::Alpha),
-        _ => None,
-    }
-}
-
-fn infer_stream(version: &str) -> ReleaseStream {
-    if version.contains('a') {
-        ReleaseStream::Alpha
-    } else if version.contains('b') {
-        ReleaseStream::Beta
-    } else {
-        ReleaseStream::Tech
-    }
 }
 
 // ── Install command ────────────────────────────────────────────────
@@ -304,78 +193,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_release_line_comma_separated() {
-        let entry = parse_release_line("6000.0.32f1,abc123,2026-05-14,lts").unwrap();
-        assert_eq!(entry.version, "6000.0.32f1");
-        assert_eq!(entry.changeset.as_deref(), Some("abc123"));
-        assert_eq!(entry.release_date.as_deref(), Some("2026-05-14"));
-        assert_eq!(entry.stream, ReleaseStream::Lts);
-    }
-
-    #[test]
-    fn parse_release_line_whitespace_separated() {
-        let entry = parse_release_line("2022.3.62f2 def456 2025-05-29 lts").unwrap();
-        assert_eq!(entry.version, "2022.3.62f2");
-        assert_eq!(entry.changeset.as_deref(), Some("def456"));
-        assert_eq!(entry.stream, ReleaseStream::Lts);
-    }
-
-    #[test]
-    fn parse_release_line_version_only() {
-        let entry = parse_release_line("6000.0.0b16").unwrap();
-        assert_eq!(entry.version, "6000.0.0b16");
-        assert!(entry.changeset.is_none());
-        assert_eq!(entry.stream, ReleaseStream::Beta);
-    }
-
-    #[test]
-    fn parse_release_line_empty_returns_none() {
-        assert!(parse_release_line("").is_none());
-        assert!(parse_release_line("   ").is_none());
-    }
-
-    #[test]
-    fn infer_stream_alpha() {
-        assert_eq!(infer_stream("6000.0.0a25"), ReleaseStream::Alpha);
-    }
-
-    #[test]
-    fn infer_stream_beta() {
-        assert_eq!(infer_stream("6000.0.0b16"), ReleaseStream::Beta);
-    }
-
-    #[test]
-    fn infer_stream_tech_default() {
-        assert_eq!(infer_stream("2023.3.20f1"), ReleaseStream::Tech);
-    }
-
-    #[test]
-    fn parse_stream_variants() {
-        assert_eq!(parse_stream("lts"), Some(ReleaseStream::Lts));
-        assert_eq!(parse_stream("LTS"), Some(ReleaseStream::Lts));
-        assert_eq!(parse_stream("tech"), Some(ReleaseStream::Tech));
-        assert_eq!(parse_stream("beta"), Some(ReleaseStream::Beta));
-        assert_eq!(parse_stream("alpha"), Some(ReleaseStream::Alpha));
-        assert_eq!(parse_stream("unknown"), None);
-    }
-
-    #[test]
-    fn parse_releases_output_multiple_lines() {
-        let output = "6000.0.32f1,abc,2026-05-14,lts\n2022.3.62f2,def,2025-05-29,lts\n";
-        let entries = parse_releases_output(output);
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].version, "6000.0.32f1");
-        assert_eq!(entries[1].version, "2022.3.62f2");
-    }
-
-    #[test]
-    fn parse_releases_output_skips_empty_and_comments() {
-        let output = "# header\n\n6000.0.32f1,abc,2026-05-14,lts\n";
-        let entries = parse_releases_output(output);
-        assert_eq!(entries.len(), 1);
-    }
-
-    #[test]
     fn install_error_hub_not_found_serializes() {
         let err = InstallError::HubNotFound;
         let json = serde_json::to_string(&err).unwrap();
@@ -416,21 +233,5 @@ mod tests {
             let exists = std::path::Path::new("/Applications/Unity Hub.app/Contents/MacOS/Unity Hub").exists();
             assert_eq!(result.is_some(), exists);
         }
-    }
-
-    #[test]
-    fn release_entry_from_cli_has_changeset() {
-        let entry = parse_release_line("6000.0.32f1,abc123,2026-05-14,lts").unwrap();
-        assert_eq!(entry.changeset.as_deref(), Some("abc123"));
-        let json = serde_json::to_string(&entry).unwrap();
-        assert!(json.contains("\"changeset\""));
-    }
-
-    #[test]
-    fn release_entry_without_changeset_omits_field() {
-        let entry = parse_release_line("6000.0.32f1").unwrap();
-        assert!(entry.changeset.is_none());
-        let json = serde_json::to_string(&entry).unwrap();
-        assert!(!json.contains("changeset"));
     }
 }
