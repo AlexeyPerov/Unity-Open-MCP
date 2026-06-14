@@ -11,6 +11,7 @@ use crate::config::env_vars;
 use crate::config::launch_log::{self, LaunchOutcome, LaunchRecord};
 use crate::config::persistence;
 use crate::config::projects::read_dir_mtime_iso;
+use crate::config::running_unity::{scan_running_unity, RunningUnity};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -25,6 +26,18 @@ pub enum LaunchError {
     InstallNotFound { project_id: String, version: String },
     #[serde(rename_all = "camelCase")]
     LaunchFailed { project_id: String, message: String },
+    /// A Unity process is already running for this project (matched by
+    /// `-projectPath` arg or by `lastLaunchPid`). Surfaced before spawn so
+    /// the frontend can offer a "terminate and relaunch" path instead of
+    /// forking a second Unity that will hit the `Library/EditorInstance.json`
+    /// lock and either hang or show its own system-modal dialog the Hub
+    /// cannot dismiss.
+    #[serde(rename_all = "camelCase")]
+    AlreadyRunning {
+        project_id: String,
+        pid: u32,
+        project_path: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +56,57 @@ pub struct VersionRefreshResult {
     pub unity_version: Option<String>,
     pub last_modified_at: Option<String>,
     pub git_branch: Option<String>,
+}
+
+/// Pure helper: decide whether a fresh `scan_running_unity` snapshot
+/// already contains a Unity process that would conflict with launching
+/// `project_path` (whose own `last_launch_pid` is `last_pid`).
+///
+/// Returns `Some((pid, project_path))` when a conflict is found, `None`
+/// otherwise. The two matchers:
+///   1. **Path match** — any scan row whose `project_path` canonicalises
+///      equal to `project_path` (caller is expected to pass an already-
+///      canonicalised project path so the comparison is string-only).
+///   2. **PID match** — any scan row whose `pid` equals `last_pid`,
+///      regardless of whether its `-projectPath` could be parsed. Covers
+///      Hub-launched Editors opened without `-projectPath` (the "Open
+///      empty editor only" launch mode).
+///
+/// When both matchers fire, the path-match wins so the `project_path`
+/// field on the returned error is the real project root (useful for the
+/// frontend error message) and the PID is the path-match's PID. The
+/// function never shells out — it is the unit-testable core of the
+/// double-launch guard.
+pub(crate) fn is_already_running(
+    scan: &[RunningUnity],
+    project_path: &str,
+    last_pid: Option<u32>,
+) -> Option<(u32, String)> {
+    // Pass 1: path match — the explicit "this exact project is open" case.
+    for row in scan {
+        if let Some(p) = &row.project_path {
+            if p == project_path {
+                return Some((row.pid, p.clone()));
+            }
+        }
+    }
+    // Pass 2: PID fallback — the Hub tracked a previous launch PID and
+    // that exact PID is still alive, even if its `-projectPath` was not
+    // parseable (e.g. bare-editor launch, Windows quoting edge case).
+    if let Some(pid) = last_pid {
+        if pid == 0 {
+            return None;
+        }
+        for row in scan {
+            if row.pid == pid {
+                // We don't know the project path in this branch; surface
+                // the project_path the caller asked about so the error
+                // message is still useful.
+                return Some((row.pid, project_path.to_string()));
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn get_unity_executable_path(install_dir: &Path) -> Option<PathBuf> {
@@ -329,6 +393,44 @@ fn launch_project_inner(
             });
         }
     };
+
+    // Double-launch guard: refuse to spawn a second Unity that would
+    // collide with one already running for this project. A scan failure
+    // is non-fatal — we fall through to the spawn rather than blocking
+    // the user on a transient `ps` / PowerShell error. The frontend
+    // stores the same scan on a 5-second poll, so the worst case after
+    // a backend scan failure is the same as the worst case without this
+    // check (a duplicate spawn), not worse.
+    let project_path_canon = match std::fs::canonicalize(project_path) {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(_) => project_path_str.clone(),
+    };
+    let scan = scan_running_unity();
+    if let Some((conflict_pid, conflict_path)) = is_already_running(
+        &scan,
+        &project_path_canon,
+        project.last_launch_pid,
+    ) {
+        return Err(InnerLaunchError {
+            typed: LaunchError::AlreadyRunning {
+                project_id: project_id.to_string(),
+                pid: conflict_pid,
+                project_path: conflict_path,
+            },
+            project_id: project_id.to_string(),
+            project_name,
+            project_path: project_path_str,
+            unity_version: Some(version.clone()),
+            install_path: Some(install_path),
+            launch_args: vec![],
+            build_target: None,
+            code: "alreadyRunning".to_string(),
+            message: format!(
+                "Unity is already running for this project (pid {})",
+                conflict_pid
+            ),
+        });
+    }
 
     let mut args: Vec<String> = Vec::new();
     let mut build_target: Option<String> = None;
@@ -780,5 +882,88 @@ mod tests {
     fn get_unity_executable_path_returns_none_when_missing() {
         let dir = tempfile::tempdir().unwrap();
         assert!(get_unity_executable_path(dir.path()).is_none());
+    }
+
+    // ---- double-launch guard --------------------------------------------
+
+    fn scan_row(pid: u32, path: Option<&str>) -> RunningUnity {
+        RunningUnity {
+            pid,
+            project_path: path.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn is_already_running_empty_scan_is_none() {
+        assert!(is_already_running(&[], "/p", Some(42)).is_none());
+    }
+
+    #[test]
+    fn is_already_running_unrelated_pid_is_none() {
+        let scan = vec![scan_row(42, Some("/other"))];
+        assert!(is_already_running(&scan, "/p", Some(99)).is_none());
+    }
+
+    #[test]
+    fn is_already_running_matches_by_path() {
+        let scan = vec![
+            scan_row(7, Some("/p")),
+            scan_row(8, Some("/other")),
+        ];
+        let got = is_already_running(&scan, "/p", Some(99));
+        assert_eq!(got, Some((7, "/p".to_string())));
+    }
+
+    #[test]
+    fn is_already_running_matches_by_pid_when_path_unparseable() {
+        // Bare-editor launch: Unity is alive for our project but the
+        // scanner could not read its `-projectPath` (None).
+        let scan = vec![scan_row(55, None), scan_row(7, Some("/other"))];
+        let got = is_already_running(&scan, "/p", Some(55));
+        assert_eq!(got, Some((55, "/p".to_string())));
+    }
+
+    #[test]
+    fn is_already_running_prefers_path_match_over_pid() {
+        // Both a path-match (pid 7) and a PID-match (last_launch_pid = 9,
+        // pid 9 is a different Unity on a different project) are present.
+        // The path-match wins so the returned PID targets the conflicting
+        // project, not a stale tracked PID.
+        let scan = vec![
+            scan_row(9, Some("/other")),
+            scan_row(7, Some("/p")),
+        ];
+        let got = is_already_running(&scan, "/p", Some(9));
+        assert_eq!(got, Some((7, "/p".to_string())));
+    }
+
+    #[test]
+    fn is_already_running_ignores_zero_pid() {
+        // PID 0 is a sentinel: never treated as a real match (it means
+        // "process group" on Unix and is unused on Windows).
+        let scan = vec![scan_row(0, None)];
+        assert!(is_already_running(&scan, "/p", Some(0)).is_none());
+    }
+
+    #[test]
+    fn is_already_running_no_last_pid_skips_pid_pass() {
+        // Without a tracked PID, the PID pass must not run; only the
+        // path pass can flag a conflict (Unity Hub-launched externally).
+        let scan = vec![scan_row(99, None)];
+        assert!(is_already_running(&scan, "/p", None).is_none());
+    }
+
+    #[test]
+    fn launch_error_already_running_serializes() {
+        let err = LaunchError::AlreadyRunning {
+            project_id: "abc".to_string(),
+            pid: 1234,
+            project_path: "/Users/me/MyGame".to_string(),
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"alreadyRunning\""));
+        assert!(json.contains("\"projectId\":\"abc\""));
+        assert!(json.contains("\"pid\":1234"));
+        assert!(json.contains("\"projectPath\":\"/Users/me/MyGame\""));
     }
 }

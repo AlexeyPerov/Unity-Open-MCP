@@ -18,6 +18,14 @@ export interface LastLaunchFailure {
   launchLogPath: string;
   /** Absolute path to the platform crash-log folder (only set when isLikelyCrash). */
   crashLogPath: string | null;
+  /**
+   * When set, the failure was a double-launch guard: a Unity process is
+   * already running for this project and the conflict was identified by
+   * the given PID. The status drawer offers a "Terminate & relaunch"
+   * quick action that targets this PID. `null` for non-conflict
+   * failures.
+   */
+  conflictPid: number | null;
 }
 
 class AppState {
@@ -38,9 +46,26 @@ class AppState {
     this.confirmationTitle = title;
     this.confirmationMessage = message;
     this.showConfirmationModal = true;
-    return new Promise((resolve) => {
-      this.confirmationResolve = resolve;
-    });
+    try {
+      return await new Promise<boolean>((resolve) => {
+        this.confirmationResolve = resolve;
+      });
+    } catch {
+      // A defensive catch so a throw from a derived effect (e.g. a
+      // misbehaving Svelte 5 subscriber) cannot leave the modal open
+      // with an unresolvable promise — the user would otherwise be
+      // "stuck forever" with a non-dismissable overlay.
+      return false;
+    } finally {
+      // Best-effort: if the promise was neither resolved nor rejected,
+      // make sure the modal state is cleared so the next `confirm()` is
+      // not stacked on top of a hidden one. `resolveConfirmation`
+      // already clears it, so this is a no-op in the normal path.
+      if (this.showConfirmationModal) {
+        this.showConfirmationModal = false;
+        this.confirmationResolve = null;
+      }
+    }
   }
 
   resolveConfirmation(result: boolean) {
@@ -92,6 +117,25 @@ class AppState {
     const f = this.pendingProjectsFilter;
     this.pendingProjectsFilter = null;
     return f;
+  }
+
+  // Callback registered by ProjectsTab so the status drawer can request
+  // a "terminate & relaunch" without importing the ProjectsTab module
+  // (the drawer is mounted at the app root and outlives tab switches).
+  // Signature: (projectId: string) => Promise<void> | void.
+  terminateAndRelaunchHandler:
+    | ((projectId: string) => Promise<void> | void)
+    | null = null;
+
+  setTerminateAndRelaunchHandler(
+    handler: ((projectId: string) => Promise<void> | void) | null,
+  ): void {
+    this.terminateAndRelaunchHandler = handler;
+  }
+
+  async requestTerminateAndRelaunch(projectId: string): Promise<void> {
+    if (!this.terminateAndRelaunchHandler) return;
+    await this.terminateAndRelaunchHandler(projectId);
   }
 }
 

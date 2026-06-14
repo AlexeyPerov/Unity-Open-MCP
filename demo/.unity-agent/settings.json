@@ -1,0 +1,6 @@
+{
+    "disabledTools": [],
+    "defaultGateMode": "enforce",
+    "autoStart": true,
+    "verboseActivityLog": false
+}

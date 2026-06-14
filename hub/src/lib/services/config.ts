@@ -210,7 +210,13 @@ export type LaunchError =
   | { type: "pathInvalid"; projectId: string; path: string }
   | { type: "versionMissing"; projectId: string }
   | { type: "installNotFound"; projectId: string; version: string }
-  | { type: "launchFailed"; projectId: string; message: string };
+  | { type: "launchFailed"; projectId: string; message: string }
+  | {
+      type: "alreadyRunning";
+      projectId: string;
+      pid: number;
+      projectPath: string;
+    };
 
 export type RunUnityError =
   | { type: "versionMissing" }

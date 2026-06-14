@@ -23,6 +23,12 @@
     S.clearLastLaunchFailure();
   }
 
+  function handleTerminateAndRelaunch() {
+    const failure = S.lastLaunchFailure;
+    if (!failure) return;
+    void S.requestTerminateAndRelaunch(failure.projectId);
+  }
+
   function formatFailureTime(iso: string): string {
     try {
       const d = new Date(iso);
@@ -93,6 +99,19 @@
               >
                 Reveal crash logs
               </button>
+            {/if}
+            {#if S.lastLaunchFailure.conflictPid !== null}
+              <button
+                type="button"
+                class="drawer-action drawer-action-accent"
+                onclick={handleTerminateAndRelaunch}
+                title={`Terminate pid ${S.lastLaunchFailure.conflictPid} and re-launch ${S.lastLaunchFailure.projectName}`}
+              >
+                Terminate &amp; relaunch
+              </button>
+              <span class="failure-hint">
+                conflict pid {S.lastLaunchFailure.conflictPid}
+              </span>
             {/if}
             {#if S.lastLaunchFailure.launchLogPath}
               <span class="failure-hint" title={S.lastLaunchFailure.launchLogPath}>
@@ -206,6 +225,17 @@
 
   .drawer-action:hover {
     border-color: var(--hub-accent);
+    color: var(--hub-text-bright);
+  }
+
+  .drawer-action-accent {
+    background: var(--hub-info-bg);
+    border-color: var(--hub-info-fg);
+    color: var(--hub-info-fg);
+  }
+
+  .drawer-action-accent:hover {
+    background: var(--hub-selected);
     color: var(--hub-text-bright);
   }
 

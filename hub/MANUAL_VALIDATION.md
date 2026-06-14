@@ -165,6 +165,37 @@ Notes:
 | 9.4 | Hard-quit the app during a settings save (kill the process while footer shows `Saving…`) | Next launch reads either the previous-good file or the new file (atomic write), never a half-written one; check the file's trailing bytes are valid JSON | ☐ |
 | 9.5 | Review the status drawer for the whole session | No unexpected stack traces; all errors have actionable text and a path/link where applicable | ☐ |
 
+### 9a. Double-launch guard (M1.5-10 follow-up)
+
+> Covers: backend `LaunchError::AlreadyRunning` + frontend pre-check +
+> status drawer "Terminate & relaunch" action.
+
+| # | Step | Expected | Result |
+|---|------|----------|--------|
+| 9a.1 | Launch a project (per step 3.1) and wait for the `running` chip to appear | Row shows `running` chip; `lastLaunchPid` is set in `projects.json` | ☐ |
+| 9a.2 | With that Unity still running, click the same row again (Launch) | No second Unity is spawned; status drawer shows `launch refused: Unity is already running for "<name>" (pid <pid>). Terminate it first, or click "Terminate & relaunch" in the status drawer.`; the failure banner shows a **Terminate & relaunch** action button | ☐ |
+| 9a.3 | In the settings popup for the same running project | The **Launch** button is disabled, label reads `Running`, tooltip `Unity is already running for this project — terminate it first` | ☐ |
+| 9a.4 | Open the status drawer, click **Terminate & relaunch** | Drawer logs `terminating pid <pid> for <name>…`; on success logs `terminated pid <pid> — <msg>`; the original Unity exits (verify in OS); a new Unity launches for the project; the `running` chip stays on the row | ☐ |
+| 9a.5 | Repeat 9a.2, then in the settings popup **More** menu, click **Terminate Unity** (the existing kill flow), wait for Unity to exit, then click the row's Launch | No "already running" error; the spawn proceeds normally | ☐ |
+| 9a.6 | Externally launch Unity on a different project via Unity Hub (or `open -a Unity --args -projectPath /p`), wait for it to register, then click that row in Hub | Frontend pre-check surfaces the same `launch refused` error; backend also returns `AlreadyRunning` if the snapshot is stale (verify by reloading the Hub and immediately clicking the row) | ☐ |
+| 9a.7 | Kill -9 the running Unity process from a terminal (no `child.wait()` reap), then click the row in Hub | After the next running-Unity poll (≤ `scanIntervalSeconds`, default 5s) the `running` chip clears and Launch works again; the Hub's `lastLaunchPid` is still the dead PID, but the backend `AlreadyRunning` matcher is path-based first so the launch is allowed once the scan catches up | ☐ |
+
+### 9b. Confirmation modal — Escape + focus (regression of "stuck popup")
+
+> Covers: the bug where the env-var override confirm (and any other
+> `S.confirm` consumer) had no Escape handler and no focus management,
+> so a user who clicked a table row could not dismiss the modal with
+> the keyboard.
+
+| # | Step | Expected | Result |
+|---|------|----------|--------|
+| 9b.1 | Set a project env var that collides with a parent process var (`Settings → Safety → Confirm before env-var override` must be on). Click Launch on that project | The "Override environment variables?" modal opens | ☐ |
+| 9b.2 | Without clicking inside the modal, press **Escape** | Modal closes; no Unity is spawned; drawer log shows no error | ☐ |
+| 9b.3 | Reopen the modal (Launch again). Click outside the modal (on the overlay) | Modal closes; no Unity is spawned | ☐ |
+| 9b.4 | Reopen the modal. Press **Tab** | Focus cycles through the close (X), Cancel, Confirm controls (focus was moved into the modal on open) | ☐ |
+| 9b.5 | Reopen the modal. Press **Enter** while focus is on the Confirm button | Modal closes; Unity spawns as expected (env-var override accepted) | ☐ |
+| 9b.6 | Trigger the same flow on the Platform intent save (M1.5-5: edit `platformIntent` while Unity is running for the project) — same `S.confirm` consumer, same modal | All of 9b.2–9b.5 pass for that prompt as well | ☐ |
+
 Notes:
 
 ## 10. Sign-off

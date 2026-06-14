@@ -222,6 +222,10 @@
     void walkUpScanStore.start();
     window.addEventListener("click", closeContextMenu, true);
     window.addEventListener("keydown", handleGlobalKeydown, true);
+    // Register the terminate-and-relaunch callback so the status drawer
+    // (mounted at the app root) can request a conflict resolution
+    // without importing the ProjectsTab module. Cleared on teardown.
+    S.setTerminateAndRelaunchHandler((id) => terminateAndRelaunch(id));
 
     // Drag-and-drop a folder onto the Projects tab. Tauri's webview
     // emits a single `DragDropEvent` stream covering enter/over/leave/drop
@@ -276,6 +280,10 @@
       // session. The wizard's internal state is local; closing the
       // modal re-mounts it next time with a fresh Step 1 (Task 3).
       aiSetupWizardProjectId = null;
+      // Detach the terminate-and-relaunch callback so a stale
+      // handler is not invoked after the tab is unmounted (e.g. the
+      // status drawer is mounted at the app root and outlives us).
+      S.setTerminateAndRelaunchHandler(null);
     };
   });
 
@@ -592,6 +600,13 @@
 
   function handleGlobalKeydown(e: KeyboardEvent) {
     if (S.activeTab !== "projects") return;
+    // The confirmation modal owns Escape (and the overlay-click cancel)
+    // while it is open; its own `onkeydown` on the overlay calls
+    // `e.stopPropagation()` but the global handler is registered in the
+    // capture phase via `addEventListener(..., true)` so the modal's
+    // stopPropagation does not actually suppress us. Bail out explicitly
+    // so this handler cannot close anything underneath the modal.
+    if (S.showConfirmationModal) return;
     const target = e.target as HTMLElement | null;
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
       if (e.key !== "Escape") return;
@@ -617,6 +632,31 @@
     const status = statusFor(project);
     if (status.pathExists === false) {
       S.appendErrorLog(`cannot launch: path missing — ${project.path}`);
+      return;
+    }
+    // M1.5-10 follow-up: refuse to spawn a second Unity for a project
+    // whose editor is already running. The backend has the authoritative
+    // check (`is_already_running` in `config::launch`), but we also
+    // consult the running-Unity store here for a snappy UX (no
+    // round-trip) and to surface the running PID in the error message.
+    // The store polls every `scanIntervalSeconds`; if the snapshot is
+    // stale the backend will still catch it.
+    if (isRunningFor(project)) {
+      const pid = project.lastLaunchPid ?? 0;
+      const message = pid > 0
+        ? `launch refused: Unity is already running for "${project.name}" (pid ${pid}). Terminate it first, or click "Terminate & relaunch" in the status drawer.`
+        : `launch refused: Unity is already running for "${project.name}". Terminate it from the project menu before launching again.`;
+      S.appendErrorLog(message);
+      S.setLastLaunchFailure({
+        projectId: project.id,
+        projectName: project.name,
+        projectPath: project.path,
+        timestamp: new Date().toISOString(),
+        isLikelyCrash: false,
+        launchLogPath: "",
+        crashLogPath: null,
+        conflictPid: pid > 0 ? pid : null,
+      });
       return;
     }
     // M1.5-17: when the project has env vars and the safety toggle is
@@ -665,7 +705,12 @@
       const autoOpen =
         projectsStore.settings?.diagnostics.autoOpenDrawerOnLaunchFailure ?? true;
       S.appendLaunchLog(message, autoOpen);
-      await handleLaunchFailure(project, err, message, autoOpen);
+      // For an `alreadyRunning` error coming back from the backend, lift
+      // the conflicting PID into the failure banner so the relaunch
+      // action targets the right process. A frontend pre-check
+      // (handleLaunch) sets the same field on the local rejection path.
+      const conflictPid = err.type === "alreadyRunning" ? err.pid : null;
+      await handleLaunchFailure(project, err, message, autoOpen, conflictPid);
     } finally {
       launching = null;
     }
@@ -676,6 +721,7 @@
     err: LaunchError,
     message: string,
     autoOpen: boolean,
+    conflictPid: number | null = null,
   ): Promise<void> {
     // Tail the on-disk launch log and push its lines into the in-memory
     // drawer so the user sees the persistent record without clicking
@@ -727,12 +773,86 @@
       isLikelyCrash: err.type === "launchFailed",
       launchLogPath: tailPath,
       crashLogPath,
+      conflictPid,
     });
 
     // The original `message` was already added via `appendLaunchLog`; this
     // is a no-op in normal flow but keeps the helper self-contained for
     // future extension.
     void message;
+  }
+
+  /**
+   * Terminate the Unity process that blocked a launch (the PID recorded
+   * on the latest `LastLaunchFailure.conflictPid`), wait for the OS to
+   * actually reap it, then retry the launch. Used by the status drawer's
+   * "Terminate & relaunch" quick action so a user who accidentally
+   * double-clicks Launch on a running project does not have to find the
+   * running row, open the popup, and click through the More menu.
+   *
+   * The kill reuses the existing `killUnity` Rust command (which
+   * handles the SIGTERM → SIGKILL escalation) and polls the running-
+   * Unity store for a cleared snapshot before re-launching. The backend
+   * double-launch guard is the final safety net — if the polling misses
+   * the process exit, the second `launchProject` call will return
+   * `alreadyRunning` and the user gets the same clear error message.
+   */
+  async function terminateAndRelaunch(projectId: string): Promise<void> {
+    const failure = S.lastLaunchFailure;
+    if (!failure || failure.projectId !== projectId) return;
+    const pid = failure.conflictPid ?? 0;
+    const project = projectsStore.find(projectId);
+    if (!project) return;
+    if (pid <= 0) {
+      // No PID to terminate (the conflict came from a different tool
+      // that the PID-fallback could not match). Fall back to refreshing
+      // the running-Unity snapshot and asking the user to terminate
+      // manually if the process is still there.
+      await runningUnityStore.tick();
+      S.appendDrawerLog(
+        `cannot auto-terminate: no PID recorded for ${project.name}; open the project menu to terminate manually.`,
+      );
+      return;
+    }
+    S.appendDrawerLog(`terminating pid ${pid} for ${project.name}…`);
+    try {
+      const result = await killUnity(pid);
+      if (result.status === "accessDenied") {
+        S.appendErrorLog(`kill: access denied for pid ${pid} — ${result.message}`);
+        return;
+      }
+      if (result.status === "notFound") {
+        // The process already exited between the guard and the kill —
+        // not an error, just clear the banner and proceed to launch.
+        S.appendDrawerLog(`pid ${pid} is not running (${result.message}); proceeding to relaunch.`);
+      } else {
+        S.appendDrawerLog(`terminated pid ${pid} — ${result.message}`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`terminate failed: ${msg}`);
+      return;
+    }
+    // Wait briefly for the OS to actually reap the process and for the
+    // running-Unity store to reflect it on the next tick. A short
+    // explicit tick is the fastest path; cap the wait so a stuck OS
+    // reaper does not hang the UI.
+    let cleared = false;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await runningUnityStore.tick();
+      if (!runningUnityStore.isRunningForPid(pid)) {
+        cleared = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (!cleared) {
+      S.appendDrawerLog(
+        `pid ${pid} may still be alive; the backend guard will refuse the relaunch if so.`,
+      );
+    }
+    S.clearLastLaunchFailure();
+    await handleLaunch(projectId);
   }
 
   function formatLaunchError(err: LaunchError, project: ProjectEntry): string {
@@ -747,6 +867,8 @@
         return `launch failed: Unity ${err.version} is not installed`;
       case "launchFailed":
         return `launch failed: ${err.message}`;
+      case "alreadyRunning":
+        return `launch refused: Unity is already running for "${project.name}" (pid ${err.pid}). Terminate it first, or click "Terminate & relaunch" in the status drawer.`;
       default:
         return `launch failed: ${JSON.stringify(err)}`;
     }
@@ -3353,10 +3475,13 @@
         <div class="settings-actions">
           <Button
             variant="primary"
-            disabled={!ps.launchable || launching === popupProject.id}
+            disabled={!ps.launchable || launching === popupProject.id || ps.running}
+            title={ps.running
+              ? "Unity is already running for this project — terminate it first"
+              : (!ps.launchable ? "Project not launchable" : "Launch this project")}
             onclick={handlePopupLaunch}
           >
-            {launching === popupProject.id ? "Launching…" : "Launch"}
+            {launching === popupProject.id ? "Launching…" : (ps.running ? "Running" : "Launch")}
           </Button>
           <Button
             variant="secondary"
