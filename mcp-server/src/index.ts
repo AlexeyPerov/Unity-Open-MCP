@@ -33,9 +33,7 @@ function getEnv(): { projectPath: string; port: number } {
   return { projectPath, port };
 }
 
-async function main() {
-  const { port, projectPath } = getEnv();
-
+export function createServer(projectPath: string, port: number): Server {
   const server = new Server(
     { name: "unity-agent", version: "0.1.0" },
     { capabilities: { tools: {}, resources: {} } },
@@ -74,6 +72,12 @@ async function main() {
     return resourceRouter.read(uri);
   });
 
+  return server;
+}
+
+async function main() {
+  const { port, projectPath } = getEnv();
+  const server = createServer(projectPath, port);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
