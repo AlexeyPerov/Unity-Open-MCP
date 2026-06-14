@@ -83,8 +83,8 @@
   }
 
   .tab.tab-active {
-    background: var(--hub-selected);
     color: var(--hub-text-bright);
-    border-color: var(--hub-border-hover);
+    border-color: var(--hub-accent);
+    background: rgba(92, 124, 250, 0.12);
   }
 </style>

@@ -254,8 +254,18 @@
     if (!installBridge && !installVerify) return false;
     if (!mergePlan) return false;
     if (mergePlan.manifestRead.parseError) return false;
-    if (mergePlan.hasUpgrades && !upgradeAcknowledged) return false;
-    return true;
+    // Allow Next whenever the selected packages already exist in the
+    // manifest — whether via a local `file:` path (demo project) or a
+    // remote git URL. The upgrade-acknowledgement toggle only gates the
+    // "Install / Upgrade" action, not navigation.
+    const selectedIds: string[] = [];
+    if (installBridge) selectedIds.push("com.unity.ai-agent-bridge");
+    if (installVerify) selectedIds.push("com.unity.ai-agent-verify");
+    return mergePlan.changes.some(
+      (c) =>
+        selectedIds.includes(c.id) &&
+        (c.kind === "unchanged" || c.kind === "upgrade"),
+    );
   }
 
   function nextStep() {
@@ -295,7 +305,7 @@
     }
     if (isLastFormStep()) {
       void persistToolkitRoot();
-      cancelWizard();
+      currentStep = "done";
       return;
     }
     nextStep();
@@ -1619,11 +1629,14 @@
             Step 3 adds bridge + verify packages to the project's
             <code>Packages/manifest.json</code>. The diff preview
             below is live — it re-computes whenever you change a
-            toggle, version pin, or custom URL. An upgrade
-            (existing entry with a different URL or tag) always
-            requires explicit confirmation before the wizard will
-            write. Unrelated dependency entries are preserved
-            verbatim.
+            toggle, version pin, or custom URL. When the project is
+            the demo project bundled inside the Unity-AI-Hub repo
+            itself, the wizard detects this and uses a local
+            <code>file:</code> path instead of a remote git URL —
+            no network fetch required. An upgrade (existing entry
+            with a different URL or tag) always requires explicit
+            confirmation before the wizard will write. Unrelated
+            dependency entries are preserved verbatim.
           </p>
 
           <div class="wiz-field">
@@ -2029,8 +2042,21 @@
         </section>
       {:else if currentStep === "done"}
         <section class="wiz-section">
+          <div class="wiz-block wiz-block-ok wiz-done-banner" role="status">
+            <strong>Setup complete!</strong>
+            The Unity AI agent is installed and configured. You can now
+            use MCP tools from your AI client to inspect and drive the
+            Unity Editor. Examples you can try:
+            <ul class="wiz-done-examples">
+              <li><code>"List all scenes in the project"</code></li>
+              <li><code>"What is the current build target?"</code></li>
+              <li><code>"Run a health check on the project"</code></li>
+              <li><code>"Show me all installed packages"</code></li>
+            </ul>
+          </div>
+
           <p class="wiz-desc">
-            Wizard complete. The checklist below is computed from
+            The checklist below is computed from
             the live project state — no per-step progress is
             persisted (questions-4 Q11 = A), so re-running the
             wizard always restarts at Step 1 and the Done screen
@@ -2637,6 +2663,32 @@
 
   .wiz-block-ok strong {
     color: #bbf7d0;
+  }
+
+  .wiz-done-banner {
+    padding: 0.7rem 0.85rem;
+    line-height: 1.6;
+  }
+
+  .wiz-done-examples {
+    margin: 0.5rem 0 0;
+    padding-left: 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .wiz-done-examples li {
+    font-size: 0.8rem;
+    color: var(--hub-text);
+  }
+
+  .wiz-done-examples code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.76rem;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 0 0.25rem;
+    border-radius: 3px;
   }
 
   .wiz-toggle-confirm {

@@ -5,6 +5,7 @@
     title = undefined,
     onclick,
     children,
+    class: extraClass = "",
     ...rest
   }: {
     variant?: "primary" | "secondary" | "destructive";
@@ -12,13 +13,14 @@
     title?: string;
     onclick?: () => void;
     children?: import("svelte").Snippet;
+    class?: string;
     [key: string]: unknown;
   } = $props();
 </script>
 
 <button
   type="button"
-  class="btn btn-{variant}"
+  class="btn btn-{variant} {extraClass}"
   {disabled}
   {title}
   {onclick}
