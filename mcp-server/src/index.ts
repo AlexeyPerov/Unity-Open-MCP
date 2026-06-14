@@ -9,6 +9,7 @@ import {
 import { ALL_TOOLS } from "./tools/index.js";
 import { LiveClient } from "./live-client.js";
 import { BatchSpawn } from "./batch-spawn.js";
+import { ToolRouter } from "./tool-router.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 const DEFAULT_PORT = 19120;
@@ -28,7 +29,7 @@ function getEnv(): { projectPath: string; port: number } {
 }
 
 async function main() {
-  const { port } = getEnv();
+  const { port, projectPath } = getEnv();
 
   const server = new Server(
     { name: "unity-agent", version: "0.1.0" },
@@ -37,6 +38,7 @@ async function main() {
 
   const liveClient = new LiveClient(port);
   const batchSpawn = new BatchSpawn();
+  const router = new ToolRouter(liveClient, batchSpawn, projectPath);
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: ALL_TOOLS,
@@ -47,12 +49,7 @@ async function main() {
     async (request): Promise<CallToolResult> => {
       const { name, arguments: args } = request.params;
       const callArgs = (args ?? {}) as Record<string, unknown>;
-
-      if (batchSpawn.isBatchTool(name)) {
-        return batchSpawn.route(name, callArgs);
-      }
-
-      return liveClient.route(name, callArgs);
+      return router.route(name, callArgs);
     },
   );
 

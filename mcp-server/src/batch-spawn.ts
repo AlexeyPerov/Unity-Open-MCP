@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { stat } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 
@@ -96,13 +97,8 @@ export class BatchSpawn implements Router {
       );
     }
 
-    if (!this.unityPath) {
-      return makeErrorResult(
-        "unity_path_missing",
-        "UNITY_PATH environment variable is required for batch operations. " +
-          "Set it to the Unity Editor executable path.",
-      );
-    }
+    const pathError = await this.validateUnityPath();
+    if (pathError) return pathError;
 
     if (!this.projectPath) {
       return makeErrorResult(
@@ -120,6 +116,13 @@ export class BatchSpawn implements Router {
     }
 
     const body = parsed.json;
+    body.exitCode = parsed.exitCode;
+    body._diagnostics = {
+      command: this.unityPath,
+      elapsedMs: parsed.elapsedMs,
+      exitCode: parsed.exitCode,
+    };
+
     const hasError = body.error != null;
 
     return {
@@ -131,6 +134,38 @@ export class BatchSpawn implements Router {
       ],
       isError: hasError,
     };
+  }
+
+  private async validateUnityPath(): Promise<CallToolResult | null> {
+    if (!this.unityPath) {
+      return makeErrorResult(
+        "unity_path_missing",
+        "UNITY_PATH environment variable is required for batch operations. " +
+          "Set it to the Unity Editor executable path " +
+          "(macOS: /Applications/Unity/Hub/Editor/<version>/Unity.app/Contents/MacOS/Unity, " +
+          "Windows: C:\\Program Files\\Unity\\Hub\\Editor\\<version>\\Editor\\Unity.exe, " +
+          "Linux: ~/Unity/Hub/Editor/<version>/Unity).",
+      );
+    }
+
+    try {
+      const s = await stat(this.unityPath);
+      if (!s.isFile()) {
+        return makeErrorResult(
+          "unity_path_invalid",
+          `UNITY_PATH '${this.unityPath}' is not a file. ` +
+            "Set it to the Unity Editor executable.",
+        );
+      }
+    } catch {
+      return makeErrorResult(
+        "unity_path_not_found",
+        `UNITY_PATH '${this.unityPath}' does not exist or is not accessible. ` +
+          "Verify the path points to a valid Unity Editor executable.",
+      );
+    }
+
+    return null;
   }
 
   private spawnUnity(
@@ -148,6 +183,10 @@ export class BatchSpawn implements Router {
         "--",
         ...toolArgs,
       ];
+
+      console.error(
+        `[unity-agent-mcp] Batch spawn: ${this.unityPath} ${unityArgs.join(" ")}`,
+      );
 
       const startTime = Date.now();
       let stdout = "";
@@ -183,6 +222,10 @@ export class BatchSpawn implements Router {
         clearTimeout(timer);
         const elapsedMs = Date.now() - startTime;
         const exitCode = code ?? 1;
+
+        console.error(
+          `[unity-agent-mcp] Batch completed: exit=${exitCode} elapsed=${elapsedMs}ms`,
+        );
 
         const jsonStr = extractJson(stdout);
         if (!jsonStr) {

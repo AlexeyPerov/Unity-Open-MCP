@@ -60,6 +60,18 @@ export class LiveClient implements Router {
     this.baseUrl = `http://127.0.0.1:${port}`;
   }
 
+  async isLiveAvailable(): Promise<boolean> {
+    try {
+      const res = await this.fetchWithTimeout("/ping", { method: "GET" });
+      if (res.status === 503) return true;
+      if (!res.ok) return false;
+      const body = (await res.json()) as PingResponse;
+      return body.connected;
+    } catch {
+      return false;
+    }
+  }
+
   async route(
     toolName: string,
     args: Record<string, unknown>,
