@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using UnityAgentVerify.Cache;
 using UnityEngine;
 
 namespace UnityAgentVerify.Batch
@@ -96,6 +97,8 @@ namespace UnityAgentVerify.Batch
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Full);
             sw.Stop();
 
+            VerifyCacheService.Record(result, VerifyCacheService.SourceScanAll);
+
             var batchResult = BuildBatchResult("scan_all", profile, result, sw.ElapsedMilliseconds);
             batchResult.failOnSeverity = SeverityThreshold.ToString(threshold);
             batchResult.outputPath = outputPath;
@@ -129,6 +132,8 @@ namespace UnityAgentVerify.Batch
             var scope = new VerifyScope(null);
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Full);
             sw.Stop();
+
+            VerifyCacheService.Record(result, VerifyCacheService.SourceScanAll);
 
             var baseline = BaselineStore.CreateFromResult(result, profile);
 
@@ -180,6 +185,8 @@ namespace UnityAgentVerify.Batch
             var scope = new VerifyScope(null);
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Full);
             sw.Stop();
+
+            VerifyCacheService.Record(result, VerifyCacheService.SourceScanAll);
 
             var current = BaselineStore.CreateFromResult(result, profile);
             var regression = BaselineStore.Compare(current, baseline, threshold);

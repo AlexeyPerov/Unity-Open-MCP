@@ -2,7 +2,8 @@
   "name": "com.alexeyperov.unity-agent-bridge.Editor.Tests",
   "rootNamespace": "UnityAgentBridge.Tests",
   "references": [
-    "com.alexeyperov.unity-agent-bridge.Editor"
+    "com.alexeyperov.unity-agent-bridge.Editor",
+    "com.alexeyperov.unity-agent-verify.Editor"
   ],
   "includePlatforms": [
     "Editor"

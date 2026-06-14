@@ -19,9 +19,7 @@ namespace UnityAgentBridge.MetaTools
             VerifyResult result;
             try
             {
-                var scope = new VerifyScope(paths);
-                var ruleIds = categories?.Length > 0 ? categories : null;
-                result = VerifyRunner.RunScoped(scope, ruleIds, VerifyRunMode.Full);
+                result = VerifyGateAdapter.ScanPaths(paths, categories);
             }
             catch (System.Exception e)
             {

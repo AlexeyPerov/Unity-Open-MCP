@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using UnityAgentVerify;
+using UnityAgentVerify.Cache;
 
 namespace UnityAgentBridge
 {
@@ -143,7 +144,7 @@ namespace UnityAgentBridge
             VerifyResult validation;
             try
             {
-                validation = VerifyGateAdapter.ValidatePaths(pathsHint, null);
+                validation = VerifyGateAdapter.ValidatePaths(pathsHint, null, UnityAgentVerify.Cache.VerifyCacheService.SourceGate);
             }
             catch (Exception e)
             {

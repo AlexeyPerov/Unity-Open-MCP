@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityAgentVerify;
+using UnityAgentVerify.Cache;
 using UnityAgentVerify.References;
 using UnityEditor;
 
@@ -80,11 +81,22 @@ namespace UnityAgentBridge
             return VerifyRunner.CreateCheckpoint(scope, ids);
         }
 
-        public static VerifyResult ValidatePaths(string[] paths, string[] ruleIds)
+        public static VerifyResult ValidatePaths(string[] paths, string[] ruleIds, string source = null)
         {
             var scope = new VerifyScope(paths);
             var ids = ruleIds ?? SelectRuleIds(paths);
-            return VerifyRunner.RunScoped(scope, ids, VerifyRunMode.Validate);
+            var result = VerifyRunner.RunScoped(scope, ids, VerifyRunMode.Validate);
+            VerifyCacheService.Record(result, source ?? VerifyCacheService.SourceValidateEdit);
+            return result;
+        }
+
+        public static VerifyResult ScanPaths(string[] paths, string[] ruleIds)
+        {
+            var scope = new VerifyScope(paths);
+            var ids = ruleIds ?? SelectRuleIds(paths);
+            var result = VerifyRunner.RunScoped(scope, ids, VerifyRunMode.Full);
+            VerifyCacheService.Record(result, VerifyCacheService.SourceScanPaths);
+            return result;
         }
 
         public static DeltaData ComputeDelta(CheckpointFingerprint before, VerifyResult after)
