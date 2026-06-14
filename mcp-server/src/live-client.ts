@@ -1,6 +1,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import type { MutationEnvelope } from "./gate-error.js";
+import type { PingCache } from "./ping-cache.js";
 import { deriveIsError } from "./gate-error.js";
 
 const MAX_COMPILE_WAIT_MS = 120_000;
@@ -55,9 +56,11 @@ const OFFLINE_HINT =
 
 export class LiveClient implements Router {
   private baseUrl: string;
+  private pingCache: PingCache;
 
-  constructor(port: number) {
+  constructor(port: number, pingCache: PingCache) {
     this.baseUrl = `http://127.0.0.1:${port}`;
+    this.pingCache = pingCache;
   }
 
   async isLiveAvailable(): Promise<boolean> {
@@ -66,6 +69,7 @@ export class LiveClient implements Router {
       if (res.status === 503) return true;
       if (!res.ok) return false;
       const body = (await res.json()) as PingResponse;
+      this.pingCache.record(body);
       return body.connected;
     } catch {
       return false;
@@ -86,6 +90,7 @@ export class LiveClient implements Router {
     try {
       const res = await this.fetchWithTimeout("/ping", { method: "GET" });
       const body: PingResponse = await res.json();
+      this.pingCache.record(body);
       return {
         content: [{ type: "text", text: JSON.stringify(body) }],
         isError: false,
@@ -201,6 +206,7 @@ export class LiveClient implements Router {
       }
 
       const body = (await res.json()) as PingResponse;
+      this.pingCache.record(body);
 
       if (!body.connected) {
         return makeErrorResult(
@@ -263,6 +269,37 @@ export class LiveClient implements Router {
         },
       },
     );
+  }
+
+  async readResource(route: string): Promise<Record<string, unknown>> {
+    try {
+      const res = await this.fetchWithTimeout(
+        `/resources/${route}`,
+        { method: "GET" },
+        10_000,
+      );
+
+      if (!res.ok) {
+        return {
+          status: "no_data",
+          asOf: null,
+          summary: null,
+          nextStep:
+            "Run unity_agent_scan_paths or a gated mutation to populate the cache.",
+        };
+      }
+
+      const text = await res.text();
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return {
+        status: "no_data",
+        asOf: null,
+        summary: null,
+        nextStep:
+          "Run unity_agent_scan_paths or a gated mutation to populate the cache.",
+      };
+    }
   }
 
   private fetchWithTimeout(

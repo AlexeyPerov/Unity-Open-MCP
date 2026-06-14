@@ -5,11 +5,16 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ALL_TOOLS } from "./tools/index.js";
+import { ALL_RESOURCES } from "./resources/index.js";
 import { LiveClient } from "./live-client.js";
 import { BatchSpawn } from "./batch-spawn.js";
 import { ToolRouter } from "./tool-router.js";
+import { PingCache } from "./ping-cache.js";
+import { ResourceRouter } from "./resource-router.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 const DEFAULT_PORT = 19120;
@@ -33,12 +38,19 @@ async function main() {
 
   const server = new Server(
     { name: "unity-agent", version: "0.1.0" },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {}, resources: {} } },
   );
 
-  const liveClient = new LiveClient(port);
+  const pingCache = new PingCache();
+  const liveClient = new LiveClient(port, pingCache);
   const batchSpawn = new BatchSpawn();
   const router = new ToolRouter(liveClient, batchSpawn, projectPath);
+  const resourceRouter = new ResourceRouter({
+    live: liveClient,
+    pingCache,
+    projectPath,
+    port,
+  });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: ALL_TOOLS,
@@ -52,6 +64,15 @@ async function main() {
       return router.route(name, callArgs);
     },
   );
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: ALL_RESOURCES,
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const { uri } = request.params;
+    return resourceRouter.read(uri);
+  });
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
