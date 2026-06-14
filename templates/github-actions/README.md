@@ -2,7 +2,7 @@
 
 Copy-paste GitHub Actions workflow for running Unity Agent Verify **batch** scans, baselines, and regression checks without an open Unity Editor.
 
-See also: [packages/verify.md](../../specs/packages/verify.md) §VerifyBatchEntry, [packages/mcp-server.md](../../specs/packages/mcp-server.md), [architecture/mcp-tools.md](../../specs/architecture/mcp-tools.md) §M5.
+See also: the verify package and MCP server documentation under `packages/verify/` and `mcp-server/`.
 
 ## Files
 
@@ -30,7 +30,7 @@ See also: [packages/verify.md](../../specs/packages/verify.md) §VerifyBatchEntr
 
 ## How batch verification works
 
-All three M5 tools invoke the same headless entry point:
+All three batch tools invoke the same headless entry point:
 
 ```bash
 Unity -batchmode -quit -nographics \
@@ -59,7 +59,7 @@ Add to your project's `Packages/manifest.json`:
 }
 ```
 
-See [packages/verify.md](../../specs/packages/verify.md) §Install for details.
+See the verify package README (`packages/verify/README.md`) for details.
 
 ---
 
@@ -132,7 +132,7 @@ The committed baseline file (`CI/unity-agent-baseline.json`) is the regression r
 2. **PR checks:** `regression-check` runs on every PR and fails when new errors exceed `--regression-threshold`.
 3. **Baseline refresh:** re-run `baseline-update` after intentionally accepting new issues (e.g., bulk asset imports, rule additions). Review the diff before merging.
 
-The baseline JSON includes `schemaVersion: 1` per [packages/verify.md](../../specs/packages/verify.md) §Baseline JSON schema v1.
+The baseline JSON includes `schemaVersion: 1`.
 
 ## Failure triage
 

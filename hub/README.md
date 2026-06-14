@@ -14,7 +14,7 @@ npm run tauri dev
 
 ## Stack and pinned versions
 
-Versions match `vibe-launcher` as required by M1 scaffold specs:
+Versions match the pinned stack:
 
 - Tauri: `^2` (`tauri`, `tauri-build`, `@tauri-apps/api`, `@tauri-apps/cli`)
 - Svelte: `^5.0.0`
@@ -26,7 +26,7 @@ Versions match `vibe-launcher` as required by M1 scaffold specs:
 ## Current scope
 
 - Empty main window with branded app metadata (`Unity Hub Pro`).
-- Baseline Tauri capabilities for upcoming M1 work:
+- Baseline Tauri capabilities:
   - `core:default`
   - `fs:default`
   - `shell:default`
@@ -98,7 +98,7 @@ The seed reads `projects-v1.json` from the Unity Hub data directory. This file h
 ### Seed behavior
 
 - Skipped silently if Unity Hub is not installed or has no projects.
-- Imported paths are validated for existence; missing paths are kept with a `skippedPaths` note for the missing-path chip (Plan 2).
+- Imported paths are validated for existence; missing paths are kept with a `skippedPaths` note for the missing-path chip.
 - Each imported project gets a new stable UUID `id`.
 - Projects are sorted by `lastModified` (most recent first).
 - `lastModified` (Unix epoch ms) is converted to ISO 8601 `lastModifiedAt`.
@@ -155,16 +155,16 @@ If the failure is specifically a `launchFailed` (i.e. Unity could not be spawned
 
 ## Tools tab — log shortcuts
 
-The Tools tab exposes the platform-aware log paths per the hub-ui spec (M1.5-16 extended the M1 set with `Editor-prev.log`, the per-project `Player.log`, and the per-user global `Player.log` for standalone builds):
+The Tools tab exposes the platform-aware log paths. The full set includes `Editor-prev.log`, the per-project `Player.log`, and the per-user global `Player.log` for standalone builds:
 
 | Shortcut | macOS | Windows | Linux |
 |---|---|---|---|
 | Editor logs folder | `~/Library/Logs/Unity` | `%LOCALAPPDATA%\Unity\Editor` | `~/.config/unity3d` |
 | `Editor.log` | `<editor logs>/Editor.log` | `<editor logs>/Editor.log` | `<editor logs>/Editor.log` |
-| `Editor-prev.log` (M1.5-16) | `<editor logs>/Editor-prev.log` | `<editor logs>/Editor-prev.log` | `<editor logs>/Editor-prev.log` |
-| `Player.log` (editor preview, M1.5-16) | `<editor logs>/Player.log` | `<editor logs>/Player.log` | `<editor logs>/Player.log` |
+| `Editor-prev.log` | `<editor logs>/Editor-prev.log` | `<editor logs>/Editor-prev.log` | `<editor logs>/Editor-prev.log` |
+| `Player.log` (editor preview) | `<editor logs>/Player.log` | `<editor logs>/Player.log` | `<editor logs>/Player.log` |
 | Player logs folder (per-project) | `<project>/Logs` | `<project>/Logs` | `<project>/Logs` |
-| Standalone `Player.log` (M1.5-16) | `~/Library/Logs/Unity/Player.log` | `%LOCALAPPDATA%\Unity\Player.log` | `~/.config/unity3d/Player.log` |
+| Standalone `Player.log` | `~/Library/Logs/Unity/Player.log` | `%LOCALAPPDATA%\Unity\Player.log` | `~/.config/unity3d/Player.log` |
 | Crash logs | `~/Library/Logs/DiagnosticReports` | `%LOCALAPPDATA%\CrashDumps` | `~/.config/unity3d` |
 | Asset Store downloads | `~/Library/Application Support/Unity/Asset Store-5.x` | `%LOCALAPPDATA%\Unity\Asset Store-5.x` | not resolved yet |
 
@@ -172,7 +172,7 @@ The Asset Store shortcut resolves the newest `Asset Store-5.*` subfolder; if no 
 
 The standalone `Player.log` button is disabled (with the inline message "no standalone player log on disk yet") until a standalone Unity Player build has been run on the machine — the file does not exist on a clean dev box.
 
-## Tools tab — env variables (M1.5-17)
+## Tools tab — env variables
 
 The Tools tab exposes a per-project environment-variables editor
 ("Environment variables" panel, below the log shortcuts). Each row
@@ -200,11 +200,11 @@ key collision).
   (`env_var_collisions`) so the modal can be shown without
   spawning Unity.
 
-## Unity Versions — All releases sub-section (M1.5-19)
+## Unity Versions — All releases sub-section
 
 The Unity Versions tab carries a two-way toggle in the toolbar —
 `Installed` (the default; the existing discovered-installations
-table) and `All releases` (the M1.5-19 additions). The `All
+table) and `All releases` (the additional view). The `All
 releases` view renders a table of recent Unity release streams
 (LTS / TECH / BETA / ALPHA) with:
 
@@ -223,7 +223,7 @@ Projects tab so the user can drop into the upgrade flow).
 ### Data source and caching
 
 Unity does not publish a public JSON feed of releases that the
-Hub can rely on; the spec explicitly forbids scraping arbitrary
+Hub can rely on; scraping arbitrary
 sites without a documented stable URL. The chosen documented URL
 is the release-notes page, and the Hub ships a static snapshot of
 recent LTS / TECH / BETA / ALPHA releases as the "fetched"
@@ -232,8 +232,7 @@ refresh) is fully implemented so the call sites can be swapped to
 a real feed when Unity publishes one:
 
 - Cache file: `<config_dir>/cache/releases.json`.
-- Default TTL: **1 hour** (the spec's "once per hour per user"
-  debounce).
+- Default TTL: **1 hour** (debounced to once per hour per user).
 - `fetch_releases` reads the cache; the response is annotated
   with `stale: true` when the file is older than the TTL.
 - `refresh_releases` rewrites the cache unconditionally (the

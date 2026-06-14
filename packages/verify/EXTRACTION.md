@@ -33,7 +33,7 @@ Extraction baseline for porting scanner algorithms into `packages/verify`.
 - Header: `// Extracted from Unity-Scanner: <path>`
 - Exclude: UI, orchestrator, MCP, batch, cache, tab drawers
 
-## Not ported (M3 not required)
+## Not ported (not required for v1)
 
 | Unity-Scanner piece | Reason |
 |---|---|

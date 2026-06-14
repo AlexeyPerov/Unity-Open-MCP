@@ -1,6 +1,6 @@
 # Unity Agent Skill
 
-Skill for AI agents working with Unity projects via the `unity-agent` MCP server. This skill covers the M3 gate + verify workflow.
+Skill for AI agents working with Unity projects via the `unity-agent` MCP server. This skill covers the gate + verify workflow.
 
 ## Install
 

@@ -1,16 +1,15 @@
-# Unity Hub Pro — M1 Manual Validation Checklist
+# Unity Hub Pro — Manual Validation Checklist
 
-**Scope:** [specs/hub/hub-requirements.md](../../specs/hub/hub-requirements.md) §V1 done criteria, executed on Windows + macOS.
-**Plan:** [specs/execution/M1/execution-plan-4-settings-validation.md](../../specs/execution/M1/execution-plan-4-settings-validation.md) Task 4.
+**Scope:** v1 done criteria, executed on Windows + macOS.
 **Version under test:** `0.1.0` (see [hub/src/lib/version.ts](src/lib/version.ts)).
 
-Use a copy of this checklist per platform. Record pass/fail notes inline. Critical failures must be filed against [execution-plan-4 Task 5](../../specs/execution/M1/execution-plan-4-settings-validation.md#task-5-deferrals-audit-vs-backlog-m1-19) follow-up or fixed before M1 sign-off.
+Use a copy of this checklist per platform. Record pass/fail notes inline. Critical failures must be fixed before sign-off.
 
 ## 0. Automated pre-flight (run on every platform)
 
 | # | Check | Command | Expected | Result |
 |---|-------|---------|----------|--------|
-| 0.1 | Rust unit tests | `cargo test --manifest-path hub/src-tauri/Cargo.toml` | all tests pass (see the latest `specs/changelog.md` entry for the current count) | ☐ |
+| 0.1 | Rust unit tests | `cargo test --manifest-path hub/src-tauri/Cargo.toml` | all tests pass | ☐ |
 | 0.2 | Frontend typecheck | `npm --prefix hub run check` | `0 errors, 0 warnings` | ☐ |
 | 0.3 | Frontend build | `npm --prefix hub run build` | clean exit, no errors | ☐ |
 | 0.4 | Tauri typecheck | `cargo check --manifest-path hub/src-tauri/Cargo.toml` | clean exit | ☐ |
@@ -19,7 +18,7 @@ Notes:
 
 ## 1. First-run seed and config creation
 
-> Covers: Plan 1 Task 3 (config dir), Task 4 (Hub seed), M1-hub-launcher §Scaffold & persistence.
+> Covers: config dir, Hub seed, scaffold & persistence.
 
 | # | Step | Expected | Result |
 |---|------|----------|--------|
@@ -34,7 +33,7 @@ Notes:
 
 ## 2. Add / remove project, missing path behavior
 
-> Covers: Plan 2 Tasks 4 + 5, M1-hub-launcher §Projects tab.
+> Covers: Projects tab.
 
 | # | Step | Expected | Result |
 |---|------|----------|--------|
@@ -52,7 +51,7 @@ Notes:
 
 ## 3. Launch — version match, launch args, `-buildTarget`
 
-> Covers: Plan 2 Task 2, Plan 3 Task 2, M1-hub-launcher §Projects / §Tools.
+> Covers: Projects / Tools.
 
 | # | Step | Expected | Result |
 |---|------|----------|--------|
@@ -70,7 +69,7 @@ Notes:
 
 ## 4. Unity Versions discovery and warnings banner
 
-> Covers: Plan 2 Task 1, Plan 3 Task 1, M1-hub-launcher §Unity Versions tab.
+> Covers: Unity Versions tab.
 
 | # | Step | Expected | Result |
 |---|------|----------|--------|
@@ -88,7 +87,7 @@ Notes:
 
 ## 5. Tools: log shortcuts, Kill Unity (live + stale PID)
 
-> Covers: Plan 3 Tasks 3 + 4, M1-hub-launcher §Tools tab.
+> Covers: Tools tab.
 
 | # | Step | Expected | Result |
 |---|------|----------|--------|
@@ -106,7 +105,7 @@ Notes:
 
 ## 6. Settings toggles and diagnostics export
 
-> Covers: Plan 4 Tasks 1 + 2, M1-hub-launcher §Settings tab.
+> Covers: Settings tab.
 
 | # | Step | Expected | Result |
 |---|------|----------|--------|
@@ -127,35 +126,35 @@ Notes:
 
 ## 7. AI Setup reserved slot
 
-> Covers: Plan 4 Task 3, M1-hub-launcher §Validation & deferrals.
+> Covers: Validation & deferrals.
 
 | # | Step | Expected | Result |
 |---|------|----------|--------|
 | 7.1 | Projects tab toolbar shows the `AI Setup` button in a disabled state with title `AI Setup — coming in a later milestone (reserved slot)` | Visible, disabled, no click action | ☐ |
 | 7.2 | Click the disabled `AI Setup` button | Nothing happens (the stub `handleAiSetupStub` may log a hint line to the drawer, but no navigation occurs) | ☐ |
-| 7.3 | `grep -ri "wizard\|mcp\|bridge" hub/src` shows **no** wizard/MCP/bridge detect logic; only the AI Setup stub in Projects toolbar | Matches the M1 deferral rule | ☐ |
+| 7.3 | `grep -ri "wizard\|mcp\|bridge" hub/src` shows **no** wizard/MCP/bridge detect logic; only the AI Setup stub in Projects toolbar | Matches the v1 deferral rule | ☐ |
 
 Notes:
 
 ## 8. Deferrals audit
 
-> Covers: Plan 4 Task 5, hub-requirements §Explicitly not required for v1, hub/backlog.md.
+> Covers: Explicitly not required for v1.
 
 | # | Check | Expected | Result |
 |---|-------|----------|--------|
-| 8.1 | `drag-and-drop add project` is implemented in the Hub UI (M1.5-7) | Drop a valid Unity project folder on the Projects tab — it is added with a new uuid | ☐ |
-| 8.2 | `relink missing path` action is available for missing-path rows (M1.5-8) | Right-click a row with the `missing path` chip — a `Relink…` action appears in the context menu and the popup's More menu | ☐ |
+| 8.1 | `drag-and-drop add project` is implemented in the Hub UI | Drop a valid Unity project folder on the Projects tab — it is added with a new uuid | ☐ |
+| 8.2 | `relink missing path` action is available for missing-path rows | Right-click a row with the `missing path` chip — a `Relink…` action appears in the context menu and the popup's More menu | ☐ |
 | 8.3 | No arbitrary Unity.exe path parser — discovery is limited to configured parent folders | Confirmed via the Unity Versions tab and `discovery.rs` | ☐ |
-| 8.4 | No Linux-only code paths exposed; Linux is allowed to render but the manual test matrix is Windows + macOS only | Confirmed by [hub-requirements.md](../../specs/hub/hub-requirements.md) §V1 done criteria + [backlog.md](../../specs/hub/backlog.md) | ☐ |
+| 8.4 | No Linux-only code paths exposed; Linux is allowed to render but the manual test matrix is Windows + macOS only | Confirmed by the v1 done criteria | ☐ |
 | 8.5 | No `template-based new project creation` flow | Confirmed by the Add Project button opening a folder picker only | ☐ |
 | 8.6 | No advanced ecosystem adapters (UCP, unity-cli, Unity official MCP) wired into the Hub UI | Confirmed by `grep -ri` searches in the source | ☐ |
-| 8.7 | `specs/hub/backlog.md` is consistent with the deferrals in [hub-requirements.md](../../specs/hub/hub-requirements.md) §Explicitly not required for v1 | Each deferred item appears in backlog with a priority bucket | ☐ |
+| 8.7 | Deferred items are tracked in the project backlog | Each deferred item appears with a priority bucket | ☐ |
 
 Notes:
 
 ## 9. Repeat-launch / data-loss smoke
 
-> Covers: hub-requirements §Non-functional requirements, §V1 done criteria #4.
+> Covers: Non-functional requirements, v1 done criteria #4.
 
 | # | Step | Expected | Result |
 |---|------|----------|--------|
@@ -165,7 +164,7 @@ Notes:
 | 9.4 | Hard-quit the app during a settings save (kill the process while footer shows `Saving…`) | Next launch reads either the previous-good file or the new file (atomic write), never a half-written one; check the file's trailing bytes are valid JSON | ☐ |
 | 9.5 | Review the status drawer for the whole session | No unexpected stack traces; all errors have actionable text and a path/link where applicable | ☐ |
 
-### 9a. Double-launch guard (M1.5-10 follow-up)
+### 9a. Double-launch guard
 
 > Covers: backend `LaunchError::AlreadyRunning` + frontend pre-check +
 > status drawer "Terminate & relaunch" action.
@@ -194,7 +193,7 @@ Notes:
 | 9b.3 | Reopen the modal (Launch again). Click outside the modal (on the overlay) | Modal closes; no Unity is spawned | ☐ |
 | 9b.4 | Reopen the modal. Press **Tab** | Focus cycles through the close (X), Cancel, Confirm controls (focus was moved into the modal on open) | ☐ |
 | 9b.5 | Reopen the modal. Press **Enter** while focus is on the Confirm button | Modal closes; Unity spawns as expected (env-var override accepted) | ☐ |
-| 9b.6 | Trigger the same flow on the Platform intent save (M1.5-5: edit `platformIntent` while Unity is running for the project) — same `S.confirm` consumer, same modal | All of 9b.2–9b.5 pass for that prompt as well | ☐ |
+| 9b.6 | Trigger the same flow on the Platform intent save (edit `platformIntent` while Unity is running for the project) — same confirm modal consumer, same modal | All of 9b.2–9b.5 pass for that prompt as well | ☐ |
 
 Notes:
 
@@ -205,14 +204,14 @@ Notes:
 | macOS    |      |        |                        | ☐ pass / ☐ fail |
 | Windows  |      |        |                        | ☐ pass / ☐ fail |
 
-Critical issues found (block M1 sign-off):
+Critical issues found (block sign-off):
 
 - [ ]
 - [ ]
 
-Follow-ups filed against [execution-plan-4 Task 5](../../specs/execution/M1/execution-plan-4-settings-validation.md#task-5-deferrals-audit-vs-backlog-m1-19):
+Follow-ups:
 
 - [ ]
 - [ ]
 
-M1 sign-off recorded in [specs/changelog.md](../../specs/changelog.md) on the day all critical issues above are resolved.
+Sign-off recorded on the day all critical issues above are resolved.

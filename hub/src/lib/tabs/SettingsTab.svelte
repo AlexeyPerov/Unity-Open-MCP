@@ -698,7 +698,7 @@
               <span class="widget-text">
                 <span class="check-label">Open with "Missing or stale" filter selected</span>
                 <span class="check-desc">
-                  M1.5-15: when on, the Projects tab lands on the
+                  When on, the Projects tab lands on the
                   <strong>Missing or stale</strong> filter preset on first
                   load so a freshly-installed Hub does not flash every
                   missing path at the user. The toolbar chips and the
@@ -774,7 +774,7 @@
                 onchange={(e) =>
                   setConfirmEnvVarOverride((e.currentTarget as HTMLInputElement).checked)}
               />
-              <span class="check-label">Confirm env-var overrides before launch (M1.5-17)</span>
+              <span class="check-label">Confirm env-var overrides before launch</span>
             </label>
           </div>
         {/if}
@@ -921,7 +921,7 @@
               </div>
             </div>
             <div class="walkup-section">
-              <h4 class="walkup-heading">Custom template folders (M1.5-13)</h4>
+              <h4 class="walkup-heading">Custom template folders</h4>
               <p class="walkup-hint">
                 Unity project roots that can be used as a template when
                 creating a new project from the <strong>New project…</strong>

@@ -1655,7 +1655,7 @@
               <input type="checkbox" bind:checked={installScanner} disabled />
               <span>
                 <strong>Also install Unity Scanner</strong> —
-                <small>Full upstream product for human inspection in the Editor (advanced, off by default; not wired in M4).</small>
+                <small>Full upstream product for human inspection in the Editor (advanced, off by default; not wired in v1).</small>
               </span>
             </label>
           </div>
@@ -1900,9 +1900,9 @@
               {/if}
               {#if mcpPlan.command}
                 <p class="wiz-hint">
-                  Claude Code is CLI-only in M4 — the wizard
+                  Claude Code is CLI-only — the wizard
                   renders the <code>claude mcp add</code> command
-                  and never writes a config file (questions-4 Q9 = A).
+                  and never writes a config file.
                 </p>
               {/if}
             {/if}
@@ -1974,8 +1974,8 @@
             <code>-UNITY_AGENT_BRIDGE_PORT={step5BridgePort ?? bridgePortFromString(String(bridgePort))}</code>
             and polls the bridge HTTP <code>/ping</code> endpoint
             for up to 120 s. The wizard never spawns a separate
-            <code>unity-agent-mcp</code> subprocess — questions-4
-            Q8 = B keeps the verify path to a direct HTTP GET. The
+            <code>unity-agent-mcp</code> subprocess — the wizard
+            keeps the verify path to a direct HTTP GET. The
             Done screen re-runs detection on entry and pairs the
             live snapshot with this step's bridge result.
           </p>
@@ -2058,7 +2058,7 @@
           <p class="wiz-desc">
             The checklist below is computed from
             the live project state — no per-step progress is
-            persisted (questions-4 Q11 = A), so re-running the
+            persisted, so re-running the
             wizard always restarts at Step 1 and the Done screen
             always reflects the latest on-disk manifest. The
             bridge <code>/ping</code> row carries the Step 5
@@ -2182,10 +2182,10 @@
               </Button>
             </div>
             <p class="wiz-hint">
-              The M7 Advanced BYO-bridge section is intentionally
-              hidden in M4 (questions-4 Q1 = A — re-enable after
-              the M5 batch criteria are met). Step 6 baseline
-              creation is also M5-follow-up; the wizard renders
+              The Advanced BYO-bridge section is intentionally
+              hidden in v1 (it will be re-enabled after
+              the batch criteria are met). Step 6 baseline
+              creation is also deferred; the wizard renders
               only Steps 1-5 plus this Done screen.
             </p>
           </div>

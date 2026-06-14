@@ -394,7 +394,7 @@ namespace UnityAgentBridge
             EditorGUILayout.LabelField("Tools catalog", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Unified list of dispatchable tools in this Editor session. " +
-                "Toggle a tool off to block its HTTP dispatch path with an explicit `tool_disabled` error. " +
+                "Untoggle a tool to block its HTTP dispatch path with an explicit `tool_disabled` error. " +
                 "Disable state persists in `.unity-agent/settings.json` and survives domain reload.\n" +
                 TokenEstimateNote,
                 MessageType.None);
@@ -532,21 +532,21 @@ namespace UnityAgentBridge
 
         void DrawToolRow(BridgeToolCatalogItem item)
         {
-            bool disabled = BridgeToolTogglePolicy.IsDisabled(item.Name);
+            bool enabled = !BridgeToolTogglePolicy.IsDisabled(item.Name);
             bool expanded = _toolFoldoutExpanded.Contains(item.Name);
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.BeginHorizontal();
 
-            var newDisabled = EditorGUILayout.ToggleLeft("Disable", disabled, GUILayout.Width(70));
-            if (newDisabled != disabled)
+            var newEnabled = EditorGUILayout.ToggleLeft("Enabled", enabled, GUILayout.Width(70));
+            if (newEnabled != enabled)
             {
-                BridgeToolTogglePolicy.SetDisabled(item.Name, newDisabled);
-                disabled = newDisabled;
+                BridgeToolTogglePolicy.SetDisabled(item.Name, !newEnabled);
+                enabled = newEnabled;
             }
 
             var labelStyle = EditorStyles.boldLabel;
-            if (disabled)
+            if (!enabled)
             {
                 var prev = GUI.color;
                 GUI.color = new Color(0.85f, 0.55f, 0.55f);
@@ -567,7 +567,7 @@ namespace UnityAgentBridge
                 item.Mutability == BridgeToolMutability.Mutating ? "mutating" : "read-only",
                 mutColor, 70);
 
-            var gateColor = disabled
+            var gateColor = !enabled
                 ? new Color(0.7f, 0.7f, 0.7f)
                 : (item.GateMode == "enforce" ? new Color(1f, 0.75f, 0.45f)
                 : item.GateMode == "warn" ? new Color(1f, 0.9f, 0.4f)
@@ -587,7 +587,7 @@ namespace UnityAgentBridge
 
             EditorGUILayout.EndHorizontal();
 
-            if (disabled)
+            if (!enabled)
             {
                 EditorGUILayout.HelpBox(
                     $"Disabled — `POST /tools/{item.Name}` returns a `tool_disabled` error with the tool name. " +
@@ -1257,11 +1257,11 @@ namespace UnityAgentBridge
         void DrawActivityPassiveBatchHint()
         {
             EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Batch (M5 follow-up)", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField("Batch workflows", EditorStyles.miniBoldLabel);
             EditorGUILayout.HelpBox(
-                "Batch scan / baseline / regression workflows live in M5 and run via `unity-agent-mcp` " +
+                "Batch scan / baseline / regression workflows run via `unity-agent-mcp` " +
                 "fallback (or headless Editor CLI). The full batch panel — entry points, filters, " +
-                "regression threshold controls — is not part of v1 and will land after M5 closes. " +
+                "regression threshold controls — is not part of v1 and will land in a future update. " +
                 "Use the Gate tab's Manual validate for ad-hoc scoped scans in the meantime.",
                 MessageType.None);
         }
@@ -1393,10 +1393,10 @@ namespace UnityAgentBridge
         void DrawSettingsPassiveBatchHint()
         {
             EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Batch (M5 follow-up)", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField("Batch workflows", EditorStyles.miniBoldLabel);
             EditorGUILayout.HelpBox(
-                "Batch scan / baseline / regression workflows are owned by M5 and will land " +
-                "in a dedicated batch panel after M5 closes. v1 ships a passive hint only " +
+                "Batch scan / baseline / regression workflows will land " +
+                "in a dedicated batch panel in a future update. v1 ships a passive hint only " +
                 "— no batch execution controls are exposed in the bridge window.",
                 MessageType.None);
         }

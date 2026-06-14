@@ -55,7 +55,7 @@ Set environment variables:
 
 ### 4. Connect an AI client
 
-Configure your MCP client (Cursor, Claude Desktop, or OpenCode) to use the MCP server. See [mcp-server.md](../specs/packages/mcp-server.md) §Client config for configuration examples.
+Configure your MCP client (Cursor, Claude Desktop, or OpenCode) to use the MCP server. See the MCP server README (`mcp-server/README.md`) for configuration examples.
 
 ## Sample Assets
 
@@ -69,7 +69,7 @@ These assets are designed for controlled broken/fixed reference checks:
 - **Break a reference**: Remove or rename the prefab file while the scene references it → `missing_references` rule detects the broken reference.
 - **Fix a reference**: Restore the prefab file → gate delta shows `resolvedErrors: 1`.
 
-## Gate Test Fixtures (M3)
+## Gate Test Fixtures
 
 Located in `Assets/Fixtures/`. These prefabs provide controlled break/fix scenarios for EditMode tests and manual E2E checklists.
 
@@ -83,7 +83,7 @@ Located in `Assets/Fixtures/`. These prefabs provide controlled break/fix scenar
 ### Usage in tests
 
 - **EditMode tests** in `packages/verify/Tests~/Editor/` reference these fixture paths for reproducible rule testing.
-- **Manual E2E checklist** (`specs/execution/M3/m3-manual-e2e-checklist.md`) uses these paths in curl commands.
+- **Manual E2E checklist** uses these paths in curl commands.
 - **Bridge `file:` wiring**: demo `manifest.json` includes both `bridge` and `verify` packages so fixtures are scanned by M3 rules.
 
 ## Package References
