@@ -3,19 +3,34 @@ import { stat } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 
-const EXECUTE_METHOD = "UnityAgentVerify.Batch.VerifyBatchEntry.Run";
+const VERIFY_EXECUTE_METHOD = "UnityAgentVerify.Batch.VerifyBatchEntry.Run";
+const BRIDGE_EXECUTE_METHOD = "UnityAgentBridge.Batch.BridgeBatchEntry.Run";
 const OUTPUT_BEGIN = "---UNITY_AGENT_VERIFY_JSON_BEGIN---";
 const OUTPUT_END = "---UNITY_AGENT_VERIFY_JSON_END---";
 
 const DEFAULT_BATCH_TIMEOUT_MS = 600_000;
 
-const TOOL_TO_OPERATION: Record<string, string> = {
+const VERIFY_TOOL_TO_OPERATION: Record<string, string> = {
   unity_agent_scan_all: "scan_all",
   unity_agent_baseline_create: "baseline_create",
   unity_agent_regression_check: "regression_check",
 };
 
-export const BATCH_TOOL_NAMES = new Set(Object.keys(TOOL_TO_OPERATION));
+const META_TOOL_TO_OPERATION: Record<string, string> = {
+  unity_agent_find_members: "find_members",
+};
+
+const LIMITED_META_TOOLS: ReadonlySet<string> = new Set([
+  "unity_agent_execute_csharp",
+  "unity_agent_invoke_method",
+  "unity_agent_execute_menu",
+]);
+
+export const BATCH_TOOL_NAMES = new Set([
+  ...Object.keys(VERIFY_TOOL_TO_OPERATION),
+  ...Object.keys(META_TOOL_TO_OPERATION),
+  ...LIMITED_META_TOOLS,
+]);
 
 interface ParsedBatchResult {
   json: Record<string, unknown>;
@@ -44,7 +59,7 @@ function extractJson(stdout: string): string | null {
   return stdout.slice(jsonStart, endIdx).trim();
 }
 
-function buildArgs(
+function buildVerifyArgs(
   operation: string,
   args: Record<string, unknown>,
 ): string[] {
@@ -68,6 +83,43 @@ function buildArgs(
   return cli;
 }
 
+export function buildMetaArgs(
+  operation: string,
+  args: Record<string, unknown>,
+): string[] {
+  const cli: string[] = [operation];
+
+  if (operation === "find_members") {
+    if (args.query !== undefined) cli.push("--query", String(args.query));
+    if (args.kind !== undefined) cli.push("--kind", String(args.kind));
+    if (args.assembly_filter !== undefined) cli.push("--assembly-filter", String(args.assembly_filter));
+    if (args.include_unity_editor !== undefined) cli.push("--include-unity-editor", String(args.include_unity_editor));
+    if (args.include_project !== undefined) cli.push("--include-project", String(args.include_project));
+    if (args.max_results !== undefined) cli.push("--max-results", String(args.max_results));
+  }
+
+  return cli;
+}
+
+const LIMITED_META_MESSAGES: Record<string, string> = {
+  unity_agent_execute_csharp:
+    "execute_csharp is not supported in batch mode. " +
+    "The gate (checkpoint, validate, delta) cannot run headless and Roslyn compilation " +
+    "without a live Editor is unreliable. Connect a live Editor for full support. " +
+    "Only find_members is available in batch mode.",
+  unity_agent_invoke_method:
+    "invoke_method is not supported in batch mode. " +
+    "Mutating method calls require gate enforcement which is unavailable headless, " +
+    "and instance methods may depend on Editor-only state. " +
+    "Connect a live Editor for full support. " +
+    "Only find_members is available in batch mode.",
+  unity_agent_execute_menu:
+    "execute_menu is not supported in batch mode. " +
+    "Menu execution requires a live Editor UI; most menus fail in -batchmode. " +
+    "Connect a live Editor for full support. " +
+    "Only find_members is available in batch mode.",
+};
+
 export class BatchSpawn implements Router {
   private unityPath: string;
   private projectPath: string;
@@ -89,8 +141,18 @@ export class BatchSpawn implements Router {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
-    const operation = TOOL_TO_OPERATION[toolName];
-    if (!operation) {
+    if (LIMITED_META_TOOLS.has(toolName)) {
+      return makeErrorResult(
+        "batch_not_supported",
+        LIMITED_META_MESSAGES[toolName] ??
+          `${toolName} is not supported in batch mode.`,
+      );
+    }
+
+    const verifyOperation = VERIFY_TOOL_TO_OPERATION[toolName];
+    const metaOperation = META_TOOL_TO_OPERATION[toolName];
+
+    if (!verifyOperation && !metaOperation) {
       return makeErrorResult(
         "unknown_batch_tool",
         `Tool '${toolName}' is not a batch tool.`,
@@ -107,9 +169,15 @@ export class BatchSpawn implements Router {
       );
     }
 
+    const executeMethod = verifyOperation
+      ? VERIFY_EXECUTE_METHOD
+      : BRIDGE_EXECUTE_METHOD;
+    const operation = verifyOperation ?? metaOperation;
+    const argBuilder = verifyOperation ? buildVerifyArgs : buildMetaArgs;
+
     let parsed: ParsedBatchResult;
     try {
-      parsed = await this.spawnUnity(operation, args);
+      parsed = await this.spawnUnity(operation, args, executeMethod, argBuilder);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return makeErrorResult("batch_spawn_failed", message);
@@ -123,7 +191,10 @@ export class BatchSpawn implements Router {
       exitCode: parsed.exitCode,
     };
 
-    const hasError = body.error != null;
+    const mutation = body.mutation as Record<string, unknown> | undefined;
+    const hasError =
+      body.error != null ||
+      (mutation != null && mutation.success === false);
 
     return {
       content: [
@@ -171,15 +242,17 @@ export class BatchSpawn implements Router {
   private spawnUnity(
     operation: string,
     args: Record<string, unknown>,
+    executeMethod: string,
+    argBuilder: (operation: string, args: Record<string, unknown>) => string[],
   ): Promise<ParsedBatchResult> {
     return new Promise((resolve, reject) => {
-      const toolArgs = buildArgs(operation, args);
+      const toolArgs = argBuilder(operation, args);
 
       const unityArgs = [
         "-batchmode",
         "-quit",
         "-projectPath", this.projectPath,
-        "-executeMethod", EXECUTE_METHOD,
+        "-executeMethod", executeMethod,
         "--",
         ...toolArgs,
       ];
