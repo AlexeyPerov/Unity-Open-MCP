@@ -2,15 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using UnityAgentVerify.Cache;
+using UnityOpenMcpVerify.Cache;
 using UnityEngine;
 
-namespace UnityAgentVerify.Batch
+namespace UnityOpenMcpVerify.Batch
 {
     public static class VerifyBatchEntry
     {
-        public const string OutputBegin = "---UNITY_AGENT_VERIFY_JSON_BEGIN---";
-        public const string OutputEnd = "---UNITY_AGENT_VERIFY_JSON_END---";
+        public const string OutputBegin = "---UNITY_OPEN_MCP_VERIFY_JSON_BEGIN---";
+        public const string OutputEnd = "---UNITY_OPEN_MCP_VERIFY_JSON_END---";
 
         public const int ExitPass = 0;
         public const int ExitFail = 1;
@@ -57,7 +57,7 @@ namespace UnityAgentVerify.Batch
                     operation: null,
                     message: "No tool arguments found after '--'. " +
                              "Usage: Unity -batchmode -executeMethod " +
-                             "UnityAgentVerify.Batch.VerifyBatchEntry.Run -- " +
+                             "UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run -- " +
                              "<operation> [--platform-profile <p>] ..."
                 );
             }

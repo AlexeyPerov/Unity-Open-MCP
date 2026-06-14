@@ -68,8 +68,8 @@
   // now calls `plan_mcp_config` / `write_mcp_config` from the
   // Rust backend instead of building the JSON client-side, so
   // the live preview is guaranteed to match what the writer
-  // will emit (the `mcpServers.unity-agent` merge key, the
-  // OpenCode `mcp.unity-agent` + `environment` envelope, the
+  // will emit (the `mcpServers.unity-open-mcp` merge key, the
+  // OpenCode `mcp.unity-open-mcp` + `environment` envelope, the
   // OS-resolved Claude Desktop path, and the `claude mcp add`
   // command for Claude Code all live in Rust).
   import Button from "$lib/components/shell/Button.svelte";
@@ -362,7 +362,7 @@
       const picked = await openDialog({
         directory: true,
         multiple: false,
-        title: "Select Unity-AI-Hub toolkit root",
+        title: "Select unity-open-mcp toolkit root",
       });
       if (typeof picked === "string") {
         toolkitRoot = picked;
@@ -1123,7 +1123,7 @@
 
   async function openToolkitSkill() {
     if (!toolkitRoot.trim()) return;
-    const target = `${toolkitRoot.replace(/[\\/]+$/, "")}/skills/unity-agent/SKILL.md`;
+    const target = `${toolkitRoot.replace(/[\\/]+$/, "")}/skills/unity-open-mcp/SKILL.md`;
     try {
       await openPath(target);
     } catch (e) {
@@ -1291,7 +1291,7 @@
       return "ProjectSettings/ProjectVersion.txt is missing or empty.";
     }
     if (!detection.meetsMinUnityVersion) {
-      return `Detected Unity ${detection.unityVersion ?? "unknown"} — Unity Agent Bridge requires Unity 6 (6000.0+).`;
+      return `Detected Unity ${detection.unityVersion ?? "unknown"} — Unity Open MCP Bridge requires Unity 6 (6000.0+).`;
     }
     return null;
   });
@@ -1471,7 +1471,7 @@
         <section class="wiz-section">
           <p class="wiz-desc">
             Step 2 validates Unity version, Node.js, the cloned
-            Unity-AI-Hub toolkit root, and write access to
+            unity-open-mcp toolkit root, and write access to
             <code>Packages/manifest.json</code>. The first three
             checks must pass before you can continue to Step 3.
           </p>
@@ -1505,7 +1505,7 @@
             {:else}
               <div class="wiz-block wiz-block-error" role="alert">
                 <strong>Node.js {nodeProbe.requiredMajor}+ is required</strong>
-                to run <code>unity-agent-mcp</code>.
+                to run <code>unity-open-mcp</code>.
                 {#if nodeProbe.version}
                   Detected <strong>{nodeProbe.version}</strong>.
                 {:else}
@@ -1530,7 +1530,7 @@
                 id="wiz-toolkit-root"
                 type="text"
                 class="wiz-input"
-                placeholder="/Users/you/Unity-AI-Hub"
+                placeholder="/Users/you/unity-open-mcp"
                 value={toolkitRoot}
                 oninput={(e) => onToolkitRootInput((e.currentTarget as HTMLInputElement).value)}
               />
@@ -1611,7 +1611,7 @@
                 id="wiz-mcp-override"
                 type="text"
                 class="wiz-input"
-                placeholder="/opt/builds/unity-agent-mcp/index.js"
+                placeholder="/opt/builds/unity-open-mcp/index.js"
                 value={mcpIndexOverride}
                 oninput={(e) => (mcpIndexOverride = (e.currentTarget as HTMLInputElement).value)}
               />
@@ -1630,7 +1630,7 @@
             <code>Packages/manifest.json</code>. The diff preview
             below is live — it re-computes whenever you change a
             toggle, version pin, or custom URL. When the project is
-            the demo project bundled inside the Unity-AI-Hub repo
+            the demo project bundled inside the unity-open-mcp repo
             itself, the wizard detects this and uses a local
             <code>file:</code> path instead of a remote git URL —
             no network fetch required. An upgrade (existing entry
@@ -1642,12 +1642,12 @@
           <div class="wiz-field">
             <label class="wiz-toggle">
               <input type="checkbox" bind:checked={installBridge} />
-              <span><strong>Install Unity Agent Bridge</strong> — required for live MCP tooling</span>
+              <span><strong>Install Unity Open MCP Bridge</strong> — required for live MCP tooling</span>
             </label>
             <label class="wiz-toggle">
               <input type="checkbox" bind:checked={installVerify} />
               <span>
-                <strong>Install Unity Agent Verify</strong> —
+                <strong>Install Unity Open MCP Verify</strong> —
                 <small>Scoped health checks for AI gates — not the full Unity Scanner window.</small>
               </span>
             </label>
@@ -1684,7 +1684,7 @@
                 id="wiz-pkg-url"
                 type="text"
                 class="wiz-input"
-                placeholder="https://github.com/your-fork/Unity-AI-Hub.git"
+                placeholder="https://github.com/your-fork/unity-open-mcp.git"
                 value={packageCustomUrl}
                 oninput={(e) => (packageCustomUrl = (e.currentTarget as HTMLInputElement).value)}
               />
@@ -1804,12 +1804,12 @@
       {:else if currentStep === "step4"}
         <section class="wiz-section">
           <p class="wiz-desc">
-            Step 4 writes a <code>unity-agent</code> MCP server
+            Step 4 writes a <code>unity-open-mcp</code> MCP server
             entry to your client config. The wizard calls the
             Rust planner on every form-state change so the live
             preview matches exactly what the writer will emit:
-            <code>mcpServers.unity-agent</code> for Cursor /
-            Claude Desktop, <code>mcp.unity-agent</code> for
+            <code>mcpServers.unity-open-mcp</code> for Cursor /
+            Claude Desktop, <code>mcp.unity-open-mcp</code> for
             OpenCode, a <code>claude mcp add</code> command for
             Claude Code, and a copyable snippet for Manual.
             Unrelated MCP servers are merged through unchanged.
@@ -1928,7 +1928,7 @@
             <div class="wiz-block wiz-block-ok" role="status">
               <strong>Already up to date.</strong>
               Existing <code>{mcpWriteResult.targetPath}</code> already
-              matches the proposed <code>unity-agent</code> entry — no
+              matches the proposed <code>unity-open-mcp</code> entry — no
               write or backup was needed.
             </div>
           {/if}
@@ -1971,10 +1971,10 @@
         <section class="wiz-section">
           <p class="wiz-desc">
             Step 5 launches Unity with the bridge port pinned via
-            <code>-UNITY_AGENT_BRIDGE_PORT={step5BridgePort ?? bridgePortFromString(String(bridgePort))}</code>
+            <code>-UNITY_OPEN_MCP_BRIDGE_PORT={step5BridgePort ?? bridgePortFromString(String(bridgePort))}</code>
             and polls the bridge HTTP <code>/ping</code> endpoint
             for up to 120 s. The wizard never spawns a separate
-            <code>unity-agent-mcp</code> subprocess — the wizard
+            <code>unity-open-mcp</code> subprocess — the wizard
             keeps the verify path to a direct HTTP GET. The
             Done screen re-runs detection on entry and pairs the
             live snapshot with this step's bridge result.
@@ -2194,7 +2194,7 @@
             <span class="wiz-label">Skill copy</span>
             <p class="wiz-desc">
               On Done, the wizard copies
-              <code>{toolkitRoot || "<toolkit>"}/skills/unity-agent/SKILL.md</code>
+              <code>{toolkitRoot || "<toolkit>"}/skills/unity-open-mcp/SKILL.md</code>
               into the project's Claude-compatible skill folder, and
               {#if isOpencodeClient(mcpClient)}
                 (because OpenCode was selected) the OpenCode mirror too.

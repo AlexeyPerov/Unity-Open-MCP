@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using NUnit.Framework;
-using UnityAgentVerify.Batch;
-using UnityAgentVerify.Cache;
+using UnityOpenMcpVerify.Batch;
+using UnityOpenMcpVerify.Cache;
 
-namespace UnityAgentVerify.Tests
+namespace UnityOpenMcpVerify.Tests
 {
     [TestFixture]
     public class VerifyCacheServiceTests

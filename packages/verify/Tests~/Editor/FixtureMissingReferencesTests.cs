@@ -5,7 +5,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.TestTools;
 
-namespace UnityAgentVerify.Tests
+namespace UnityOpenMcpVerify.Tests
 {
     [TestFixture]
     public class FixtureMissingReferencesTests

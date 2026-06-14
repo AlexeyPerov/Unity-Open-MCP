@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public static class MainThreadDispatcher
     {

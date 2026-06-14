@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace UnityAgentVerify.Internals.AssetDatabase
+namespace UnityOpenMcpVerify.Internals.AssetDatabase
 {
     public static class PathFilterUtilities
     {

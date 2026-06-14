@@ -1,12 +1,12 @@
-# Unity Agent Verify — CI Template
+# Unity Open MCP Verify — CI Template
 #
-# Copy-paste source for running unity_agent_scan_all, unity_agent_baseline_create,
-# and unity_agent_regression_check in GitHub Actions without an open Unity Editor.
+# Copy-paste source for running unity_open_mcp_scan_all, unity_open_mcp_baseline_create,
+# and unity_open_mcp_regression_check in GitHub Actions without an open Unity Editor.
 #
 # All three tools invoke the same batch entry point headless:
 #
 #   Unity -batchmode -quit -projectPath <UNITY_PROJECT_PATH> \
-#     -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+#     -executeMethod UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run \
 #     -- <operation> [--flag value ...]
 #
 # Exit codes: 0 = pass, 1 = threshold exceeded / regression / error.
@@ -29,7 +29,7 @@
 # friction-heavy. Switch to (B) by uncommenting the hosted blocks.
 # ----------------------------------------------------------------------------
 
-name: unity-agent-verify
+name: unity-open-mcp-verify
 
 on:
   workflow_dispatch:
@@ -37,7 +37,7 @@ on:
     paths:
       - "Assets/**"
       - "Packages/**"
-      - "CI/unity-agent-baseline.json"
+      - "CI/unity-open-mcp-baseline.json"
 
 env:
   # --- Required for all batch operations ---
@@ -86,9 +86,9 @@ jobs:
             -nographics \
             -projectPath "$UNITY_PROJECT_PATH" \
             -logFile "$UNITY_LOG_PATH" \
-            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -executeMethod UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run \
             -- regression_check \
-               --baseline-path CI/unity-agent-baseline.json \
+               --baseline-path CI/unity-open-mcp-baseline.json \
                --regression-threshold 0 \
                --platform-profile desktop
           EXIT_CODE=$?
@@ -140,7 +140,7 @@ jobs:
             -nographics \
             -projectPath "$UNITY_PROJECT_PATH" \
             -logFile "$UNITY_LOG_PATH" \
-            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -executeMethod UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run \
             -- scan_all \
                --fail-on-severity error \
                --platform-profile desktop \
@@ -181,7 +181,7 @@ jobs:
   # ===========================================================================
   # Job 3: Baseline update — refresh the committed baseline file.
   # Runs manually (workflow_dispatch) or on pushes to the default branch.
-  # Commits CI/unity-agent-baseline.json back to the repo.
+  # Commits CI/unity-open-mcp-baseline.json back to the repo.
   # ===========================================================================
   baseline-update:
     name: Update baseline
@@ -208,9 +208,9 @@ jobs:
             -nographics \
             -projectPath "$UNITY_PROJECT_PATH" \
             -logFile "$UNITY_LOG_PATH" \
-            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -executeMethod UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run \
             -- baseline_create \
-               --baseline-path CI/unity-agent-baseline.json \
+               --baseline-path CI/unity-open-mcp-baseline.json \
                --platform-profile desktop
           EXIT_CODE=$?
           echo "::endgroup::"
@@ -223,15 +223,15 @@ jobs:
             exit 1
           fi
 
-          echo "✓ Baseline written to CI/unity-agent-baseline.json"
+          echo "✓ Baseline written to CI/unity-open-mcp-baseline.json"
 
       - name: Commit baseline
         working-directory: ${{ env.UNITY_PROJECT_PATH }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CI/unity-agent-baseline.json
-          git commit -m "chore: update unity-agent baseline [skip ci]" || echo "No changes to commit."
+          git add CI/unity-open-mcp-baseline.json
+          git commit -m "chore: update unity-open-mcp baseline [skip ci]" || echo "No changes to commit."
           git push
 
       - name: Upload Unity log on failure

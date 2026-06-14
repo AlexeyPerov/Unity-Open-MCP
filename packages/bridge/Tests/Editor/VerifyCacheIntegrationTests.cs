@@ -1,9 +1,9 @@
 using System;
 using NUnit.Framework;
-using UnityAgentVerify;
-using UnityAgentVerify.Cache;
+using UnityOpenMcpVerify;
+using UnityOpenMcpVerify.Cache;
 
-namespace UnityAgentBridge.Tests
+namespace UnityOpenMcpBridge.Tests
 {
     public class VerifyCacheIntegrationTests
     {

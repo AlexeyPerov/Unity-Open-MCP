@@ -4,7 +4,7 @@ using System;
 using UnityEditor;
 using UnityEngine;
 
-namespace UnityAgentVerify.Internals.AssetDatabase
+namespace UnityOpenMcpVerify.Internals.AssetDatabase
 {
     public static class AssetTypeUtilities
     {

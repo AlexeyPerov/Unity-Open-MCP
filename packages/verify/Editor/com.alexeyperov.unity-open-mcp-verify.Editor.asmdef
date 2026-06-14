@@ -1,6 +1,6 @@
 {
-  "name": "com.alexeyperov.unity-agent-verify.Editor",
-  "rootNamespace": "UnityAgentVerify",
+  "name": "com.alexeyperov.unity-open-mcp-verify.Editor",
+  "rootNamespace": "UnityOpenMcpVerify",
   "references": [],
   "includePlatforms": [
     "Editor"

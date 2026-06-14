@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using UnityAgentVerify;
+using UnityOpenMcpVerify;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public class CheckpointStoreEntry
     {

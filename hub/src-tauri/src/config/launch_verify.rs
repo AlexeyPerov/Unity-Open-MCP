@@ -3,8 +3,8 @@
 //! The Step 5 surface owns **two** Tauri commands:
 //!
 //! - [`launch_for_verify`] — spawns Unity for the project with
-//!   the bridge port pinned via the `-UNITY_AGENT_BRIDGE_PORT`
-//!   command-line argument **and** the `UNITY_AGENT_BRIDGE_PORT`
+//!   the bridge port pinned via the `-UNITY_OPEN_MCP_BRIDGE_PORT`
+//!   command-line argument **and** the `UNITY_OPEN_MCP_BRIDGE_PORT`
 //!   env var (the bridge package reads the env var; the CLI
 //!   form is here for parity with `packages/bridge.md` §HTTP
 //!   API). This is the same launch flow as the regular
@@ -18,8 +18,8 @@
 //!   (`timeout`, `connectionRefused`, `unreachable`, `httpError`,
 //!   `malformedBody`).
 //!
-//! Step 5 **never** spawns a separate `unity-agent-mcp`
-//! subprocess to call `unity_agent_ping` (per `questions-4.md`
+//! Step 5 **never** spawns a separate `unity-open-mcp`
+//! subprocess to call `unity_open_mcp_ping` (per `questions-4.md`
 //! Q8 = B) — the wizard goes straight to the bridge HTTP
 //! endpoint.
 
@@ -129,7 +129,7 @@ impl BridgePingResult {
 pub struct LaunchForVerifyParams {
     pub project_id: String,
     /// Bridge port to pass to Unity via
-    /// `-UNITY_AGENT_BRIDGE_PORT` / `UNITY_AGENT_BRIDGE_PORT`.
+    /// `-UNITY_OPEN_MCP_BRIDGE_PORT` / `UNITY_OPEN_MCP_BRIDGE_PORT`.
     /// The wizard always uses the port the user picked in Step
     /// 4 — `DEFAULT_BRIDGE_PORT` is just a default the caller
     /// picks when the user did not override.
@@ -149,8 +149,8 @@ fn default_port() -> u16 {
 /// `launch_project` uses (install resolution, version refresh,
 /// env-var layering, `last_launch_pid` bookkeeping) with one
 /// addition: the bridge port is appended to the launch args
-/// (`-UNITY_AGENT_BRIDGE_PORT=<port>`) and the same value is
-/// set as the `UNITY_AGENT_BRIDGE_PORT` env var so the bridge
+/// (`-UNITY_OPEN_MCP_BRIDGE_PORT=<port>`) and the same value is
+/// set as the `UNITY_OPEN_MCP_BRIDGE_PORT` env var so the bridge
 /// package reads it on Editor startup.
 #[tauri::command]
 pub fn launch_for_verify(
@@ -410,12 +410,12 @@ fn launch_for_verify_inner(
     // `packages/bridge.md` §HTTP API) and as an env var (the
     // bridge package reads the env var first). The arg is
     // additive — we never strip user-provided args above.
-    let port_arg = format!("-UNITY_AGENT_BRIDGE_PORT={}", params.bridge_port);
+    let port_arg = format!("-UNITY_OPEN_MCP_BRIDGE_PORT={}", params.bridge_port);
     args.push(port_arg.clone());
     let mut command = std::process::Command::new(&executable);
     command.args(&args);
     env_vars::apply_to_command(&mut command, &project.env_vars);
-    command.env("UNITY_AGENT_BRIDGE_PORT", params.bridge_port.to_string());
+    command.env("UNITY_OPEN_MCP_BRIDGE_PORT", params.bridge_port.to_string());
     let child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -632,7 +632,7 @@ fn http_get_with_timeout(
         )));
     }
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nAccept: application/json\r\nUser-Agent: unity-ai-hub/0.1 (Step5-verify)\r\n\r\n",
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nAccept: application/json\r\nUser-Agent: unity-open-mcp/0.1 (Step5-verify)\r\n\r\n",
         path = path
     );
     if let Err(e) = stream.write_all(request.as_bytes()) {

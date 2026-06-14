@@ -11,10 +11,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
-using UnityAgentBridge.UI.Controls;
-using UnityAgentVerify;
+using UnityOpenMcpBridge.UI.Controls;
+using UnityOpenMcpVerify;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public enum BridgeWindowTab
     {
@@ -25,10 +25,10 @@ namespace UnityAgentBridge
         Settings
     }
 
-    public class UnityAgentBridgeWindow : EditorWindow
+    public class UnityOpenMcpBridgeWindow : EditorWindow
     {
-        const string MenuPath = "Tools/Unity Agent Bridge";
-        const string SelectedTabPref = "UAB_SelectedTab";
+        const string MenuPath = "Tools/Unity Open MCP Bridge";
+        const string SelectedTabPref = "UOMCB_SelectedTab";
         const string BindAddress = "127.0.0.1";
 
         static readonly HttpClient SharedHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
@@ -36,7 +36,7 @@ namespace UnityAgentBridge
         [MenuItem(MenuPath)]
         public static void Launch()
         {
-            var window = GetWindow<UnityAgentBridgeWindow>("Unity Agent Bridge");
+            var window = GetWindow<UnityOpenMcpBridgeWindow>("Unity Open MCP Bridge");
             window.minSize = new Vector2(520, 360);
         }
 
@@ -395,7 +395,7 @@ namespace UnityAgentBridge
             EditorGUILayout.HelpBox(
                 "Unified list of dispatchable tools in this Editor session. " +
                 "Untoggle a tool to block its HTTP dispatch path with an explicit `tool_disabled` error. " +
-                "Disable state persists in `.unity-agent/settings.json` and survives domain reload.\n" +
+                "Disable state persists in `.unity-open-mcp/settings.json` and survives domain reload.\n" +
                 TokenEstimateNote,
                 MessageType.None);
 
@@ -648,7 +648,7 @@ namespace UnityAgentBridge
             EditorGUILayout.HelpBox(
                 "Sets the project-wide default for the gate policy. " +
                 "Applies to all mutating tool calls that do not supply an explicit request-level `gate`. " +
-                "Persists in `.unity-agent/settings.json`.",
+                "Persists in `.unity-open-mcp/settings.json`.",
                 MessageType.None);
 
             var current = BridgeGateDefaultPolicy.GetDefault();
@@ -808,7 +808,7 @@ namespace UnityAgentBridge
 
             EditorGUILayout.HelpBox(
                 "Session-scoped ring buffer (capacity " + BridgeGateRunHistory.Capacity + "). " +
-                "Populated by gate runs and by the `unity_agent_checkpoint_create` tool. " +
+                "Populated by gate runs and by the `unity_open_mcp_checkpoint_create` tool. " +
                 "In-memory only — no on-disk persistence in v1.",
                 MessageType.None);
 
@@ -1259,7 +1259,7 @@ namespace UnityAgentBridge
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Batch workflows", EditorStyles.miniBoldLabel);
             EditorGUILayout.HelpBox(
-                "Batch scan / baseline / regression workflows run via `unity-agent-mcp` " +
+                "Batch scan / baseline / regression workflows run via `unity-open-mcp` " +
                 "fallback (or headless Editor CLI). The full batch panel — entry points, filters, " +
                 "regression threshold controls — is not part of v1 and will land in a future update. " +
                 "Use the Gate tab's Manual validate for ad-hoc scoped scans in the meantime.",
@@ -1269,7 +1269,7 @@ namespace UnityAgentBridge
         // ---------- Settings tab (M4.5-11) ----------
 
         const string SettingsPersistenceNote =
-            "Project-level runtime settings persist in `.unity-agent/settings.json` at the project root. " +
+            "Project-level runtime settings persist in `.unity-open-mcp/settings.json` at the project root. " +
             "Changes are saved immediately. v1 surface only — no Project Settings provider.";
 
         void DrawSettingsTab()
@@ -1367,7 +1367,7 @@ namespace UnityAgentBridge
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.HelpBox(
-                "v1 schema (`.unity-agent/settings.json`):\n" +
+                "v1 schema (`.unity-open-mcp/settings.json`):\n" +
                 "  - disabledTools: string[]\n" +
                 "  - defaultGateMode: \"enforce\" | \"warn\" | \"off\"\n" +
                 "  - autoStart: bool\n" +

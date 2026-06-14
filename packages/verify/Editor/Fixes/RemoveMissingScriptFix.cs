@@ -2,7 +2,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace UnityAgentVerify.Fixes
+namespace UnityOpenMcpVerify.Fixes
 {
     public class RemoveMissingScriptFix : IFixProvider
     {

@@ -2,7 +2,7 @@ using System;
 using System.Reflection;
 using System.ComponentModel;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public class BridgeToolEntry
     {

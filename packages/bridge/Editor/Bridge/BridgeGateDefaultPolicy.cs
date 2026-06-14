@@ -2,7 +2,7 @@
 //
 // Per architecture/gate-policy.md precedence contract:
 //   1. Request-level `gate` value in the incoming tool body (if present)
-//   2. Project default from `.unity-agent/settings.json` (this class)
+//   2. Project default from `.unity-open-mcp/settings.json` (this class)
 //   3. Tool-level default (`[BridgeTool(..., Gate=...)]` attribute) or "enforce"
 //
 // The value is the source-of-truth project default; per-request `gate` and tool-attribute
@@ -11,7 +11,7 @@
 using System;
 using UnityEngine;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public static class BridgeGateDefaultPolicy
     {
@@ -55,7 +55,7 @@ namespace UnityAgentBridge
 
         public static string DescribePrecedence()
         {
-            return "Precedence: request body `gate` > project default (.unity-agent/settings.json) > tool-level default.";
+            return "Precedence: request body `gate` > project default (.unity-open-mcp/settings.json) > tool-level default.";
         }
     }
 }

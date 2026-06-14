@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEditor;
 
-namespace UnityAgentBridge.MetaTools
+namespace UnityOpenMcpBridge.MetaTools
 {
     public static class ExecuteMenuTool
     {

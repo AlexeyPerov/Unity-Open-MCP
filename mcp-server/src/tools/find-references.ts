@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const findReferences: Tool = {
-  name: "unity_agent_find_references",
+  name: "unity_open_mcp_find_references",
   description:
     "Reverse dependency lookup for assets. Returns all assets that reference the given asset path or GUID.",
   inputSchema: {

@@ -5,7 +5,7 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 
-namespace UnityAgentBridge.MetaTools
+namespace UnityOpenMcpBridge.MetaTools
 {
     static class OutputSerializer
     {

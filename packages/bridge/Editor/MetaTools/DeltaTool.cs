@@ -1,7 +1,7 @@
 using System.Text;
-using UnityAgentVerify;
+using UnityOpenMcpVerify;
 
-namespace UnityAgentBridge.MetaTools
+namespace UnityOpenMcpBridge.MetaTools
 {
     public static class DeltaTool
     {

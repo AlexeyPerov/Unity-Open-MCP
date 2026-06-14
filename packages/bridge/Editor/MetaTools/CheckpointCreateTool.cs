@@ -1,9 +1,9 @@
 using System;
 using System.Linq;
 using System.Text;
-using UnityAgentVerify;
+using UnityOpenMcpVerify;
 
-namespace UnityAgentBridge.MetaTools
+namespace UnityOpenMcpBridge.MetaTools
 {
     public static class CheckpointCreateTool
     {

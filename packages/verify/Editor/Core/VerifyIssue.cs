@@ -1,4 +1,4 @@
-namespace UnityAgentVerify
+namespace UnityOpenMcpVerify
 {
     public enum VerifySeverity
     {

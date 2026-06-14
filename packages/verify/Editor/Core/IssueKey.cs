@@ -1,6 +1,6 @@
 using System;
 
-namespace UnityAgentVerify
+namespace UnityOpenMcpVerify
 {
     public static class IssueKey
     {

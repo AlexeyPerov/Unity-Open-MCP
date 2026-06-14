@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const executeCsharp: Tool = {
-  name: "unity_agent_execute_csharp",
+  name: "unity_open_mcp_execute_csharp",
   description:
     "Compile and run a C# snippet in the Editor (Roslyn). Primary escape hatch — covers most Editor APIs without typed tools.",
   inputSchema: {

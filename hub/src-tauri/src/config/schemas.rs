@@ -14,7 +14,7 @@ pub struct Settings {
     #[serde(default = "default_diagnostics_settings")]
     pub diagnostics: DiagnosticsSettings,
     /// M4: AI toolkit root + advanced MCP override (Q2=B). The wizard
-    /// Step 2 collects the cloned Unity-AI-Hub monorepo path and
+    /// Step 2 collects the cloned unity-open-mcp monorepo path and
     /// persists it here; the MCP path, package URLs, and skill copy
     /// sources are all derived from `aiToolkit.rootPath`. The
     /// advanced override is the per-M4 Step 4 escape hatch for a
@@ -42,7 +42,7 @@ fn default_theme() -> String {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiToolkitSettings {
-    /// Absolute path to the cloned Unity-AI-Hub monorepo root.
+    /// Absolute path to the cloned unity-open-mcp monorepo root.
     /// Empty when the wizard has not yet collected a valid root;
     /// downstream steps (3/4) hard-block until this is set.
     #[serde(default)]

@@ -1,6 +1,6 @@
-# Unity Agent Verify — CI Templates
+# Unity Open MCP Verify — CI Templates
 
-Copy-paste GitHub Actions workflow for running Unity Agent Verify **batch** scans, baselines, and regression checks without an open Unity Editor.
+Copy-paste GitHub Actions workflow for running Unity Open MCP Verify **batch** scans, baselines, and regression checks without an open Unity Editor.
 
 See also: the verify package and MCP server documentation under `packages/verify/` and `mcp-server/`.
 
@@ -8,14 +8,14 @@ See also: the verify package and MCP server documentation under `packages/verify
 
 | File | Purpose |
 |---|---|
-| `unity-agent-verify.yml` | Reusable workflow template: `scan_all`, `baseline_create`, `regression_check` jobs. |
+| `unity-open-mcp-verify.yml` | Reusable workflow template: `scan_all`, `baseline_create`, `regression_check` jobs. |
 
 ## Quick start
 
-1. Copy `unity-agent-verify.yml` into your project repo's `.github/workflows/`.
+1. Copy `unity-open-mcp-verify.yml` into your project repo's `.github/workflows/`.
 2. Set `UNITY_PROJECT_PATH` to your Unity project root (if it's a subdirectory).
 3. Set `UNITY_PATH` to the Unity Editor executable on the runner.
-4. Commit a baseline at `CI/unity-agent-baseline.json` (run `baseline_create` once via `workflow_dispatch`).
+4. Commit a baseline at `CI/unity-open-mcp-baseline.json` (run `baseline_create` once via `workflow_dispatch`).
 5. PRs will now run regression checks and full scans automatically.
 
 ## Required environment
@@ -35,7 +35,7 @@ All three batch tools invoke the same headless entry point:
 ```bash
 Unity -batchmode -quit -nographics \
   -projectPath "$UNITY_PROJECT_PATH" \
-  -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+  -executeMethod UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run \
   -- <operation> [--flag value ...]
 ```
 
@@ -45,9 +45,9 @@ Unity -batchmode -quit -nographics \
 | `baseline_create` | `--baseline-path`, `--platform-profile` | `0` success / `1` failure |
 | `regression_check` | `--baseline-path`, `--regression-threshold`, `--platform-profile` | `0` no regression / `1` regression |
 
-CI shells gate on exit status — no JSON parsing required. The JSON report (machine-readable, written between `---UNITY_AGENT_VERIFY_JSON_BEGIN---` / `---UNITY_AGENT_VERIFY_JSON_END---` markers in stdout) is available for deeper triage via `--output-path`.
+CI shells gate on exit status — no JSON parsing required. The JSON report (machine-readable, written between `---UNITY_OPEN_MCP_VERIFY_JSON_BEGIN---` / `---UNITY_OPEN_MCP_VERIFY_JSON_END---` markers in stdout) is available for deeper triage via `--output-path`.
 
-The verify package (`com.alexeyperov.unity-agent-verify`) must be installed in the target project for the `-executeMethod` call to resolve.
+The verify package (`com.alexeyperov.unity-open-mcp-verify`) must be installed in the target project for the `-executeMethod` call to resolve.
 
 ## Prerequisite: install the verify package
 
@@ -55,7 +55,7 @@ Add to your project's `Packages/manifest.json`:
 
 ```json
 {
-  "com.alexeyperov.unity-agent-verify": "https://github.com/AlexeyPerov/Unity-AI-Hub.git?path=packages/verify#verify-v1.0.0"
+  "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v1.0.0"
 }
 ```
 
@@ -126,7 +126,7 @@ Use **Strategy A** (self-hosted) as the default. Use **Strategy B** (hosted) whe
 
 ## Baseline workflow
 
-The committed baseline file (`CI/unity-agent-baseline.json`) is the regression reference. The lifecycle is:
+The committed baseline file (`CI/unity-open-mcp-baseline.json`) is the regression reference. The lifecycle is:
 
 1. **Initial baseline:** trigger `baseline-update` via `workflow_dispatch` after installing verify and confirming a clean project state.
 2. **PR checks:** `regression-check` runs on every PR and fails when new errors exceed `--regression-threshold`.

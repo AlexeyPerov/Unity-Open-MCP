@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 
-namespace UnityAgentBridge.MetaTools
+namespace UnityOpenMcpBridge.MetaTools
 {
     public static class InvokeMethodTool
     {
@@ -25,7 +25,7 @@ namespace UnityAgentBridge.MetaTools
                 var hint = assemblyName != null ? $" in assembly '{assemblyName}'" : "";
                 return ToolDispatchResult.Fail("type_not_found", $"Type '{typeName}' not found{hint}. " +
                     "Use fully qualified name including namespace. " +
-                    "Use 'unity_agent_find_members' to discover available types.");
+                    "Use 'unity_open_mcp_find_members' to discover available types.");
             }
 
             var bindingFlags = BindingFlags.Public | BindingFlags.FlattenHierarchy;

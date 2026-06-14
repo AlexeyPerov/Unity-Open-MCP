@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const findMembers: Tool = {
-  name: "unity_agent_find_members",
+  name: "unity_open_mcp_find_members",
   description:
     "Discover types, methods, and properties for agent planning (reduces blind execute calls).",
   inputSchema: {

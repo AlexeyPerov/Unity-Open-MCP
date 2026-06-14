@@ -1,20 +1,20 @@
 {
-  "name": "com.alexeyperov.unity-agent-bridge",
-  "displayName": "Unity Agent Bridge",
+  "name": "com.alexeyperov.unity-open-mcp-bridge",
+  "displayName": "Unity Open MCP Bridge",
   "version": "0.1.0",
   "unity": "6000.0",
-  "description": "Live HTTP connector for Unity Agent MCP. Exposes meta-tool dispatch and GatePolicy over localhost.",
+  "description": "Live HTTP connector for Unity Open MCP. Exposes meta-tool dispatch and GatePolicy over localhost.",
   "author": {
     "name": "Alexey Perov",
-    "url": "https://github.com/AlexeyPerov/Unity-AI-Hub"
+    "url": "https://github.com/AlexeyPerov/unity-open-mcp"
   },
   "keywords": [
-    "unity-agent",
+    "unity-open-mcp",
     "mcp",
     "bridge",
     "ai"
   ],
   "dependencies": {
-    "com.alexeyperov.unity-agent-verify": "0.1.0"
+    "com.alexeyperov.unity-open-mcp-verify": "0.1.0"
   }
 }

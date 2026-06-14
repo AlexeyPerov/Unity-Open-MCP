@@ -7,15 +7,15 @@ using System.Text;
 using System.Threading;
 using UnityEditor;
 using UnityEngine;
-using UnityAgentBridge.MetaTools;
+using UnityOpenMcpBridge.MetaTools;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     [InitializeOnLoad]
     public static class BridgeHttpServer
     {
-        const string PortEnvVar = "UNITY_AGENT_BRIDGE_PORT";
-        const string PortArgPrefix = "-UNITY_AGENT_BRIDGE_PORT=";
+        const string PortEnvVar = "UNITY_OPEN_MCP_BRIDGE_PORT";
+        const string PortArgPrefix = "-UNITY_OPEN_MCP_BRIDGE_PORT=";
         const int DefaultPort = 19120;
         const string BindAddress = "127.0.0.1";
         const int DefaultTimeoutMs = 30000;
@@ -24,33 +24,33 @@ namespace UnityAgentBridge
 
         static readonly HashSet<string> KnownTools = new()
         {
-            "unity_agent_execute_csharp",
-            "unity_agent_invoke_method",
-            "unity_agent_execute_menu",
-            "unity_agent_find_members",
-            "unity_agent_validate_edit",
-            "unity_agent_checkpoint_create",
-            "unity_agent_delta",
-            "unity_agent_find_references",
-            "unity_agent_scan_paths",
-            "unity_agent_apply_fix"
+            "unity_open_mcp_execute_csharp",
+            "unity_open_mcp_invoke_method",
+            "unity_open_mcp_execute_menu",
+            "unity_open_mcp_find_members",
+            "unity_open_mcp_validate_edit",
+            "unity_open_mcp_checkpoint_create",
+            "unity_open_mcp_delta",
+            "unity_open_mcp_find_references",
+            "unity_open_mcp_scan_paths",
+            "unity_open_mcp_apply_fix"
         };
 
         static readonly HashSet<string> DirectResponseTools = new()
         {
-            "unity_agent_validate_edit",
-            "unity_agent_checkpoint_create",
-            "unity_agent_delta",
-            "unity_agent_find_references",
-            "unity_agent_scan_paths"
+            "unity_open_mcp_validate_edit",
+            "unity_open_mcp_checkpoint_create",
+            "unity_open_mcp_delta",
+            "unity_open_mcp_find_references",
+            "unity_open_mcp_scan_paths"
         };
 
         static readonly HashSet<string> MutatingTools = new()
         {
-            "unity_agent_execute_csharp",
-            "unity_agent_invoke_method",
-            "unity_agent_execute_menu",
-            "unity_agent_apply_fix"
+            "unity_open_mcp_execute_csharp",
+            "unity_open_mcp_invoke_method",
+            "unity_open_mcp_execute_menu",
+            "unity_open_mcp_apply_fix"
         };
 
         static HttpListener _listener;
@@ -116,16 +116,16 @@ namespace UnityAgentBridge
 
                 _listenerThread = new Thread(ListenLoop)
                 {
-                    Name = "Unity Agent Bridge HTTP Listener",
+                    Name = "Unity Open MCP Bridge HTTP Listener",
                     IsBackground = true
                 };
                 _listenerThread.Start();
 
-                UnityEngine.Debug.Log($"[Unity Agent Bridge] Listening on http://{BindAddress}:{_port}/");
+                UnityEngine.Debug.Log($"[Unity Open MCP Bridge] Listening on http://{BindAddress}:{_port}/");
             }
             catch (System.Exception e)
             {
-                UnityEngine.Debug.LogError($"[Unity Agent Bridge] Failed to start listener: {e.Message}");
+                UnityEngine.Debug.LogError($"[Unity Open MCP Bridge] Failed to start listener: {e.Message}");
                 _running = false;
                 BridgeSession.SetConnected(false);
             }
@@ -143,7 +143,7 @@ namespace UnityAgentBridge
             }
             catch (System.Exception e)
             {
-                UnityEngine.Debug.LogWarning($"[Unity Agent Bridge] Error stopping listener: {e.Message}");
+                UnityEngine.Debug.LogWarning($"[Unity Open MCP Bridge] Error stopping listener: {e.Message}");
             }
 
             _listener = null;
@@ -155,7 +155,7 @@ namespace UnityAgentBridge
             catch { }
 
             _listenerThread = null;
-            UnityEngine.Debug.Log("[Unity Agent Bridge] Stopped.");
+            UnityEngine.Debug.Log("[Unity Open MCP Bridge] Stopped.");
         }
 
         static void ListenLoop()
@@ -172,7 +172,7 @@ namespace UnityAgentBridge
                 catch (System.Exception e)
                 {
                     if (_running)
-                        UnityEngine.Debug.LogError($"[Unity Agent Bridge] Listener error: {e.Message}");
+                        UnityEngine.Debug.LogError($"[Unity Open MCP Bridge] Listener error: {e.Message}");
                 }
             }
         }
@@ -393,7 +393,7 @@ namespace UnityAgentBridge
                 pathsHint = JsonBody.GetStringArray(body, "paths_hint");
                 if (pathsHint == null || pathsHint.Length == 0)
                 {
-                    if (toolName == "unity_agent_apply_fix")
+                    if (toolName == "unity_open_mcp_apply_fix")
                     {
                         var issueId = JsonBody.GetString(body, "issue_id");
                         pathsHint = PathsFromIssueId(issueId);
@@ -401,7 +401,7 @@ namespace UnityAgentBridge
 
                     if (pathsHint == null || pathsHint.Length == 0)
                     {
-                        bool skipPathsHint = toolName == "unity_agent_execute_menu"
+                        bool skipPathsHint = toolName == "unity_open_mcp_execute_menu"
                             && ExecuteMenuTool.IsReadOnlyMenu(JsonBody.GetString(body, "menu_path"));
 
                         if (!skipPathsHint)
@@ -548,16 +548,16 @@ namespace UnityAgentBridge
         {
             return toolName switch
             {
-                "unity_agent_execute_csharp" => ExecuteCSharpTool.Execute(body),
-                "unity_agent_invoke_method" => InvokeMethodTool.Execute(body),
-                "unity_agent_execute_menu" => ExecuteMenuTool.Execute(body),
-                "unity_agent_find_members" => FindMembersTool.Execute(body),
-                "unity_agent_validate_edit" => ValidateEditTool.Execute(body),
-                "unity_agent_checkpoint_create" => CheckpointCreateTool.Execute(body),
-                "unity_agent_delta" => DeltaTool.Execute(body),
-                "unity_agent_find_references" => FindReferencesTool.Execute(body),
-                "unity_agent_scan_paths" => ScanPathsTool.Execute(body),
-                "unity_agent_apply_fix" => ApplyFixTool.Execute(body),
+                "unity_open_mcp_execute_csharp" => ExecuteCSharpTool.Execute(body),
+                "unity_open_mcp_invoke_method" => InvokeMethodTool.Execute(body),
+                "unity_open_mcp_execute_menu" => ExecuteMenuTool.Execute(body),
+                "unity_open_mcp_find_members" => FindMembersTool.Execute(body),
+                "unity_open_mcp_validate_edit" => ValidateEditTool.Execute(body),
+                "unity_open_mcp_checkpoint_create" => CheckpointCreateTool.Execute(body),
+                "unity_open_mcp_delta" => DeltaTool.Execute(body),
+                "unity_open_mcp_find_references" => FindReferencesTool.Execute(body),
+                "unity_open_mcp_scan_paths" => ScanPathsTool.Execute(body),
+                "unity_open_mcp_apply_fix" => ApplyFixTool.Execute(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };
@@ -632,7 +632,7 @@ namespace UnityAgentBridge
         {
             // Precedence per architecture/gate-policy.md:
             //   1. Request body `gate` value
-            //   2. Project default from `.unity-agent/settings.json`
+            //   2. Project default from `.unity-open-mcp/settings.json`
             //   3. Tool-level default (caller-provided)
             if (string.IsNullOrEmpty(body)) return BridgeGateDefaultPolicy.GetDefault();
 

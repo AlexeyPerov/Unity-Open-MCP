@@ -2,7 +2,7 @@
 
 using System.Collections.Generic;
 
-namespace UnityAgentVerify.Rules.MissingReferences
+namespace UnityOpenMcpVerify.Rules.MissingReferences
 {
     public static class IssueMapper
     {

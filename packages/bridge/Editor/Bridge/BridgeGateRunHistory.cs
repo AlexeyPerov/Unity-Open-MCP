@@ -5,12 +5,12 @@
 // Also exposes the latest entry for quick context.
 //
 // This data is **session-scoped and in-memory** — it is intentionally not persisted to
-// `.unity-agent/settings.json`. v1 follows the same retention model as the activity log
+// `.unity-open-mcp/settings.json`. v1 follows the same retention model as the activity log
 // (Q13 — in-memory ring buffer only). Capacity is small to keep allocation predictable.
 using System;
 using System.Collections.Generic;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public class BridgeGateRunRecord
     {

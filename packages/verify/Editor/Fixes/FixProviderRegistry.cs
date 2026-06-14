@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 
-namespace UnityAgentVerify.Fixes
+namespace UnityOpenMcpVerify.Fixes
 {
     public class FixDescription
     {

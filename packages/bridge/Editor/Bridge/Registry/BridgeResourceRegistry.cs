@@ -4,7 +4,7 @@ using System.Linq;
 using System.Reflection;
 using UnityEngine;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public static class BridgeResourceRegistry
     {

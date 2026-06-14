@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using UnityEngine;
 
-namespace UnityAgentVerify.Batch
+namespace UnityOpenMcpVerify.Batch
 {
     public static class BaselineStore
     {
@@ -55,7 +55,7 @@ namespace UnityAgentVerify.Batch
                 throw new InvalidOperationException(
                     $"Baseline schema version mismatch: expected {BaselineSchema.Version}, " +
                     $"got {baseline.schemaVersion} in '{path}'. " +
-                    "Regenerate the baseline with unity_agent_baseline_create.");
+                    "Regenerate the baseline with unity_open_mcp_baseline_create.");
 
             return baseline;
         }

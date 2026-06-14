@@ -2,7 +2,7 @@
 
 using System.Collections.Generic;
 
-namespace UnityAgentVerify.Rules.ScenePrefabHealth
+namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
 {
     public static class IssueMapper
     {

@@ -1,12 +1,12 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using UnityAgentVerify;
-using UnityAgentVerify.Cache;
-using UnityAgentVerify.References;
+using UnityOpenMcpVerify;
+using UnityOpenMcpVerify.Cache;
+using UnityOpenMcpVerify.References;
 using UnityEditor;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public static class VerifyGateAdapter
     {

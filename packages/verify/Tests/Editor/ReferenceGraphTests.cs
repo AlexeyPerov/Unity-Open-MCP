@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using NUnit.Framework;
-using UnityAgentVerify.References;
+using UnityOpenMcpVerify.References;
 using UnityEditor;
 using UnityEngine;
 
-namespace UnityAgentVerify.Tests
+namespace UnityOpenMcpVerify.Tests
 {
     public class ReferenceGraphTests
     {

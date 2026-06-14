@@ -1,8 +1,8 @@
 {
-  "name": "com.alexeyperov.unity-agent-bridge.Editor",
-  "rootNamespace": "UnityAgentBridge",
+  "name": "com.alexeyperov.unity-open-mcp-verify.Editor.Tests",
+  "rootNamespace": "UnityOpenMcpVerify.Tests",
   "references": [
-    "com.alexeyperov.unity-agent-verify.Editor"
+    "com.alexeyperov.unity-open-mcp-verify.Editor"
   ],
   "includePlatforms": [
     "Editor"

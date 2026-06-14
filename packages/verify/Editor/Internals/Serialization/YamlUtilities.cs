@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
-namespace UnityAgentVerify.Internals.Serialization
+namespace UnityOpenMcpVerify.Internals.Serialization
 {
     public static class YamlUtilities
     {

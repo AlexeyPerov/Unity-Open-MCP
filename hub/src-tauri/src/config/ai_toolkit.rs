@@ -1,5 +1,5 @@
 //! M4 — AI toolkit root validation, Node check, and derived path
-//! contract. The wizard Step 2 collects the cloned Unity-AI-Hub
+//! contract. The wizard Step 2 collects the cloned unity-open-mcp
 //! monorepo root and persists it to `settings.aiToolkit.rootPath`;
 //! every downstream step (3/4) derives its paths from that root.
 //! See `specs/hub/hub-wizard.md` §AI toolkit root and
@@ -19,14 +19,14 @@ use serde::{Deserialize, Serialize};
 /// | `mcp-server/package.json` | MCP server manifest |
 /// | `packages/bridge/` | Bridge package source |
 /// | `packages/verify/` | Verify package source |
-/// | `skills/unity-agent/SKILL.md` | Core skill (Done copy source) |
+/// | `skills/unity-open-mcp/SKILL.md` | Core skill (Done copy source) |
 /// | `mcp-server/dist/index.js` | Built MCP entry (remediation: `npm run build`) |
 pub const TOOLKIT_FINGERPRINTS: &[(&str, ToolkitFingerprintKind, bool)] = &[
     ("mcp-server/package.json", ToolkitFingerprintKind::File, true),
     ("packages/bridge", ToolkitFingerprintKind::Dir, true),
     ("packages/verify", ToolkitFingerprintKind::Dir, true),
     (
-        "skills/unity-agent/SKILL.md",
+        "skills/unity-open-mcp/SKILL.md",
         ToolkitFingerprintKind::File,
         true,
     ),
@@ -322,8 +322,8 @@ mod tests {
         fs::write(root.join("mcp-server/dist/index.js"), "module.exports={};").unwrap();
         fs::create_dir_all(root.join("packages/bridge")).unwrap();
         fs::create_dir_all(root.join("packages/verify")).unwrap();
-        fs::create_dir_all(root.join("skills/unity-agent")).unwrap();
-        fs::write(root.join("skills/unity-agent/SKILL.md"), "# skill").unwrap();
+        fs::create_dir_all(root.join("skills/unity-open-mcp")).unwrap();
+        fs::write(root.join("skills/unity-open-mcp/SKILL.md"), "# skill").unwrap();
     }
 
     #[test]
@@ -356,8 +356,8 @@ mod tests {
         fs::write(dir.path().join("mcp-server/package.json"), "{}").unwrap();
         fs::create_dir_all(dir.path().join("packages/bridge")).unwrap();
         fs::create_dir_all(dir.path().join("packages/verify")).unwrap();
-        fs::create_dir_all(dir.path().join("skills/unity-agent")).unwrap();
-        fs::write(dir.path().join("skills/unity-agent/SKILL.md"), "# skill").unwrap();
+        fs::create_dir_all(dir.path().join("skills/unity-open-mcp")).unwrap();
+        fs::write(dir.path().join("skills/unity-open-mcp/SKILL.md"), "# skill").unwrap();
         // Intentionally do NOT create mcp-server/dist/index.js.
         let v = validate_toolkit_root_at(dir.path());
         assert!(!v.ok, "mcp dist is required per spec table");
@@ -375,8 +375,8 @@ mod tests {
         fs::create_dir_all(dir.path().join("packages")).unwrap();
         fs::write(dir.path().join("packages/bridge"), "not a dir").unwrap();
         fs::create_dir_all(dir.path().join("packages/verify")).unwrap();
-        fs::create_dir_all(dir.path().join("skills/unity-agent")).unwrap();
-        fs::write(dir.path().join("skills/unity-agent/SKILL.md"), "# skill").unwrap();
+        fs::create_dir_all(dir.path().join("skills/unity-open-mcp")).unwrap();
+        fs::write(dir.path().join("skills/unity-open-mcp/SKILL.md"), "# skill").unwrap();
         let v = validate_toolkit_root_at(dir.path());
         assert!(!v.ok);
         let bridge = v
@@ -393,17 +393,17 @@ mod tests {
 
     #[test]
     fn derived_mcp_index_uses_root_when_override_empty() {
-        let p = derived_mcp_index_path("/repos/Unity-AI-Hub", "").unwrap();
+        let p = derived_mcp_index_path("/repos/unity-open-mcp", "").unwrap();
         assert_eq!(
             p.to_string_lossy(),
-            "/repos/Unity-AI-Hub/mcp-server/dist/index.js"
+            "/repos/unity-open-mcp/mcp-server/dist/index.js"
         );
     }
 
     #[test]
     fn derived_mcp_index_prefers_override() {
         let p =
-            derived_mcp_index_path("/repos/Unity-AI-Hub", "/custom/build/mcp/index.js").unwrap();
+            derived_mcp_index_path("/repos/unity-open-mcp", "/custom/build/mcp/index.js").unwrap();
         assert_eq!(p.to_string_lossy(), "/custom/build/mcp/index.js");
     }
 

@@ -1,9 +1,9 @@
-# Unity Agent Verify — Dogfood CI
+# Unity Open MCP Verify — Dogfood CI
 #
 # Exercises the M5 batch flow (scan_all, baseline_create, regression_check)
 # against the demo/ project in this repository.
 #
-# This workflow mirrors templates/github-actions/unity-agent-verify.yml but is
+# This workflow mirrors templates/github-actions/unity-open-mcp-verify.yml but is
 # scoped to the monorepo demo project.
 #
 # Runner assumption: self-hosted with Unity 6 installed and licensed locally.
@@ -13,7 +13,7 @@
 # To enable: register a self-hosted runner with the label "unity" and ensure
 # UNITY_PATH is set in the runner's environment or as a repo variable.
 
-name: unity-agent-verify-demo
+name: unity-open-mcp-verify-demo
 
 on:
   workflow_dispatch:
@@ -22,8 +22,8 @@ on:
       - "packages/verify/**"
       - "packages/bridge/**"
       - "demo/**"
-      - ".github/workflows/unity-agent-verify-demo.yml"
-      - "demo/CI/unity-agent-baseline.json"
+      - ".github/workflows/unity-open-mcp-verify-demo.yml"
+      - "demo/CI/unity-open-mcp-baseline.json"
   push:
     branches:
       - main
@@ -64,9 +64,9 @@ jobs:
             -nographics \
             -projectPath "$UNITY_PROJECT_PATH" \
             -logFile "$UNITY_LOG_PATH" \
-            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -executeMethod UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run \
             -- regression_check \
-               --baseline-path CI/unity-agent-baseline.json \
+               --baseline-path CI/unity-open-mcp-baseline.json \
                --regression-threshold 0 \
                --platform-profile desktop
           EXIT_CODE=$?
@@ -120,7 +120,7 @@ jobs:
             -nographics \
             -projectPath "$UNITY_PROJECT_PATH" \
             -logFile "$UNITY_LOG_PATH" \
-            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -executeMethod UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run \
             -- scan_all \
                --fail-on-severity error \
                --platform-profile desktop \
@@ -185,9 +185,9 @@ jobs:
             -nographics \
             -projectPath "$UNITY_PROJECT_PATH" \
             -logFile "$UNITY_LOG_PATH" \
-            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -executeMethod UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run \
             -- baseline_create \
-               --baseline-path CI/unity-agent-baseline.json \
+               --baseline-path CI/unity-open-mcp-baseline.json \
                --platform-profile desktop
           EXIT_CODE=$?
           echo "::endgroup::"
@@ -202,14 +202,14 @@ jobs:
             exit 1
           fi
 
-          echo "✓ Baseline written to demo/CI/unity-agent-baseline.json"
+          echo "✓ Baseline written to demo/CI/unity-open-mcp-baseline.json"
 
       - name: Commit baseline
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add demo/CI/unity-agent-baseline.json
-          git commit -m "chore(ci): update unity-agent demo baseline [skip ci]" || echo "No changes to commit."
+          git add demo/CI/unity-open-mcp-baseline.json
+          git commit -m "chore(ci): update unity-open-mcp demo baseline [skip ci]" || echo "No changes to commit."
           git push
 
       - name: Upload Unity log on failure

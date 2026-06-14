@@ -3,7 +3,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 
-namespace UnityAgentBridge.Tests
+namespace UnityOpenMcpBridge.Tests
 {
     public class VerifyGateAdapterFindReferencesTests
     {

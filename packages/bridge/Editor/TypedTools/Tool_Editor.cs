@@ -2,12 +2,12 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     [BridgeToolType]
     public partial class Tool_Editor
     {
-        [BridgeTool("unity_agent_editor_status", Title = "Editor Status",
+        [BridgeTool("unity_open_mcp_editor_status", Title = "Editor Status",
             IsMutating = false, ReadOnlyHint = true)]
         [System.ComponentModel.Description("Returns the current Unity Editor state")]
         public string EditorStatus()

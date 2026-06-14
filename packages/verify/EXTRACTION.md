@@ -29,7 +29,7 @@ Extraction baseline for porting scanner algorithms into `packages/verify`.
 
 ## Adapt-on-copy rules
 
-- Namespace: `UnityAgentVerify.Internals.*`
+- Namespace: `UnityOpenMcpVerify.Internals.*`
 - Header: `// Extracted from Unity-Scanner: <path>`
 - Exclude: UI, orchestrator, MCP, batch, cache, tab drawers
 

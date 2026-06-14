@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const invokeMethod: Tool = {
-  name: "unity_agent_invoke_method",
+  name: "unity_open_mcp_invoke_method",
   description: "Call a method via reflection.",
   inputSchema: {
     type: "object",

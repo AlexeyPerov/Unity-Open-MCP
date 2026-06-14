@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const editorStatus: Tool = {
-  name: "unity_agent_editor_status",
+  name: "unity_open_mcp_editor_status",
   description:
     "Returns the current Unity Editor state: play mode, compile state, current scene path, Unity version, and editor type.",
   inputSchema: {

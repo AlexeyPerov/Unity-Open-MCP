@@ -1,14 +1,14 @@
 using System.Text;
-using UnityAgentVerify.Cache;
+using UnityOpenMcpVerify.Cache;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     [BridgeResourceType]
     public class HealthResources
     {
         [BridgeResource(
             "Health summary",
-            "unity-agent://health/summary",
+            "unity-open-mcp://health/summary",
             Description = "Cached verify health summary (error/warn/info counts) from the last scan or gate validation")]
         public string HealthSummary()
         {
@@ -32,7 +32,7 @@ namespace UnityAgentBridge
                 sb.Append("\"status\":\"no_data\",");
                 sb.Append("\"asOf\":null,");
                 sb.Append("\"summary\":null,");
-                sb.Append("\"nextStep\":\"Run unity_agent_scan_paths or a gated mutation to populate the cache.\"");
+                sb.Append("\"nextStep\":\"Run unity_open_mcp_scan_paths or a gated mutation to populate the cache.\"");
             }
 
             sb.Append('}');

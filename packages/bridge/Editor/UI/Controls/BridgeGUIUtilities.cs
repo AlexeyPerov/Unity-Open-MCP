@@ -5,7 +5,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace UnityAgentBridge.UI.Controls
+namespace UnityOpenMcpBridge.UI.Controls
 {
     public static class BridgeGUIUtilities
     {

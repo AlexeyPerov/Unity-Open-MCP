@@ -1,7 +1,7 @@
 import type { Resource } from "@modelcontextprotocol/sdk/types.js";
 
 export const healthSummary: Resource = {
-  uri: "unity-agent://health/summary",
+  uri: "unity-open-mcp://health/summary",
   name: "Health summary",
   mimeType: "application/json",
   description:
@@ -9,7 +9,7 @@ export const healthSummary: Resource = {
 };
 
 export const healthBaseline: Resource = {
-  uri: "unity-agent://health/baseline",
+  uri: "unity-open-mcp://health/baseline",
   name: "Health baseline",
   mimeType: "application/json",
   description:
@@ -17,7 +17,7 @@ export const healthBaseline: Resource = {
 };
 
 export const bridgeStatus: Resource = {
-  uri: "unity-agent://bridge/status",
+  uri: "unity-open-mcp://bridge/status",
   name: "Bridge status",
   mimeType: "application/json",
   description:

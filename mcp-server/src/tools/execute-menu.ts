@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const executeMenu: Tool = {
-  name: "unity_agent_execute_menu",
+  name: "unity_open_mcp_execute_menu",
   description: "Execute a Unity Editor menu item.",
   inputSchema: {
     type: "object",

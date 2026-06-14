@@ -3,27 +3,27 @@ import { stat } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 
-const VERIFY_EXECUTE_METHOD = "UnityAgentVerify.Batch.VerifyBatchEntry.Run";
-const BRIDGE_EXECUTE_METHOD = "UnityAgentBridge.Batch.BridgeBatchEntry.Run";
-const OUTPUT_BEGIN = "---UNITY_AGENT_VERIFY_JSON_BEGIN---";
-const OUTPUT_END = "---UNITY_AGENT_VERIFY_JSON_END---";
+const VERIFY_EXECUTE_METHOD = "UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run";
+const BRIDGE_EXECUTE_METHOD = "UnityOpenMcpBridge.Batch.BridgeBatchEntry.Run";
+const OUTPUT_BEGIN = "---UNITY_OPEN_MCP_VERIFY_JSON_BEGIN---";
+const OUTPUT_END = "---UNITY_OPEN_MCP_VERIFY_JSON_END---";
 
 const DEFAULT_BATCH_TIMEOUT_MS = 600_000;
 
 const VERIFY_TOOL_TO_OPERATION: Record<string, string> = {
-  unity_agent_scan_all: "scan_all",
-  unity_agent_baseline_create: "baseline_create",
-  unity_agent_regression_check: "regression_check",
+  unity_open_mcp_scan_all: "scan_all",
+  unity_open_mcp_baseline_create: "baseline_create",
+  unity_open_mcp_regression_check: "regression_check",
 };
 
 const META_TOOL_TO_OPERATION: Record<string, string> = {
-  unity_agent_find_members: "find_members",
+  unity_open_mcp_find_members: "find_members",
 };
 
 const LIMITED_META_TOOLS: ReadonlySet<string> = new Set([
-  "unity_agent_execute_csharp",
-  "unity_agent_invoke_method",
-  "unity_agent_execute_menu",
+  "unity_open_mcp_execute_csharp",
+  "unity_open_mcp_invoke_method",
+  "unity_open_mcp_execute_menu",
 ]);
 
 export const BATCH_TOOL_NAMES = new Set([
@@ -70,7 +70,7 @@ function buildVerifyArgs(
     if (args.fail_on_severity) cli.push("--fail-on-severity", String(args.fail_on_severity));
     if (args.output_path) cli.push("--output-path", String(args.output_path));
   } else if (operation === "baseline_create") {
-    const baselinePath = (args.baseline_path as string) || "CI/unity-agent-baseline.json";
+    const baselinePath = (args.baseline_path as string) || "CI/unity-open-mcp-baseline.json";
     cli.push("--baseline-path", baselinePath);
     if (args.platform_profile) cli.push("--platform-profile", String(args.platform_profile));
   } else if (operation === "regression_check") {
@@ -102,18 +102,18 @@ export function buildMetaArgs(
 }
 
 const LIMITED_META_MESSAGES: Record<string, string> = {
-  unity_agent_execute_csharp:
+  unity_open_mcp_execute_csharp:
     "execute_csharp is not supported in batch mode. " +
     "The gate (checkpoint, validate, delta) cannot run headless and Roslyn compilation " +
     "without a live Editor is unreliable. Connect a live Editor for full support. " +
     "Only find_members is available in batch mode.",
-  unity_agent_invoke_method:
+  unity_open_mcp_invoke_method:
     "invoke_method is not supported in batch mode. " +
     "Mutating method calls require gate enforcement which is unavailable headless, " +
     "and instance methods may depend on Editor-only state. " +
     "Connect a live Editor for full support. " +
     "Only find_members is available in batch mode.",
-  unity_agent_execute_menu:
+  unity_open_mcp_execute_menu:
     "execute_menu is not supported in batch mode. " +
     "Menu execution requires a live Editor UI; most menus fail in -batchmode. " +
     "Connect a live Editor for full support. " +
@@ -128,8 +128,8 @@ export class BatchSpawn implements Router {
   constructor() {
     this.unityPath = process.env.UNITY_PATH ?? "";
     this.projectPath = process.env.UNITY_PROJECT_PATH ?? "";
-    this.timeoutMs = process.env.UNITY_AGENT_BATCH_TIMEOUT_MS
-      ? parseInt(process.env.UNITY_AGENT_BATCH_TIMEOUT_MS, 10)
+    this.timeoutMs = process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS
+      ? parseInt(process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS, 10)
       : DEFAULT_BATCH_TIMEOUT_MS;
   }
 
@@ -258,7 +258,7 @@ export class BatchSpawn implements Router {
       ];
 
       console.error(
-        `[unity-agent-mcp] Batch spawn: ${this.unityPath} ${unityArgs.join(" ")}`,
+        `[unity-open-mcp] Batch spawn: ${this.unityPath} ${unityArgs.join(" ")}`,
       );
 
       const startTime = Date.now();
@@ -297,7 +297,7 @@ export class BatchSpawn implements Router {
         const exitCode = code ?? 1;
 
         console.error(
-          `[unity-agent-mcp] Batch completed: exit=${exitCode} elapsed=${elapsedMs}ms`,
+          `[unity-open-mcp] Batch completed: exit=${exitCode} elapsed=${elapsedMs}ms`,
         );
 
         const jsonStr = extractJson(stdout);

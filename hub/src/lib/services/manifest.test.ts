@@ -31,8 +31,8 @@ test("changeKindTone maps upgrades to warn", () => {
 
 test("shortPackageName strips the com.alexeyperov. prefix", () => {
   assert.equal(
-    shortPackageName("com.alexeyperov.unity-agent-bridge"),
-    "unity-agent-bridge"
+    shortPackageName("com.alexeyperov.unity-open-mcp-bridge"),
+    "unity-open-mcp-bridge"
   );
   assert.equal(shortPackageName("com.unity.ide.rider"), "rider");
   assert.equal(shortPackageName("plain"), "plain");
@@ -40,58 +40,58 @@ test("shortPackageName strips the com.alexeyperov. prefix", () => {
 
 test("formatChangeLine for an add", () => {
   const line = formatChangeLine({
-    id: "com.alexeyperov.unity-agent-bridge",
+    id: "com.alexeyperov.unity-open-mcp-bridge",
     before: null,
     after: "file:../../packages/bridge",
     kind: "add",
   });
-  assert.equal(line, "unity-agent-bridge: add file:../../packages/bridge");
+  assert.equal(line, "unity-open-mcp-bridge: add file:../../packages/bridge");
 });
 
 test("formatChangeLine for an upgrade", () => {
   const line = formatChangeLine({
-    id: "com.alexeyperov.unity-agent-bridge",
+    id: "com.alexeyperov.unity-open-mcp-bridge",
     before: "https://github.com/.../bridge#bridge-v0.9.0",
     after: "https://github.com/.../bridge#bridge-v1.0.0",
     kind: "upgrade",
   });
   assert.equal(
     line,
-    "unity-agent-bridge: upgrade https://github.com/.../bridge#bridge-v0.9.0 → https://github.com/.../bridge#bridge-v1.0.0"
+    "unity-open-mcp-bridge: upgrade https://github.com/.../bridge#bridge-v0.9.0 → https://github.com/.../bridge#bridge-v1.0.0"
   );
 });
 
 test("formatChangeLine for an unchanged", () => {
   const line = formatChangeLine({
-    id: "com.alexeyperov.unity-agent-bridge",
+    id: "com.alexeyperov.unity-open-mcp-bridge",
     before: "file:../../packages/bridge",
     after: "file:../../packages/bridge",
     kind: "unchanged",
   });
   assert.equal(
     line,
-    "unity-agent-bridge: unchanged (file:../../packages/bridge)"
+    "unity-open-mcp-bridge: unchanged (file:../../packages/bridge)"
   );
 });
 
 test("formatDiffPreview joins change lines with newlines", () => {
   const changes: PackageChange[] = [
     {
-      id: "com.alexeyperov.unity-agent-bridge",
+      id: "com.alexeyperov.unity-open-mcp-bridge",
       before: null,
       after: "file:../../packages/bridge",
       kind: "add",
     },
     {
-      id: "com.alexeyperov.unity-agent-verify",
+      id: "com.alexeyperov.unity-open-mcp-verify",
       before: null,
       after: "file:../../packages/verify",
       kind: "add",
     },
   ];
   const out = formatDiffPreview(changes);
-  assert.match(out, /^unity-agent-bridge: add /);
-  assert.match(out, /\nunity-agent-verify: add /);
+  assert.match(out, /^unity-open-mcp-bridge: add /);
+  assert.match(out, /\nunity-open-mcp-verify: add /);
 });
 
 test("summarizeChanges counts adds, upgrades, and unchanged", () => {

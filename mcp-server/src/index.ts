@@ -23,19 +23,19 @@ function getEnv(): { projectPath: string; port: number } {
   const projectPath = process.env.UNITY_PROJECT_PATH;
   if (!projectPath) {
     console.error(
-      "unity-agent-mcp: UNITY_PROJECT_PATH environment variable is required.",
+      "unity-open-mcp: UNITY_PROJECT_PATH environment variable is required.",
     );
     process.exit(1);
   }
-  const port = process.env.UNITY_AGENT_BRIDGE_PORT
-    ? parseInt(process.env.UNITY_AGENT_BRIDGE_PORT, 10)
+  const port = process.env.UNITY_OPEN_MCP_BRIDGE_PORT
+    ? parseInt(process.env.UNITY_OPEN_MCP_BRIDGE_PORT, 10)
     : DEFAULT_PORT;
   return { projectPath, port };
 }
 
 export function createServer(projectPath: string, port: number): Server {
   const server = new Server(
-    { name: "unity-agent", version: "0.1.0" },
+    { name: "unity-open-mcp", version: "0.1.0" },
     { capabilities: { tools: {}, resources: {} } },
   );
 
@@ -83,6 +83,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("unity-agent-mcp fatal:", err);
+  console.error("unity-open-mcp fatal:", err);
   process.exit(1);
 });

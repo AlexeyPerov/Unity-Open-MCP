@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace UnityAgentVerify.Batch
+namespace UnityOpenMcpVerify.Batch
 {
     public static class BaselineSchema
     {

@@ -1,6 +1,6 @@
 // Minimal project-level runtime settings store for the bridge UI.
 //
-// Backed by `.unity-agent/settings.json` at the project root. The v1 schema carries:
+// Backed by `.unity-open-mcp/settings.json` at the project root. The v1 schema carries:
 //   - disabledTools (Plan 2)
 //   - defaultGateMode (Plan 3)
 //   - autoStart (Plan 4)
@@ -17,7 +17,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     [Serializable]
     public class BridgeProjectSettingsData
@@ -30,7 +30,7 @@ namespace UnityAgentBridge
 
     public static class BridgeProjectSettings
     {
-        const string SettingsDirName = ".unity-agent";
+        const string SettingsDirName = ".unity-open-mcp";
         const string SettingsFileName = "settings.json";
         const string TempSuffix = ".tmp";
 

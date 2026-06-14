@@ -1,14 +1,14 @@
 using System;
 using System.Text;
 using UnityEngine;
-using UnityAgentBridge.MetaTools;
+using UnityOpenMcpBridge.MetaTools;
 
-namespace UnityAgentBridge.Batch
+namespace UnityOpenMcpBridge.Batch
 {
     public static class BridgeBatchEntry
     {
-        public const string OutputBegin = "---UNITY_AGENT_VERIFY_JSON_BEGIN---";
-        public const string OutputEnd = "---UNITY_AGENT_VERIFY_JSON_END---";
+        public const string OutputBegin = "---UNITY_OPEN_MCP_VERIFY_JSON_BEGIN---";
+        public const string OutputEnd = "---UNITY_OPEN_MCP_VERIFY_JSON_END---";
 
         public const int ExitPass = 0;
         public const int ExitFail = 1;
@@ -53,7 +53,7 @@ namespace UnityAgentBridge.Batch
                 return Fail(
                     "No meta-tool arguments found after '--'. " +
                     "Usage: Unity -batchmode -executeMethod " +
-                    "UnityAgentBridge.Batch.BridgeBatchEntry.Run -- " +
+                    "UnityOpenMcpBridge.Batch.BridgeBatchEntry.Run -- " +
                     "<operation> [--query <s>] [--kind <k>] ..."
                 );
             }

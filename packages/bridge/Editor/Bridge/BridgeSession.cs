@@ -2,7 +2,7 @@ using System.Threading;
 using UnityEditor;
 using UnityEngine;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public static class BridgeSession
     {

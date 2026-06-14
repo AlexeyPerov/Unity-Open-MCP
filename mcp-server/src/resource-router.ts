@@ -4,7 +4,7 @@ import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import type { LiveClient } from "./live-client.js";
 import type { PingCache } from "./ping-cache.js";
 
-const DEFAULT_BASELINE_PATH = "CI/unity-agent-baseline.json";
+const DEFAULT_BASELINE_PATH = "CI/unity-open-mcp-baseline.json";
 
 export interface ResourceHandlerDeps {
   live: LiveClient;
@@ -47,7 +47,7 @@ function noDataSummary() {
     asOf: null,
     summary: null,
     nextStep:
-      "Run unity_agent_scan_paths or a gated mutation to populate the cache.",
+      "Run unity_open_mcp_scan_paths or a gated mutation to populate the cache.",
   };
 }
 
@@ -87,8 +87,8 @@ async function readBaselineFile(
 export async function handleHealthSummary(
   deps: ResourceHandlerDeps,
 ): Promise<ReadResourceResult> {
-  const json = await deps.live.readResource("unity-agent://health/summary");
-  return toTextResource("unity-agent://health/summary", json);
+  const json = await deps.live.readResource("unity-open-mcp://health/summary");
+  return toTextResource("unity-open-mcp://health/summary", json);
 }
 
 export function handleHealthBaseline(
@@ -99,15 +99,15 @@ export function handleHealthBaseline(
     const parsed = await readBaselineFile(baselinePath);
 
     if (parsed === null) {
-      return toTextResource("unity-agent://health/baseline", {
+      return toTextResource("unity-open-mcp://health/baseline", {
         status: "no_baseline",
         asOf: null,
         baselinePath: DEFAULT_BASELINE_PATH,
-        nextStep: "Run unity_agent_baseline_create.",
+        nextStep: "Run unity_open_mcp_baseline_create.",
       });
     }
 
-    return toTextResource("unity-agent://health/baseline", {
+    return toTextResource("unity-open-mcp://health/baseline", {
       status: "ok",
       asOf: parsed.asOf,
       baselinePath: DEFAULT_BASELINE_PATH,
@@ -124,14 +124,14 @@ export function handleBridgeStatus(
   const snapshot = deps.pingCache.get();
 
   if (!snapshot) {
-    return toTextResource("unity-agent://bridge/status", {
+    return toTextResource("unity-open-mcp://bridge/status", {
       status: "no_data",
       asOf: null,
       connected: false,
     });
   }
 
-  return toTextResource("unity-agent://bridge/status", {
+  return toTextResource("unity-open-mcp://bridge/status", {
     status: "ok",
     asOf: snapshot.asOf,
     connected: snapshot.connected,
@@ -151,11 +151,11 @@ export class ResourceRouter {
 
   async read(uri: string): Promise<ReadResourceResult> {
     switch (uri) {
-      case "unity-agent://health/summary":
+      case "unity-open-mcp://health/summary":
         return handleHealthSummary(this.deps);
-      case "unity-agent://health/baseline":
+      case "unity-open-mcp://health/baseline":
         return handleHealthBaseline(this.deps);
-      case "unity-agent://bridge/status":
+      case "unity-open-mcp://bridge/status":
         return handleBridgeStatus(this.deps);
       default:
         return toTextResource(uri, {

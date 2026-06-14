@@ -1,7 +1,7 @@
 using System;
 using NUnit.Framework;
 
-namespace UnityAgentVerify.Tests
+namespace UnityOpenMcpVerify.Tests
 {
     [TestFixture]
     public class IssueKeyTests

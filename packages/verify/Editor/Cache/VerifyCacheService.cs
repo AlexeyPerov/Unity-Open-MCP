@@ -1,7 +1,7 @@
 using System;
-using UnityAgentVerify.Batch;
+using UnityOpenMcpVerify.Batch;
 
-namespace UnityAgentVerify.Cache
+namespace UnityOpenMcpVerify.Cache
 {
     public static class VerifyCacheService
     {

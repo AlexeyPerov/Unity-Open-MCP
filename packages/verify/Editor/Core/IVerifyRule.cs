@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace UnityAgentVerify
+namespace UnityOpenMcpVerify
 {
     public interface IVerifyRule
     {

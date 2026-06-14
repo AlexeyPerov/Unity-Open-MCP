@@ -8,7 +8,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace UnityAgentVerify.Rules.ScenePrefabHealth
+namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
 {
     public static class Scanner
     {

@@ -9,11 +9,11 @@ const COMPILE_POLL_INTERVAL_MS = 2_000;
 const PING_TIMEOUT_MS = 5_000;
 
 const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
-  "unity_agent_validate_edit",
-  "unity_agent_checkpoint_create",
-  "unity_agent_delta",
-  "unity_agent_find_references",
-  "unity_agent_scan_paths",
+  "unity_open_mcp_validate_edit",
+  "unity_open_mcp_checkpoint_create",
+  "unity_open_mcp_delta",
+  "unity_open_mcp_find_references",
+  "unity_open_mcp_scan_paths",
 ]);
 
 interface PingResponse {
@@ -80,7 +80,7 @@ export class LiveClient implements Router {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
-    if (toolName === "unity_agent_ping") {
+    if (toolName === "unity_open_mcp_ping") {
       return this.handlePing();
     }
     return this.handleToolCall(toolName, args);
@@ -285,7 +285,7 @@ export class LiveClient implements Router {
           asOf: null,
           summary: null,
           nextStep:
-            "Run unity_agent_scan_paths or a gated mutation to populate the cache.",
+            "Run unity_open_mcp_scan_paths or a gated mutation to populate the cache.",
         };
       }
 
@@ -297,7 +297,7 @@ export class LiveClient implements Router {
         asOf: null,
         summary: null,
         nextStep:
-          "Run unity_agent_scan_paths or a gated mutation to populate the cache.",
+          "Run unity_open_mcp_scan_paths or a gated mutation to populate the cache.",
       };
     }
   }

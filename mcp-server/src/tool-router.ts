@@ -39,7 +39,7 @@ export class ToolRouter implements Router {
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
     const canBatch = this.batch.isBatchTool(toolName);
-    const isPing = toolName === "unity_agent_ping";
+    const isPing = toolName === "unity_open_mcp_ping";
 
     if (!canBatch && !isPing) {
       const result = await this.live.route(toolName, args);
@@ -49,13 +49,13 @@ export class ToolRouter implements Router {
     const liveAvailable = await this.live.isLiveAvailable();
 
     if (liveAvailable) {
-      console.error(`[unity-agent-mcp] Route: ${toolName} -> live`);
+      console.error(`[unity-open-mcp] Route: ${toolName} -> live`);
       const result = await this.live.route(toolName, args);
       return injectRouteMeta(result, { route: "live" });
     }
 
     console.error(
-      `[unity-agent-mcp] Route: ${toolName} -> batch (live bridge unavailable)`,
+      `[unity-open-mcp] Route: ${toolName} -> batch (live bridge unavailable)`,
     );
 
     if (isPing) {

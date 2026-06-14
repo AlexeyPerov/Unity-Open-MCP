@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace UnityAgentVerify.Rules
+namespace UnityOpenMcpVerify.Rules
 {
     public class MissingReferencesRule : IVerifyRule
     {

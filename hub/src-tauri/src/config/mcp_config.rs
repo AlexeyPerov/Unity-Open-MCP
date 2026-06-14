@@ -9,15 +9,15 @@
 //! - [`write_mcp_config`] — apply the merge. Creates a `.bak`
 //!   next to the existing file (when one exists) and writes the
 //!   merged value with an atomic rename. **Only** the
-//!   `unity-agent` entry under the per-client merge key
-//!   (`mcpServers.unity-agent` for Cursor / Claude Desktop,
-//!   `mcp.unity-agent` for OpenCode) is touched; every other
+//!   `unity-open-mcp` entry under the per-client merge key
+//!   (`mcpServers.unity-open-mcp` for Cursor / Claude Desktop,
+//!   `mcp.unity-open-mcp` for OpenCode) is touched; every other
 //!   key, every other MCP server, and every ordering choice
 //!   outside our entry are preserved verbatim.
 //! - [`plan_skill_copy`] / [`copy_skill_files`] — the Done-time
 //!   skill copy behaviour per `hub-wizard.md` §Skill copy
-//!   behavior. Copies `{toolkitRoot}/skills/unity-agent/SKILL.md`
-//!   into the project's `.claude/skills/unity-agent/SKILL.md`
+//!   behavior. Copies `{toolkitRoot}/skills/unity-open-mcp/SKILL.md`
+//!   into the project's `.claude/skills/unity-open-mcp/SKILL.md`
 //!   (always) and, when OpenCode is selected, the
 //!   `.opencode/skills/...` mirror.
 //!
@@ -46,22 +46,22 @@ fn resolve_mcp_index_path(toolkit_root: &str, mcp_index_override: &str) -> Optio
 
 /// MCP server key used in the parent config. Matches
 /// `MCP_SERVER_KEY` in `ai_toolkit.ts` and the spec
-/// "MCP server name in config: `unity-agent` (recommended)"
+/// "MCP server name in config: `unity-open-mcp` (recommended)"
 /// (`mcp-tools.md` §Naming).
-pub const MCP_SERVER_KEY: &str = "unity-agent";
+pub const MCP_SERVER_KEY: &str = "unity-open-mcp";
 
 /// Sub-path inside the project where the Claude-compatible
 /// skill file is copied. Always relative to the project root.
-pub const CLAUDE_SKILL_REL: &str = ".claude/skills/unity-agent/SKILL.md";
+pub const CLAUDE_SKILL_REL: &str = ".claude/skills/unity-open-mcp/SKILL.md";
 
 /// Sub-path inside the project where the OpenCode-specific
 /// skill mirror is copied when OpenCode is selected. OpenCode
 /// also reads `.claude/skills/` directly, but the wizard copies
 /// to both locations for clients that look in either spot.
-pub const OPENCODE_SKILL_REL: &str = ".opencode/skills/unity-agent/SKILL.md";
+pub const OPENCODE_SKILL_REL: &str = ".opencode/skills/unity-open-mcp/SKILL.md";
 
 /// Sub-path inside the toolkit root for the source skill file.
-pub const TOOLKIT_SKILL_REL: &str = "skills/unity-agent/SKILL.md";
+pub const TOOLKIT_SKILL_REL: &str = "skills/unity-open-mcp/SKILL.md";
 
 /// Supported MCP client ids. Mirrors `McpClientId` in
 /// `ai_toolkit.ts` and the radio group in `AiSetupWizard.svelte`
@@ -108,7 +108,7 @@ pub struct McpConfigParams {
     pub mcp_index_override: String,
     /// Project path for the `UNITY_PROJECT_PATH` env var.
     pub unity_project_path: String,
-    /// Bridge HTTP port for `UNITY_AGENT_BRIDGE_PORT`.
+    /// Bridge HTTP port for `UNITY_OPEN_MCP_BRIDGE_PORT`.
     #[serde(default)]
     pub bridge_port: String,
     /// `true` when the user opted in to batch routing; the
@@ -146,7 +146,7 @@ pub struct McpConfigPlan {
     pub file_exists: bool,
     /// `true` when the resolved MCP server entry would be a
     /// meaningful change (either the file is missing or the
-    /// `unity-agent` key is missing or differs from the
+    /// `unity-open-mcp` key is missing or differs from the
     /// proposed value). `false` when the file already has the
     /// exact entry the wizard would write — the writer still
     /// re-emits the file (no-op merge, no backup) so the plan
@@ -235,7 +235,7 @@ pub fn plan_mcp_config(params: McpConfigParams) -> Result<McpConfigPlan, McpConf
 ///
 /// On success, leaves a `<target>.bak` next to the original
 /// when one existed and the merge actually mutates the
-/// `unity-agent` entry.
+/// `unity-open-mcp` entry.
 #[tauri::command]
 pub fn write_mcp_config(
     params: McpConfigParams,
@@ -572,7 +572,7 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
     } else {
         params.bridge_port.trim().to_string()
     };
-    env.insert("UNITY_AGENT_BRIDGE_PORT".to_string(), Value::String(port));
+    env.insert("UNITY_OPEN_MCP_BRIDGE_PORT".to_string(), Value::String(port));
     if params.include_unity_path && !params.unity_path.trim().is_empty() {
         env.insert(
             "UNITY_PATH".to_string(),
@@ -603,8 +603,8 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
 
 fn merge_key_for(client: McpClientId) -> String {
     match client {
-        McpClientId::Cursor | McpClientId::ClaudeDesktop => "mcpServers.unity-agent".to_string(),
-        McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => "mcp.unity-agent".to_string(),
+        McpClientId::Cursor | McpClientId::ClaudeDesktop => "mcpServers.unity-open-mcp".to_string(),
+        McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => "mcp.unity-open-mcp".to_string(),
         _ => String::new(),
     }
 }
@@ -618,14 +618,14 @@ fn split_merge_key(merge_key: &str) -> (&str, &str) {
 
 /// `true` when the merged value would actually change the
 /// file on disk for this client. We compare the parent key's
-/// `unity-agent` child only — unrelated keys and other MCP
+/// `unity-open-mcp` child only — unrelated keys and other MCP
 /// servers are not part of the "did we change anything" test.
 fn merged_differs(existing: &Value, merged: &Value, scope: McpScope) -> bool {
     let merge_key = match scope {
         McpScope::CursorGlobal
         | McpScope::CursorProject
-        | McpScope::ClaudeDesktopGlobal => "mcpServers.unity-agent",
-        McpScope::OpencodeGlobal | McpScope::OpencodeProject => "mcp.unity-agent",
+        | McpScope::ClaudeDesktopGlobal => "mcpServers.unity-open-mcp",
+        McpScope::OpencodeGlobal | McpScope::OpencodeProject => "mcp.unity-open-mcp",
     };
     let (parent, child) = split_merge_key(merge_key);
     let before = existing
@@ -663,7 +663,7 @@ pub fn claude_mcp_add_command(
         bridge_port.trim().to_string()
     };
     format!(
-        "claude mcp add {name} --env UNITY_PROJECT_PATH={project} --env UNITY_AGENT_BRIDGE_PORT={port} -- node {index}",
+        "claude mcp add {name} --env UNITY_PROJECT_PATH={project} --env UNITY_OPEN_MCP_BRIDGE_PORT={port} -- node {index}",
         name = MCP_SERVER_KEY,
         project = unity_project_path,
         port = port,
@@ -697,7 +697,7 @@ pub struct SkillCopyTarget {
     /// or overwrite).
     pub target_path: String,
     /// Target path relative to the project root, for display
-    /// (e.g. `.claude/skills/unity-agent/SKILL.md`).
+    /// (e.g. `.claude/skills/unity-open-mcp/SKILL.md`).
     pub relative_path: String,
     /// Absolute source path under the toolkit root. `null`
     /// when the source skill file is missing on disk.
@@ -994,13 +994,13 @@ mod tests {
         assert!(target.ends_with(".cursor/mcp.json"));
         assert!(!plan.file_exists);
         assert!(plan.would_write);
-        // The proposed JSON must use mcpServers.unity-agent.
+        // The proposed JSON must use mcpServers.unity-open-mcp.
         let proposed = plan.proposed_json.unwrap();
         let parsed: Value = serde_json::from_str(&proposed).unwrap();
         let entry = parsed
             .get("mcpServers")
-            .and_then(|m| m.get("unity-agent"))
-            .expect("mcpServers.unity-agent present");
+            .and_then(|m| m.get("unity-open-mcp"))
+            .expect("mcpServers.unity-open-mcp present");
         assert_eq!(entry.get("command").unwrap(), "node");
         let expected_index = toolkit.path().join("mcp-server/dist/index.js");
         assert_eq!(
@@ -1010,7 +1010,7 @@ mod tests {
         assert_eq!(
             entry
                 .get("env")
-                .and_then(|e| e.get("UNITY_AGENT_BRIDGE_PORT"))
+                .and_then(|e| e.get("UNITY_OPEN_MCP_BRIDGE_PORT"))
                 .unwrap(),
             "19120"
         );
@@ -1060,8 +1060,8 @@ mod tests {
         let mcp = proposed.get("mcp").and_then(|m| m.as_object()).unwrap();
         // The unrelated server survived the merge.
         assert!(mcp.contains_key("other-server"));
-        assert!(mcp.contains_key("unity-agent"));
-        let unity = mcp.get("unity-agent").unwrap();
+        assert!(mcp.contains_key("unity-open-mcp"));
+        let unity = mcp.get("unity-open-mcp").unwrap();
         assert_eq!(unity.get("type").unwrap(), "local");
         let cmd = unity.get("command").unwrap().as_array().unwrap();
         assert_eq!(cmd[0], "node");
@@ -1103,7 +1103,7 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&cursor_path).unwrap()).unwrap();
         let servers = written.get("mcpServers").unwrap().as_object().unwrap();
         assert!(servers.contains_key("another-server"));
-        assert!(servers.contains_key("unity-agent"));
+        assert!(servers.contains_key("unity-open-mcp"));
     }
 
     #[test]
@@ -1201,9 +1201,9 @@ mod tests {
         assert!(plan.target_path.is_none());
         assert!(plan.proposed_json.is_none());
         let cmd = plan.command.expect("claude-code renders a command");
-        assert!(cmd.starts_with("claude mcp add unity-agent"));
+        assert!(cmd.starts_with("claude mcp add unity-open-mcp"));
         assert!(cmd.contains("--env UNITY_PROJECT_PATH="));
-        assert!(cmd.contains("--env UNITY_AGENT_BRIDGE_PORT=19120"));
+        assert!(cmd.contains("--env UNITY_OPEN_MCP_BRIDGE_PORT=19120"));
         assert!(cmd.contains("-- node "));
         assert!(cmd.contains("index.js"));
     }
@@ -1211,7 +1211,7 @@ mod tests {
     #[test]
     fn claude_mcp_add_command_uses_default_port_when_blank() {
         let cmd = claude_mcp_add_command("/games/MyGame", "  ", "/u/mcp-server/dist/index.js");
-        assert!(cmd.contains("UNITY_AGENT_BRIDGE_PORT=19120"));
+        assert!(cmd.contains("UNITY_OPEN_MCP_BRIDGE_PORT=19120"));
     }
 
     #[test]
@@ -1244,7 +1244,7 @@ mod tests {
         .unwrap();
         assert_eq!(plan.targets.len(), 1);
         assert_eq!(plan.targets[0].kind, SkillCopyKind::Claude);
-        assert!(plan.targets[0].target_path.ends_with(".claude/skills/unity-agent/SKILL.md"));
+        assert!(plan.targets[0].target_path.ends_with(".claude/skills/unity-open-mcp/SKILL.md"));
     }
 
     #[test]
@@ -1267,10 +1267,10 @@ mod tests {
         let project_dir = tempdir().unwrap();
         let project = project_dir.path();
         let root = tempdir().unwrap();
-        let skill = root.path().join("skills").join("unity-agent").join("SKILL.md");
-        write_text(&skill, "# unity-agent\n\nHello.\n");
+        let skill = root.path().join("skills").join("unity-open-mcp").join("SKILL.md");
+        write_text(&skill, "# unity-open-mcp\n\nHello.\n");
         // Pre-existing target file the user has customised.
-        let existing = project.join(".claude/skills/unity-agent/SKILL.md");
+        let existing = project.join(".claude/skills/unity-open-mcp/SKILL.md");
         write_text(&existing, "# user's custom notes\n");
         let result = copy_skill_files_at(
             &SkillCopyParams {
@@ -1295,9 +1295,9 @@ mod tests {
         let project_dir = tempdir().unwrap();
         let project = project_dir.path();
         let root = tempdir().unwrap();
-        let skill = root.path().join("skills").join("unity-agent").join("SKILL.md");
-        write_text(&skill, "# unity-agent\n\nToolkit content.\n");
-        let existing = project.join(".claude/skills/unity-agent/SKILL.md");
+        let skill = root.path().join("skills").join("unity-open-mcp").join("SKILL.md");
+        write_text(&skill, "# unity-open-mcp\n\nToolkit content.\n");
+        let existing = project.join(".claude/skills/unity-open-mcp/SKILL.md");
         write_text(&existing, "# user's old notes\n");
         let result = copy_skill_files_at(
             &SkillCopyParams {
@@ -1311,15 +1311,15 @@ mod tests {
         assert_eq!(result.copied.len(), 2);
         assert_eq!(result.overwritten.len(), 1);
         assert_eq!(result.skipped.len(), 0);
-        let backup = project.join(".claude/skills/unity-agent/SKILL.md.bak");
+        let backup = project.join(".claude/skills/unity-open-mcp/SKILL.md.bak");
         assert!(backup.exists());
         assert_eq!(fs::read_to_string(&backup).unwrap(), "# user's old notes\n");
         // OpenCode mirror was created (it did not exist).
-        let opencode_target = project.join(".opencode/skills/unity-agent/SKILL.md");
+        let opencode_target = project.join(".opencode/skills/unity-open-mcp/SKILL.md");
         assert!(opencode_target.exists());
         assert_eq!(
             fs::read_to_string(&opencode_target).unwrap(),
-            "# unity-agent\n\nToolkit content.\n"
+            "# unity-open-mcp\n\nToolkit content.\n"
         );
     }
 
@@ -1342,7 +1342,7 @@ mod tests {
     #[test]
     fn mcp_path_check_uses_existing_heuristic() {
         // Sanity check: a real on-disk config file with a
-        // `unity-agent` entry is detected by the same
+        // `unity-open-mcp` entry is detected by the same
         // contains_mcp_key helper the heuristic uses, so the
         // Done screen's MCP status stays consistent after a
         // wizard write.
@@ -1350,7 +1350,7 @@ mod tests {
         let target = dir.path().join("mcp.json");
         write_text(
             &target,
-            r#"{"mcpServers":{"unity-agent":{"command":"node","args":["/x"]}}}"#,
+            r#"{"mcpServers":{"unity-open-mcp":{"command":"node","args":["/x"]}}}"#,
         );
         assert!(contains_mcp_key(&target));
     }

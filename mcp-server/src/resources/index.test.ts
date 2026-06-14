@@ -9,7 +9,7 @@ test("ALL_RESOURCES has exactly three resources", () => {
 
 test("health/summary resource is registered with correct URI", () => {
   const r = ALL_RESOURCES.find(
-    (r) => r.uri === "unity-agent://health/summary",
+    (r) => r.uri === "unity-open-mcp://health/summary",
   );
   assert.ok(r, "health/summary must be in ALL_RESOURCES");
   assert.equal(r!.mimeType, "application/json");
@@ -18,7 +18,7 @@ test("health/summary resource is registered with correct URI", () => {
 
 test("health/baseline resource is registered with correct URI", () => {
   const r = ALL_RESOURCES.find(
-    (r) => r.uri === "unity-agent://health/baseline",
+    (r) => r.uri === "unity-open-mcp://health/baseline",
   );
   assert.ok(r, "health/baseline must be in ALL_RESOURCES");
   assert.equal(r!.mimeType, "application/json");
@@ -27,7 +27,7 @@ test("health/baseline resource is registered with correct URI", () => {
 
 test("bridge/status resource is registered with correct URI", () => {
   const r = ALL_RESOURCES.find(
-    (r) => r.uri === "unity-agent://bridge/status",
+    (r) => r.uri === "unity-open-mcp://bridge/status",
   );
   assert.ok(r, "bridge/status must be in ALL_RESOURCES");
   assert.equal(r!.mimeType, "application/json");
@@ -39,17 +39,17 @@ test("resource URIs are stable and deterministic across reads", () => {
   const uris2 = ALL_RESOURCES.map((r) => r.uri).sort();
   assert.deepEqual(uris1, uris2);
   assert.deepEqual(uris1, [
-    "unity-agent://bridge/status",
-    "unity-agent://health/baseline",
-    "unity-agent://health/summary",
+    "unity-open-mcp://bridge/status",
+    "unity-open-mcp://health/baseline",
+    "unity-open-mcp://health/summary",
   ]);
 });
 
 test("no unintended URIs are exposed", () => {
   const allowed = new Set([
-    "unity-agent://health/summary",
-    "unity-agent://health/baseline",
-    "unity-agent://bridge/status",
+    "unity-open-mcp://health/summary",
+    "unity-open-mcp://health/baseline",
+    "unity-open-mcp://bridge/status",
   ]);
   for (const r of ALL_RESOURCES) {
     assert.ok(allowed.has(r.uri), `unexpected URI: ${r.uri}`);

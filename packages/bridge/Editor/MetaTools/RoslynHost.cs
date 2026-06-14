@@ -6,7 +6,7 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 
-namespace UnityAgentBridge.MetaTools
+namespace UnityOpenMcpBridge.MetaTools
 {
     static class RoslynHost
     {
@@ -37,7 +37,7 @@ namespace UnityAgentBridge.MetaTools
             if (string.IsNullOrEmpty(LastInitError))
                 LastInitError = "Roslyn directory not found in Unity installation";
 
-            Debug.LogWarning($"[Unity Agent Bridge] {LastInitError}");
+            Debug.LogWarning($"[Unity Open MCP Bridge] {LastInitError}");
             return false;
         }
 
@@ -78,7 +78,7 @@ namespace UnityAgentBridge.MetaTools
                 _ca = null;
                 _cacs = null;
                 LastInitError = $"Roslyn init failed for {roslynDir}: {e.Message}";
-                Debug.LogWarning($"[Unity Agent Bridge] {LastInitError}");
+                Debug.LogWarning($"[Unity Open MCP Bridge] {LastInitError}");
                 return false;
             }
         }
@@ -132,7 +132,7 @@ namespace UnityAgentBridge.MetaTools
             if (createMethod == null)
                 return (null, "Could not find CSharpCompilation.Create method");
 
-            var compilation = InvokeWithOptionalDefaults(createMethod, null, "UnityAgentSnippet");
+            var compilation = InvokeWithOptionalDefaults(createMethod, null, "UnityOpenMcpSnippet");
 
             var syntaxTrees = Array.CreateInstance(syntaxTreeType, 1);
             syntaxTrees.SetValue(syntaxTree, 0);

@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using UnityAgentVerify;
-using UnityAgentVerify.Cache;
+using UnityOpenMcpVerify;
+using UnityOpenMcpVerify.Cache;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public enum GateMode
     {
@@ -144,7 +144,7 @@ namespace UnityAgentBridge
             VerifyResult validation;
             try
             {
-                validation = VerifyGateAdapter.ValidatePaths(pathsHint, null, UnityAgentVerify.Cache.VerifyCacheService.SourceGate);
+                validation = VerifyGateAdapter.ValidatePaths(pathsHint, null, UnityOpenMcpVerify.Cache.VerifyCacheService.SourceGate);
             }
             catch (Exception e)
             {
@@ -246,7 +246,7 @@ namespace UnityAgentBridge
                     if (delta.NewErrors > 0)
                         AddIssueHints(steps, delta.NewIssueKeys, delta.NewErrors, delta.NewWarnings, isFailed: false);
                     else
-                        steps.Add($"Gate detected {delta.NewWarnings} new warning(s). Consider reviewing with unity_agent_validate_edit before proceeding.");
+                        steps.Add($"Gate detected {delta.NewWarnings} new warning(s). Consider reviewing with unity_open_mcp_validate_edit before proceeding.");
                     break;
                 case GateOutcome.Passed:
                     if (delta.ResolvedErrors > 0)
@@ -270,9 +270,9 @@ namespace UnityAgentBridge
             if (parsed != null)
             {
                 if (TryFixIdForIssue(parsed.Value.CategoryId, parsed.Value.IssueCode, out var fixId))
-                    steps.Add($"Consider unity_agent_apply_fix with fix_id {fixId} (dry_run first)");
+                    steps.Add($"Consider unity_open_mcp_apply_fix with fix_id {fixId} (dry_run first)");
 
-                steps.Add($"Use unity_agent_find_references for {parsed.Value.AssetPath} to assess downstream impact");
+                steps.Add($"Use unity_open_mcp_find_references for {parsed.Value.AssetPath} to assess downstream impact");
             }
             else
             {
@@ -280,7 +280,7 @@ namespace UnityAgentBridge
             }
 
             if (isFailed)
-                steps.Add("Fix the issue and retry; use unity_agent_validate_edit to verify without mutation.");
+                steps.Add("Fix the issue and retry; use unity_open_mcp_validate_edit to verify without mutation.");
         }
 
         static string FormatIssue(IssueKeyParts? parsed, string rawKey)

@@ -33,7 +33,7 @@ function makeMockLive(
     asOf: null,
     summary: null,
     nextStep:
-      "Run unity_agent_scan_paths or a gated mutation to populate the cache.",
+      "Run unity_open_mcp_scan_paths or a gated mutation to populate the cache.",
   },
 ): ResourceHandlerDeps["live"] {
   return {
@@ -47,7 +47,7 @@ function createTestServer(
   liveResult?: Record<string, unknown>,
 ): Server {
   const server = new Server(
-    { name: "unity-agent", version: "0.1.0" },
+    { name: "unity-open-mcp", version: "0.1.0" },
     { capabilities: { tools: {}, resources: {} } },
   );
 
@@ -114,9 +114,9 @@ test("integration: listResources returns exactly the three M6 URIs", async () =>
 
       const uris = resources.map((r) => r.uri).sort();
       assert.deepEqual(uris, [
-        "unity-agent://bridge/status",
-        "unity-agent://health/baseline",
-        "unity-agent://health/summary",
+        "unity-open-mcp://bridge/status",
+        "unity-open-mcp://health/baseline",
+        "unity-open-mcp://health/summary",
       ]);
 
       for (const r of resources) {
@@ -141,7 +141,7 @@ test("integration: health/summary returns no_data in empty state", async () => {
     const { client, cleanup } = await setupClient(tmpDir);
     try {
       const { contents } = await client.readResource({
-        uri: "unity-agent://health/summary",
+        uri: "unity-open-mcp://health/summary",
       });
       const body = parseContent(contents);
 
@@ -174,7 +174,7 @@ test("integration: health/summary returns ok with cached summary", async () => {
     });
     try {
       const { contents } = await client.readResource({
-        uri: "unity-agent://health/summary",
+        uri: "unity-open-mcp://health/summary",
       });
       const body = parseContent(contents);
 
@@ -200,7 +200,7 @@ test("integration: health/baseline returns no_baseline when file is missing", as
     const { client, cleanup } = await setupClient(tmpDir);
     try {
       const { contents } = await client.readResource({
-        uri: "unity-agent://health/baseline",
+        uri: "unity-open-mcp://health/baseline",
       });
       const body = parseContent(contents);
 
@@ -228,7 +228,7 @@ test("integration: health/baseline returns ok when baseline file exists", async 
   try {
     await mkdir(join(tmpDir, "CI"), { recursive: true });
     await writeFile(
-      join(tmpDir, "CI", "unity-agent-baseline.json"),
+      join(tmpDir, "CI", "unity-open-mcp-baseline.json"),
       JSON.stringify({
         schemaVersion: 1,
         platformProfile: "desktop",
@@ -241,7 +241,7 @@ test("integration: health/baseline returns ok when baseline file exists", async 
     const { client, cleanup } = await setupClient(tmpDir);
     try {
       const { contents } = await client.readResource({
-        uri: "unity-agent://health/baseline",
+        uri: "unity-open-mcp://health/baseline",
       });
       const body = parseContent(contents);
 
@@ -268,7 +268,7 @@ test("integration: bridge/status returns no_data in fresh session", async () => 
     const { client, cleanup } = await setupClient(tmpDir);
     try {
       const { contents } = await client.readResource({
-        uri: "unity-agent://bridge/status",
+        uri: "unity-open-mcp://bridge/status",
       });
       const body = parseContent(contents);
 
@@ -304,7 +304,7 @@ test("integration: bridge/status returns ok with cached ping", async () => {
     const { client, cleanup } = await setupClient(tmpDir, { pingCache });
     try {
       const { contents } = await client.readResource({
-        uri: "unity-agent://bridge/status",
+        uri: "unity-open-mcp://bridge/status",
       });
       const body = parseContent(contents);
 
@@ -333,9 +333,9 @@ test("integration: all three URIs readable in sequence with correct empty-state 
     const { client, cleanup } = await setupClient(tmpDir);
     try {
       const uris = [
-        "unity-agent://health/summary",
-        "unity-agent://health/baseline",
-        "unity-agent://bridge/status",
+        "unity-open-mcp://health/summary",
+        "unity-open-mcp://health/baseline",
+        "unity-open-mcp://bridge/status",
       ];
 
       const statuses: string[] = [];
@@ -368,9 +368,9 @@ test("integration: resource reads return application/json mimeType", async () =>
     const { client, cleanup } = await setupClient(tmpDir);
     try {
       for (const uri of [
-        "unity-agent://health/summary",
-        "unity-agent://health/baseline",
-        "unity-agent://bridge/status",
+        "unity-open-mcp://health/summary",
+        "unity-open-mcp://health/baseline",
+        "unity-open-mcp://bridge/status",
       ]) {
         const { contents } = await client.readResource({ uri });
         assert.equal(contents[0]!.mimeType, "application/json");

@@ -1,7 +1,7 @@
 using System;
 using System.Reflection;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public class BridgeResourceEntry
     {

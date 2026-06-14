@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 
-namespace UnityAgentVerify.Tests
+namespace UnityOpenMcpVerify.Tests
 {
     [TestFixture]
     public class VerifyResultTests

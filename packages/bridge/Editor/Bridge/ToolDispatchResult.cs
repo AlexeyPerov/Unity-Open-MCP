@@ -1,4 +1,4 @@
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public class ToolDispatchResult
     {

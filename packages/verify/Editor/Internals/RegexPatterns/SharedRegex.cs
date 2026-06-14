@@ -2,7 +2,7 @@
 
 using System.Text.RegularExpressions;
 
-namespace UnityAgentVerify.Internals.RegexPatterns
+namespace UnityOpenMcpVerify.Internals.RegexPatterns
 {
     public static class SharedRegex
     {

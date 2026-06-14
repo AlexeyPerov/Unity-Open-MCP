@@ -1,7 +1,7 @@
 /**
  * M4 — AI Setup wizard environment-variable contract.
  *
- * The wizard Step 4 writes a `unity-agent` MCP server entry to one
+ * The wizard Step 4 writes a `unity-open-mcp` MCP server entry to one
  * of three client config shapes. The env-var contract is the same
  * across all three (see `specs/packages/mcp-server.md` §Environment
  * variables), but the surrounding envelope differs:
@@ -12,7 +12,7 @@
  *  | Claude Desktop | mcpServers | `command` + `args: [path]` | `env`           |
  *  | OpenCode     | mcp          | `command: [node, path]`    | `environment`   |
  *
- * `UNITY_PROJECT_PATH` and `UNITY_AGENT_BRIDGE_PORT` are always
+ * `UNITY_PROJECT_PATH` and `UNITY_OPEN_MCP_BRIDGE_PORT` are always
  * present (the wizard pre-fills `UNITY_PROJECT_PATH` from the Step 1
  * project path). `UNITY_PATH` is included for batch-capable flows
  * (M5+) — the wizard exposes a Step 4 advanced toggle to opt in,
@@ -22,7 +22,7 @@
  * `buildXxxMcpEntry` directly into the client config file.
  */
 
-export const MCP_SERVER_KEY = "unity-agent";
+export const MCP_SERVER_KEY = "unity-open-mcp";
 export const DEFAULT_BRIDGE_PORT = "19120";
 
 /** The full set of env-var inputs the wizard may pass. `unityPath`
@@ -39,7 +39,7 @@ export interface McpEnvInputs {
 }
 
 /** Resolved env-var map. Always includes `UNITY_PROJECT_PATH` and
- *  `UNITY_AGENT_BRIDGE_PORT`; `UNITY_PATH` is included only when
+ *  `UNITY_OPEN_MCP_BRIDGE_PORT`; `UNITY_PATH` is included only when
  *  `inputs.unityPath` is a non-empty string. */
 export type McpEnv = Record<string, string>;
 
@@ -50,7 +50,7 @@ export type McpEnv = Record<string, string>;
 export function buildMcpEnv(inputs: McpEnvInputs): McpEnv {
   const env: McpEnv = {
     UNITY_PROJECT_PATH: inputs.unityProjectPath,
-    UNITY_AGENT_BRIDGE_PORT: inputs.bridgePort ?? DEFAULT_BRIDGE_PORT,
+    UNITY_OPEN_MCP_BRIDGE_PORT: inputs.bridgePort ?? DEFAULT_BRIDGE_PORT,
   };
   if (inputs.unityPath && inputs.unityPath.trim().length > 0) {
     env.UNITY_PATH = inputs.unityPath.trim();
@@ -60,9 +60,9 @@ export function buildMcpEnv(inputs: McpEnvInputs): McpEnv {
 
 /** Cursor / Claude Desktop MCP server entry. Uses the `command` +
  *  `args` form documented in `specs/architecture/mcp-tools.md`
- *  §M4. The MCP server key in the parent config is `unity-agent`
+ *  §M4. The MCP server key in the parent config is `unity-open-mcp`
  *  (see `MCP_SERVER_KEY`); the wizard merges this entry under
- *  `mcpServers[unity-agent]`. */
+ *  `mcpServers[unity-open-mcp]`. */
 export interface CursorMcpServerEntry {
   command: "node";
   args: [string];
@@ -150,13 +150,13 @@ export function mcpClientConfigTarget(
       return {
         path: `${homeDir}/.cursor/mcp.json`,
         scope: "global",
-        mergeKey: "mcpServers.unity-agent",
+        mergeKey: "mcpServers.unity-open-mcp",
       };
     case "claude-desktop":
       return {
         path: null, // OS-specific; resolved in Step 4
         scope: "global",
-        mergeKey: "mcpServers.unity-agent",
+        mergeKey: "mcpServers.unity-open-mcp",
       };
     case "claude-code":
       return {
@@ -168,13 +168,13 @@ export function mcpClientConfigTarget(
       return {
         path: `${homeDir}/.config/opencode/opencode.json`,
         scope: "global",
-        mergeKey: "mcp.unity-agent",
+        mergeKey: "mcp.unity-open-mcp",
       };
     case "opencode-project":
       return {
         path: "opencode.json", // resolved relative to project in Step 4
         scope: "project",
-        mergeKey: "mcp.unity-agent",
+        mergeKey: "mcp.unity-open-mcp",
       };
     case "manual":
       return {

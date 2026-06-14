@@ -87,7 +87,7 @@ export interface DiagnosticsSettings {
 
 /**
  * M4: AI toolkit root + advanced MCP override (questions-4 Q2 = B).
- * `rootPath` is the absolute path to the cloned Unity-AI-Hub
+ * `rootPath` is the absolute path to the cloned unity-open-mcp
  * monorepo; the wizard Step 2 collects it and persists it here on
  * successful fingerprint validation. `mcpIndexOverride` is the Step 4
  * advanced escape hatch for a custom-built `mcp-server/dist/index.js`
@@ -1161,7 +1161,7 @@ export function bridgePortFromString(raw: string): number {
 
 /**
  * Tauri command: launch Unity with the bridge port pinned via
- * `-UNITY_AGENT_BRIDGE_PORT` and the `UNITY_AGENT_BRIDGE_PORT`
+ * `-UNITY_OPEN_MCP_BRIDGE_PORT` and the `UNITY_OPEN_MCP_BRIDGE_PORT`
  * env var, so the in-Editor bridge listens on the port the
  * wizard Step 5 is about to poll. Reuses the regular launch
  * pipeline (install resolution, version refresh, env-var
@@ -1181,7 +1181,7 @@ export async function launchForVerify(
  * calls this on a 2-3 s cadence until the bridge responds 200
  * with a parseable body or until the 120 s overall budget
  * elapses. The ping call never spawns a separate
- * `unity-agent-mcp` subprocess (questions-4 Q8 = B).
+ * `unity-open-mcp` subprocess (questions-4 Q8 = B).
  */
 export async function pollBridgePing(
   port: number,

@@ -4,37 +4,37 @@ import assert from "node:assert/strict";
 import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs } from "./batch-spawn.ts";
 
 test("BATCH_TOOL_NAMES includes find_members and limited meta-tools", () => {
-  assert.ok(BATCH_TOOL_NAMES.has("unity_agent_find_members"));
-  assert.ok(BATCH_TOOL_NAMES.has("unity_agent_execute_csharp"));
-  assert.ok(BATCH_TOOL_NAMES.has("unity_agent_invoke_method"));
-  assert.ok(BATCH_TOOL_NAMES.has("unity_agent_execute_menu"));
-  assert.ok(BATCH_TOOL_NAMES.has("unity_agent_scan_all"));
-  assert.ok(BATCH_TOOL_NAMES.has("unity_agent_baseline_create"));
-  assert.ok(BATCH_TOOL_NAMES.has("unity_agent_regression_check"));
+  assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_find_members"));
+  assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_execute_csharp"));
+  assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_invoke_method"));
+  assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_execute_menu"));
+  assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_scan_all"));
+  assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_baseline_create"));
+  assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_regression_check"));
 });
 
 test("isBatchTool returns true for all batch-capable tools", () => {
   const batch = new BatchSpawn();
-  assert.ok(batch.isBatchTool("unity_agent_find_members"));
-  assert.ok(batch.isBatchTool("unity_agent_execute_csharp"));
-  assert.ok(batch.isBatchTool("unity_agent_invoke_method"));
-  assert.ok(batch.isBatchTool("unity_agent_execute_menu"));
-  assert.ok(batch.isBatchTool("unity_agent_scan_all"));
+  assert.ok(batch.isBatchTool("unity_open_mcp_find_members"));
+  assert.ok(batch.isBatchTool("unity_open_mcp_execute_csharp"));
+  assert.ok(batch.isBatchTool("unity_open_mcp_invoke_method"));
+  assert.ok(batch.isBatchTool("unity_open_mcp_execute_menu"));
+  assert.ok(batch.isBatchTool("unity_open_mcp_scan_all"));
 });
 
 test("isBatchTool returns false for non-batch tools", () => {
   const batch = new BatchSpawn();
-  assert.ok(!batch.isBatchTool("unity_agent_ping"));
-  assert.ok(!batch.isBatchTool("unity_agent_validate_edit"));
+  assert.ok(!batch.isBatchTool("unity_open_mcp_ping"));
+  assert.ok(!batch.isBatchTool("unity_open_mcp_validate_edit"));
   assert.ok(!batch.isBatchTool("unknown_tool"));
 });
 
 test("limited meta-tools fast-fail without spawning Unity", async () => {
   const batch = new BatchSpawn();
   const tools = [
-    "unity_agent_execute_csharp",
-    "unity_agent_invoke_method",
-    "unity_agent_execute_menu",
+    "unity_open_mcp_execute_csharp",
+    "unity_open_mcp_invoke_method",
+    "unity_open_mcp_execute_menu",
   ] as const;
 
   for (const tool of tools) {
@@ -57,14 +57,14 @@ test("limited meta-tools fast-fail without spawning Unity", async () => {
 test("limited meta-tool errors mention the specific limitation", async () => {
   const batch = new BatchSpawn();
 
-  const csharp = await batch.route("unity_agent_execute_csharp", { code: "return 1;" });
+  const csharp = await batch.route("unity_open_mcp_execute_csharp", { code: "return 1;" });
   const csharpBody = JSON.parse(csharp.content[0]!.text) as Record<string, unknown>;
   assert.ok(
     (csharpBody.error as Record<string, string>).message.includes("gate"),
     "execute_csharp error should mention gate",
   );
 
-  const menu = await batch.route("unity_agent_execute_menu", { menu_path: "Assets/Refresh" });
+  const menu = await batch.route("unity_open_mcp_execute_menu", { menu_path: "Assets/Refresh" });
   const menuBody = JSON.parse(menu.content[0]!.text) as Record<string, unknown>;
   assert.ok(
     (menuBody.error as Record<string, string>).message.includes("UI"),
@@ -111,7 +111,7 @@ test("find_members without UNITY_PATH returns path error, not batch_not_supporte
   delete process.env.UNITY_PATH;
   try {
     const batch = new BatchSpawn();
-    const result = await batch.route("unity_agent_find_members", { query: "Transform" });
+    const result = await batch.route("unity_open_mcp_find_members", { query: "Transform" });
     assert.equal(result.isError, true);
     const body = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
     const error = body.error as Record<string, string>;

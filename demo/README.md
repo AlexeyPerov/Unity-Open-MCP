@@ -1,6 +1,6 @@
-# Unity Agent Demo Project
+# Unity Open MCP Demo Project
 
-Minimal Unity project for testing the Unity Agent Bridge and MCP tools locally.
+Minimal Unity project for testing the Unity Open MCP Bridge and MCP tools locally.
 
 ## Requirements
 
@@ -13,8 +13,8 @@ Minimal Unity project for testing the Unity Agent Bridge and MCP tools locally.
 
 Open this `demo/` folder as a Unity project. Unity will resolve local `file:` package references automatically:
 
-- `com.alexeyperov.unity-agent-bridge` → `../../packages/bridge`
-- `com.alexeyperov.unity-agent-verify` → `../../packages/verify`
+- `com.alexeyperov.unity-open-mcp-bridge` → `../../packages/bridge`
+- `com.alexeyperov.unity-open-mcp-verify` → `../../packages/verify`
 
 The bridge HTTP listener starts automatically on `127.0.0.1:19120` when the Editor finishes loading.
 
@@ -41,7 +41,7 @@ Expected response:
 ### 3. Start MCP server
 
 ```bash
-cd /path/to/Unity-AI-Hub/mcp-server
+cd /path/to/unity-open-mcp/mcp-server
 npm run build
 node dist/index.js
 ```
@@ -51,7 +51,7 @@ Set environment variables:
 | Variable | Value |
 |---|---|
 | `UNITY_PROJECT_PATH` | Absolute path to this `demo/` directory |
-| `UNITY_AGENT_BRIDGE_PORT` | `19120` (default) |
+| `UNITY_OPEN_MCP_BRIDGE_PORT` | `19120` (default) |
 
 ### 4. Connect an AI client
 
@@ -92,8 +92,8 @@ The demo uses local `file:` references in `Packages/manifest.json`:
 
 ```json
 {
-  "com.alexeyperov.unity-agent-bridge": "file:../../packages/bridge",
-  "com.alexeyperov.unity-agent-verify": "file:../../packages/verify"
+  "com.alexeyperov.unity-open-mcp-bridge": "file:../../packages/bridge",
+  "com.alexeyperov.unity-open-mcp-verify": "file:../../packages/verify"
 }
 ```
 
@@ -101,4 +101,4 @@ Changes to bridge or verify source are reflected after Unity recompiles (domain 
 
 ## Port Override
 
-Set `UNITY_AGENT_BRIDGE_PORT` environment variable or pass `-UNITY_AGENT_BRIDGE_PORT=<port>` as a Unity launch argument to override the default port `19120`.
+Set `UNITY_OPEN_MCP_BRIDGE_PORT` environment variable or pass `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>` as a Unity launch argument to override the default port `19120`.

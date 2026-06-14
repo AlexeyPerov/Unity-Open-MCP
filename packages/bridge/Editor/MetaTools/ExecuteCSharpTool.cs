@@ -6,7 +6,7 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 
-namespace UnityAgentBridge.MetaTools
+namespace UnityOpenMcpBridge.MetaTools
 {
     public static class ExecuteCSharpTool
     {
@@ -49,7 +49,7 @@ namespace UnityAgentBridge.MetaTools
             try
             {
                 var assembly = Assembly.Load(pe);
-                var type = assembly.GetType("UnityAgentSnippet.Snippet");
+                var type = assembly.GetType("UnityOpenMcpSnippet.Snippet");
                 if (type == null)
                     return ToolDispatchResult.Fail("execution_error", "Compiled snippet type not found");
 
@@ -77,7 +77,7 @@ namespace UnityAgentBridge.MetaTools
             foreach (var u in usings)
                 sb.AppendLine($"using {u};");
             sb.AppendLine();
-            sb.AppendLine("namespace UnityAgentSnippet {");
+            sb.AppendLine("namespace UnityOpenMcpSnippet {");
             sb.AppendLine("  public static class Snippet {");
             sb.AppendLine("    public static object Run() {");
             sb.AppendLine($"      {code}");

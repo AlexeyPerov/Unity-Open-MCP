@@ -64,7 +64,7 @@ function parseContent(result: { contents: Array<{ text: string }> }): unknown {
 test("health/summary returns ok payload from bridge", async () => {
   const { deps } = makeDeps();
   const router = new ResourceRouter(deps);
-  const result = await router.read("unity-agent://health/summary");
+  const result = await router.read("unity-open-mcp://health/summary");
   const body = parseContent(result) as Record<string, unknown>;
   assert.equal(body.status, "ok");
   assert.equal(body.asOf, "2026-06-12T00:00:00Z");
@@ -78,10 +78,10 @@ test("health/summary returns no_data when bridge returns no_data", async () => {
     status: "no_data",
     asOf: null,
     summary: null,
-    nextStep: "Run unity_agent_scan_paths or a gated mutation to populate the cache.",
+    nextStep: "Run unity_open_mcp_scan_paths or a gated mutation to populate the cache.",
   };
   const router = new ResourceRouter(deps);
-  const result = await router.read("unity-agent://health/summary");
+  const result = await router.read("unity-open-mcp://health/summary");
   const body = parseContent(result) as Record<string, unknown>;
   assert.equal(body.status, "no_data");
   assert.equal(body.asOf, null);
@@ -92,9 +92,9 @@ test("health/summary returns no_data when bridge returns no_data", async () => {
 test("health/summary read calls bridge with correct route", async () => {
   const { deps, mockLive } = makeDeps();
   const router = new ResourceRouter(deps);
-  await router.read("unity-agent://health/summary");
+  await router.read("unity-open-mcp://health/summary");
   assert.equal(mockLive.readResourceCalls.length, 1);
-  assert.equal(mockLive.readResourceCalls[0], "unity-agent://health/summary");
+  assert.equal(mockLive.readResourceCalls[0], "unity-open-mcp://health/summary");
 });
 
 // ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ test("health/baseline returns no_baseline when file is missing", async () => {
   try {
     const { deps } = makeDeps({ projectPath: tmpDir });
     const router = new ResourceRouter(deps);
-    const result = await router.read("unity-agent://health/baseline");
+    const result = await router.read("unity-open-mcp://health/baseline");
     const body = parseContent(result) as Record<string, unknown>;
     assert.equal(body.status, "no_baseline");
     assert.equal(body.asOf, null);
@@ -122,7 +122,7 @@ test("health/baseline returns ok when file exists", async () => {
   try {
     await mkdir(join(tmpDir, "CI"), { recursive: true });
     await writeFile(
-      join(tmpDir, "CI", "unity-agent-baseline.json"),
+      join(tmpDir, "CI", "unity-open-mcp-baseline.json"),
       JSON.stringify({
         schemaVersion: 1,
         platformProfile: "desktop",
@@ -134,7 +134,7 @@ test("health/baseline returns ok when file exists", async () => {
 
     const { deps } = makeDeps({ projectPath: tmpDir });
     const router = new ResourceRouter(deps);
-    const result = await router.read("unity-agent://health/baseline");
+    const result = await router.read("unity-open-mcp://health/baseline");
     const body = parseContent(result) as Record<string, unknown>;
     assert.equal(body.status, "ok");
     assert.ok(body.asOf, "asOf should be populated from file mtime");
@@ -151,7 +151,7 @@ test("health/baseline does not throw on corrupt JSON", async () => {
   try {
     await mkdir(join(tmpDir, "CI"), { recursive: true });
     await writeFile(
-      join(tmpDir, "CI", "unity-agent-baseline.json"),
+      join(tmpDir, "CI", "unity-open-mcp-baseline.json"),
       "not valid json {{{",
     );
 
@@ -214,7 +214,7 @@ test("bridge/status handler does not call live", () => {
 test("unknown URI returns error payload, not exception", async () => {
   const { deps } = makeDeps();
   const router = new ResourceRouter(deps);
-  const result = await router.read("unity-agent://unknown/uri");
+  const result = await router.read("unity-open-mcp://unknown/uri");
   const body = parseContent(result) as Record<string, unknown>;
   assert.equal(body.status, "no_data");
   assert.ok((body.error as string).includes("Unknown resource URI"));

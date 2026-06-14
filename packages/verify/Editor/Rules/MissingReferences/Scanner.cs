@@ -7,12 +7,12 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
-using UnityAgentVerify.Internals.AssetDatabase;
-using UnityAgentVerify.Internals.Serialization;
-using UnityAgentVerify.Internals.RegexPatterns;
+using UnityOpenMcpVerify.Internals.AssetDatabase;
+using UnityOpenMcpVerify.Internals.Serialization;
+using UnityOpenMcpVerify.Internals.RegexPatterns;
 using Object = UnityEngine.Object;
 
-namespace UnityAgentVerify.Rules.MissingReferences
+namespace UnityOpenMcpVerify.Rules.MissingReferences
 {
     public static class Scanner
     {

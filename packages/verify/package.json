@@ -1,15 +1,15 @@
 {
-  "name": "com.alexeyperov.unity-agent-verify",
-  "displayName": "Unity Agent Verify",
+  "name": "com.alexeyperov.unity-open-mcp-verify",
+  "displayName": "Unity Open MCP Verify",
   "version": "0.1.0",
   "unity": "6000.0",
   "description": "Scoped health checks for Unity Hub Pro gate-first validation.",
   "author": {
     "name": "Alexey Perov",
-    "url": "https://github.com/AlexeyPerov/Unity-AI-Hub"
+    "url": "https://github.com/AlexeyPerov/unity-open-mcp"
   },
   "keywords": [
-    "unity-agent",
+    "unity-open-mcp",
     "verify",
     "gate",
     "health-check"

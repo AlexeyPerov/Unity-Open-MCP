@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const scanPaths: Tool = {
-  name: "unity_agent_scan_paths",
+  name: "unity_open_mcp_scan_paths",
   description:
     "Run one or more ported verify rules scoped to paths. For a single rule, pass categories: [\"missing_references\"]. Unknown rule IDs error with availableRules.",
   inputSchema: {

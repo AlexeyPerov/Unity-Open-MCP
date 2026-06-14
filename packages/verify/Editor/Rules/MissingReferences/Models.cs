@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace UnityAgentVerify.Rules.MissingReferences
+namespace UnityOpenMcpVerify.Rules.MissingReferences
 {
     public class ExternalReferenceRegistry
     {

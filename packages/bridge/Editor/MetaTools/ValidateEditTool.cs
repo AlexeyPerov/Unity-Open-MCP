@@ -1,8 +1,8 @@
 using System.Text;
-using UnityAgentVerify;
-using UnityAgentVerify.Fixes;
+using UnityOpenMcpVerify;
+using UnityOpenMcpVerify.Fixes;
 
-namespace UnityAgentBridge.MetaTools
+namespace UnityOpenMcpBridge.MetaTools
 {
     public static class ValidateEditTool
     {

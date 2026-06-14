@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const regressionCheck: Tool = {
-  name: "unity_agent_regression_check",
+  name: "unity_open_mcp_regression_check",
   description:
     "Compare current full scan against a baseline file. Returns exitCode 1 when the error count increase exceeds regression_threshold, or when the baseline is missing/invalid. Emits a compact regression summary suitable for CI logs.",
   inputSchema: {
@@ -10,7 +10,7 @@ export const regressionCheck: Tool = {
     properties: {
       baseline_path: {
         type: "string",
-        description: "Path to a baseline JSON file created by unity_agent_baseline_create.",
+        description: "Path to a baseline JSON file created by unity_open_mcp_baseline_create.",
       },
       regression_threshold: {
         type: "integer",

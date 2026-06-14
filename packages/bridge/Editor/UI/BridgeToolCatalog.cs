@@ -19,7 +19,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public enum BridgeToolSource
     {
@@ -80,16 +80,16 @@ namespace UnityAgentBridge
         // honest about what is actually dispatchable in the current session.
         static readonly (string Name, string Title, bool IsMutating, string Gate)[] HardcodedTools =
         {
-            ("unity_agent_execute_csharp", "Execute C#", true,  "enforce"),
-            ("unity_agent_invoke_method",  "Invoke Method", true,  "enforce"),
-            ("unity_agent_execute_menu",   "Execute Menu", true,   "enforce"),
-            ("unity_agent_find_members",   "Find Members", false, "n/a"),
-            ("unity_agent_validate_edit",  "Validate Edit", false, "n/a"),
-            ("unity_agent_checkpoint_create", "Checkpoint Create", false, "n/a"),
-            ("unity_agent_delta",          "Delta", false, "n/a"),
-            ("unity_agent_find_references","Find References", false, "n/a"),
-            ("unity_agent_scan_paths",     "Scan Paths", false, "n/a"),
-            ("unity_agent_apply_fix",      "Apply Fix", true, "enforce"),
+            ("unity_open_mcp_execute_csharp", "Execute C#", true,  "enforce"),
+            ("unity_open_mcp_invoke_method",  "Invoke Method", true,  "enforce"),
+            ("unity_open_mcp_execute_menu",   "Execute Menu", true,   "enforce"),
+            ("unity_open_mcp_find_members",   "Find Members", false, "n/a"),
+            ("unity_open_mcp_validate_edit",  "Validate Edit", false, "n/a"),
+            ("unity_open_mcp_checkpoint_create", "Checkpoint Create", false, "n/a"),
+            ("unity_open_mcp_delta",          "Delta", false, "n/a"),
+            ("unity_open_mcp_find_references","Find References", false, "n/a"),
+            ("unity_open_mcp_scan_paths",     "Scan Paths", false, "n/a"),
+            ("unity_open_mcp_apply_fix",      "Apply Fix", true, "enforce"),
         };
 
         public static List<BridgeToolCatalogItem> Build()
@@ -214,25 +214,25 @@ namespace UnityAgentBridge
             // in sync with the schema when tools evolve.
             switch (toolName)
             {
-                case "unity_agent_execute_csharp":
+                case "unity_open_mcp_execute_csharp":
                     return P("code: string", "usings: string[]", "paths_hint: string[]", "gate: string = \"enforce\"", "timeout_ms: int = 30000");
-                case "unity_agent_invoke_method":
+                case "unity_open_mcp_invoke_method":
                     return P("type_name: string", "method_name: string", "args: object[]", "is_static: bool = false", "assembly_name: string", "paths_hint: string[]", "gate: string = \"enforce\"", "timeout_ms: int = 30000");
-                case "unity_agent_execute_menu":
+                case "unity_open_mcp_execute_menu":
                     return P("menu_path: string", "paths_hint: string[]", "gate: string = \"enforce\"");
-                case "unity_agent_find_members":
+                case "unity_open_mcp_find_members":
                     return P("query: string", "kind: string = \"all\"", "assembly_filter: string", "include_unity_editor: bool = true", "include_project: bool = true", "max_results: int = 50");
-                case "unity_agent_validate_edit":
+                case "unity_open_mcp_validate_edit":
                     return P("paths: string[]", "categories: string[]", "platform_profile: string = \"desktop\"", "detail: string = \"normal\"");
-                case "unity_agent_checkpoint_create":
+                case "unity_open_mcp_checkpoint_create":
                     return P("paths: string[]", "label: string");
-                case "unity_agent_delta":
+                case "unity_open_mcp_delta":
                     return P("checkpoint_id: string", "paths: string[]");
-                case "unity_agent_find_references":
+                case "unity_open_mcp_find_references":
                     return P("asset_path: string", "guid: string", "detail: string = \"normal\"", "max_results: int = 100");
-                case "unity_agent_scan_paths":
+                case "unity_open_mcp_scan_paths":
                     return P("paths: string[]", "categories: string[]", "platform_profile: string", "fail_on_severity: string = \"never\"");
-                case "unity_agent_apply_fix":
+                case "unity_open_mcp_apply_fix":
                     return P("fix_id: string", "issue_id: string", "dry_run: bool = true", "gate: string = \"enforce\"");
                 default:
                     return new List<BridgeToolParameterSummary>();

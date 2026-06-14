@@ -35,16 +35,16 @@ pub const MIN_UNITY_MAJOR: u32 = 6000;
 
 /// UPM package id for the bridge package. Used by detect (is the
 /// package already installed?) and by the merge (target entry).
-pub const BRIDGE_PACKAGE_ID: &str = "com.alexeyperov.unity-agent-bridge";
+pub const BRIDGE_PACKAGE_ID: &str = "com.alexeyperov.unity-open-mcp-bridge";
 
 /// UPM package id for the verify package.
-pub const VERIFY_PACKAGE_ID: &str = "com.alexeyperov.unity-agent-verify";
+pub const VERIFY_PACKAGE_ID: &str = "com.alexeyperov.unity-open-mcp-verify";
 
 /// Default git remote used when the toolkit root has no `.git`
 /// directory or no `[remote "origin"]` block (e.g. a downloaded
 /// zip). Mirrors the canonical repository URL referenced in
 /// `packages/bridge.md` and `packages/verify.md` §Install.
-pub const DEFAULT_GIT_REMOTE: &str = "https://github.com/AlexeyPerov/Unity-AI-Hub.git";
+pub const DEFAULT_GIT_REMOTE: &str = "https://github.com/AlexeyPerov/unity-open-mcp.git";
 
 /// Default git tag pins for each package. Used when the user does
 /// not override via the Step 3 "Package version pin" field.
@@ -106,7 +106,7 @@ pub enum BridgeStatusKind {
 
 /// Per-client MCP configuration heuristic. Each flag is `true`
 /// when a known client config file exists on disk and contains a
-/// `unity-agent` MCP server entry. Used by Step 1 to surface
+/// `unity-open-mcp` MCP server entry. Used by Step 1 to surface
 /// "MCP configured?" and by the Done screen checklist.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -118,7 +118,7 @@ pub struct McpConfigHeuristic {
 }
 
 impl McpConfigHeuristic {
-    /// `true` when any known client has a `unity-agent` entry.
+    /// `true` when any known client has a `unity-open-mcp` entry.
     pub fn any(&self) -> bool {
         self.cursor || self.claude_desktop || self.opencode_global || self.opencode_project
     }
@@ -157,7 +157,7 @@ pub struct ProjectState {
     /// `true` when the manifest's `dependencies` contains the
     /// verify package id.
     pub verify_installed: bool,
-    /// Per-client heuristic for whether a `unity-agent` MCP
+    /// Per-client heuristic for whether a `unity-open-mcp` MCP
     /// server entry is already configured.
     pub mcp_configured: McpConfigHeuristic,
     /// `true` when the wizard believes `Packages/manifest.json`
@@ -1014,7 +1014,7 @@ pub fn claude_desktop_config_path(home: &Path) -> PathBuf {
 }
 
 /// `true` when the JSON file at `path` exists and contains a
-/// `unity-agent` MCP server entry under either `mcpServers` or
+/// `unity-open-mcp` MCP server entry under either `mcpServers` or
 /// `mcp`. Unparsable files are treated as "not configured" so a
 /// malformed config does not falsely report as set up.
 pub fn contains_mcp_key(path: &Path) -> bool {
@@ -1031,12 +1031,12 @@ pub fn contains_mcp_key(path: &Path) -> bool {
         return false;
     };
     if let Some(servers) = obj.get("mcpServers").and_then(|v| v.as_object()) {
-        if servers.contains_key("unity-agent") {
+        if servers.contains_key("unity-open-mcp") {
             return true;
         }
     }
     if let Some(mcp) = obj.get("mcp").and_then(|v| v.as_object()) {
-        if mcp.contains_key("unity-agent") {
+        if mcp.contains_key("unity-open-mcp") {
             return true;
         }
     }
@@ -1259,7 +1259,7 @@ mod tests {
         fs::create_dir_all(dir.path().join(".git")).unwrap();
         fs::write(
             dir.path().join(".git").join("config"),
-            "[core]\n  repositoryformatversion = 0\n[remote \"origin\"]\n  url = git@github.com:AlexeyPerov/Unity-AI-Hub.git\n  fetch = +refs/heads/*:refs/remotes/origin/*\n",
+            "[core]\n  repositoryformatversion = 0\n[remote \"origin\"]\n  url = git@github.com:AlexeyPerov/unity-open-mcp.git\n  fetch = +refs/heads/*:refs/remotes/origin/*\n",
         )
         .unwrap();
         let derived = derive_package_urls(
@@ -1267,8 +1267,8 @@ mod tests {
             "",
             "",
         );
-        assert_eq!(derived.git_remote, "git@github.com:AlexeyPerov/Unity-AI-Hub.git");
-        assert!(derived.bridge.url.starts_with("git@github.com:AlexeyPerov/Unity-AI-Hub.git"));
+        assert_eq!(derived.git_remote, "git@github.com:AlexeyPerov/unity-open-mcp.git");
+        assert!(derived.bridge.url.starts_with("git@github.com:AlexeyPerov/unity-open-mcp.git"));
     }
 
     #[test]
@@ -1276,14 +1276,14 @@ mod tests {
         let derived = derive_package_urls(
             "/repos/uai",
             "bridge-v1.2.3",
-            "https://github.com/fork/Unity-AI-Hub.git",
+            "https://github.com/fork/unity-open-mcp.git",
         );
-        assert_eq!(derived.git_remote, "https://github.com/fork/Unity-AI-Hub.git");
+        assert_eq!(derived.git_remote, "https://github.com/fork/unity-open-mcp.git");
         assert_eq!(derived.bridge.tag, "bridge-v1.2.3");
         assert!(derived
             .bridge
             .url
-            .contains("https://github.com/fork/Unity-AI-Hub.git"));
+            .contains("https://github.com/fork/unity-open-mcp.git"));
     }
 
     #[test]
@@ -1296,7 +1296,7 @@ mod tests {
 
     #[test]
     fn classify_reports_unchanged_on_exact_match() {
-        let url = "https://github.com/AlexeyPerov/Unity-AI-Hub.git?path=packages/bridge#bridge-v1.0.0";
+        let url = "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.0.0";
         let mut existing = BTreeMap::new();
         existing.insert(BRIDGE_PACKAGE_ID.to_string(), url.to_string());
         let kind = classify(&existing, BRIDGE_PACKAGE_ID, url, "bridge-v1.0.0");
@@ -1308,13 +1308,13 @@ mod tests {
         let mut existing = BTreeMap::new();
         existing.insert(
             BRIDGE_PACKAGE_ID.to_string(),
-            "https://github.com/AlexeyPerov/Unity-AI-Hub.git?path=packages/bridge#bridge-v0.9.0"
+            "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.9.0"
                 .to_string(),
         );
         let kind = classify(
             &existing,
             BRIDGE_PACKAGE_ID,
-            "https://github.com/AlexeyPerov/Unity-AI-Hub.git?path=packages/bridge#bridge-v1.0.0",
+            "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.0.0",
             "bridge-v1.0.0",
         );
         assert_eq!(kind, ChangeKind::Upgrade);
@@ -1325,13 +1325,13 @@ mod tests {
         let mut existing = BTreeMap::new();
         existing.insert(
             BRIDGE_PACKAGE_ID.to_string(),
-            "https://github.com/fork/Unity-AI-Hub.git?path=packages/bridge#bridge-v1.0.0"
+            "https://github.com/fork/unity-open-mcp.git?path=packages/bridge#bridge-v1.0.0"
                 .to_string(),
         );
         let kind = classify(
             &existing,
             BRIDGE_PACKAGE_ID,
-            "https://github.com/AlexeyPerov/Unity-AI-Hub.git?path=packages/bridge#bridge-v1.0.0",
+            "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.0.0",
             "bridge-v1.0.0",
         );
         assert_eq!(kind, ChangeKind::Upgrade);
@@ -1371,7 +1371,7 @@ mod tests {
             dir.path(),
             &[(
                 BRIDGE_PACKAGE_ID,
-                "https://github.com/AlexeyPerov/Unity-AI-Hub.git?path=packages/bridge#bridge-v0.5.0",
+                "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.5.0",
             )],
         );
         let plan = plan_manifest_merge(ManifestMergeParams {
@@ -1459,7 +1459,7 @@ mod tests {
             dir.path(),
             &[(
                 BRIDGE_PACKAGE_ID,
-                "https://github.com/AlexeyPerov/Unity-AI-Hub.git?path=packages/bridge#bridge-v0.5.0",
+                "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.5.0",
             )],
         );
         let err = write_manifest_merge(ManifestMergeParams {

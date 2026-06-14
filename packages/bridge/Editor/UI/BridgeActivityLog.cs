@@ -19,7 +19,7 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public enum BridgeActivityKind
     {

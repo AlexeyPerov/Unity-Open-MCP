@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const applyFix: Tool = {
-  name: "unity_agent_apply_fix",
+  name: "unity_open_mcp_apply_fix",
   description:
     "Apply a verify rule fix action. Supports dry_run (default true) to preview the fix before applying. Returns gate envelope when dry_run is false.",
   inputSchema: {

@@ -12,10 +12,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityAgentVerify;
+using UnityOpenMcpVerify;
 using UnityEditor;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     public class BridgeManualIssue
     {

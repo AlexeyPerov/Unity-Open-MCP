@@ -1,6 +1,6 @@
-# Unity Agent Skill
+# Unity Open MCP Skill
 
-Skill for AI agents working with Unity projects via the `unity-agent` MCP server. This skill covers the gate + verify workflow.
+Skill for AI agents working with Unity projects via the `unity-open-mcp` MCP server. This skill covers the gate + verify workflow.
 
 ## Install
 
@@ -8,42 +8,42 @@ Copy this file to your client's skills directory:
 
 | Client | Path |
 |---|---|
-| Cursor / Claude Code | `.claude/skills/unity-agent/SKILL.md` (project) or global skills dir |
-| OpenCode | `.opencode/skills/unity-agent/SKILL.md` (project) or `~/.config/opencode/skills/` |
+| Cursor / Claude Code | `.claude/skills/unity-open-mcp/SKILL.md` (project) or global skills dir |
+| OpenCode | `.opencode/skills/unity-open-mcp/SKILL.md` (project) or `~/.config/opencode/skills/` |
 
 ## Available tools
 
-All tools are prefixed `unity_agent_*`.
+All tools are prefixed `unity_open_mcp_*`.
 
 ### Mutating tools (gate-aware)
 
-- `unity_agent_execute_csharp` — Compile and run a C# snippet in the Unity Editor.
-- `unity_agent_invoke_method` — Call a method via reflection.
-- `unity_agent_execute_menu` — Execute a Unity Editor menu item.
-- `unity_agent_apply_fix` — Apply a verify rule fix action (e.g. remove missing script).
+- `unity_open_mcp_execute_csharp` — Compile and run a C# snippet in the Unity Editor.
+- `unity_open_mcp_invoke_method` — Call a method via reflection.
+- `unity_open_mcp_execute_menu` — Execute a Unity Editor menu item.
+- `unity_open_mcp_apply_fix` — Apply a verify rule fix action (e.g. remove missing script).
 
 All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`) and require a non-empty `paths_hint` array.
 
 ### Read-only tools (no gate)
 
-- `unity_agent_ping` — Bridge health check.
-- `unity_agent_find_members` — Discover types, methods, and properties.
-- `unity_agent_validate_edit` — Scoped health scan without mutation.
-- `unity_agent_find_references` — Reverse dependency lookup for assets.
-- `unity_agent_scan_paths` — Run specific verify rules over scoped paths.
+- `unity_open_mcp_ping` — Bridge health check.
+- `unity_open_mcp_find_members` — Discover types, methods, and properties.
+- `unity_open_mcp_validate_edit` — Scoped health scan without mutation.
+- `unity_open_mcp_find_references` — Reverse dependency lookup for assets.
+- `unity_open_mcp_scan_paths` — Run specific verify rules over scoped paths.
 
 ### Checkpoint tools
 
-- `unity_agent_checkpoint_create` — Create a manual checkpoint for later delta comparison.
-- `unity_agent_delta` — Compare current project health vs a checkpoint.
+- `unity_open_mcp_checkpoint_create` — Create a manual checkpoint for later delta comparison.
+- `unity_open_mcp_delta` — Compare current project health vs a checkpoint.
 
 ## Core loop: mutate → gate → fix
 
-1. **Discover** — use `unity_agent_find_members` before blind `execute_csharp` calls.
+1. **Discover** — use `unity_open_mcp_find_members` before blind `execute_csharp` calls.
 2. **Declare scope** — always pass `paths_hint` with asset paths you intend to touch.
-3. **Mutate** — call `unity_agent_execute_csharp`, `invoke_method`, or `execute_menu` with default `gate: enforce`.
+3. **Mutate** — call `unity_open_mcp_execute_csharp`, `invoke_method`, or `execute_menu` with default `gate: enforce`.
 4. **Read gate** — on `isError: true`, inspect `gate.delta.newIssues` and `agentNextSteps`.
-5. **Fix** — address top error; optionally use `unity_agent_apply_fix` with `dry_run: true` first.
+5. **Fix** — address top error; optionally use `unity_open_mcp_apply_fix` with `dry_run: true` first.
 6. **Retry** — re-run mutation; confirm `gate.delta.resolvedErrors > 0` or `newErrors == 0`.
 
 **Principle: mutation success ≠ project safe.** A successful C# compile can still break prefab references.
@@ -51,7 +51,7 @@ All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`)
 ### Example: execute_csharp with gate enforcement
 
 ```json
-// Tool call: unity_agent_execute_csharp
+// Tool call: unity_open_mcp_execute_csharp
 {
   "code": "var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(\"Assets/Prefabs/Player.prefab\");\nvar go = PrefabUtility.InstantiatePrefab(prefab);\ngo.transform.position = Vector3.zero;\nreturn go.name;",
   "usings": ["UnityEngine"],
@@ -112,8 +112,8 @@ All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`)
   },
   "agentNextSteps": [
     "New error: missing_references MISSING_SCRIPT on Assets/Prefabs/Player.prefab",
-    "Fix available: use unity_agent_apply_fix with fix_id=\"remove_missing_script\"",
-    "Verify after fix: use unity_agent_validate_edit on the affected paths"
+    "Fix available: use unity_open_mcp_apply_fix with fix_id=\"remove_missing_script\"",
+    "Verify after fix: use unity_open_mcp_validate_edit on the affected paths"
   ]
 }
 ```
@@ -121,7 +121,7 @@ All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`)
 ### Example: apply_fix with dry_run
 
 ```json
-// Tool call: unity_agent_apply_fix
+// Tool call: unity_open_mcp_apply_fix
 {
   "fix_id": "remove_missing_script",
   "issue_id": "missing_references|Error|Assets/Prefabs/Player.prefab|MISSING_SCRIPT",
@@ -166,7 +166,7 @@ After confirming, apply for real (`"dry_run": false`). The tool runs through the
 Before deleting or moving an asset, check who depends on it:
 
 ```json
-// Tool call: unity_agent_find_references
+// Tool call: unity_open_mcp_find_references
 { "asset_path": "Assets/Materials/PlayerMat.mat", "max_results": 50 }
 ```
 
@@ -187,7 +187,7 @@ Before deleting or moving an asset, check who depends on it:
 Run a scoped health scan without any preceding mutation — useful for pre-commit verification:
 
 ```json
-// Tool call: unity_agent_validate_edit
+// Tool call: unity_open_mcp_validate_edit
 { "paths": ["Assets/Prefabs/Player.prefab"], "detail": "normal" }
 ```
 
@@ -203,7 +203,7 @@ Run a scoped health scan without any preceding mutation — useful for pre-commi
 ### Example: scan_paths with explicit categories
 
 ```json
-// Tool call: unity_agent_scan_paths
+// Tool call: unity_open_mcp_scan_paths
 { "paths": ["Assets/Prefabs/", "Assets/Scenes/"], "categories": ["missing_references"] }
 ```
 
@@ -237,7 +237,7 @@ Run a scoped health scan without any preceding mutation — useful for pre-commi
 ### Example: warn mode
 
 ```json
-// Tool call: unity_agent_execute_csharp
+// Tool call: unity_open_mcp_execute_csharp
 {
   "code": "Selection.activeGameObject = GameObject.Find(\"Camera\");\nreturn Selection.activeGameObject != null;",
   "paths_hint": ["Assets/Scenes/Main.unity"],
@@ -250,7 +250,7 @@ Even if gate detects new issues, `isError` is `false` in MCP — the agent reads
 ### Example: gate off
 
 ```json
-// Tool call: unity_agent_execute_csharp
+// Tool call: unity_open_mcp_execute_csharp
 {
   "code": "EditorApplication.Exit(0);",
   "paths_hint": [],
@@ -270,15 +270,15 @@ No checkpoint, no validation, no delta. Use only for trusted administrative scri
 
 For large refactors:
 
-1. `unity_agent_checkpoint_create` with scoped paths.
+1. `unity_open_mcp_checkpoint_create` with scoped paths.
 2. Run trusted mutations with `gate: off` if needed.
-3. `unity_agent_delta` against checkpoint — single verification pass.
+3. `unity_open_mcp_delta` against checkpoint — single verification pass.
 
 ### Example: checkpoint → mutate → delta
 
 ```json
 // Step 1: create checkpoint
-// Tool call: unity_agent_checkpoint_create
+// Tool call: unity_open_mcp_checkpoint_create
 { "paths": ["Assets/Prefabs/"], "label": "before-refactor" }
 ```
 
@@ -291,7 +291,7 @@ For large refactors:
 // ... execute_csharp / invoke_method calls ...
 
 // Step 3: delta check
-// Tool call: unity_agent_delta
+// Tool call: unity_open_mcp_delta
 { "checkpoint_id": "cp_k4m8n2" }
 ```
 
@@ -315,9 +315,9 @@ For large refactors:
 
 ## Setup without Hub
 
-1. Add `com.alexeyperov.unity-agent-bridge` and `com.alexeyperov.unity-agent-verify` to `Packages/manifest.json`.
-2. Configure MCP client with `unity-agent` server entry.
-3. Open project in Unity 6; confirm `unity_agent_ping` returns `connected: true`.
+1. Add `com.alexeyperov.unity-open-mcp-bridge` and `com.alexeyperov.unity-open-mcp-verify` to `Packages/manifest.json`.
+2. Configure MCP client with `unity-open-mcp` server entry.
+3. Open project in Unity 6; confirm `unity_open_mcp_ping` returns `connected: true`.
 
 ### Example MCP client config
 
@@ -326,12 +326,12 @@ For large refactors:
 ```json
 {
   "mcpServers": {
-    "unity-agent": {
+    "unity-open-mcp": {
       "command": "node",
-      "args": ["/path/to/unity-ai-hub/mcp-server/dist/index.js"],
+      "args": ["/path/to/unity-open-mcp/mcp-server/dist/index.js"],
       "env": {
         "UNITY_PROJECT_PATH": "/path/to/MyGame",
-        "UNITY_AGENT_BRIDGE_PORT": "19120"
+        "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
       }
     }
   }
@@ -343,13 +343,13 @@ For large refactors:
 ```json
 {
   "mcp": {
-    "unity-agent": {
+    "unity-open-mcp": {
       "type": "local",
-      "command": ["node", "/path/to/unity-ai-hub/mcp-server/dist/index.js"],
+      "command": ["node", "/path/to/unity-open-mcp/mcp-server/dist/index.js"],
       "enabled": true,
       "environment": {
         "UNITY_PROJECT_PATH": "/path/to/MyGame",
-        "UNITY_AGENT_BRIDGE_PORT": "19120"
+        "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
       }
     }
   }

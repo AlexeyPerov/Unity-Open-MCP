@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const delta: Tool = {
-  name: "unity_agent_delta",
+  name: "unity_open_mcp_delta",
   description: "Compare current project health vs a checkpoint.",
   inputSchema: {
     type: "object",

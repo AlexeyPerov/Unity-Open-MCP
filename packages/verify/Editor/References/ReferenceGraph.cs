@@ -7,7 +7,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEditor;
 
-namespace UnityAgentVerify.References
+namespace UnityOpenMcpVerify.References
 {
     public class ReferenceGraph
     {

@@ -2,9 +2,9 @@
 // M4.5-10 (activity ring buffer + verbose mode), and M4.5-11 (project settings schema
 // extension: autoStart + verboseActivityLog).
 using NUnit.Framework;
-using UnityAgentBridge;
+using UnityOpenMcpBridge;
 
-namespace UnityAgentBridge.Tests
+namespace UnityOpenMcpBridge.Tests
 {
     public class BridgeGateDefaultPolicyTests
     {
@@ -138,7 +138,7 @@ namespace UnityAgentBridge.Tests
             var evt = new BridgeActivityEvent
             {
                 Kind = BridgeActivityKind.ToolRequest,
-                ToolName = "unity_agent_execute_csharp",
+                ToolName = "unity_open_mcp_execute_csharp",
                 GateMode = "enforce",
                 Outcome = BridgeActivityOutcome.Success,
                 HttpStatus = 200,
@@ -147,7 +147,7 @@ namespace UnityAgentBridge.Tests
             BridgeActivityLog.Record(evt);
             Assert.AreEqual(1, BridgeActivityLog.Count);
             var stored = BridgeActivityLog.Events[0];
-            Assert.AreEqual("unity_agent_execute_csharp", stored.ToolName);
+            Assert.AreEqual("unity_open_mcp_execute_csharp", stored.ToolName);
             Assert.AreEqual("enforce", stored.GateMode);
             Assert.AreEqual(BridgeActivityOutcome.Success, stored.Outcome);
         }

@@ -1,14 +1,14 @@
 {
   "dependencies": {
-    "com.alexeyperov.unity-agent-bridge": {
+    "com.alexeyperov.unity-open-mcp-bridge": {
       "version": "file:../../packages/bridge",
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.alexeyperov.unity-agent-verify": "0.1.0"
+        "com.alexeyperov.unity-open-mcp-verify": "0.1.0"
       }
     },
-    "com.alexeyperov.unity-agent-verify": {
+    "com.alexeyperov.unity-open-mcp-verify": {
       "version": "file:../../packages/verify",
       "depth": 0,
       "source": "local",

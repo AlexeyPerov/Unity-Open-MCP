@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const validateEdit: Tool = {
-  name: "unity_agent_validate_edit",
+  name: "unity_open_mcp_validate_edit",
   description:
     "Scoped health check without a preceding mutation. Used by agents for manual verification or pre-commit checks.",
   inputSchema: {

@@ -21,7 +21,7 @@ import {
 test("buildMcpEnv always includes required vars", () => {
   const env = buildMcpEnv({ unityProjectPath: "/games/MyGame" });
   assert.equal(env.UNITY_PROJECT_PATH, "/games/MyGame");
-  assert.equal(env.UNITY_AGENT_BRIDGE_PORT, DEFAULT_BRIDGE_PORT);
+  assert.equal(env.UNITY_OPEN_MCP_BRIDGE_PORT, DEFAULT_BRIDGE_PORT);
   assert.equal(env.UNITY_PATH, undefined);
 });
 
@@ -30,7 +30,7 @@ test("buildMcpEnv honors custom bridge port", () => {
     unityProjectPath: "/games/MyGame",
     bridgePort: "19199",
   });
-  assert.equal(env.UNITY_AGENT_BRIDGE_PORT, "19199");
+  assert.equal(env.UNITY_OPEN_MCP_BRIDGE_PORT, "19199");
 });
 
 test("buildMcpEnv omits UNITY_PATH when blank", () => {
@@ -56,7 +56,7 @@ test("buildCursorMcpEntry uses command+args+env envelope", () => {
   assert.equal(entry.command, "node");
   assert.deepEqual(entry.args, ["/repos/uai/mcp-server/dist/index.js"]);
   assert.equal(entry.env.UNITY_PROJECT_PATH, "/games/MyGame");
-  assert.equal(entry.env.UNITY_AGENT_BRIDGE_PORT, DEFAULT_BRIDGE_PORT);
+  assert.equal(entry.env.UNITY_OPEN_MCP_BRIDGE_PORT, DEFAULT_BRIDGE_PORT);
 });
 
 test("buildOpenCodeMcpEntry uses command-array+environment envelope", () => {
@@ -79,13 +79,13 @@ test("mcpClientConfigTarget resolves cursor to ~/.cursor/mcp.json", () => {
   const t = mcpClientConfigTarget("cursor", "/home/dev");
   assert.equal(t.path, "/home/dev/.cursor/mcp.json");
   assert.equal(t.scope, "global");
-  assert.equal(t.mergeKey, "mcpServers.unity-agent");
+  assert.equal(t.mergeKey, "mcpServers.unity-open-mcp");
 });
 
 test("mcpClientConfigTarget resolves opencode-global to ~/.config/opencode/opencode.json", () => {
   const t = mcpClientConfigTarget("opencode-global", "/home/dev");
   assert.equal(t.path, "/home/dev/.config/opencode/opencode.json");
-  assert.equal(t.mergeKey, "mcp.unity-agent");
+  assert.equal(t.mergeKey, "mcp.unity-open-mcp");
 });
 
 test("mcpClientConfigTarget returns null path for claude-code (CLI-only)", () => {
@@ -100,8 +100,8 @@ test("mcpClientConfigTarget returns null path for manual (clipboard-only)", () =
   assert.equal(t.scope, "none");
 });
 
-test("MCP_SERVER_KEY is unity-agent (matches Rust AiToolkitSettings convention)", () => {
-  assert.equal(MCP_SERVER_KEY, "unity-agent");
+test("MCP_SERVER_KEY is unity-open-mcp (matches Rust AiToolkitSettings convention)", () => {
+  assert.equal(MCP_SERVER_KEY, "unity-open-mcp");
 });
 
 test("mcpClientConfigTarget covers all McpClientId values", () => {

@@ -1,6 +1,6 @@
 using System;
 
-namespace UnityAgentBridge
+namespace UnityOpenMcpBridge
 {
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
     public class BridgeResourceAttribute : Attribute

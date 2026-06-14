@@ -1,6 +1,6 @@
 using System;
 
-namespace UnityAgentVerify.Batch
+namespace UnityOpenMcpVerify.Batch
 {
     public enum FailSeverity
     {
