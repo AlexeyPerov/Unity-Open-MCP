@@ -26,6 +26,8 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
         public List<string> Sample { get; } = new List<string>();
         public bool FileIDExistsInAssets { get; set; }
         public bool GuidExistsInAssets { get; set; }
+        public string GuidAssetPath { get; set; }
+        public bool FileIDExistsInTargetAsset { get; set; }
         public string HolderName { get; set; }
         public int WarningLevel { get; private set; }
 
@@ -34,6 +36,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             WarningLevel = 0;
             if (FileIDValid && !FileIDExistsInAssets) WarningLevel++;
             if (GuidValid && !GuidExistsInAssets) WarningLevel++;
+            if (GuidValid && GuidExistsInAssets && FileIDValid && !FileIDExistsInTargetAsset) WarningLevel++;
         }
     }
 
@@ -150,8 +153,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                 x.FileIDValid && x.GuidValid && !x.FileIDExistsInAssets && !x.GuidExistsInAssets);
             MissingGuidCount = ExternalReferences.Count(x => x.GuidValid && !x.GuidExistsInAssets);
             MissingFileIDCount = ExternalReferences.Count(x =>
-                x.FileIDValid && !x.FileIDExistsInAssets &&
-                LocalReferences.All(l => l.Id != x.FileID));
+                x.GuidValid && x.GuidExistsInAssets && x.FileIDValid && !x.FileIDExistsInTargetAsset);
             MissingLocalFileIDCount = LocalReferences.Count(x =>
                 x.IdValid && x.LocalUsagesCount == 0 && !x.ExistsInAssets);
 

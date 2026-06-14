@@ -13,6 +13,7 @@ namespace UnityOpenMcpVerify.Tests
         const string MissingScriptFixture = "Assets/Fixtures/MissingScriptFixture.prefab";
         const string BrokenRefFixture = "Assets/Fixtures/BrokenRefFixture.prefab";
         const string HealthyFixture = "Assets/Fixtures/HealthyFixture.prefab";
+        const string RestorableRefFixture = "Assets/Fixtures/RestorableRefFixture.prefab";
 
         MissingReferencesRule rule;
 
@@ -97,11 +98,37 @@ namespace UnityOpenMcpVerify.Tests
             Assert.Greater(sink.Count, 0,
                 "BrokenRefFixture must produce at least one missing_references issue");
 
+            var hasMissingGuid = sink.Any(i => i.IssueCode == "missing_guid");
+            Assert.IsTrue(hasMissingGuid,
+                $"Expected 'missing_guid' issue code. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+
+            var missingGuidIssue = sink.First(i => i.IssueCode == "missing_guid");
+            Assert.AreEqual(VerifySeverity.Error, missingGuidIssue.Severity,
+                "missing_guid must be Error severity so gate/delta catches broken PPtr refs");
+
             foreach (var issue in sink)
             {
                 Assert.AreEqual("missing_references", issue.RuleId);
                 Assert.AreEqual(BrokenRefFixture, issue.AssetPath);
             }
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator RestorableRefFixture_IsHealthy()
+        {
+            yield return null;
+
+            Assume.That(System.IO.File.Exists(RestorableRefFixture),
+                Is.True, $"Fixture missing: {RestorableRefFixture}");
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { RestorableRefFixture });
+
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            Assert.AreEqual(0, sink.Count,
+                $"RestorableRefFixture should have no missing_references issues. " +
+                $"Got: {string.Join(", ", sink.Select(i => $"{i.IssueCode}({i.Severity})"))}");
         }
 
         [UnityTest]

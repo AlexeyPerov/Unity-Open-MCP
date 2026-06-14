@@ -16,6 +16,7 @@ namespace UnityOpenMcpVerify.Internals.Serialization
             "m_PrefabInstance: {fileID:",
             "m_PrefabAsset: {fileID:",
             "m_GameObject: {fileID:",
+            "m_Script: {fileID:",
             "m_Icon: {fileID:",
             "m_Father: {fileID:"
         };

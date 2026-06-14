@@ -162,6 +162,82 @@ namespace UnityOpenMcpVerify.Tests
             yield return CleanupFixture(FixtureRoot);
         }
 
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_BrokenPptrReference_DetectsError()
+        {
+            var meshPath = FixtureRoot + "/RefMesh.asset";
+            var prefabPath = FixtureRoot + "/RefPrefab.prefab";
+            yield return CreatePrefabWithMeshReference(prefabPath, meshPath);
+
+            Assume.That(System.IO.File.Exists(meshPath), Is.True,
+                "Mesh asset must exist before breaking");
+
+            var backupPath = meshPath + ".bak";
+            var backupMeta = meshPath + ".meta.bak";
+            System.IO.File.Move(meshPath, backupPath);
+            if (System.IO.File.Exists(meshPath + ".meta"))
+                System.IO.File.Move(meshPath + ".meta", backupMeta);
+            AssetDatabase.Refresh();
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { prefabPath });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var hasMissingGuid = sink.Any(i => i.IssueCode == "missing_guid");
+            Assert.IsTrue(hasMissingGuid,
+                $"Expected 'missing_guid' for broken PPtr reference. " +
+                $"Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+
+            var guidIssue = sink.First(i => i.IssueCode == "missing_guid");
+            Assert.AreEqual(VerifySeverity.Error, guidIssue.Severity,
+                "Broken PPtr reference must be Error severity");
+
+            System.IO.File.Move(backupPath, meshPath);
+            if (System.IO.File.Exists(backupMeta))
+                System.IO.File.Move(backupMeta, meshPath + ".meta");
+            AssetDatabase.Refresh();
+
+            yield return CleanupFixture(FixtureRoot);
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_HealthyPptrReference_ProducesNoMissingGuid()
+        {
+            var meshPath = FixtureRoot + "/HealthyMesh.asset";
+            var prefabPath = FixtureRoot + "/HealthyRefPrefab.prefab";
+            yield return CreatePrefabWithMeshReference(prefabPath, meshPath);
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { prefabPath });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var hasMissingGuid = sink.Any(i => i.IssueCode == "missing_guid");
+            Assert.IsFalse(hasMissingGuid,
+                "Valid PPtr reference must not produce missing_guid. " +
+                $"Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+
+            yield return CleanupFixture(FixtureRoot);
+        }
+
+        static System.Collections.IEnumerator CreatePrefabWithMeshReference(string prefabPath, string meshPath)
+        {
+            EnsureDirectory(System.IO.Path.GetDirectoryName(prefabPath));
+
+            var mesh = new Mesh();
+            mesh.vertices = new[] { new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0) };
+            mesh.triangles = new[] { 0, 1, 2 };
+            AssetDatabase.CreateAsset(mesh, meshPath);
+
+            var go = new GameObject("RefTest");
+            var mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+            PrefabUtility.SaveAsPrefabAsset(go, prefabPath);
+            Object.DestroyImmediate(go);
+            AssetDatabase.Refresh();
+            yield return null;
+        }
+
         static System.Collections.IEnumerator CreateMinimalPrefab(string path)
         {
             EnsureDirectory(System.IO.Path.GetDirectoryName(path));

@@ -154,9 +154,15 @@ namespace UnityOpenMcpVerify.Tests
         static System.Collections.IEnumerator BreakPrefab(string prefabPath)
         {
             var meshPath = System.IO.Path.ChangeExtension(prefabPath, ".asset");
+            var metaPath = meshPath + ".meta";
             Assume.That(System.IO.File.Exists(meshPath), Is.True,
                 $"Mesh asset must exist to break: {meshPath}");
-            AssetDatabase.DeleteAsset(meshPath);
+
+            var backupMeshPath = meshPath + ".bak";
+            var backupMetaPath = metaPath + ".bak";
+            System.IO.File.Move(meshPath, backupMeshPath);
+            if (System.IO.File.Exists(metaPath))
+                System.IO.File.Move(metaPath, backupMetaPath);
             AssetDatabase.Refresh();
             yield return null;
         }
@@ -164,11 +170,17 @@ namespace UnityOpenMcpVerify.Tests
         static System.Collections.IEnumerator RestorePrefab(string prefabPath)
         {
             var meshPath = System.IO.Path.ChangeExtension(prefabPath, ".asset");
+            var metaPath = meshPath + ".meta";
+            var backupMeshPath = meshPath + ".bak";
+            var backupMetaPath = metaPath + ".bak";
+
             if (System.IO.File.Exists(meshPath))
                 yield break;
 
-            var mesh = new Mesh();
-            AssetDatabase.CreateAsset(mesh, meshPath);
+            if (System.IO.File.Exists(backupMeshPath))
+                System.IO.File.Move(backupMeshPath, meshPath);
+            if (System.IO.File.Exists(backupMetaPath))
+                System.IO.File.Move(backupMetaPath, metaPath);
             AssetDatabase.Refresh();
             yield return null;
         }

@@ -7,7 +7,7 @@ namespace UnityOpenMcpVerify.Internals.RegexPatterns
     public static class SharedRegex
     {
         public static readonly Regex ExternalFileAndGuid = new Regex(
-            @"fileID: \d+, guid: [a-f0-9]{32}",
+            @"fileID: (\d+), guid: ([a-f0-9]{32})",
             RegexOptions.Compiled);
 
         public static readonly Regex LocalFileId = new Regex(

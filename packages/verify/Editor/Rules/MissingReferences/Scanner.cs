@@ -20,6 +20,8 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
         {
             var results = new List<AssetData>();
             var scopedFileIDs = new HashSet<long>();
+            var guidResolveCache = new Dictionary<string, bool>();
+            var fileIdCache = new Dictionary<string, HashSet<long>>();
 
             foreach (var assetPath in paths)
             {
@@ -53,7 +55,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                 var refsData = new AssetReferencesData();
                 var isScene = type == typeof(SceneAsset);
 
-                ParseReferences(lines, isScene, regexFileAndGuid, regexFileID, regexTypeStart, refsData);
+                ParseReferences(lines, isScene, regexFileAndGuid, regexFileID, regexTypeStart, refsData, guidResolveCache);
                 CountLocalUsages(lines, refsData);
                 ScanMissingScripts(lines, refsData);
 
@@ -70,14 +72,14 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                 results.Add(new AssetData(assetPath, type, typeName, guid, refsData));
             }
 
-            ResolveReferences(results, scopedFileIDs);
+            ResolveReferences(results, scopedFileIDs, guidResolveCache, fileIdCache);
             return results;
         }
 
         static void ParseReferences(
             string[] lines, bool isScene,
             Regex regexFileAndGuid, Regex regexFileID, Regex regexTypeStart,
-            AssetReferencesData refsData)
+            AssetReferencesData refsData, Dictionary<string, bool> guidResolveCache)
         {
             for (var i = 0; i < lines.Length; i++)
             {
@@ -91,13 +93,8 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                     var matches = regexFileAndGuid.Matches(line);
                     foreach (Match match in matches)
                     {
-                        var matchText = match.Value;
-                        var lastSpace = matchText.LastIndexOf(' ');
-                        var externalGuid = matchText.Substring(lastSpace + 1);
-
-                        var colonIdx = matchText.IndexOf(':');
-                        var localFileIdStr = matchText.Substring(colonIdx + 1, lastSpace - colonIdx - 1).Trim();
-                        long.TryParse(localFileIdStr, out var localFileID);
+                        long.TryParse(match.Groups[1].Value, out var localFileID);
+                        var externalGuid = match.Groups[2].Value;
 
                         var guidValid = !externalGuid.StartsWith("0000000000");
                         var localIdValid = localFileID > 0;
@@ -108,8 +105,8 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                         if (guidValid)
                         {
-                            var guidPath = AssetDatabase.GUIDToAssetPath(externalGuid);
-                            referenceData.GuidExistsInAssets = !string.IsNullOrEmpty(guidPath);
+                            referenceData.GuidAssetPath = AssetDatabase.GUIDToAssetPath(externalGuid);
+                            referenceData.GuidExistsInAssets = VerifyGuidResolves(referenceData.GuidAssetPath, guidResolveCache);
 
                             if (!referenceData.GuidExistsInAssets)
                                 RecordGuidPlaceData(i, lines, referenceData);
@@ -160,7 +157,8 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             }
         }
 
-        static void ResolveReferences(List<AssetData> assets, HashSet<long> scopedFileIDs)
+        static void ResolveReferences(List<AssetData> assets, HashSet<long> scopedFileIDs,
+            Dictionary<string, bool> guidResolveCache, Dictionary<string, HashSet<long>> fileIdCache)
         {
             foreach (var asset in assets)
             {
@@ -174,6 +172,16 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                         registry.FileIDExistsInAssets = scopedFileIDs.Contains(registry.FileID) ||
                             asset.RefsData.LocalReferences.Any(l => l.Id == registry.FileID);
                     }
+
+                    if (registry.GuidValid && registry.GuidExistsInAssets && registry.FileIDValid)
+                    {
+                        var fileIds = GetFileIdsForPath(registry.GuidAssetPath, fileIdCache);
+                        registry.FileIDExistsInTargetAsset = fileIds != null && fileIds.Contains(registry.FileID);
+                    }
+                    else
+                    {
+                        registry.FileIDExistsInTargetAsset = true;
+                    }
                 }
 
                 asset.RefsData.CalculateCounters();
@@ -184,6 +192,45 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                         asset.MissingFieldTypes.Add(extRef.FieldType);
                 }
             }
+        }
+
+        static bool VerifyGuidResolves(string guidPath, Dictionary<string, bool> cache)
+        {
+            if (string.IsNullOrEmpty(guidPath))
+                return false;
+
+            if (cache.TryGetValue(guidPath, out var cached))
+                return cached;
+
+            var asset = AssetDatabase.LoadAssetAtPath<Object>(guidPath);
+            var resolved = asset != null;
+            cache[guidPath] = resolved;
+            return resolved;
+        }
+
+        static HashSet<long> GetFileIdsForPath(string assetPath, Dictionary<string, HashSet<long>> cache)
+        {
+            if (string.IsNullOrEmpty(assetPath))
+                return null;
+
+            if (cache.TryGetValue(assetPath, out var cached))
+                return cached;
+
+            HashSet<long> fileIds = null;
+            var allAssets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+            if (allAssets != null && allAssets.Length > 0)
+            {
+                fileIds = new HashSet<long>();
+                foreach (var subAsset in allAssets)
+                {
+                    if (subAsset == null) continue;
+                    if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(subAsset, out _, out long subFileId))
+                        fileIds.Add(subFileId);
+                }
+            }
+
+            cache[assetPath] = fileIds;
+            return fileIds;
         }
 
         static void FindFieldType(Regex regexTypeStart, int index, string[] lines, ExternalReferenceRegistry referenceData)

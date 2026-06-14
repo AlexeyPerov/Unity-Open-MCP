@@ -25,23 +25,20 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 foreach (var extRef in refs.ExternalReferences)
                 {
-                    if (extRef.FileIDValid && extRef.GuidValid && !extRef.FileIDExistsInAssets && !extRef.GuidExistsInAssets)
-                    {
-                        sink.Add(MakeIssue(asset, CodeMissingFileIDAndGuid,
-                            $"Missing both FileID ({extRef.FileID}) and GUID ({extRef.Guid}) at line {extRef.Line}",
-                            VerifySeverity.Error));
-                    }
-                    else if (extRef.GuidValid && !extRef.GuidExistsInAssets)
+                    if (!extRef.GuidValid)
+                        continue;
+
+                    if (!extRef.GuidExistsInAssets)
                     {
                         sink.Add(MakeIssue(asset, CodeMissingGuid,
-                            $"Missing GUID ({extRef.Guid}) at line {extRef.Line}",
-                            VerifySeverity.Warning));
+                            $"Broken PPtr reference: GUID '{extRef.Guid}' does not resolve to a loadable asset at line {extRef.Line}",
+                            VerifySeverity.Error));
                     }
-                    else if (extRef.FileIDValid && !extRef.FileIDExistsInAssets)
+                    else if (extRef.FileIDValid && !extRef.FileIDExistsInTargetAsset)
                     {
                         sink.Add(MakeIssue(asset, CodeMissingFileID,
-                            $"Missing FileID ({extRef.FileID}) at line {extRef.Line}",
-                            VerifySeverity.Warning));
+                            $"Broken PPtr reference: FileID {extRef.FileID} not found in target asset '{extRef.GuidAssetPath}' (guid {extRef.Guid}) at line {extRef.Line}",
+                            VerifySeverity.Error));
                     }
                 }
 

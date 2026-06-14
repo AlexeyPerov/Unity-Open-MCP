@@ -78,7 +78,7 @@ Located in `Assets/Fixtures/`. These prefabs provide controlled break/fix scenar
 | **HealthyFixture** | `Assets/Fixtures/HealthyFixture.prefab` | Minimal prefab with no issues. Used as the "clean" baseline for gate pass checks and delta comparisons. |
 | **MissingScriptFixture** | `Assets/Fixtures/MissingScriptFixture.prefab` | Prefab with a MonoBehaviour whose `m_Script` GUID (`deadbeef…`) points to a nonexistent script. Triggers `missing_references` / `missing_script` issue. Fixable via `apply_fix` (remove missing script). |
 | **BrokenRefFixture** | `Assets/Fixtures/BrokenRefFixture.prefab` | Prefab with a MeshFilter whose `m_Mesh` GUID (`aaaaaaaa…`) points to a nonexistent asset. Triggers `missing_references` / `missing_guid` issue. |
-| **RestorableRefFixture** | `Assets/Fixtures/RestorableRefFixture.prefab` | Healthy prefab referencing Unity built-in Cube mesh. Edit the `m_Mesh` GUID to a fake value to break → gate fails; restore the original GUID (`0000000000000000e000000000000000`) → gate passes. Used for checkpoint → mutate → delta workflows. |
+| **RestorableRefFixture** | `Assets/Fixtures/RestorableRefFixture.prefab` | Healthy prefab referencing Unity built-in Cube mesh and default material. Edit the `m_Mesh` GUID to a fake value to break → gate fails; restore the original GUID (`0000000000000000e000000000000000`) → gate passes. Used for checkpoint → mutate → delta workflows. |
 
 ### Usage in tests
 
