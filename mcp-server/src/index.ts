@@ -8,6 +8,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { LiveClient } from "./live-client.js";
+import { BatchSpawn } from "./batch-spawn.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 const DEFAULT_PORT = 19120;
@@ -35,6 +36,7 @@ async function main() {
   );
 
   const liveClient = new LiveClient(port);
+  const batchSpawn = new BatchSpawn();
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: ALL_TOOLS,
@@ -44,10 +46,13 @@ async function main() {
     CallToolRequestSchema,
     async (request): Promise<CallToolResult> => {
       const { name, arguments: args } = request.params;
-      return liveClient.route(
-        name,
-        (args ?? {}) as Record<string, unknown>,
-      );
+      const callArgs = (args ?? {}) as Record<string, unknown>;
+
+      if (batchSpawn.isBatchTool(name)) {
+        return batchSpawn.route(name, callArgs);
+      }
+
+      return liveClient.route(name, callArgs);
     },
   );
 
