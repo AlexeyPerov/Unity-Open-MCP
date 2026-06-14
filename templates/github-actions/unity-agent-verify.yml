@@ -1,41 +1,243 @@
+# Unity Agent Verify — CI Template
+#
+# Copy-paste source for running unity_agent_scan_all, unity_agent_baseline_create,
+# and unity_agent_regression_check in GitHub Actions without an open Unity Editor.
+#
+# All three tools invoke the same batch entry point headless:
+#
+#   Unity -batchmode -quit -projectPath <UNITY_PROJECT_PATH> \
+#     -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+#     -- <operation> [--flag value ...]
+#
+# Exit codes: 0 = pass, 1 = threshold exceeded / regression / error.
+# CI can gate on the shell exit status without parsing JSON.
+#
+# ----------------------------------------------------------------------------
+# Runner strategies (see README.md for full trade-off discussion):
+#
+#   A) Self-hosted runner (recommended for private teams).
+#      Set runs-on to your self-hosted label and point UNITY_PATH at the local
+#      Unity Editor executable. No license secret plumbing required — the
+#      machine already has Unity activated.
+#
+#   B) GitHub-hosted runner + game-ci docker image.
+#      Requires UNITY_LICENSE / UNITY_EMAIL / UNITY_PASSWORD secrets (Unity
+#      personal/team licensing). See https://game.ci/docs/github/getting-started
+#      Uncomment the container + license-activate steps below.
+#
+# This template defaults to (A) because Unity licensing on public runners is
+# friction-heavy. Switch to (B) by uncommenting the hosted blocks.
+# ----------------------------------------------------------------------------
+
 name: unity-agent-verify
 
 on:
   workflow_dispatch:
   pull_request:
+    paths:
+      - "Assets/**"
+      - "Packages/**"
+      - "CI/unity-agent-baseline.json"
+
+env:
+  # --- Required for all batch operations ---
+  UNITY_PROJECT_PATH: . # Change to your project root if it's a subdirectory.
+  # UNITY_PATH is set per-job for self-hosted; override in your repo secrets or env.
+  UNITY_PATH: /opt/unity/Editor/Unity
+
+  # --- Unity batch log (uploaded as artifact on failure) ---
+  UNITY_LOG_PATH: ${{ github.workspace }}/unity-batch.log
 
 jobs:
-  verify:
-    runs-on: ubuntu-latest
+  # ===========================================================================
+  # Job 1: Regression check — does this PR introduce NEW issues vs baseline?
+  # Runs on every PR. Fails when error count increased beyond threshold.
+  # ===========================================================================
+  regression-check:
+    name: Regression check
+    runs-on: self-hosted # ← Switch to ubuntu-latest for hosted (see comments)
+
+    # --- Hosted (game-ci) runner setup — uncomment for strategy B ---
+    # container:
+    #   image: unityci/editor:ubuntu-6000.0.1f1-linux-il2cpp-1.0.0
+    # env:
+    #   UNITY_PATH: /unity/Unity
+    #   UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+    #   UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+    #   UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      # --- Hosted license activation — uncomment for strategy B ---
+      # - name: Activate Unity license
+      #   uses: game-ci/unity-license-activate@v1
+      #   with:
+      #     unity-version: 6000.0.1f1
+
+      - name: Run regression check
+        working-directory: ${{ env.UNITY_PROJECT_PATH }}
+        run: |
+          echo "::group::Unity batch — regression_check"
+          "$UNITY_PATH" \
+            -batchmode \
+            -quit \
+            -nographics \
+            -projectPath "$UNITY_PROJECT_PATH" \
+            -logFile "$UNITY_LOG_PATH" \
+            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -- regression_check \
+               --baseline-path CI/unity-agent-baseline.json \
+               --regression-threshold 0 \
+               --platform-profile desktop
+          EXIT_CODE=$?
+          echo "::endgroup::"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Regression check failed (exit $EXIT_CODE). New issues detected vs baseline."
+            echo "::group::Unity log (last 80 lines)"
+            tail -n 80 "$UNITY_LOG_PATH" || true
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "✓ No regression detected."
+
+      - name: Upload Unity log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          node-version: "20"
+          name: regression-check-unity-log
+          path: ${{ env.UNITY_LOG_PATH }}
+          retention-days: 7
 
-      - name: Install MCP dependencies
-        working-directory: mcp-server
-        run: npm ci
+  # ===========================================================================
+  # Job 2: Full scan — run all ported verify rules with a fail threshold.
+  # Runs on every PR. Fails when issues exceed fail-on-severity.
+  # ===========================================================================
+  scan-all:
+    name: Scan all (fail on error)
+    runs-on: self-hosted # ← Switch to ubuntu-latest for hosted
 
-      - name: Build MCP server
-        working-directory: mcp-server
-        run: npm run build
+    # container:
+    #   image: unityci/editor:ubuntu-6000.0.1f1-linux-il2cpp-1.0.0
+    # env:
+    #   UNITY_PATH: /unity/Unity
+    #   UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
 
-      # Replace with your preferred Unity setup action and license strategy.
-      - name: Baseline create (example command)
-        env:
-          UNITY_PROJECT_PATH: demo
-          UNITY_PATH: /opt/unity/Editor/Unity
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run scan_all
+        working-directory: ${{ env.UNITY_PROJECT_PATH }}
         run: |
-          node mcp-server/dist/index.js --help || true
-          echo "Run unity_agent_baseline_create via your MCP client or batch wrapper here."
+          echo "::group::Unity batch — scan_all"
+          "$UNITY_PATH" \
+            -batchmode \
+            -quit \
+            -nographics \
+            -projectPath "$UNITY_PROJECT_PATH" \
+            -logFile "$UNITY_LOG_PATH" \
+            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -- scan_all \
+               --fail-on-severity error \
+               --platform-profile desktop \
+               --output-path CI/scan-report.json
+          EXIT_CODE=$?
+          echo "::endgroup::"
 
-      - name: Regression check (example command)
-        env:
-          UNITY_PROJECT_PATH: demo
-          UNITY_PATH: /opt/unity/Editor/Unity
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Scan failed (exit $EXIT_CODE). Issues at or above 'error' severity."
+            echo "::group::Scan report"
+            cat CI/scan-report.json 2>/dev/null || echo "(report not written)"
+            echo "::endgroup::"
+            echo "::group::Unity log (last 80 lines)"
+            tail -n 80 "$UNITY_LOG_PATH" || true
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "✓ Scan passed (no errors)."
+
+      - name: Upload scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-report
+          path: ${{ env.UNITY_PROJECT_PATH }}/CI/scan-report.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Unity log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-all-unity-log
+          path: ${{ env.UNITY_LOG_PATH }}
+          retention-days: 7
+
+  # ===========================================================================
+  # Job 3: Baseline update — refresh the committed baseline file.
+  # Runs manually (workflow_dispatch) or on pushes to the default branch.
+  # Commits CI/unity-agent-baseline.json back to the repo.
+  # ===========================================================================
+  baseline-update:
+    name: Update baseline
+    runs-on: self-hosted
+    if: github.event_name == 'workflow_dispatch'
+
+    # container:
+    #   image: unityci/editor:ubuntu-6000.0.1f1-linux-il2cpp-1.0.0
+    # env:
+    #   UNITY_PATH: /unity/Unity
+    #   UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run baseline_create
+        working-directory: ${{ env.UNITY_PROJECT_PATH }}
         run: |
-          echo "Run unity_agent_regression_check and fail on non-zero exit."
+          echo "::group::Unity batch — baseline_create"
+          "$UNITY_PATH" \
+            -batchmode \
+            -quit \
+            -nographics \
+            -projectPath "$UNITY_PROJECT_PATH" \
+            -logFile "$UNITY_LOG_PATH" \
+            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -- baseline_create \
+               --baseline-path CI/unity-agent-baseline.json \
+               --platform-profile desktop
+          EXIT_CODE=$?
+          echo "::endgroup::"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Baseline creation failed (exit $EXIT_CODE)."
+            echo "::group::Unity log (last 80 lines)"
+            tail -n 80 "$UNITY_LOG_PATH" || true
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "✓ Baseline written to CI/unity-agent-baseline.json"
+
+      - name: Commit baseline
+        working-directory: ${{ env.UNITY_PROJECT_PATH }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CI/unity-agent-baseline.json
+          git commit -m "chore: update unity-agent baseline [skip ci]" || echo "No changes to commit."
+          git push
+
+      - name: Upload Unity log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-update-unity-log
+          path: ${{ env.UNITY_LOG_PATH }}
+          retention-days: 7

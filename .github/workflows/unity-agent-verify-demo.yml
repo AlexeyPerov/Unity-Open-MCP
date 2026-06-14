@@ -1,0 +1,221 @@
+# Unity Agent Verify — Dogfood CI
+#
+# Exercises the M5 batch flow (scan_all, baseline_create, regression_check)
+# against the demo/ project in this repository.
+#
+# This workflow mirrors templates/github-actions/unity-agent-verify.yml but is
+# scoped to the monorepo demo project.
+#
+# Runner assumption: self-hosted with Unity 6 installed and licensed locally.
+# UNITY_PATH is read from the runner environment or repo variable.
+# No GitHub-hosted license secrets are stored in this public repo.
+#
+# To enable: register a self-hosted runner with the label "unity" and ensure
+# UNITY_PATH is set in the runner's environment or as a repo variable.
+
+name: unity-agent-verify-demo
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packages/verify/**"
+      - "packages/bridge/**"
+      - "demo/**"
+      - ".github/workflows/unity-agent-verify-demo.yml"
+      - "demo/CI/unity-agent-baseline.json"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/verify/**"
+      - "packages/bridge/**"
+
+env:
+  UNITY_PROJECT_PATH: demo
+  UNITY_LOG_PATH: ${{ github.workspace }}/unity-batch.log
+
+jobs:
+  regression-check:
+    name: Regression check (demo)
+    runs-on: unity
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Unity is available
+        run: |
+          if [ -z "$UNITY_PATH" ]; then
+            echo "::error::UNITY_PATH is not set. Set it as a repo variable or in the runner environment."
+            exit 1
+          fi
+          if [ ! -f "$UNITY_PATH" ]; then
+            echo "::error::UNITY_PATH '$UNITY_PATH' does not exist or is not a file."
+            exit 1
+          fi
+          echo "Unity: $UNITY_PATH"
+
+      - name: Run regression check
+        run: |
+          echo "::group::Unity batch — regression_check"
+          "$UNITY_PATH" \
+            -batchmode \
+            -quit \
+            -nographics \
+            -projectPath "$UNITY_PROJECT_PATH" \
+            -logFile "$UNITY_LOG_PATH" \
+            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -- regression_check \
+               --baseline-path CI/unity-agent-baseline.json \
+               --regression-threshold 0 \
+               --platform-profile desktop
+          EXIT_CODE=$?
+          echo "::endgroup::"
+
+          echo "Batch exit code: $EXIT_CODE"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Regression check failed (exit $EXIT_CODE). New issues detected vs baseline."
+            echo "::group::Unity log (last 100 lines)"
+            tail -n 100 "$UNITY_LOG_PATH" || true
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "✓ No regression detected."
+
+      - name: Upload Unity log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-regression-unity-log
+          path: ${{ env.UNITY_LOG_PATH }}
+          retention-days: 7
+
+  scan-all:
+    name: Scan all (demo)
+    runs-on: unity
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Unity is available
+        run: |
+          if [ -z "$UNITY_PATH" ]; then
+            echo "::error::UNITY_PATH is not set. Set it as a repo variable or in the runner environment."
+            exit 1
+          fi
+          if [ ! -f "$UNITY_PATH" ]; then
+            echo "::error::UNITY_PATH '$UNITY_PATH' does not exist or is not a file."
+            exit 1
+          fi
+          echo "Unity: $UNITY_PATH"
+
+      - name: Run scan_all
+        run: |
+          echo "::group::Unity batch — scan_all"
+          "$UNITY_PATH" \
+            -batchmode \
+            -quit \
+            -nographics \
+            -projectPath "$UNITY_PROJECT_PATH" \
+            -logFile "$UNITY_LOG_PATH" \
+            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -- scan_all \
+               --fail-on-severity error \
+               --platform-profile desktop \
+               --output-path CI/scan-report.json
+          EXIT_CODE=$?
+          echo "::endgroup::"
+
+          echo "Batch exit code: $EXIT_CODE"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Scan failed (exit $EXIT_CODE). Issues at or above 'error' severity."
+            echo "::group::Scan report"
+            cat demo/CI/scan-report.json 2>/dev/null || echo "(report not written)"
+            echo "::endgroup::"
+            echo "::group::Unity log (last 100 lines)"
+            tail -n 100 "$UNITY_LOG_PATH" || true
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "✓ Scan passed (no errors)."
+
+      - name: Upload scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-scan-report
+          path: demo/CI/scan-report.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Unity log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-scan-unity-log
+          path: ${{ env.UNITY_LOG_PATH }}
+          retention-days: 7
+
+  baseline-update:
+    name: Update baseline (demo)
+    runs-on: unity
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Unity is available
+        run: |
+          if [ -z "$UNITY_PATH" ]; then
+            echo "::error::UNITY_PATH is not set."
+            exit 1
+          fi
+          echo "Unity: $UNITY_PATH"
+
+      - name: Run baseline_create
+        run: |
+          echo "::group::Unity batch — baseline_create"
+          "$UNITY_PATH" \
+            -batchmode \
+            -quit \
+            -nographics \
+            -projectPath "$UNITY_PROJECT_PATH" \
+            -logFile "$UNITY_LOG_PATH" \
+            -executeMethod UnityAgentVerify.Batch.VerifyBatchEntry.Run \
+            -- baseline_create \
+               --baseline-path CI/unity-agent-baseline.json \
+               --platform-profile desktop
+          EXIT_CODE=$?
+          echo "::endgroup::"
+
+          echo "Batch exit code: $EXIT_CODE"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Baseline creation failed (exit $EXIT_CODE)."
+            echo "::group::Unity log (last 100 lines)"
+            tail -n 100 "$UNITY_LOG_PATH" || true
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "✓ Baseline written to demo/CI/unity-agent-baseline.json"
+
+      - name: Commit baseline
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add demo/CI/unity-agent-baseline.json
+          git commit -m "chore(ci): update unity-agent demo baseline [skip ci]" || echo "No changes to commit."
+          git push
+
+      - name: Upload Unity log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-baseline-unity-log
+          path: ${{ env.UNITY_LOG_PATH }}
+          retention-days: 7
