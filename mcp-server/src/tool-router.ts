@@ -6,6 +6,7 @@ import { AssetModelCache, isCompressible, routeCompressible } from "./compressib
 import { listAssetsOffline, findReferencesOffline } from "./offline.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
+import { generateSkill } from "./skill/generate-skill.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { BATCH_TOOL_NAMES } from "./batch-spawn.js";
 
@@ -53,6 +54,11 @@ export class ToolRouter implements Router {
     // capabilities — local capability-discovery surface (no live/batch hop).
     if (toolName === "unity_open_mcp_capabilities") {
       return this.routeCapabilities(args);
+    }
+
+    // generate_skill — local skill generation (no live/batch hop).
+    if (toolName === "unity_agent_generate_skill") {
+      return this.routeGenerateSkill(args);
     }
 
     // find_references — offline-first when no bridge is connected; live
@@ -179,6 +185,61 @@ export class ToolRouter implements Router {
       ],
       isError: false,
     };
+  }
+
+  private async routeGenerateSkill(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const write = args.write === true;
+    const rawClients = Array.isArray(args.clients) ? args.clients : [];
+    const clients = rawClients.filter(
+      (c): c is string =>
+        typeof c === "string" && (c === "claude" || c === "cursor" || c === "opencode"),
+    );
+
+    const caps = buildCapabilities(
+      {
+        tools: ALL_TOOLS,
+        batchToolNames: BATCH_TOOL_NAMES,
+        rules: RULE_CATALOG,
+        fixes: FIX_CATALOG,
+      },
+      { includePlanned: false },
+    );
+
+    try {
+      const result = await generateSkill(this.projectPath, caps, {
+        write,
+        clients: clients.length > 0 ? clients : undefined,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              skill: result.skill,
+              project: result.project,
+              written: result.written,
+              _source: "local",
+            }),
+          },
+        ],
+        isError: false,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: { code: "skill_generation_failed", message },
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
   }
 
   private async routeFindReferences(

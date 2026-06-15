@@ -19,6 +19,10 @@ All tools are prefixed `unity_open_mcp_*`.
 
 Call `unity_open_mcp_capabilities` (no arguments) to learn the full surface in one shot: every tool with its schema and route policy, every verify rule with applicable asset kinds and issue severities, and every available fix. Planned-but-unbuilt capabilities return with `status: "planned"` and guidance — they tell you the fallback instead of failing. Use this as your first step before guessing which tools or rules exist.
 
+### Generate a project-specific skill
+
+Call `unity_agent_generate_skill` with `{ "write": true }` to generate a project-specific SKILL.md that reflects the actual project state — Unity version, installed packages, available verify rules, and key MonoBehaviour/ScriptableObject types discovered from source. The file is written to `.claude/skills/unity-open-mcp/SKILL.md` (or `.cursor/skills/` / `.opencode/skills/` via the `clients` parameter). Regenerate after package or script changes to keep it current.
+
 ### Mutating tools (gate-aware)
 
 - `unity_open_mcp_execute_csharp` — Compile and run a C# snippet in the Unity Editor.

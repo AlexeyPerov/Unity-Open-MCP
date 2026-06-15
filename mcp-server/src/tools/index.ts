@@ -26,6 +26,7 @@ import { profilerMemory } from "./profiler-memory.js";
 import { profilerRendering } from "./profiler-rendering.js";
 import { spatialQuery } from "./spatial-query.js";
 import { agentCapabilities } from "./agent-capabilities.js";
+import { generateSkill } from "./generate-skill.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -53,7 +54,7 @@ export const M10_TOOLS: Tool[] = [
   spatialQuery,
 ];
 
-export const M11_TOOLS: Tool[] = [agentCapabilities];
+export const M11_TOOLS: Tool[] = [agentCapabilities, generateSkill];
 
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,

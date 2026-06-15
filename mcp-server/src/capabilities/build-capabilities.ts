@@ -62,6 +62,7 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_search_assets: "asset-intelligence",
   unity_open_mcp_list_assets: "asset-intelligence",
   unity_open_mcp_capabilities: "capability-discovery",
+  unity_agent_generate_skill: "capability-discovery",
   unity_agent_run_tests: "agent-senses",
   unity_agent_screenshot: "agent-senses",
   unity_agent_read_console: "agent-senses",

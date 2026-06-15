@@ -55,6 +55,7 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 ### Capability discovery
 
 - `unity_open_mcp_capabilities` — Returns the full capability surface in one call: every tool with its input schema and route policy, every verify rule with applicable asset kinds and issue severities, and every available fix. Each capability carries an `implemented` boolean; planned-but-unbuilt items return with `status: "planned"` and guidance instead of failing. Call this first to learn what is available.
+- `unity_agent_generate_skill` — Generates a project-specific SKILL.md reflecting the actual project state: Unity version, installed packages (including bridge/verify versions), available tools and verify rules, key MonoBehaviour/ScriptableObject types discovered from source, and the mutate→gate→fix workflow. Set `write: true` to persist the file into `.claude/skills/`, `.cursor/skills/`, or `.opencode/skills/`. Regenerate after package or script changes.
 
 ### Typed editor tools (M16 planned)
 
@@ -149,6 +150,43 @@ Planned categories:
 - Planned typed tools and planned verify rules ship `implemented: false` with `status: "planned"` and a `guidance` string explaining the fallback — they never raise hard errors.
 - The rule catalog is versioned with the package, so the `implemented` flags reflect what ships in the matching bridge/verify release.
 
+## Skill generation
+
+`unity_agent_generate_skill` produces a project-specific SKILL.md that gives the LLM up-to-date context for the specific project — installed tool versions, available verify rules, key MonoBehaviour/ScriptableObject types, and the core workflow.
+
+- Implementation: `mcp-server/src/skill/generate-skill.ts`.
+- Routes locally (`_source: "local"`) — reads `ProjectSettings/ProjectVersion.txt`, `Packages/manifest.json`, and scans `.cs` files under `Assets/` for type declarations. Never hits the live bridge or batch Unity.
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `write` | boolean | `false` | When `true`, write the generated skill to client skill directories. |
+| `clients` | `("claude" \| "cursor" \| "opencode")[]` | `["claude"]` | Which client skill dirs to write to. Only used when `write: true`. |
+
+### Response shape
+
+```json
+{
+  "skill": "# Unity Agent Skill — MyGame\n...",
+  "project": {
+    "projectName": "MyGame",
+    "unityVersion": "6000.0.1f1",
+    "packages": [{ "id": "com.unity.ugui", "version": "2.0.0" }],
+    "bridgeVersion": "0.3.0",
+    "verifyVersion": "0.3.0",
+    "monoBehaviours": [{ "name": "PlayerController", "namespace": "MyGame", "filePath": "Assets/Scripts/PlayerController.cs" }],
+    "scriptableObjects": []
+  },
+  "written": [
+    { "client": "claude", "relativePath": ".claude/skills/unity-open-mcp/SKILL.md", "absolutePath": "/path/.claude/skills/unity-open-mcp/SKILL.md", "written": true, "existed": false }
+  ],
+  "_source": "local"
+}
+```
+
+When `write: false` (default), `written` is an empty array and the skill content is returned as a preview string.
+
 ## Object handle system
 
 Live `UnityEngine.Object` values returned by `invoke_method` and `execute_csharp` are serialized as object handles (instance ID + type + fallback locators) instead of reflected JSON. This lets agents pass live objects back in subsequent tool calls:
@@ -164,6 +202,7 @@ Route selection is implemented in `mcp-server/src/tool-router.ts`.
 
 - `unity_open_mcp_list_assets`: always offline route.
 - `unity_open_mcp_capabilities`: always local route (static catalog).
+- `unity_agent_generate_skill`: always local route (reads project files from disk).
 - `unity_open_mcp_find_references`: live when available, otherwise offline reader.
 - `unity_open_mcp_read_asset` and `unity_open_mcp_search_assets`: compressible router with offline-first behavior and live fallback.
 - Other tools:
@@ -220,3 +259,4 @@ Behavior:
 - `mcp-server/src/batch-spawn.ts`
 - `mcp-server/src/compressible-router.ts`
 - `mcp-server/src/capabilities/build-capabilities.ts`
+- `mcp-server/src/skill/generate-skill.ts`
