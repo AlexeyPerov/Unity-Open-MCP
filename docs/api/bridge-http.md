@@ -74,8 +74,18 @@ Non-mutating direct-response tools return tool payloads directly (or direct erro
 - `unity_open_mcp_reserialize`
 - `unity_open_mcp_read_asset`
 - `unity_open_mcp_search_assets`
+- `unity_agent_run_tests` (test runner; requires Unity Test Framework)
 
 Typed tools discovered via `BridgeToolRegistry` are also callable through `/tools/{toolName}`.
+
+### Test runner (`unity_agent_run_tests`)
+
+Direct-response tool that starts an async Unity test run and returns `{ "status": "started", "runId": "...", "mode": "EditMode|PlayMode" }`.
+
+- Results are written to `~/.unity-agent/test-results-<runId>.json` when the run completes.
+- PlayMode runs survive domain reload: a pending marker file (`test-pending-<runId>.json`) is written before the run, and `TestRunnerState` re-attaches callbacks after reload.
+- The MCP server polls the results file and returns structured pass/fail counts to the caller.
+- Lives in a separate assembly (`com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor`) that is conditionally compiled only when `com.unity.test-framework` is installed.
 
 ## `/resources` and `/resources/{route}`
 

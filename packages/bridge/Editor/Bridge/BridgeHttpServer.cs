@@ -36,7 +36,8 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_apply_fix",
             "unity_open_mcp_reserialize",
             "unity_open_mcp_read_asset",
-            "unity_open_mcp_search_assets"
+            "unity_open_mcp_search_assets",
+            "unity_agent_run_tests"
         };
 
         static readonly HashSet<string> DirectResponseTools = new()
@@ -49,7 +50,9 @@ namespace UnityOpenMcpBridge
             // Compact drill-down reads: bridge returns the structured model JSON
             // directly; the MCP server applies the shared compression module.
             "unity_open_mcp_read_asset",
-            "unity_open_mcp_search_assets"
+            "unity_open_mcp_search_assets",
+            // Test runner: starts async test run, returns { status, runId } directly.
+            "unity_agent_run_tests"
         };
 
         static readonly HashSet<string> MutatingTools = new()

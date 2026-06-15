@@ -41,6 +41,10 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 - `unity_open_mcp_search_assets`
 - `unity_open_mcp_list_assets`
 
+### Agent senses tools (M10)
+
+- `unity_agent_run_tests` — EditMode + PlayMode test runner with per-test pass/fail, filter by assembly/namespace/class/method, domain-reload-safe PlayMode via file handoff.
+
 ## Route policy
 
 Route selection is implemented in `mcp-server/src/tool-router.ts`.

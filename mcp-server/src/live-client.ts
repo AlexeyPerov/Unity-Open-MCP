@@ -3,6 +3,9 @@ import type { Router } from "./router.js";
 import type { MutationEnvelope } from "./gate-error.js";
 import type { PingCache } from "./ping-cache.js";
 import { deriveIsError } from "./gate-error.js";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 const MAX_COMPILE_WAIT_MS = 120_000;
 const COMPILE_POLL_INTERVAL_MS = 2_000;
@@ -18,6 +21,9 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   // ToolRouter applies the compression module on top (compressible-router.ts).
   "unity_open_mcp_read_asset",
   "unity_open_mcp_search_assets",
+  // Test runner returns { status, runId } directly; LiveClient polls the
+  // results file and returns the final result.
+  "unity_agent_run_tests",
 ]);
 
 interface PingResponse {
@@ -87,6 +93,9 @@ export class LiveClient implements Router {
     if (toolName === "unity_open_mcp_ping") {
       return this.handlePing();
     }
+    if (toolName === "unity_agent_run_tests") {
+      return this.handleRunTests(args);
+    }
     return this.handleToolCall(toolName, args);
   }
 
@@ -120,6 +129,97 @@ export class LiveClient implements Router {
     if (readyError) return readyError;
 
     return this.postTool(toolName, args, true);
+  }
+
+  private async handleRunTests(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const readyError = await this.ensureReady();
+    if (readyError) return readyError;
+
+    const startResult = await this.postTool(
+      "unity_agent_run_tests",
+      args,
+      true,
+    );
+
+    if (startResult.isError) return startResult;
+
+    const text =
+      startResult.content[0]?.type === "text"
+        ? startResult.content[0].text
+        : "";
+    let body: { status?: string; runId?: string; mode?: string };
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return startResult;
+    }
+
+    if (body.status !== "started" || !body.runId) {
+      return startResult;
+    }
+
+    return this.pollTestResults(body.runId, args);
+  }
+
+  private async pollTestResults(
+    runId: string,
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const timeoutMs =
+      typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
+    const deadline = Date.now() + timeoutMs;
+    const pollIntervalMs = 1_000;
+
+    const resultsPath = join(
+      homedir(),
+      ".unity-agent",
+      `test-results-${runId}.json`,
+    );
+
+    while (Date.now() < deadline) {
+      await sleep(pollIntervalMs);
+
+      try {
+        if (existsSync(resultsPath)) {
+          const content = readFileSync(resultsPath, "utf-8");
+          try {
+            unlinkSync(resultsPath);
+          } catch {
+            // best-effort cleanup
+          }
+
+          let isError = false;
+          try {
+            const parsed = JSON.parse(content);
+            isError = parsed.status === "error";
+          } catch {
+            // unparseable → treat as error
+            isError = true;
+          }
+
+          return {
+            content: [{ type: "text", text: content }],
+            isError,
+          };
+        }
+      } catch {
+        // continue polling
+      }
+    }
+
+    return makeErrorResult(
+      `Test results for run ${runId} were not available within ` +
+        `${timeoutMs / 1000}s. The test run may still be in progress or ` +
+        "the bridge may have lost the callback.",
+      {
+        error: {
+          code: "test_results_timeout",
+          message: `Test results poll timed out after ${timeoutMs / 1000}s`,
+        },
+      },
+    );
   }
 
   private async postTool(
