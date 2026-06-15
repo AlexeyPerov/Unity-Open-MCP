@@ -75,6 +75,8 @@ Non-mutating direct-response tools return tool payloads directly (or direct erro
 - `unity_open_mcp_read_asset`
 - `unity_open_mcp_search_assets`
 - `unity_agent_run_tests` (test runner; requires Unity Test Framework)
+- `unity_agent_screenshot` (scene/game/isolated screenshots)
+- `unity_agent_read_console` (console log reader)
 
 Typed tools discovered via `BridgeToolRegistry` are also callable through `/tools/{toolName}`.
 
@@ -86,6 +88,26 @@ Direct-response tool that starts an async Unity test run and returns `{ "status"
 - PlayMode runs survive domain reload: a pending marker file (`test-pending-<runId>.json`) is written before the run, and `TestRunnerState` re-attaches callbacks after reload.
 - The MCP server polls the results file and returns structured pass/fail counts to the caller.
 - Lives in a separate assembly (`com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor`) that is conditionally compiled only when `com.unity.test-framework` is installed.
+
+### Screenshots (`unity_agent_screenshot`)
+
+Direct-response tool that captures a PNG screenshot and returns the saved file path.
+
+- `view: "scene"` — renders the last active Scene view camera.
+- `view: "game"` — renders the main game camera (or first camera found).
+- `view: "isolated"` — renders a single GameObject in a 2×2 composite (Front/Right/Back/Top) with layer culling, configurable background (transparent/solid/skybox), and guaranteed state restore.
+- Output is written to `~/.unity-agent/screenshots/screenshot-<view>-<timestamp>.png`.
+- Parameters: `view`, `width` (default 1280), `height` (default 720), `object_path` (required for isolated), `background` (default skybox).
+
+### Console reader (`unity_agent_read_console`)
+
+Direct-response tool that reads Unity console entries via reflection on internal `LogEntries`.
+
+- Returns structured entries: `{ type, message, stack }` with summary counts.
+- Filter by `type`: `error` | `warning` | `log` | `all` (default).
+- `include_unity_frames` (default false) controls whether UnityEngine/UnityEditor/System stack frames are included.
+- `max_entries` (default 100) caps the returned entry count; `max_stack_frames` (default 20) truncates long stack traces.
+- `clear: true` empties the console after reading.
 
 ## `/resources` and `/resources/{route}`
 

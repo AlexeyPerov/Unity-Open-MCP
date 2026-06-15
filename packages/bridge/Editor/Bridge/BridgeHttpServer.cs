@@ -37,7 +37,9 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_reserialize",
             "unity_open_mcp_read_asset",
             "unity_open_mcp_search_assets",
-            "unity_agent_run_tests"
+            "unity_agent_run_tests",
+            "unity_agent_screenshot",
+            "unity_agent_read_console"
         };
 
         static readonly HashSet<string> DirectResponseTools = new()
@@ -52,7 +54,10 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_read_asset",
             "unity_open_mcp_search_assets",
             // Test runner: starts async test run, returns { status, runId } directly.
-            "unity_agent_run_tests"
+            "unity_agent_run_tests",
+            // Agent senses (non-mutating): return tool JSON directly.
+            "unity_agent_screenshot",
+            "unity_agent_read_console"
         };
 
         static readonly HashSet<string> MutatingTools = new()

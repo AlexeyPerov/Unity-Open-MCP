@@ -19,6 +19,8 @@ import { readAsset } from "./read-asset.js";
 import { searchAssets } from "./search-assets.js";
 import { listAssets } from "./list-assets.js";
 import { runTests } from "./run-tests.js";
+import { screenshot } from "./screenshot.js";
+import { readConsole } from "./read-console.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -36,6 +38,6 @@ export const M5_TOOLS: Tool[] = [scanAll, baselineCreate, regressionCheck];
 
 export const M9_TOOLS: Tool[] = [reserialize, readAsset, searchAssets, listAssets];
 
-export const M10_TOOLS: Tool[] = [runTests];
+export const M10_TOOLS: Tool[] = [runTests, screenshot, readConsole];
 
 export const ALL_TOOLS: Tool[] = [...M2_TOOLS, ...M2_5_TOOLS, ...M3_TOOLS, ...M5_TOOLS, ...M9_TOOLS, ...M10_TOOLS];

@@ -24,6 +24,9 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   // Test runner returns { status, runId } directly; LiveClient polls the
   // results file and returns the final result.
   "unity_agent_run_tests",
+  // Agent senses (non-mutating): return tool JSON directly.
+  "unity_agent_screenshot",
+  "unity_agent_read_console",
 ]);
 
 interface PingResponse {
