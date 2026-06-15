@@ -19,6 +19,7 @@ import type {
   AssetModel,
   AssetComponent,
   HierarchyNode,
+  PrefabOverrideEntry,
   SearchModel,
   SearchMatch,
   SearchObjectMatch,
@@ -353,6 +354,7 @@ export interface RenderOptions {
   component?: string;
   path?: string;
   id?: string;
+  override?: boolean;
   depth?: number;
   limit?: number;
 }
@@ -406,6 +408,7 @@ export interface CompactAssetResult {
   componentQuery?: string;
   pathScope?: string;
   idResult?: IdResult;
+  overrides?: PrefabOverrideEntry[];
 }
 
 /** Render the compact asset summary / drill-down. */
@@ -439,6 +442,16 @@ export function renderAssetSummary(
   if (opts.component !== undefined && opts.component !== "") {
     result.componentQuery = opts.component;
     result.componentMatches = resolveComponentDrilldown(model, opts.component);
+    return result;
+  }
+
+  // --override drill-down: prefab variant override list.
+  if (opts.override) {
+    if (model.overrides && model.overrides.length > 0) {
+      result.overrides = model.overrides;
+    } else {
+      result.note = "no prefab overrides (asset has no PrefabInstance or no modifications)";
+    }
     return result;
   }
 

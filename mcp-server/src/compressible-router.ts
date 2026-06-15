@@ -176,6 +176,7 @@ async function routeReadAsset(
     component: typeof args.component === "string" ? args.component : undefined,
     path: typeof args.path === "string" ? args.path : undefined,
     id: typeof args.id === "string" ? args.id : undefined,
+    override: typeof args.override === "boolean" ? args.override : undefined,
     depth: typeof args.depth === "number" ? args.depth : undefined,
     limit: typeof args.limit === "number" ? args.limit : undefined,
   };

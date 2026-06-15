@@ -57,6 +57,24 @@ export interface FlatObject {
   fields?: ComponentField[];
 }
 
+/** A single prefab variant override (from PrefabInstance m_Modifications etc.). */
+export interface PrefabOverrideEntry {
+  kind:
+    | "property"
+    | "added-component"
+    | "added-gameobjects"
+    | "removed-components"
+    | "removed-gameobjects";
+  /** Property path (backing-field names unwrapped). Property overrides only. */
+  propertyPath?: string;
+  /** Override value. Property overrides only. */
+  value?: string;
+  /** Resolved target label (GameObject path or "Component on Path"). Omitted when unresolvable. */
+  target?: string;
+  /** Resolved added-object label. Added-component / added-gameobjects only. */
+  addedObject?: string;
+}
+
 export interface AssetModel {
   kind: AssetKind | string;
   path: string;
@@ -68,6 +86,8 @@ export interface AssetModel {
   roots: HierarchyNode[];
   /** Present for non-hierarchical assets (no GameObject tree). */
   flatObjects?: FlatObject[];
+  /** Prefab variant overrides. Populated for prefabs with PrefabInstance objects. */
+  overrides?: PrefabOverrideEntry[];
   /** Optional source-side notice (e.g. "scene hierarchy requires offline parser"). */
   note?: string;
 }

@@ -19,6 +19,7 @@ import type {
   HierarchyNode,
   FlatObject,
   ComponentField,
+  PrefabOverrideEntry,
   SearchModel,
   SearchMatch,
   SearchObjectMatch,
@@ -486,12 +487,16 @@ function resolveReferences(
   return value;
 }
 
-function localReferenceLabel(asset: ParsedAsset, fileID: string): string {
+function localReferenceLabel(
+  asset: ParsedAsset,
+  fileID: string,
+  scriptIndex: ScriptIndex = new Map(),
+): string {
   if (fileID === "" || fileID === "0") return "";
   const obj = asset.byID.get(fileID);
   if (!obj) return "";
   if (obj.type === "GameObject") return objectPath(asset, obj.id);
-  const { name } = componentName(obj, new Map());
+  const { name } = componentName(obj, scriptIndex);
   if (obj.gameObjectID !== "") {
     const path = objectPath(asset, obj.gameObjectID);
     if (path) return `${name} on ${path}`;
@@ -584,7 +589,13 @@ function parsePrefabOverrides(lines: string[]): PrefabOverride[] {
         break;
       }
       case "added-components": {
-        const { override, next } = parsePrefabAddedComponentOverride(lines, i);
+        const { override, next } = parsePrefabAddedComponentOverride(lines, i, "added-component");
+        if (override.target !== "" || override.addedObject !== "") out.push(override);
+        i = next;
+        break;
+      }
+      case "added-gameobjects": {
+        const { override, next } = parsePrefabAddedComponentOverride(lines, i, "added-gameobjects");
         if (override.target !== "" || override.addedObject !== "") out.push(override);
         i = next;
         break;
@@ -619,8 +630,9 @@ function parsePrefabPropertyOverride(
 function parsePrefabAddedComponentOverride(
   lines: string[],
   start: number,
+  kind: string,
 ): { override: PrefabOverride; next: number } {
-  const override: PrefabOverride = { kind: "added-component", target: "", propertyPath: "", value: "", addedObject: "" };
+  const override: PrefabOverride = { kind, target: "", propertyPath: "", value: "", addedObject: "" };
   for (let i = start; i < lines.length; i++) {
     const trim = lines[i].trim();
     if (i > start && isPrefabOverrideSection(trim)) return { override, next: i - 1 };
@@ -645,6 +657,128 @@ function isPrefabOverrideSection(trim: string): boolean {
     default:
       return false;
   }
+}
+
+// ===========================================================================
+// Prefab override collection — resolve raw overrides to readable labels.
+// ===========================================================================
+
+function buildSourceMap(parsed: ParsedAsset): Map<string, ParsedObject> {
+  const map = new Map<string, ParsedObject>();
+  for (const obj of parsed.objects) {
+    if (obj.sourceObjectID === "" || obj.sourceGUID === "") continue;
+    map.set(`${obj.sourceGUID.toLowerCase()}\0${obj.sourceObjectID}`, obj);
+  }
+  return map;
+}
+
+function collectOverrides(
+  parsed: ParsedAsset,
+  scriptIndex: ScriptIndex,
+  guidIndex: GUIDIndex,
+): PrefabOverrideEntry[] {
+  const sourceMap = buildSourceMap(parsed);
+  const entries: PrefabOverrideEntry[] = [];
+
+  for (const obj of parsed.objects) {
+    if (obj.type !== "PrefabInstance") continue;
+    for (const ov of parsePrefabOverrides(obj.lines)) {
+      entries.push(resolveOverrideEntry(ov, parsed, sourceMap, scriptIndex, guidIndex));
+    }
+  }
+
+  return entries;
+}
+
+function resolveOverrideEntry(
+  ov: PrefabOverride,
+  parsed: ParsedAsset,
+  sourceMap: Map<string, ParsedObject>,
+  scriptIndex: ScriptIndex,
+  guidIndex: GUIDIndex,
+): PrefabOverrideEntry {
+  const entry: PrefabOverrideEntry = { kind: ov.kind as PrefabOverrideEntry["kind"] };
+
+  switch (ov.kind) {
+    case "property":
+      entry.propertyPath = ov.propertyPath;
+      entry.value = normalizeOverrideValue(ov.value, guidIndex, parsed);
+      entry.target = resolveOverrideTarget(ov.target, sourceMap, parsed, scriptIndex);
+      break;
+    case "added-component":
+    case "added-gameobjects":
+      entry.target = resolveOverrideTarget(ov.target, sourceMap, parsed, scriptIndex);
+      entry.addedObject = resolveAddedObject(ov.addedObject, parsed, scriptIndex);
+      break;
+    default:
+      entry.target = resolveOverrideTarget(ov.target, sourceMap, parsed, scriptIndex);
+      break;
+  }
+
+  return entry;
+}
+
+function normalizeOverrideValue(
+  value: string,
+  guidIndex: GUIDIndex,
+  parsed: ParsedAsset,
+): string {
+  const trimmed = value.trim();
+  if (trimmed === "{fileID: 0}" || trimmed === "{}") return "null";
+  return resolveReferences(value, guidIndex, parsed);
+}
+
+function resolveOverrideTarget(
+  target: string,
+  sourceMap: Map<string, ParsedObject>,
+  parsed: ParsedAsset,
+  scriptIndex: ScriptIndex,
+): string | undefined {
+  if (target === "") return undefined;
+  const fileID = extractFileID(target);
+  const guid = extractGUID(target);
+  if (fileID === "" && guid === "") return undefined;
+
+  if (guid !== "" && fileID !== "") {
+    const localObj = sourceMap.get(`${guid.toLowerCase()}\0${fileID}`);
+    if (localObj) {
+      return labelForParsedObject(localObj, parsed, scriptIndex);
+    }
+  }
+
+  if (fileID !== "") {
+    const label = localReferenceLabel(parsed, fileID, scriptIndex);
+    if (label) return label;
+  }
+
+  return undefined;
+}
+
+function resolveAddedObject(
+  addedObject: string,
+  parsed: ParsedAsset,
+  scriptIndex: ScriptIndex,
+): string | undefined {
+  if (addedObject === "") return undefined;
+  const fileID = extractFileID(addedObject);
+  if (fileID === "") return undefined;
+  const label = localReferenceLabel(parsed, fileID, scriptIndex);
+  return label || undefined;
+}
+
+function labelForParsedObject(
+  obj: ParsedObject,
+  parsed: ParsedAsset,
+  scriptIndex: ScriptIndex,
+): string {
+  if (obj.type === "GameObject") return objectPath(parsed, obj.id);
+  const { name } = componentName(obj, scriptIndex);
+  if (obj.gameObjectID !== "") {
+    const path = objectPath(parsed, obj.gameObjectID);
+    if (path) return `${name} on ${path}`;
+  }
+  if (obj.name !== "") return `${name} ${obj.name}`;
+  return `${name} ${obj.id}`;
 }
 
 // ===========================================================================
@@ -993,6 +1127,7 @@ function buildAssetModel(
   fieldLimit: number,
 ): AssetModel {
   const hierarchy = buildHierarchy(parsed);
+  const overrides = collectOverrides(parsed, scriptIndex, guidIndex);
 
   if (hierarchy.length > 0) {
     const roots: HierarchyNode[] = hierarchy.map((node) =>
@@ -1011,6 +1146,7 @@ function buildAssetModel(
       objectCount: parsed.objects.length,
       componentCount,
       roots,
+      ...(overrides.length > 0 ? { overrides } : {}),
     };
   }
 
@@ -1033,6 +1169,7 @@ function buildAssetModel(
     componentCount: 0,
     roots: [],
     flatObjects,
+    ...(overrides.length > 0 ? { overrides } : {}),
   };
 }
 

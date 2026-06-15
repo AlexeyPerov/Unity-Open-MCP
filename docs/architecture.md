@@ -29,6 +29,15 @@
 3. Bridge endpoint `/tools/{name}` dispatches in Unity (`packages/bridge/Editor/Bridge/BridgeHttpServer.cs`).
 4. Response returns through MCP server to client with `_route: { route: "live" }`.
 
+### Offline route (no Editor needed)
+
+1. Text-serialized assets (`.prefab`/`.unity`/`.asset`/`.mat`/…) parse directly from disk via `mcp-server/src/offline.ts`.
+2. `.meta` GUID indices and YAML parsing are rebuilt per request — no on-disk cache, so reads are always correct against current files.
+3. The compressible router (`mcp-server/src/compressible-router.ts`) applies the shared compression module and returns the compact drill-down response.
+4. A session-scoped in-memory `AssetModelCache` (LRU, last 8) lets drill-down flags reuse the last model without re-parsing; it is never persisted to disk.
+
+**No-cache philosophy.** The offline-read path deliberately avoids persistent on-disk caches. GUID indices, YAML parses, and reference scans are rebuilt from current files on each request. This trades a small per-request cost for always-correct results and eliminates stale-cache invalidation bugs entirely. The only in-memory state is the session-scoped `AssetModelCache`, which is ephemeral and scoped to drill-down reuse within a single MCP session.
+
 ### Fallback route (Editor unavailable)
 
 1. Router checks live availability and detects no live bridge.

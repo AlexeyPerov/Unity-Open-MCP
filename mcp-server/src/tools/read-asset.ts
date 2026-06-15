@@ -43,6 +43,12 @@ export const readAsset: Tool = {
         description:
           "Drill-down: return one object by local YAML fileID. Offline-only (live bridge does not expose fileIDs); use component/path drill-down when reading live.",
       },
+      override: {
+        type: "boolean",
+        default: false,
+        description:
+          "Drill-down: show prefab variant overrides (property modifications, added/removed components and GameObjects). Returns an overrides list instead of the TREE. Offline-only (requires the offline YAML parser).",
+      },
       depth: {
         type: "integer",
         default: -1,
