@@ -40,6 +40,20 @@ export const invokeMethod: Tool = {
         type: "integer",
         default: 30000,
       },
+      max_depth: {
+        type: "integer",
+        default: 4,
+        minimum: 0,
+        description:
+          "Max recursion depth when serializing the returned object graph (default 4).",
+      },
+      max_items: {
+        type: "integer",
+        default: 100,
+        minimum: 0,
+        description:
+          "Max items emitted per list/enumerable in the returned object graph (default 100). Truncated lists report a `truncated` count.",
+      },
     },
     additionalProperties: false,
   },

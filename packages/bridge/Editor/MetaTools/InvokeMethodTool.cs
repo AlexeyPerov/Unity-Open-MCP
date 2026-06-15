@@ -60,7 +60,7 @@ namespace UnityOpenMcpBridge.MetaTools
             try
             {
                 var result = method.Invoke(target, invokeArgs);
-                var output = OutputSerializer.Serialize(result);
+                var output = OutputSerializer.Serialize(result, BuildSerializeOptions(body));
                 return ToolDispatchResult.Ok(output);
             }
             catch (TargetInvocationException tie)
@@ -71,6 +71,17 @@ namespace UnityOpenMcpBridge.MetaTools
             {
                 return ToolDispatchResult.Fail("execution_error", e.Message);
             }
+        }
+
+        static SerializeOptions BuildSerializeOptions(string body)
+        {
+            var maxDepth = JsonBody.GetInt(body, "max_depth", 4);
+            var maxItems = JsonBody.GetInt(body, "max_items", 100);
+            return new SerializeOptions
+            {
+                MaxDepth = maxDepth <= 0 ? 4 : maxDepth,
+                MaxListItems = maxItems <= 0 ? 100 : maxItems,
+            };
         }
 
         static Type FindType(string typeName, string assemblyName)

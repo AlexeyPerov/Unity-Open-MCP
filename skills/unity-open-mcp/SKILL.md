@@ -121,6 +121,13 @@ All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`)
 }
 ```
 
+**Return serialization.** `execute_csharp` and `invoke_method` results are walked by a depth-limited reflective serializer before becoming `mutation.output`:
+
+- Structs/POCOs (e.g. `Vector3`, your own DTOs) are emitted as JSON objects with their public fields and properties — `return new Vector3(1,2,3)` gives `{"$type":"Vector3","x":1,"y":2,"z":3}`, not a stringified tuple.
+- Lists/enumerables are truncated to 100 items (configurable via `max_items`); a truncated array reports `{"items":[...],"truncated":N}` so you know how many were elided.
+- Recursion is capped at depth 4 (configurable via `max_depth`); deeper nodes are stringified.
+- Cycles and `UnityEngine.Object` references never infinite-loop — back-edges become `{"$ref":"TypeName"}` and Unity objects become `{"$type":...,"name":...,"instanceId":...}` descriptors.
+
 ### Example: apply_fix with dry_run
 
 ```json

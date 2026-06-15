@@ -58,7 +58,7 @@ namespace UnityOpenMcpBridge.MetaTools
                     return ToolDispatchResult.Fail("execution_error", "Compiled snippet entry point not found");
 
                 var result = method.Invoke(null, null);
-                var output = OutputSerializer.Serialize(result);
+                var output = OutputSerializer.Serialize(result, BuildSerializeOptions(body));
                 return ToolDispatchResult.Ok(output);
             }
             catch (TargetInvocationException tie)
@@ -69,6 +69,17 @@ namespace UnityOpenMcpBridge.MetaTools
             {
                 return ToolDispatchResult.Fail("execution_error", e.Message);
             }
+        }
+
+        static SerializeOptions BuildSerializeOptions(string body)
+        {
+            var maxDepth = JsonBody.GetInt(body, "max_depth", 4);
+            var maxItems = JsonBody.GetInt(body, "max_items", 100);
+            return new SerializeOptions
+            {
+                MaxDepth = maxDepth <= 0 ? 4 : maxDepth,
+                MaxListItems = maxItems <= 0 ? 100 : maxItems,
+            };
         }
 
         static string BuildSource(string code, string[] usings)

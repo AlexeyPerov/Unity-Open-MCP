@@ -34,6 +34,20 @@ export const executeCsharp: Tool = {
         minimum: 1000,
         maximum: 300000,
       },
+      max_depth: {
+        type: "integer",
+        default: 4,
+        minimum: 0,
+        description:
+          "Max recursion depth when serializing the returned object graph (default 4). Composite nodes deeper than this are stringified to bound payload size.",
+      },
+      max_items: {
+        type: "integer",
+        default: 100,
+        minimum: 0,
+        description:
+          "Max items emitted per list/enumerable in the returned object graph (default 100). Truncated lists report a `truncated` count of the elided items.",
+      },
     },
     additionalProperties: false,
   },

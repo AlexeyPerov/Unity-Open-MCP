@@ -2,19 +2,55 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using UnityEngine;
 
+[assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.Editor.Tests")]
+
 namespace UnityOpenMcpBridge.MetaTools
 {
+    /// <summary>
+    /// Options controlling the depth-limited reflective walker in <see cref="OutputSerializer"/>.
+    /// Defaults mirror the unity-cli reference walker: depth 4, list truncation 100.
+    /// </summary>
+    public sealed class SerializeOptions
+    {
+        public int MaxDepth = 4;
+        public int MaxListItems = 100;
+        public bool IncludeFields = true;
+        public bool IncludeProperties = true;
+    }
+
     static class OutputSerializer
     {
+        const int EnumerableSafetyCap = 100_000;
+
         public static string Serialize(object value)
+        {
+            return Serialize(value, new SerializeOptions());
+        }
+
+        public static string Serialize(object value, SerializeOptions options)
+        {
+            if (options == null) options = new SerializeOptions();
+            return SerializeInternal(value, 0, options, new HashSet<object>(ReferenceComparer.Instance));
+        }
+
+        static string SerializeInternal(object value, int depth, SerializeOptions opts, HashSet<object> visited)
         {
             if (value == null) return null;
 
+            // Unity "fake null": a destroyed UnityEngine.Object is not a real null
+            // reference but the overloaded == operator reports it as null. Reading
+            // any property on it throws, so short-circuit to JSON null first.
+            if (value is UnityEngine.Object unityObj && unityObj == null)
+                return null;
+
             var type = value.GetType();
 
+            // --- Leaf types: serialize inline regardless of depth (no recursion risk) ---
             if (type == typeof(string))
                 return "\"" + EscapeJsonString((string)value) + "\"";
             if (type == typeof(bool))
@@ -44,43 +80,156 @@ namespace UnityOpenMcpBridge.MetaTools
             if (type == typeof(char))
                 return "\"" + EscapeJsonString(value.ToString()) + "\"";
 
-            if (value is UnityEngine.Object obj)
-                return SerializeUnityObject(obj);
+            if (type.IsEnum)
+                return "\"" + EscapeJsonString(value.ToString()) + "\"";
 
+            // System.Type → emit the full name; reflecting into it reaches the type
+            // system and produces enormous / throwing payloads.
+            if (value is Type t)
+                return "\"" + EscapeJsonString(t.FullName ?? t.Name) + "\"";
+
+            // ECS FixedString types throw / recurse nastily; stringify like unity-cli.
+            if (type.Name.StartsWith("FixedString"))
+                return "\"" + EscapeJsonString(value.ToString()) + "\"";
+
+            // UnityEngine.Object: never reflect (cyclic GameObject↔Component graphs,
+            // property access can throw). Emit a compact descriptor instead.
+            if (value is UnityEngine.Object liveUnityObj)
+                return SerializeUnityObject(liveUnityObj);
+
+            // --- Composite types: enforce depth limit to bound payload size ---
+            if (depth > opts.MaxDepth)
+                return "\"" + EscapeJsonString(SafeToString(value)) + "\"";
+
+            // Cycle detection: only reference types can form true back-edges. Value
+            // types are boxed copies and never cycle, so they are excluded to avoid
+            // false positives when the same value (e.g. Vector3.zero) repeats.
+            if (!type.IsValueType)
+            {
+                if (!visited.Add(value))
+                    return "{\"$ref\":\"" + EscapeJsonString(type.Name) + "\"}";
+                try
+                {
+                    return SerializeComposite(value, type, depth, opts, visited);
+                }
+                finally
+                {
+                    visited.Remove(value);
+                }
+            }
+
+            return SerializeComposite(value, type, depth, opts, visited);
+        }
+
+        static string SerializeComposite(object value, Type type, int depth, SerializeOptions opts, HashSet<object> visited)
+        {
             if (value is IDictionary dict)
-                return SerializeDictionary(dict);
+                return SerializeDictionary(dict, depth, opts, visited);
 
             if (value is IEnumerable enumerable && !(value is string))
-                return SerializeEnumerable(enumerable);
+                return SerializeEnumerable(enumerable, depth, opts, visited);
 
-            return "\"" + EscapeJsonString(value.ToString()) + "\"";
+            return ReflectObject(value, type, depth, opts, visited);
         }
 
         static string SerializeUnityObject(UnityEngine.Object obj)
         {
             var name = EscapeJsonString(obj.name);
             var typeName = EscapeJsonString(obj.GetType().FullName);
-            return $"{{\"name\":\"{name}\",\"type\":\"{typeName}\",\"entityId\":\"{obj.GetEntityId()}\"}}";
+            return $"{{\"$type\":\"{typeName}\",\"name\":\"{name}\",\"instanceId\":{obj.GetInstanceID()}}}";
         }
 
-        static string SerializeDictionary(IDictionary dict)
+        static string SerializeDictionary(IDictionary dict, int depth, SerializeOptions opts, HashSet<object> visited)
         {
             var items = new List<string>();
             foreach (DictionaryEntry entry in dict)
             {
-                var key = Serialize(entry.Key);
-                var val = Serialize(entry.Value);
-                items.Add($"{key}:{val}");
+                var val = SerializeInternal(entry.Value, depth + 1, opts, visited);
+                // JSON object keys must be strings; coerce any key type to a quoted string.
+                var keyStr = Convert.ToString(entry.Key, CultureInfo.InvariantCulture) ?? "";
+                items.Add("\"" + EscapeJsonString(keyStr) + "\":" + val);
             }
             return "{" + string.Join(",", items) + "}";
         }
 
-        static string SerializeEnumerable(IEnumerable enumerable)
+        static string SerializeEnumerable(IEnumerable enumerable, int depth, SerializeOptions opts, HashSet<object> visited)
         {
             var items = new List<string>();
+            var taken = 0;
+            var elided = 0;
+            var capped = false;
+
             foreach (var item in enumerable)
-                items.Add(Serialize(item));
-            return "[" + string.Join(",", items) + "]";
+            {
+                if (taken < opts.MaxListItems)
+                {
+                    items.Add(SerializeInternal(item, depth + 1, opts, visited));
+                    taken++;
+                }
+                else
+                {
+                    elided++;
+                    if (elided >= EnumerableSafetyCap)
+                    {
+                        capped = true;
+                        break;
+                    }
+                }
+            }
+
+            if (elided == 0)
+                return "[" + string.Join(",", items) + "]";
+
+            var truncated = capped
+                ? "\"" + (elided + "+") + "\""
+                : elided.ToString(CultureInfo.InvariantCulture);
+            return "{\"items\":[" + string.Join(",", items) + "],\"truncated\":" + truncated + "}";
+        }
+
+        static string ReflectObject(object value, Type type, int depth, SerializeOptions opts, HashSet<object> visited)
+        {
+            var members = new List<string>();
+            members.Add("\"$type\":\"" + EscapeJsonString(type.Name) + "\"");
+
+            if (opts.IncludeFields)
+            {
+                var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance);
+                foreach (var f in fields)
+                {
+                    string valJson;
+                    try { valJson = SerializeInternal(f.GetValue(value), depth + 1, opts, visited); }
+                    catch (Exception ex) { valJson = ErrorMarker(ex); }
+                    members.Add("\"" + EscapeJsonString(f.Name) + "\":" + valJson);
+                }
+            }
+
+            if (opts.IncludeProperties)
+            {
+                var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+                foreach (var p in props)
+                {
+                    if (p.GetIndexParameters().Length > 0) continue;
+                    var getter = p.GetMethod;
+                    if (getter == null || !getter.IsPublic) continue;
+                    string valJson;
+                    try { valJson = SerializeInternal(p.GetValue(value, null), depth + 1, opts, visited); }
+                    catch (Exception ex) { valJson = ErrorMarker(ex); }
+                    members.Add("\"" + EscapeJsonString(p.Name) + "\":" + valJson);
+                }
+            }
+
+            return "{" + string.Join(",", members) + "}";
+        }
+
+        static string ErrorMarker(Exception ex)
+        {
+            return "\"" + EscapeJsonString("<error: " + ex.GetType().Name + ">") + "\"";
+        }
+
+        static string SafeToString(object value)
+        {
+            try { return value.ToString(); }
+            catch { return value.GetType().Name; }
         }
 
         public static string EscapeJsonString(string s)
@@ -107,6 +256,18 @@ namespace UnityOpenMcpBridge.MetaTools
                 }
             }
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Reference-identity comparer for cycle detection. The default object
+        /// comparer uses overridden Equals/GetHashCode which breaks for types
+        /// that implement value equality (strings, some structs boxed as object).
+        /// </summary>
+        sealed class ReferenceComparer : IEqualityComparer<object>
+        {
+            public static readonly ReferenceComparer Instance = new ReferenceComparer();
+            public bool Equals(object x, object y) => ReferenceEquals(x, y);
+            public int GetHashCode(object obj) => RuntimeHelpers.GetHashCode(obj);
         }
     }
 }
