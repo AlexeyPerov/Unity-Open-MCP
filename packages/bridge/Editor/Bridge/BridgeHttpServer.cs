@@ -34,7 +34,9 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_find_references",
             "unity_open_mcp_scan_paths",
             "unity_open_mcp_apply_fix",
-            "unity_open_mcp_reserialize"
+            "unity_open_mcp_reserialize",
+            "unity_open_mcp_read_asset",
+            "unity_open_mcp_search_assets"
         };
 
         static readonly HashSet<string> DirectResponseTools = new()
@@ -43,7 +45,11 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_checkpoint_create",
             "unity_open_mcp_delta",
             "unity_open_mcp_find_references",
-            "unity_open_mcp_scan_paths"
+            "unity_open_mcp_scan_paths",
+            // Compact drill-down reads: bridge returns the structured model JSON
+            // directly; the MCP server applies the shared compression module.
+            "unity_open_mcp_read_asset",
+            "unity_open_mcp_search_assets"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -566,6 +572,8 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_scan_paths" => ScanPathsTool.Execute(body),
                 "unity_open_mcp_apply_fix" => ApplyFixTool.Execute(body),
                 "unity_open_mcp_reserialize" => ReserializeAssetsTool.Execute(body),
+                "unity_open_mcp_read_asset" => ReadAssetTool.Execute(body),
+                "unity_open_mcp_search_assets" => SearchAssetsTool.Execute(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

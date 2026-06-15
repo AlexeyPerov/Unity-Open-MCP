@@ -2,6 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import type { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
+import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 
 export interface RouteMeta {
   route: "live" | "batch";
@@ -28,6 +29,7 @@ function injectRouteMeta(
 }
 
 export class ToolRouter implements Router {
+  private readonly modelCache = new AssetModelCache();
   constructor(
     private live: LiveClient,
     private batch: BatchSpawn,
@@ -38,6 +40,35 @@ export class ToolRouter implements Router {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
+    // Compact drill-down reads: fetch structured model from the bridge, apply
+    // the shared compression module, and return. These are read-only, live-only
+    // tools (offline parser arrives in M9 Plan 3) — no gate, no batch fallback.
+    if (isCompressible(toolName)) {
+      const liveAvailable = await this.live.isLiveAvailable();
+      if (!liveAvailable) {
+        return injectRouteMeta(
+          {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  error: {
+                    code: "bridge_offline",
+                    message:
+                      "Compact reads require the live bridge. Offline reads arrive in a later milestone.",
+                  },
+                }),
+              },
+            ],
+            isError: true,
+          },
+          { route: "live", fallbackReason: "live_unavailable" },
+        );
+      }
+      const result = await routeCompressible(toolName, args, this.live, this.modelCache);
+      return injectRouteMeta(result, { route: "live" });
+    }
+
     const canBatch = this.batch.isBatchTool(toolName);
     const isPing = toolName === "unity_open_mcp_ping";
 

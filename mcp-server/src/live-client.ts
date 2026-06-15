@@ -14,6 +14,10 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_delta",
   "unity_open_mcp_find_references",
   "unity_open_mcp_scan_paths",
+  // Compact drill-down reads return a structured model JSON directly; the MCP
+  // ToolRouter applies the compression module on top (compressible-router.ts).
+  "unity_open_mcp_read_asset",
+  "unity_open_mcp_search_assets",
 ]);
 
 interface PingResponse {

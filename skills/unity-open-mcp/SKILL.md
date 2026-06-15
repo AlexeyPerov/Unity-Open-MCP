@@ -32,6 +32,8 @@ All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`)
 - `unity_open_mcp_validate_edit` — Scoped health scan without mutation.
 - `unity_open_mcp_find_references` — Reverse dependency lookup for assets.
 - `unity_open_mcp_scan_paths` — Run specific verify rules over scoped paths.
+- `unity_open_mcp_read_asset` — Compact drill-down asset read (≥70% smaller than raw YAML). Default returns a map (counts + CMP component-set codes + folded tree + omission counts); drill down with `component`/`path`/`id`/`detail` instead of re-reading raw YAML.
+- `unity_open_mcp_search_assets` — Compact asset search by name/component/GUID/type. Each result tags why it matched (`file-name`/`gameobject`/`component`/`guid`) so you know which `read_asset` drill-down to run next.
 
 ### Checkpoint tools
 
@@ -272,6 +274,61 @@ If the round-trip surfaces a missing-script or broken-prefab error, the delta li
 **Supported extensions:** `.prefab`, `.unity`, `.asset`, `.mat`, `.controller`, `.anim`. Whole-project reserialize is intentionally **not** supported — the gate needs scoped paths to validate the delta, so always enumerate the assets you edited.
 
 **Principle: edit freely, but always reserialize before trusting a direct YAML change.** A text edit that "looks right" can silently corrupt a prefab; `reserialize` is the safety primitive that catches it.
+
+### Example: read an asset compactly, then drill down
+
+Raw Unity YAML is enormous and repetitive. `unity_open_mcp_read_asset` returns a **map, not a dump**: counts, a `cmp` table that declares repeated component sets once (referenced by `c1`/`c2` codes), and a folded `tree` where render-only leaf runs (e.g. 7 meshes) collapse into one row with a `count`. Omission counts (`moreHidden`, `collapsed`) tell you what was elided so you know where to drill next.
+
+1. **Read the summary** — start with the default. No raw YAML.
+
+   ```json
+   // Tool call: unity_open_mcp_read_asset
+   { "asset_path": "Assets/Prefabs/Player.prefab" }
+   ```
+
+   ```json
+   {
+     "asset": "prefab", "path": "Assets/Prefabs/Player.prefab", "guid": "abc…",
+     "objects": 42, "components": 18,
+     "cmp": { "c1": ["Transform","MeshFilter","MeshRenderer"], "c2": ["Transform","PlayerController"] },
+     "tree": [
+       { "idx": 0, "name": "Player", "depth": 0, "cmp": "c2" },
+       { "idx": 1, "name": "SampleMesh_01..07", "depth": 1, "cmp": "c1", "count": 7, "toIdx": 7 }
+     ],
+     "moreHidden": 0, "collapsed": 7,
+     "hint": "use detail=verbose, component=<name>, path=<subtree>, or id=<fileID> to drill down",
+     "_cache": "miss"
+   }
+   ```
+
+2. **Drill into one component's fields.** First fetch fields (`field_limit: 30`), then use `component`. The session cache reuses the model (`_cache: "hit"`) — no re-parse.
+
+   ```json
+   // Tool call: unity_open_mcp_read_asset
+   { "asset_path": "Assets/Prefabs/Player.prefab", "field_limit": 30, "component": "PlayerController" }
+   ```
+
+   ```json
+   {
+     "asset": "prefab", "path": "Assets/Prefabs/Player.prefab", "objects": 42, "components": 18,
+     "componentQuery": "PlayerController",
+     "componentMatches": [
+       { "object": "Player", "component": "PlayerController", "fields": [ { "name": "m_Speed", "value": "5" }, { "name": "m_Health", "value": "100" } ] }
+     ],
+     "_cache": "hit"
+   }
+   ```
+
+3. **Find assets before editing.** Use `unity_open_mcp_search_assets` to locate prefabs/components/GUIDs; the `reasons` tags tell you which `read_asset` drill-down to run next.
+
+   ```json
+   // Tool call: unity_open_mcp_search_assets
+   { "component": "EnemyAI", "type": "prefab", "max_results": 20 }
+   ```
+
+**Notes.** `read_asset` is live-only today (offline reads arrive later); `id` (fileID) drill-down works once the offline parser lands — use `component`/`path` drill-down when reading live. `detail: verbose` disables render-only folding; `detail: normal` inlines component names per node. `field_limit: 0` (default) returns names only — bump it before `component` drill-down so fields are available.
+
+**Principle: first answer is a map, not a dump.** Drill down with flags; never pull raw YAML.
 
 ## Gate modes
 
