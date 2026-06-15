@@ -21,6 +21,9 @@ import { listAssets } from "./list-assets.js";
 import { runTests } from "./run-tests.js";
 import { screenshot } from "./screenshot.js";
 import { readConsole } from "./read-console.js";
+import { profilerCapture } from "./profiler-capture.js";
+import { profilerMemory } from "./profiler-memory.js";
+import { profilerRendering } from "./profiler-rendering.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -38,6 +41,13 @@ export const M5_TOOLS: Tool[] = [scanAll, baselineCreate, regressionCheck];
 
 export const M9_TOOLS: Tool[] = [reserialize, readAsset, searchAssets, listAssets];
 
-export const M10_TOOLS: Tool[] = [runTests, screenshot, readConsole];
+export const M10_TOOLS: Tool[] = [
+  runTests,
+  screenshot,
+  readConsole,
+  profilerCapture,
+  profilerMemory,
+  profilerRendering,
+];
 
 export const ALL_TOOLS: Tool[] = [...M2_TOOLS, ...M2_5_TOOLS, ...M3_TOOLS, ...M5_TOOLS, ...M9_TOOLS, ...M10_TOOLS];

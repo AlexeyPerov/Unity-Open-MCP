@@ -77,6 +77,9 @@ Non-mutating direct-response tools return tool payloads directly (or direct erro
 - `unity_agent_run_tests` (test runner; requires Unity Test Framework)
 - `unity_agent_screenshot` (scene/game/isolated screenshots)
 - `unity_agent_read_console` (console log reader)
+- `unity_agent_profiler_capture` (profiler frame hierarchy)
+- `unity_agent_profiler_memory` (memory allocator stats)
+- `unity_agent_profiler_rendering` (rendering environment stats)
 
 Typed tools discovered via `BridgeToolRegistry` are also callable through `/tools/{toolName}`.
 
@@ -108,6 +111,34 @@ Direct-response tool that reads Unity console entries via reflection on internal
 - `include_unity_frames` (default false) controls whether UnityEngine/UnityEditor/System stack frames are included.
 - `max_entries` (default 100) caps the returned entry count; `max_stack_frames` (default 20) truncates long stack traces.
 - `clear: true` empties the console after reading.
+
+### Profiler capture (`unity_agent_profiler_capture`)
+
+Direct-response tool that reads the Unity Profiler frame hierarchy via `ProfilerDriver.GetHierarchyFrameDataView` (requires the Profiler to be enabled and to have captured frames).
+
+- Single-frame mode (default): returns `{ itemId, name, totalMs, selfMs, calls, children? }` for the root level.
+- Drill-down: `parent` (an `itemId` from a previous response, same frame only) or `root` (recursive case-insensitive name substring).
+- Averaging: set `from_frame`/`to_frame` or `frames` (last N) to switch to averaged flat-by-name mode with `avgTotalMs`/`avgSelfMs`/`avgCalls`/`appearedIn`.
+- Token-bounded via `depth` (1 = one level, 0 = unlimited), `min_ms`, `max_items` (default 30), and `sort` (`total`/`self`/`calls`).
+- Returns `profiler_empty` / `frame_out_of_range` / `no_frame_data` / `root_not_found` / `no_frames_in_range` error codes as appropriate.
+
+### Profiler memory (`unity_agent_profiler_memory`)
+
+Direct-response tool that snapshots live memory allocator stats.
+
+- Returns raw byte counts (`allocatedBytes`, `reservedBytes`, `unusedReservedBytes`, `tempAllocatorBytes`, `managedHeapBytes`) plus a `humanReadable` block.
+- `gc_collect: true` runs a full GC (with finalizers) before sampling.
+
+### Profiler rendering (`unity_agent_profiler_rendering`)
+
+Direct-response tool that snapshots the rendering environment (no parameters).
+
+- `system` — GPU name/vendor/version, device type, VRAM (MB), processor, OS.
+- `renderPipeline` — active `RenderPipelineAsset` type name (URP/HDRP) or `Built-in Render Pipeline`.
+- `screen` — width/height/dpi/fullScreen, current resolution + refresh rate.
+- `quality` — quality level/name, vSync, pixel lights, anti-aliasing, shadow cascades, soft shadows.
+- `application` — target frame rate, run in background, is playing, Unity version.
+- `time` — frame count, rendered frame count, time scale, realtime since startup.
 
 ## `/resources` and `/resources/{route}`
 

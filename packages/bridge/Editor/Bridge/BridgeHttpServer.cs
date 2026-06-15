@@ -39,7 +39,10 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_search_assets",
             "unity_agent_run_tests",
             "unity_agent_screenshot",
-            "unity_agent_read_console"
+            "unity_agent_read_console",
+            "unity_agent_profiler_capture",
+            "unity_agent_profiler_memory",
+            "unity_agent_profiler_rendering"
         };
 
         static readonly HashSet<string> DirectResponseTools = new()
@@ -57,7 +60,10 @@ namespace UnityOpenMcpBridge
             "unity_agent_run_tests",
             // Agent senses (non-mutating): return tool JSON directly.
             "unity_agent_screenshot",
-            "unity_agent_read_console"
+            "unity_agent_read_console",
+            "unity_agent_profiler_capture",
+            "unity_agent_profiler_memory",
+            "unity_agent_profiler_rendering"
         };
 
         static readonly HashSet<string> MutatingTools = new()

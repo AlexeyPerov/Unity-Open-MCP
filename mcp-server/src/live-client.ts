@@ -27,6 +27,9 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   // Agent senses (non-mutating): return tool JSON directly.
   "unity_agent_screenshot",
   "unity_agent_read_console",
+  "unity_agent_profiler_capture",
+  "unity_agent_profiler_memory",
+  "unity_agent_profiler_rendering",
 ]);
 
 interface PingResponse {
