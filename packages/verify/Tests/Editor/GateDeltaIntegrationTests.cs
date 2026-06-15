@@ -4,6 +4,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityOpenMcpVerify;
 
 namespace UnityOpenMcpVerify.Tests
 {

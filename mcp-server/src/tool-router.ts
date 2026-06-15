@@ -3,7 +3,7 @@ import type { Router } from "./router.js";
 import type { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
-import { listAssetsOffline } from "./offline.js";
+import { listAssetsOffline, findReferencesOffline } from "./offline.js";
 
 export interface RouteMeta {
   route: "live" | "batch";
@@ -44,6 +44,12 @@ export class ToolRouter implements Router {
     // list_assets — always offline (no live equivalent needed).
     if (toolName === "unity_open_mcp_list_assets") {
       return this.routeListAssets(args);
+    }
+
+    // find_references — offline-first when no bridge is connected; live
+    // ReferenceGraph remains available when the bridge is up.
+    if (toolName === "unity_open_mcp_find_references") {
+      return this.routeFindReferences(args);
     }
 
     // Compact drill-down reads: offline-first for text-serialized assets, fall
@@ -134,6 +140,72 @@ export class ToolRouter implements Router {
       return {
         content: [
           { type: "text", text: JSON.stringify({ error: { code: "offline_error", message } }) },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  private async routeFindReferences(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const liveAvailable = await this.live.isLiveAvailable();
+    if (liveAvailable) {
+      console.error("[unity-open-mcp] Route: find_references -> live");
+      const result = await this.live.route("unity_open_mcp_find_references", args);
+      return injectRouteMeta(result, { route: "live" });
+    }
+
+    console.error(
+      "[unity-open-mcp] Route: find_references -> offline (live bridge unavailable)",
+    );
+
+    const assetPath = typeof args.asset_path === "string" ? args.asset_path : undefined;
+    const guid = typeof args.guid === "string" ? args.guid : undefined;
+
+    if (!assetPath && !guid) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "missing_parameter",
+                message: "Either 'asset_path' or 'guid' is required.",
+              },
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    try {
+      const result = await findReferencesOffline({
+        assetPath,
+        guid,
+        detail: typeof args.detail === "string" ? args.detail : "normal",
+        maxResults: typeof args.max_results === "number" ? args.max_results : 100,
+        maxPerFile: typeof args.max_per_file === "number" ? args.max_per_file : 5,
+        patternThreshold: typeof args.pattern_threshold === "number" ? args.pattern_threshold : 0,
+        projectRoot: this.projectPath,
+      });
+      return {
+        content: [
+          { type: "text", text: JSON.stringify({ ...result, _source: "offline" }) },
+        ],
+        isError: false,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: { code: "offline_error", message },
+            }),
+          },
         ],
         isError: true,
       };

@@ -1350,3 +1350,227 @@ async function walkFiles(
     } catch { /* skip */ }
   }
 }
+
+// ===========================================================================
+// findReferencesOffline — offline reverse reference lookup (T1.4).
+//
+// Scans .meta + YAML on disk to find all assets that reference a given target
+// (by GUID or asset path). No running Editor required. Output is grouped by
+// asset kind and folder, with detail levels and caps to protect token budget.
+//
+// Algorithm: resolve target GUID → scan all text-serialized files → raw-text
+// fast-filter (content.includes(guid)) → optional YAML parse for verbose
+// locations → group + cap + collapse.
+// ===========================================================================
+
+const REFERENCEABLE_EXTENSIONS = new Set([
+  ".prefab", ".unity", ".asset", ".mat", ".controller", ".anim", ".playable",
+]);
+
+export interface ReferencedByEntry {
+  assetPath: string;
+  guid?: string;
+  kind: string;
+  folder: string;
+  /** Verbose-only: field locations where the GUID appears (capped). */
+  locations?: string[];
+}
+
+export interface CollapsedGroup {
+  folder: string;
+  count: number;
+  kinds: Record<string, number>;
+}
+
+export interface FindReferencesOfflineResult {
+  queriedAssetPath: string;
+  queriedAssetGuid: string;
+  referencedBy: ReferencedByEntry[];
+  totalCount: number;
+  byKind: Record<string, number>;
+  byFolder: Record<string, number>;
+  collapsedGroups?: CollapsedGroup[];
+  detail: string;
+  truncated: number;
+}
+
+export async function findReferencesOffline(
+  opts: {
+    assetPath?: string;
+    guid?: string;
+    detail?: string;
+    maxResults?: number;
+    maxPerFile?: number;
+    patternThreshold?: number;
+    projectRoot: string;
+  },
+): Promise<FindReferencesOfflineResult> {
+  const detail = (opts.detail ?? "normal") as "summary" | "normal" | "verbose";
+  const maxResults = opts.maxResults ?? 100;
+  const maxPerFile = opts.maxPerFile ?? 5;
+  const patternThreshold = opts.patternThreshold ?? 0;
+
+  // Resolve target GUID + path.
+  let targetGuid = "";
+  let targetPath = "";
+  if (opts.guid) {
+    targetGuid = opts.guid.toLowerCase();
+  } else if (opts.assetPath) {
+    targetPath = opts.assetPath;
+    targetGuid = (await safeReadMetaGUID(
+      join(opts.projectRoot, opts.assetPath + ".meta"),
+    )).toLowerCase();
+  }
+
+  if (targetGuid === "") {
+    return {
+      queriedAssetPath: targetPath,
+      queriedAssetGuid: "",
+      referencedBy: [],
+      totalCount: 0,
+      byKind: {},
+      byFolder: {},
+      detail,
+      truncated: 0,
+    };
+  }
+
+  // If only GUID was given, resolve target path from .meta index.
+  if (targetPath === "") {
+    const guidIndex = await buildGUIDIndex(
+      opts.projectRoot, new Set([targetGuid]),
+    );
+    targetPath = guidIndex.get(targetGuid) ?? "";
+  }
+
+  // Scan all candidate files in Assets/.
+  const candidates = await collectFiles(join(opts.projectRoot, "Assets"));
+  const hits: ReferencedByEntry[] = [];
+
+  for (const absPath of candidates) {
+    const ext = extname(absPath).toLowerCase();
+    if (!REFERENCEABLE_EXTENSIONS.has(ext)) continue;
+
+    let content: string;
+    try { content = await readFile(absPath, "utf-8"); } catch { continue; }
+
+    // Fast filter: skip files that don't mention the GUID at all.
+    if (!content.includes(targetGuid)) continue;
+
+    const assetPath = toAssetPath(opts.projectRoot, absPath);
+    // Skip self-reference.
+    if (assetPath === targetPath) continue;
+
+    const kind = kindForPath(absPath);
+    const folder = relativeDir(opts.projectRoot, absPath);
+    const guid = await safeReadMetaGUID(absPath + ".meta");
+
+    const entry: ReferencedByEntry = {
+      assetPath,
+      guid: guid || undefined,
+      kind,
+      folder,
+    };
+
+    if (detail === "verbose") {
+      entry.locations = extractReferenceLocations(content, targetGuid, maxPerFile);
+    }
+
+    hits.push(entry);
+  }
+
+  // Group by kind and folder.
+  const byKind: Record<string, number> = {};
+  const byFolder: Record<string, number> = {};
+  for (const hit of hits) {
+    byKind[hit.kind] = (byKind[hit.kind] ?? 0) + 1;
+    byFolder[hit.folder] = (byFolder[hit.folder] ?? 0) + 1;
+  }
+
+  // Pattern collapsing: folders with >= threshold files get collapsed.
+  let collapsedGroups: CollapsedGroup[] | undefined;
+  let displayHits = hits;
+
+  if (patternThreshold > 0) {
+    collapsedGroups = [];
+    const collapsedFolders = new Set<string>();
+    for (const [folder, count] of Object.entries(byFolder)) {
+      if (count < patternThreshold) continue;
+      const kinds: Record<string, number> = {};
+      for (const hit of hits) {
+        if (hit.folder !== folder) continue;
+        kinds[hit.kind] = (kinds[hit.kind] ?? 0) + 1;
+      }
+      collapsedGroups.push({ folder, count, kinds });
+      collapsedFolders.add(folder);
+    }
+    if (collapsedFolders.size > 0) {
+      displayHits = hits.filter((h) => !collapsedFolders.has(h.folder));
+    }
+  }
+
+  // Apply max_results cap and detail filtering.
+  const totalCount = hits.length;
+  let referencedBy: ReferencedByEntry[];
+  let truncated = 0;
+
+  if (detail === "summary") {
+    referencedBy = [];
+  } else {
+    referencedBy = displayHits.slice(0, maxResults);
+    truncated = Math.max(0, displayHits.length - maxResults);
+  }
+
+  return {
+    queriedAssetPath: targetPath,
+    queriedAssetGuid: targetGuid,
+    referencedBy,
+    totalCount,
+    byKind,
+    byFolder,
+    collapsedGroups: collapsedGroups && collapsedGroups.length > 0
+      ? collapsedGroups
+      : undefined,
+    detail,
+    truncated,
+  };
+}
+
+function extractReferenceLocations(
+  content: string,
+  targetGuid: string,
+  maxPerFile: number,
+): string[] {
+  const locations: string[] = [];
+  const lines = content.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].includes(targetGuid)) continue;
+    if (locations.length >= maxPerFile) break;
+
+    const trim = lines[i].trim();
+    const cleaned = trim.startsWith("- ") ? trim.slice(2) : trim;
+    const colonIdx = cleaned.indexOf(":");
+    const field = colonIdx > 0 ? cleaned.slice(0, colonIdx).trim() : cleaned;
+
+    if (field === "target") {
+      let label = "prefab modification";
+      for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+        const pp = lines[j].trim();
+        if (pp.startsWith("propertyPath:")) {
+          label = `prefab → ${displayFieldName(
+            cleanScalar(pp.slice("propertyPath:".length).trim()),
+          )}`;
+          break;
+        }
+        if (pp.startsWith("- target:") || pp.startsWith("- ") || pp === "") continue;
+        break;
+      }
+      locations.push(label);
+    } else {
+      locations.push(displayFieldName(field));
+    }
+  }
+
+  return locations;
+}

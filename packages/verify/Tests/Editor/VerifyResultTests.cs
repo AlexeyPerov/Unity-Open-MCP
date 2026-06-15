@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using NUnit.Framework;
+using UnityOpenMcpVerify;
 
 namespace UnityOpenMcpVerify.Tests
 {

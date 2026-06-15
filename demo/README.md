@@ -82,7 +82,7 @@ Located in `Assets/Fixtures/`. These prefabs provide controlled break/fix scenar
 
 ### Usage in tests
 
-- **EditMode tests** in `packages/verify/Tests~/Editor/` reference these fixture paths for reproducible rule testing.
+- **EditMode tests** in `packages/verify/Tests/Editor/` reference these fixture paths for reproducible rule testing.
 - **Manual E2E checklist** uses these paths in curl commands.
 - **Bridge `file:` wiring**: demo `manifest.json` includes both `bridge` and `verify` packages so fixtures are scanned by M3 rules.
 
