@@ -3,14 +3,16 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // M9 Plan 2 — compact drill-down asset read. Returns a MAP by default (counts +
 // CMP component-set declarations + folded hierarchy tree + omission counts);
 // drill-down flags expand detail progressively without the caller re-specifying
-// the whole asset. Live-only for now (offline YAML parser arrives in M9 Plan 3).
+// the whole asset. Offline-first (Plan 3): text-serialized assets are parsed
+// directly from disk without a running Editor; binary formats fall back to the
+// live bridge.
 export const readAsset: Tool = {
   name: "unity_open_mcp_read_asset",
   description:
     "Read a Unity asset as a compact, token-budgeted summary (hierarchy + components + counts). " +
     "Default returns a map: ASSET/PATH/GUID/OBJECTS/COMPONENTS counts, CMP component-set declarations, and a folded TREE with 'more: N hidden' omission counts. " +
     "Drill down with component/path/id/detail instead of re-reading raw YAML. " +
-    "Achieves >=70% size reduction vs raw YAML on typical prefabs. Live bridge required (offline reads arrive in a later milestone).",
+    "Achieves >=70% size reduction vs raw YAML on typical prefabs. Offline-first: text-serialized assets parse from disk (no Editor needed); binary formats fall back to the live bridge.",
   inputSchema: {
     type: "object",
     required: ["asset_path"],

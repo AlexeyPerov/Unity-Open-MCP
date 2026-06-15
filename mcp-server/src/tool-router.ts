@@ -3,6 +3,7 @@ import type { Router } from "./router.js";
 import type { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
+import { listAssetsOffline } from "./offline.js";
 
 export interface RouteMeta {
   route: "live" | "batch";
@@ -40,32 +41,22 @@ export class ToolRouter implements Router {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
-    // Compact drill-down reads: fetch structured model from the bridge, apply
-    // the shared compression module, and return. These are read-only, live-only
-    // tools (offline parser arrives in M9 Plan 3) — no gate, no batch fallback.
+    // list_assets — always offline (no live equivalent needed).
+    if (toolName === "unity_open_mcp_list_assets") {
+      return this.routeListAssets(args);
+    }
+
+    // Compact drill-down reads: offline-first for text-serialized assets, fall
+    // back to live bridge for binary formats. The compressible-router handles
+    // the source selection internally.
     if (isCompressible(toolName)) {
-      const liveAvailable = await this.live.isLiveAvailable();
-      if (!liveAvailable) {
-        return injectRouteMeta(
-          {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  error: {
-                    code: "bridge_offline",
-                    message:
-                      "Compact reads require the live bridge. Offline reads arrive in a later milestone.",
-                  },
-                }),
-              },
-            ],
-            isError: true,
-          },
-          { route: "live", fallbackReason: "live_unavailable" },
-        );
-      }
-      const result = await routeCompressible(toolName, args, this.live, this.modelCache);
+      const result = await routeCompressible(
+        toolName,
+        args,
+        this.live,
+        this.modelCache,
+        this.projectPath,
+      );
       return injectRouteMeta(result, { route: "live" });
     }
 
@@ -122,5 +113,30 @@ export class ToolRouter implements Router {
       ],
       isError: false,
     };
+  }
+
+  private async routeListAssets(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    try {
+      const result = await listAssetsOffline({
+        folder: typeof args.folder === "string" ? args.folder : "Assets",
+        type: typeof args.type === "string" ? args.type : undefined,
+        maxPerFolder: typeof args.max_per_folder === "number" ? args.max_per_folder : 30,
+        projectRoot: this.projectPath,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify({ ...result, _source: "offline" }) }],
+        isError: false,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          { type: "text", text: JSON.stringify({ error: { code: "offline_error", message } }) },
+        ],
+        isError: true,
+      };
+    }
   }
 }

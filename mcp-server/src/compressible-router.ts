@@ -1,16 +1,14 @@
-// M9 Plan 2 — compressible-tool router.
+// M9 Plan 2 + Plan 3 — compressible-tool router.
 //
-// Intercepts `read_asset` / `search_assets`: fetches the structured
-// AssetModel / SearchModel JSON from the live bridge (direct-response path) and
-// applies the shared compression module (compact.ts) to produce the compact
-// drill-down response. This is the one place where the live path meets the
-// compression module — the same module will serve the offline parser in M9
-// Plan 3, so the algorithm lives in exactly one place.
+// Intercepts `read_asset` / `search_assets`: produces the structured
+// AssetModel / SearchModel (offline parser for text-serialized assets, or live
+// bridge for binary formats) and applies the shared compression module
+// (compact.ts) to produce the compact drill-down response.
 //
 // A session-scoped AssetModel cache lets `--component` / `--path` / `--id`
 // drill-downs reuse the last-fetched model instead of re-parsing the asset.
 // The cache key includes field_limit and depth (the parameters that change what
-// the bridge returns); detail/component/path/id are pure TS-side render options
+// the source returns); detail/component/path/id are pure TS-side render options
 // and do not invalidate the cache.
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -21,6 +19,8 @@ import {
   renderSearchSummary,
   type RenderOptions,
 } from "./compression/compact.js";
+import { readAssetOffline, isOfflineAsset } from "./offline.js";
+import { searchAssetsOffline } from "./offline.js";
 
 const COMPRESSIBLE = new Set([
   "unity_open_mcp_read_asset",
@@ -76,7 +76,7 @@ function makeErrorResult(message: string, code: string): CallToolResult {
   };
 }
 
-function makeResult(payload: unknown, cacheHit: boolean): CallToolResult {
+function makeResult(payload: unknown, cacheHit: boolean, source?: "offline" | "live"): CallToolResult {
   return {
     content: [
       {
@@ -84,6 +84,7 @@ function makeResult(payload: unknown, cacheHit: boolean): CallToolResult {
         text: JSON.stringify({
           ...(payload as Record<string, unknown>),
           _cache: cacheHit ? "hit" : "miss",
+          ...(source ? { _source: source } : {}),
         }),
       },
     ],
@@ -92,25 +93,28 @@ function makeResult(payload: unknown, cacheHit: boolean): CallToolResult {
 }
 
 /**
- * Route a compressible tool: fetch the structured model from the live bridge,
- * cache it (read_asset only), apply the compression module, and return.
+ * Route a compressible tool: try offline parser first for text-serialized
+ * assets, fall back to the live bridge for binary formats. Cache the model
+ * (read_asset only), apply the compression module, and return.
  */
 export async function routeCompressible(
   toolName: string,
   args: Record<string, unknown>,
   live: LiveClient,
   cache: AssetModelCache,
+  projectPath: string,
 ): Promise<CallToolResult> {
   if (toolName === "unity_open_mcp_read_asset") {
-    return routeReadAsset(args, live, cache);
+    return routeReadAsset(args, live, cache, projectPath);
   }
-  return routeSearchAssets(args, live);
+  return routeSearchAssets(args, live, projectPath);
 }
 
 async function routeReadAsset(
   args: Record<string, unknown>,
   live: LiveClient,
   cache: AssetModelCache,
+  projectPath: string,
 ): Promise<CallToolResult> {
   const assetPath = typeof args.asset_path === "string" ? args.asset_path : "";
   if (assetPath === "") {
@@ -123,22 +127,48 @@ async function routeReadAsset(
 
   let model = cache.get(cacheKey);
   let cacheHit = true;
+  let source: "offline" | "live" = "offline";
+
   if (!model) {
     cacheHit = false;
-    // Fetch the structured model from the bridge (direct-response path).
-    const raw = await live.route("unity_open_mcp_read_asset", args);
-    const parsed = parseContentJson(raw);
-    if (parsed === null) {
-      return raw.isError
-        ? raw
-        : makeErrorResult("Bridge returned an unreadable asset model.", "bridge_error");
+
+    if (isOfflineAsset(assetPath)) {
+      try {
+        const result = await readAssetOffline(assetPath, { fieldLimit, projectRoot: projectPath });
+        model = result.model;
+        source = "offline";
+        cache.set(cacheKey, model);
+      } catch {
+        // Offline parse failed — fall through to live bridge.
+        model = null;
+      }
     }
-    if (parsed.error) {
-      // Forward bridge-side errors (asset_not_found, etc.) unchanged.
-      return { ...raw, isError: true };
+
+    if (!model) {
+      // Fall back to live bridge (for binary formats or parse failures).
+      const liveAvailable = await live.isLiveAvailable();
+      if (!liveAvailable) {
+        return makeErrorResult(
+          isOfflineAsset(assetPath)
+            ? `Offline parse failed and live bridge is unavailable for: ${assetPath}`
+            : `Binary or unsupported format requires the live bridge, which is unavailable: ${assetPath}`,
+          "source_unavailable",
+        );
+      }
+      const raw = await live.route("unity_open_mcp_read_asset", args);
+      const parsed = parseContentJson(raw);
+      if (parsed === null) {
+        return raw.isError
+          ? raw
+          : makeErrorResult("Bridge returned an unreadable asset model.", "bridge_error");
+      }
+      if (parsed.error) {
+        return { ...raw, isError: true };
+      }
+      model = parsed as unknown as AssetModel;
+      source = "live";
+      cache.set(cacheKey, model);
     }
-    model = parsed as unknown as AssetModel;
-    cache.set(cacheKey, model);
   }
 
   const opts: RenderOptions = {
@@ -151,13 +181,33 @@ async function routeReadAsset(
   };
 
   const compact = renderAssetSummary(model, opts);
-  return makeResult(compact, cacheHit);
+  return makeResult(compact, cacheHit, source);
 }
 
 async function routeSearchAssets(
   args: Record<string, unknown>,
   live: LiveClient,
+  projectPath: string,
 ): Promise<CallToolResult> {
+  try {
+    const model = await searchAssetsOffline({
+      name: typeof args.name === "string" ? args.name : undefined,
+      component: typeof args.component === "string" ? args.component : undefined,
+      guid: typeof args.guid === "string" ? args.guid : undefined,
+      type: typeof args.type === "string" ? args.type : undefined,
+      folder: typeof args.folder === "string" ? args.folder : "Assets",
+      projectRoot: projectPath,
+      maxResults: typeof args.max_results === "number" ? args.max_results : 50,
+    });
+
+    const objectLimit = typeof args.object_limit === "number" ? args.object_limit : 12;
+    const matchLimit = typeof args.max_results === "number" ? args.max_results : 50;
+    const compact = renderSearchSummary(model, { objectLimit, matchLimit });
+    return makeResult(compact, false, "offline");
+  } catch {
+    // Fall back to live bridge.
+  }
+
   const raw = await live.route("unity_open_mcp_search_assets", args);
   const parsed = parseContentJson(raw);
   if (parsed === null) {
@@ -172,7 +222,7 @@ async function routeSearchAssets(
   const objectLimit = typeof args.object_limit === "number" ? args.object_limit : 12;
   const matchLimit = typeof args.max_results === "number" ? args.max_results : 50;
   const compact = renderSearchSummary(parsed as unknown as SearchModel, { objectLimit, matchLimit });
-  return makeResult(compact, false);
+  return makeResult(compact, false, "live");
 }
 
 function parseContentJson(result: CallToolResult): Record<string, unknown> | null {

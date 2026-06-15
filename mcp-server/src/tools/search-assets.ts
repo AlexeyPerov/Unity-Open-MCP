@@ -3,13 +3,14 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // M9 Plan 2 — compact asset search. Returns grouped, reason-tagged matches with
 // omission counts; each match lists why it matched (file-name/gameobject/
 // component/guid). Paths are compacted (Assets/ prefix dropped, EXT table
-// declared once). Live-only for now (offline search arrives in M9 Plan 3).
+// declared once). Offline-first (Plan 3): scans Assets/ on disk without a
+// running Editor.
 export const searchAssets: Tool = {
   name: "unity_open_mcp_search_assets",
   description:
     "Search the project for assets by file/GameObject/component/script/GUID. Returns compact, grouped, reason-tagged matches with omission counts. " +
     "Each result tags why it matched (file-name / gameobject / component / guid) so the agent knows which drill-down to run next. " +
-    "Live bridge required (offline search arrives in a later milestone).",
+    "Offline-first: scans Assets/ on disk (no Editor needed).",
   inputSchema: {
     type: "object",
     properties: {
