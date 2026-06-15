@@ -30,6 +30,7 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_agent_profiler_capture",
   "unity_agent_profiler_memory",
   "unity_agent_profiler_rendering",
+  "unity_agent_spatial_query",
 ]);
 
 interface PingResponse {

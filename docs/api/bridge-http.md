@@ -80,6 +80,7 @@ Non-mutating direct-response tools return tool payloads directly (or direct erro
 - `unity_agent_profiler_capture` (profiler frame hierarchy)
 - `unity_agent_profiler_memory` (memory allocator stats)
 - `unity_agent_profiler_rendering` (rendering environment stats)
+- `unity_agent_spatial_query` (physics raycast / overlap / bounds / ground / nearest)
 
 Typed tools discovered via `BridgeToolRegistry` are also callable through `/tools/{toolName}`.
 
@@ -139,6 +140,19 @@ Direct-response tool that snapshots the rendering environment (no parameters).
 - `quality` — quality level/name, vSync, pixel lights, anti-aliasing, shadow cascades, soft shadows.
 - `application` — target frame rate, run in background, is playing, Unity version.
 - `time` — frame count, rendered frame count, time scale, realtime since startup.
+
+### Spatial query (`unity_agent_spatial_query`)
+
+Direct-response tool that runs physics-based spatial queries against the current scene (live-only; requires a loaded scene).
+
+- `action: raycast` — `origin` + `direction` (`"x,y,z"` strings); returns `hit`, and on hit `point`/`normal`/`distance` plus the hit object's `instanceId`/`gameObject`/`path`/`collider`.
+- `action: overlap` — volume query by `shape` (`sphere`/`box`/`capsule`) centered on `center`; returns `hits[]` with `instanceId`/`gameObject`/`path`/`collider`/`distance`. `half_extents` (box) and `end` (capsule) configure the shape.
+- `action: bounds` — combined world AABB of a target object; returns `center`/`extents`/`size`/`min`/`max` (and `empty` if no renderers/colliders).
+- `action: ground_check` — cast downward (override with `direction`) from a target object or a `point` to find the surface below; returns `hit` and on hit `point`/`normal`/`distance` plus `surface`/`surfaceId`/`surfacePath`.
+- `action: nearest` — closest objects to a target object or a `point`; returns `objects[]` sorted by distance with `instanceId`/`name`/`path`/`distance`/`position`. Filter via `component` (type name) and `tag`; cap via `max` (default 5).
+- Targets are addressed in priority order: `instance_id`, `path` (`"Root/Child"`), `name` (first match).
+- Physics queries (`raycast`/`overlap`/`ground_check`) hit Colliders only; `bounds`/`nearest` also see render-only objects. `layer` (name) restricts physics to one layer; `query_triggers` includes trigger colliders.
+- Error codes: `unknown_action`, `missing_parameter`, `bad_parameter`, `target_not_found`.
 
 ## `/resources` and `/resources/{route}`
 

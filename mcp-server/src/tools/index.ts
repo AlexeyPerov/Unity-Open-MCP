@@ -24,6 +24,7 @@ import { readConsole } from "./read-console.js";
 import { profilerCapture } from "./profiler-capture.js";
 import { profilerMemory } from "./profiler-memory.js";
 import { profilerRendering } from "./profiler-rendering.js";
+import { spatialQuery } from "./spatial-query.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -48,6 +49,7 @@ export const M10_TOOLS: Tool[] = [
   profilerCapture,
   profilerMemory,
   profilerRendering,
+  spatialQuery,
 ];
 
 export const ALL_TOOLS: Tool[] = [...M2_TOOLS, ...M2_5_TOOLS, ...M3_TOOLS, ...M5_TOOLS, ...M9_TOOLS, ...M10_TOOLS];

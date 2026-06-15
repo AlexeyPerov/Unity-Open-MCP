@@ -42,7 +42,8 @@ namespace UnityOpenMcpBridge
             "unity_agent_read_console",
             "unity_agent_profiler_capture",
             "unity_agent_profiler_memory",
-            "unity_agent_profiler_rendering"
+            "unity_agent_profiler_rendering",
+            "unity_agent_spatial_query"
         };
 
         static readonly HashSet<string> DirectResponseTools = new()
@@ -63,7 +64,8 @@ namespace UnityOpenMcpBridge
             "unity_agent_read_console",
             "unity_agent_profiler_capture",
             "unity_agent_profiler_memory",
-            "unity_agent_profiler_rendering"
+            "unity_agent_profiler_rendering",
+            "unity_agent_spatial_query"
         };
 
         static readonly HashSet<string> MutatingTools = new()

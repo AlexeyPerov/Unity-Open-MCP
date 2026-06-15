@@ -49,6 +49,7 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 - `unity_agent_profiler_capture` — Read the Unity Profiler frame hierarchy via `ProfilerDriver.GetHierarchyFrameDataView`. Drill-down by parent ID / root name-substring / depth, multi-frame averaging, token-bounded top-N by self/total/calls.
 - `unity_agent_profiler_memory` — Live memory allocator stats (allocated/reserved/unused/temp/managed heap) with optional GC first.
 - `unity_agent_profiler_rendering` — Rendering environment batch: GPU/SystemInfo, active render pipeline, QualitySettings, screen resolution, target frame rate, Time stats.
+- `unity_agent_spatial_query` — Physics-based spatial reasoning (raycast / overlap / bounds / ground_check / nearest) against the live scene. Targets addressed by instance_id/path/name; returns hit object instanceId/name/path.
 
 ## Route policy
 
