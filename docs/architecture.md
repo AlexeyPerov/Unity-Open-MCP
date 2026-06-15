@@ -67,3 +67,15 @@ Update this document when:
 - package boundaries or ownership change,
 - route selection logic changes (live/batch/offline),
 - bridge transport endpoints or envelope flow changes.
+
+## Agent governance (layered AGENTS.md)
+
+`AGENTS.md` files are co-located with the code they govern. Precedence flows root → package → subtree: a deeper file may add or narrow rules for its subtree, but never silently contradicts a root rule unless that root rule explicitly allows an exception. On overlap, the deepest applicable rule is most specific.
+
+| Layer | File | Scope |
+|---|---|---|
+| Root | `AGENTS.md` | Cross-cutting rules (specs/ gitignored, no migrations, docs ownership). |
+| Bridge | `packages/bridge/AGENTS.md` | Bridge transport, tool registration, gate policy. |
+| Verify | `packages/verify/AGENTS.md` | Verify rules (must declare issue codes), fixes, capability catalog sync. |
+| MCP server | `mcp-server/AGENTS.md` | Tool definitions, routing, offline-read no-cache philosophy. |
+| Hub | `hub/AGENTS.md` | SvelteKit/Tauri UI, state/data, platform neutrality. |

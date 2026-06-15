@@ -1,5 +1,12 @@
 # Agent rules
 
+- **Layered AGENTS.md (deepest rule wins).** `AGENTS.md` files are co-located with the code they govern. Precedence flows root → package → subtree: a deeper file may add or narrow rules for its subtree, but never silently contradicts a root rule unless that root rule explicitly allows an exception. On overlap, the deepest applicable rule is most specific. Current layers:
+  - Root (`AGENTS.md`) — cross-cutting rules (specs/ is gitignored, no migrations, docs ownership).
+  - `packages/bridge/AGENTS.md` — bridge transport, tool registration, gate policy.
+  - `packages/verify/AGENTS.md` — verify rules (must declare issue codes), fixes, capability catalog sync.
+  - `mcp-server/AGENTS.md` — tool definitions, routing, offline-read no-cache philosophy.
+  - `hub/AGENTS.md` — SvelteKit/Tauri UI, state/data, platform neutrality.
+
 - **Specs (`specs/`).** Local working docs only — `specs/` is gitignored. Do not `git add`, commit, or push anything under `specs/`. You may read and edit files there when helpful (e.g. `specs/changelog.md`, execution plans, backlog files), but keep those changes out of version control.
 
 - **Migrations.** Do not implement data migrations, compatibility shims, or upgrade paths for persisted data unless explicitly requested. The app is in active development and is not used by real users yet; prefer simplifying storage and codecs over backward compatibility.
