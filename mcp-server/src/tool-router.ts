@@ -4,6 +4,10 @@ import type { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline } from "./offline.js";
+import { buildCapabilities } from "./capabilities/build-capabilities.js";
+import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
+import { ALL_TOOLS } from "./tools/index.js";
+import { BATCH_TOOL_NAMES } from "./batch-spawn.js";
 
 export interface RouteMeta {
   route: "live" | "batch";
@@ -44,6 +48,11 @@ export class ToolRouter implements Router {
     // list_assets — always offline (no live equivalent needed).
     if (toolName === "unity_open_mcp_list_assets") {
       return this.routeListAssets(args);
+    }
+
+    // capabilities — local capability-discovery surface (no live/batch hop).
+    if (toolName === "unity_open_mcp_capabilities") {
+      return this.routeCapabilities(args);
     }
 
     // find_references — offline-first when no bridge is connected; live
@@ -144,6 +153,32 @@ export class ToolRouter implements Router {
         isError: true,
       };
     }
+  }
+
+  private async routeCapabilities(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const kind =
+      args.kind === "tools" || args.kind === "rules" || args.kind === "fixes"
+        ? args.kind
+        : undefined;
+    const includePlanned = args.include_planned !== false;
+
+    const result = buildCapabilities(
+      {
+        tools: ALL_TOOLS,
+        batchToolNames: BATCH_TOOL_NAMES,
+        rules: RULE_CATALOG,
+        fixes: FIX_CATALOG,
+      },
+      { kind, includePlanned },
+    );
+    return {
+      content: [
+        { type: "text", text: JSON.stringify({ ...result, _source: "local" }) },
+      ],
+      isError: false,
+    };
   }
 
   private async routeFindReferences(

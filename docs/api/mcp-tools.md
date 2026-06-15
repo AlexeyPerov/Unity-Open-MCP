@@ -7,6 +7,7 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 | Question | Section |
 |---|---|
 | Which tool names are available? | Tool catalog |
+| How do I discover everything at once? | Capability discovery |
 | How route selection works? | Route policy |
 | Which tools can run in batch? | Batch support |
 | Which tools are offline-first? | Offline/compressible reads |
@@ -51,6 +52,103 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 - `unity_agent_profiler_rendering` — Rendering environment batch: GPU/SystemInfo, active render pipeline, QualitySettings, screen resolution, target frame rate, Time stats.
 - `unity_agent_spatial_query` — Physics-based spatial reasoning (raycast / overlap / bounds / ground_check / nearest) against the live scene. Targets addressed by instance_id/path/name; returns hit object instanceId/name/path.
 
+### Capability discovery
+
+- `unity_open_mcp_capabilities` — Returns the full capability surface in one call: every tool with its input schema and route policy, every verify rule with applicable asset kinds and issue severities, and every available fix. Each capability carries an `implemented` boolean; planned-but-unbuilt items return with `status: "planned"` and guidance instead of failing. Call this first to learn what is available.
+
+### Typed editor tools (M16 planned)
+
+M16 adds a curated typed surface on top of existing meta-tools. Duplicates are intentionally avoided:
+- keep `unity_open_mcp_execute_csharp`, `unity_open_mcp_invoke_method`, `unity_open_mcp_find_members` as core
+- keep M9 read/list/search/reserialize as the asset intelligence baseline
+- keep M10 sense tools for screenshots/test run/profiler capture/memory/rendering/spatial
+
+Planned categories:
+
+- **Project & Asset Management:** typed asset CRUD/material/prefab stage helpers (`unity_open_mcp_assets_*`)
+- **GameObject & Components:** typed hierarchy/component lifecycle (`unity_open_mcp_gameobject_*`)
+- **Scene Management:** typed scene lifecycle/data (`unity_open_mcp_scene_*`)
+- **Package Manager:** `unity_open_mcp_package_list`, `unity_open_mcp_package_add`, `unity_open_mcp_package_remove`, `unity_open_mcp_package_search`
+- **Console + Editor state/selection:** `unity_open_mcp_console_clear`, `unity_open_mcp_editor_set_state`, `unity_open_mcp_selection_get`, `unity_open_mcp_selection_set`
+- **Reflection/scripts/object data:** `unity_open_mcp_type_schema`, `unity_open_mcp_script_read`, `unity_open_mcp_script_write`, `unity_open_mcp_script_delete`, `unity_open_mcp_object_get_data`, `unity_open_mcp_object_modify`
+- **Profiler & Diagnostics session:** `unity_open_mcp_profiler_*` session/module/save/load/clear helpers (non-duplicate with M10 capture/memory/rendering)
+- **Gate intelligence:** `unity_open_mcp_impact_preview`, `unity_open_mcp_gate_budget_estimate`, `unity_open_mcp_mutation_explain`
+
+## Capability discovery
+
+`unity_open_mcp_capabilities` lets an agent self-discover the entire tool + rule + fix surface in a single call, including what is planned but not yet built.
+
+- Implementation: `mcp-server/src/capabilities/build-capabilities.ts`, `mcp-server/src/capabilities/rule-catalog.ts`.
+- Routes locally (`_source: "local"`) — never hits the live bridge or batch Unity.
+
+### Response shape
+
+```json
+{
+  "tools": [
+    {
+      "name": "unity_open_mcp_scan_paths",
+      "implemented": true,
+      "status": "implemented",
+      "category": "gate-and-verify",
+      "routePolicy": "live",
+      "batchCapable": false,
+      "inputSchema": { "type": "object", "properties": { "...": "..." } }
+    },
+    {
+      "name": "unity_open_mcp_type_schema",
+      "implemented": false,
+      "status": "planned",
+      "category": "reflection",
+      "guidance": "Planned reflection surface. Use find_members ..."
+    }
+  ],
+  "rules": [
+    {
+      "id": "missing_references",
+      "implemented": true,
+      "status": "implemented",
+      "title": "Missing references",
+      "applicableAssetKinds": ["prefab", "scene", "scriptable_object"],
+      "issues": [
+        { "code": "missing_script", "severity": "Error", "fixIds": ["remove_missing_script"] }
+      ]
+    },
+    {
+      "id": "materials",
+      "implemented": false,
+      "status": "planned",
+      "guidance": "Not yet ported. Use find_references ..."
+    }
+  ],
+  "fixes": [
+    { "id": "remove_missing_script", "implemented": true, "safe": true, "rules": ["missing_references"] }
+  ],
+  "counts": {
+    "toolsImplemented": 28,
+    "toolsPlanned": 14,
+    "rulesImplemented": 2,
+    "rulesPlanned": 7,
+    "fixesImplemented": 1,
+    "fixesPlanned": 0
+  },
+  "_source": "local"
+}
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `kind` | `"tools"` \| `"rules"` \| `"fixes"` | (all) | Filter to a single surface. |
+| `include_planned` | boolean | `true` | Set false to see only implemented items. |
+
+### Planned-vs-implemented contract
+
+- Every registered tool ships `implemented: true`.
+- Planned typed tools and planned verify rules ship `implemented: false` with `status: "planned"` and a `guidance` string explaining the fallback — they never raise hard errors.
+- The rule catalog is versioned with the package, so the `implemented` flags reflect what ships in the matching bridge/verify release.
+
 ## Object handle system
 
 Live `UnityEngine.Object` values returned by `invoke_method` and `execute_csharp` are serialized as object handles (instance ID + type + fallback locators) instead of reflected JSON. This lets agents pass live objects back in subsequent tool calls:
@@ -65,6 +163,7 @@ Handles include fallback locators (`path`, `assetPath`, `assetGuid`, `gameObject
 Route selection is implemented in `mcp-server/src/tool-router.ts`.
 
 - `unity_open_mcp_list_assets`: always offline route.
+- `unity_open_mcp_capabilities`: always local route (static catalog).
 - `unity_open_mcp_find_references`: live when available, otherwise offline reader.
 - `unity_open_mcp_read_asset` and `unity_open_mcp_search_assets`: compressible router with offline-first behavior and live fallback.
 - Other tools:
@@ -120,3 +219,4 @@ Behavior:
 - `mcp-server/src/tool-router.ts`
 - `mcp-server/src/batch-spawn.ts`
 - `mcp-server/src/compressible-router.ts`
+- `mcp-server/src/capabilities/build-capabilities.ts`

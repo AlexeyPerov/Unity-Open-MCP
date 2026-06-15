@@ -15,6 +15,10 @@ Copy this file to your client's skills directory:
 
 All tools are prefixed `unity_open_mcp_*`.
 
+### Discover first
+
+Call `unity_open_mcp_capabilities` (no arguments) to learn the full surface in one shot: every tool with its schema and route policy, every verify rule with applicable asset kinds and issue severities, and every available fix. Planned-but-unbuilt capabilities return with `status: "planned"` and guidance — they tell you the fallback instead of failing. Use this as your first step before guessing which tools or rules exist.
+
 ### Mutating tools (gate-aware)
 
 - `unity_open_mcp_execute_csharp` — Compile and run a C# snippet in the Unity Editor.
@@ -27,6 +31,7 @@ All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`)
 
 ### Read-only tools (no gate)
 
+- `unity_open_mcp_capabilities` — Discover the full tool + rule + fix surface in one call. Call this first.
 - `unity_open_mcp_ping` — Bridge health check.
 - `unity_open_mcp_find_members` — Discover types, methods, and properties.
 - `unity_open_mcp_validate_edit` — Scoped health scan without mutation.
@@ -35,6 +40,20 @@ All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`)
 - `unity_open_mcp_read_asset` — Compact drill-down asset read (≥70% smaller than raw YAML). Default returns a map (counts + CMP component-set codes + folded tree + omission counts); drill down with `component`/`path`/`id`/`detail` instead of re-reading raw YAML.
 - `unity_open_mcp_search_assets` — Compact asset search by name/component/GUID/type. Each result tags why it matched (`file-name`/`gameobject`/`component`/`guid`) so you know which `read_asset` drill-down to run next.
 
+### Typed tool layer (M16 planned)
+
+M16 adds a curated typed surface for routine editor operations:
+- assets/prefabs/materials (`unity_open_mcp_assets_*`)
+- gameobject/components (`unity_open_mcp_gameobject_*`)
+- scenes (`unity_open_mcp_scene_*`)
+- package manager (`unity_open_mcp_package_*`)
+- editor controls (`unity_open_mcp_console_clear`, `unity_open_mcp_editor_set_state`, `unity_open_mcp_selection_*`)
+- reflection/script/object helpers (`unity_open_mcp_type_schema`, `unity_open_mcp_script_*`, `unity_open_mcp_object_*`)
+- profiler session helpers (`unity_open_mcp_profiler_*`)
+- gate intelligence (`unity_open_mcp_impact_preview`, `unity_open_mcp_gate_budget_estimate`, `unity_open_mcp_mutation_explain`)
+
+Use typed tools first for common actions; fall back to `execute_csharp`/`invoke_method` for uncommon or highly custom workflows.
+
 ### Checkpoint tools
 
 - `unity_open_mcp_checkpoint_create` — Create a manual checkpoint for later delta comparison.
@@ -42,7 +61,7 @@ All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`)
 
 ## Core loop: mutate → gate → fix
 
-1. **Discover** — use `unity_open_mcp_find_members` before blind `execute_csharp` calls.
+1. **Discover** — call `unity_open_mcp_capabilities` once to learn which tools, verify rules, and fixes are implemented; then use `unity_open_mcp_find_members` before blind `execute_csharp` calls.
 2. **Declare scope** — always pass `paths_hint` with asset paths you intend to touch.
 3. **Mutate** — call `unity_open_mcp_execute_csharp`, `invoke_method`, or `execute_menu` with default `gate: enforce`.
 4. **Read gate** — on `isError: true`, inspect `gate.delta.newIssues` and `agentNextSteps`.
