@@ -14,6 +14,7 @@ import { applyFix } from "./apply-fix.js";
 import { scanAll } from "./scan-all.js";
 import { baselineCreate } from "./baseline-create.js";
 import { regressionCheck } from "./regression-check.js";
+import { reserialize } from "./reserialize.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -29,4 +30,6 @@ export const M3_TOOLS: Tool[] = [validateEdit, checkpointCreate, delta, findRefe
 
 export const M5_TOOLS: Tool[] = [scanAll, baselineCreate, regressionCheck];
 
-export const ALL_TOOLS: Tool[] = [...M2_TOOLS, ...M2_5_TOOLS, ...M3_TOOLS, ...M5_TOOLS];
+export const M9_TOOLS: Tool[] = [reserialize];
+
+export const ALL_TOOLS: Tool[] = [...M2_TOOLS, ...M2_5_TOOLS, ...M3_TOOLS, ...M5_TOOLS, ...M9_TOOLS];

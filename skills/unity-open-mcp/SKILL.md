@@ -21,8 +21,9 @@ All tools are prefixed `unity_open_mcp_*`.
 - `unity_open_mcp_invoke_method` — Call a method via reflection.
 - `unity_open_mcp_execute_menu` — Execute a Unity Editor menu item.
 - `unity_open_mcp_apply_fix` — Apply a verify rule fix action (e.g. remove missing script).
+- `unity_open_mcp_reserialize` — Round-trip text-serialized assets through Unity's native serializer to normalize direct YAML edits.
 
-All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`) and require a non-empty `paths_hint` array.
+All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`) and require a non-empty `paths_hint` array. For `reserialize`, the required `paths` array doubles as the gate scope (no separate `paths_hint` needed).
 
 ### Read-only tools (no gate)
 
@@ -225,6 +226,52 @@ Run a scoped health scan without any preceding mutation — useful for pre-commi
   "durationMs": 210
 }
 ```
+
+### Example: reserialize after direct YAML edits (edit → reserialize → validate)
+
+When you edit a `.prefab` / `.unity` / `.asset` / `.mat` / `.controller` / `.anim` directly as YAML (text edit of a file on disk), Unity's serializer should re-write the file in canonical form so that missing fields, wrong indentation, and stale `fileID` references surface. `reserialize` is the mutating tool that wraps `AssetDatabase.ForceReserializeAssets` for exactly this — and because it is mutating, it runs the full gate path (checkpoint → reserialize → validate → delta).
+
+**Workflow:**
+
+1. **Edit** the asset file directly (sed, your editor, a generated patch).
+2. **Reserialize** with `unity_open_mcp_reserialize`, passing the touched `paths`. The `paths` array doubles as the gate's `paths_hint` scope — no separate hint field needed.
+3. **Read the gate delta** — if the round-trip surfaced new issues (missing references, malformed structure), `gate.delta.newIssues` will list them and `agentNextSteps` will suggest next moves.
+
+```json
+// Tool call: unity_open_mcp_reserialize
+{
+  "paths": ["Assets/Prefabs/Player.prefab"],
+  "gate": "enforce"
+}
+```
+
+```json
+{
+  "mutation": {
+    "success": true,
+    "output": "{\"reserialized\":[\"Assets/Prefabs/Player.prefab\"],\"totalCount\":1,\"wholeProject\":false}",
+    "error": null
+  },
+  "gate": {
+    "mode": "enforce",
+    "checkpointId": "cp_b2d4f8",
+    "skipped": false,
+    "validation": { "passed": true, "categoriesRun": ["missing_references"], "durationMs": 87 },
+    "delta": {
+      "newErrors": 0, "newWarnings": 0,
+      "resolvedErrors": 0, "resolvedWarnings": 0,
+      "newIssues": [], "resolvedIssues": []
+    }
+  },
+  "agentNextSteps": []
+}
+```
+
+If the round-trip surfaces a missing-script or broken-prefab error, the delta lists it and you fall into the normal fix loop (`unity_open_mcp_apply_fix` with `dry_run: true`, then `dry_run: false`).
+
+**Supported extensions:** `.prefab`, `.unity`, `.asset`, `.mat`, `.controller`, `.anim`. Whole-project reserialize is intentionally **not** supported — the gate needs scoped paths to validate the delta, so always enumerate the assets you edited.
+
+**Principle: edit freely, but always reserialize before trusting a direct YAML change.** A text edit that "looks right" can silently corrupt a prefab; `reserialize` is the safety primitive that catches it.
 
 ## Gate modes
 

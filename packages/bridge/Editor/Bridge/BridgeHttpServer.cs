@@ -33,7 +33,8 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_delta",
             "unity_open_mcp_find_references",
             "unity_open_mcp_scan_paths",
-            "unity_open_mcp_apply_fix"
+            "unity_open_mcp_apply_fix",
+            "unity_open_mcp_reserialize"
         };
 
         static readonly HashSet<string> DirectResponseTools = new()
@@ -50,7 +51,8 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_execute_csharp",
             "unity_open_mcp_invoke_method",
             "unity_open_mcp_execute_menu",
-            "unity_open_mcp_apply_fix"
+            "unity_open_mcp_apply_fix",
+            "unity_open_mcp_reserialize"
         };
 
         static HttpListener _listener;
@@ -398,6 +400,11 @@ namespace UnityOpenMcpBridge
                         var issueId = JsonBody.GetString(body, "issue_id");
                         pathsHint = PathsFromIssueId(issueId);
                     }
+                    else if (toolName == "unity_open_mcp_reserialize")
+                    {
+                        // reserialize's `paths` array IS the mutation scope — reuse it as the gate hint.
+                        pathsHint = JsonBody.GetStringArray(body, "paths");
+                    }
 
                     if (pathsHint == null || pathsHint.Length == 0)
                     {
@@ -558,6 +565,7 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_find_references" => FindReferencesTool.Execute(body),
                 "unity_open_mcp_scan_paths" => ScanPathsTool.Execute(body),
                 "unity_open_mcp_apply_fix" => ApplyFixTool.Execute(body),
+                "unity_open_mcp_reserialize" => ReserializeAssetsTool.Execute(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };
