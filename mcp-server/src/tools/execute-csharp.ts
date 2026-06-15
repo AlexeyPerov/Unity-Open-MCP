@@ -18,6 +18,16 @@ export const executeCsharp: Tool = {
         description:
           "Extra using directives beyond defaults (UnityEngine, UnityEditor, etc.)",
       },
+      object_ids: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Instance IDs (or full handle JSON) of live UnityEngine.Objects " +
+          "to inject into the snippet. Access them via Refs[index] or " +
+          "Ref<T>(index) in the code body. Instance IDs come from the " +
+          "'objectId' field of object handles returned by other tools. " +
+          "Instance IDs change on domain reload.",
+      },
       paths_hint: {
         type: "array",
         items: { type: "string" },

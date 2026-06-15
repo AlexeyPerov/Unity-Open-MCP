@@ -160,6 +160,35 @@ Direct-response tool that runs physics-based spatial queries against the current
 - `GET /resources/{route}` executes the mapped resource provider and returns content with provider mime type.
 - Resource errors use JSON envelope with codes such as `resource_not_found` and `execution_error`.
 
+## Object handles
+
+Live `UnityEngine.Object` values returned by `invoke_method` / `execute_csharp` are emitted as serializable handles (not reflected into JSON) so they survive the LLM round-trip. Each handle carries a canonical instance ID plus redundant fallback locators:
+
+```json
+{
+  "objectId": 12345,
+  "type": "UnityEngine.GameObject",
+  "name": "Player",
+  "path": "Root/Player",
+  "assetPath": "Assets/Prefabs/Player.prefab",
+  "assetGuid": "a1b2c3..."
+}
+```
+
+- **GameObjects** include `path` (hierarchy path).
+- **Components** include `gameObjectPath` and `gameObjectId` (parent locators).
+- **Assets** include `assetPath` and `assetGuid`.
+- Objects that are neither assets nor scene objects emit only `objectId`, `type`, `name`.
+
+### Passing handles back to tools
+
+- `invoke_method` accepts `object_id` (instance ID) to target a live object for instance methods instead of creating a new instance. Args that are handle JSON are auto-resolved when the target parameter type is `UnityEngine.Object`.
+- `execute_csharp` accepts `object_ids` (array of instance IDs or handle JSON). Resolved objects are injected as `Snippet.Refs[index]` / `Snippet.Ref<T>(index)` in the snippet body.
+
+### Domain-reload safety
+
+Instance IDs are invalidated by domain reload (recompilation, enter/exit Play Mode). Resolution uses a priority fallback chain: `objectId` → `assetPath` → `assetGuid` → `path` → component-on-parent → `name`. When all locators fail, the error includes guidance to re-acquire the object via `unity_agent_scene_snapshot`, `unity_agent_spatial_query`, or `unity_open_mcp_search_assets`.
+
 ## Source-of-truth files
 
 - `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`

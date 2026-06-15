@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using UnityOpenMcpBridge.ObjectRefs;
+using UnityEngine;
 
 namespace UnityOpenMcpBridge.MetaTools
 {
@@ -13,6 +15,7 @@ namespace UnityOpenMcpBridge.MetaTools
             var methodName = JsonBody.GetString(body, "method_name");
             var isStatic = JsonBody.GetBool(body, "is_static", false);
             var assemblyName = JsonBody.GetString(body, "assembly_name");
+            var objectId = JsonBody.GetInt(body, "object_id", 0);
 
             if (string.IsNullOrEmpty(typeName))
                 return ToolDispatchResult.Fail("validation_error", "Field 'type_name' is required and must be non-empty");
@@ -45,15 +48,29 @@ namespace UnityOpenMcpBridge.MetaTools
             object target = null;
             if (!isStatic)
             {
-                try
+                if (objectId != 0)
                 {
-                    target = Activator.CreateInstance(type);
+                    target = ObjectHandle.Resolve(objectId, type.FullName, null, null, null, null,
+                        null, 0, out var resolveError);
+                    if (target == null)
+                        return ToolDispatchResult.Fail("object_not_found",
+                            $"Could not resolve object_id {objectId} as target for instance method: {resolveError}");
+                    if (!type.IsInstanceOfType(target))
+                        return ToolDispatchResult.Fail("type_mismatch",
+                            $"Resolved object (type '{target.GetType().FullName}') is not assignable to '{type.FullName}'.");
                 }
-                catch (Exception e)
+                else
                 {
-                    return ToolDispatchResult.Fail("instantiation_error",
-                        $"Cannot create instance of '{type.FullName}': {e.Message}. " +
-                        "Use is_static: true for static methods.");
+                    try
+                    {
+                        target = Activator.CreateInstance(type);
+                    }
+                    catch (Exception e)
+                    {
+                        return ToolDispatchResult.Fail("instantiation_error",
+                            $"Cannot create instance of '{type.FullName}': {e.Message}. " +
+                            "Use is_static: true for static methods, or pass object_id to target a live object.");
+                    }
                 }
             }
 
@@ -135,6 +152,16 @@ namespace UnityOpenMcpBridge.MetaTools
                 if (targetType.IsValueType)
                     return Activator.CreateInstance(targetType);
                 return null;
+            }
+
+            // Object handle resolution: when the target type is or derives from
+            // UnityEngine.Object and the arg looks like a handle JSON, resolve it.
+            if (typeof(UnityEngine.Object).IsAssignableFrom(targetType)
+                && ObjectHandle.LooksLikeHandle(value))
+            {
+                var resolved = ObjectHandle.ResolveJson(value.ToString(), out var error);
+                if (resolved != null)
+                    return resolved;
             }
 
             if (targetType == typeof(string))

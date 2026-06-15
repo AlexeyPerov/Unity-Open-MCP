@@ -28,6 +28,17 @@ export const invokeMethod: Tool = {
         description:
           "Optional assembly simple name if type is ambiguous",
       },
+      object_id: {
+        type: "integer",
+        default: 0,
+        description:
+          "Instance ID of a live UnityEngine.Object to use as the target " +
+          "for instance methods (instead of creating a new instance via " +
+          "Activator). 0 = not set (create new instance). The instance ID " +
+          "comes from the 'objectId' field of object handles returned by " +
+          "other tools (screenshot, spatial_query, scene_snapshot, etc.). " +
+          "Instance IDs change on domain reload.",
+      },
       paths_hint: {
         type: "array",
         items: { type: "string" },

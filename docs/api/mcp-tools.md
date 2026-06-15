@@ -51,6 +51,15 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 - `unity_agent_profiler_rendering` — Rendering environment batch: GPU/SystemInfo, active render pipeline, QualitySettings, screen resolution, target frame rate, Time stats.
 - `unity_agent_spatial_query` — Physics-based spatial reasoning (raycast / overlap / bounds / ground_check / nearest) against the live scene. Targets addressed by instance_id/path/name; returns hit object instanceId/name/path.
 
+## Object handle system
+
+Live `UnityEngine.Object` values returned by `invoke_method` and `execute_csharp` are serialized as object handles (instance ID + type + fallback locators) instead of reflected JSON. This lets agents pass live objects back in subsequent tool calls:
+
+- `invoke_method` — `object_id` parameter targets a live object for instance methods; args that are handle JSON are auto-resolved for `UnityEngine.Object` parameters.
+- `execute_csharp` — `object_ids` parameter injects resolved objects as `Snippet.Refs[i]` / `Snippet.Ref<T>(i)`.
+
+Handles include fallback locators (`path`, `assetPath`, `assetGuid`, `gameObjectPath`) so they degrade gracefully after domain reload. See [bridge-http.md](bridge-http.md#object-handles) for the wire format and resolution priority.
+
 ## Route policy
 
 Route selection is implemented in `mcp-server/src/tool-router.ts`.

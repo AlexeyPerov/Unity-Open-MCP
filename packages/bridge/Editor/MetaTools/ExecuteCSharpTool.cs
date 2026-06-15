@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.MetaTools
 {
@@ -34,6 +35,26 @@ namespace UnityOpenMcpBridge.MetaTools
                 .Distinct()
                 .ToArray();
 
+            // Resolve object_ids to live objects before compiling so the snippet
+            // can access them via Refs[index] or Ref<T>(index).
+            var objectIdStrings = JsonBody.GetStringArray(body, "object_ids");
+            UnityEngine.Object[] resolvedRefs = null;
+            if (objectIdStrings != null && objectIdStrings.Length > 0)
+            {
+                resolvedRefs = new UnityEngine.Object[objectIdStrings.Length];
+                for (var i = 0; i < objectIdStrings.Length; i++)
+                {
+                    var idStr = objectIdStrings[i];
+                    if (string.IsNullOrEmpty(idStr)) continue;
+
+                    // Accept bare integers or full handle JSON.
+                    var resolved = int.TryParse(idStr.Trim(), out var bareId)
+                        ? ObjectHandle.Resolve(bareId, null, null, null, null, null, null, 0, out _)
+                        : ObjectHandle.ResolveJson(idStr, out _);
+                    resolvedRefs[i] = resolved;
+                }
+            }
+
             if (!RoslynHost.Initialize())
                 return ToolDispatchResult.Fail("roslyn_unavailable",
                     "Could not load Roslyn compiler assemblies from Unity installation. " +
@@ -56,6 +77,14 @@ namespace UnityOpenMcpBridge.MetaTools
                 var method = type.GetMethod("Run", BindingFlags.Public | BindingFlags.Static);
                 if (method == null)
                     return ToolDispatchResult.Fail("execution_error", "Compiled snippet entry point not found");
+
+                // Inject resolved object references so the snippet can access live objects.
+                if (resolvedRefs != null)
+                {
+                    var refsField = type.GetField("Refs", BindingFlags.Public | BindingFlags.Static);
+                    if (refsField != null)
+                        refsField.SetValue(null, resolvedRefs);
+                }
 
                 var result = method.Invoke(null, null);
                 var output = OutputSerializer.Serialize(result, BuildSerializeOptions(body));
@@ -84,12 +113,19 @@ namespace UnityOpenMcpBridge.MetaTools
 
         static string BuildSource(string code, string[] usings)
         {
-            var sb = new StringBuilder(code.Length + usings.Length * 30 + 120);
+            var sb = new StringBuilder(code.Length + usings.Length * 30 + 280);
             foreach (var u in usings)
                 sb.AppendLine($"using {u};");
             sb.AppendLine();
             sb.AppendLine("namespace UnityOpenMcpSnippet {");
             sb.AppendLine("  public static class Snippet {");
+            // Live object references injected from the object_ids parameter.
+            // Access via Refs[i] or Ref<T>(i) in the snippet body.
+            sb.AppendLine("    public static UnityEngine.Object[] Refs;");
+            sb.AppendLine("    public static T Ref<T>(int index) where T : UnityEngine.Object {");
+            sb.AppendLine("      if (Refs == null || index < 0 || index >= Refs.Length) return null;");
+            sb.AppendLine("      return Refs[index] as T;");
+            sb.AppendLine("    }");
             sb.AppendLine("    public static object Run() {");
             sb.AppendLine($"      {code}");
             sb.AppendLine("      return null;");

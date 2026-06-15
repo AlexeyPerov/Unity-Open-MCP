@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using UnityEngine;
+using UnityOpenMcpBridge.ObjectRefs;
 
 [assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.Editor.Tests")]
 
@@ -134,9 +135,7 @@ namespace UnityOpenMcpBridge.MetaTools
 
         static string SerializeUnityObject(UnityEngine.Object obj)
         {
-            var name = EscapeJsonString(obj.name);
-            var typeName = EscapeJsonString(obj.GetType().FullName);
-            return $"{{\"$type\":\"{typeName}\",\"name\":\"{name}\",\"instanceId\":{obj.GetInstanceID()}}}";
+            return ObjectHandle.Serialize(obj);
         }
 
         static string SerializeDictionary(IDictionary dict, int depth, SerializeOptions opts, HashSet<object> visited)
