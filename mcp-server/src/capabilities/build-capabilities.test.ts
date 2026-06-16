@@ -216,6 +216,53 @@ test("counts reflect implemented vs planned split", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Routing summary (T1.5.1)
+// ---------------------------------------------------------------------------
+
+test("capabilities include a top-level routing summary", () => {
+  const caps = buildCapabilities(DEPS);
+  assert.ok(caps.routing, "routing summary must be present");
+  assert.equal(typeof caps.routing.liveDefault, "boolean");
+  assert.equal(typeof caps.routing.batchFallback, "boolean");
+  assert.ok(Array.isArray(caps.routing.batchRequirements));
+  assert.ok(Array.isArray(caps.routing.batchBlocked));
+  assert.ok(Array.isArray(caps.routing.liveOnlyCategories));
+});
+
+test("routing summary names the batch env vars and the blocked meta-tools", () => {
+  const caps = buildCapabilities(DEPS);
+  const r = caps.routing;
+  assert.ok(r.batchRequirements.includes("UNITY_PATH"));
+  assert.ok(r.batchRequirements.includes("UNITY_PROJECT_PATH"));
+  const blockedNames = r.batchBlocked.map((b) => b.tool);
+  assert.ok(blockedNames.includes("unity_open_mcp_execute_csharp"));
+  assert.ok(blockedNames.includes("unity_open_mcp_invoke_method"));
+  assert.ok(blockedNames.includes("unity_open_mcp_execute_menu"));
+  for (const b of r.batchBlocked) {
+    assert.ok(
+      typeof b.reason === "string" && b.reason.length > 0,
+      `${b.tool} blocked entry must carry a reason`,
+    );
+  }
+});
+
+test("routing summary marks agent-senses as live-only", () => {
+  const caps = buildCapabilities(DEPS);
+  assert.ok(
+    caps.routing.liveOnlyCategories.includes("agent-senses"),
+    "agent-senses category must be flagged live-only",
+  );
+});
+
+test("routing summary is returned even with a kind filter", () => {
+  // An agent asking only for rules still benefits from the routing
+  // narrative — the summary is independent of the kind filter.
+  const caps = buildCapabilities(DEPS, { kind: "rules" });
+  assert.ok(caps.routing);
+  assert.ok(caps.routing.batchRequirements.includes("UNITY_PROJECT_PATH"));
+});
+
+// ---------------------------------------------------------------------------
 // buildCapabilities — filters
 // ---------------------------------------------------------------------------
 

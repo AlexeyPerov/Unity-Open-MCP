@@ -1040,10 +1040,18 @@ export async function writeMcpConfig(
 }
 
 /**
- * M4 Plan 4: wizard Done-time skill copy plan / write.
- * Mirrors the Rust `mcp_config::{SkillCopyParams, SkillCopyPlan, …}` types.
+ * Wizard skill-copy plan / write. Mirrors the Rust
+ * `mcp_config::{SkillCopyParams, SkillCopyPlan, …}` types. Targets
+ * are derived from the selected MCP client via the single-source
+ * manifest (`skills/client-paths.json`); the wire type carries the
+ * MCP client id, not ad-hoc booleans.
  */
-export type SkillCopyKind = "claude" | "opencode" | "agents";
+export type SkillCopyKind =
+  /** Manifest client keys. */
+  | "cursor"
+  | "claude"
+  | "opencode"
+  | "agents";
 
 export interface SkillCopyTarget {
   kind: SkillCopyKind;
@@ -1060,11 +1068,21 @@ export interface SkillCopyPlan {
   targets: SkillCopyTarget[];
 }
 
+/** Mirrors the Rust `McpClientId` (camelCase). */
+export type McpClientWire =
+  | "cursor"
+  | "claudeDesktop"
+  | "claudeCode"
+  | "opencodeGlobal"
+  | "opencodeProject"
+  | "zcodeGlobal"
+  | "zcodeProject"
+  | "manual";
+
 export interface SkillCopyParamsWire {
   projectPath: string;
   toolkitRoot: string;
-  opencodeSelected: boolean;
-  zcodeSelected: boolean;
+  mcpClient: McpClientWire;
 }
 
 export interface SkillCopyResult {

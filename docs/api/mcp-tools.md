@@ -133,9 +133,36 @@ Planned categories:
     "fixesImplemented": 1,
     "fixesPlanned": 0
   },
+  "routing": {
+    "liveDefault": true,
+    "batchFallback": true,
+    "batchRequirements": ["UNITY_PATH", "UNITY_PROJECT_PATH"],
+    "batchBlocked": [
+      { "tool": "unity_open_mcp_execute_csharp", "reason": "Requires a live Editor compile context." },
+      { "tool": "unity_open_mcp_invoke_method", "reason": "Requires a live Editor reflection context." },
+      { "tool": "unity_open_mcp_execute_menu", "reason": "Menu execution needs the Editor UI; most menus fail in -batchmode." }
+    ],
+    "liveOnlyCategories": ["agent-senses"],
+    "perToolFlag": "batchCapable"
+  },
   "_source": "local"
 }
 ```
+
+### `routing` summary
+
+The top-level `routing` object is a one-shot narrative for agents so a single `unity_open_mcp_capabilities` call gives the batch/route story without reading these docs. It is independent of the `kind` filter — asking for `kind: "rules"` still returns `routing`.
+
+| Field | Meaning |
+|---|---|
+| `liveDefault` | `true` — most tools prefer the live bridge when connected. |
+| `batchFallback` | `true` — when the live bridge is unavailable, only `batchCapable` tools fall back to a headless Unity spawn. |
+| `batchRequirements` | Env vars a headless batch spawn requires (`UNITY_PATH`, `UNITY_PROJECT_PATH`). |
+| `batchBlocked` | Mutating meta-tools intentionally rejected in batch, each with a short `reason`. |
+| `liveOnlyCategories` | Tool categories that have no batch form (e.g. `agent-senses`). |
+| `perToolFlag` | The per-tool flag name (`batchCapable`) agents should read for the authoritative per-tool answer. |
+
+Per-tool route details live on each tool entry (`routePolicy`, `batchCapable`, `category`); the `routing` object only summarizes them.
 
 ### Parameters
 
@@ -162,7 +189,7 @@ Planned categories:
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `write` | boolean | `false` | When `true`, write the generated skill to client skill directories. |
-| `clients` | `("claude" \| "cursor" \| "opencode" \| "agents")[]` | `["claude"]` | Which client skill dirs to write to. Only used when `write: true`. `agents` writes to `.agents/skills/` for ZCode and other `.agents`-aware clients. |
+| `clients` | string[] | `["claude"]` | Which client skill dirs to write to. Only used when `write: true`. Allowed values are derived from the single-source manifest at `skills/client-paths.json` (`cursor`, `claude`, `opencode`, `agents`). `agents` writes to `.agents/skills/` for ZCode and other `.agents`-aware clients. |
 
 ### Response shape
 
@@ -260,3 +287,5 @@ Behavior:
 - `mcp-server/src/compressible-router.ts`
 - `mcp-server/src/capabilities/build-capabilities.ts`
 - `mcp-server/src/skill/generate-skill.ts`
+- `mcp-server/src/skill/client-paths.ts`
+- `skills/client-paths.json` — single source of truth for project-relative skill install paths and the MCP-client → skill-target mapping (consumed by both the Hub wizard and `unity_agent_generate_skill`).

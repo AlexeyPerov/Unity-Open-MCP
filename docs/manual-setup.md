@@ -195,9 +195,29 @@ In your AI client, use a Unity-related MCP tool or resource. If tools fail:
 
 For MCP tool routing and offline fallbacks, see [api/mcp-tools.md](api/mcp-tools.md).
 
-## Optional: skill files
+## Optional: install the agent skill
 
-Unity Hub Pro’s wizard can copy toolkit skill files into `.cursor/skills/` or OpenCode skill paths. For manual setup, copy skill files from the toolkit checkout yourself if your workflow needs them. This step is optional for basic MCP tooling.
+The agent skill (`skills/unity-open-mcp/SKILL.md` in this repo) gives your AI client workflow guidance for the Unity MCP tools — the mutate→gate→fix loop, capabilities-first discovery, and the agent senses (tests, profiler, screenshots). It is optional: the MCP tools work without it, but agents miss the workflow narrative and the `unity_agent_run_tests` verification habit.
+
+Install paths are derived from the single-source manifest at [`skills/client-paths.json`](../skills/client-paths.json). Copy the template to the project-relative folder for your client:
+
+| Client | Skill path |
+|---|---|
+| Cursor | `.cursor/skills/unity-open-mcp/SKILL.md` |
+| Claude Desktop / Claude Code | `.claude/skills/unity-open-mcp/SKILL.md` |
+| OpenCode | `.opencode/skills/unity-open-mcp/SKILL.md` |
+| ZCode (and other `.agents`-aware clients) | `.agents/skills/unity-open-mcp/SKILL.md` |
+
+For example, for Cursor:
+
+```bash
+mkdir -p .cursor/skills/unity-open-mcp
+cp /path/to/unity-open-mcp/skills/unity-open-mcp/SKILL.md .cursor/skills/unity-open-mcp/SKILL.md
+```
+
+ZCode also discovers project skills under `.agents/skills/` — copy the template there for ZCode.
+
+To generate a **project-specific** skill (Unity version, installed packages, key types) instead of the static template, run `unity_agent_generate_skill` with `{ "write": true, "clients": ["cursor"] }` once the MCP server is connected. Regenerate after package or script changes.
 
 ## Troubleshooting
 

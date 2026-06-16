@@ -1,4 +1,11 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { knownClientKeys } from "../skill/client-paths.js";
+
+// The `clients` enum is derived from the single-source manifest at
+// `skills/client-paths.json`. Do not hand-maintain a literal array
+// here — edit the manifest instead.
+const CLIENT_ENUM = knownClientKeys();
+const clientListDoc = CLIENT_ENUM.map((c) => `\`${c}\``).join(", ");
 
 export const generateSkill: Tool = {
   name: "unity_agent_generate_skill",
@@ -7,7 +14,7 @@ export const generateSkill: Tool = {
     "actual project state: Unity version, installed packages (including bridge/verify " +
     "versions), available tools and verify rules, key MonoBehaviour/ScriptableObject " +
     "types, and the mutate→gate→fix workflow. Set write=true to persist the file into " +
-    ".claude/skills/ (and optionally .cursor/skills/ or .opencode/skills/). Regenerate " +
+    "the client skill directories derived from skills/client-paths.json. Regenerate " +
     "after package or script changes to keep the skill current.",
   inputSchema: {
     type: "object",
@@ -22,13 +29,12 @@ export const generateSkill: Tool = {
       clients: {
         type: "array",
         items: {
-          enum: ["claude", "cursor", "opencode", "agents"],
+          enum: CLIENT_ENUM,
         },
         description:
           "Which client skill directories to write to. Only used when write=true. " +
-          "Defaults to [\"claude\"]. Each entry writes to the project's " +
-          ".claude/skills/, .cursor/skills/, .opencode/skills/, or " +
-          ".agents/skills/ (ZCode and other .agents-aware clients) respectively.",
+          `Defaults to ["claude"]. Allowed values: ${clientListDoc}. Each entry writes ` +
+          "to the project-relative path declared for that client in skills/client-paths.json.",
       },
     },
     additionalProperties: false,

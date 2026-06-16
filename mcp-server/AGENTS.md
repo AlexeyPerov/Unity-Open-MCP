@@ -41,3 +41,25 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Inherits ro
 - Run `npm run typecheck` and `npm test` after changes. Tests use `node --test` with type stripping.
 - Tool contract changes: update the tool catalog in `docs/api/mcp-tools.md` in the same task.
 - Capability changes: verify `build-capabilities.test.ts` covers the new rule/fix/surface.
+
+## Agent skill sync (`skills/unity-open-mcp/SKILL.md`)
+
+The agent skill is the **agent-facing** counterpart of the human/contributor docs. Two surfaces must stay in sync with tool/capability/routing changes — they serve different audiences:
+
+- `skills/unity-open-mcp/SKILL.md` — **agent playbook**: workflows, principles, short routing narrative, pointers to `unity_open_mcp_capabilities`. Shipped into a game project's `.claude/skills/` / `.cursor/skills/` / `.opencode/skills/` / `.agents/skills/` (paths from `skills/client-paths.json`). Agents working in a game project see this file, not `docs/api/`.
+- `docs/api/mcp-tools.md` — **human/contributor reference**: full tool catalog, route-policy table, batch support table, response-shape examples. Lives in the toolkit repo; not assumed visible to agents in a downstream game project.
+
+When an MCP tool, capability, route policy, batch behavior, or agent-senses tool changes, update **both**:
+
+- **Always** update `docs/api/mcp-tools.md` (tool catalog, route/batch tables, response shapes).
+- **When the change affects agent workflow or routing guidance**, also update `skills/unity-open-mcp/SKILL.md`. Examples that require a SKILL edit: a new agent-senses tool, a new batch-eligible tool, a route-policy change, a new gate workflow, a new verify rule that changes the mutate→gate→fix loop.
+- Pure schema tweaks (renaming an optional field, adding a non-workflow detail) only need the api doc.
+
+Rules for the SKILL file:
+
+- Keep it lean (~150–200 lines): workflows, principles, one canonical example per concept, pointers to `unity_open_mcp_capabilities` for details. Do **not** copy the full `docs/api/mcp-tools.md` tables into the skill.
+- The `routing` object on the capabilities response is the machine-readable routing source — the SKILL only summarizes it.
+- Do **not** put MCP client config JSON, install path tables, or `Setup without Hub` content in the skill. Those live in `docs/manual-setup.md` / `docs/wizard-setup.md`.
+- The `unity_agent_generate_skill` output stays a **project inventory** (packages, types, tool list from catalog). Do not reintroduce install/MCP JSON into generated skills.
+
+The MCP package (this directory) owns SKILL sync with tool changes — same obligation as the api doc sync above.

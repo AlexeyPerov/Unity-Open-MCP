@@ -79,13 +79,14 @@
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
-  type StepId = "step1" | "step2" | "step3" | "step4" | "step5" | "done";
+  type StepId = "step1" | "step2" | "step3" | "step4" | "step4b" | "step5" | "done";
 
   const STEP_ORDER: StepId[] = [
     "step1",
     "step2",
     "step3",
     "step4",
+    "step4b",
     "step5",
     "done",
   ];
@@ -95,6 +96,7 @@
     step2: "Environment",
     step3: "Install Unity packages",
     step4: "Configure AI client",
+    step4b: "Agent skill (optional)",
     step5: "Launch Unity and verify bridge",
     done: "Setup complete",
   };
@@ -235,6 +237,8 @@
       case "step3":
         return isManifestReady();
       case "step4":
+        return true;
+      case "step4b":
         return true;
       case "step5":
         return true;
@@ -612,13 +616,17 @@
     };
   });
 
-  // Live Step 4 Skill copy plan: runs on every Done entry so
-  // the wizard surfaces the per-target preview + "file
-  // exists" flags before the user clicks the copy action.
+  // Live skill-copy plan: recomputed whenever the user enters the
+  // dedicated Agent skill step (step4b) OR the Done screen, so the
+  // per-target preview + "file exists" flags are always fresh. The
+  // targets come from the single-source manifest keyed off the
+  // selected MCP client (Cursor → .cursor/skills/, ZCode →
+  // .agents/skills/, etc.) — never from ad-hoc booleans.
   $effect(() => {
-    if (currentStep !== "done") return;
+    if (currentStep !== "step4b" && currentStep !== "done") return;
     const root = toolkitRoot;
     const projectPath = project.path;
+    const client = mcpClient;
     if (!projectPath || !root) {
       skillPlan = null;
       return;
@@ -630,8 +638,7 @@
         const params: SkillCopyParamsWire = {
           projectPath,
           toolkitRoot: root,
-          opencodeSelected: isOpencodeClient(mcpClient),
-          zcodeSelected: isZcodeClient(mcpClient),
+          mcpClient: clientToWire(client),
         };
         const plan = await planSkillCopy(params);
         if (!cancelled) {
@@ -679,14 +686,6 @@
     }
   }
 
-  function isOpencodeClient(id: McpClientId): boolean {
-    return id === "opencode-global" || id === "opencode-project";
-  }
-
-  function isZcodeClient(id: McpClientId): boolean {
-    return id === "zcode-global" || id === "zcode-project";
-  }
-
   function toMcpConfigError(e: unknown): McpConfigError {
     if (e && typeof e === "object" && "kind" in e && "message" in e) {
       return e as McpConfigError;
@@ -726,12 +725,17 @@
     switch (err.kind) {
       case "sourceMissing":
         return `Toolkit source skill file is missing. Run the wizard with a valid toolkit root.`;
+      case "manifestMissing":
+      case "manifestInvalid":
+        return `Skill client-paths manifest problem: ${err.message}. Make sure your toolkit root is the unity-open-mcp monorepo checkout.`;
       case "writeFailed":
         return `Failed to copy skill: ${err.message}. Check folder permissions.`;
       case "backupFailed":
         return `Cannot create backup: ${err.message}`;
       case "notAUnityProject":
         return `Project path is not a directory.`;
+      case "overwriteNotConfirmed":
+        return err.message;
       default:
         return `${err.kind}: ${err.message}`;
     }
@@ -867,8 +871,7 @@
       const params: SkillCopyParamsWire = {
         projectPath,
         toolkitRoot: root,
-        opencodeSelected: isOpencodeClient(mcpClient),
-        zcodeSelected: isZcodeClient(mcpClient),
+        mcpClient: clientToWire(mcpClient),
       };
       const result = await copySkillFiles(params, skillOverwriteAck);
       skillResult = result;
@@ -1096,6 +1099,22 @@
     S.appendDrawerLog(
       `AI Setup: skipped Step 5 verify for ${project.name} — wizard marked incomplete on Done`,
     );
+  }
+
+  // Skip the optional Agent skill step without copying. Logs the
+  // decision so the Done-screen summary is consistent.
+  function skipSkillStep() {
+    S.appendDrawerLog(
+      `AI Setup: skipped Agent skill copy for ${project.name} (${mcpClientLabel(mcpClient)})`,
+    );
+    nextStep();
+  }
+
+  // Human-readable label for the MCP client radio selection. Used by
+  // the Agent skill step so the user sees which client the skill
+  // folder is derived from.
+  function mcpClientLabel(id: McpClientId): string {
+    return MCP_CLIENT_OPTIONS.find((o) => o.id === id)?.label ?? id;
   }
 
   function describeLaunchForVerifyError(e: unknown): string {
@@ -2081,6 +2100,107 @@
             {/if}
           </div>
         </section>
+      {:else if currentStep === "step4b"}
+        <section class="wiz-section">
+          <p class="wiz-desc">
+            Install the Unity Open MCP <strong>agent skill</strong> so your AI
+            client gets workflow guidance for the Unity MCP tools — the
+            mutate→gate→fix loop, capabilities-first discovery, and the agent
+            senses (tests, profiler, screenshots). This step is
+            <strong>optional</strong>: skip it if you manage skills yourself.
+          </p>
+          <p class="wiz-hint">
+            The wizard copies the template from
+            <code>{toolkitRoot || "<toolkit>"}/skills/unity-open-mcp/SKILL.md</code>
+            into the project-relative skill folder(s) for the MCP client you
+            picked in Step 4 (<strong>{mcpClientLabel(mcpClient)}</strong>).
+            Paths are derived from a single manifest
+            (<code>skills/client-paths.json</code>), so ZCode writes
+            <code>.agents/skills/</code> and Cursor writes
+            <code>.cursor/skills/</code> — never an unconditional
+            <code>.claude/skills/</code>.
+          </p>
+
+          {#if skillPlanning && !skillPlan}
+            <p class="wiz-hint">Planning skill copy…</p>
+          {:else if skillError}
+            <div class="wiz-block wiz-block-error" role="alert">
+              {describeSkillCopyError(skillError)}
+            </div>
+          {:else if skillPlan}
+            {#if !skillPlan.sourcePath}
+              <div class="wiz-block wiz-block-error" role="alert">
+                Source skill file is missing in the toolkit root. Run
+                the wizard again with a valid toolkit checkout.
+              </div>
+            {:else if skillPlan.targets.length === 0}
+              <p class="wiz-hint wiz-hint-warn">
+                No skill folder is mapped for <strong>{mcpClientLabel(mcpClient)}</strong>.
+                Use the **Skip** button to continue, or pick a different MCP client in Step 4.
+              </p>
+            {:else}
+              <ul class="wiz-fingerprints" aria-label="Agent skill copy targets">
+                {#each skillPlan.targets as target (target.targetPath)}
+                  {@const tone = target.exists ? "warn" : "ok"}
+                  <li class="wiz-fp wiz-fp-{tone}">
+                    <span class="wiz-fp-name">
+                      <code>{target.relativePath}</code>
+                    </span>
+                    <span class="wiz-fp-status">
+                      {#if target.exists}exists — will be overwritten only with confirmation{:else}will create{/if}
+                    </span>
+                  </li>
+                {/each}
+              </ul>
+              {#if skillPlan.targets.some((t) => t.exists)}
+                <label class="wiz-toggle wiz-toggle-confirm">
+                  <input type="checkbox" bind:checked={skillOverwriteAck} />
+                  <span>
+                    <strong>Overwrite existing skill files.</strong>
+                    <small>The targets above already exist; the wizard will back them up to <code>*.bak</code> and replace them only when this is checked.</small>
+                  </span>
+                </label>
+              {/if}
+            {/if}
+          {/if}
+
+          {#if skillResult}
+            <div class="wiz-block wiz-block-ok" role="status">
+              <strong>Skill copy complete.</strong>
+              Copied {skillResult.copied.length} file(s)
+              {#if skillResult.overwritten.length > 0}
+                ({skillResult.overwritten.length} replaced existing)
+              {/if}
+              {#if skillResult.skipped.length > 0}
+                · skipped {skillResult.skipped.length} (already present)
+              {/if}
+            </div>
+          {/if}
+
+          <div class="wiz-actions-row">
+            <Button
+              variant="primary"
+              onclick={copySkillFilesClick}
+              disabled={
+                !skillPlan ||
+                skillPlan.targets.length === 0 ||
+                !skillPlan.sourcePath ||
+                skillCopying ||
+                (skillPlan.targets.some((t) => t.exists) && !skillOverwriteAck)
+              }
+              title={
+                skillPlan && skillPlan.targets.some((t) => t.exists) && !skillOverwriteAck
+                  ? "Confirm overwrite first"
+                  : "Copy the template skill into the client's skill folder"
+              }
+            >
+              {skillCopying ? "Copying…" : skillResult?.copied.length ? "Copy again" : "Copy skill"}
+            </Button>
+            <Button variant="secondary" onclick={skipSkillStep}>
+              Skip
+            </Button>
+          </div>
+        </section>
       {:else if currentStep === "step5"}
         <section class="wiz-section">
           <p class="wiz-desc">
@@ -2307,13 +2427,16 @@
           <div class="wiz-field">
             <span class="wiz-label">Skill copy</span>
             <p class="wiz-desc">
-              On Done, the wizard copies
-              <code>{toolkitRoot || "<toolkit>"}/skills/unity-open-mcp/SKILL.md</code>
-              into the project's Claude-compatible skill folder, and
-              {#if isOpencodeClient(mcpClient)}
-                (because OpenCode was selected) the OpenCode mirror too.
+              {#if skillResult && skillResult.copied.length > 0}
+                The wizard copied
+                <code>{toolkitRoot || "<toolkit>"}/skills/unity-open-mcp/SKILL.md</code>
+                into the project-relative skill folder(s) for your selected client ({skillResult.copied.map((t) => t.relativePath).join(", ")}).
               {:else}
-                also into the OpenCode mirror when OpenCode is the selected client.
+                The wizard copies
+                <code>{toolkitRoot || "<toolkit>"}/skills/unity-open-mcp/SKILL.md</code>
+                into the project-relative skill folder(s) for your selected client
+                ({#each skillPlan?.targets ?? [] as t, i}{#if i > 0}, {/if}<code>{t.relativePath}</code>{/each}{#if !skillPlan || skillPlan.targets.length === 0}<em>none for this client</em>{/if}).
+                You can also do this from the dedicated **Agent skill** step.
               {/if}
               Existing files are only overwritten after you tick the
               confirmation box.
@@ -2330,6 +2453,10 @@
                   Source skill file is missing in the toolkit root. Run
                   the wizard again with a valid toolkit checkout.
                 </div>
+              {:else if skillPlan.targets.length === 0}
+                <p class="wiz-hint wiz-hint-warn">
+                  No skill targets are mapped for the selected client. Pick a different MCP client in Step 4 or use the Manual option to install into all known client folders.
+                </p>
               {:else}
                 <ul class="wiz-fingerprints" aria-label="Skill copy targets">
                   {#each skillPlan.targets as target (target.targetPath)}
@@ -2367,7 +2494,7 @@
                         : "Copy skill files"
                     }
                   >
-                    {skillCopying ? "Copying…" : "Copy skill files"}
+                    {skillCopying ? "Copying…" : skillResult?.copied.length ? "Copy again" : "Copy skill files"}
                   </Button>
                 </div>
               {/if}

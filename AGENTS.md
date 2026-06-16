@@ -17,6 +17,8 @@
 
 - **Docs are part of done.** If a change affects public behavior, API contracts, architecture boundaries, or developer workflows, update tracked docs in `README.md` and/or `docs/` in the same task.
 
+- **Agent skill sync.** `skills/unity-open-mcp/SKILL.md` is agent-facing guidance (the playbook agents see inside a game project). The MCP package owns keeping it in sync with tool/capability/routing changes alongside `docs/api/mcp-tools.md` — see `mcp-server/AGENTS.md` §Agent skill sync for the rule. Skill install paths come from the single-source `skills/client-paths.json` manifest, not from per-package constants.
+
 - **Docs layout and ownership.**
   - Root `README.md` stays short: intro, current feature set, quick links.
   - `docs/README.md` is the docs index and must link every top-level doc.

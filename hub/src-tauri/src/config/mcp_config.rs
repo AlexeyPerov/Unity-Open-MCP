@@ -24,6 +24,12 @@
 //! Client-id resolution and the env-var contract live in
 //! `ai_toolkit.rs` / `ai_toolkit.ts`; this module is purely
 //! about merging, writing, and copying files.
+//!
+//! Skill install paths are NOT hardcoded here. They come from the
+//! single-source manifest at `<toolkitRoot>/skills/client-paths.json`
+//! (see [`ClientPathsManifest`]). The MCP-client → skill-target
+//! mapping lives in the same manifest, so adding a client means
+//! editing the manifest, not Rust or TypeScript constants.
 
 use std::fs;
 use std::io::Write;
@@ -50,24 +56,12 @@ fn resolve_mcp_index_path(toolkit_root: &str, mcp_index_override: &str) -> Optio
 /// (`mcp-tools.md` §Naming).
 pub const MCP_SERVER_KEY: &str = "unity-open-mcp";
 
-/// Sub-path inside the project where the Claude-compatible
-/// skill file is copied. Always relative to the project root.
-pub const CLAUDE_SKILL_REL: &str = ".claude/skills/unity-open-mcp/SKILL.md";
-
-/// Sub-path inside the project where the OpenCode-specific
-/// skill mirror is copied when OpenCode is selected. OpenCode
-/// also reads `.claude/skills/` directly, but the wizard copies
-/// to both locations for clients that look in either spot.
-pub const OPENCODE_SKILL_REL: &str = ".opencode/skills/unity-open-mcp/SKILL.md";
-
-/// Sub-path inside the project where the ZCode skill is copied
-/// when ZCode is selected. ZCode discovers skills under
-/// `.agents/skills/` (its recommended cross-tool default) and
-/// `.zcode/skills/`; we write the cross-tool location.
-pub const ZCODE_SKILL_REL: &str = ".agents/skills/unity-open-mcp/SKILL.md";
-
-/// Sub-path inside the toolkit root for the source skill file.
-pub const TOOLKIT_SKILL_REL: &str = "skills/unity-open-mcp/SKILL.md";
+/// Relative path of the skill client-paths manifest under the
+/// toolkit root. The single source of truth for project-relative
+/// skill install paths and the MCP-client → skill-target mapping.
+/// Consumed by [`load_client_paths_manifest`] below and by the
+/// mcp-server (`mcp-server/src/skill/client-paths.ts`).
+pub const CLIENT_PATHS_MANIFEST_REL: &str = "skills/client-paths.json";
 
 /// Supported MCP client ids. Mirrors `McpClientId` in
 /// `ai_toolkit.ts` and the radio group in `AiSetupWizard.svelte`
@@ -736,16 +730,81 @@ fn command_for(params: &McpConfigParams, resolved_index: &str, _is_cli_only: boo
 }
 
 // --- Skill copy ----------------------------------------------------------
+//
+// Project-relative skill install paths and the MCP-client → skill-target
+// mapping come from the single-source manifest at
+// `<toolkitRoot>/skills/client-paths.json` (see [`ClientPathsManifest`]).
+// Do not add per-client path constants here — edit the manifest.
 
-/// One row in the skill-copy plan. The Done screen renders
-/// this so the user can see which files would be created /
-/// overwritten.
+/// In-memory mirror of `skills/client-paths.json`. The Hub and the
+/// mcp-server (`unity_agent_generate_skill`) resolve identical paths
+/// from the same file, so a new client is added once in the manifest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPathsManifest {
+    pub skill_id: String,
+    pub template_relative_path: String,
+    /// Map of client key → `{ relativePath }`. Keys are the canonical
+    /// client identifiers also used by `unity_agent_generate_skill`.
+    pub clients: std::collections::BTreeMap<String, ClientPathEntry>,
+    /// Map of `McpClientId`-equivalent wire key → client keys.
+    pub mcp_client_mapping: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPathEntry {
+    pub relative_path: String,
+}
+
+/// Load the manifest from `<toolkitRoot>/skills/client-paths.json`.
+/// Returns a typed error so the wizard can surface "manifest missing /
+/// malformed" instead of silently falling back to stale constants.
+pub fn load_client_paths_manifest(toolkit_root: &str) -> Result<ClientPathsManifest, SkillCopyError> {
+    let root = PathBuf::from(toolkit_root);
+    let path = root.join(CLIENT_PATHS_MANIFEST_REL);
+    let body = fs::read_to_string(&path).map_err(|e| {
+        SkillCopyError::new(
+            "manifestMissing",
+            format!(
+                "cannot read skill client-paths manifest at {}: {}. The toolkit root should contain skills/client-paths.json.",
+                path.display(),
+                e
+            ),
+        )
+    })?;
+    let manifest: ClientPathsManifest = serde_json::from_str(&body).map_err(|e| {
+        SkillCopyError::new(
+            "manifestInvalid",
+            format!("skills/client-paths.json is not valid: {}", e),
+        )
+    })?;
+    Ok(manifest)
+}
+
+/// Wire key for an [`McpClientId`], matching the keys used in the
+/// manifest's `mcpClientMapping` (kebab-case, matching `ai_toolkit.ts`).
+fn mcp_client_wire_key(client: McpClientId) -> &'static str {
+    match client {
+        McpClientId::Cursor => "cursor",
+        McpClientId::ClaudeDesktop => "claude-desktop",
+        McpClientId::ClaudeCode => "claude-code",
+        McpClientId::OpencodeGlobal => "opencode-global",
+        McpClientId::OpencodeProject => "opencode-project",
+        McpClientId::ZcodeGlobal => "zcode-global",
+        McpClientId::ZcodeProject => "zcode-project",
+        McpClientId::Manual => "manual",
+    }
+}
+
+/// One row in the skill-copy plan. The wizard renders this so the user
+/// can see which files would be created / overwritten.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillCopyTarget {
-    /// `"claude"` or `"opencode"`. Used by the UI for labels
-    /// only — the target path carries the location.
-    pub kind: SkillCopyKind,
+    /// Manifest client key (e.g. `claude`, `opencode`, `agents`).
+    /// Used by the UI for labels; the target path carries the location.
+    pub kind: String,
     /// Absolute target path (the file the wizard will create
     /// or overwrite).
     pub target_path: String,
@@ -759,18 +818,6 @@ pub struct SkillCopyTarget {
     pub exists: bool,
 }
 
-/// `claude` = `.claude/skills/...` (always copied). `opencode`
-/// = `.opencode/skills/...` (only copied when OpenCode was
-/// selected in Step 4). `agents` = `.agents/skills/...`
-/// (only copied when ZCode was selected in Step 4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SkillCopyKind {
-    Claude,
-    Opencode,
-    Agents,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillCopyPlan {
@@ -780,19 +827,17 @@ pub struct SkillCopyPlan {
     pub targets: Vec<SkillCopyTarget>,
 }
 
+/// Inputs to the skill-copy plan. Targets are derived from the
+/// selected MCP client via the manifest's `mcpClientMapping` (single
+/// source of truth) — not from ad-hoc booleans.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillCopyParams {
     pub project_path: String,
     pub toolkit_root: String,
-    /// `true` when the user selected OpenCode in Step 4 (or
-    /// the OpenCode project variant). Controls whether the
-    /// `.opencode/...` mirror is included in the plan.
-    pub opencode_selected: bool,
-    /// `true` when the user selected ZCode in Step 4 (either
-    /// variant). Controls whether the `.agents/skills/...`
-    /// target is included in the plan.
-    pub zcode_selected: bool,
+    /// The MCP client selected in the wizard Step 4. Drives which
+    /// skill targets are included via the manifest mapping.
+    pub mcp_client: McpClientId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -802,7 +847,7 @@ pub struct SkillCopyResult {
     pub copied: Vec<SkillCopyTarget>,
     /// Targets that already existed and were **not** copied
     /// because the caller declined to overwrite. Surfaced on
-    /// the Done screen so the user can see which files were
+    /// the wizard so the user can see which files were
     /// left untouched.
     pub skipped: Vec<SkillCopyTarget>,
     /// Targets the user explicitly asked to overwrite. Used
@@ -827,7 +872,7 @@ impl SkillCopyError {
 }
 
 /// Tauri command: compute the skill-copy plan without
-/// touching any file. The Done screen calls this to render
+/// touching any file. The wizard calls this to render
 /// the per-target preview + "file exists" status.
 #[tauri::command]
 pub fn plan_skill_copy(params: SkillCopyParams) -> Result<SkillCopyPlan, SkillCopyError> {
@@ -838,8 +883,8 @@ pub fn plan_skill_copy(params: SkillCopyParams) -> Result<SkillCopyPlan, SkillCo
 /// the plan, the writer creates a `.bak` of the existing
 /// file (when one is present) and then overwrites — but only
 /// when `overwrite_existing` is `true` for that target. The
-/// caller is expected to have prompted the user (Done screen
-/// renders an explicit confirmation) before passing
+/// caller is expected to have prompted the user (wizard renders
+/// an explicit confirmation) before passing
 /// `overwrite_existing = true`.
 #[tauri::command]
 pub fn copy_skill_files(
@@ -857,30 +902,38 @@ fn plan_skill_copy_at(params: &SkillCopyParams) -> Result<SkillCopyPlan, SkillCo
             "Project path is not a directory.",
         ));
     }
-    let source_path = resolve_source_skill(&params.toolkit_root);
+    let manifest = load_client_paths_manifest(&params.toolkit_root)?;
+    let source_path = resolve_source_skill(&params.toolkit_root, &manifest);
     let source_path_str = source_path
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned());
+
+    // Derive client keys from the manifest's mcpClientMapping for the
+    // selected MCP client. Unknown mappings yield an empty plan so the
+    // wizard can show a clear "no skill targets for this client" state.
+    let wire_key = mcp_client_wire_key(params.mcp_client);
+    let client_keys: Vec<&str> = manifest
+        .mcp_client_mapping
+        .get(wire_key)
+        .map(|v| v.iter().map(String::as_str).collect())
+        .unwrap_or_default();
+
     let mut targets = Vec::new();
-    targets.push(build_skill_target(
-        SkillCopyKind::Claude,
-        &project,
-        source_path.as_deref(),
-    ));
-    if params.opencode_selected {
-        targets.push(build_skill_target(
-            SkillCopyKind::Opencode,
-            &project,
-            source_path.as_deref(),
-        ));
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for key in client_keys {
+        if !seen.insert(key.to_string()) {
+            continue;
+        }
+        if let Some(entry) = manifest.clients.get(key) {
+            targets.push(build_skill_target(
+                key,
+                &entry.relative_path,
+                &project,
+                source_path.as_deref(),
+            ));
+        }
     }
-    if params.zcode_selected {
-        targets.push(build_skill_target(
-            SkillCopyKind::Agents,
-            &project,
-            source_path.as_deref(),
-        ));
-    }
+
     Ok(SkillCopyPlan {
         project_path: params.project_path.clone(),
         toolkit_root: params.toolkit_root.clone(),
@@ -890,18 +943,14 @@ fn plan_skill_copy_at(params: &SkillCopyParams) -> Result<SkillCopyPlan, SkillCo
 }
 
 fn build_skill_target(
-    kind: SkillCopyKind,
+    kind: &str,
+    relative: &str,
     project: &Path,
     source: Option<&Path>,
 ) -> SkillCopyTarget {
-    let relative = match kind {
-        SkillCopyKind::Claude => CLAUDE_SKILL_REL,
-        SkillCopyKind::Opencode => OPENCODE_SKILL_REL,
-        SkillCopyKind::Agents => ZCODE_SKILL_REL,
-    };
     let target_path = project.join(relative);
     SkillCopyTarget {
-        kind,
+        kind: kind.to_string(),
         target_path: target_path.to_string_lossy().into_owned(),
         relative_path: relative.to_string(),
         source_path: source.map(|p| p.to_string_lossy().into_owned()),
@@ -909,12 +958,15 @@ fn build_skill_target(
     }
 }
 
-fn resolve_source_skill(toolkit_root: &str) -> Option<PathBuf> {
+fn resolve_source_skill(
+    toolkit_root: &str,
+    manifest: &ClientPathsManifest,
+) -> Option<PathBuf> {
     let root = PathBuf::from(toolkit_root);
     if !root.is_dir() {
         return None;
     }
-    let candidate = root.join(TOOLKIT_SKILL_REL);
+    let candidate = root.join(&manifest.template_relative_path);
     if candidate.is_file() {
         Some(candidate)
     } else {
@@ -927,6 +979,7 @@ fn copy_skill_files_at(
     overwrite_existing: bool,
 ) -> Result<SkillCopyResult, SkillCopyError> {
     let plan = plan_skill_copy_at(params)?;
+    let manifest = load_client_paths_manifest(&params.toolkit_root)?;
     let source = match plan.source_path.as_deref() {
         Some(s) => PathBuf::from(s),
         None => {
@@ -934,7 +987,7 @@ fn copy_skill_files_at(
                 "sourceMissing",
                 format!(
                     "Toolkit source skill file not found at {}/{}. Run the wizard with a valid toolkit root.",
-                    params.toolkit_root, TOOLKIT_SKILL_REL
+                    params.toolkit_root, manifest.template_relative_path
                 ),
             ));
         }
@@ -1012,11 +1065,57 @@ mod tests {
 
     /// Make a fake toolkit root with a real `index.js` under
     /// `mcp-server/dist/` so the writer's `mcpPathInvalid`
-    /// check passes.
+    /// check passes. Also seeds a `skills/client-paths.json`
+    /// manifest (single source of truth) and a template skill
+    /// so the skill-copy planner has everything it needs.
     fn make_fake_toolkit(root: &Path) {
         let mcp_dir = root.join("mcp-server").join("dist");
         fs::create_dir_all(&mcp_dir).unwrap();
         fs::write(mcp_dir.join("index.js"), "module.exports = {};").unwrap();
+        make_fake_skill_manifest(root);
+    }
+
+    /// Seed a `skills/client-paths.json` + template SKILL.md that
+    /// mirror the checked-in manifest. Skill-copy tests build their
+    /// own toolkit root, so they need a local manifest copy.
+    fn make_fake_skill_manifest(root: &Path) {
+        let skills_dir = root.join("skills").join("unity-open-mcp");
+        fs::create_dir_all(&skills_dir).unwrap();
+        fs::write(
+            root.join(CLIENT_PATHS_MANIFEST_REL),
+            r#"{
+  "skillId": "unity-open-mcp",
+  "templateRelativePath": "skills/unity-open-mcp/SKILL.md",
+  "clients": {
+    "cursor": { "relativePath": ".cursor/skills/unity-open-mcp/SKILL.md" },
+    "claude": { "relativePath": ".claude/skills/unity-open-mcp/SKILL.md" },
+    "opencode": { "relativePath": ".opencode/skills/unity-open-mcp/SKILL.md" },
+    "agents": { "relativePath": ".agents/skills/unity-open-mcp/SKILL.md" }
+  },
+  "mcpClientMapping": {
+    "cursor": ["cursor"],
+    "claude-desktop": ["claude"],
+    "claude-code": ["claude"],
+    "opencode-global": ["opencode"],
+    "opencode-project": ["opencode"],
+    "zcode-global": ["agents"],
+    "zcode-project": ["agents"],
+    "manual": ["cursor", "claude", "opencode", "agents"]
+  }
+}
+"#,
+        )
+        .unwrap();
+    }
+
+    /// Build skill-copy params for the given MCP client against a
+    /// toolkit root. Uses the manifest-driven `mcp_client` field.
+    fn make_skill_params(project: &Path, toolkit_root: &Path, client: McpClientId) -> SkillCopyParams {
+        SkillCopyParams {
+            project_path: project.to_string_lossy().into_owned(),
+            toolkit_root: toolkit_root.to_string_lossy().into_owned(),
+            mcp_client: client,
+        }
     }
 
     fn make_cursor_params(_home: &Path, project: &Path, toolkit_root: &Path) -> McpConfigParams {
@@ -1318,36 +1417,106 @@ mod tests {
     }
 
     #[test]
-    fn plan_skill_copy_includes_claude_target_only_when_opencode_not_selected() {
+    fn plan_skill_copy_for_cursor_maps_to_cursor_target_only() {
+        // T1.5.6: Cursor selection must NOT push an unconditional
+        // `.claude/skills/` target. It maps to `.cursor/skills/` only.
         let dir = tempdir().unwrap();
         let project = dir.path();
+        let toolkit = tempdir().unwrap();
+        make_fake_skill_manifest(toolkit.path());
         fs::create_dir_all(project).unwrap();
-        let plan = plan_skill_copy_at(&SkillCopyParams {
-            project_path: project.to_string_lossy().into_owned(),
-            toolkit_root: "/repos/uai".to_string(),
-            opencode_selected: false,
-            zcode_selected: false,
-        })
-        .unwrap();
+        let plan = plan_skill_copy_at(&make_skill_params(project, toolkit.path(), McpClientId::Cursor))
+            .unwrap();
         assert_eq!(plan.targets.len(), 1);
-        assert_eq!(plan.targets[0].kind, SkillCopyKind::Claude);
+        assert_eq!(plan.targets[0].kind, "cursor");
+        assert!(plan.targets[0].target_path.ends_with(".cursor/skills/unity-open-mcp/SKILL.md"));
+    }
+
+    #[test]
+    fn plan_skill_copy_for_claude_desktop_maps_to_claude_only() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        let toolkit = tempdir().unwrap();
+        make_fake_skill_manifest(toolkit.path());
+        fs::create_dir_all(project).unwrap();
+        let plan =
+            plan_skill_copy_at(&make_skill_params(project, toolkit.path(), McpClientId::ClaudeDesktop))
+                .unwrap();
+        assert_eq!(plan.targets.len(), 1);
+        assert_eq!(plan.targets[0].kind, "claude");
         assert!(plan.targets[0].target_path.ends_with(".claude/skills/unity-open-mcp/SKILL.md"));
     }
 
     #[test]
-    fn plan_skill_copy_includes_opencode_target_when_selected() {
+    fn plan_skill_copy_for_opencode_maps_to_opencode_only() {
         let dir = tempdir().unwrap();
         let project = dir.path();
+        let toolkit = tempdir().unwrap();
+        make_fake_skill_manifest(toolkit.path());
         fs::create_dir_all(project).unwrap();
-        let plan = plan_skill_copy_at(&SkillCopyParams {
-            project_path: project.to_string_lossy().into_owned(),
-            toolkit_root: "/repos/uai".to_string(),
-            opencode_selected: true,
-            zcode_selected: false,
-        })
+        let plan = plan_skill_copy_at(&make_skill_params(
+            project,
+            toolkit.path(),
+            McpClientId::OpencodeProject,
+        ))
         .unwrap();
-        assert_eq!(plan.targets.len(), 2);
-        assert!(plan.targets.iter().any(|t| t.kind == SkillCopyKind::Opencode));
+        assert_eq!(plan.targets.len(), 1);
+        assert_eq!(plan.targets[0].kind, "opencode");
+        assert!(plan.targets[0].target_path.ends_with(".opencode/skills/unity-open-mcp/SKILL.md"));
+    }
+
+    #[test]
+    fn plan_skill_copy_for_zcode_maps_to_agents_only() {
+        // T1.5.6: ZCode selection must push `.agents/skills/` and
+        // never `.claude/skills/`.
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        let toolkit = tempdir().unwrap();
+        make_fake_skill_manifest(toolkit.path());
+        fs::create_dir_all(project).unwrap();
+        let plan =
+            plan_skill_copy_at(&make_skill_params(project, toolkit.path(), McpClientId::ZcodeProject))
+                .unwrap();
+        assert_eq!(plan.targets.len(), 1);
+        let agents = plan
+            .targets
+            .iter()
+            .find(|t| t.kind == "agents")
+            .expect("agents target present");
+        assert!(agents.target_path.ends_with(".agents/skills/unity-open-mcp/SKILL.md"));
+        // No unconditional Claude target leaks in for ZCode.
+        assert!(!plan.targets.iter().any(|t| t.kind == "claude"));
+    }
+
+    #[test]
+    fn plan_skill_copy_for_manual_includes_all_clients() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        let toolkit = tempdir().unwrap();
+        make_fake_skill_manifest(toolkit.path());
+        fs::create_dir_all(project).unwrap();
+        let plan =
+            plan_skill_copy_at(&make_skill_params(project, toolkit.path(), McpClientId::Manual))
+                .unwrap();
+        let kinds: Vec<&str> = plan.targets.iter().map(|t| t.kind.as_str()).collect();
+        assert!(kinds.contains(&"cursor"));
+        assert!(kinds.contains(&"claude"));
+        assert!(kinds.contains(&"opencode"));
+        assert!(kinds.contains(&"agents"));
+    }
+
+    #[test]
+    fn plan_skill_copy_errors_when_manifest_missing() {
+        // A toolkit root without the manifest surfaces a clear error
+        // instead of silently falling back to stale constants.
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        let toolkit = tempdir().unwrap();
+        // No make_fake_skill_manifest — manifest is absent.
+        fs::create_dir_all(project).unwrap();
+        let err = plan_skill_copy_at(&make_skill_params(project, toolkit.path(), McpClientId::Cursor))
+            .unwrap_err();
+        assert_eq!(err.kind, "manifestMissing");
     }
 
     #[test]
@@ -1355,18 +1524,14 @@ mod tests {
         let project_dir = tempdir().unwrap();
         let project = project_dir.path();
         let root = tempdir().unwrap();
+        make_fake_skill_manifest(root.path());
         let skill = root.path().join("skills").join("unity-open-mcp").join("SKILL.md");
         write_text(&skill, "# unity-open-mcp\n\nHello.\n");
         // Pre-existing target file the user has customised.
         let existing = project.join(".claude/skills/unity-open-mcp/SKILL.md");
         write_text(&existing, "# user's custom notes\n");
         let result = copy_skill_files_at(
-            &SkillCopyParams {
-                project_path: project.to_string_lossy().into_owned(),
-                toolkit_root: root.path().to_string_lossy().into_owned(),
-                opencode_selected: false,
-                zcode_selected: false,
-            },
+            &make_skill_params(project, root.path(), McpClientId::ClaudeDesktop),
             false,
         )
         .unwrap();
@@ -1384,31 +1549,31 @@ mod tests {
         let project_dir = tempdir().unwrap();
         let project = project_dir.path();
         let root = tempdir().unwrap();
+        make_fake_skill_manifest(root.path());
         let skill = root.path().join("skills").join("unity-open-mcp").join("SKILL.md");
         write_text(&skill, "# unity-open-mcp\n\nToolkit content.\n");
         let existing = project.join(".claude/skills/unity-open-mcp/SKILL.md");
         write_text(&existing, "# user's old notes\n");
+        // Opencode selection drives two targets (none) — use manual to
+        // exercise the multi-target overwrite path while keeping a
+        // pre-existing Claude file.
         let result = copy_skill_files_at(
-            &SkillCopyParams {
-                project_path: project.to_string_lossy().into_owned(),
-                toolkit_root: root.path().to_string_lossy().into_owned(),
-                opencode_selected: true,
-                zcode_selected: false,
-            },
+            &make_skill_params(project, root.path(), McpClientId::Manual),
             true,
         )
         .unwrap();
-        assert_eq!(result.copied.len(), 2);
+        // All four client targets copied; the pre-existing Claude one
+        // was backed up and replaced.
+        assert!(result.copied.len() >= 2);
         assert_eq!(result.overwritten.len(), 1);
         assert_eq!(result.skipped.len(), 0);
         let backup = project.join(".claude/skills/unity-open-mcp/SKILL.md.bak");
         assert!(backup.exists());
         assert_eq!(fs::read_to_string(&backup).unwrap(), "# user's old notes\n");
-        // OpenCode mirror was created (it did not exist).
-        let opencode_target = project.join(".opencode/skills/unity-open-mcp/SKILL.md");
-        assert!(opencode_target.exists());
+        // The Claude target now holds the toolkit content.
+        let claude_target = project.join(".claude/skills/unity-open-mcp/SKILL.md");
         assert_eq!(
-            fs::read_to_string(&opencode_target).unwrap(),
+            fs::read_to_string(&claude_target).unwrap(),
             "# unity-open-mcp\n\nToolkit content.\n"
         );
     }
@@ -1417,13 +1582,11 @@ mod tests {
     fn copy_skill_files_errors_when_source_missing() {
         let project_dir = tempdir().unwrap();
         let project = project_dir.path();
+        let toolkit = tempdir().unwrap();
+        // Manifest present but no template SKILL.md on disk.
+        make_fake_skill_manifest(toolkit.path());
         let result = copy_skill_files_at(
-            &SkillCopyParams {
-                project_path: project.to_string_lossy().into_owned(),
-                toolkit_root: "/repos/this/does/not/exist".to_string(),
-                opencode_selected: false,
-                zcode_selected: false,
-            },
+            &make_skill_params(project, toolkit.path(), McpClientId::ClaudeDesktop),
             true,
         )
         .unwrap_err();
@@ -1559,24 +1722,32 @@ mod tests {
     }
 
     #[test]
-    fn plan_skill_copy_includes_agents_target_when_zcode_selected() {
-        let dir = tempdir().unwrap();
-        let project = dir.path();
-        fs::create_dir_all(project).unwrap();
-        let plan = plan_skill_copy_at(&SkillCopyParams {
-            project_path: project.to_string_lossy().into_owned(),
-            toolkit_root: "/repos/uai".to_string(),
-            opencode_selected: false,
-            zcode_selected: true,
-        })
-        .unwrap();
-        assert_eq!(plan.targets.len(), 2);
-        let agents = plan
-            .targets
-            .iter()
-            .find(|t| t.kind == SkillCopyKind::Agents)
-            .expect("agents target present");
-        assert!(agents.target_path.ends_with(".agents/skills/unity-open-mcp/SKILL.md"));
+    fn load_client_paths_manifest_parses_checked_in_shape() {
+        // The manifest shipped at the repo root parses cleanly into
+        // the typed struct and exposes the four canonical clients.
+        let repo_root = env!("CARGO_MANIFEST_DIR");
+        // hub/ is two levels under the repo root.
+        let manifest_root = Path::new(repo_root)
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("repo root");
+        let manifest =
+            load_client_paths_manifest(&manifest_root.to_string_lossy()).unwrap_or_else(|e| {
+                panic!("checked-in skills/client-paths.json should parse: {:?}", e)
+            });
+        assert_eq!(manifest.skill_id, "unity-open-mcp");
+        assert_eq!(
+            manifest.template_relative_path,
+            "skills/unity-open-mcp/SKILL.md"
+        );
+        for key in ["cursor", "claude", "opencode", "agents"] {
+            assert!(manifest.clients.contains_key(key), "missing client {}", key);
+        }
+        // ZCode maps to `.agents/skills/`, never `.claude/skills/`.
+        assert_eq!(manifest.mcp_client_mapping["zcode-global"], vec!["agents"]);
+        assert_eq!(manifest.mcp_client_mapping["zcode-project"], vec!["agents"]);
+        // Cursor maps to `.cursor/skills/`, never Claude.
+        assert_eq!(manifest.mcp_client_mapping["cursor"], vec!["cursor"]);
     }
 
 }

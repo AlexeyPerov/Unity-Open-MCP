@@ -1,119 +1,64 @@
-# Unity Open MCP Skill
+# Unity Open MCP
 
-Skill for AI agents working with Unity projects via the `unity-open-mcp` MCP server. This skill covers the gate + verify workflow.
+Skill for AI agents driving a Unity project through the `unity-open-mcp` MCP server. Covers the gate + verify workflow, capabilities-first discovery, and the agent senses.
 
-## Install
+> Tool prefixes: `unity_open_mcp_*` (bridge-routed) and `unity_agent_*` (standalone senses). The prefix signals routing — see below.
 
-Copy this file to your client's skills directory:
+## Preconditions
 
-| Client | Path |
-|---|---|
-| Cursor / Claude Code | `.claude/skills/unity-open-mcp/SKILL.md` (project) or global skills dir |
-| OpenCode | `.opencode/skills/unity-open-mcp/SKILL.md` (project) or `~/.config/opencode/skills/` |
-| ZCode (and `.agents`-aware clients) | `.agents/skills/unity-open-mcp/SKILL.md` (project) or `~/.agents/skills/` |
+- Unity Editor is open with the target project.
+- `unity_open_mcp_ping` returns `connected: true`.
+- If you only need offline reads (asset search, find_references, read_asset), the bridge is optional — those routes parse the project from disk.
 
-## Available tools
+## Discover first
 
-All tools are prefixed `unity_open_mcp_*`.
+Call **`unity_open_mcp_capabilities`** (no args) before guessing which tools, verify rules, or fixes exist. It returns, in one local call:
 
-### Discover first
+- every tool with its **input schema**, **route policy** (`live` / `offline` / `offline-first` / `compressible`), **category**, and a `batchCapable` flag;
+- every verify rule with its issue codes, severities, and fix ids;
+- every available fix;
+- a top-level **`routing`** summary (batch requirements, blocked meta-tools, live-only categories);
+- planned-but-unbuilt items with `status: "planned"` and a fallback hint — they tell you what to use *today* instead of failing.
 
-Call `unity_open_mcp_capabilities` (no arguments) to learn the full surface in one shot: every tool with its schema and route policy, every verify rule with applicable asset kinds and issue severities, and every available fix. Planned-but-unbuilt capabilities return with `status: "planned"` and guidance — they tell you the fallback instead of failing. Use this as your first step before guessing which tools or rules exist.
+Make this your first step on a fresh project. Re-call it if tool/rule behavior seems to have changed.
 
-### Generate a project-specific skill
+## Routing (brief)
 
-Call `unity_agent_generate_skill` with `{ "write": true }` to generate a project-specific SKILL.md that reflects the actual project state — Unity version, installed packages, available verify rules, and key MonoBehaviour/ScriptableObject types discovered from source. The file is written to `.claude/skills/unity-open-mcp/SKILL.md` (or `.cursor/skills/` / `.opencode/skills/` / `.agents/skills/` via the `clients` parameter). Regenerate after package or script changes to keep it current.
+The per-tool `routePolicy` and `batchCapable` fields on the capabilities response are authoritative. In short:
 
-### Mutating tools (gate-aware)
+- **Live is the default.** When the bridge is connected, most tools route to `POST /tools/{name}` on the Editor.
+- **Batch fallback** spawns a headless Unity (`-batchmode`) **only** when a tool has `batchCapable: true` AND the live bridge is unavailable. Batch requires `UNITY_PATH` + `UNITY_PROJECT_PATH` env vars. Mutating meta-tools (`execute_csharp`, `invoke_method`, `execute_menu`) are blocked in batch — they need a live Editor.
+- **Agent senses are live-only.** `unity_agent_run_tests`, screenshots, profiler, console, and spatial queries have no batch form — they need a running Editor.
+- **Offline reads** (`list_assets`, `find_references`, `read_asset`, `search_assets`) parse the project from disk and never need Unity.
 
-- `unity_open_mcp_execute_csharp` — Compile and run a C# snippet in the Unity Editor.
-- `unity_open_mcp_invoke_method` — Call a method via reflection.
-- `unity_open_mcp_execute_menu` — Execute a Unity Editor menu item.
-- `unity_open_mcp_apply_fix` — Apply a verify rule fix action (e.g. remove missing script).
-- `unity_open_mcp_reserialize` — Round-trip text-serialized assets through Unity's native serializer to normalize direct YAML edits.
-
-All mutating tools accept `gate` (`enforce` / `warn` / `off`, default `enforce`) and require a non-empty `paths_hint` array. For `reserialize`, the required `paths` array doubles as the gate scope (no separate `paths_hint` needed).
-
-### Read-only tools (no gate)
-
-- `unity_open_mcp_capabilities` — Discover the full tool + rule + fix surface in one call. Call this first.
-- `unity_open_mcp_ping` — Bridge health check.
-- `unity_open_mcp_find_members` — Discover types, methods, and properties.
-- `unity_open_mcp_validate_edit` — Scoped health scan without mutation.
-- `unity_open_mcp_find_references` — Reverse dependency lookup for assets.
-- `unity_open_mcp_scan_paths` — Run specific verify rules over scoped paths.
-- `unity_open_mcp_read_asset` — Compact drill-down asset read (≥70% smaller than raw YAML). Default returns a map (counts + CMP component-set codes + folded tree + omission counts); drill down with `component`/`path`/`id`/`detail` instead of re-reading raw YAML.
-- `unity_open_mcp_search_assets` — Compact asset search by name/component/GUID/type. Each result tags why it matched (`file-name`/`gameobject`/`component`/`guid`) so you know which `read_asset` drill-down to run next.
-
-### Typed tool layer (M16 planned)
-
-M16 adds a curated typed surface for routine editor operations:
-- assets/prefabs/materials (`unity_open_mcp_assets_*`)
-- gameobject/components (`unity_open_mcp_gameobject_*`)
-- scenes (`unity_open_mcp_scene_*`)
-- package manager (`unity_open_mcp_package_*`)
-- editor controls (`unity_open_mcp_console_clear`, `unity_open_mcp_editor_set_state`, `unity_open_mcp_selection_*`)
-- reflection/script/object helpers (`unity_open_mcp_type_schema`, `unity_open_mcp_script_*`, `unity_open_mcp_object_*`)
-- profiler session helpers (`unity_open_mcp_profiler_*`)
-- gate intelligence (`unity_open_mcp_impact_preview`, `unity_open_mcp_gate_budget_estimate`, `unity_open_mcp_mutation_explain`)
-
-Use typed tools first for common actions; fall back to `execute_csharp`/`invoke_method` for uncommon or highly custom workflows.
-
-### Checkpoint tools
-
-- `unity_open_mcp_checkpoint_create` — Create a manual checkpoint for later delta comparison.
-- `unity_open_mcp_delta` — Compare current project health vs a checkpoint.
+Full route-policy and batch tables live in `docs/api/mcp-tools.md` (human/contributor docs). Do not copy them here — read them from `routing` + per-tool fields on the capabilities response.
 
 ## Core loop: mutate → gate → fix
 
-1. **Discover** — call `unity_open_mcp_capabilities` once to learn which tools, verify rules, and fixes are implemented; then use `unity_open_mcp_find_members` before blind `execute_csharp` calls.
-2. **Declare scope** — always pass `paths_hint` with asset paths you intend to touch.
-3. **Mutate** — call `unity_open_mcp_execute_csharp`, `invoke_method`, or `execute_menu` with default `gate: enforce`.
-4. **Read gate** — on `isError: true`, inspect `gate.delta.newIssues` and `agentNextSteps`.
-5. **Fix** — address top error; optionally use `unity_open_mcp_apply_fix` with `dry_run: true` first.
-6. **Retry** — re-run mutation; confirm `gate.delta.resolvedErrors > 0` or `newErrors == 0`.
+1. **Discover** — `unity_open_mcp_capabilities`, then `unity_open_mcp_find_members` before blind reflection.
+2. **Declare scope** — pass `paths_hint` with every asset path you intend to touch. Empty `paths_hint` fails with `paths_hint_required`.
+3. **Mutate** — `unity_open_mcp_execute_csharp` / `invoke_method` / `execute_menu` with default `gate: enforce`.
+4. **Read the gate** — on `isError: true`, inspect `gate.delta.newIssues` and `agentNextSteps`.
+5. **Fix** — address the top error; `unity_open_mcp_apply_fix` with `dry_run: true` first when a `fixId` is present.
+6. **Retry** — re-run the mutation; confirm `gate.delta.resolvedErrors > 0` or `newErrors == 0`.
 
-**Principle: mutation success ≠ project safe.** A successful C# compile can still break prefab references.
+**Principle: mutation success ≠ project safe.** A successful C# compile can still break prefab references. The gate is the safety net.
 
-### Example: execute_csharp with gate enforcement
+### Gate modes
 
-```json
-// Tool call: unity_open_mcp_execute_csharp
-{
-  "code": "var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(\"Assets/Prefabs/Player.prefab\");\nvar go = PrefabUtility.InstantiatePrefab(prefab);\ngo.transform.position = Vector3.zero;\nreturn go.name;",
-  "usings": ["UnityEngine"],
-  "paths_hint": ["Assets/Prefabs/Player.prefab"],
-  "gate": "enforce"
-}
-```
+| Mode | When |
+|---|---|
+| `enforce` (default) | Normal edits — fail fast on new errors (`isError: true`) |
+| `warn` | Exploratory — read `gate.delta` but the call does not error |
+| `off` | Trusted admin scripts only — no checkpoint/validate |
 
-**Success response** — gate passed, no new issues:
+### Gate failure (canonical shape)
 
 ```json
 {
   "mutation": { "success": true, "output": "Player(Clone)", "error": null },
   "gate": {
     "mode": "enforce",
-    "checkpointId": "cp_8f3a2b",
-    "validation": { "passed": true, "issues": [] },
-    "delta": {
-      "newErrors": 0, "newWarnings": 0,
-      "resolvedErrors": 0, "resolvedWarnings": 0,
-      "newIssues": [], "resolvedIssues": []
-    }
-  },
-  "agentNextSteps": []
-}
-```
-
-**Failure response** — gate detected new errors (`isError: true` in MCP):
-
-```json
-{
-  "mutation": { "success": true, "output": "Player(Clone)", "error": null },
-  "gate": {
-    "mode": "enforce",
-    "checkpointId": "cp_a1c7e4",
     "validation": {
       "passed": false,
       "issues": [
@@ -121,392 +66,96 @@ Use typed tools first for common actions; fall back to `execute_csharp`/`invoke_
           "severity": "Error",
           "code": "MISSING_SCRIPT",
           "assetPath": "Assets/Prefabs/Player.prefab",
-          "description": "MonoBehaviour 'PlayerController' has missing script GUID",
           "fixId": "remove_missing_script",
           "fixSafe": true,
-          "agentHint": "Remove the missing script component to restore prefab health"
+          "agentHint": "Remove the missing script component"
         }
       ]
     },
     "delta": {
       "newErrors": 1, "newWarnings": 0,
       "resolvedErrors": 0, "resolvedWarnings": 0,
-      "newIssues": [
-        "missing_references|Error|Assets/Prefabs/Player.prefab|MISSING_SCRIPT"
-      ],
+      "newIssues": ["missing_references|Error|Assets/Prefabs/Player.prefab|MISSING_SCRIPT"],
       "resolvedIssues": []
     }
   },
   "agentNextSteps": [
     "New error: missing_references MISSING_SCRIPT on Assets/Prefabs/Player.prefab",
-    "Fix available: use unity_open_mcp_apply_fix with fix_id=\"remove_missing_script\"",
-    "Verify after fix: use unity_open_mcp_validate_edit on the affected paths"
+    "Fix available: use unity_open_mcp_apply_fix with fix_id=\"remove_missing_script\""
   ]
 }
 ```
 
-**Return serialization.** `execute_csharp` and `invoke_method` results are walked by a depth-limited reflective serializer before becoming `mutation.output`:
-
-- Structs/POCOs (e.g. `Vector3`, your own DTOs) are emitted as JSON objects with their public fields and properties — `return new Vector3(1,2,3)` gives `{"$type":"Vector3","x":1,"y":2,"z":3}`, not a stringified tuple.
-- Lists/enumerables are truncated to 100 items (configurable via `max_items`); a truncated array reports `{"items":[...],"truncated":N}` so you know how many were elided.
-- Recursion is capped at depth 4 (configurable via `max_depth`); deeper nodes are stringified.
-- Cycles and `UnityEngine.Object` references never infinite-loop — back-edges become `{"$ref":"TypeName"}` and Unity objects become `{"$type":...,"name":...,"instanceId":...}` descriptors.
-
-### Example: apply_fix with dry_run
-
-```json
-// Tool call: unity_open_mcp_apply_fix
-{
-  "fix_id": "remove_missing_script",
-  "issue_id": "missing_references|Error|Assets/Prefabs/Player.prefab|MISSING_SCRIPT",
-  "dry_run": true
-}
-```
-
-**Dry-run response** — no mutation applied, describes what will happen:
-
-```json
-{
-  "fixDescription": "Remove MonoBehaviour with missing script GUID from Player.prefab",
-  "affectedAssets": ["Assets/Prefabs/Player.prefab"],
-  "safe": true
-}
-```
-
-After confirming, apply for real (`"dry_run": false`). The tool runs through the gate envelope like other mutating tools:
-
-```json
-{
-  "mutation": { "success": true, "output": "Removed 1 missing script component(s)", "error": null },
-  "gate": {
-    "mode": "enforce",
-    "checkpointId": "cp_d5f9c1",
-    "validation": { "passed": true, "issues": [] },
-    "delta": {
-      "newErrors": 0, "newWarnings": 0,
-      "resolvedErrors": 1, "resolvedWarnings": 0,
-      "newIssues": [],
-      "resolvedIssues": [
-        "missing_references|Error|Assets/Prefabs/Player.prefab|MISSING_SCRIPT"
-      ]
-    }
-  },
-  "agentNextSteps": []
-}
-```
-
-### Example: find_references before delete
-
-Before deleting or moving an asset, check who depends on it:
-
-```json
-// Tool call: unity_open_mcp_find_references
-{ "asset_path": "Assets/Materials/PlayerMat.mat", "max_results": 50 }
-```
-
-```json
-{
-  "queriedAssetPath": "Assets/Materials/PlayerMat.mat",
-  "queriedAssetGuid": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
-  "referencedBy": [
-    { "assetPath": "Assets/Prefabs/Player.prefab", "guid": "11223344556677889900aabbccddeeff" },
-    { "assetPath": "Assets/Scenes/Main.unity", "guid": "aabbccddeeff00112233445566778899" }
-  ],
-  "totalCount": 2
-}
-```
-
-### Example: validate_edit (read-only check)
-
-Run a scoped health scan without any preceding mutation — useful for pre-commit verification:
-
-```json
-// Tool call: unity_open_mcp_validate_edit
-{ "paths": ["Assets/Prefabs/Player.prefab"], "detail": "normal" }
-```
-
-```json
-{
-  "passed": true,
-  "issues": [],
-  "categoriesRun": ["missing_references", "scene_prefab_health"],
-  "durationMs": 142
-}
-```
-
-### Example: scan_paths with explicit categories
-
-```json
-// Tool call: unity_open_mcp_scan_paths
-{ "paths": ["Assets/Prefabs/", "Assets/Scenes/"], "categories": ["missing_references"] }
-```
-
-```json
-{
-  "passed": false,
-  "issues": [
-    {
-      "severity": "Error",
-      "code": "MISSING_SCRIPT",
-      "assetPath": "Assets/Prefabs/Enemy.prefab",
-      "description": "MonoBehaviour 'AIController' has missing script GUID",
-      "fixId": "remove_missing_script",
-      "fixSafe": true,
-      "agentHint": "Remove the missing script component"
-    }
-  ],
-  "categoriesRun": ["missing_references"],
-  "durationMs": 210
-}
-```
-
-### Example: reserialize after direct YAML edits (edit → reserialize → validate)
-
-When you edit a `.prefab` / `.unity` / `.asset` / `.mat` / `.controller` / `.anim` directly as YAML (text edit of a file on disk), Unity's serializer should re-write the file in canonical form so that missing fields, wrong indentation, and stale `fileID` references surface. `reserialize` is the mutating tool that wraps `AssetDatabase.ForceReserializeAssets` for exactly this — and because it is mutating, it runs the full gate path (checkpoint → reserialize → validate → delta).
-
-**Workflow:**
-
-1. **Edit** the asset file directly (sed, your editor, a generated patch).
-2. **Reserialize** with `unity_open_mcp_reserialize`, passing the touched `paths`. The `paths` array doubles as the gate's `paths_hint` scope — no separate hint field needed.
-3. **Read the gate delta** — if the round-trip surfaced new issues (missing references, malformed structure), `gate.delta.newIssues` will list them and `agentNextSteps` will suggest next moves.
-
-```json
-// Tool call: unity_open_mcp_reserialize
-{
-  "paths": ["Assets/Prefabs/Player.prefab"],
-  "gate": "enforce"
-}
-```
-
-```json
-{
-  "mutation": {
-    "success": true,
-    "output": "{\"reserialized\":[\"Assets/Prefabs/Player.prefab\"],\"totalCount\":1,\"wholeProject\":false}",
-    "error": null
-  },
-  "gate": {
-    "mode": "enforce",
-    "checkpointId": "cp_b2d4f8",
-    "skipped": false,
-    "validation": { "passed": true, "categoriesRun": ["missing_references"], "durationMs": 87 },
-    "delta": {
-      "newErrors": 0, "newWarnings": 0,
-      "resolvedErrors": 0, "resolvedWarnings": 0,
-      "newIssues": [], "resolvedIssues": []
-    }
-  },
-  "agentNextSteps": []
-}
-```
-
-If the round-trip surfaces a missing-script or broken-prefab error, the delta lists it and you fall into the normal fix loop (`unity_open_mcp_apply_fix` with `dry_run: true`, then `dry_run: false`).
-
-**Supported extensions:** `.prefab`, `.unity`, `.asset`, `.mat`, `.controller`, `.anim`. Whole-project reserialize is intentionally **not** supported — the gate needs scoped paths to validate the delta, so always enumerate the assets you edited.
-
-**Principle: edit freely, but always reserialize before trusting a direct YAML change.** A text edit that "looks right" can silently corrupt a prefab; `reserialize` is the safety primitive that catches it.
-
-### Example: read an asset compactly, then drill down
-
-Raw Unity YAML is enormous and repetitive. `unity_open_mcp_read_asset` returns a **map, not a dump**: counts, a `cmp` table that declares repeated component sets once (referenced by `c1`/`c2` codes), and a folded `tree` where render-only leaf runs (e.g. 7 meshes) collapse into one row with a `count`. Omission counts (`moreHidden`, `collapsed`) tell you what was elided so you know where to drill next.
-
-1. **Read the summary** — start with the default. No raw YAML.
-
-   ```json
-   // Tool call: unity_open_mcp_read_asset
-   { "asset_path": "Assets/Prefabs/Player.prefab" }
-   ```
-
-   ```json
-   {
-     "asset": "prefab", "path": "Assets/Prefabs/Player.prefab", "guid": "abc…",
-     "objects": 42, "components": 18,
-     "cmp": { "c1": ["Transform","MeshFilter","MeshRenderer"], "c2": ["Transform","PlayerController"] },
-     "tree": [
-       { "idx": 0, "name": "Player", "depth": 0, "cmp": "c2" },
-       { "idx": 1, "name": "SampleMesh_01..07", "depth": 1, "cmp": "c1", "count": 7, "toIdx": 7 }
-     ],
-     "moreHidden": 0, "collapsed": 7,
-     "hint": "use detail=verbose, component=<name>, path=<subtree>, or id=<fileID> to drill down",
-     "_cache": "miss"
-   }
-   ```
-
-2. **Drill into one component's fields.** First fetch fields (`field_limit: 30`), then use `component`. The session cache reuses the model (`_cache: "hit"`) — no re-parse.
-
-   ```json
-   // Tool call: unity_open_mcp_read_asset
-   { "asset_path": "Assets/Prefabs/Player.prefab", "field_limit": 30, "component": "PlayerController" }
-   ```
-
-   ```json
-   {
-     "asset": "prefab", "path": "Assets/Prefabs/Player.prefab", "objects": 42, "components": 18,
-     "componentQuery": "PlayerController",
-     "componentMatches": [
-       { "object": "Player", "component": "PlayerController", "fields": [ { "name": "m_Speed", "value": "5" }, { "name": "m_Health", "value": "100" } ] }
-     ],
-     "_cache": "hit"
-   }
-   ```
-
-3. **Find assets before editing.** Use `unity_open_mcp_search_assets` to locate prefabs/components/GUIDs; the `reasons` tags tell you which `read_asset` drill-down to run next.
-
-   ```json
-   // Tool call: unity_open_mcp_search_assets
-   { "component": "EnemyAI", "type": "prefab", "max_results": 20 }
-   ```
-
-**Notes.** `read_asset` is live-only today (offline reads arrive later); `id` (fileID) drill-down works once the offline parser lands — use `component`/`path` drill-down when reading live. `detail: verbose` disables render-only folding; `detail: normal` inlines component names per node. `field_limit: 0` (default) returns names only — bump it before `component` drill-down so fields are available.
-
-**Principle: first answer is a map, not a dump.** Drill down with flags; never pull raw YAML.
-
-## Gate modes
-
-| Mode | When to use |
-|---|---|
-| `enforce` (default) | Normal agent edits — fail fast on new errors |
-| `warn` | Exploratory changes — read `gate.delta` but continue |
-| `off` | Trusted scripts only — no checkpoint/validate; use sparingly |
-
-### Example: warn mode
-
-```json
-// Tool call: unity_open_mcp_execute_csharp
-{
-  "code": "Selection.activeGameObject = GameObject.Find(\"Camera\");\nreturn Selection.activeGameObject != null;",
-  "paths_hint": ["Assets/Scenes/Main.unity"],
-  "gate": "warn"
-}
-```
-
-Even if gate detects new issues, `isError` is `false` in MCP — the agent reads `gate.delta` and decides whether to proceed or fix.
-
-### Example: gate off
-
-```json
-// Tool call: unity_open_mcp_execute_csharp
-{
-  "code": "EditorApplication.Exit(0);",
-  "paths_hint": [],
-  "gate": "off"
-}
-```
-
-No checkpoint, no validation, no delta. Use only for trusted administrative scripts.
-
-## `paths_hint` rules
-
-- Include every asset path the mutation may touch (prefabs, scenes, scripts, materials).
-- If unsure, include the parent folder's key assets rather than leaving empty.
-- Empty `paths_hint` fails immediately with error code `paths_hint_required`.
-
-## Manual checkpoint workflow
-
-For large refactors:
-
-1. `unity_open_mcp_checkpoint_create` with scoped paths.
-2. Run trusted mutations with `gate: off` if needed.
-3. `unity_open_mcp_delta` against checkpoint — single verification pass.
-
-### Example: checkpoint → mutate → delta
-
-```json
-// Step 1: create checkpoint
-// Tool call: unity_open_mcp_checkpoint_create
-{ "paths": ["Assets/Prefabs/"], "label": "before-refactor" }
-```
-
-```json
-{ "checkpointId": "cp_k4m8n2", "timestamp": "2026-06-15T14:00:00Z", "fingerprint": { "issueCount": 3 } }
-```
-
-```json
-// Step 2: run mutations (gate: off for bulk, or enforce per-call)
-// ... execute_csharp / invoke_method calls ...
-
-// Step 3: delta check
-// Tool call: unity_open_mcp_delta
-{ "checkpoint_id": "cp_k4m8n2" }
-```
-
-```json
-{
-  "passed": false,
-  "summary": {
-    "newErrors": 1, "newWarnings": 2,
-    "resolvedErrors": 3, "resolvedWarnings": 0
-  },
-  "newIssues": [
-    "missing_references|Error|Assets/Prefabs/Enemy.prefab|MISSING_SCRIPT"
-  ],
-  "resolvedIssues": [
-    "missing_references|Error|Assets/Prefabs/Player.prefab|MISSING_SCRIPT",
-    "scene_prefab_health|Warning|Assets/Scenes/Main.unity|BROKEN_PREFAB_INSTANCE",
-    "missing_references|Warning|Assets/Scenes/Main.unity|MISSING_SCRIPT"
-  ]
-}
-```
-
-## Setup without Hub
-
-1. Add `com.alexeyperov.unity-open-mcp-bridge` and `com.alexeyperov.unity-open-mcp-verify` to `Packages/manifest.json`.
-2. Configure MCP client with `unity-open-mcp` server entry.
-3. Open project in Unity 6; confirm `unity_open_mcp_ping` returns `connected: true`.
-
-### Example MCP client config
-
-**Cursor / Claude Desktop** (`mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "unity-open-mcp": {
-      "command": "node",
-      "args": ["/path/to/unity-open-mcp/mcp-server/dist/index.js"],
-      "env": {
-        "UNITY_PROJECT_PATH": "/path/to/MyGame",
-        "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
-      }
-    }
-  }
-}
-```
-
-**OpenCode** (`opencode.json`):
-
-```json
-{
-  "mcp": {
-    "unity-open-mcp": {
-      "type": "local",
-      "command": ["node", "/path/to/unity-open-mcp/mcp-server/dist/index.js"],
-      "enabled": true,
-      "environment": {
-        "UNITY_PROJECT_PATH": "/path/to/MyGame",
-        "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
-      }
-    }
-  }
-}
-```
-
-**ZCode** (`~/.zcode/cli/config.json` — note the three-level `mcp.servers` path):
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "unity-open-mcp": {
-        "type": "stdio",
-        "command": "node",
-        "args": ["/path/to/unity-open-mcp/mcp-server/dist/index.js"],
-        "env": {
-          "UNITY_PROJECT_PATH": "/path/to/MyGame",
-          "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
-        }
-      }
-    }
-  }
-}
-```
+On success the same envelope returns `validation.passed: true`, empty `issues`, and `agentNextSteps: []`.
+
+## Key workflows
+
+### Reserialize after direct YAML edits
+
+When you edit a `.prefab` / `.unity` / `.asset` / `.mat` / `.controller` / `.anim` file directly as YAML text, run **`unity_open_mcp_reserialize`** with the touched `paths` (the `paths` array doubles as the gate scope). The round-trip rewrites the file canonically so missing fields, wrong indentation, and stale `fileID` references surface in `gate.delta`. Supported extensions: `.prefab`, `.unity`, `.asset`, `.mat`, `.controller`, `.anim`. Whole-project reserialize is intentionally unsupported — enumerate the assets you edited.
+
+**Principle: edit freely, but always reserialize before trusting a direct YAML change.**
+
+### read_asset: map, not dump
+
+Raw Unity YAML is enormous. `unity_open_mcp_read_asset` returns counts, a `cmp` table that declares repeated component sets once (referenced by `c1`/`c2` codes), and a folded `tree`. Drill down with `field_limit` + `component` / `path` / `detail=verbose` instead of re-reading raw YAML. The session cache reuses the parsed model (`_cache: "hit"`). `detail: verbose` disables render-only folding; `field_limit: 0` (default) returns names only — bump it before `component` drill-down so fields are available.
+
+Use **`unity_open_mcp_search_assets`** to locate prefabs/components/GUIDs; each result tags *why* it matched so you know which `read_asset` drill-down to run next.
+
+### checkpoint → mutate → delta
+
+For large refactors: `unity_open_mcp_checkpoint_create` with scoped paths → run mutations (`gate: off` for bulk, or `enforce` per call) → `unity_open_mcp_delta` against the checkpoint for a single verification pass.
+
+### find_references before delete
+
+Before deleting or moving an asset, call **`unity_open_mcp_find_references`** to see who depends on it. Offline-first (no live bridge needed for text-serialized assets).
+
+## Agent senses (live-only)
+
+These give you direct project feedback and are **live-only** (no batch fallback):
+
+- **`unity_agent_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Use this to verify your changes — e.g. after a C# edit, run the affected assembly's EditMode tests. PlayMode is domain-reload-safe via a file handoff. Set `include_passes: false` on large suites to avoid truncation.
+- **`unity_agent_read_console`** — Unity console entries via reflection. Filter `type: "error"` to confirm a clean compile after edits.
+- **`unity_agent_screenshot`** — Scene / Game / isolated 2×2 composite of one GameObject.
+- **`unity_agent_profiler_capture`** / **`profiler_memory`** / **`profiler_rendering`** — frame hierarchy, memory allocators, rendering env.
+- **`unity_agent_spatial_query`** — physics-based raycast / overlap / bounds / ground_check / nearest against the live scene.
+
+**Verification habit:** after any C# change, run `unity_agent_read_console` with `type: "error"` (or `unity_agent_run_tests` on the affected assembly) to confirm the change compiled and tests pass before declaring done.
+
+## Mutating tools (gate-aware)
+
+All accept `gate` (`enforce` / `warn` / `off`, default `enforce`) and require a non-empty `paths_hint`:
+
+- `unity_open_mcp_execute_csharp` — compile + run a C# snippet.
+- `unity_open_mcp_invoke_method` — call a method via reflection.
+- `unity_open_mcp_execute_menu` — run a Unity Editor menu item.
+- `unity_open_mcp_apply_fix` — apply a verify rule fix (e.g. `remove_missing_script`).
+- `unity_open_mcp_reserialize` — round-trip text assets through Unity's serializer.
+
+### Return serialization (execute_csharp / invoke_method)
+
+Results are walked by a depth-limited reflective serializer before becoming `mutation.output`:
+
+- Structs/POCOs → JSON objects with public fields/props (`return new Vector3(1,2,3)` → `{"$type":"Vector3","x":1,"y":2,"z":3}`).
+- Lists truncate to 100 items (configurable via `max_items`); truncated arrays report `{"items":[...],"truncated":N}`.
+- Recursion caps at depth 4 (configurable via `max_depth`).
+- Cycles / `UnityEngine.Object` refs never infinite-loop — back-edges become `{"$ref":"TypeName"}`, Unity objects become `{"$type":...,"name":...,"instanceId":...}`.
+
+## Read-only tools (no gate)
+
+- `unity_open_mcp_capabilities` — discover the surface (call first).
+- `unity_open_mcp_ping` — bridge health.
+- `unity_open_mcp_find_members` — types, methods, properties.
+- `unity_open_mcp_validate_edit` — scoped health scan, no mutation (pre-commit check).
+- `unity_open_mcp_find_references` — reverse dependency lookup (offline-first).
+- `unity_open_mcp_scan_paths` — run specific verify rules over scoped paths.
+- `unity_open_mcp_read_asset` — compact drill-down asset read.
+- `unity_open_mcp_search_assets` — compact asset search.
+- `unity_open_mcp_list_assets` — offline asset listing.
+- `unity_open_mcp_checkpoint_create` / `unity_open_mcp_delta` — manual checkpoint + delta.
+
+## Project-specific skill (optional)
+
+Call **`unity_agent_generate_skill`** with `{ "write": true }` to generate a project-specific SKILL.md reflecting the actual project — Unity version, installed packages, available verify rules, and key MonoBehaviour/ScriptableObject types from source. The `clients` parameter writes to the project-relative skill folder(s) declared in `skills/client-paths.json` (`cursor` / `claude` / `opencode` / `agents`). Regenerate after package or script changes.
+
+For routing details, see the `routing` object on the capabilities response — not this file.

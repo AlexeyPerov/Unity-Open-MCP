@@ -15,6 +15,7 @@
 import { readFile, writeFile, readdir, stat } from "node:fs/promises";
 import { join, basename, relative, sep } from "node:path";
 import type { CapabilitiesResult } from "../capabilities/build-capabilities.js";
+import { clientSkillRelativePath } from "./client-paths.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,12 +63,9 @@ export interface GenerateSkillResult {
 const BRIDGE_PACKAGE_ID = "com.alexeyperov.unity-open-mcp-bridge";
 const VERIFY_PACKAGE_ID = "com.alexeyperov.unity-open-mcp-verify";
 
-const CLIENT_SKILL_PATHS: Record<string, string> = {
-  claude: ".claude/skills/unity-open-mcp/SKILL.md",
-  cursor: ".cursor/skills/unity-open-mcp/SKILL.md",
-  opencode: ".opencode/skills/unity-open-mcp/SKILL.md",
-  agents: ".agents/skills/unity-open-mcp/SKILL.md",
-};
+// Project-relative skill paths come from the single-source manifest
+// at `skills/client-paths.json` (see client-paths.ts). Do not add a
+// per-client constant here — edit the manifest instead.
 
 const SKIP_DIRS = new Set([
   ".git", ".vs", "Library", "Logs", "obj", "Obj",
@@ -444,8 +442,13 @@ export async function writeSkillToClients(
 ): Promise<SkillWriteTarget[]> {
   const results: SkillWriteTarget[] = [];
   for (const client of clients) {
-    const rel = CLIENT_SKILL_PATHS[client];
-    if (!rel) continue;
+    let rel: string;
+    try {
+      rel = clientSkillRelativePath(client);
+    } catch {
+      // Unknown client key — skip rather than abort the whole write.
+      continue;
+    }
     const abs = join(projectRoot, rel.split("/").join(sep));
     let existed = false;
     try {

@@ -7,6 +7,7 @@ import { listAssetsOffline, findReferencesOffline } from "./offline.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
 import { generateSkill } from "./skill/generate-skill.js";
+import { knownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { BATCH_TOOL_NAMES } from "./batch-spawn.js";
 
@@ -192,10 +193,11 @@ export class ToolRouter implements Router {
   ): Promise<CallToolResult> {
     const write = args.write === true;
     const rawClients = Array.isArray(args.clients) ? args.clients : [];
+    // Client allowlist comes from the single-source manifest at
+    // `skills/client-paths.json`. Do not add a literal union here.
+    const allowedClients = new Set(knownClientKeys());
     const clients = rawClients.filter(
-      (c): c is string =>
-        typeof c === "string" &&
-          (c === "claude" || c === "cursor" || c === "opencode" || c === "agents"),
+      (c): c is string => typeof c === "string" && allowedClients.has(c),
     );
 
     const caps = buildCapabilities(

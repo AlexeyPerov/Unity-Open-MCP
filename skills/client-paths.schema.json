@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://unity-open-mcp/skills/client-paths.schema.json",
+  "title": "Unity Open MCP skill client-paths manifest",
+  "description": "Single source of truth for project-relative agent-skill install paths and the MCP-client to skill-target mapping. Read by the Hub wizard and unity_agent_generate_skill.",
+  "type": "object",
+  "required": ["skillId", "templateRelativePath", "clients", "mcpClientMapping"],
+  "additionalProperties": false,
+  "properties": {
+    "skillId": {
+      "type": "string",
+      "description": "Stable skill identifier used by clients to namespace the skill directory."
+    },
+    "templateRelativePath": {
+      "type": "string",
+      "description": "Path of the template SKILL.md relative to the toolkit root."
+    },
+    "description": {
+      "type": "string",
+      "description": "Free-form note for maintainers (not consumed by tooling)."
+    },
+    "clients": {
+      "type": "object",
+      "description": "Map of client key to project-relative install metadata. Keys are the canonical client identifiers also used by unity_agent_generate_skill's `clients` parameter.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["relativePath"],
+        "additionalProperties": false,
+        "properties": {
+          "relativePath": {
+            "type": "string",
+            "description": "Project-relative path the skill template is copied to (forward slashes)."
+          }
+        }
+      }
+    },
+    "mcpClientMapping": {
+      "type": "object",
+      "description": "Map of MCP client identifier (mirrors the Hub McpClientId vocabulary) to one or more client keys from `clients`. Used by the Hub wizard to derive skill targets from the selected MCP client.",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Client keys from `clients` that this MCP client maps to."
+      }
+    }
+  }
+}

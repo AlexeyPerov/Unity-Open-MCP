@@ -94,7 +94,22 @@ The wizard writes a `unity-open-mcp` server entry with at least:
 
 See [tools.md](tools.md) for optional environment variables.
 
-### Step 5 — Launch and verify
+### Step 5 — Agent skill (optional)
+
+Install the agent skill so your AI client gets workflow guidance for the Unity MCP tools. This step is **optional** — skip it if you manage skills yourself.
+
+1. The wizard derives the target folder from the MCP client you picked in Step 4 and the single-source manifest at [`skills/client-paths.json`](../skills/client-paths.json):
+   - Cursor → `.cursor/skills/unity-open-mcp/SKILL.md`
+   - Claude Desktop / Claude Code → `.claude/skills/unity-open-mcp/SKILL.md`
+   - OpenCode → `.opencode/skills/unity-open-mcp/SKILL.md`
+   - ZCode → `.agents/skills/unity-open-mcp/SKILL.md`
+   - Manual → all four folders
+2. The preview lists each target with a "will create" / "exists — will be overwritten only with confirmation" status.
+3. Click **Copy skill** to copy the template, or **Skip** to continue without it.
+
+Existing files are only overwritten after you tick the **Overwrite existing skill files** box — the wizard backs them up to `*.bak` first. You can also copy the skill from the Done screen later.
+
+### Step 6 — Launch and verify
 
 1. Click **Launch Unity and verify** (or use your usual launch flow with the bridge port shown).
 2. Wait for compile + bridge `/ping` checks (up to about two minutes).

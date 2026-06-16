@@ -19,7 +19,8 @@ use serde::{Deserialize, Serialize};
 /// | `mcp-server/package.json` | MCP server manifest |
 /// | `packages/bridge/` | Bridge package source |
 /// | `packages/verify/` | Verify package source |
-/// | `skills/unity-open-mcp/SKILL.md` | Core skill (Done copy source) |
+/// | `skills/unity-open-mcp/SKILL.md` | Core skill (skill copy source) |
+/// | `skills/client-paths.json` | Single-source skill client-path manifest (T1.5.6) |
 /// | `mcp-server/dist/index.js` | Built MCP entry (remediation: `npm run build`) |
 pub const TOOLKIT_FINGERPRINTS: &[(&str, ToolkitFingerprintKind, bool)] = &[
     ("mcp-server/package.json", ToolkitFingerprintKind::File, true),
@@ -27,6 +28,11 @@ pub const TOOLKIT_FINGERPRINTS: &[(&str, ToolkitFingerprintKind, bool)] = &[
     ("packages/verify", ToolkitFingerprintKind::Dir, true),
     (
         "skills/unity-open-mcp/SKILL.md",
+        ToolkitFingerprintKind::File,
+        true,
+    ),
+    (
+        "skills/client-paths.json",
         ToolkitFingerprintKind::File,
         true,
     ),
@@ -324,6 +330,8 @@ mod tests {
         fs::create_dir_all(root.join("packages/verify")).unwrap();
         fs::create_dir_all(root.join("skills/unity-open-mcp")).unwrap();
         fs::write(root.join("skills/unity-open-mcp/SKILL.md"), "# skill").unwrap();
+        // Required fingerprint (T1.5.6): the skill client-paths manifest.
+        fs::write(root.join("skills/client-paths.json"), "{}").unwrap();
     }
 
     #[test]
@@ -358,6 +366,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("packages/verify")).unwrap();
         fs::create_dir_all(dir.path().join("skills/unity-open-mcp")).unwrap();
         fs::write(dir.path().join("skills/unity-open-mcp/SKILL.md"), "# skill").unwrap();
+        fs::write(dir.path().join("skills/client-paths.json"), "{}").unwrap();
         // Intentionally do NOT create mcp-server/dist/index.js.
         let v = validate_toolkit_root_at(dir.path());
         assert!(!v.ok, "mcp dist is required per spec table");
@@ -377,6 +386,7 @@ mod tests {
         fs::create_dir_all(dir.path().join("packages/verify")).unwrap();
         fs::create_dir_all(dir.path().join("skills/unity-open-mcp")).unwrap();
         fs::write(dir.path().join("skills/unity-open-mcp/SKILL.md"), "# skill").unwrap();
+        fs::write(dir.path().join("skills/client-paths.json"), "{}").unwrap();
         let v = validate_toolkit_root_at(dir.path());
         assert!(!v.ok);
         let bridge = v

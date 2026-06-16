@@ -193,6 +193,38 @@ export const PLANNED_TOOLS: PlannedTool[] = [
 // Capability descriptors
 // ---------------------------------------------------------------------------
 
+/**
+ * Static routing narrative. Mirrors `docs/api/mcp-tools.md` §Route
+ * policy + §Batch support + the `BATCH_TOOL_NAMES` / blocked-tool
+ * lists in `batch-spawn.ts`. Kept concise; per-tool `batchCapable`
+ * flags live on each {@link ToolCapability}.
+ */
+export const ROUTING_SUMMARY: RoutingSummary = {
+  liveDefault: true,
+  batchFallback: true,
+  batchRequirements: ["UNITY_PATH", "UNITY_PROJECT_PATH"],
+  // Mutating meta-tools that need an interactive Editor UI or live
+  // compilation; intentionally rejected by the batch entry point.
+  batchBlocked: [
+    {
+      tool: "unity_open_mcp_execute_csharp",
+      reason: "Requires a live Editor compile context.",
+    },
+    {
+      tool: "unity_open_mcp_invoke_method",
+      reason: "Requires a live Editor reflection context.",
+    },
+    {
+      tool: "unity_open_mcp_execute_menu",
+      reason: "Menu execution needs the Editor UI; most menus fail in -batchmode.",
+    },
+  ],
+  // Agent senses (screenshots, profiler, console, spatial, run_tests)
+  // and gate mutations need a live Editor — they have no batch form.
+  liveOnlyCategories: ["agent-senses"],
+  perToolFlag: "batchCapable",
+};
+
 export interface ToolCapability {
   name: string;
   implemented: boolean;
@@ -219,6 +251,39 @@ export interface CapabilitiesResult {
     fixesImplemented: number;
     fixesPlanned: number;
   };
+  /**
+   * One-shot routing narrative for agents. Lets a batch-narrative
+   * agent learn how tool calls are routed without reading repo docs.
+   * Concise on purpose — per-tool details live on each
+   * {@link ToolCapability} entry, not here.
+   */
+  routing: RoutingSummary;
+}
+
+/**
+ * Compact routing summary embedded in the capabilities response. This
+ * is the agent-facing counterpart of `docs/api/mcp-tools.md` §Route
+ * policy / §Batch support — it does NOT duplicate the full prose.
+ */
+export interface RoutingSummary {
+  /** Most tools prefer the live bridge when it is connected. */
+  liveDefault: boolean;
+  /**
+   * When the live bridge is unavailable, only `batchCapable` tools
+   * fall back to a headless Unity spawn.
+   */
+  batchFallback: boolean;
+  /** Env vars a headless batch spawn requires. */
+  batchRequirements: string[];
+  /** Mutating meta-tools that are intentionally blocked in batch. */
+  batchBlocked: { tool: string; reason: string }[];
+  /** Tool categories that are live-only (no batch fallback). */
+  liveOnlyCategories: string[];
+  /**
+   * Pointer back to the per-tool `batchCapable` flag — agents should
+   * read that flag on each tool, not scan this summary for the list.
+   */
+  perToolFlag: string;
 }
 
 export interface CapabilitiesFilter {
@@ -296,5 +361,9 @@ export function buildCapabilities(
         ? deps.fixes.filter((f) => !f.implemented).length
         : 0,
     },
+    // The routing summary is independent of the kind filter — agents
+    // that ask for `kind: "rules"` still benefit from the routing
+    // narrative. It is constant, so no per-call computation.
+    routing: ROUTING_SUMMARY,
   };
 }
