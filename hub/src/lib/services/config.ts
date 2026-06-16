@@ -921,6 +921,7 @@ export interface ManifestMergeParams {
   versionPin: string;
   customUrl: string;
   confirmUpgrades: boolean;
+  useLocalPackages: boolean;
 }
 
 export interface ManifestMergePlan {
@@ -930,6 +931,8 @@ export interface ManifestMergePlan {
   proposedDependencies: Record<string, string>;
   manifestRead: ManifestRead;
   hasUpgrades: boolean;
+  useLocalPackages: boolean;
+  manifestUsesLocalPackages: boolean;
 }
 
 export interface ManifestWriteResult {

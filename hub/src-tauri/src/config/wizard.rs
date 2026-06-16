@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -273,6 +273,11 @@ pub struct ManifestMergeParams {
     /// refuses to apply an upgrade when this is `false`.
     #[serde(default)]
     pub confirm_upgrades: bool,
+    /// When `true`, install bridge/verify via `file:` paths
+    /// relative to the project's `Packages/` folder instead of
+    /// git remote URLs.
+    #[serde(default)]
+    pub use_local_packages: bool,
 }
 
 /// The plan returned by [`plan_manifest_merge`]. Includes the
@@ -288,6 +293,11 @@ pub struct ManifestMergePlan {
     pub proposed_dependencies: BTreeMap<String, String>,
     pub manifest_read: ManifestRead,
     pub has_upgrades: bool,
+    /// Whether this plan proposes `file:` package URLs.
+    pub use_local_packages: bool,
+    /// Whether the on-disk manifest already uses `file:` paths for
+    /// any selected package.
+    pub manifest_uses_local_packages: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -393,9 +403,11 @@ pub fn read_manifest(project_path: String) -> ManifestRead {
 pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
     let read = read_manifest_inner(&PathBuf::from(&params.project_path));
     let derived = derive_package_urls(
+        &params.project_path,
         &params.toolkit_root,
         &params.version_pin,
         &params.custom_url,
+        params.use_local_packages,
     );
     let mut changes = Vec::new();
     let mut proposed = BTreeMap::new();
@@ -427,6 +439,11 @@ pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
         proposed.entry(k.clone()).or_insert_with(|| v.clone());
     }
     let has_upgrades = changes.iter().any(|c| c.kind == ChangeKind::Upgrade);
+    let manifest_uses_local_packages = manifest_uses_local_packages(
+        &read.dependencies,
+        params.install_bridge,
+        params.install_verify,
+    );
     ManifestMergePlan {
         project_path: params.project_path,
         derived_urls: derived,
@@ -434,6 +451,8 @@ pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
         proposed_dependencies: proposed,
         manifest_read: read,
         has_upgrades,
+        use_local_packages: params.use_local_packages,
+        manifest_uses_local_packages,
     }
 }
 
@@ -467,9 +486,11 @@ pub fn write_manifest_merge(
         ));
     }
     let derived = derive_package_urls(
+        &params.project_path,
         &params.toolkit_root,
         &params.version_pin,
         &params.custom_url,
+        params.use_local_packages,
     );
     let mut changes = Vec::new();
     let mut proposed = BTreeMap::new();
@@ -786,20 +807,45 @@ fn extract_dependencies(value: &Value) -> BTreeMap<String, String> {
 
 /// Derive the per-package install URLs from the validated
 /// toolkit root, honoring the optional version pin and custom
-/// git URL. The order of precedence matches `hub-wizard.md`
+/// git URL. When `use_local_packages` is `true`, emits `file:`
+/// paths relative to the project's `Packages/` folder instead
+/// of git remotes.
+///
+/// Git remote order of precedence matches `hub-wizard.md`
 /// §Step 3 "Package URL derivation":
 ///
 /// 1. Custom git URL (when non-empty) — replaces the remote.
 /// 2. Toolkit root's `[remote "origin"]` URL (when present).
 /// 3. [`DEFAULT_GIT_REMOTE`] — fallback for non-git checkouts.
 pub fn derive_package_urls(
+    project_path: &str,
     toolkit_root: &str,
     version_pin: &str,
     custom_url: &str,
+    use_local_packages: bool,
 ) -> DerivedPackageUrls {
     let trimmed_root = toolkit_root.trim();
     let trimmed_pin = version_pin.trim();
     let trimmed_custom = custom_url.trim();
+
+    if use_local_packages {
+        let project = Path::new(project_path.trim());
+        let packages_dir = project.join("Packages");
+        let bridge_abs = Path::new(trimmed_root).join(BRIDGE_PACKAGE_PATH);
+        let verify_abs = Path::new(trimmed_root).join(VERIFY_PACKAGE_PATH);
+        let bridge_rel = relative_path_for_upm(&packages_dir, &bridge_abs)
+            .unwrap_or_else(|| "../../packages/bridge".to_string());
+        let verify_rel = relative_path_for_upm(&packages_dir, &verify_abs)
+            .unwrap_or_else(|| "../../packages/verify".to_string());
+        let bridge = build_local_package_entry(BRIDGE_PACKAGE_ID, &bridge_rel);
+        let verify = build_local_package_entry(VERIFY_PACKAGE_ID, &verify_rel);
+        return DerivedPackageUrls {
+            toolkit_root: trimmed_root.to_string(),
+            git_remote: String::new(),
+            bridge,
+            verify,
+        };
+    }
 
     let remote = if !trimmed_custom.is_empty() {
         trimmed_custom.to_string()
@@ -830,6 +876,82 @@ pub fn derive_package_urls(
         bridge,
         verify,
     }
+}
+
+fn build_local_package_entry(id: &str, relative_path: &str) -> PackageInstallEntry {
+    let normalized = relative_path.replace('\\', "/");
+    PackageInstallEntry {
+        id: id.to_string(),
+        url: format!("file:{}", normalized),
+        tag: String::new(),
+        package_path: normalized,
+    }
+}
+
+/// Relative path from `from_dir` to `to_dir` for UPM `file:` URLs.
+/// Paths are compared component-wise without requiring canonicalization.
+fn relative_path_for_upm(from_dir: &Path, to_dir: &Path) -> Option<String> {
+    let from: Vec<_> = from_dir.components().collect();
+    let to: Vec<_> = to_dir.components().collect();
+    let mut shared = 0usize;
+    while shared < from.len() && shared < to.len() && from[shared] == to[shared] {
+        shared += 1;
+    }
+    let mut result = PathBuf::new();
+    for component in &from[shared..] {
+        match component {
+            Component::Normal(_) | Component::ParentDir => {
+                result.push("..");
+            }
+            Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    for component in &to[shared..] {
+        match component {
+            Component::Normal(name) => result.push(name),
+            Component::CurDir => {}
+            Component::ParentDir => result.push(".."),
+            _ => return None,
+        }
+    }
+    if result.as_os_str().is_empty() {
+        return Some(".".to_string());
+    }
+    Some(result.to_string_lossy().replace('\\', "/"))
+}
+
+fn is_local_file_url(url: &str) -> bool {
+    url.trim().starts_with("file:")
+}
+
+fn normalize_file_url(url: &str) -> String {
+    url.trim()
+        .strip_prefix("file:")
+        .unwrap_or(url.trim())
+        .replace('\\', "/")
+}
+
+fn manifest_uses_local_packages(
+    dependencies: &BTreeMap<String, String>,
+    install_bridge: bool,
+    install_verify: bool,
+) -> bool {
+    if install_bridge {
+        if let Some(value) = dependencies.get(BRIDGE_PACKAGE_ID) {
+            if is_local_file_url(value) {
+                return true;
+            }
+        }
+    }
+    if install_verify {
+        if let Some(value) = dependencies.get(VERIFY_PACKAGE_ID) {
+            if is_local_file_url(value) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn build_package_entry(
@@ -925,6 +1047,9 @@ fn classify(
 fn urls_match(existing: &str, proposed_url: &str, _proposed_tag: &str) -> bool {
     let existing_normalized = existing.trim();
     let proposed_normalized = proposed_url.trim();
+    if is_local_file_url(existing_normalized) || is_local_file_url(proposed_normalized) {
+        return normalize_file_url(existing_normalized) == normalize_file_url(proposed_normalized);
+    }
     let existing_tag = extract_tag(existing_normalized);
     let proposed_tag = extract_tag(proposed_normalized);
     if existing_tag != proposed_tag {
@@ -1245,7 +1370,7 @@ mod tests {
 
     #[test]
     fn derive_package_urls_uses_default_remote_when_no_git_config() {
-        let derived = derive_package_urls("/repos/uai", "", "");
+        let derived = derive_package_urls("/proj/demo", "/repos/uai", "", "", false);
         assert_eq!(derived.git_remote, DEFAULT_GIT_REMOTE);
         assert!(derived.bridge.url.contains("packages/bridge"));
         assert!(derived.bridge.url.contains(DEFAULT_BRIDGE_TAG));
@@ -1263,9 +1388,11 @@ mod tests {
         )
         .unwrap();
         let derived = derive_package_urls(
+            "/proj/demo",
             dir.path().to_str().unwrap(),
             "",
             "",
+            false,
         );
         assert_eq!(derived.git_remote, "git@github.com:AlexeyPerov/unity-open-mcp.git");
         assert!(derived.bridge.url.starts_with("git@github.com:AlexeyPerov/unity-open-mcp.git"));
@@ -1274,9 +1401,11 @@ mod tests {
     #[test]
     fn derive_package_urls_prefers_custom_url() {
         let derived = derive_package_urls(
+            "/proj/demo",
             "/repos/uai",
             "bridge-v1.2.3",
             "https://github.com/fork/unity-open-mcp.git",
+            false,
         );
         assert_eq!(derived.git_remote, "https://github.com/fork/unity-open-mcp.git");
         assert_eq!(derived.bridge.tag, "bridge-v1.2.3");
@@ -1341,7 +1470,7 @@ mod tests {
     fn plan_manifest_merge_marks_noop_when_already_installed() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
-        let derived = derive_package_urls("/repos/uai", "", "");
+        let derived = derive_package_urls("/proj/demo", "/repos/uai", "", "", false);
         write_manifest(
             dir.path(),
             &[
@@ -1357,6 +1486,7 @@ mod tests {
             version_pin: String::new(),
             custom_url: String::new(),
             confirm_upgrades: false,
+            use_local_packages: false,
         });
         assert!(!plan.has_upgrades);
         assert_eq!(plan.changes.len(), 2);
@@ -1382,6 +1512,7 @@ mod tests {
             version_pin: String::new(),
             custom_url: String::new(),
             confirm_upgrades: false,
+            use_local_packages: false,
         });
         assert!(plan.has_upgrades);
         let bridge = plan
@@ -1413,6 +1544,7 @@ mod tests {
             version_pin: String::new(),
             custom_url: String::new(),
             confirm_upgrades: false,
+            use_local_packages: false,
         })
         .unwrap();
         assert!(!result.backup_path.is_empty());
@@ -1443,6 +1575,7 @@ mod tests {
             version_pin: String::new(),
             custom_url: String::new(),
             confirm_upgrades: false,
+            use_local_packages: false,
         })
         .unwrap();
         assert!(result.backup_path.is_empty());
@@ -1470,6 +1603,7 @@ mod tests {
             version_pin: String::new(),
             custom_url: String::new(),
             confirm_upgrades: false,
+            use_local_packages: false,
         })
         .unwrap_err();
         assert_eq!(err.kind, "upgradeNotConfirmed");
@@ -1498,6 +1632,7 @@ mod tests {
             version_pin: String::new(),
             custom_url: String::new(),
             confirm_upgrades: true,
+            use_local_packages: false,
         })
         .unwrap_err();
         assert_eq!(err.kind, "invalidJson");
@@ -1514,6 +1649,7 @@ mod tests {
             version_pin: String::new(),
             custom_url: String::new(),
             confirm_upgrades: false,
+            use_local_packages: false,
         });
         assert!(matches!(result, Err(ref e) if e.kind == "notAUnityProject"));
     }
@@ -1530,6 +1666,7 @@ mod tests {
             version_pin: "bridge-v1.2.3".to_string(),
             custom_url: String::new(),
             confirm_upgrades: false,
+            use_local_packages: false,
         })
         .unwrap();
         assert!(result
@@ -1548,7 +1685,7 @@ mod tests {
     fn write_manifest_merge_noop_when_already_installed() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
-        let derived = derive_package_urls("/repos/uai", "", "");
+        let derived = derive_package_urls("/proj/demo", "/repos/uai", "", "", false);
         write_manifest(
             dir.path(),
             &[
@@ -1564,6 +1701,7 @@ mod tests {
             version_pin: String::new(),
             custom_url: String::new(),
             confirm_upgrades: false,
+            use_local_packages: false,
         })
         .unwrap();
         // All changes are Unchanged, so the writer did not touch
@@ -1589,5 +1727,106 @@ mod tests {
         write_manifest(dir.path(), &[]);
         let manifest_path = dir.path().join("Packages").join("manifest.json");
         assert!(check_manifest_writable_at(&manifest_path));
+    }
+
+    #[test]
+    fn derive_package_urls_local_mode_emits_file_paths() {
+        let root = tempdir().unwrap();
+        let toolkit = root.path().join("toolkit");
+        let project = root.path().join("demo");
+        fs::create_dir_all(toolkit.join("packages/bridge")).unwrap();
+        fs::create_dir_all(toolkit.join("packages/verify")).unwrap();
+        make_valid_project(&project);
+        let derived = derive_package_urls(
+            project.to_str().unwrap(),
+            toolkit.to_str().unwrap(),
+            "",
+            "",
+            true,
+        );
+        assert!(derived.bridge.url.starts_with("file:"));
+        assert!(derived.verify.url.starts_with("file:"));
+        assert!(derived.bridge.url.contains("packages/bridge"));
+        assert!(derived.verify.url.contains("packages/verify"));
+    }
+
+    #[test]
+    fn plan_manifest_merge_local_packages_unchanged_when_file_paths_match() {
+        let root = tempdir().unwrap();
+        let toolkit = root.path().join("toolkit");
+        let project = root.path().join("demo");
+        fs::create_dir_all(toolkit.join("packages/bridge")).unwrap();
+        fs::create_dir_all(toolkit.join("packages/verify")).unwrap();
+        make_valid_project(&project);
+        let derived = derive_package_urls(
+            project.to_str().unwrap(),
+            toolkit.to_str().unwrap(),
+            "",
+            "",
+            true,
+        );
+        write_manifest(
+            &project,
+            &[
+                (BRIDGE_PACKAGE_ID, &derived.bridge.url),
+                (VERIFY_PACKAGE_ID, &derived.verify.url),
+            ],
+        );
+        let plan = plan_manifest_merge(ManifestMergeParams {
+            project_path: project.to_string_lossy().into_owned(),
+            toolkit_root: toolkit.to_string_lossy().into_owned(),
+            install_bridge: true,
+            install_verify: true,
+            version_pin: String::new(),
+            custom_url: String::new(),
+            confirm_upgrades: false,
+            use_local_packages: true,
+        });
+        assert!(plan.use_local_packages);
+        assert!(plan.manifest_uses_local_packages);
+        assert!(!plan.has_upgrades);
+        assert!(plan.changes.iter().all(|c| c.kind == ChangeKind::Unchanged));
+    }
+
+    #[test]
+    fn plan_manifest_merge_git_mode_upgrades_existing_file_paths() {
+        let dir = tempdir().unwrap();
+        make_valid_project(dir.path());
+        write_manifest(
+            dir.path(),
+            &[
+                (BRIDGE_PACKAGE_ID, "file:../../packages/bridge"),
+                (VERIFY_PACKAGE_ID, "file:../../packages/verify"),
+            ],
+        );
+        let plan = plan_manifest_merge(ManifestMergeParams {
+            project_path: dir.path().to_string_lossy().into_owned(),
+            toolkit_root: "/repos/uai".to_string(),
+            install_bridge: true,
+            install_verify: true,
+            version_pin: String::new(),
+            custom_url: String::new(),
+            confirm_upgrades: false,
+            use_local_packages: false,
+        });
+        assert!(!plan.use_local_packages);
+        assert!(plan.manifest_uses_local_packages);
+        assert!(plan.has_upgrades);
+    }
+
+    #[test]
+    fn urls_match_treats_file_paths_as_unchanged() {
+        let mut existing = BTreeMap::new();
+        existing.insert(
+            BRIDGE_PACKAGE_ID.to_string(),
+            "file:../../packages/bridge".to_string(),
+        );
+        let kind = classify(
+            &existing,
+            BRIDGE_PACKAGE_ID,
+            "file:../../packages/bridge",
+            "",
+        );
+        assert_eq!(kind, ChangeKind::Unchanged);
     }
 }

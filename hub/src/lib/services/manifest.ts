@@ -19,6 +19,10 @@ import type {
   PackageChange,
 } from "./config.ts";
 
+/** UPM package ids — keep in sync with `wizard.rs` constants. */
+export const BRIDGE_PACKAGE_ID = "com.alexeyperov.unity-open-mcp-bridge";
+export const VERIFY_PACKAGE_ID = "com.alexeyperov.unity-open-mcp-verify";
+
 /** Short, user-facing label for each change kind. */
 export function changeKindLabel(kind: ChangeKind): string {
   switch (kind) {

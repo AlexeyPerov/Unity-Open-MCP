@@ -50,6 +50,8 @@
     type ToolkitValidation,
   } from "$lib/services/config";
   import {
+    BRIDGE_PACKAGE_ID,
+    VERIFY_PACKAGE_ID,
     changeKindLabel,
     changeKindTone,
     describeManifestError,
@@ -146,6 +148,8 @@
   let installScanner = $state(false);
   let packageVersionPin = $state("");
   let packageCustomUrl = $state("");
+  let useLocalPackages = $state(false);
+  let useLocalPackagesTouched = $state(false);
   let mergePlan = $state<ManifestMergePlan | null>(null);
   let mergePlanning = $state(false);
   let mergeWriting = $state(false);
@@ -259,13 +263,18 @@
     // remote git URL. The upgrade-acknowledgement toggle only gates the
     // "Install / Upgrade" action, not navigation.
     const selectedIds: string[] = [];
-    if (installBridge) selectedIds.push("com.unity.ai-agent-bridge");
-    if (installVerify) selectedIds.push("com.unity.ai-agent-verify");
+    if (installBridge) selectedIds.push(BRIDGE_PACKAGE_ID);
+    if (installVerify) selectedIds.push(VERIFY_PACKAGE_ID);
     return mergePlan.changes.some(
       (c) =>
         selectedIds.includes(c.id) &&
         (c.kind === "unchanged" || c.kind === "upgrade"),
     );
+  }
+
+  function canSkipStep3(): boolean {
+    if (mergeResult) return true;
+    return isManifestReady();
   }
 
   function nextStep() {
@@ -445,6 +454,28 @@
     }
   });
 
+  function manifestHasLocalEntries(deps: Record<string, string> | undefined): boolean {
+    if (!deps) return false;
+    const selectedIds: string[] = [];
+    if (installBridge) selectedIds.push(BRIDGE_PACKAGE_ID);
+    if (installVerify) selectedIds.push(VERIFY_PACKAGE_ID);
+    return selectedIds.some((id) => deps[id]?.trim().startsWith("file:"));
+  }
+
+  function onUseLocalPackagesChange(checked: boolean) {
+    useLocalPackagesTouched = true;
+    useLocalPackages = checked;
+  }
+
+  $effect(() => {
+    if (currentStep !== "step3") return;
+    if (useLocalPackagesTouched) return;
+    if (!mergePlan?.manifestRead.dependencies) return;
+    if (manifestHasLocalEntries(mergePlan.manifestRead.dependencies)) {
+      useLocalPackages = true;
+    }
+  });
+
   // Live plan: re-compute the merge plan whenever Step 3 form
   // state (or the toolkit root) changes. The diff preview is
   // always live — the user does not have to click a refresh.
@@ -455,6 +486,7 @@
       mergePlan = null;
       return;
     }
+    const localMode = useLocalPackages;
     mergePlanning = true;
     let cancelled = false;
     void (async () => {
@@ -467,6 +499,7 @@
           versionPin: packageVersionPin,
           customUrl: packageCustomUrl,
           confirmUpgrades: false,
+          useLocalPackages: localMode,
         });
         if (!cancelled) {
           mergePlan = plan;
@@ -854,6 +887,7 @@
         versionPin: packageVersionPin,
         customUrl: packageCustomUrl,
         confirmUpgrades: mergePlan.hasUpgrades,
+        useLocalPackages,
       });
       mergeResult = result;
       S.appendDrawerLog(
@@ -1218,6 +1252,8 @@
     mergeResult = null;
     mergeError = null;
     upgradeAcknowledged = false;
+    useLocalPackages = false;
+    useLocalPackagesTouched = false;
     skillResult = null;
     skillError = null;
     skillOverwriteAck = false;
@@ -1318,6 +1354,32 @@
   let manifestParseError = $derived.by(() => {
     if (!mergePlan) return null;
     return mergePlan.manifestRead.parseError;
+  });
+
+  let showLocalPackagesInfo = $derived.by(() => {
+    if (!mergePlan) return false;
+    return (
+      mergePlan.useLocalPackages ||
+      mergePlan.manifestUsesLocalPackages ||
+      manifestHasLocalEntries(mergePlan.manifestRead.dependencies)
+    );
+  });
+
+  let localPackagesInfoText = $derived.by(() => {
+    if (!mergePlan) return "";
+    const paths = mergePlan.changes
+      .filter((c) => c.after.startsWith("file:"))
+      .map((c) => c.after);
+    if (paths.length > 0) {
+      return `Local package paths are in use (${paths.join(", ")}).`;
+    }
+    const existing = mergePlan.changes
+      .map((c) => c.before)
+      .filter((v): v is string => !!v && v.startsWith("file:"));
+    if (existing.length > 0) {
+      return `Local package paths are in use (${existing.join(", ")}).`;
+    }
+    return "Local package paths are in use.";
   });
 </script>
 
@@ -1629,14 +1691,14 @@
             Step 3 adds bridge + verify packages to the project's
             <code>Packages/manifest.json</code>. The diff preview
             below is live — it re-computes whenever you change a
-            toggle, version pin, or custom URL. When the project is
-            the demo project bundled inside the unity-open-mcp repo
-            itself, the wizard detects this and uses a local
-            <code>file:</code> path instead of a remote git URL —
-            no network fetch required. An upgrade (existing entry
-            with a different URL or tag) always requires explicit
-            confirmation before the wizard will write. Unrelated
-            dependency entries are preserved verbatim.
+            toggle, version pin, custom URL, or local-package
+            mode. Enable <strong>Use local packages</strong> to
+            install via <code>file:</code> paths from the toolkit
+            root (typical for projects inside this monorepo). An
+            upgrade (existing entry with a different URL or tag)
+            always requires explicit confirmation before the
+            wizard will write. Unrelated dependency entries are
+            preserved verbatim.
           </p>
 
           <div class="wiz-field">
@@ -1649,6 +1711,21 @@
               <span>
                 <strong>Install Unity Open MCP Verify</strong> —
                 <small>Scoped health checks for AI gates — not the full Unity Scanner window.</small>
+              </span>
+            </label>
+            <label class="wiz-toggle">
+              <input
+                type="checkbox"
+                checked={useLocalPackages}
+                onchange={(e) =>
+                  onUseLocalPackagesChange((e.currentTarget as HTMLInputElement).checked)}
+              />
+              <span>
+                <strong>Use local packages</strong> —
+                <small>
+                  Install via <code>file:</code> paths relative to the toolkit root
+                  (e.g. <code>file:../../packages/bridge</code>).
+                </small>
               </span>
             </label>
             <label class="wiz-toggle">
@@ -1670,6 +1747,7 @@
                 class="wiz-input"
                 placeholder="bridge-v1.0.0"
                 value={packageVersionPin}
+                disabled={useLocalPackages}
                 oninput={(e) => (packageVersionPin = (e.currentTarget as HTMLInputElement).value)}
               />
               <p class="wiz-hint">
@@ -1686,6 +1764,7 @@
                 class="wiz-input"
                 placeholder="https://github.com/your-fork/unity-open-mcp.git"
                 value={packageCustomUrl}
+                disabled={useLocalPackages}
                 oninput={(e) => (packageCustomUrl = (e.currentTarget as HTMLInputElement).value)}
               />
               <p class="wiz-hint">
@@ -1709,6 +1788,9 @@
             {:else if mergePlanning && !mergePlan}
               <p class="wiz-hint">Planning merge…</p>
             {:else if mergePlan}
+              {#if showLocalPackagesInfo}
+                <p class="wiz-hint wiz-hint-info">{localPackagesInfoText}</p>
+              {/if}
               {#if manifestParseError}
                 <div class="wiz-block wiz-block-error" role="alert">
                   <strong>Cannot parse <code>Packages/manifest.json</code>.</strong>
@@ -1779,7 +1861,11 @@
             <Button
               variant="primary"
               onclick={installManifest}
-              disabled={!isManifestReady() || mergeWriting}
+              disabled={
+                !isManifestReady() ||
+                mergeWriting ||
+                Boolean(mergePlan?.hasUpgrades && hasRealChanges && !upgradeAcknowledged)
+              }
             >
               {mergeWriting
                 ? "Installing…"
@@ -1794,8 +1880,10 @@
               onclick={() => {
                 currentStep = "step4";
               }}
-              disabled={!mergeResult}
-              title={mergeResult ? "Skip to MCP client config" : "Run the install at least once"}
+              disabled={!canSkipStep3()}
+              title={canSkipStep3()
+                ? "Skip to MCP client config"
+                : "Validate the toolkit root and resolve manifest blocks first"}
             >
               Skip to Step 4
             </Button>
@@ -2423,15 +2511,16 @@
 
   .wiz-seg {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.45rem;
-    padding: 0.35rem 0.5rem;
+    padding: 0.5rem 0.45rem;
     border: 1px solid var(--hub-border-light);
     border-radius: 6px;
     font-size: 0.74rem;
     color: var(--hub-text-muted);
     background: var(--hub-card);
     min-width: 0;
+    min-height: 3.2rem;
   }
 
   .wiz-seg-done {
@@ -2469,9 +2558,11 @@
   }
 
   .wiz-seg-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.25;
+    word-break: break-word;
   }
 
   .wiz-body {
@@ -2566,6 +2657,7 @@
 
   .wiz-hint-ok { color: #4ade80; }
   .wiz-hint-warn { color: var(--hub-error-fg); }
+  .wiz-hint-info { color: #22d3ee; }
 
   .wiz-fingerprints {
     list-style: none;

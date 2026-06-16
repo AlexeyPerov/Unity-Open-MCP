@@ -2031,7 +2031,7 @@
     const gitBranch = "minmax(5rem, 0.7fr)";
     const size = "minmax(4rem, 0.6fr)";
     const status = "minmax(10rem, 1.4fr)";
-    const settings = "2.6rem";
+    const settings = AI_SETUP_ENABLED ? "5.2rem" : "2.6rem";
     if (showModified && showGitBranch) {
       return `${name} ${version} ${modified} ${gitBranch} ${size} ${status} ${settings}`;
     }
@@ -2618,9 +2618,20 @@
                 </div>
               </div>
               <div class="cell cell-settings" role="gridcell">
+                {#if AI_SETUP_ENABLED && s.pathExists === true && s.hasVersion && !s.stale}
+                  <button
+                    type="button"
+                    class="row-action-btn ai-row-btn ai-setup-btn ai-setup-{s.launchable ? 'ready' : 'incomplete'}"
+                    onclick={(e: MouseEvent) => { e.stopPropagation(); openAiSetupFor(project); }}
+                    aria-label="AI setup"
+                    title="AI — install / configure the Unity AI agent for this project"
+                  >
+                    AI
+                  </button>
+                {/if}
                 <button
                   type="button"
-                  class="settings-btn"
+                  class="row-action-btn settings-btn"
                   onclick={(e: MouseEvent) => { e.stopPropagation(); openSettingsPopup(project.id); }}
                   aria-label="Project settings"
                   title="Project settings"
@@ -3499,16 +3510,6 @@
           >
             Copy Path
           </Button>
-          {#if AI_SETUP_ENABLED && ps.pathExists === true && ps.hasVersion && !ps.stale}
-            <Button
-              variant="secondary"
-              class="ai-setup-btn ai-setup-{ps.launchable ? 'ready' : 'incomplete'}"
-              title="AI Setup — install / configure the Unity AI agent for this project"
-              onclick={() => openAiSetupFor(popupProject)}
-            >
-              AI Setup
-            </Button>
-          {/if}
           <div class="more-wrap">
             <Button
               variant="secondary"
@@ -3550,14 +3551,6 @@
                     title="Bump the project's Unity version to an installed version higher than the current one"
                     onclick={() => { moreMenuOpenFor = null; openUpgradeModal(popupProject); }}>
                     Upgrade Unity…
-                  </button>
-                {/if}
-                {#if AI_SETUP_ENABLED && popupProject && statusFor(popupProject).pathExists === true && statusFor(popupProject).hasVersion}
-                  <div class="more-sep"></div>
-                  <button type="button" class="more-item more-item-ai-setup" role="menuitem"
-                    title="Install / configure the Unity AI agent for this project"
-                    onclick={() => { moreMenuOpenFor = null; openAiSetupFor(popupProject); }}>
-                    Configure Agent Bridge…
                   </button>
                 {/if}
                 {#if canHide(popupProject) || canUnhide(popupProject) || canMarkStale(popupProject) || canUnmarkStale(popupProject)}
@@ -4116,32 +4109,49 @@
   }
 
   .cell-settings {
-    padding: 0;
+    padding: 0.15rem;
     display: flex;
-    align-items: stretch;
-    justify-content: stretch;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
     border-left: 1px solid var(--hub-card);
   }
 
-  .settings-btn {
-    flex: 1;
-    width: 100%;
-    height: 100%;
-    border: none;
+  .row-action-btn {
+    flex: 0 0 auto;
+    border: 1px solid transparent;
     background: transparent;
-    color: var(--hub-text-muted);
+    color: var(--hub-text-dim);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
     line-height: 1;
-    border-radius: 0;
+    border-radius: 6px;
   }
 
-  .settings-btn:hover {
+  .row-action-btn:hover {
+    color: var(--hub-text-bright);
     background: var(--hub-bg);
-    color: var(--hub-text);
+  }
+
+  .row-action-btn:focus-visible {
+    outline: 2px solid var(--hub-accent);
+    outline-offset: 1px;
+  }
+
+  .ai-row-btn {
+    width: 2.5rem;
+    height: 2.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .settings-btn {
+    width: 2.5rem;
+    height: 2.5rem;
   }
 
   .cell-name {
