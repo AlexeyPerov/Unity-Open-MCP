@@ -131,7 +131,13 @@ namespace UnityOpenMcpBridge.Tests
         public static void Scan_Collision_KeepsFirst()
         {
             Assert.IsTrue(BridgeToolRegistry.TryGet("test_collision_tool", out var entry));
-            Assert.AreEqual("first", entry.Method.Name);
+            // BridgeToolEntry.Method is the CLR MethodInfo; its Name is the C# method
+            // name, not the return value. First-wins policy (ScanAssembly skips a
+            // duplicate tool name) means the registered method is Tool_CollisionFirst.First().
+            Assert.AreEqual("First", entry.Method.Name);
+            // Confirm first-wins semantically: invoking must return the first tool's value.
+            var instance = entry.GetInstance();
+            Assert.AreEqual("first", entry.Method.Invoke(instance, null));
         }
 
         [Test]
@@ -169,9 +175,15 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void TryDispatch_MissingRequiredParam_ReturnsError()
         {
+            // Missing a required (non-nullable, no default) parameter must surface as a
+            // non-null failed result carrying the missing_parameter code. Returning null
+            // is reserved by TryDispatch for unknown-tool only (the HTTP layer maps null
+            // -> tool_not_found, and a missing_parameter Fail -> the gate error envelope).
             var body = "{\"name\":\"hello\"}";
             var result = BridgeToolRegistry.TryDispatch("test_params_tool", body);
-            Assert.IsNull(result, "Missing required parameter should return null (which maps to missing_parameter error in the server)");
+            Assert.IsNotNull(result, "Missing required parameter must not map to unknown-tool (null)");
+            Assert.IsFalse(result.Success, "Dispatch must fail when a required parameter is missing");
+            Assert.AreEqual("missing_parameter", result.ErrorCode);
         }
     }
 }

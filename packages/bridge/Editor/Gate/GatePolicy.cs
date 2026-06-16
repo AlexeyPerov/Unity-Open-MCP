@@ -306,7 +306,11 @@ namespace UnityOpenMcpBridge
         {
             if (string.IsNullOrEmpty(key)) return null;
             var parts = key.Split('|');
-            if (parts.Length < 4) return null;
+            // Match the canonical IssueKey.TryParse contract (IssueKey.cs): a key is
+            // exactly four pipe-separated parts. Fewer is malformed; more means a stray
+            // '|' leaked into one of the fields and the key must be rejected, not
+            // silently truncated — otherwise the truncated key would masquerade as valid.
+            if (parts.Length != 4) return null;
             return new IssueKeyParts(parts[0], parts[1], parts[2], parts[3]);
         }
 

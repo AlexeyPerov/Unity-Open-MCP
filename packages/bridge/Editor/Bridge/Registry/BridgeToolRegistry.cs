@@ -123,7 +123,8 @@ namespace UnityOpenMcpBridge
                 var hasDefault = param.HasDefaultValue;
                 var isNullable = !paramType.IsValueType || Nullable.GetUnderlyingType(paramType) != null;
 
-                var rawValue = JsonBody.GetRawValue(body, "\"" + paramName + "\"");
+                // JsonBody.GetRawValue wraps the key in quotes itself; pass the bare key.
+                var rawValue = JsonBody.GetRawValue(body, paramName);
                 if (rawValue == null)
                 {
                     if (hasDefault)
