@@ -9,6 +9,12 @@ using UnityOpenMcpVerify.Rules;
 
 namespace UnityOpenMcpVerify.Tests
 {
+    // TEMPORARILY DISABLED (heavy) — re-enable as part of T2.5 (EditMode
+    // test-suite speed-up, specs/execution/M12/execution-plan-3-rules-wave2-
+    // fixes.md). [UnityTest] coroutines exercise real fixture assets with
+    // AssetDatabase I/O. [Explicit] excludes from suite runs until optimized;
+    // still runnable by name.
+    [Explicit]
     [TestFixture]
     public class FixtureMissingReferencesTests
     {

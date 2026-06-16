@@ -31,6 +31,14 @@ export const runTests: Tool = {
         type: "string",
         description: "Filter: run only this test method (fully qualified name).",
       },
+      include_passes: {
+        type: "boolean",
+        default: true,
+        description:
+          "Include passing tests in the results array. Set false to return " +
+          "only failures/inconclusive — the summary still reports the full " +
+          "counts. Recommended for large suites to avoid truncation.",
+      },
       timeout_ms: {
         type: "integer",
         default: 60000,

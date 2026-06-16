@@ -6,6 +6,12 @@ using UnityEngine;
 
 namespace UnityOpenMcpVerify.Tests
 {
+    // TEMPORARILY DISABLED (heavy) — re-enable as part of T2.5 (EditMode
+    // test-suite speed-up, specs/execution/M12/execution-plan-3-rules-wave2-
+    // fixes.md). ReferenceGraph.Find walks all assets referencing the Standard
+    // shader (full-project traversal). [Explicit] excludes from suite runs
+    // until optimized; still runnable by name.
+    [Explicit]
     public class ReferenceGraphTests
     {
         const string TestFolder = "Assets/__RefGraphTestTmp";

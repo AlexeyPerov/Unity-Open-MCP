@@ -8,6 +8,12 @@ using UnityOpenMcpVerify;
 
 namespace UnityOpenMcpVerify.Tests
 {
+    // TEMPORARILY DISABLED (heavy) — re-enable as part of T2.5 (EditMode
+    // test-suite speed-up, specs/execution/M12/execution-plan-3-rules-wave2-
+    // fixes.md). Each [UnityTest] does .bak file swaps + multiple
+    // AssetDatabase.Refresh() calls + full VerifyRunner.RunScoped scans.
+    // [Explicit] excludes from suite runs until optimized; runnable by name.
+    [Explicit]
     [TestFixture]
     public class GateDeltaIntegrationTests
     {

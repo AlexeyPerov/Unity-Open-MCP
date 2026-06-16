@@ -6,6 +6,11 @@ using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
+// Exposes TestRunnerService internals (BuildResultsJson, Cap, TestResultInfo)
+// to the test assembly for the filtering/truncation unit tests.
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo(
+    "com.alexeyperov.unity-open-mcp-bridge.Editor.Tests")]
+
 namespace UnityOpenMcpBridge.TestRunner
 {
     struct TestResultInfo
@@ -19,6 +24,12 @@ namespace UnityOpenMcpBridge.TestRunner
 
     static class TestRunnerService
     {
+        // Per-field caps keep the results payload within typical MCP client
+        // context windows. A 390-test run with many failures can otherwise emit
+        // hundreds of KB of stack traces, which clients truncate mid-JSON.
+        internal const int MaxFieldLength = 2000;
+        internal const int MaxStackTraceLength = 4000;
+
         internal static readonly string StatusDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".unity-agent");
@@ -82,11 +93,14 @@ namespace UnityOpenMcpBridge.TestRunner
         }
 
         internal static void WriteResultsFile(string runId, string mode, List<TestResultInfo> results)
+            => WriteResultsFile(runId, mode, results, includePasses: true);
+
+        internal static void WriteResultsFile(string runId, string mode, List<TestResultInfo> results, bool includePasses)
         {
             try
             {
                 Directory.CreateDirectory(StatusDir);
-                File.WriteAllText(ResultsFilePath(runId), BuildResultsJson(runId, mode, results));
+                File.WriteAllText(ResultsFilePath(runId), BuildResultsJson(runId, mode, results, includePasses));
             }
             catch (Exception ex)
             {
@@ -126,7 +140,7 @@ namespace UnityOpenMcpBridge.TestRunner
             return sb.ToString();
         }
 
-        static string BuildResultsJson(string runId, string mode, List<TestResultInfo> results)
+        internal static string BuildResultsJson(string runId, string mode, List<TestResultInfo> results, bool includePasses)
         {
             int passed = 0, failed = 0, skipped = 0, inconclusive = 0;
             for (int i = 0; i < results.Count; i++)
@@ -145,6 +159,7 @@ namespace UnityOpenMcpBridge.TestRunner
             sb.Append("\"status\":\"completed\",");
             sb.Append("\"runId\":").Append(EscapeString(runId)).Append(',');
             sb.Append("\"mode\":").Append(EscapeString(mode)).Append(',');
+            sb.Append("\"includePasses\":").Append(includePasses ? "true" : "false").Append(',');
             sb.Append("\"summary\":{");
             sb.Append("\"total\":").Append(results.Count).Append(',');
             sb.Append("\"passed\":").Append(passed).Append(',');
@@ -152,21 +167,35 @@ namespace UnityOpenMcpBridge.TestRunner
             sb.Append("\"skipped\":").Append(skipped).Append(',');
             sb.Append("\"inconclusive\":").Append(inconclusive);
             sb.Append("},");
+
+            // When includePasses is false, emit only non-passed results so a
+            // large suite doesn't overrun the client's context window. The
+            // summary above always carries the full counts either way.
             sb.Append("\"results\":[");
+            bool first = true;
             for (int i = 0; i < results.Count; i++)
             {
-                if (i > 0) sb.Append(',');
                 var r = results[i];
+                if (!includePasses && r.Status == "passed") continue;
+
+                if (!first) sb.Append(',');
+                first = false;
                 sb.Append('{');
                 sb.Append("\"name\":").Append(EscapeString(r.Name)).Append(',');
                 sb.Append("\"status\":").Append(EscapeString(r.Status)).Append(',');
                 sb.Append("\"duration\":").Append(r.Duration.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
-                sb.Append(",\"message\":").Append(EscapeString(r.Message));
-                sb.Append(",\"stackTrace\":").Append(EscapeString(r.StackTrace));
+                sb.Append(",\"message\":").Append(EscapeString(Cap(r.Message, MaxFieldLength)));
+                sb.Append(",\"stackTrace\":").Append(EscapeString(Cap(r.StackTrace, MaxStackTraceLength)));
                 sb.Append('}');
             }
             sb.Append("]}");
             return sb.ToString();
+        }
+
+        internal static string Cap(string value, int max)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length <= max) return value ?? "";
+            return value.Substring(0, max) + $"…[{value.Length - max} more chars]";
         }
 
         internal static string EscapeString(string s)

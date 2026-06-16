@@ -22,7 +22,8 @@ namespace UnityOpenMcpBridge.TestRunner
             string test_namespace = null,
             string test_class = null,
             string test_method = null,
-            string run_id = null)
+            string run_id = null,
+            bool include_passes = true)
         {
             if (string.IsNullOrEmpty(run_id))
                 run_id = System.Diagnostics.Process.GetCurrentProcess().Id + "-"
@@ -40,15 +41,15 @@ namespace UnityOpenMcpBridge.TestRunner
 
             if (play_mode)
             {
-                TestRunnerState.MarkPending(run_id, assembly_name, test_namespace, test_class, test_method);
+                TestRunnerState.MarkPending(run_id, assembly_name, test_namespace, test_class, test_method, include_passes);
             }
 
-            StartRun(filter, run_id, mode, play_mode);
+            StartRun(filter, run_id, mode, play_mode, include_passes);
 
             return TestRunnerService.BuildStartedJson(run_id, mode);
         }
 
-        static void StartRun(Filter filter, string runId, string mode, bool playMode)
+        static void StartRun(Filter filter, string runId, string mode, bool playMode, bool includePasses)
         {
             var results = new List<TestResultInfo>();
             TestRunnerApi api = null;
@@ -60,7 +61,7 @@ namespace UnityOpenMcpBridge.TestRunner
                     if (api != null) Object.DestroyImmediate(api);
                     if (playMode)
                         TestRunnerState.ClearPending(runId);
-                    TestRunnerService.WriteResultsFile(runId, mode, results);
+                    TestRunnerService.WriteResultsFile(runId, mode, results, includePasses);
                 });
 
             api = ScriptableObject.CreateInstance<TestRunnerApi>();

@@ -22,7 +22,8 @@ namespace UnityOpenMcpBridge.TestRunner
             string assemblyName,
             string testNamespace,
             string testClass,
-            string testMethod)
+            string testMethod,
+            bool includePasses = true)
         {
             try
             {
@@ -33,7 +34,8 @@ namespace UnityOpenMcpBridge.TestRunner
                 sb.Append("\"assemblyName\":").Append(TestRunnerService.EscapeString(assemblyName ?? "")).Append(',');
                 sb.Append("\"testNamespace\":").Append(TestRunnerService.EscapeString(testNamespace ?? "")).Append(',');
                 sb.Append("\"testClass\":").Append(TestRunnerService.EscapeString(testClass ?? "")).Append(',');
-                sb.Append("\"testMethod\":").Append(TestRunnerService.EscapeString(testMethod ?? ""));
+                sb.Append("\"testMethod\":").Append(TestRunnerService.EscapeString(testMethod ?? "")).Append(',');
+                sb.Append("\"includePasses\":").Append(includePasses ? "true" : "false");
                 sb.Append('}');
                 File.WriteAllText(PendingFilePath(runId), sb.ToString());
             }
@@ -65,13 +67,14 @@ namespace UnityOpenMcpBridge.TestRunner
                     var testNamespace = JsonBody.GetString(json, "testNamespace");
                     var testClass = JsonBody.GetString(json, "testClass");
                     var testMethod = JsonBody.GetString(json, "testMethod");
+                    var includePasses = JsonBody.GetBool(json, "includePasses", true);
 
                     if (assemblyName == "") assemblyName = null;
                     if (testNamespace == "") testNamespace = null;
                     if (testClass == "") testClass = null;
                     if (testMethod == "") testMethod = null;
 
-                    ReattachCallbacks(runId, assemblyName, testNamespace, testClass, testMethod);
+                    ReattachCallbacks(runId, assemblyName, testNamespace, testClass, testMethod, includePasses);
                 }
             }
             catch (Exception ex)
@@ -85,7 +88,8 @@ namespace UnityOpenMcpBridge.TestRunner
             string assemblyName,
             string testNamespace,
             string testClass,
-            string testMethod)
+            string testMethod,
+            bool includePasses)
         {
             var filter = TestRunnerService.BuildFilter(true, assemblyName, testNamespace, testClass, testMethod);
             var results = new List<TestResultInfo>();
@@ -97,7 +101,7 @@ namespace UnityOpenMcpBridge.TestRunner
                 {
                     if (api != null) Object.DestroyImmediate(api);
                     ClearPending(runId);
-                    TestRunnerService.WriteResultsFile(runId, "PlayMode", results);
+                    TestRunnerService.WriteResultsFile(runId, "PlayMode", results, includePasses);
                 });
 
             api = ScriptableObject.CreateInstance<TestRunnerApi>();

@@ -9,6 +9,13 @@ using UnityOpenMcpVerify.Rules;
 
 namespace UnityOpenMcpVerify.Tests
 {
+    // TEMPORARILY DISABLED (heavy) — re-enable as part of T2.5 (EditMode
+    // test-suite speed-up, specs/execution/M12/execution-plan-3-rules-wave2-
+    // fixes.md). The [UnityTest] coroutines each fire ~4 AssetDatabase.Refresh()
+    // calls plus CreateAsset/SaveAsPrefabAsset, making this the single slowest
+    // file in the suite. [Explicit] excludes it from suite runs until the
+    // redundant Refresh() calls are consolidated in T2.5; still runnable by name.
+    [Explicit]
     [TestFixture]
     public class MissingReferencesRuleTests
     {

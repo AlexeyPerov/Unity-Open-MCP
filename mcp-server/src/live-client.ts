@@ -177,7 +177,12 @@ export class LiveClient implements Router {
     const timeoutMs =
       typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
     const deadline = Date.now() + timeoutMs;
-    const pollIntervalMs = 1_000;
+    // Check before sleeping: an EditMode run often finishes within a second or
+    // two, and the previous fixed 1s-before-first-check + 1s interval added up
+    // to seconds of dead time per call. Back off 250ms -> 1s so fast runs return
+    // promptly without hammering the filesystem on long ones.
+    const minIntervalMs = 250;
+    const maxIntervalMs = 1_000;
 
     const resultsPath = join(
       homedir(),
@@ -185,9 +190,8 @@ export class LiveClient implements Router {
       `test-results-${runId}.json`,
     );
 
+    let intervalMs = minIntervalMs;
     while (Date.now() < deadline) {
-      await sleep(pollIntervalMs);
-
       try {
         if (existsSync(resultsPath)) {
           const content = readFileSync(resultsPath, "utf-8");
@@ -214,6 +218,9 @@ export class LiveClient implements Router {
       } catch {
         // continue polling
       }
+
+      await sleep(intervalMs);
+      intervalMs = Math.min(intervalMs * 2, maxIntervalMs);
     }
 
     return makeErrorResult(
