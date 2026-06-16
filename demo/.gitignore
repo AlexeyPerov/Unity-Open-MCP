@@ -88,3 +88,6 @@ crashlytics-build.properties
 
 # AI
 .cursor/
+
+*.bak
+*.bak.meta
