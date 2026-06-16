@@ -5,9 +5,9 @@ using UnityEngine;
 
 namespace UnityOpenMcpBridge.Tests
 {
-    // TEMPORARILY DISABLED (heavy) — re-enable as part of T2.5 (EditMode
-    // test-suite speed-up, specs/execution/M12/execution-plan-3-rules-wave2-
-    // fixes.md). FindReferences performs full-project reverse-lookup scans of
+    // TEMPORARILY DISABLED (heavy) — re-enable as part of T17.3 (EditMode
+    // test-suite speed-up, specs/execution/M17/execution-plan-3-editmode-test-perf.md).
+    // FindReferences performs full-project reverse-lookup scans of
     // the Standard shader across all assets. [Explicit] excludes from suite
     // runs until optimized; still runnable by name.
     [Explicit]

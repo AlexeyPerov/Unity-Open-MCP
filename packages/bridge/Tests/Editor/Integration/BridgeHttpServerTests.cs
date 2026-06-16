@@ -9,12 +9,12 @@ using UnityEngine;
 
 namespace UnityOpenMcpBridge.Tests
 {
-    // TEMPORARILY DISABLED — re-enable as part of T2.5 (EditMode test-suite
-    // speed-up, specs/execution/M12/execution-plan-3-rules-wave2-fixes.md).
+    // TEMPORARILY DISABLED — re-enable as part of T17.3 (EditMode test-suite
+    // speed-up, specs/execution/M17/execution-plan-3-editmode-test-perf.md).
     // These tests hard-require a live bridge listening on :19120; when the
     // bridge is down each fails after a 10s HttpClient timeout, burning the
     // entire 30s suite budget. [Explicit] keeps them runnable by name but
-    // excludes them from suite runs until bridge lifecycle is fixed in T2.5.
+    // excludes them from suite runs until bridge lifecycle is fixed (M12 T1.5.4).
     [Explicit]
     public class BridgeHttpServerTests
     {
