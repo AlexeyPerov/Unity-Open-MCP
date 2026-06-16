@@ -236,7 +236,7 @@ export class LiveClient implements Router {
   ): Promise<CallToolResult> {
     try {
       const timeoutMs =
-        typeof args.timeout_ms === "number" ? args.timeout_ms : 30_000;
+        typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
       const res = await this.fetchWithTimeout(
         `/tools/${toolName}`,
         {

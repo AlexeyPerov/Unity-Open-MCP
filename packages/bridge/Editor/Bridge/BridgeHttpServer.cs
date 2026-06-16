@@ -20,7 +20,10 @@ namespace UnityOpenMcpBridge
         const string BindAddress = "127.0.0.1";
         const int DefaultTimeoutMs = 30000;
         const int MinTimeoutMs = 1000;
-        const int MaxTimeoutMs = 300000;
+        // Matches the documented maximum in the run-tests tool schema
+        // (mcp-server/src/tools/run-tests.ts). Previously 300000, which silently
+        // clamped a caller's explicit value below the advertised ceiling.
+        const int MaxTimeoutMs = 600000;
 
         static readonly HashSet<string> KnownTools = new()
         {
@@ -637,7 +640,7 @@ namespace UnityOpenMcpBridge
             return reader.ReadToEnd();
         }
 
-        static int ExtractTimeoutMs(string body)
+        internal static int ExtractTimeoutMs(string body)
         {
             if (string.IsNullOrEmpty(body)) return DefaultTimeoutMs;
 

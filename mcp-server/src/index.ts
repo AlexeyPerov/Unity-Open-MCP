@@ -15,9 +15,15 @@ import { BatchSpawn } from "./batch-spawn.js";
 import { ToolRouter } from "./tool-router.js";
 import { PingCache } from "./ping-cache.js";
 import { ResourceRouter } from "./resource-router.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { withSchemaDefaults } from "./schema-defaults.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 
 const DEFAULT_PORT = 19120;
+
+/** Name → tool lookup, built once for default-injection in the CallTool handler. */
+const TOOL_BY_NAME = new Map<string, Tool>(
+  ALL_TOOLS.map((t) => [t.name, t]),
+);
 
 function getEnv(): { projectPath: string; port: number } {
   const projectPath = process.env.UNITY_PROJECT_PATH;
@@ -59,7 +65,13 @@ export function createServer(projectPath: string, port: number): Server {
     async (request): Promise<CallToolResult> => {
       const { name, arguments: args } = request.params;
       const callArgs = (args ?? {}) as Record<string, unknown>;
-      return router.route(name, callArgs);
+      // Fill missing top-level scalar defaults (e.g. timeout_ms) from the
+      // tool's documented schema. MCP clients may omit these; without this
+      // step every downstream layer falls back to its own hardcoded value and
+      // silently contradicts the schema (historically 30s vs run_tests' 60s).
+      const tool = TOOL_BY_NAME.get(name);
+      const routedArgs = tool ? withSchemaDefaults(tool, callArgs) : callArgs;
+      return router.route(name, routedArgs);
     },
   );
 

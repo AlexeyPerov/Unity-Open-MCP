@@ -5,9 +5,9 @@ Includes a Unity Hub Pro launcher with wizard setup for this MCP.
 
 ## Current features
 
-- Unity Hub Pro desktop app scaffold under [hub/](hub/).
-- Bridge package and tests under [packages/](packages/).
 - MCP server workspace under [mcp-server/](mcp-server/).
+- Bridge package and tests under [packages/](packages/).
+- Unity Hub Pro desktop app scaffold under [hub/](hub/).
 - Demo and templates for local experimentation and automation under [demo/](demo/) and [templates/](templates/).
 
 ## Repository layout
@@ -38,3 +38,9 @@ Start from the component you are working on:
 - Hub app: see [hub/README.md](hub/README.md)
 - Demo setup: see [demo/README.md](demo/README.md)
 - Templates usage: see [templates/github-actions/README.md](templates/github-actions/README.md)
+
+<div align="center" width="100%">
+
+[![MCP](https://badge.mcpx.dev 'MCP Server')](https://modelcontextprotocol.io/introduction)
+
+</div>
