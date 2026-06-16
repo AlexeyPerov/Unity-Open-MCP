@@ -49,7 +49,7 @@ namespace UnityOpenMcpBridge.MetaTools
 
                     // Accept bare integers or full handle JSON.
                     var resolved = int.TryParse(idStr.Trim(), out var bareId)
-                        ? ObjectHandle.Resolve(bareId, null, null, null, null, null, null, 0, out _)
+                        ? ObjectHandle.Resolve(bareId, null, null, null, null, null, out _)
                         : ObjectHandle.ResolveJson(idStr, out _);
                     resolvedRefs[i] = resolved;
                 }

@@ -40,7 +40,7 @@ namespace UnityOpenMcpBridge.Screenshot
             var cam = Camera.main;
             if (cam == null)
             {
-                var all = Object.FindObjectsByType<Camera>(FindObjectsSortMode.None);
+                var all = Object.FindObjectsByType<Camera>();
                 if (all == null || all.Length == 0)
                     throw new InvalidOperationException("No camera found in the scene.");
                 cam = all[0];
@@ -85,8 +85,6 @@ namespace UnityOpenMcpBridge.Screenshot
             };
 
             var composites = new Texture2D[4];
-            RenderTexture prevTarget = null;
-            Camera prevCam = null;
 
             try
             {
@@ -129,7 +127,7 @@ namespace UnityOpenMcpBridge.Screenshot
                 tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
                 tex.Apply();
 
-                var png = ImageConversion.EncodeToPNG();
+                var png = ImageConversion.EncodeToPNG(tex);
                 Directory.CreateDirectory(OutputDir);
                 File.WriteAllBytes(outPath, png);
 
@@ -217,7 +215,7 @@ namespace UnityOpenMcpBridge.Screenshot
             composite.SetPixels32(pixels);
             composite.Apply();
 
-            var png = ImageConversion.EncodeToPNG();
+            var png = ImageConversion.EncodeToPNG(composite);
             Directory.CreateDirectory(OutputDir);
             File.WriteAllBytes(outPath, png);
             Object.DestroyImmediate(composite);

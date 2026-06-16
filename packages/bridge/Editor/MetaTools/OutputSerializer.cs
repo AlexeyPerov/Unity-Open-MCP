@@ -265,7 +265,9 @@ namespace UnityOpenMcpBridge.MetaTools
         sealed class ReferenceComparer : IEqualityComparer<object>
         {
             public static readonly ReferenceComparer Instance = new ReferenceComparer();
-            public bool Equals(object x, object y) => ReferenceEquals(x, y);
+            // 'new' is intentional: this implements IEqualityComparer<object>.Equals(object,object)
+            // and deliberately hides the default object.Equals(object,object) with reference identity.
+            public new bool Equals(object x, object y) => ReferenceEquals(x, y);
             public int GetHashCode(object obj) => RuntimeHelpers.GetHashCode(obj);
         }
     }

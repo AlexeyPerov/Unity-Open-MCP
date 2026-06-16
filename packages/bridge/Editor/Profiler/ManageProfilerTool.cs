@@ -167,11 +167,15 @@ namespace UnityOpenMcpBridge.Profiler
                     GC.Collect();
                 }
 
-                long allocated = Profiler.GetTotalAllocatedMemoryLong();
-                long reserved = Profiler.GetTotalReservedMemoryLong();
-                long unusedReserved = Profiler.GetTotalUnusedReservedMemoryLong();
+                // Fully qualified: the unqualified 'Profiler' identifier resolves
+                // to this file's own namespace (UnityOpenMcpBridge.Profiler), not
+                // the static UnityEngine.Profiling.Profiler type, so it must be
+                // written out in full to avoid CS0234.
+                long allocated = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong();
+                long reserved = UnityEngine.Profiling.Profiler.GetTotalReservedMemoryLong();
+                long unusedReserved = UnityEngine.Profiling.Profiler.GetTotalUnusedReservedMemoryLong();
                 long tempAllocator = 0;
-                try { tempAllocator = Profiler.GetTempAllocatorSize(); } catch { }
+                try { tempAllocator = UnityEngine.Profiling.Profiler.GetTempAllocatorSize(); } catch { }
                 long managed = GC.GetTotalMemory(false);
 
                 var sb = new StringBuilder(512);
@@ -236,7 +240,7 @@ namespace UnityOpenMcpBridge.Profiler
                 var res = Screen.currentResolution;
                 sb.Append("\"currentWidth\":").Append(res.width).Append(',');
                 sb.Append("\"currentHeight\":").Append(res.height).Append(',');
-                sb.Append("\"refreshRate\":").Append(Num(res.refreshRateRatio));
+                sb.Append("\"refreshRate\":").Append(Num(res.refreshRateRatio.value));
                 sb.Append("},");
 
                 // ---- Quality / Application ----
@@ -254,7 +258,7 @@ namespace UnityOpenMcpBridge.Profiler
                 sb.Append("\"pixelLightCount\":").Append(QualitySettings.pixelLightCount).Append(',');
                 sb.Append("\"antiAliasing\":").Append(QualitySettings.antiAliasing).Append(',');
                 sb.Append("\"shadowCascades\":").Append(QualitySettings.shadowCascades).Append(',');
-                sb.Append("\"softShadows\":").Append(QualitySettings.softShadows ? "true" : "false");
+                sb.Append("\"softShadows\":").Append(QualitySettings.shadows == ShadowQuality.All ? "true" : "false");
                 sb.Append("},");
 
                 sb.Append("\"application\":{");

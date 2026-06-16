@@ -6,6 +6,13 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
+// GetInstanceID() / EditorUtility.InstanceIDToObject() are deprecated in Unity
+// 6000.4+ in favour of GetEntityId() / EntityIdToObject(), but those replacements
+// only exist on 6000.4+ (this package's declared minimum is 6000.0) and
+// GetEntityId() returns *different values* than the int instance ID. Our JSON
+// object-handle contract (objectId / gameObjectId / instanceId) is built on the
+// stable int instance ID, so we intentionally keep the deprecated int APIs here.
+#pragma warning disable CS0618
 namespace UnityOpenMcpBridge.ObjectRefs
 {
     /// <summary>
@@ -97,9 +104,9 @@ namespace UnityOpenMcpBridge.ObjectRefs
             string path,
             string assetPath,
             string assetGuid,
+            out string error,
             string gameObjectPath = null,
-            int gameObjectId = 0,
-            out string error)
+            int gameObjectId = 0)
         {
             // 1. Canonical instance ID — fast, but invalidated by domain reload.
             if (instanceId != 0)
@@ -206,7 +213,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             var trimmed = handleJson.Trim();
             if (int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var bareId))
             {
-                return Resolve(bareId, null, null, null, null, null, null, 0, out error);
+                return Resolve(bareId, null, null, null, null, null, out error);
             }
 
             var instanceId = JsonBody.GetInt(handleJson, ObjectIdKey, 0);
@@ -225,7 +232,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             var gameObjectId = JsonBody.GetInt(handleJson, GameObjectIdKey, 0);
 
             return Resolve(instanceId, typeName, name, path, assetPath, assetGuid,
-                gameObjectPath, gameObjectId, out error);
+                out error, gameObjectPath, gameObjectId);
         }
 
         /// <summary>

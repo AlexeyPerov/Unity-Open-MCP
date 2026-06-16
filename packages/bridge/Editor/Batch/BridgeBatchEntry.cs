@@ -34,9 +34,17 @@ namespace UnityOpenMcpBridge.Batch
                 json = ErrorEnvelope("unhandled_exception", e.Message);
             }
 
-            Console.WriteLine(OutputBegin);
-            Console.WriteLine(json);
-            Console.WriteLine(OutputEnd);
+            // System.Console (NOT UnityEngine.Debug) is intentional: this is a
+            // -batchmode entry point whose stdout is parsed by the MCP server
+            // (batch-spawn.ts extractJson reads the spawned process stdout) for
+            // the JSON markers below. Debug.Log writes to Editor.log, not stdout,
+            // so switching to it would break every batch invocation. The bare
+            // 'Console' name is qualified with 'System.' because it would
+            // otherwise resolve to the sibling UnityOpenMcpBridge.Console
+            // namespace (Console/ReadConsoleTool.cs), causing CS0234.
+            System.Console.WriteLine(OutputBegin);
+            System.Console.WriteLine(json);
+            System.Console.WriteLine(OutputEnd);
 
             if (Application.isBatchMode)
             {

@@ -72,7 +72,9 @@ namespace UnityOpenMcpBridge.Screenshot
         {
             // Try as hierarchy path first (slash-separated from root).
             var parts = path.Split('/');
-            var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            // FindObjectsByType<T>(FindObjectsInactive) — the sort-mode overloads
+            // are deprecated in Unity 6000.4+; None-sorted is the default anyway.
+            var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude);
 
             foreach (var root in roots)
             {

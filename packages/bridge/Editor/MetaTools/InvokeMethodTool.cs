@@ -51,7 +51,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 if (objectId != 0)
                 {
                     target = ObjectHandle.Resolve(objectId, type.FullName, null, null, null, null,
-                        null, 0, out var resolveError);
+                        out var resolveError);
                     if (target == null)
                         return ToolDispatchResult.Fail("object_not_found",
                             $"Could not resolve object_id {objectId} as target for instance method: {resolveError}");

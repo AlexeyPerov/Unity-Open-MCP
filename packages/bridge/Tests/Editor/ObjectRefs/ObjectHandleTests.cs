@@ -63,7 +63,7 @@ namespace UnityOpenMcpBridge.Tests
                 var instanceId = go.GetInstanceID();
                 var resolved = ObjectHandle.Resolve(
                     instanceId, "UnityEngine.GameObject", go.name, null, null, null,
-                    null, 0, out var error);
+                    out var error);
 
                 Assert.IsNotNull(resolved, "Should resolve by instance ID");
                 Assert.IsNull(error, "No error expected on successful resolution");
@@ -81,7 +81,7 @@ namespace UnityOpenMcpBridge.Tests
             // Use an instance ID that does not exist.
             var resolved = ObjectHandle.Resolve(
                 999999999, "UnityEngine.GameObject", null, null, null, null,
-                null, 0, out var error);
+                out var error);
 
             Assert.IsNull(resolved, "Should not resolve a non-existent instance ID");
             Assert.IsNotNull(error, "Must provide error guidance for stale handles");
@@ -99,7 +99,7 @@ namespace UnityOpenMcpBridge.Tests
                 // Use a stale instance ID but provide the name as fallback.
                 var resolved = ObjectHandle.Resolve(
                     999999999, "UnityEngine.GameObject", "TestHandle_Fallback_GO", null, null, null,
-                    null, 0, out var error);
+                    out var error);
 
                 Assert.IsNotNull(resolved, "Should fall back to name lookup");
                 Assert.IsNull(error, "No error when a fallback succeeds");
@@ -178,7 +178,7 @@ namespace UnityOpenMcpBridge.Tests
                 var resolved = ObjectHandle.Resolve(
                     999999999, "UnityEngine.GameObject", null,
                     "TestHandle_Path_Root/TestHandle_Path_Child",
-                    null, null, null, 0, out var error);
+                    null, null, out var error);
 
                 Assert.IsNotNull(resolved, "Should fall back to path lookup");
                 Assert.IsNull(error);
@@ -201,7 +201,7 @@ namespace UnityOpenMcpBridge.Tests
                 // Stale component instance ID, but provide the parent GameObject path.
                 var resolved = ObjectHandle.Resolve(
                     999999999, "UnityEngine.Camera", null, null, null, null,
-                    "TestHandle_CompFallback_GO", 0, out var error);
+                    out var error, "TestHandle_CompFallback_GO", 0);
 
                 Assert.IsNotNull(resolved, "Should find component via parent path fallback");
                 Assert.IsNull(error);
