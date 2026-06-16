@@ -15,9 +15,9 @@ import {
   searchAssetsOffline,
   listAssetsOffline,
   findReferencesOffline,
-} from "./offline.ts";
-import { renderAssetSummary } from "./compression/compact.ts";
-import type { AssetModel } from "./compression/asset-model.ts";
+} from "./offline.js";
+import { renderAssetSummary } from "./compression/compact.js";
+import type { AssetModel } from "./compression/asset-model.js";
 
 // ---------------------------------------------------------------------------
 // readAssetOffline — end-to-end integration (acceptance criteria).

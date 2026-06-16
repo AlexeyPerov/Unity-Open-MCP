@@ -147,7 +147,7 @@ namespace UnityOpenMcpBridge
             return args;
         }
 
-        static object ConvertValue(string raw, Type targetType)
+        internal static object ConvertValue(string raw, Type targetType)
         {
             if (raw == "null") return null;
 

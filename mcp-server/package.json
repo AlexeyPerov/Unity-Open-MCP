@@ -7,8 +7,9 @@
   "bin": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "build:test": "tsc -p tsconfig.test.json",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types --no-warnings 'src/**/*.test.ts'"
+    "test": "npm run build:test && node --test 'dist-test/**/*.test.js'"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -1,0 +1,74 @@
+# TypeScript CI — typecheck + tests for the hub and mcp-server packages.
+#
+# No Unity license is required; runs on a GitHub-hosted Ubuntu runner. Each
+# package is a separate job and is path-filtered so a TS-only change does not
+# spin up the Unity runner and vice-versa.
+
+name: typescript
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "hub/**"
+      - "mcp-server/**"
+      - ".github/workflows/typescript.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "hub/**"
+      - "mcp-server/**"
+
+jobs:
+  hub:
+    name: hub — check + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hub
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: hub/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck (svelte-check)
+        run: npm run check
+
+      - name: Test
+        run: npm test
+
+  mcp-server:
+    name: mcp-server — typecheck + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test (build then run)
+        run: npm test

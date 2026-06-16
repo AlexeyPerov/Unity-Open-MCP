@@ -214,7 +214,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        static (GateOutcome outcome, bool gateFailed) ResolveOutcome(GateMode mode, DeltaData delta)
+        internal static (GateOutcome outcome, bool gateFailed) ResolveOutcome(GateMode mode, DeltaData delta)
         {
             if (delta.NewErrors > 0)
             {
@@ -233,7 +233,7 @@ namespace UnityOpenMcpBridge
             return (GateOutcome.Passed, false);
         }
 
-        static string[] GenerateAgentNextSteps(DeltaData delta, GateOutcome outcome)
+        internal static string[] GenerateAgentNextSteps(DeltaData delta, GateOutcome outcome)
         {
             var steps = new List<string>();
 
@@ -302,7 +302,7 @@ namespace UnityOpenMcpBridge
             return false;
         }
 
-        static IssueKeyParts? ParseIssueKey(string key)
+        internal static IssueKeyParts? ParseIssueKey(string key)
         {
             if (string.IsNullOrEmpty(key)) return null;
             var parts = key.Split('|');

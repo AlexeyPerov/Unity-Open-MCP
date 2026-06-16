@@ -1,17 +1,18 @@
+import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PingCache } from "./ping-cache.ts";
+import { PingCache } from "./ping-cache.js";
 import {
   ResourceRouter,
   handleHealthBaseline,
   handleBridgeStatus,
-} from "./resource-router.ts";
-import type { ResourceHandlerDeps } from "./resource-router.ts";
-import type { PingSnapshot } from "./ping-cache.ts";
+} from "./resource-router.js";
+import type { ResourceHandlerDeps } from "./resource-router.js";
+import type { PingSnapshot } from "./ping-cache.js";
 
 interface MockLive {
   readResourceCalls: string[];
@@ -53,8 +54,12 @@ function makeDeps(
   };
 }
 
-function parseContent(result: { contents: Array<{ text: string }> }): unknown {
-  return JSON.parse(result.contents[0]!.text);
+function parseContent(result: ReadResourceResult): unknown {
+  const first = result.contents[0];
+  if (!first || !("text" in first) || typeof first.text !== "string") {
+    throw new Error("expected a text content part");
+  }
+  return JSON.parse(first.text);
 }
 
 // ---------------------------------------------------------------------------

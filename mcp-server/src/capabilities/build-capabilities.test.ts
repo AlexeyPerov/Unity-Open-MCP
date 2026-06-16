@@ -4,14 +4,14 @@ import assert from "node:assert/strict";
 import {
   buildCapabilities,
   PLANNED_TOOLS,
-} from "./build-capabilities.ts";
+} from "./build-capabilities.js";
 import {
   RULE_CATALOG,
   FIX_CATALOG,
   implementedRules,
   plannedRules,
   implementedFixes,
-} from "./rule-catalog.ts";
+} from "./rule-catalog.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // ---------------------------------------------------------------------------

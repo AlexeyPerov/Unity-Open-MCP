@@ -34,6 +34,7 @@ on:
 env:
   UNITY_PROJECT_PATH: demo
   UNITY_LOG_PATH: ${{ github.workspace }}/unity-batch.log
+  UNITY_TEST_RESULTS_PATH: ${{ github.workspace }}/test-results/nunit-results.xml
 
 jobs:
   regression-check:
@@ -157,6 +158,73 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: demo-scan-unity-log
+          path: ${{ env.UNITY_LOG_PATH }}
+          retention-days: 7
+
+  run-tests:
+    name: Run tests (demo)
+    runs-on: unity
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Unity is available
+        run: |
+          if [ -z "$UNITY_PATH" ]; then
+            echo "::error::UNITY_PATH is not set. Set it as a repo variable or in the runner environment."
+            exit 1
+          fi
+          if [ ! -f "$UNITY_PATH" ]; then
+            echo "::error::UNITY_PATH '$UNITY_PATH' does not exist or is not a file."
+            exit 1
+          fi
+          echo "Unity: $UNITY_PATH"
+
+      - name: Create test-results directory
+        run: mkdir -p "$(dirname "$UNITY_TEST_RESULTS_PATH")"
+
+      - name: Run Unity Test Runner (package tests, EditMode)
+        run: |
+          echo "::group::Unity Test Runner — EditMode package tests"
+          "$UNITY_PATH" \
+            -batchmode \
+            -quit \
+            -nographics \
+            -projectPath "$UNITY_PROJECT_PATH" \
+            -logFile "$UNITY_LOG_PATH" \
+            -runTests \
+            -testPlatform editmode \
+            -testAssembly com.alexeyperov.unity-open-mcp-bridge.Editor.Tests,com.alexeyperov.unity-open-mcp-verify.Editor.Tests \
+            -testResults "$UNITY_TEST_RESULTS_PATH"
+          EXIT_CODE=$?
+          echo "::endgroup::"
+
+          echo "Test runner exit code: $EXIT_CODE"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Unity tests failed (exit $EXIT_CODE)."
+            echo "::group::Unity log (last 100 lines)"
+            tail -n 100 "$UNITY_LOG_PATH" || true
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "✓ All package tests passed."
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-test-results
+          path: ${{ env.UNITY_TEST_RESULTS_PATH }}
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Unity log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-tests-unity-log
           path: ${{ env.UNITY_LOG_PATH }}
           retention-days: 7
 

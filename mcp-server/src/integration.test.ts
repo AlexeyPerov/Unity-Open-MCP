@@ -11,20 +11,23 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 
-import { ALL_RESOURCES } from "./resources/index.ts";
-import { PingCache } from "./ping-cache.ts";
+import { ALL_RESOURCES } from "./resources/index.js";
+import { PingCache } from "./ping-cache.js";
 import {
   ResourceRouter,
   type ResourceHandlerDeps,
-} from "./resource-router.ts";
+} from "./resource-router.js";
 
 const TEST_PORT = 19199;
 
-function parseContent(
-  contents: Array<{ text?: string }>,
-): Record<string, unknown> {
-  return JSON.parse(contents[0]!.text!);
+function parseContent(result: ReadResourceResult): Record<string, unknown> {
+  const first = result.contents[0];
+  if (!first || !("text" in first) || typeof first.text !== "string") {
+    throw new Error("expected a text content part");
+  }
+  return JSON.parse(first.text);
 }
 
 function makeMockLive(
@@ -143,7 +146,7 @@ test("integration: health/summary returns no_data in empty state", async () => {
       const { contents } = await client.readResource({
         uri: "unity-open-mcp://health/summary",
       });
-      const body = parseContent(contents);
+      const body = parseContent({ contents });
 
       assert.equal(body.status, "no_data");
       assert.equal(body.asOf, null);
@@ -176,7 +179,7 @@ test("integration: health/summary returns ok with cached summary", async () => {
       const { contents } = await client.readResource({
         uri: "unity-open-mcp://health/summary",
       });
-      const body = parseContent(contents);
+      const body = parseContent({ contents });
 
       assert.equal(body.status, "ok");
       assert.equal(body.asOf, "2026-06-12T00:00:00Z");
@@ -202,7 +205,7 @@ test("integration: health/baseline returns no_baseline when file is missing", as
       const { contents } = await client.readResource({
         uri: "unity-open-mcp://health/baseline",
       });
-      const body = parseContent(contents);
+      const body = parseContent({ contents });
 
       assert.equal(body.status, "no_baseline");
       assert.equal(body.asOf, null);
@@ -243,7 +246,7 @@ test("integration: health/baseline returns ok when baseline file exists", async 
       const { contents } = await client.readResource({
         uri: "unity-open-mcp://health/baseline",
       });
-      const body = parseContent(contents);
+      const body = parseContent({ contents });
 
       assert.equal(body.status, "ok");
       assert.ok(body.asOf, "asOf should be populated from file mtime");
@@ -270,7 +273,7 @@ test("integration: bridge/status returns no_data in fresh session", async () => 
       const { contents } = await client.readResource({
         uri: "unity-open-mcp://bridge/status",
       });
-      const body = parseContent(contents);
+      const body = parseContent({ contents });
 
       assert.equal(body.status, "no_data");
       assert.equal(body.asOf, null);
@@ -306,7 +309,7 @@ test("integration: bridge/status returns ok with cached ping", async () => {
       const { contents } = await client.readResource({
         uri: "unity-open-mcp://bridge/status",
       });
-      const body = parseContent(contents);
+      const body = parseContent({ contents });
 
       assert.equal(body.status, "ok");
       assert.ok(body.asOf, "asOf should be populated");
@@ -343,7 +346,7 @@ test("integration: all three URIs readable in sequence with correct empty-state 
 
       for (const uri of uris) {
         const { contents } = await client.readResource({ uri });
-        const body = parseContent(contents);
+        const body = parseContent({ contents });
         statuses.push(body.status as string);
         asOfs.push(body.asOf);
       }
@@ -373,8 +376,10 @@ test("integration: resource reads return application/json mimeType", async () =>
         "unity-open-mcp://bridge/status",
       ]) {
         const { contents } = await client.readResource({ uri });
-        assert.equal(contents[0]!.mimeType, "application/json");
-        assert.ok(contents[0]!.text, `${uri} must return text content`);
+        const first = contents[0];
+        assert.ok(first, `${uri} must return a content part`);
+        assert.equal(first!.mimeType, "application/json");
+        assert.ok("text" in first! && typeof first!.text === "string", `${uri} must return text content`);
       }
     } finally {
       await cleanup();

@@ -8,5 +8,8 @@
     "com.unity.ide.vscode": "1.2.5"
   },
   "scopedRegistries": [],
-  "testables": []
+  "testables": [
+    "com.alexeyperov.unity-open-mcp-bridge",
+    "com.alexeyperov.unity-open-mcp-verify"
+  ]
 }

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ALL_RESOURCES } from "./index.ts";
+import { ALL_RESOURCES } from "./index.js";
 
 test("ALL_RESOURCES has exactly three resources", () => {
   assert.equal(ALL_RESOURCES.length, 3);

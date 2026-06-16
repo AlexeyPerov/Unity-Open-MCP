@@ -1,7 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs } from "./batch-spawn.ts";
+import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs } from "./batch-spawn.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+
+function parseBody(result: CallToolResult): Record<string, unknown> {
+  const first = result.content[0];
+  if (!first || first.type !== "text" || typeof first.text !== "string") {
+    throw new Error("expected a text content part");
+  }
+  return JSON.parse(first.text);
+}
 
 test("BATCH_TOOL_NAMES includes find_members and limited meta-tools", () => {
   assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_find_members"));
@@ -40,7 +49,7 @@ test("limited meta-tools fast-fail without spawning Unity", async () => {
   for (const tool of tools) {
     const result = await batch.route(tool, {});
     assert.equal(result.isError, true);
-    const body = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
+    const body = parseBody(result);
     const error = body.error as Record<string, string>;
     assert.equal(error.code, "batch_not_supported");
     assert.ok(
@@ -58,14 +67,14 @@ test("limited meta-tool errors mention the specific limitation", async () => {
   const batch = new BatchSpawn();
 
   const csharp = await batch.route("unity_open_mcp_execute_csharp", { code: "return 1;" });
-  const csharpBody = JSON.parse(csharp.content[0]!.text) as Record<string, unknown>;
+  const csharpBody = parseBody(csharp);
   assert.ok(
     (csharpBody.error as Record<string, string>).message.includes("gate"),
     "execute_csharp error should mention gate",
   );
 
   const menu = await batch.route("unity_open_mcp_execute_menu", { menu_path: "Assets/Refresh" });
-  const menuBody = JSON.parse(menu.content[0]!.text) as Record<string, unknown>;
+  const menuBody = parseBody(menu);
   assert.ok(
     (menuBody.error as Record<string, string>).message.includes("UI"),
     "execute_menu error should mention UI",
@@ -113,7 +122,7 @@ test("find_members without UNITY_PATH returns path error, not batch_not_supporte
     const batch = new BatchSpawn();
     const result = await batch.route("unity_open_mcp_find_members", { query: "Transform" });
     assert.equal(result.isError, true);
-    const body = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
+    const body = parseBody(result);
     const error = body.error as Record<string, string>;
     assert.equal(error.code, "unity_path_missing");
   } finally {

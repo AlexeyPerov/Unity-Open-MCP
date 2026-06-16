@@ -76,7 +76,7 @@ namespace UnityOpenMcpVerify.Tests
             Assert.AreEqual(1, cp.Fingerprints.Count);
             Assert.AreEqual(1, cp.Fingerprints["rule_a"].Errors);
             Assert.AreEqual(2, cp.Fingerprints["rule_a"].Warnings);
-            Assert.Contains("key1", cp.Fingerprints["rule_a"].IssueKeys);
+            CollectionAssert.Contains(cp.Fingerprints["rule_a"].IssueKeys, "key1");
         }
     }
 }

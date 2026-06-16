@@ -9,15 +9,15 @@ import {
   generateSkillMarkdown,
   writeSkillToClients,
   generateSkill,
-} from "./generate-skill.ts";
+} from "./generate-skill.js";
 import {
   buildCapabilities,
   type CapabilitiesResult,
-} from "../capabilities/build-capabilities.ts";
+} from "../capabilities/build-capabilities.js";
 import {
   RULE_CATALOG,
   FIX_CATALOG,
-} from "../capabilities/rule-catalog.ts";
+} from "../capabilities/rule-catalog.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // ---------------------------------------------------------------------------

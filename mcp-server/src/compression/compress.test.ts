@@ -13,18 +13,18 @@ import {
   foldHierarchy,
   componentMatches,
   displayObjectName,
-} from "./compact.ts";
+} from "./compact.js";
 import {
   renderAssetSummary,
   renderSearchSummary,
   compactPath,
   extForKind,
-} from "./compact.ts";
+} from "./compact.js";
 import type {
   AssetModel,
   HierarchyNode,
   SearchModel,
-} from "./asset-model.ts";
+} from "./asset-model.js";
 
 // ---------------------------------------------------------------------------
 // compressNames — port parity with unity-scanner CompressNames.

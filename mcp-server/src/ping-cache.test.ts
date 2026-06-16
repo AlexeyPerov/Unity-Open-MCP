@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { PingCache } from "./ping-cache.ts";
+import { PingCache } from "./ping-cache.js";
 
 function makePingBody() {
   return {

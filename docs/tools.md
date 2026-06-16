@@ -25,8 +25,9 @@ This document tracks primary technologies, scripts, and runtime requirements use
 ### `mcp-server/package.json`
 
 - `npm run build` - compile TypeScript (`dist/`).
+- `npm run build:test` - compile tests + source to `dist-test/` (`tsconfig.test.json`).
 - `npm run typecheck` - TypeScript no-emit validation.
-- `npm run test` - Node test runner for `src/**/*.test.ts`.
+- `npm run test` - build tests to `dist-test/` then run the Node test runner against the compiled `*.test.js`. Tests import sibling modules with `.js` specifiers, so they run against compiled output rather than via type-stripping.
 
 ## Runtime environment variables
 
@@ -44,6 +45,25 @@ Optional:
 
 - `UNITY_OPEN_MCP_BRIDGE_PORT` can override default listener port.
 - Unity command-line argument `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>` also overrides port.
+
+## Testing
+
+### Running tests locally
+
+- **Hub (`hub/`)** — `npm test` runs `node --test` with `--experimental-strip-types` over `src/lib/**/*.test.ts` (pure-TS modules only; component tests are out of scope). Requires Node >= 22.6. Also `npm run check` for Svelte + TypeScript validation.
+- **MCP server (`mcp-server/`)** — `npm test` compiles the suite to `dist-test/` (`tsconfig.test.json`) then runs `node --test` over the compiled `*.test.js`. `npm run typecheck` validates types without emitting.
+- **Unity packages (`packages/bridge`, `packages/verify`)** — open `demo/` in Unity and run the Test Runner (Window → General → Test Runner → EditMode). The demo declares both packages in `Packages/manifest.json` `testables`, so their `*.Editor.Tests` assemblies are discovered. The demo's own `Demo.Tests.EditMode`/`PlayMode` assemblies (including the intentionally-failing sanity test) are excluded from CI runs.
+
+### CI
+
+Two workflows run on pull requests and pushes to `main`:
+
+| Workflow | Runner | What it does |
+|---|---|---|
+| `.github/workflows/typescript.yml` | GitHub-hosted Ubuntu, Node 22 | `npm ci`, `npm run check` + `npm test` for `hub/`; `npm ci`, `npm run typecheck` + `npm test` for `mcp-server/`. No Unity license needed. |
+| `.github/workflows/unity-open-mcp-verify-demo.yml` | Self-hosted `unity` runner with Unity 6 | Verify batch scan (regression check + scan-all) against `demo/`, **plus** a `run-tests` job that runs the Unity Test Runner in EditMode against the two package test assemblies. The `-runTests` step also serves as the project compilation check: Unity must import and compile the full `demo/` project (and both packages) before any test runs. |
+
+The Unity test job targets only `com.alexeyperov.unity-open-mcp-bridge.Editor.Tests` and `com.alexeyperov.unity-open-mcp-verify.Editor.Tests` via `-testAssembly`, so the demo's intentionally-failing sanity test stays available for manual / `unity_agent_run_tests` demonstration.
 
 ## Key external dependencies
 

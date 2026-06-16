@@ -67,7 +67,7 @@ namespace UnityOpenMcpBridge.Tests
         [BridgeResourceType]
         public class Resource_Single
         {
-            [BridgeResource("Test Resource", Route = "unity-open-mcp://test/resource")]
+            [BridgeResource("Test Resource", "unity-open-mcp://test/resource")]
             public string GetResource() => "{\"test\":true}";
         }
     }
@@ -87,7 +87,7 @@ namespace UnityOpenMcpBridge.Tests
         [BridgeResourceType]
         public class Resource_Disabled
         {
-            [BridgeResource("Disabled Resource", Route = "unity-open-mcp://test/disabled", Enabled = false)]
+            [BridgeResource("Disabled Resource", "unity-open-mcp://test/disabled", Enabled = false)]
             public string GetDisabled() => "should not appear";
         }
     }

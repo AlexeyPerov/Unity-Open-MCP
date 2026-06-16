@@ -29,6 +29,7 @@ Use this folder for version-controlled documentation that should stay aligned wi
 | What MCP resources are available and what do they return? | `api/resources.md` |
 | What env vars are required to run the MCP server? | `tools.md` |
 | Which package owns a feature area? | `architecture.md` |
+| How do I run tests locally, and what does CI run? | `tools.md` (Testing) |
 
 ## Maintenance rules
 

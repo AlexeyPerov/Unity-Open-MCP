@@ -137,7 +137,7 @@ namespace UnityOpenMcpVerify.Tests
 
             foreach (var issue in sink)
             {
-                Assert.Contains(issue.IssueCode, knownCodes,
+                CollectionAssert.Contains(knownCodes, issue.IssueCode,
                     $"Issue code '{issue.IssueCode}' must be a known MissingReferences code");
             }
 
