@@ -6,9 +6,11 @@ Use this folder for version-controlled documentation that should stay aligned wi
 
 | Document | Purpose |
 |---|---|
-| `architecture.md` | Repo structure, package boundaries, runtime interactions, and routing flows. |
-| `tools.md` | Toolchain, scripts, and runtime environment requirements by workspace area. |
-| `api.md` | Index for HTTP/MCP/API contracts and protocol surfaces. |
+| [manual-setup.md](manual-setup.md) | Manual MCP setup without Unity Hub Pro (packages, client config, verify). |
+| [wizard-setup.md](wizard-setup.md) | Step-by-step setup using the AI Setup wizard in Unity Hub Pro. |
+| [architecture.md](architecture.md) | Repo structure, package boundaries, runtime interactions, and routing flows. |
+| [tools.md](tools.md) | Toolchain, scripts, and runtime environment requirements by workspace area. |
+| [api.md](api.md) | Index for HTTP/MCP/API contracts and protocol surfaces. |
 
 ## API and protocol docs
 
