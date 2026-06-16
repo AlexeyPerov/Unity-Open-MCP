@@ -368,6 +368,23 @@ test("writeSkillToClients writes to multiple client dirs", async () => {
   }
 });
 
+test("writeSkillToClients writes the agents (ZCode) skill dir", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "uomcp-skill-agents-"));
+  try {
+    const targets = await writeSkillToClients(dir, "# Test\n", ["agents"]);
+    assert.equal(targets.length, 1);
+    const t = targets[0];
+    assert.equal(t.client, "agents");
+    assert.ok(
+      t.absolutePath.endsWith(".agents/skills/unity-open-mcp/SKILL.md"),
+      `expected .agents/skills path, got ${t.absolutePath}`,
+    );
+    assert.equal(await readFile(t.absolutePath, "utf-8"), "# Test\n");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("writeSkillToClients reports existed flag for pre-existing files", async () => {
   const dir = await mkdtemp(join(tmpdir(), "uomcp-skill-"));
   try {

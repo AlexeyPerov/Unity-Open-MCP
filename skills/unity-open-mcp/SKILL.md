@@ -10,6 +10,7 @@ Copy this file to your client's skills directory:
 |---|---|
 | Cursor / Claude Code | `.claude/skills/unity-open-mcp/SKILL.md` (project) or global skills dir |
 | OpenCode | `.opencode/skills/unity-open-mcp/SKILL.md` (project) or `~/.config/opencode/skills/` |
+| ZCode (and `.agents`-aware clients) | `.agents/skills/unity-open-mcp/SKILL.md` (project) or `~/.agents/skills/` |
 
 ## Available tools
 
@@ -21,7 +22,7 @@ Call `unity_open_mcp_capabilities` (no arguments) to learn the full surface in o
 
 ### Generate a project-specific skill
 
-Call `unity_agent_generate_skill` with `{ "write": true }` to generate a project-specific SKILL.md that reflects the actual project state — Unity version, installed packages, available verify rules, and key MonoBehaviour/ScriptableObject types discovered from source. The file is written to `.claude/skills/unity-open-mcp/SKILL.md` (or `.cursor/skills/` / `.opencode/skills/` via the `clients` parameter). Regenerate after package or script changes to keep it current.
+Call `unity_agent_generate_skill` with `{ "write": true }` to generate a project-specific SKILL.md that reflects the actual project state — Unity version, installed packages, available verify rules, and key MonoBehaviour/ScriptableObject types discovered from source. The file is written to `.claude/skills/unity-open-mcp/SKILL.md` (or `.cursor/skills/` / `.opencode/skills/` / `.agents/skills/` via the `clients` parameter). Regenerate after package or script changes to keep it current.
 
 ### Mutating tools (gate-aware)
 
@@ -484,6 +485,26 @@ For large refactors:
       "environment": {
         "UNITY_PROJECT_PATH": "/path/to/MyGame",
         "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
+      }
+    }
+  }
+}
+```
+
+**ZCode** (`~/.zcode/cli/config.json` — note the three-level `mcp.servers` path):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "unity-open-mcp": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["/path/to/unity-open-mcp/mcp-server/dist/index.js"],
+        "env": {
+          "UNITY_PROJECT_PATH": "/path/to/MyGame",
+          "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
+        }
       }
     }
   }

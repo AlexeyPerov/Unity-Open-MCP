@@ -1,6 +1,6 @@
 # MCP Setup with Unity Hub Pro
 
-Step-by-step guide to connect an AI client (Cursor, Claude Desktop, OpenCode, and others) to a Unity project using the **AI Setup wizard** in Unity Hub Pro.
+Step-by-step guide to connect an AI client (Cursor, Claude Desktop, OpenCode, ZCode, and others) to a Unity project using the **AI Setup wizard** in Unity Hub Pro.
 
 For setup without Unity Hub Pro, see [manual-setup.md](manual-setup.md).
 
@@ -12,7 +12,7 @@ For setup without Unity Hub Pro, see [manual-setup.md](manual-setup.md).
 | Node.js 18+ | Runs the MCP server (`mcp-server/dist/index.js`). |
 | This repository | Clone or download the `unity-open-mcp` monorepo. |
 | Unity Hub Pro | Desktop app in [hub/](../hub/). |
-| An MCP client | Cursor, Claude Desktop, OpenCode, or any client that supports MCP stdio servers. |
+| An MCP client | Cursor, Claude Desktop, OpenCode, ZCode, or any client that supports MCP stdio servers. |
 
 ## 1. Build the MCP server
 
@@ -81,7 +81,7 @@ When the demo project lives inside this monorepo, the wizard uses local `file:` 
 
 ### Step 4 — MCP client config
 
-1. Choose your MCP client (Cursor, Claude Desktop, OpenCode, Claude Code, or Manual).
+1. Choose your MCP client (Cursor, Claude Desktop, OpenCode, ZCode, Claude Code, or Manual).
 2. Review the live preview (JSON entry, CLI command, or copyable snippet).
 3. Click **Write config** (or follow the CLI instructions for Claude Code).
 4. Optional: enable advanced options such as a custom `mcp-server/dist/index.js` path if you built the server elsewhere.
@@ -113,6 +113,7 @@ Most clients load MCP servers only at startup:
 - **Cursor** — restart Cursor or reload MCP servers from settings after the config file is written.
 - **Claude Desktop** — quit and reopen the app.
 - **OpenCode** — restart the TUI or reload global/project MCP config as you normally would.
+- **ZCode** — restart the ZCode session or reload MCP config so the new `~/.zcode/cli/config.json` (global) or `<project>/.zcode/cli/config.json` (project) entry is picked up.
 
 Config file locations depend on the client and scope you chose in Step 4. The wizard shows the exact target path in the preview.
 

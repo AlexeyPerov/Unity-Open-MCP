@@ -55,7 +55,7 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 ### Capability discovery
 
 - `unity_open_mcp_capabilities` — Returns the full capability surface in one call: every tool with its input schema and route policy, every verify rule with applicable asset kinds and issue severities, and every available fix. Each capability carries an `implemented` boolean; planned-but-unbuilt items return with `status: "planned"` and guidance instead of failing. Call this first to learn what is available.
-- `unity_agent_generate_skill` — Generates a project-specific SKILL.md reflecting the actual project state: Unity version, installed packages (including bridge/verify versions), available tools and verify rules, key MonoBehaviour/ScriptableObject types discovered from source, and the mutate→gate→fix workflow. Set `write: true` to persist the file into `.claude/skills/`, `.cursor/skills/`, or `.opencode/skills/`. Regenerate after package or script changes.
+- `unity_agent_generate_skill` — Generates a project-specific SKILL.md reflecting the actual project state: Unity version, installed packages (including bridge/verify versions), available tools and verify rules, key MonoBehaviour/ScriptableObject types discovered from source, and the mutate→gate→fix workflow. Set `write: true` to persist the file into `.claude/skills/`, `.cursor/skills/`, `.opencode/skills/`, or `.agents/skills/`. Regenerate after package or script changes.
 
 ### Typed editor tools (M16 planned)
 
@@ -162,7 +162,7 @@ Planned categories:
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `write` | boolean | `false` | When `true`, write the generated skill to client skill directories. |
-| `clients` | `("claude" \| "cursor" \| "opencode")[]` | `["claude"]` | Which client skill dirs to write to. Only used when `write: true`. |
+| `clients` | `("claude" \| "cursor" \| "opencode" \| "agents")[]` | `["claude"]` | Which client skill dirs to write to. Only used when `write: true`. `agents` writes to `.agents/skills/` for ZCode and other `.agents`-aware clients. |
 
 ### Response shape
 

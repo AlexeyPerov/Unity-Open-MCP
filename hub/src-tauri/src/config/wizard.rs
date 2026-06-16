@@ -115,6 +115,8 @@ pub struct McpConfigHeuristic {
     pub claude_desktop: bool,
     pub opencode_global: bool,
     pub opencode_project: bool,
+    pub zcode_global: bool,
+    pub zcode_project: bool,
 }
 
 impl McpConfigHeuristic {
@@ -1107,11 +1109,15 @@ fn read_mcp_heuristic(project: &Path) -> McpConfigHeuristic {
     let claude_desktop = contains_mcp_key(&claude_desktop_config_path(&home));
     let opencode_global = contains_mcp_key(&home.join(".config").join("opencode").join("opencode.json"));
     let opencode_project = contains_mcp_key(&project.join("opencode.json"));
+    let zcode_global = contains_mcp_key(&home.join(".zcode").join("cli").join("config.json"));
+    let zcode_project = contains_mcp_key(&project.join(".zcode").join("cli").join("config.json"));
     McpConfigHeuristic {
         cursor,
         claude_desktop,
         opencode_global,
         opencode_project,
+        zcode_global,
+        zcode_project,
     }
 }
 
@@ -1161,8 +1167,15 @@ pub fn contains_mcp_key(path: &Path) -> bool {
         }
     }
     if let Some(mcp) = obj.get("mcp").and_then(|v| v.as_object()) {
+        // OpenCode: mcp.unity-open-mcp (two levels).
         if mcp.contains_key("unity-open-mcp") {
             return true;
+        }
+        // ZCode: mcp.servers.unity-open-mcp (three levels).
+        if let Some(servers) = mcp.get("servers").and_then(|v| v.as_object()) {
+            if servers.contains_key("unity-open-mcp") {
+                return true;
+            }
         }
     }
     false

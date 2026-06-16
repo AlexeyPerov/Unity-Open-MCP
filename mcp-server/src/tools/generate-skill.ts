@@ -22,12 +22,13 @@ export const generateSkill: Tool = {
       clients: {
         type: "array",
         items: {
-          enum: ["claude", "cursor", "opencode"],
+          enum: ["claude", "cursor", "opencode", "agents"],
         },
         description:
           "Which client skill directories to write to. Only used when write=true. " +
           "Defaults to [\"claude\"]. Each entry writes to the project's " +
-          ".claude/skills/, .cursor/skills/, or .opencode/skills/ respectively.",
+          ".claude/skills/, .cursor/skills/, .opencode/skills/, or " +
+          ".agents/skills/ (ZCode and other .agents-aware clients) respectively.",
       },
     },
     additionalProperties: false,

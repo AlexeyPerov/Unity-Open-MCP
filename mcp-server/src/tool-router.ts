@@ -194,7 +194,8 @@ export class ToolRouter implements Router {
     const rawClients = Array.isArray(args.clients) ? args.clients : [];
     const clients = rawClients.filter(
       (c): c is string =>
-        typeof c === "string" && (c === "claude" || c === "cursor" || c === "opencode"),
+        typeof c === "string" &&
+          (c === "claude" || c === "cursor" || c === "opencode" || c === "agents"),
     );
 
     const caps = buildCapabilities(

@@ -114,6 +114,8 @@ export type McpClientId =
   | "claude-code"
   | "opencode-global"
   | "opencode-project"
+  | "zcode-global"
+  | "zcode-project"
   | "manual";
 
 /** Per-client config-file path shape. `null` means the client is
@@ -175,6 +177,18 @@ export function mcpClientConfigTarget(
         path: "opencode.json", // resolved relative to project in Step 4
         scope: "project",
         mergeKey: "mcp.unity-open-mcp",
+      };
+    case "zcode-global":
+      return {
+        path: `${homeDir}/.zcode/cli/config.json`,
+        scope: "global",
+        mergeKey: "mcp.servers.unity-open-mcp",
+      };
+    case "zcode-project":
+      return {
+        path: ".zcode/cli/config.json", // resolved relative to project in Step 4
+        scope: "project",
+        mergeKey: "mcp.servers.unity-open-mcp",
       };
     case "manual":
       return {

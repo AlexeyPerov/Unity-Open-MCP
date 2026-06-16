@@ -60,6 +60,12 @@ pub const CLAUDE_SKILL_REL: &str = ".claude/skills/unity-open-mcp/SKILL.md";
 /// to both locations for clients that look in either spot.
 pub const OPENCODE_SKILL_REL: &str = ".opencode/skills/unity-open-mcp/SKILL.md";
 
+/// Sub-path inside the project where the ZCode skill is copied
+/// when ZCode is selected. ZCode discovers skills under
+/// `.agents/skills/` (its recommended cross-tool default) and
+/// `.zcode/skills/`; we write the cross-tool location.
+pub const ZCODE_SKILL_REL: &str = ".agents/skills/unity-open-mcp/SKILL.md";
+
 /// Sub-path inside the toolkit root for the source skill file.
 pub const TOOLKIT_SKILL_REL: &str = "skills/unity-open-mcp/SKILL.md";
 
@@ -75,6 +81,8 @@ pub enum McpClientId {
     ClaudeCode,
     OpencodeGlobal,
     OpencodeProject,
+    ZcodeGlobal,
+    ZcodeProject,
     Manual,
 }
 
@@ -89,6 +97,8 @@ enum McpScope {
     ClaudeDesktopGlobal,
     OpencodeGlobal,
     OpencodeProject,
+    ZcodeGlobal,
+    ZcodeProject,
 }
 
 /// Inputs to the MCP config merge. Mirrors the Step 4 form
@@ -466,6 +476,8 @@ fn resolve_scope(params: &McpConfigParams) -> Result<McpScope, McpScopeSkip> {
         McpClientId::ClaudeDesktop => Ok(McpScope::ClaudeDesktopGlobal),
         McpClientId::OpencodeGlobal => Ok(McpScope::OpencodeGlobal),
         McpClientId::OpencodeProject => Ok(McpScope::OpencodeProject),
+        McpClientId::ZcodeGlobal => Ok(McpScope::ZcodeGlobal),
+        McpClientId::ZcodeProject => Ok(McpScope::ZcodeProject),
         McpClientId::ClaudeCode => Err(McpScopeSkip::CliOnly),
         McpClientId::Manual => Err(McpScopeSkip::Manual),
     }
@@ -482,6 +494,13 @@ fn resolve_target_path(scope: McpScope, project_path: &str, home: &Path) -> Opti
         McpScope::ClaudeDesktopGlobal => Some(claude_desktop_config_path(home)),
         McpScope::OpencodeGlobal => Some(home.join(".config").join("opencode").join("opencode.json")),
         McpScope::OpencodeProject => Some(PathBuf::from(project_path).join("opencode.json")),
+        McpScope::ZcodeGlobal => Some(home.join(".zcode").join("cli").join("config.json")),
+        McpScope::ZcodeProject => Some(
+            PathBuf::from(project_path)
+                .join(".zcode")
+                .join("cli")
+                .join("config.json"),
+        ),
     }
 }
 
@@ -521,31 +540,26 @@ fn build_full_config_json(
     existing: Value,
 ) -> Value {
     let entry = build_entry_json(params, resolved_index);
-    let merge_key = merge_key_for(params.client);
-    let (parent_key, child_key) = split_merge_key(&merge_key);
-    let mut root: Map<String, Value> = match existing {
+    let key_path = merge_key_path(params.client);
+    let mut root_value: Value = match existing {
+        Value::Object(_) | Value::Null => existing,
+        _ => Value::Null,
+    };
+    if !root_value.is_object() {
+        root_value = Value::Object(Map::new());
+    }
+    // Insert/overwrite only the key-path we own (e.g.
+    // `mcpServers.unity-open-mcp` for Cursor, `mcp.servers.unity-open-mcp`
+    // for ZCode). Every other top-level key, every other MCP server, and
+    // every sibling under each path segment are preserved verbatim. Walk
+    // down the path, ensuring each intermediate is an object (replacing a
+    // non-object scalar so we never silently drop the user's own block),
+    // then set the entry at the leaf.
+    insert_by_path(&mut root_value, &key_path, entry);
+    let mut root = match root_value {
         Value::Object(m) => m,
-        Value::Null => Map::new(),
         _ => Map::new(),
     };
-    // Insert/overwrite only the `parent_key` → `child_key` path
-    // we own. Every other top-level key, every other MCP
-    // server, and every other entry under our parent key are
-    // preserved verbatim.
-    let parent_value = root
-        .entry(parent_key.to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if !parent_value.is_object() {
-        // Malformed parent — replace with an empty object
-        // so the writer does not silently drop the user's
-        // own `mcpServers` block. (The writer refused earlier
-        // for invalid JSON, so this is only reachable when
-        // the parent key exists but is a scalar.)
-        *parent_value = Value::Object(Map::new());
-    }
-    if let Some(obj) = parent_value.as_object_mut() {
-        obj.insert(child_key.to_string(), entry);
-    }
     // Ensure the target's eventual JSON serialization looks
     // sane even when there is no `$schema` field; OpenCode
     // tooling reads it back from the file we just wrote.
@@ -591,6 +605,12 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
             "enabled": true,
             "environment": Value::Object(env),
         }),
+        McpClientId::ZcodeGlobal | McpClientId::ZcodeProject => json!({
+            "type": "stdio",
+            "command": "node",
+            "args": [resolved_index],
+            "env": Value::Object(env),
+        }),
         // CLI / manual clients never reach the file writer;
         // they only consume the JSON via the snippet panel.
         _ => json!({
@@ -601,18 +621,59 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
     }
 }
 
-fn merge_key_for(client: McpClientId) -> String {
+/// The dotted JSON path (relative to the config root) where this
+/// client's `unity-open-mcp` entry lives. Returned as a key-path
+/// vector so it generalizes to clients whose path nests deeper
+/// than two levels — notably ZCode, whose envelope is
+/// `mcp.servers.<name>` (three levels), versus Cursor/Claude
+/// (`mcpServers.<name>`, two levels) and OpenCode
+/// (`mcp.<name>`, two levels). Empty for CLI/Manual clients.
+fn merge_key_path(client: McpClientId) -> Vec<&'static str> {
     match client {
-        McpClientId::Cursor | McpClientId::ClaudeDesktop => "mcpServers.unity-open-mcp".to_string(),
-        McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => "mcp.unity-open-mcp".to_string(),
-        _ => String::new(),
+        McpClientId::Cursor | McpClientId::ClaudeDesktop => vec!["mcpServers", MCP_SERVER_KEY],
+        McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => vec!["mcp", MCP_SERVER_KEY],
+        McpClientId::ZcodeGlobal | McpClientId::ZcodeProject => {
+            vec!["mcp", "servers", MCP_SERVER_KEY]
+        }
+        _ => Vec::new(),
     }
 }
 
-fn split_merge_key(merge_key: &str) -> (&str, &str) {
-    match merge_key.split_once('.') {
-        Some((parent, child)) => (parent, child),
-        None => ("", ""),
+/// Walk `root` along `path`, returning a reference to the leaf
+/// value if every segment exists as an object key.
+fn get_by_path<'a>(root: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut current = root;
+    for key in path {
+        current = current.as_object()?.get(*key)?;
+    }
+    Some(current)
+}
+
+/// Insert `value` at `path` under `root`, creating an object at each
+/// intermediate segment (and replacing a non-object scalar so the user's
+/// own block is never silently dropped). A no-op when `path` is empty.
+fn insert_by_path(root: &mut Value, path: &[&str], value: Value) {
+    if path.is_empty() {
+        return;
+    }
+    if !root.is_object() {
+        *root = Value::Object(Map::new());
+    }
+    // The last segment is the leaf; the rest are intermediates we descend.
+    let (segments, leaf) = path.split_at(path.len() - 1);
+    let mut cursor = root;
+    for segment in segments {
+        let obj = cursor.as_object_mut().expect("ensured object above");
+        let child = obj
+            .entry((*segment).to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        if !child.is_object() {
+            *child = Value::Object(Map::new());
+        }
+        cursor = child;
+    }
+    if let Some(obj) = cursor.as_object_mut() {
+        obj.insert(leaf[0].to_string(), value);
     }
 }
 
@@ -621,23 +682,15 @@ fn split_merge_key(merge_key: &str) -> (&str, &str) {
 /// `unity-open-mcp` child only — unrelated keys and other MCP
 /// servers are not part of the "did we change anything" test.
 fn merged_differs(existing: &Value, merged: &Value, scope: McpScope) -> bool {
-    let merge_key = match scope {
-        McpScope::CursorGlobal
-        | McpScope::CursorProject
-        | McpScope::ClaudeDesktopGlobal => "mcpServers.unity-open-mcp",
-        McpScope::OpencodeGlobal | McpScope::OpencodeProject => "mcp.unity-open-mcp",
+    let key_path: Vec<&str> = match scope {
+        McpScope::CursorGlobal | McpScope::CursorProject | McpScope::ClaudeDesktopGlobal => {
+            vec!["mcpServers", MCP_SERVER_KEY]
+        }
+        McpScope::OpencodeGlobal | McpScope::OpencodeProject => vec!["mcp", MCP_SERVER_KEY],
+        McpScope::ZcodeGlobal | McpScope::ZcodeProject => vec!["mcp", "servers", MCP_SERVER_KEY],
     };
-    let (parent, child) = split_merge_key(merge_key);
-    let before = existing
-        .as_object()
-        .and_then(|m| m.get(parent))
-        .and_then(|v| v.as_object())
-        .and_then(|m| m.get(child));
-    let after = merged
-        .as_object()
-        .and_then(|m| m.get(parent))
-        .and_then(|v| v.as_object())
-        .and_then(|m| m.get(child));
+    let before = get_by_path(existing, &key_path);
+    let after = get_by_path(merged, &key_path);
     before != after
 }
 
@@ -708,12 +761,14 @@ pub struct SkillCopyTarget {
 
 /// `claude` = `.claude/skills/...` (always copied). `opencode`
 /// = `.opencode/skills/...` (only copied when OpenCode was
-/// selected in Step 4).
+/// selected in Step 4). `agents` = `.agents/skills/...`
+/// (only copied when ZCode was selected in Step 4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SkillCopyKind {
     Claude,
     Opencode,
+    Agents,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -734,6 +789,10 @@ pub struct SkillCopyParams {
     /// the OpenCode project variant). Controls whether the
     /// `.opencode/...` mirror is included in the plan.
     pub opencode_selected: bool,
+    /// `true` when the user selected ZCode in Step 4 (either
+    /// variant). Controls whether the `.agents/skills/...`
+    /// target is included in the plan.
+    pub zcode_selected: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -815,6 +874,13 @@ fn plan_skill_copy_at(params: &SkillCopyParams) -> Result<SkillCopyPlan, SkillCo
             source_path.as_deref(),
         ));
     }
+    if params.zcode_selected {
+        targets.push(build_skill_target(
+            SkillCopyKind::Agents,
+            &project,
+            source_path.as_deref(),
+        ));
+    }
     Ok(SkillCopyPlan {
         project_path: params.project_path.clone(),
         toolkit_root: params.toolkit_root.clone(),
@@ -831,6 +897,7 @@ fn build_skill_target(
     let relative = match kind {
         SkillCopyKind::Claude => CLAUDE_SKILL_REL,
         SkillCopyKind::Opencode => OPENCODE_SKILL_REL,
+        SkillCopyKind::Agents => ZCODE_SKILL_REL,
     };
     let target_path = project.join(relative);
     SkillCopyTarget {
@@ -976,6 +1043,25 @@ mod tests {
             include_unity_path: false,
             unity_path: String::new(),
             client: McpClientId::OpencodeProject,
+            cursor_project_scope: false,
+        }
+    }
+
+    fn make_zcode_params(
+        client: McpClientId,
+        home: &Path,
+        project: &Path,
+        toolkit_root: &Path,
+    ) -> McpConfigParams {
+        McpConfigParams {
+            project_path: project.to_string_lossy().into_owned(),
+            toolkit_root: toolkit_root.to_string_lossy().into_owned(),
+            mcp_index_override: String::new(),
+            unity_project_path: project.to_string_lossy().into_owned(),
+            bridge_port: "19120".to_string(),
+            include_unity_path: false,
+            unity_path: String::new(),
+            client,
             cursor_project_scope: false,
         }
     }
@@ -1240,6 +1326,7 @@ mod tests {
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             opencode_selected: false,
+            zcode_selected: false,
         })
         .unwrap();
         assert_eq!(plan.targets.len(), 1);
@@ -1256,6 +1343,7 @@ mod tests {
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             opencode_selected: true,
+            zcode_selected: false,
         })
         .unwrap();
         assert_eq!(plan.targets.len(), 2);
@@ -1277,6 +1365,7 @@ mod tests {
                 project_path: project.to_string_lossy().into_owned(),
                 toolkit_root: root.path().to_string_lossy().into_owned(),
                 opencode_selected: false,
+                zcode_selected: false,
             },
             false,
         )
@@ -1304,6 +1393,7 @@ mod tests {
                 project_path: project.to_string_lossy().into_owned(),
                 toolkit_root: root.path().to_string_lossy().into_owned(),
                 opencode_selected: true,
+                zcode_selected: false,
             },
             true,
         )
@@ -1332,6 +1422,7 @@ mod tests {
                 project_path: project.to_string_lossy().into_owned(),
                 toolkit_root: "/repos/this/does/not/exist".to_string(),
                 opencode_selected: false,
+                zcode_selected: false,
             },
             true,
         )
@@ -1354,4 +1445,138 @@ mod tests {
         );
         assert!(contains_mcp_key(&target));
     }
+
+    #[test]
+    fn plan_zcode_global_targets_home_dot_zcode() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let toolkit = tempdir().unwrap();
+        make_fake_toolkit(toolkit.path());
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_zcode_params(McpClientId::ZcodeGlobal, home, &project, toolkit.path());
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        let target = plan.target_path.expect("zcode global has a target");
+        assert!(target.ends_with(".zcode/cli/config.json"));
+        // ZCode nests three levels: mcp.servers.unity-open-mcp.
+        let proposed: Value = serde_json::from_str(&plan.proposed_json.clone().unwrap()).unwrap();
+        let entry = proposed
+            .get("mcp")
+            .and_then(|m| m.get("servers"))
+            .and_then(|s| s.get(MCP_SERVER_KEY))
+            .expect("mcp.servers.unity-open-mcp present");
+        assert_eq!(entry.get("type").unwrap(), "stdio");
+        assert_eq!(entry.get("command").unwrap(), "node");
+        assert!(entry.get("env").is_some());
+    }
+
+    #[test]
+    fn plan_zcode_project_targets_project_dot_zcode() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let toolkit = tempdir().unwrap();
+        make_fake_toolkit(toolkit.path());
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_zcode_params(McpClientId::ZcodeProject, home, &project, toolkit.path());
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        let target = plan.target_path.expect("zcode project has a target");
+        // Project scope: file under <project>/.zcode/cli/config.json, NOT ~/.zcode.
+        assert!(target.contains("proj/.zcode/cli/config.json"));
+        // Project scope writes under the project dir, not the home dir.
+        let proj_zcode = project.join(".zcode").join("cli").join("config.json");
+        assert_eq!(
+            std::path::Path::new(&target),
+            proj_zcode.as_path()
+        );
+    }
+
+    #[test]
+    fn plan_zcode_preserves_unrelated_servers_and_three_level_nesting() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let toolkit = tempdir().unwrap();
+        make_fake_toolkit(toolkit.path());
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        // Pre-existing ZCode config with an unrelated server and a sibling key.
+        let zcode_path = home.join(".zcode").join("cli").join("config.json");
+        write_text(
+            &zcode_path,
+            r#"{
+  "mcp": {
+    "servers": {
+      "another-server": {
+        "type": "http",
+        "url": "https://example.com/mcp"
+      }
+    }
+  },
+  "ui": { "theme": "dark" }
+}
+"#,
+        );
+        let params = make_zcode_params(McpClientId::ZcodeGlobal, home, &project, toolkit.path());
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        assert!(plan.file_exists);
+        assert!(plan.would_write);
+        let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+        let servers = proposed
+            .get("mcp")
+            .and_then(|m| m.get("servers"))
+            .and_then(|s| s.as_object())
+            .unwrap();
+        // The unrelated server survived the three-level merge.
+        assert!(servers.contains_key("another-server"));
+        assert!(servers.contains_key(MCP_SERVER_KEY));
+        // An unrelated top-level key is preserved too.
+        assert_eq!(
+            proposed.get("ui").and_then(|u| u.get("theme")).and_then(|t| t.as_str()),
+            Some("dark")
+        );
+        // ZCode does NOT inject the OpenCode $schema.
+        assert!(proposed.get("$schema").is_none());
+    }
+
+    #[test]
+    fn write_zcode_global_merges_into_mcp_servers_key() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let toolkit = tempdir().unwrap();
+        make_fake_toolkit(toolkit.path());
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let zcode_path = home.join(".zcode").join("cli").join("config.json");
+        write_text(&zcode_path, r#"{"mcp":{"servers":{"existing":{"type":"stdio","command":"x"}}}}"#);
+        let params = make_zcode_params(McpClientId::ZcodeGlobal, home, &project, toolkit.path());
+        let result = write_mcp_config_at(&params, home).unwrap();
+        assert!(result.would_write);
+        let written: Value =
+            serde_json::from_str(&fs::read_to_string(&zcode_path).unwrap()).unwrap();
+        let servers = written.get("mcp").unwrap().get("servers").unwrap().as_object().unwrap();
+        assert!(servers.contains_key("existing"));
+        assert!(servers.contains_key(MCP_SERVER_KEY));
+    }
+
+    #[test]
+    fn plan_skill_copy_includes_agents_target_when_zcode_selected() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        fs::create_dir_all(project).unwrap();
+        let plan = plan_skill_copy_at(&SkillCopyParams {
+            project_path: project.to_string_lossy().into_owned(),
+            toolkit_root: "/repos/uai".to_string(),
+            opencode_selected: false,
+            zcode_selected: true,
+        })
+        .unwrap();
+        assert_eq!(plan.targets.len(), 2);
+        let agents = plan
+            .targets
+            .iter()
+            .find(|t| t.kind == SkillCopyKind::Agents)
+            .expect("agents target present");
+        assert!(agents.target_path.ends_with(".agents/skills/unity-open-mcp/SKILL.md"));
+    }
+
 }

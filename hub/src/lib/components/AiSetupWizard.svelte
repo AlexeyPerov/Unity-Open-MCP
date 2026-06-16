@@ -105,6 +105,8 @@
     { id: "claude-code", label: "Claude Code (CLI only)", kind: "cli" },
     { id: "opencode-global", label: "OpenCode (global)", kind: "file" },
     { id: "opencode-project", label: "OpenCode (project)", kind: "file" },
+    { id: "zcode-global", label: "ZCode (global)", kind: "file" },
+    { id: "zcode-project", label: "ZCode (project)", kind: "file" },
     { id: "manual", label: "Manual / copy JSON", kind: "clipboard" },
   ];
 
@@ -629,6 +631,7 @@
           projectPath,
           toolkitRoot: root,
           opencodeSelected: isOpencodeClient(mcpClient),
+          zcodeSelected: isZcodeClient(mcpClient),
         };
         const plan = await planSkillCopy(params);
         if (!cancelled) {
@@ -667,6 +670,10 @@
         return "opencodeGlobal";
       case "opencode-project":
         return "opencodeProject";
+      case "zcode-global":
+        return "zcodeGlobal";
+      case "zcode-project":
+        return "zcodeProject";
       case "manual":
         return "manual";
     }
@@ -674,6 +681,10 @@
 
   function isOpencodeClient(id: McpClientId): boolean {
     return id === "opencode-global" || id === "opencode-project";
+  }
+
+  function isZcodeClient(id: McpClientId): boolean {
+    return id === "zcode-global" || id === "zcode-project";
   }
 
   function toMcpConfigError(e: unknown): McpConfigError {
@@ -857,6 +868,7 @@
         projectPath,
         toolkitRoot: root,
         opencodeSelected: isOpencodeClient(mcpClient),
+        zcodeSelected: isZcodeClient(mcpClient),
       };
       const result = await copySkillFiles(params, skillOverwriteAck);
       skillResult = result;
@@ -1194,7 +1206,14 @@
   function mcpSummary(): { tone: "ok" | "warn" | "muted"; label: string } {
     const h = detection?.mcpConfigured;
     if (!h) return { tone: "muted", label: "not detected" };
-    if (h.cursor || h.claudeDesktop || h.opencodeGlobal || h.opencodeProject) {
+    if (
+      h.cursor ||
+      h.claudeDesktop ||
+      h.opencodeGlobal ||
+      h.opencodeProject ||
+      h.zcodeGlobal ||
+      h.zcodeProject
+    ) {
       return { tone: "ok", label: "configured" };
     }
     if (mcpWriteResult?.wouldWrite) {
@@ -1310,13 +1329,20 @@
   // --- Step 1 derived display helpers -------------------------------
   function mcpConfiguredSummary(h: McpConfigHeuristic): string {
     const any =
-      h.cursor || h.claudeDesktop || h.opencodeGlobal || h.opencodeProject;
+      h.cursor ||
+      h.claudeDesktop ||
+      h.opencodeGlobal ||
+      h.opencodeProject ||
+      h.zcodeGlobal ||
+      h.zcodeProject;
     if (!any) return "not detected";
     const clients: string[] = [];
     if (h.cursor) clients.push("Cursor");
     if (h.claudeDesktop) clients.push("Claude Desktop");
     if (h.opencodeGlobal) clients.push("OpenCode (global)");
     if (h.opencodeProject) clients.push("OpenCode (project)");
+    if (h.zcodeGlobal) clients.push("ZCode (global)");
+    if (h.zcodeProject) clients.push("ZCode (project)");
     return `yes (${clients.join(", ")})`;
   }
 
@@ -2201,7 +2227,7 @@
                   {@const mcp = mcpSummary()}
                   <StatusChip tone={mcp.tone} label={mcp.label} />
                   <small class="wiz-summary-small">
-                    {mcpConfiguredSummary(detection?.mcpConfigured ?? { cursor: false, claudeDesktop: false, opencodeGlobal: false, opencodeProject: false })}
+                    {mcpConfiguredSummary(detection?.mcpConfigured ?? { cursor: false, claudeDesktop: false, opencodeGlobal: false, opencodeProject: false, zcodeGlobal: false, zcodeProject: false })}
                   </small>
                 {/if}
               </dd>

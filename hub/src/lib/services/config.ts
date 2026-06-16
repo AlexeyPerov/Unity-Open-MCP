@@ -848,6 +848,8 @@ export interface McpConfigHeuristic {
   claudeDesktop: boolean;
   opencodeGlobal: boolean;
   opencodeProject: boolean;
+  zcodeGlobal: boolean;
+  zcodeProject: boolean;
 }
 
 export interface ProjectState {
@@ -974,6 +976,8 @@ export type McpClientIdWire =
   | "claudeCode"
   | "opencodeGlobal"
   | "opencodeProject"
+  | "zcodeGlobal"
+  | "zcodeProject"
   | "manual";
 
 export interface McpConfigParamsWire {
@@ -1039,7 +1043,7 @@ export async function writeMcpConfig(
  * M4 Plan 4: wizard Done-time skill copy plan / write.
  * Mirrors the Rust `mcp_config::{SkillCopyParams, SkillCopyPlan, …}` types.
  */
-export type SkillCopyKind = "claude" | "opencode";
+export type SkillCopyKind = "claude" | "opencode" | "agents";
 
 export interface SkillCopyTarget {
   kind: SkillCopyKind;
@@ -1060,6 +1064,7 @@ export interface SkillCopyParamsWire {
   projectPath: string;
   toolkitRoot: string;
   opencodeSelected: boolean;
+  zcodeSelected: boolean;
 }
 
 export interface SkillCopyResult {

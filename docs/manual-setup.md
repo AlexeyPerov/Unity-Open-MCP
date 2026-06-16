@@ -11,7 +11,7 @@ For the guided wizard in Unity Hub Pro, see [wizard-setup.md](wizard-setup.md).
 | Unity 6 (6000.0+) | Required by the bridge package. |
 | Node.js 18+ | Runs the MCP server (`mcp-server/dist/index.js`). |
 | This repository | Clone or download the `unity-open-mcp` monorepo. |
-| An MCP client | Cursor, Claude Desktop, OpenCode, or any MCP stdio client. |
+| An MCP client | Cursor, Claude Desktop, OpenCode, ZCode, or any MCP stdio client. |
 
 ## 1. Build the MCP server
 
@@ -115,6 +115,32 @@ Edit `~/.config/opencode/opencode.json`. Add under `mcp`:
 ```
 
 For a project-scoped config, put the same `mcp.unity-open-mcp` block in `opencode.json` at your Unity project root.
+
+### ZCode
+
+Edit `~/.zcode/cli/config.json` (global) — ZCode nests MCP servers three levels deep under `mcp.servers`. Add a `unity-open-mcp` entry:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "unity-open-mcp": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["/absolute/path/to/unity-open-mcp/mcp-server/dist/index.js"],
+        "env": {
+          "UNITY_PROJECT_PATH": "/absolute/path/to/your/unity/project",
+          "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
+        }
+      }
+    }
+  }
+}
+```
+
+For a project-scoped config, put the same `mcp.servers.unity-open-mcp` block in `.zcode/cli/config.json` at your Unity project root.
+
+ZCode also discovers project skills under `.agents/skills/`. Run `unity_agent_generate_skill` with `clients: ["agents"]` (or use the Hub wizard, which writes `.agents/skills/unity-open-mcp/SKILL.md` when ZCode is selected) to give the agent a project-specific Unity skill.
 
 ### Claude Code (CLI)
 

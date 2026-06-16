@@ -66,12 +66,13 @@ const CLIENT_SKILL_PATHS: Record<string, string> = {
   claude: ".claude/skills/unity-open-mcp/SKILL.md",
   cursor: ".cursor/skills/unity-open-mcp/SKILL.md",
   opencode: ".opencode/skills/unity-open-mcp/SKILL.md",
+  agents: ".agents/skills/unity-open-mcp/SKILL.md",
 };
 
 const SKIP_DIRS = new Set([
   ".git", ".vs", "Library", "Logs", "obj", "Obj",
   "Temp", "Build", "Builds", "UserSettings", "node_modules",
-  ".claude", ".cursor", ".opencode",
+  ".claude", ".cursor", ".opencode", ".agents",
 ]);
 
 const MAX_CS_SCAN = 500;
