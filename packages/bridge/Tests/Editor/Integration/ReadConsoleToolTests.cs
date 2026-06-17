@@ -58,5 +58,64 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"counts\"", result.Output,
                 "Output should contain a counts object");
         }
+
+        // M13 T4.6 — `truncated` and `detail` are always present so agents can
+        // bound their token budget without re-checking the schema.
+        [Test]
+        public static void ReadConsole_AlwaysReportsTruncated()
+        {
+            var result = BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+                "{\"type\":\"all\",\"max_entries\":10}");
+            Assert.IsNotNull(result);
+            Assert.IsTrue(result.Success);
+            StringAssert.Contains("\"truncated\":", result.Output);
+            StringAssert.Contains("\"detail\":\"normal\"", result.Output);
+        }
+
+        [Test]
+        public static void ReadConsole_DetailSummary_OmitsStacks()
+        {
+            // Emit a test log entry so we have at least one to inspect.
+            UnityEngine.Debug.Log("m13_t46_summary_probe");
+            try
+            {
+                var result = BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+                    "{\"type\":\"all\",\"detail\":\"summary\",\"max_entries\":50}");
+                Assert.IsNotNull(result);
+                Assert.IsTrue(result.Success);
+                // Summary must never include stack traces (the dominant token cost).
+                Assert.IsFalse(result.Output.Contains("\"stack\":"),
+                    $"summary detail must omit stacks. Output: {result.Output}");
+                StringAssert.Contains("\"detail\":\"summary\"", result.Output);
+            }
+            finally
+            {
+                // best-effort cleanup so we don't pollute later tests
+                BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+                    "{\"type\":\"all\",\"clear\":true,\"max_entries\":1}");
+            }
+        }
+
+        [Test]
+        public static void ReadConsole_DetailVerbose_IncludesStacksWhenPresent()
+        {
+            UnityEngine.Debug.Log("m13_t46_verbose_probe");
+            try
+            {
+                var result = BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+                    "{\"type\":\"log\",\"detail\":\"verbose\",\"max_entries\":50}");
+                Assert.IsNotNull(result);
+                Assert.IsTrue(result.Success);
+                StringAssert.Contains("\"detail\":\"verbose\"", result.Output);
+                // Our probe entry should be present. Stack presence depends on
+                // Unity's LogEntry internals, so we only assert detail echoed.
+                StringAssert.Contains("m13_t46_verbose_probe", result.Output);
+            }
+            finally
+            {
+                BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+                    "{\"type\":\"all\",\"clear\":true,\"max_entries\":1}");
+            }
+        }
     }
 }

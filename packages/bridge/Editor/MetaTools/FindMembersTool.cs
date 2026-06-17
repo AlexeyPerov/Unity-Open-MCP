@@ -24,7 +24,12 @@ namespace UnityOpenMcpBridge.MetaTools
                 kind = "all";
 
             var results = new List<string>();
+            // M13 T4.6 — total match count (pre-cap) so we can report `truncated`
+            // accurately. The walk continues past the cap to count the rest of
+            // the matches; the returned payload only carries `max_results`.
+            int totalMatches = 0;
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            bool capReached = false;
 
             foreach (var asm in assemblies)
             {
@@ -43,8 +48,15 @@ namespace UnityOpenMcpBridge.MetaTools
                         {
                             if (MatchesQuery(type.Name, query) || MatchesQuery(type.FullName, query))
                             {
-                                results.Add(SerializeMember("type", type.Name, type.FullName, "", GetSummary(type)));
-                                if (results.Count >= maxResults) goto Done;
+                                totalMatches++;
+                                if (results.Count < maxResults)
+                                {
+                                    results.Add(SerializeMember("type", type.Name, type.FullName, "", GetSummary(type)));
+                                }
+                                else
+                                {
+                                    capReached = true;
+                                }
                             }
                         }
 
@@ -54,9 +66,16 @@ namespace UnityOpenMcpBridge.MetaTools
                             {
                                 if (MatchesQuery(method.Name, query))
                                 {
-                                    results.Add(SerializeMember("method", method.Name, type.FullName,
-                                        GetMethodSignature(method), ""));
-                                    if (results.Count >= maxResults) goto Done;
+                                    totalMatches++;
+                                    if (results.Count < maxResults)
+                                    {
+                                        results.Add(SerializeMember("method", method.Name, type.FullName,
+                                            GetMethodSignature(method), ""));
+                                    }
+                                    else
+                                    {
+                                        capReached = true;
+                                    }
                                 }
                             }
                         }
@@ -67,9 +86,16 @@ namespace UnityOpenMcpBridge.MetaTools
                             {
                                 if (MatchesQuery(prop.Name, query))
                                 {
-                                    results.Add(SerializeMember("property", prop.Name, type.FullName,
-                                        GetPropertySignature(prop), ""));
-                                    if (results.Count >= maxResults) goto Done;
+                                    totalMatches++;
+                                    if (results.Count < maxResults)
+                                    {
+                                        results.Add(SerializeMember("property", prop.Name, type.FullName,
+                                            GetPropertySignature(prop), ""));
+                                    }
+                                    else
+                                    {
+                                        capReached = true;
+                                    }
                                 }
                             }
                         }
@@ -78,8 +104,13 @@ namespace UnityOpenMcpBridge.MetaTools
                 }
             }
 
-        Done:
-            var json = "{\"members\":[" + string.Join(",", results) + "]}";
+            // M13 T4.6 — always report truncation. `truncated: 0` means the cap
+            // was not hit; agents can trust the absence of further matches.
+            int truncated = capReached ? totalMatches - results.Count : 0;
+            var json = "{\"members\":[" + string.Join(",", results) + "]"
+                + ",\"count\":" + results.Count
+                + ",\"truncated\":" + truncated
+                + "}";
             return ToolDispatchResult.Ok(json);
         }
 

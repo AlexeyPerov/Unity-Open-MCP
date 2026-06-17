@@ -3,7 +3,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 export const findMembers: Tool = {
   name: "unity_open_mcp_find_members",
   description:
-    "Discover types, methods, and properties for agent planning (reduces blind execute calls).",
+    "Discover types, methods, and properties for agent planning (reduces blind execute calls). " +
+    "Token-bounded: `max_results` caps the returned list, `truncated` always reports how many " +
+    "additional matches were dropped.",
   inputSchema: {
     type: "object",
     properties: {
@@ -30,6 +32,8 @@ export const findMembers: Tool = {
         type: "integer",
         default: 50,
         maximum: 200,
+        description:
+          "Maximum number of members to return. Additional matches are counted in `truncated`.",
       },
     },
     additionalProperties: false,

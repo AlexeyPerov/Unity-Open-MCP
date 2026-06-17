@@ -8,6 +8,8 @@ Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeH
 |---|---|---|
 | `/ping` | `GET` | Bridge/editor health snapshot. |
 | `/instance` | `GET` | Live instance lock + heartbeat snapshot (M13). |
+| `/events` | `GET` | SSE stream of console logs + editor-state transitions (M13 T4.4). |
+| `/events/poll` | `GET` | Drain the event queue as a single JSON envelope (M13 T4.4). |
 | `/tools/{toolName}` | `POST` | Execute bridge tool by name. |
 | `/resources` | `GET` | List bridge-registered resources. |
 | `/resources/{route}` | `GET` | Read one bridge resource payload. |
@@ -50,6 +52,55 @@ If the bridge session is not initialized yet, endpoint may return `503` with a f
 ## `/instance` response (M13)
 
 Returns the live lock JSON described under [Multi-instance discovery](#multi-instance-discovery-m13). Returns `503` with `{"error":{"code":"no_instance", ...}}` when the bridge has not acquired a lock yet (listener started but lock write failed — e.g. the `~/.unity-agent/instances/` directory could not be created).
+
+## `/events` SSE & `/events/poll` (M13 T4.4)
+
+Streaming notification channel for console logs and editor-state transitions. Backed by an in-memory ring buffer (`BridgeEventSource`, 1024-event capacity) fed by `Application.logMessageReceived` and editor callbacks (compile start/stop, play-mode changes, before-assembly-reload). Two drain surfaces:
+
+### `GET /events` — Server-Sent Events
+
+Long-lived connection that emits incremental events. Query params:
+
+| Param | Default | Purpose |
+|---|---|---|
+| `subscriber` | (minted) | Opaque id so a reconnecting client keeps its cursor and doesn't replay events it already saw. |
+| `max_per_poll` | `100` | Cap events drained per tick. Bounds burst replay after a reconnect. |
+
+Wire format: standard SSE — one `event:` line, one or more `data:` lines (long payloads like stacks are split across `data:` lines and reassembled by the client), blank-line separator.
+
+Control events:
+- `ready` — emitted immediately on connect with `{"subscriber":"<id>"}` so the client knows the stream is live before the first event.
+- `missed` — emitted when the ring evicted events this subscriber never saw: `{"missed":N}`. Never silent.
+- `close` — emitted before the connection closes (10-minute timeout or bridge shutdown): `{"reason":"timeout_or_shutdown"}`.
+
+Event types:
+- `log` — `{"seq":N,"ts":"...","type":"log","logType":"error|warning|log|exception|assert","message":"...","stack":"..."}`. `stack` omitted when empty.
+- `editor_state` — `{"seq":N,"ts":"...","type":"editor_state","state":"idle|compiling|reloading|entering_playmode|playing|exiting_playmode","isCompiling":bool,"isPlaying":bool}`. State vocabulary matches the heartbeat file (`BridgeInstanceLock.State*`).
+
+The connection lives on a ThreadPool worker thread for up to 10 minutes; the listener's `finally` clause skips the automatic `Response.Close()` for SSE so the stream isn't aborted when `HandleRequest` returns.
+
+### `GET /events/poll` — single JSON drain
+
+Returns the events buffered since the caller's last poll as one JSON envelope. Use this when the client is request/response only (the MCP server does, because it lives behind a stdio transport). Query params:
+
+| Param | Default | Purpose |
+|---|---|---|
+| `subscriber` | (minted) | Opaque id; reused across polls to keep a cursor. |
+| `max_events` | `100` | Cap events returned; extras stay buffered for the next poll. |
+
+Response shape:
+
+```json
+{
+  "subscriberId": "abc123",
+  "events": [ /* BridgeEvent objects, same shape as SSE `data` payloads */ ],
+  "count": 3,
+  "missed": 0,
+  "totalEmitted": 42
+}
+```
+
+`missed > 0` means the ring evicted events between this subscriber's cursor and the oldest entry still in the buffer — the loss is reported, never silent.
 
 ## `/tools/{toolName}` behavior
 
@@ -265,5 +316,6 @@ Instance IDs are invalidated by domain reload (recompilation, enter/exit Play Mo
 ## Source-of-truth files
 
 - `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`
+- `packages/bridge/Editor/Bridge/BridgeEventSource.cs`
 - `packages/bridge/Editor/Bridge/Registry/BridgeToolRegistry.cs`
 - `packages/bridge/Editor/Bridge/Registry/BridgeResourceRegistry.cs`

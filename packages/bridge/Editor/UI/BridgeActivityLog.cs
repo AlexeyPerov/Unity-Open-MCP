@@ -57,6 +57,11 @@ namespace UnityOpenMcpBridge
         // Verbose-only fields (populated only when ActivityLogVerboseMode is on):
         public string RequestSnippet;   // truncated JSON snippet of the request body
         public string ResponseSnippet;  // short response outcome snippet (no body)
+
+        // M13 T4.4 — set by streaming endpoints (SSE). When true the listener's
+        // finally clause skips the automatic Response.Close() so the long-lived
+        // stream stays open; the endpoint owns its own lifecycle.
+        public bool StreamingResponse;
     }
 
     public static class BridgeActivityLog

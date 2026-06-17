@@ -17,6 +17,7 @@ import { PingCache } from "./ping-cache.js";
 import { ResourceRouter } from "./resource-router.js";
 import { withSchemaDefaults } from "./schema-defaults.js";
 import { resolvePort } from "./instance-discovery.js";
+import { BridgeEventStream } from "./event-stream.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 
 /** Name → tool lookup, built once for default-injection in the CallTool handler. */
@@ -66,7 +67,12 @@ export function createServer(projectPath: string, port: number): Server {
   const pingCache = new PingCache();
   const liveClient = new LiveClient(port, pingCache);
   const batchSpawn = new BatchSpawn();
-  const router = new ToolRouter(liveClient, batchSpawn, projectPath);
+  // M13 T4.4 — one SSE subscription per server process. The MCP server is the
+  // only long-lived hop between the bridge and the LLM; a per-process reader
+  // amortizes the connection and lets every `unity_agent_pull_events` call
+  // share the same buffered queue.
+  const eventStream = new BridgeEventStream(`http://127.0.0.1:${port}`);
+  const router = new ToolRouter(liveClient, batchSpawn, projectPath, eventStream);
   const resourceRouter = new ResourceRouter({
     live: liveClient,
     pingCache,

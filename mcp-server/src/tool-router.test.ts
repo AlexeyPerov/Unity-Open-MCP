@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { ToolRouter } from "./tool-router.js";
 import type { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
+import type { BridgeEventStream, PullResult } from "./event-stream.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,28 @@ function makeFakeBatch(opts: {
   } as unknown as BatchSpawn & { calls: LiveCall[] };
 }
 
+// M13 T4.4 — fake event stream that returns whatever the test pre-seeds. The
+// real BridgeEventStream opens an SSE reader; in unit tests we don't want any
+// network I/O, so the fake just drains a queue.
+function makeFakeEventStream(events: PullResult["events"] = []): BridgeEventStream {
+  return {
+    pull(): PullResult {
+      const out = events.slice();
+      events = [];
+      return {
+        subscriberId: "test-subscriber",
+        events: out,
+        dropped: 0,
+        connected: true,
+        started: true,
+        lastError: null,
+      };
+    },
+    ensureSubscription() { return true; },
+    stop() { /* no-op */ },
+  } as unknown as BridgeEventStream;
+}
+
 function parseBody(result: CallToolResult): Record<string, unknown> {
   const first = result.content[0];
   if (!first || first.type !== "text" || typeof first.text !== "string") {
@@ -124,7 +147,7 @@ test("route: list_assets resolves offline and tags _source=offline", async () =>
     await setupProject(tmp);
     const live = makeFakeLive();
     const batch = makeFakeBatch();
-    const router = new ToolRouter(live, batch, tmp);
+    const router = new ToolRouter(live, batch, tmp, makeFakeEventStream());
 
     const result = await router.route("unity_open_mcp_list_assets", { folder: "Assets" });
     const body = parseBody(result);
@@ -139,7 +162,7 @@ test("route: capabilities returns local capability surface", async () => {
   await withTmp("router-caps-", async (tmp) => {
     const live = makeFakeLive();
     const batch = makeFakeBatch();
-    const router = new ToolRouter(live, batch, tmp);
+    const router = new ToolRouter(live, batch, tmp, makeFakeEventStream());
 
     const result = await router.route("unity_open_mcp_capabilities", {});
     const body = parseBody(result);
@@ -151,7 +174,7 @@ test("route: capabilities returns local capability surface", async () => {
 
 test("route: capabilities filters by kind", async () => {
   await withTmp("router-caps-kind-", async (tmp) => {
-    const router = new ToolRouter(makeFakeLive(), makeFakeBatch(), tmp);
+    const router = new ToolRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
     const res = await router.route("unity_open_mcp_capabilities", { kind: "rules" });
     const body = parseBody(res);
     assert.ok(Array.isArray(body.rules) && body.rules.length > 0, "rules surface present");
@@ -163,7 +186,7 @@ test("route: list_rules returns local rule catalog with _source=local", async ()
   await withTmp("router-list-rules-", async (tmp) => {
     const live = makeFakeLive();
     const batch = makeFakeBatch();
-    const router = new ToolRouter(live, batch, tmp);
+    const router = new ToolRouter(live, batch, tmp, makeFakeEventStream());
 
     const res = await router.route("unity_agent_list_rules", {});
     const body = parseBody(res);
@@ -177,7 +200,7 @@ test("route: list_rules returns local rule catalog with _source=local", async ()
 
 test("route: list_rules honors asset_kind filter locally", async () => {
   await withTmp("router-list-rules-filter-", async (tmp) => {
-    const router = new ToolRouter(makeFakeLive(), makeFakeBatch(), tmp);
+    const router = new ToolRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
     const res = await router.route("unity_agent_list_rules", { asset_kind: "prefab" });
     const body = parseBody(res);
     const rules = body.rules as Array<{ id: string }>;
@@ -194,7 +217,7 @@ test("route: generate_skill returns local skill without writing", async () => {
     await setupProject(tmp);
     const live = makeFakeLive();
     const batch = makeFakeBatch();
-    const router = new ToolRouter(live, batch, tmp);
+    const router = new ToolRouter(live, batch, tmp, makeFakeEventStream());
 
     const result = await router.route("unity_agent_generate_skill", { write: false });
     const body = parseBody(result);
@@ -207,6 +230,60 @@ test("route: generate_skill returns local skill without writing", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// pull_events — M13 T4.4
+// ---------------------------------------------------------------------------
+
+test("route: pull_events returns bridge_unavailable when live is down", async () => {
+  const live = makeFakeLive({ available: false });
+  const router = new ToolRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_agent_pull_events", {});
+  assert.equal(result.isError, true);
+  assert.equal(errorCode(result), "bridge_unavailable");
+});
+
+test("route: pull_events drains queued events when live is up", async () => {
+  const live = makeFakeLive({ available: true });
+  const events = [
+    {
+      seq: 1,
+      ts: "2026-06-17T00:00:00.000Z",
+      type: "log" as const,
+      logType: "error",
+      message: "boom",
+    },
+    {
+      seq: 2,
+      ts: "2026-06-17T00:00:00.100Z",
+      type: "editor_state" as const,
+      state: "idle",
+      isCompiling: false,
+      isPlaying: false,
+    },
+  ];
+  const router = new ToolRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream(events));
+
+  const result = await router.route("unity_agent_pull_events", { max_events: 10 });
+  const body = parseBody(result);
+  assert.equal(result.isError, false);
+  assert.ok(Array.isArray(body.events) && body.events.length === 2, "both events drained");
+  assert.equal(body.connected, true);
+  assert.equal(body.started, true);
+});
+
+test("route: pull_events caps max_events at 1000", async () => {
+  const live = makeFakeLive({ available: true });
+  const router = new ToolRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_agent_pull_events", { max_events: 999999 });
+  const body = parseBody(result);
+  assert.equal(result.isError, false);
+  // The fake yields an empty list; we only assert the call accepted the cap
+  // and returned a well-formed result (no overflow error).
+  assert.ok(Array.isArray(body.events));
+});
+
+// ---------------------------------------------------------------------------
 // find_references — offline when no live, live when available
 // ---------------------------------------------------------------------------
 
@@ -215,7 +292,7 @@ test("route: find_references goes offline when live bridge is down", async () =>
     await setupProject(tmp);
     const live = makeFakeLive({ available: false });
     const batch = makeFakeBatch();
-    const router = new ToolRouter(live, batch, tmp);
+    const router = new ToolRouter(live, batch, tmp, makeFakeEventStream());
 
     const result = await router.route("unity_open_mcp_find_references", {
       guid: "0000000000000000000000000000aaaa",
@@ -229,7 +306,7 @@ test("route: find_references goes offline when live bridge is down", async () =>
 test("route: find_references requires asset_path or guid when offline", async () => {
   await withTmp("router-refs-missing-", async (tmp) => {
     const live = makeFakeLive({ available: false });
-    const router = new ToolRouter(live, makeFakeBatch(), tmp);
+    const router = new ToolRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
 
     const result = await router.route("unity_open_mcp_find_references", {});
     assert.equal(result.isError, true);
@@ -240,7 +317,7 @@ test("route: find_references requires asset_path or guid when offline", async ()
 test("route: find_references goes live when bridge is available", async () => {
   await withTmp("router-refs-live-", async (tmp) => {
     const live = makeFakeLive({ available: true });
-    const router = new ToolRouter(live, makeFakeBatch(), tmp);
+    const router = new ToolRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
 
     await router.route("unity_open_mcp_find_references", { guid: "deadbeef" });
     assert.equal(live.calls.length, 1);
@@ -255,7 +332,7 @@ test("route: find_references goes live when bridge is available", async () => {
 test("route: non-batch tool routes to live and tags _route=live", async () => {
   const live = makeFakeLive({ available: true });
   const batch = makeFakeBatch();
-  const router = new ToolRouter(live, batch, "/proj");
+  const router = new ToolRouter(live, batch, "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_invoke_method", { method: "Foo" });
   assert.equal(live.calls.length, 1);
@@ -270,7 +347,7 @@ test("route: non-batch tool routes to live and tags _route=live", async () => {
 test("route: batch tool prefers live when available", async () => {
   const live = makeFakeLive({ available: true });
   const batch = makeFakeBatch({ batchTools: new Set(["unity_open_mcp_scan_all"]) });
-  const router = new ToolRouter(live, batch, "/proj");
+  const router = new ToolRouter(live, batch, "/proj", makeFakeEventStream());
 
   await router.route("unity_open_mcp_scan_all", {});
   assert.equal(live.calls.length, 1, "live should serve the batch tool when up");
@@ -286,7 +363,7 @@ test("route: batch tool falls back to batch with _route=batch when live is down"
       isError: false,
     },
   });
-  const router = new ToolRouter(live, batch, "/proj");
+  const router = new ToolRouter(live, batch, "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_scan_all", {});
   assert.equal(live.calls.length, 0);
@@ -307,7 +384,7 @@ test("route: compile_check always routes to batch even when live is available", 
       isError: false,
     },
   });
-  const router = new ToolRouter(live, batch, "/proj");
+  const router = new ToolRouter(live, batch, "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_compile_check", {});
   assert.equal(live.calls.length, 0, "compile_check must never hit the live bridge");
@@ -326,7 +403,7 @@ test("route: compile_check always routes to batch even when live is available", 
 test("route: ping returns batch ping result when live is down", async () => {
   const live = makeFakeLive({ available: false });
   const batch = makeFakeBatch();
-  const router = new ToolRouter(live, batch, "/proj");
+  const router = new ToolRouter(live, batch, "/proj", makeFakeEventStream());
 
   const result = await router.route("unity_open_mcp_ping", {});
   const body = parseBody(result);
@@ -344,7 +421,7 @@ test("route: ping is served by live when bridge is up", async () => {
       isError: false,
     },
   });
-  const router = new ToolRouter(live, makeFakeBatch(), "/proj");
+  const router = new ToolRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
   // ping is not a batch tool and not compressible -> falls into the generic
   // live branch (liveAvailable true -> live.route).
@@ -360,7 +437,7 @@ test("route: read_asset is routed via the compressible path (offline hit, no liv
   await withTmp("router-read-", async (tmp) => {
     await setupProject(tmp);
     const live = makeFakeLive();
-    const router = new ToolRouter(live, makeFakeBatch(), tmp);
+    const router = new ToolRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
 
     const result = await router.route("unity_open_mcp_read_asset", {
       asset_path: "Assets/Prefabs/Player.prefab",

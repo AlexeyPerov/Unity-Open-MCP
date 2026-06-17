@@ -271,6 +271,30 @@ namespace UnityOpenMcpBridge
                         activity.Kind = BridgeActivityKind.Ping;
                         HandleInstance(context);
                         break;
+                    case "/events":
+                        if (context.Request.HttpMethod == "GET")
+                        {
+                            activity.Kind = BridgeActivityKind.ResourceRequest;
+                            HandleEventsSse(context);
+                        }
+                        else
+                        {
+                            activity.Kind = BridgeActivityKind.ResourceRequest;
+                            SendJsonError(context, 405, "method_not_allowed", "GET required for /events");
+                        }
+                        break;
+                    case "/events/poll":
+                        if (context.Request.HttpMethod == "GET")
+                        {
+                            activity.Kind = BridgeActivityKind.ResourceRequest;
+                            HandleEventsPoll(context);
+                        }
+                        else
+                        {
+                            activity.Kind = BridgeActivityKind.ResourceRequest;
+                            SendJsonError(context, 405, "method_not_allowed", "GET required for /events/poll");
+                        }
+                        break;
                     case "/resources":
                         if (context.Request.HttpMethod == "GET")
                         {
@@ -351,7 +375,13 @@ namespace UnityOpenMcpBridge
             finally
             {
                 FinishActivity(context, activity);
-                try { context.Response.Close(); } catch { }
+                // SSE owns its own response lifecycle — it streams for minutes and
+                // closes the OutputStream itself. Closing here would abort the
+                // long-lived stream the moment HandleRequest returned.
+                if (!activity.StreamingResponse)
+                {
+                    try { context.Response.Close(); } catch { }
+                }
             }
         }
 
@@ -427,6 +457,119 @@ namespace UnityOpenMcpBridge
                 return;
             }
             SendJson(context, 200, json);
+        }
+
+        // M13 T4.4 — SSE streaming endpoint. Subscribes to BridgeEventSource,
+        // flushes the current backlog, then keeps the connection open and pushes
+        // incremental events as they arrive. Long-lived on a ThreadPool worker
+        // thread; the connection closes when the client disconnects, the bridge
+        // stops, or the SSE timeout (10 min default) elapses.
+        //
+        // Query params:
+        //   subscriber=<id>  — opaque id so a reconnecting client keeps its
+        //                      cursor and doesn't replay events it already saw.
+        //                      A new id is minted when omitted.
+        //   max_per_poll=<n> — cap events per drain tick (default 100). Bounds
+        //                      burst replay after a reconnect.
+        static void HandleEventsSse(HttpListenerContext context)
+        {
+            const int sseTimeoutMs = 10 * 60 * 1000;
+            const int pollIntervalMs = 100;
+
+            var query = context.Request.QueryString;
+            var subscriber = query["subscriber"];
+            var maxPerPollRaw = query["max_per_poll"];
+            int maxPerPoll = 100;
+            if (int.TryParse(maxPerPollRaw, out var parsed) && parsed > 0 && parsed <= 1000)
+                maxPerPoll = parsed;
+
+            if (string.IsNullOrEmpty(subscriber))
+                subscriber = System.Guid.NewGuid().ToString("N");
+
+            // Take ownership of the response lifecycle so HandleRequest's finally
+            // does not Close() on us mid-stream.
+            var activity = CurrentActivity;
+            if (activity != null) activity.StreamingResponse = true;
+
+            try
+            {
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "text/event-stream; charset=utf-8";
+                context.Response.SendChunked = true;
+
+                // Initial hello so the client immediately knows the subscriber id
+                // and that the stream is live (without waiting for the first event).
+                WriteSseEvent(context, "ready", "{\"subscriber\":\"" + EscapeStringContent(subscriber) + "\"}");
+
+                var deadline = DateTime.UtcNow.AddMilliseconds(sseTimeoutMs);
+                while (_running && BridgeSession.Connected && DateTime.UtcNow < deadline)
+                {
+                    var drain = BridgeEventSource.Drain(subscriber, maxPerPoll);
+                    if (drain.Events != null)
+                    {
+                        foreach (var evt in drain.Events)
+                        {
+                            WriteSseEvent(context, evt.Type, BridgeEventSource.RenderEvent(evt));
+                        }
+                    }
+                    if (drain.Missed > 0)
+                    {
+                        WriteSseEvent(context, "missed", "{\"missed\":" + drain.Missed + "}");
+                    }
+                    // If we flushed anything, drain again immediately; otherwise
+                    // pace the loop so we don't spin the worker thread.
+                    if (drain.Events == null || drain.Events.Count == 0)
+                    {
+                        System.Threading.Thread.Sleep(pollIntervalMs);
+                    }
+                    context.Response.OutputStream.Flush();
+                }
+
+                try { WriteSseEvent(context, "close", "{\"reason\":\"timeout_or_shutdown\"}"); } catch { }
+            }
+            catch
+            {
+                // Client disconnect or write failure — exit silently.
+            }
+            finally
+            {
+                try { context.Response.Close(); } catch { }
+            }
+        }
+
+        static void WriteSseEvent(HttpListenerContext context, string eventName, string data)
+        {
+            var sb = new StringBuilder(64 + data.Length);
+            sb.Append("event: ").Append(eventName).Append('\n');
+            // SSE data lines can't contain raw newlines; split multi-line data
+            // (e.g. log stacks) across multiple `data:` prefixes.
+            var lines = data.Split('\n');
+            foreach (var line in lines)
+            {
+                sb.Append("data: ").Append(line).Append('\n');
+            }
+            sb.Append('\n');
+            var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+            context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+        }
+
+        // M13 T4.4 — non-SSE drain. Returns the events buffered since the
+        // caller's last poll as a single JSON envelope. The MCP server uses
+        // this surface (instead of SSE) because it lives behind a stdio
+        // transport and would otherwise need to forward SSE→MCP notifications.
+        static void HandleEventsPoll(HttpListenerContext context)
+        {
+            var query = context.Request.QueryString;
+            var subscriber = query["subscriber"];
+            if (string.IsNullOrEmpty(subscriber))
+                subscriber = System.Guid.NewGuid().ToString("N");
+
+            int maxEvents = 100;
+            if (int.TryParse(query["max_events"], out var parsed) && parsed > 0 && parsed <= 1000)
+                maxEvents = parsed;
+
+            var drain = BridgeEventSource.Drain(subscriber, maxEvents);
+            SendJson(context, 200, BridgeEventSource.RenderDrain(drain));
         }
 
         static void HandleToolDispatch(HttpListenerContext context, string toolName)

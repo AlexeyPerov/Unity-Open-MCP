@@ -166,10 +166,11 @@ When a C# edit breaks compilation so badly the bridge assembly won't load, the l
 These give you direct project feedback and are **live-only** (no batch fallback):
 
 - **`unity_agent_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Use this to verify your changes — e.g. after a C# edit, run the affected assembly's EditMode tests. PlayMode is domain-reload-safe via a file handoff. Set `include_passes: false` on large suites to avoid truncation.
-- **`unity_agent_read_console`** — Unity console entries via reflection. Filter `type: "error"` to confirm a clean compile after edits.
+- **`unity_agent_read_console`** — Unity console entries via reflection. Filter `type: "error"` to confirm a clean compile after edits. Use `detail: "summary"` for messages only (no stack traces) to save tokens; `detail: "verbose"` includes Unity-internal frames.
 - **`unity_agent_screenshot`** — Scene / Game / isolated 2×2 composite of one GameObject.
 - **`unity_agent_profiler_capture`** / **`profiler_memory`** / **`profiler_rendering`** — frame hierarchy, memory allocators, rendering env.
 - **`unity_agent_spatial_query`** — physics-based raycast / overlap / bounds / ground_check / nearest against the live scene.
+- **`unity_agent_pull_events`** — incremental console logs + editor-state transitions (compile start/stop, play-mode). Cheaper than `read_console` for a "what happened since my last call" check; the first call opens the stream, later calls return only new events. Returns `bridge_unavailable` when the bridge is down.
 
 **Verification habit:** after any C# change, run `unity_agent_read_console` with `type: "error"` (or `unity_agent_run_tests` on the affected assembly) to confirm the change compiled and tests pass before declaring done.
 

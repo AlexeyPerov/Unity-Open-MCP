@@ -59,6 +59,10 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 - `unity_agent_list_rules` — Purpose-built rule discovery. Lists every verify rule (implemented + planned) with applicable asset kinds/extensions, derived `defaultSeverity` (worst severity the rule can emit), flat `availableFixIds`, and issue codes. Filter by `asset_kind` / `extension` / `implemented_only`. Routes locally from the versioned rule catalog — never hits the live bridge or batch Unity. Use this before `scan_paths` / `validate_edit` to learn which rules apply to a given asset type without trial-and-error.
 - `unity_agent_generate_skill` — Generates a project-specific SKILL.md reflecting the actual project state: Unity version, installed packages (including bridge/verify versions), available tools and verify rules, key MonoBehaviour/ScriptableObject types discovered from source, and the mutate→gate→fix workflow. Set `write: true` to persist the file into `.claude/skills/`, `.cursor/skills/`, `.opencode/skills/`, or `.agents/skills/`. Regenerate after package or script changes.
 
+### Streaming & event pull (M13)
+
+- `unity_agent_pull_events` — Drains incremental bridge events (console logs + editor-state transitions) since the previous call. The first call opens a server-side SSE subscription to the bridge's `GET /events` stream; later calls return only new events. Use this after `execute_csharp` / mutations to stream console output without polling `/ping` or re-reading the full console. Each event carries `seq`, `ts`, `type` (`log` | `editor_state`), and type-specific fields (`logType`/`message`/`stack` for logs, `state`/`isCompiling`/`isPlaying` for state). `dropped` reports events evicted from the queue before this pull; `connected` reports the SSE reader state. Live-only — returns `bridge_unavailable` when the bridge is down.
+
 ### Typed editor tools (M16 planned)
 
 M16 adds a curated typed surface on top of existing meta-tools. Duplicates are intentionally avoided:
@@ -313,6 +317,7 @@ Route selection is implemented in `mcp-server/src/tool-router.ts`.
 - `unity_open_mcp_find_references`: live when available, otherwise offline reader.
 - `unity_open_mcp_read_asset` and `unity_open_mcp_search_assets`: compressible router with offline-first behavior and live fallback.
 - `unity_open_mcp_compile_check`: **always** routes to batch (a fresh Unity recompiling from scratch), even when the live bridge is connected — running it against an Editor that already compiled would never surface a broken build. Response `_route.fallbackReason` is `"compile_check_always_batch"`.
+- `unity_agent_pull_events`: live-only. Drains a per-process SSE subscription against the bridge `GET /events` endpoint; returns `bridge_unavailable` when the live bridge is down. See [Streaming & event pull](#streaming--event-pull-m13).
 - Other tools:
   - prefer live bridge when connected,
   - use batch fallback only for tools in batch-eligible set,
@@ -374,6 +379,38 @@ Every bridge tool declares a **lifecycle policy** so callers know which ops are 
 
 **Active-scene dirty guard.** `restart_then_settle` tools are refused with `error.code = "scene_dirty"` when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Recover by saving/discarding the scene, or pass `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu`. See [bridge-http.md](bridge-http.md#active-scene-dirty-guard) for the envelope shape.
 
+## Token-bounded output (M13 T4.6)
+
+Every list-returning tool honors the same three controls so agents can bound token cost without reading per-tool docs:
+
+- `detail: summary | normal | verbose` — compression level. Defaults vary per tool (`summary` for `read_asset`, `normal` for `read_console` / `find_references`). `summary` omits the largest sub-fields (component fields, stack traces, field locations); `verbose` lifts the per-item caps and includes Unity-internal frames.
+- `max_results` / `max_entries` / `max_items` — the cap on returned rows. Honored by `read_asset`, `search_assets`, `find_references`, `find_members`, `read_console`, `profiler_capture`, `list_assets`, and `pull_events`.
+- **Truncation is always reported.** Every capped response carries a count field so elision is never silent:
+  - `read_asset` — `moreHidden` (folded tree rows past `limit`/`depth`).
+  - `search_assets` — `truncated` (result files past `max_results`) and `moreObjectsHidden` per file.
+  - `find_references` — `totalCount` vs returned entries; `pattern_threshold` collapses folders.
+  - `find_members` — `count` (returned) and `truncated` (additional matches dropped).
+  - `read_console` — `truncated` (entries dropped by `max_entries`) and `totalAfterFilter` (post-type-filter count).
+  - `profiler_capture` — `truncated` on nested enumerables.
+  - `pull_events` — `dropped` (events evicted from the in-memory queue before this pull).
+
+When the cap is not hit, the count is `0` (or omitted for legacy fields); a missing count never means "unknown".
+
+## Streaming & event pull (M13)
+
+The bridge emits console-log and editor-state (compile / play-mode) notifications over an SSE stream at `GET /events`. See [bridge-http.md](bridge-http.md#events-sse--events-poll-m13) for the wire format.
+
+`unity_agent_pull_events` is the MCP surface for that stream:
+
+- The MCP server opens one SSE subscription per process on first call (lazy), keeps it connected across calls, and buffers events into a 500-entry queue.
+- Each call drains up to `max_events` events and advances the cursor; calling again immediately returns only events that arrived since.
+- The subscriber id is server-scoped — a restarted MCP server begins "now"; agents that need historical logs should still call `unity_agent_read_console`.
+- Returns `bridge_unavailable` when the live bridge is down (no batch fallback — there is no headless Unity console to stream).
+
+`pull_events` vs `read_console`: `read_console` is a snapshot of the *current* console contents (every call returns the whole buffered log). `pull_events` is *incremental* — it returns only logs emitted since the previous pull, plus editor-state transitions that never appear in the console (compile start/stop, play-mode changes). For a "what happened after my mutation" check, `pull_events` is cheaper; for a "what's the full current state" check, use `read_console`.
+
+
+
 ## Source-of-truth files
 
 - `mcp-server/src/index.ts`
@@ -381,6 +418,7 @@ Every bridge tool declares a **lifecycle policy** so callers know which ops are 
 - `mcp-server/src/tool-router.ts`
 - `mcp-server/src/batch-spawn.ts`
 - `mcp-server/src/compressible-router.ts`
+- `mcp-server/src/event-stream.ts`
 - `mcp-server/src/capabilities/build-capabilities.ts`
 - `mcp-server/src/capabilities/list-rules.ts`
 - `mcp-server/src/capabilities/rule-catalog.ts`

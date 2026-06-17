@@ -2,6 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import type { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
+import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline } from "./offline.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
@@ -42,6 +43,7 @@ export class ToolRouter implements Router {
     private live: LiveClient,
     private batch: BatchSpawn,
     private projectPath: string,
+    private eventStream: BridgeEventStream,
   ) {}
 
   async route(
@@ -51,6 +53,15 @@ export class ToolRouter implements Router {
     // list_assets — always offline (no live equivalent needed).
     if (toolName === "unity_open_mcp_list_assets") {
       return this.routeListAssets(args);
+    }
+
+    // M13 T4.4 — bridge event stream pull. The MCP server is the only long-lived
+    // hop between the bridge and the agent; a per-process SSE reader amortizes
+    // the connection and shares the queue across pulls. Lives only when the
+    // bridge is reachable; an unreachable bridge returns a clear error instead
+    // of hanging on connect.
+    if (toolName === "unity_agent_pull_events") {
+      return this.routePullEvents(args);
     }
 
     // capabilities — local capability-discovery surface (no live/batch hop).
@@ -184,6 +195,47 @@ export class ToolRouter implements Router {
         isError: true,
       };
     }
+  }
+
+  // M13 T4.4 — drain the bridge event queue. The SSE reader is started lazily
+  // on the first call; subsequent calls return only events that arrived since
+  // the previous drain. The subscription never buffers across server restarts
+  // (a fresh subscriber id is minted per process), so a restarted MCP server
+  // begins "now" — agents that care about historical logs should still call
+  // unity_agent_read_console.
+  private async routePullEvents(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const liveAvailable = await this.live.isLiveAvailable();
+    if (!liveAvailable) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "bridge_unavailable",
+                message:
+                  "Bridge event stream requires a live Unity Editor connection. " +
+                  "Ensure the Unity Editor is open with the Agent Bridge running.",
+              },
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const maxEvents =
+      typeof args.max_events === "number" && args.max_events > 0
+        ? Math.min(args.max_events, 1000)
+        : 50;
+
+    const result = this.eventStream.pull(maxEvents);
+    return {
+      content: [{ type: "text", text: JSON.stringify(result) }],
+      isError: false,
+    };
   }
 
   private async routeCapabilities(

@@ -26,6 +26,11 @@ namespace UnityOpenMcpBridge.Console
     // Warning bit → "warning", everything else → "log". This avoids
     // mis-classifying exceptions as logs.
     //
+    // M13 T4.6 — standardized token-bounded output: `detail` controls stack
+    // inclusion (summary = message only; normal = capped stack with Unity
+    // frames stripped; verbose = full stack with Unity frames), and `truncated`
+    // always reports how many entries were dropped by `max_entries`.
+    //
     // Non-mutating unless clear: true (which clears the console).
     [BridgeToolType]
     public class Tool_ReadConsole
@@ -41,24 +46,64 @@ namespace UnityOpenMcpBridge.Console
             bool clear = false,
             int max_entries = 100,
             int max_stack_frames = 20,
-            bool include_unity_frames = false)
+            bool include_unity_frames = false,
+            string detail = "normal")
         {
             try
             {
+                var detailLevel = ParseDetail(detail);
+
                 var entries = LogEntriesReader.GetEntries();
                 var filtered = FilterByType(entries, (type ?? "all").ToLowerInvariant());
-                var capped = CapEntries(filtered, max_entries, max_stack_frames, include_unity_frames);
+
+                // M13 T4.6 — truncation accounting. The console is chronological;
+                // we keep the most recent `max_entries` after type-filtering and
+                // report how many were silently dropped so the caller can widen
+                // the cap if needed.
+                int truncated;
+                var capped = CapEntries(filtered, max_entries, out truncated);
+
+                // Stack formatting is the dominant token cost; `detail` controls it.
+                // `summary` skips stacks entirely; `verbose` includes Unity frames
+                // and ignores the per-entry frame cap.
+                bool wantStack = detailLevel != DetailLevel.Summary;
+                bool verboseFrames = detailLevel == DetailLevel.Verbose;
+                int effectiveMaxFrames = verboseFrames ? int.MaxValue : max_stack_frames;
+                bool effectiveIncludeUnity = verboseFrames || include_unity_frames;
+
+                for (int i = 0; i < capped.Count; i++)
+                {
+                    var e = capped[i];
+                    e.Stack = wantStack
+                        ? FormatStack(e.StackRaw, effectiveMaxFrames, effectiveIncludeUnity)
+                        : "";
+                    capped[i] = e;
+                }
 
                 bool cleared = false;
                 if (clear)
                     cleared = LogEntriesReader.Clear();
 
-                return BuildJson(capped, entries.Count, cleared, type ?? "all",
-                    max_entries, max_stack_frames, include_unity_frames);
+                return BuildJson(capped, entries.Count, filtered.Count, truncated, cleared,
+                    type ?? "all", max_entries, max_stack_frames, include_unity_frames, detailLevel);
             }
             catch (System.Exception e)
             {
                 return ErrorJson("execution_error", e.Message);
+            }
+        }
+
+        enum DetailLevel { Summary, Normal, Verbose }
+
+        static DetailLevel ParseDetail(string detail)
+        {
+            if (string.IsNullOrEmpty(detail)) return DetailLevel.Normal;
+            switch (detail.ToLowerInvariant())
+            {
+                case "summary": return DetailLevel.Summary;
+                case "verbose": return DetailLevel.Verbose;
+                case "normal":
+                default: return DetailLevel.Normal;
             }
         }
 
@@ -95,19 +140,19 @@ namespace UnityOpenMcpBridge.Console
             return "log";
         }
 
-        static List<LogEntryInfo> CapEntries(List<LogEntryInfo> entries, int maxEntries, int maxFrames, bool includeUnity)
+        // M13 T4.6 — keep the most recent entries (console is chronological; the
+        // tail matters most) and report how many were dropped so the caller can
+        // widen the cap. Returns the trimmed list and sets `truncated` to the
+        // number of dropped entries (never silent elision).
+        static List<LogEntryInfo> CapEntries(List<LogEntryInfo> entries, int maxEntries, out int truncated)
         {
-            // Take the most recent entries (console is chronological; tail matters).
+            if (maxEntries <= 0) maxEntries = 1;
             if (entries.Count > maxEntries)
-                entries = entries.GetRange(entries.Count - maxEntries, maxEntries);
-
-            for (int i = 0; i < entries.Count; i++)
             {
-                var e = entries[i];
-                e.Stack = FormatStack(e.StackRaw, maxFrames, includeUnity);
-                entries[i] = e;
+                truncated = entries.Count - maxEntries;
+                return entries.GetRange(entries.Count - maxEntries, maxEntries);
             }
-
+            truncated = 0;
             return entries;
         }
 
@@ -151,8 +196,9 @@ namespace UnityOpenMcpBridge.Console
 
         // ---- JSON building ----
 
-        static string BuildJson(List<LogEntryInfo> entries, int totalBeforeFilter, bool cleared,
-            string type, int maxEntries, int maxFrames, bool includeUnity)
+        static string BuildJson(List<LogEntryInfo> entries, int totalBeforeFilter, int totalAfterFilter,
+            int truncated, bool cleared, string type, int maxEntries, int maxFrames, bool includeUnity,
+            DetailLevel detailLevel)
         {
             int errorCount = 0, warningCount = 0, logCount = 0;
             foreach (var e in entries)
@@ -163,10 +209,18 @@ namespace UnityOpenMcpBridge.Console
                 else logCount++;
             }
 
+            var detailWire = detailLevel == DetailLevel.Summary ? "summary"
+                : detailLevel == DetailLevel.Verbose ? "verbose"
+                : "normal";
+
             var sb = new StringBuilder(4096);
             sb.Append('{');
             sb.Append("\"totalBeforeFilter\":").Append(totalBeforeFilter).Append(',');
+            sb.Append("\"totalAfterFilter\":").Append(totalAfterFilter).Append(',');
             sb.Append("\"returnedCount\":").Append(entries.Count).Append(',');
+            // M13 T4.6 — never silently elide. Even at 0 we emit the field so
+            // agents can trust it as "no truncation" rather than "unknown".
+            sb.Append("\"truncated\":").Append(truncated).Append(',');
             sb.Append("\"counts\":{");
             sb.Append("\"error\":").Append(errorCount).Append(',');
             sb.Append("\"warning\":").Append(warningCount).Append(',');
@@ -174,6 +228,7 @@ namespace UnityOpenMcpBridge.Console
             sb.Append("},");
             sb.Append("\"cleared\":").Append(cleared ? "true" : "false").Append(',');
             sb.Append("\"filter\":").Append(Esc(type)).Append(',');
+            sb.Append("\"detail\":").Append(Esc(detailWire)).Append(',');
             sb.Append("\"settings\":{");
             sb.Append("\"maxEntries\":").Append(maxEntries).Append(',');
             sb.Append("\"maxStackFrames\":").Append(maxFrames).Append(',');
