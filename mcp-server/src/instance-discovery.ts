@@ -182,3 +182,79 @@ export function resolveAuthToken(projectPath: string, envPort?: number): string 
   const token = lock.authToken;
   return typeof token === "string" && token.length > 0 ? token : undefined;
 }
+
+// ---------------------------------------------------------------------------
+// Dead-bridge detection
+//
+// When the bridge assembly itself fails to compile, [InitializeOnLoad] never
+// re-runs after the domain reload, so the HTTP listener never restarts and the
+// heartbeat stops advancing. But the Unity process is still alive (sitting in
+// safe mode / showing compile errors). That stale-heartbeat + live-PID
+// signature is the ONLY out-of-band signal the MCP server has to distinguish
+// "normal reload, will recover" from "bridge assembly is dead, will never
+// recover" — and it only exists because the bridge keeps the lock file on disk
+// during a domain reload (releasing it only on graceful quit). See
+// BridgeHttpServer.Stop(releaseLock) and BridgeInstanceLock.
+
+/**
+ * A heartbeat is considered "stale" once it is this many milliseconds old.
+ * The bridge writes every 0.5s (BridgeHeartbeat.HeartbeatIntervalSec), so
+ * anything older than a few seconds means the heartbeat writer is no longer
+ * running. The threshold is generous to absorb a slow domain reload + ILPP
+ * pass without a false "dead" classification.
+ */
+export const HEARTBEAT_STALE_MS = 10_000;
+
+/**
+ * Coarse health classification of a bridge instance derived from its on-disk
+ * lock. Used by the live-client to decide whether a /ping failure is
+ * recoverable (keep waiting) or fatal (fail fast).
+ *
+ *   - "healthy"     — lock fresh and PID alive; bridge is (or just was) up.
+ *   - "reloading"   — lock fresh + state="reloading" + PID alive; a normal
+ *                     domain reload in flight, expected to recover.
+ *   - "dead_bridge" — PID alive BUT heartbeat is stale. The Unity process is
+ *                     running but the bridge's heartbeat writer is gone — the
+ *                     signature of a bridge assembly that failed to recompile.
+ *                     /ping will not recover until the C# error is fixed.
+ *   - "gone"        — no lock, or PID no longer alive. No live instance.
+ */
+export type InstanceClassification =
+  | "healthy"
+  | "reloading"
+  | "dead_bridge"
+  | "gone";
+
+/**
+ * Age of the lock's heartbeat in milliseconds, measured against `nowMs`.
+ * Returns `Infinity` when the heartbeat timestamp is missing or unparseable,
+ * so a malformed lock is treated as maximally stale (and thus, if the PID is
+ * alive, "dead_bridge").
+ */
+export function heartbeatAgeMs(
+  lock: InstanceLock | null,
+  nowMs: number = Date.now(),
+): number {
+  if (!lock || !lock.heartbeatAt) return Infinity;
+  const t = Date.parse(lock.heartbeatAt);
+  if (!Number.isFinite(t)) return Infinity;
+  return Math.max(0, nowMs - t);
+}
+
+/**
+ * Classify a bridge instance from its on-disk lock. `lock` may be null (no
+ * lock file / unreadable) — treated as "gone". This is a pure function over
+ * the lock snapshot + current time + PID liveness; it does no I/O of its own.
+ */
+export function classifyInstance(
+  lock: InstanceLock | null,
+  nowMs: number = Date.now(),
+): InstanceClassification {
+  if (!lock) return "gone";
+  if (!isPidAlive(lock.pid)) return "gone";
+
+  const age = heartbeatAgeMs(lock, nowMs);
+  if (age >= HEARTBEAT_STALE_MS) return "dead_bridge";
+  if (lock.state === "reloading" || lock.state === "compiling") return "reloading";
+  return "healthy";
+}

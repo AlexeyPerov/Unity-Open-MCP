@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using UnityEditor.SceneManagement;
 using UnityOpenMcpBridge;
 
 namespace UnityOpenMcpBridge.Tests
@@ -76,6 +77,42 @@ namespace UnityOpenMcpBridge.Tests
             var result = SceneDirtyGuard.Check();
             Assert.IsTrue(result.Allowed);
             Assert.IsNull(result.DirtyScenePaths);
+        }
+
+        // ----- Check(SceneSetup[]): the dirty-branch seam -----
+        //
+        // Regression for the CS1061 that shipped because no test reached the
+        // per-scene dirty loop: SceneSetup has no isDirty, and the original
+        // code read it off the setup directly. The fix resolves each setup to
+        // its Scene via EditorSceneManager.GetSceneByPath and reads Scene.isDirty.
+        // In a fresh EditMode session no real scene matches a synthetic setup's
+        // path, so GetSceneByPath returns an invalid Scene and the entry is
+        // skipped — the guard must Allow rather than throw.
+
+        [Test]
+        public static void Check_SyntheticSetup_NoMatchingScene_Allows()
+        {
+            // A setup pointing at a scene that isn't actually loaded: GetSceneByPath
+            // returns an invalid Scene, the entry is skipped, and no dirty path is
+            // collected. Critically this must NOT throw CS1061 (the shipped bug).
+            var setup = new[]
+            {
+                new SceneSetup { path = "Assets/DoesNotExist.unity", isLoaded = true },
+            };
+            var result = SceneDirtyGuard.Check(setup);
+            Assert.IsTrue(result.Allowed);
+        }
+
+        [Test]
+        public static void Check_NullSetup_Allows()
+        {
+            Assert.IsTrue(SceneDirtyGuard.Check((SceneSetup[])null).Allowed);
+        }
+
+        [Test]
+        public static void Check_EmptySetup_Allows()
+        {
+            Assert.IsTrue(SceneDirtyGuard.Check(new SceneSetup[0]).Allowed);
         }
 
         // ----- GuardResult factories -----

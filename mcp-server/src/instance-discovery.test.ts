@@ -13,6 +13,10 @@ import {
   isPidAlive,
   PORT_RANGE_START,
   PORT_RANGE_SIZE,
+  heartbeatAgeMs,
+  classifyInstance,
+  HEARTBEAT_STALE_MS,
+  type InstanceLock,
 } from "./instance-discovery.js";
 
 // Pinned cross-side values. Both the bridge (InstancePortResolverTests.cs)
@@ -311,3 +315,96 @@ function plantLock(sandbox: Sandbox, projectPath: string, opts: PlantOpts): void
   if (opts.authToken !== undefined) payload.authToken = opts.authToken;
   writeFileSync(path, JSON.stringify(payload));
 }
+
+// ---------------------------------------------------------------------------
+// heartbeatAgeMs + classifyInstance — dead-bridge detection
+// ---------------------------------------------------------------------------
+
+const NOW = Date.UTC(2026, 5, 17, 12, 0, 0); // 2026-06-17T12:00:00Z
+const LIVE_PID = process.pid; // guaranteed alive — it's the test runner
+
+function iso(offsetMs: number): string {
+  return new Date(NOW - offsetMs).toISOString();
+}
+
+function lock(partial: Partial<InstanceLock>): InstanceLock {
+  return {
+    pid: LIVE_PID,
+    port: 22028,
+    authToken: "deadbeef",
+    projectPath: "/proj",
+    projectHash: projectHash("/proj"),
+    startedAt: iso(60_000),
+    updatedAt: iso(1_000),
+    heartbeatAt: iso(1_000),
+    state: "idle",
+    isPlaying: false,
+    isCompiling: false,
+    bridgeVersion: "0.1.0",
+    unityVersion: "6000.0.0f1",
+    ...partial,
+  };
+}
+
+test("heartbeatAgeMs returns ms since the heartbeat timestamp", () => {
+  assert.equal(heartbeatAgeMs(lock({ heartbeatAt: iso(2_000) }), NOW), 2_000);
+});
+
+test("heartbeatAgeMs is Infinity for a missing/unparseable heartbeat", () => {
+  assert.equal(heartbeatAgeMs(null, NOW), Infinity);
+  assert.equal(heartbeatAgeMs(lock({ heartbeatAt: "not-a-date" }), NOW), Infinity);
+  assert.equal(heartbeatAgeMs(lock({ heartbeatAt: "" } as Partial<InstanceLock>), NOW), Infinity);
+});
+
+test("classifyInstance returns gone when there is no lock", () => {
+  assert.equal(classifyInstance(null, NOW), "gone");
+});
+
+test("classifyInstance returns gone when the PID is dead", () => {
+  // 999_999_999 is effectively never a real OS pid.
+  assert.equal(classifyInstance(lock({ pid: 999_999_999 }), NOW), "gone");
+});
+
+test("classifyInstance returns healthy when the heartbeat is fresh and idle", () => {
+  assert.equal(
+    classifyInstance(lock({ heartbeatAt: iso(2_000), state: "idle" }), NOW),
+    "healthy",
+  );
+});
+
+test("classifyInstance returns reloading when state is reloading/compiling and heartbeat fresh", () => {
+  assert.equal(
+    classifyInstance(lock({ heartbeatAt: iso(2_000), state: "reloading" }), NOW),
+    "reloading",
+  );
+  assert.equal(
+    classifyInstance(lock({ heartbeatAt: iso(2_000), state: "compiling" }), NOW),
+    "reloading",
+  );
+});
+
+test("classifyInstance returns dead_bridge when PID is alive but heartbeat is stale", () => {
+  // The signature of a broken bridge assembly: Unity process still running,
+  // but [InitializeOnLoad] never re-ran so the heartbeat writer is gone.
+  const stale = lock({ heartbeatAt: iso(HEARTBEAT_STALE_MS + 5_000), state: "reloading" });
+  assert.equal(classifyInstance(stale, NOW), "dead_bridge");
+});
+
+test("classifyInstance treats stale + idle state as dead_bridge too", () => {
+  // The last-written state may be anything; staleness + live PID is the signal.
+  const stale = lock({ heartbeatAt: iso(HEARTBEAT_STALE_MS * 5), state: "idle" });
+  assert.equal(classifyInstance(stale, NOW), "dead_bridge");
+});
+
+test("classifyInstance boundary: exactly stale threshold is dead_bridge", () => {
+  const atThreshold = lock({ heartbeatAt: iso(HEARTBEAT_STALE_MS) });
+  assert.equal(classifyInstance(atThreshold, NOW), "dead_bridge");
+});
+
+test("classifyInstance boundary: just under stale threshold with reloading state is reloading", () => {
+  const justUnder = lock({
+    heartbeatAt: iso(HEARTBEAT_STALE_MS - 1),
+    state: "reloading",
+  });
+  assert.equal(classifyInstance(justUnder, NOW), "reloading");
+});

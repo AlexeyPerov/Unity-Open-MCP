@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
 
 namespace UnityOpenMcpBridge
 {
@@ -66,24 +67,50 @@ namespace UnityOpenMcpBridge
                 return GuardResult.Allow();
             }
 
+            return Check(setup);
+        }
+
+        // Pure decision over a scene setup snapshot. Split out from Check() so
+        // the dirty-path collection is unit-testable without synthesizing live
+        // scenes: a synthetic SceneSetup[] fed through here resolves each entry
+        // via EditorSceneManager.GetSceneByPath, which returns an invalid Scene
+        // when no real scene matches (the case in a fresh EditMode test), so
+        // the dirty list comes back empty.
+        //
+        // SceneSetup has only isActive/isLoaded/path — no isDirty. The dirty
+        // flag lives on UnityEngine.SceneManagement.Scene; we resolve each
+        // setup entry to its Scene by path, then read Scene.isDirty. An entry
+        // we can't resolve (unsaved scene with empty path, or a setup whose
+        // scene isn't currently loaded) is skipped — refusing on a scene we
+        // can't introspect would block every disruptive op in such setups.
+        public static GuardResult Check(SceneSetup[] setup)
+        {
             if (setup == null || setup.Length == 0) return GuardResult.Allow();
 
+            var dirty = CollectDirtyPaths(setup);
+            if (dirty.Count == 0) return GuardResult.Allow();
+            return GuardResult.Refuse(dirty.ToArray(), BuildMessage(dirty));
+        }
+
+        static List<string> CollectDirtyPaths(SceneSetup[] setup)
+        {
             var dirty = new List<string>();
-            foreach (var scene in setup)
+            foreach (var entry in setup)
             {
-                if (scene == null) continue;
+                if (entry == null) continue;
+
+                var scene = EditorSceneManager.GetSceneByPath(entry.path);
+                if (!scene.IsValid()) continue;
+
                 if (scene.isDirty)
                 {
-                    var path = scene.path;
+                    var path = entry.path;
                     if (string.IsNullOrEmpty(path))
                         path = "(unsaved scene)";
                     dirty.Add(path);
                 }
             }
-
-            if (dirty.Count == 0) return GuardResult.Allow();
-
-            return GuardResult.Refuse(dirty.ToArray(), BuildMessage(dirty));
+            return dirty;
         }
 
         static string BuildMessage(List<string> dirty)

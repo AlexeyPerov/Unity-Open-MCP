@@ -30,6 +30,7 @@ import { agentCapabilities } from "./agent-capabilities.js";
 import { generateSkill } from "./generate-skill.js";
 import { listRules } from "./list-rules.js";
 import { pullEvents } from "./pull-events.js";
+import { readCompileErrors } from "./read-compile-errors.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -64,6 +65,11 @@ export const M12_TOOLS: Tool[] = [listRules];
 
 export const M13_TOOLS: Tool[] = [pullEvents];
 
+// Offline Editor.log compiler-error reader. Routed offline (no bridge, no
+// Unity spawn) — the one channel that works when the bridge assembly itself
+// has failed to compile.
+export const M14_TOOLS: Tool[] = [readCompileErrors];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -74,4 +80,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M11_TOOLS,
   ...M12_TOOLS,
   ...M13_TOOLS,
+  ...M14_TOOLS,
 ];

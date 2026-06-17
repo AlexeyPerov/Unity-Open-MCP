@@ -11,6 +11,7 @@ import {
   readDismissConfig,
   type PollAndDismissOptions,
 } from "./dialog-dismiss.js";
+import { readInstanceLock, classifyInstance } from "./instance-discovery.js";
 
 const MAX_COMPILE_WAIT_MS = 120_000;
 const COMPILE_POLL_INTERVAL_MS = 2_000;
@@ -87,11 +88,22 @@ export class LiveClient implements Router {
    *  in that case no Authorization header is sent and the bridge must be in
    *  authMode "none" for requests to succeed. */
   private authToken: string | undefined;
+  /** Absolute Unity project path, used to read the instance lock mid-session
+   *  for dead-bridge detection. Optional so existing callers/tests that don't
+   *  exercise the fail-fast path keep working; when absent, a /ping failure
+   *  falls back to the original bridge_offline behavior. */
+  private projectPath: string | undefined;
 
-  constructor(port: number, pingCache: PingCache, authToken?: string) {
+  constructor(
+    port: number,
+    pingCache: PingCache,
+    authToken?: string,
+    projectPath?: string,
+  ) {
     this.baseUrl = `http://127.0.0.1:${port}`;
     this.pingCache = pingCache;
     this.authToken = authToken;
+    this.projectPath = projectPath;
     // M13 T4.5 — launch-errors / Safe Mode dialog auto-dismissal. Resolved
     // once at construction; the env vars do not change mid-process. The
     // feature is enabled by default (Unity-MCP parity) and runs concurrently
@@ -367,6 +379,15 @@ export class LiveClient implements Router {
 
       return null;
     } catch {
+      // Bridge is unreachable (ECONNREFUSED / timeout). Before falling back to
+      // the generic offline error, check whether the instance lock indicates a
+      // DEAD bridge assembly — the Unity process is still alive but the bridge
+      // failed to reload after a compile error. That case is NOT recoverable
+      // by waiting; surface it immediately so the agent can fetch the compiler
+      // errors and fix them instead of hanging on /ping.
+      const deadBridge = this.deadBridgeResult();
+      if (deadBridge) return deadBridge;
+
       return makeErrorResult(
         `Bridge is not reachable at ${this.baseUrl}. ${OFFLINE_HINT}`,
         {
@@ -377,6 +398,47 @@ export class LiveClient implements Router {
         },
       );
     }
+  }
+
+  // Detect the dead-bridge-assembly signature from the on-disk instance lock:
+  // Unity process alive (PID running) but heartbeat stale (the bridge's
+  // [InitializeOnLoad] never re-ran after a compile failure, so the heartbeat
+  // writer is gone). Returns a structured error pointing the agent at
+  // read_compile_errors, or null when the signature is not present (no lock,
+  // dead PID, or a fresh/reloading heartbeat — i.e. the wait is still worth
+  // keeping). Requires projectPath to have been threaded in; without it we
+  // can't read the lock, so we return null and preserve the original behavior.
+  private deadBridgeResult(): CallToolResult | null {
+    if (!this.projectPath) return null;
+    let classification;
+    try {
+      classification = classifyInstance(readInstanceLock(this.projectPath));
+    } catch {
+      return null;
+    }
+    if (classification !== "dead_bridge") return null;
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            error: {
+              code: "bridge_compile_failed",
+              message:
+                "The bridge assembly failed to recompile and Unity is likely " +
+                "in a bad state (safe mode / compile errors). The HTTP listener " +
+                "will not return until the C# error is fixed. " +
+                "Call unity_open_mcp_read_compile_errors to retrieve the compiler " +
+                "errors from Unity's Editor.log, fix the cited file/line, then " +
+                "trigger a recompile (e.g. a no-op edit + focus Unity, or " +
+                "unity_open_mcp_compile_check once the source compiles).",
+            },
+          }),
+        },
+      ],
+      isError: true,
+    };
   }
 
   private async waitForCompile(): Promise<CallToolResult | null> {
@@ -420,9 +482,22 @@ export class LiveClient implements Router {
 
           if (!body.compiling && body.connected) return null;
         } catch {
+          // Network failure during the poll — normal during a domain reload
+          // (the listener is torn down and rebuilt). But if the instance lock
+          // shows a dead bridge assembly (stale heartbeat + live PID), the
+          // reload will never complete: abort the wait immediately with the
+          // structured bridge_compile_failed error instead of spinning to the
+          // 120s deadline.
+          const deadBridge = this.deadBridgeResult();
+          if (deadBridge) return deadBridge;
           continue;
         }
       }
+
+      // Final check before declaring a timeout: a dead-bridge signature here
+      // is a more useful error than the opaque compile_timeout.
+      const deadBridge = this.deadBridgeResult();
+      if (deadBridge) return deadBridge;
 
       return makeErrorResult(
         `Unity is still compiling after ${MAX_COMPILE_WAIT_MS / 1000}s. ` +

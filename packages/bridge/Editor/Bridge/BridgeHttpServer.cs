@@ -102,9 +102,25 @@ namespace UnityOpenMcpBridge
             _port = ResolvePort();
             Start();
 
-            AssemblyReloadEvents.beforeAssemblyReload += Stop;
-            EditorApplication.quitting += Stop;
+            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
+            EditorApplication.quitting += OnQuitting;
         }
+
+        // Domain reload: stop the listener but KEEP the instance lock on disk.
+        // The heartbeat (registered before this in Start) has already forced a
+        // "reloading" write, so the frozen lock reads state="reloading" with a
+        // heartbeatAt frozen at reload time. If the bridge assembly itself
+        // failed to compile, [InitializeOnLoad] never re-runs, the heartbeat
+        // never advances again, and the PID is still alive — that stale-lock +
+        // live-PID signature is the only out-of-band signal the MCP server has
+        // to detect a dead bridge and fail fast instead of hanging on /ping.
+        // On a normal reload, Start() runs again after the reload and Acquire()
+        // overwrites this lock with fresh state.
+        static void OnBeforeAssemblyReload() => Stop(releaseLock: false);
+
+        // Graceful editor quit: full release — delete the lock so a stale entry
+        // doesn't linger for a closed editor.
+        static void OnQuitting() => Stop(releaseLock: true);
 
         // M13 T4.3 — Per-project port with override precedence:
         //   1. UNITY_OPEN_MCP_BRIDGE_PORT env var
@@ -202,17 +218,26 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        public static void Stop()
+        public static void Stop() => Stop(releaseLock: true);
+
+        // Stop the HTTP listener. releaseLock=false (domain reload) keeps the
+        // instance lock on disk so the MCP server can detect a dead bridge
+        // assembly via the stale-heartbeat + live-PID signature; releaseLock=true
+        // (graceful quit) deletes it.
+        static void Stop(bool releaseLock)
         {
             if (!_running) return;
             _running = false;
             BridgeSession.SetConnected(false);
 
-            // M13 T4.7 — stop the heartbeat first so it can't rewrite the
-            // lock after Release() deletes it. Best-effort: a Stop during a
-            // domain reload fires before the next tick anyway.
+            // Stop the heartbeat first so it can't rewrite the lock after a
+            // release. When releaseLock is false (domain reload), the heartbeat
+            // has already forced a "reloading" write before this method runs.
             try { BridgeHeartbeat.Stop(); } catch { }
-            try { BridgeInstanceLock.Release(); } catch { }
+            if (releaseLock)
+            {
+                try { BridgeInstanceLock.Release(); } catch { }
+            }
 
             try
             {

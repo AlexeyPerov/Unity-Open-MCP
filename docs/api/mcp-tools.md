@@ -22,6 +22,7 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 - `unity_open_mcp_execute_menu`
 - `unity_open_mcp_find_members`
 - `unity_open_mcp_compile_check`
+- `unity_open_mcp_read_compile_errors`
 - `unity_open_mcp_editor_status`
 
 ### Gate and validation tools (M3 + M5)
@@ -312,11 +313,12 @@ Handles include fallback locators (`path`, `assetPath`, `assetGuid`, `gameObject
 Route selection is implemented in `mcp-server/src/tool-router.ts`.
 
 - `unity_open_mcp_list_assets`: always offline route.
+- `unity_open_mcp_read_compile_errors`: always offline route. Reads Unity's `Editor.log` directly — the one channel that works when the bridge assembly itself has failed to compile (every in-bridge channel is dead with it, and `compile_check` can't run because its batch entry point shares the broken assembly and Unity's per-project lock blocks a second instance). No bridge, no Unity spawn.
 - `unity_open_mcp_capabilities`: always local route (static catalog).
 - `unity_agent_generate_skill`: always local route (reads project files from disk).
 - `unity_open_mcp_find_references`: live when available, otherwise offline reader.
 - `unity_open_mcp_read_asset` and `unity_open_mcp_search_assets`: compressible router with offline-first behavior and live fallback.
-- `unity_open_mcp_compile_check`: **always** routes to batch (a fresh Unity recompiling from scratch), even when the live bridge is connected — running it against an Editor that already compiled would never surface a broken build. Response `_route.fallbackReason` is `"compile_check_always_batch"`.
+- `unity_open_mcp_compile_check`: **always** routes to batch (a fresh Unity recompiling from scratch), even when the live bridge is connected — running it against an Editor that already compiled would never surface a broken build. Response `_route.fallbackReason` is `"compile_check_always_batch"`. Note: `compile_check` is **not** a recovery path for a broken bridge assembly (its entry point lives in that assembly); use `read_compile_errors` for that case.
 - `unity_agent_pull_events`: live-only. Drains a per-process SSE subscription against the bridge `GET /events` endpoint; returns `bridge_unavailable` when the live bridge is down. See [Streaming & event pull](#streaming--event-pull-m13).
 - Other tools:
   - prefer live bridge when connected,
@@ -337,7 +339,21 @@ Supported operations:
 - `unity_open_mcp_baseline_create`
 - `unity_open_mcp_regression_check`
 - `unity_open_mcp_find_members`
-- `unity_open_mcp_compile_check` — headless compile check; **always** routes to batch (spawns a fresh Unity that recompiles from scratch), even when the live bridge is available. Returns structured compiler errors (`status`, `errorCount`, `errors[]` with `code`/`file`/`line`/`message`). When the bridge assembly itself fails to compile, the JSON markers never print — batch-spawn then extracts `error CSxxxx` lines from the Unity log and surfaces them in the rejection so every batch tool self-diagnoses a broken build.
+- `unity_open_mcp_compile_check` — headless compile check; **always** routes to batch (spawns a fresh Unity that recompiles from scratch), even when the live bridge is available. Returns structured compiler errors (`status`, `errorCount`, `errors[]` with `code`/`file`/`line`/`message`). When the bridge assembly itself fails to compile, the JSON markers never print — batch-spawn then extracts `error CSxxxx` lines from the Unity log and surfaces them in the rejection so every batch tool self-diagnoses a broken build. **Not** a recovery path for a broken bridge assembly: its entry point lives in that assembly, and Unity's per-project lock blocks a second instance. For that case use `read_compile_errors`.
+
+### `read_compile_errors` (offline)
+
+`unity_open_mcp_read_compile_errors` — reads the tail of Unity's platform `Editor.log` (macOS `~/Library/Logs/Unity/Editor.log`, Windows `%LOCALAPPDATA%\Unity\Editor\Editor.log`, Linux `~/.config/unity3d/Editor.log`) and extracts structured C# compiler errors. Always offline (no bridge, no Unity spawn). This is the **only** error channel that works when the bridge assembly itself has failed to compile — every in-bridge channel (`read_console`, `editor_status`) is dead with it, and `compile_check` can't run.
+
+Input: `tail_bytes` (default 262144, max 1048576) — bytes read from the end of the log, where Unity writes compiler diagnostics contiguously.
+
+Response:
+- `status`: `"compile_failed"` | `"no_errors_found"` | `"log_not_found"`
+- `errorCount`, `errors[]` (`raw`, `file`, `line`, `code`, `message`)
+- `logPath`, `tailBytes`, `_source: "offline"`
+
+The live-client returns a `bridge_compile_failed` error (pointing here) when it detects the dead-bridge signature: instance lock present with a live PID but a stale heartbeat (the bridge's `[InitializeOnLoad]` never re-ran after the failed recompile, so the heartbeat writer is gone).
+
 
 Recognized but intentionally blocked in batch mode (`batch_not_supported`):
 - `unity_open_mcp_execute_csharp`

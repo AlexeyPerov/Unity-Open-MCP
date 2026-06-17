@@ -59,35 +59,14 @@ function extractJson(stdout: string): string | null {
   return stdout.slice(jsonStart, endIdx).trim();
 }
 
-// Captures C# compiler errors surfaced via the Editor log/stderr when the bridge
-// assembly itself fails to compile. In that catastrophic case the
-// BridgeBatchEntry.Run() markers never print (the entry point never runs), so
-// the spawn sees no JSON and would otherwise reject with an opaque "did not
-// contain JSON markers" message. This pulls structured CSxxxx lines out of the
-// raw output so the rejection names the actual errors — used by every batch
-// tool, not just compile_check.
-//
-// Unity formats compiler diagnostics as
-//   Assets/Path.cs(line,col): error CSxxxx: message
-// so "error CSxxxx:" appears mid-line after the asset locator — match it
-// anywhere on a line rather than anchoring to line start.
-const COMPILER_ERROR_RE = /error\s+CS\d{4}:[^\n]+/g;
-export function extractCompilerErrors(output: string): string[] {
-  if (!output) return [];
-  const seen = new Set<string>();
-  const errors: string[] = [];
-  let m: RegExpExecArray | null;
-  COMPILER_ERROR_RE.lastIndex = 0;
-  while ((m = COMPILER_ERROR_RE.exec(output)) !== null) {
-    const line = m[0].trim();
-    if (line && !seen.has(line)) {
-      seen.add(line);
-      errors.push(line);
-      if (errors.length >= 50) break; // bounded; agent can fix-and-recheck
-    }
-  }
-  return errors;
-}
+// extractCompilerErrors is shared with the offline read_compile_errors tool —
+// see compiler-errors.ts. Imported for the local call site below and
+// re-exported so existing callers/tests that import it from batch-spawn keep
+// working. Captures CSxxxx lines from raw Unity compiler output (Editor.log /
+// batch stdout) when the bridge assembly itself fails to compile and the JSON
+// markers never print.
+import { extractCompilerErrors } from "./compiler-errors.js";
+export { extractCompilerErrors };
 
 export function buildVerifyArgs(
   operation: string,

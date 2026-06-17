@@ -22,8 +22,12 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PingCache } from "./ping-cache.js";
 import { LiveClient } from "./live-client.js";
+import { projectHash } from "./instance-discovery.js";
 import type { PollAndDismissOptions } from "./dialog-dismiss.js";
 
 interface CapturedDismiss {
@@ -240,4 +244,122 @@ test("LiveClient: omits Authorization header when no token was provided", async 
   } finally {
     await bridge.close();
   }
+});
+
+// ----- Dead-bridge fail-fast -----
+//
+// When the bridge assembly fails to recompile, /ping ECONNREFUSED forever.
+// Rather than hang on the 120s compile-wait, LiveClient must read the instance
+// lock, detect the stale-heartbeat + live-PID signature, and return an
+// immediate bridge_compile_failed error pointing at read_compile_errors.
+
+interface Sandbox {
+  dir: string;
+}
+
+function makeSandbox(): Sandbox {
+  const dir = mkdtempSync(join(tmpdir(), "lc-"));
+  return { dir };
+}
+
+function disposeSandbox(s: Sandbox): void {
+  try {
+    rmSync(s.dir, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
+}
+
+/** Plant a lock for `projectPath` in the sandbox with the given heartbeat age
+ *  and PID. Points HOME/USERPROFILE at the sandbox so the module reads it. */
+function plantLock(
+  s: Sandbox,
+  projectPath: string,
+  pid: number,
+  heartbeatAgeMs: number,
+  state: string = "reloading",
+): void {
+  process.env.HOME = s.dir;
+  process.env.USERPROFILE = s.dir;
+  const hash = projectHash(projectPath);
+  const dir = join(s.dir, ".unity-agent", "instances");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${hash}.json`);
+  const heartbeatAt = new Date(Date.now() - heartbeatAgeMs).toISOString();
+  const payload = {
+    pid,
+    port: 22028,
+    authToken: "deadbeef",
+    projectPath,
+    projectHash: hash,
+    startedAt: heartbeatAt,
+    updatedAt: heartbeatAt,
+    heartbeatAt,
+    state,
+    isPlaying: false,
+    isCompiling: false,
+    bridgeVersion: "0.1.0",
+    unityVersion: "6000.0.0f1",
+  };
+  writeFileSync(path, JSON.stringify(payload));
+}
+
+const DEAD_BRIDGE_PROJECT = "/test/DeadBridgeGame";
+
+test("LiveClient: fail-fast bridge_compile_failed when heartbeat is stale + PID alive", async () => {
+  // No bridge stub at all — /ping must ECONNREFUSED. The lock shows our own
+  // PID (alive) with a heartbeat far past the stale threshold → dead_bridge.
+  const s = makeSandbox();
+  try {
+    plantLock(s, DEAD_BRIDGE_PROJECT, process.pid, 60_000, "reloading");
+    const client = new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT);
+
+    const result = await client.route("unity_open_mcp_validate_edit", {
+      paths: ["Assets"],
+    });
+
+    assert.equal(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_compile_failed");
+    assert.ok(
+      body.error.message.includes("read_compile_errors"),
+      "error must point the agent at read_compile_errors",
+    );
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient: returns bridge_offline (not bridge_compile_failed) when PID is dead", () => {
+  // Dead PID → classifyInstance returns "gone", not "dead_bridge". The client
+  // must fall back to the original bridge_offline behavior, NOT fail-fast.
+  const s = makeSandbox();
+  try {
+    plantLock(s, DEAD_BRIDGE_PROJECT, 999_999_999, 60_000);
+    const client = new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT);
+
+    // ensureReady is private; route through a tool call. Because /ping throws
+    // and the lock says "gone", we expect the generic offline error.
+    return client.route("unity_open_mcp_validate_edit", { paths: ["Assets"] }).then(
+      (result) => {
+        assert.equal(result.isError, true);
+        const body = JSON.parse((result.content[0] as { text: string }).text);
+        assert.equal(body.error.code, "bridge_offline");
+      },
+    );
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient: no projectPath preserves original offline behavior on unreachable bridge", async () => {
+  // Without projectPath threaded in, the dead-bridge check is skipped —
+  // existing callers that don't pass the arg keep working.
+  const client = new LiveClient(1, new PingCache());
+  const result = await client.route("unity_open_mcp_validate_edit", {
+    paths: ["Assets"],
+  });
+  assert.equal(result.isError, true);
+  const body = JSON.parse((result.content[0] as { text: string }).text);
+  assert.equal(body.error.code, "bridge_offline");
 });

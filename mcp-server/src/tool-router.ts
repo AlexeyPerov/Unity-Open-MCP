@@ -5,6 +5,8 @@ import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline } from "./offline.js";
+import { editorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES } from "./unity-log.js";
+import { extractStructuredCompilerErrors } from "./compiler-errors.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
 import { listRules } from "./capabilities/list-rules.js";
@@ -53,6 +55,14 @@ export class ToolRouter implements Router {
     // list_assets — always offline (no live equivalent needed).
     if (toolName === "unity_open_mcp_list_assets") {
       return this.routeListAssets(args);
+    }
+
+    // read_compile_errors — always offline. Reads Unity's Editor.log directly;
+    // the one channel that works when the bridge assembly itself has failed to
+    // compile (every in-bridge channel is dead with it, and compile_check can't
+    // run). Never touches the bridge or spawns Unity.
+    if (toolName === "unity_open_mcp_read_compile_errors") {
+      return this.routeReadCompileErrors(args);
     }
 
     // M13 T4.4 — bridge event stream pull. The MCP server is the only long-lived
@@ -165,6 +175,74 @@ export class ToolRouter implements Router {
               route: "batch",
               fallbackReason: "live_unavailable",
             },
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+
+  private async routeReadCompileErrors(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const tailBytes =
+      typeof args.tail_bytes === "number" && args.tail_bytes >= 4096
+        ? Math.min(Math.floor(args.tail_bytes), 1048576)
+        : DEFAULT_LOG_TAIL_BYTES;
+
+    const logPath = editorLogPath();
+    const tail = readLogTail(logPath, tailBytes);
+
+    if (tail.error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "editor_log_unreadable",
+                message: `Could not read Editor.log at ${logPath}: ${tail.error}`,
+                logPath,
+              },
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    if (!tail.exists) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: "log_not_found",
+              errorCount: 0,
+              errors: [],
+              message: `No Editor.log found at ${logPath}. The Unity Editor ` +
+                "may not have written errors yet, or it is running with a " +
+                "custom -logFile path that this tool does not resolve.",
+              logPath,
+            }),
+          },
+        ],
+        isError: false,
+      };
+    }
+
+    const errors = extractStructuredCompilerErrors(tail.content);
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            status: errors.length > 0 ? "compile_failed" : "no_errors_found",
+            errorCount: errors.length,
+            errors,
+            logPath,
+            tailBytes: tail.bytes,
+            _source: "offline",
           }),
         },
       ],
