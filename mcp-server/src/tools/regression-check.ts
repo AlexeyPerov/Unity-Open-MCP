@@ -3,7 +3,11 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 export const regressionCheck: Tool = {
   name: "unity_open_mcp_regression_check",
   description:
-    "Compare current full scan against a baseline file. Returns exitCode 1 when the error count increase exceeds regression_threshold, or when the baseline is missing/invalid. Emits a compact regression summary suitable for CI logs.",
+    "Compare current full scan against a baseline file. Returns exitCode 1 when the error count increase exceeds " +
+    "regression_threshold (global) or any per-category threshold, or when the baseline is missing/invalid. " +
+    "per_category_thresholds maps a ruleId to its max tolerated error-count increase; rules absent from the map " +
+    "fall back to regression_threshold. Emits a compact regression summary (with optional per-rule breakdown) " +
+    "suitable for CI logs.",
   inputSchema: {
     type: "object",
     required: ["baseline_path"],
@@ -16,7 +20,14 @@ export const regressionCheck: Tool = {
         type: "integer",
         default: 0,
         minimum: 0,
-        description: "Max allowed increase in Error count before the check fails.",
+        description: "Max allowed increase in Error count before the check fails (applied globally).",
+      },
+      per_category_thresholds: {
+        type: "object",
+        additionalProperties: { type: "integer", minimum: 0 },
+        description:
+          "Per-ruleId max tolerated error-count increase. Each key is a ruleId; the value overrides regression_threshold " +
+          "for that rule. Example: {\"missing_references\": 2}. Rules not named here use regression_threshold.",
       },
       platform_profile: {
         enum: ["mobile", "console", "desktop"],
@@ -26,3 +37,4 @@ export const regressionCheck: Tool = {
     additionalProperties: false,
   },
 };
+

@@ -78,6 +78,17 @@ namespace UnityOpenMcpVerify.Batch
     }
 
     [Serializable]
+    public class RuleRegressionDetail
+    {
+        public string ruleId;
+        public int baselineError;
+        public int currentError;
+        public int errorDelta;
+        public int errorThreshold;
+        public bool regressed;
+    }
+
+    [Serializable]
     public class RegressionDetail
     {
         public SeveritySummary baselineSummary;
@@ -85,6 +96,11 @@ namespace UnityOpenMcpVerify.Batch
         public int errorDelta;
         public int errorThreshold;
         public bool regressed;
+        // Per-rule breakdown surfaced when the caller passes per-category
+        // thresholds. Null when only the global error-threshold was used, so
+        // older callers / fixtures that never set per-category thresholds see
+        // the same JSON shape as before.
+        public List<RuleRegressionDetail> perRule;
     }
 
     [Serializable]

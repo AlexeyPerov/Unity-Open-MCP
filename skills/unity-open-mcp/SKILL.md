@@ -174,11 +174,12 @@ Results are walked by a depth-limited reflective serializer before becoming `mut
 ## Read-only tools (no gate)
 
 - `unity_open_mcp_capabilities` — discover the surface (call first).
+- `unity_agent_list_rules` — list every verify rule (implemented + planned) with applicable asset kinds, default severity, and available fixes. Filter by `asset_kind` / `extension` before calling `scan_paths` so you know which rules apply.
 - `unity_open_mcp_ping` — bridge health.
 - `unity_open_mcp_find_members` — types, methods, properties.
-- `unity_open_mcp_validate_edit` — scoped health scan, no mutation (pre-commit check).
+- `unity_open_mcp_validate_edit` — scoped health scan, no mutation (pre-commit check). Accepts `include_rules` / `exclude_rules` to filter the auto-selected rule set; each issue carries `ruleId`/`categoryId`, `severity`, `code`/`issueCode`, `assetPath`, `description`, `fixId`/`fixSafe`.
 - `unity_open_mcp_find_references` — reverse dependency lookup (offline-first).
-- `unity_open_mcp_scan_paths` — run specific verify rules over scoped paths.
+- `unity_open_mcp_scan_paths` — run specific verify rules over scoped paths. `fail_on_severity` defaults to the project setting `verify.severityThreshold` in `.unity-open-mcp/settings.json`; override per call. Accepts `include_rules` / `exclude_rules` (exclude always wins). The response echoes the resolved `failOnSeverity` and the post-filter `rulesApplied`.
 - `unity_open_mcp_read_asset` — compact drill-down asset read.
 - `unity_open_mcp_search_assets` — compact asset search.
 - `unity_open_mcp_list_assets` — offline asset listing.

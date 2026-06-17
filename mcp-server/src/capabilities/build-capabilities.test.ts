@@ -45,6 +45,11 @@ const FIXTURE_TOOLS: Tool[] = [
     description: "Discover the full capability surface.",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "unity_agent_list_rules",
+    description: "List every verify rule (implemented + planned).",
+    inputSchema: { type: "object", properties: {} },
+  },
 ];
 
 const FIXTURE_BATCH_NAMES: ReadonlySet<string> = new Set([
@@ -219,6 +224,14 @@ test("capabilities tool itself is in the implemented surface", () => {
     (t) => t.name === "unity_open_mcp_capabilities",
   );
   assert.ok(found, "unity_open_mcp_capabilities must be discoverable");
+  assert.equal(found!.implemented, true);
+  assert.equal(found!.category, "capability-discovery");
+});
+
+test("list_rules tool is in the implemented surface under capability-discovery", () => {
+  const caps = buildCapabilities(DEPS);
+  const found = caps.tools.find((t) => t.name === "unity_agent_list_rules");
+  assert.ok(found, "unity_agent_list_rules must be discoverable via capabilities");
   assert.equal(found!.implemented, true);
   assert.equal(found!.category, "capability-discovery");
 });

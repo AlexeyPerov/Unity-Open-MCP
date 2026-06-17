@@ -159,6 +159,36 @@ test("route: capabilities filters by kind", async () => {
   });
 });
 
+test("route: list_rules returns local rule catalog with _source=local", async () => {
+  await withTmp("router-list-rules-", async (tmp) => {
+    const live = makeFakeLive();
+    const batch = makeFakeBatch();
+    const router = new ToolRouter(live, batch, tmp);
+
+    const res = await router.route("unity_agent_list_rules", {});
+    const body = parseBody(res);
+    assert.equal(res.isError, false);
+    assert.equal(body._source, "local");
+    assert.ok(Array.isArray(body.rules) && (body.rules as unknown[]).length > 0);
+    assert.equal(live.calls.length, 0, "list_rules must not hit the live bridge");
+    assert.equal(batch.calls.length, 0, "list_rules must not spawn batch Unity");
+  });
+});
+
+test("route: list_rules honors asset_kind filter locally", async () => {
+  await withTmp("router-list-rules-filter-", async (tmp) => {
+    const router = new ToolRouter(makeFakeLive(), makeFakeBatch(), tmp);
+    const res = await router.route("unity_agent_list_rules", { asset_kind: "prefab" });
+    const body = parseBody(res);
+    const rules = body.rules as Array<{ id: string }>;
+    const ids = rules.map((r) => r.id);
+    assert.ok(ids.includes("missing_references"));
+    assert.ok(ids.includes("scene_prefab_health"));
+    assert.ok(!ids.includes("materials"));
+    assert.equal(body._source, "local");
+  });
+});
+
 test("route: generate_skill returns local skill without writing", async () => {
   await withTmp("router-skill-", async (tmp) => {
     await setupProject(tmp);

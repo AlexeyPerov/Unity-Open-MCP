@@ -39,8 +39,7 @@ interface ParsedBatchResult {
   elapsedMs: number;
 }
 
-function makeErrorResult(code: string, message: string, detail?: unknown): CallToolResult {
-  return {
+function makeErrorResult(code: string, message: string, detail?: unknown): CallToolResult {  return {
     content: [
       {
         type: "text",
@@ -90,7 +89,7 @@ export function extractCompilerErrors(output: string): string[] {
   return errors;
 }
 
-function buildVerifyArgs(
+export function buildVerifyArgs(
   operation: string,
   args: Record<string, unknown>,
 ): string[] {
@@ -108,6 +107,18 @@ function buildVerifyArgs(
     cli.push("--baseline-path", String(args.baseline_path));
     if (args.regression_threshold !== undefined)
       cli.push("--regression-threshold", String(args.regression_threshold));
+    // Per-category thresholds are an optional object: ruleId -> max delta.
+    // Repeatable --per-category-threshold <ruleId>=<int> flags are emitted in a
+    // stable key order so the spawn line is deterministic.
+    const perCategory = args.per_category_thresholds;
+    if (perCategory && typeof perCategory === "object") {
+      const entries = Object.entries(perCategory).sort(([a], [b]) => a.localeCompare(b));
+      for (const [ruleId, value] of entries) {
+        if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+          cli.push("--per-category-threshold", `${ruleId}=${Math.trunc(value)}`);
+        }
+      }
+    }
     if (args.platform_profile) cli.push("--platform-profile", String(args.platform_profile));
   }
 

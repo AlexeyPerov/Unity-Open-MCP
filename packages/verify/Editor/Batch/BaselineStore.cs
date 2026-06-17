@@ -65,6 +65,23 @@ namespace UnityOpenMcpVerify.Batch
             BaselineFile baseline,
             int errorThreshold)
         {
+            return Compare(current, baseline, errorThreshold, null);
+        }
+
+        // Per-category regression gate. `perCategoryThresholds` maps a ruleId to
+        // the max tolerated increase in that rule's error count; rules absent
+        // from the map fall back to `errorThreshold`. A null/empty map reduces
+        // to the global-threshold-only path (perRule stays null), so existing
+        // callers and fixtures see an unchanged response.
+        //
+        // The overall `regressed` verdict is the OR of the global check and
+        // every per-rule check — a regression under any scope fails the gate.
+        public static RegressionDetail Compare(
+            BaselineFile current,
+            BaselineFile baseline,
+            int errorThreshold,
+            System.Collections.Generic.Dictionary<string, int> perCategoryThresholds)
+        {
             var baselineSummary = baseline != null && baseline.summary != null
                 ? baseline.summary
                 : new SeveritySummary();
@@ -74,16 +91,66 @@ namespace UnityOpenMcpVerify.Batch
                 : new SeveritySummary();
 
             int errorDelta = currentSummary.error - baselineSummary.error;
-            bool regressed = errorDelta > errorThreshold;
+            bool globalRegressed = errorDelta > errorThreshold;
 
-            return new RegressionDetail
+            var detail = new RegressionDetail
             {
                 baselineSummary = baselineSummary,
                 currentSummary = currentSummary,
                 errorDelta = errorDelta,
                 errorThreshold = errorThreshold,
-                regressed = regressed
+                regressed = globalRegressed
             };
+
+            if (perCategoryThresholds == null || perCategoryThresholds.Count == 0)
+                return detail;
+
+            // Union of ruleIds present on either side plus any the caller named
+            // explicitly — a rule that newly appears with errors still has to
+            // respect its threshold even if the baseline had no entry for it.
+            var ruleIds = new System.Collections.Generic.HashSet<string>();
+            if (baseline != null && baseline.rules != null)
+                foreach (var r in baseline.rules) ruleIds.Add(r.ruleId);
+            if (current != null && current.rules != null)
+                foreach (var r in current.rules) ruleIds.Add(r.ruleId);
+            foreach (var kv in perCategoryThresholds) ruleIds.Add(kv.Key);
+
+            var perRule = new System.Collections.Generic.List<RuleRegressionDetail>();
+            foreach (var ruleId in ruleIds)
+            {
+                int baseErr = ErrorCountFor(baseline, ruleId);
+                int currErr = ErrorCountFor(current, ruleId);
+                int delta = currErr - baseErr;
+                int threshold = perCategoryThresholds.TryGetValue(ruleId, out var perRuleThreshold)
+                    ? perRuleThreshold
+                    : errorThreshold;
+                bool ruleRegressed = delta > threshold;
+
+                perRule.Add(new RuleRegressionDetail
+                {
+                    ruleId = ruleId,
+                    baselineError = baseErr,
+                    currentError = currErr,
+                    errorDelta = delta,
+                    errorThreshold = threshold,
+                    regressed = ruleRegressed
+                });
+
+                if (ruleRegressed) detail.regressed = true;
+            }
+
+            detail.perRule = perRule;
+            return detail;
+        }
+
+        static int ErrorCountFor(BaselineFile file, string ruleId)
+        {
+            if (file == null || file.rules == null) return 0;
+            foreach (var r in file.rules)
+            {
+                if (r.ruleId == ruleId) return r.error;
+            }
+            return 0;
         }
 
         static SeveritySummary BuildSummary(List<VerifyIssue> issues)

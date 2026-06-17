@@ -56,6 +56,7 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 ### Capability discovery
 
 - `unity_open_mcp_capabilities` — Returns the full capability surface in one call: every tool with its input schema and route policy, every verify rule with applicable asset kinds and issue severities, and every available fix. Each capability carries an `implemented` boolean; planned-but-unbuilt items return with `status: "planned"` and guidance instead of failing. Call this first to learn what is available.
+- `unity_agent_list_rules` — Purpose-built rule discovery. Lists every verify rule (implemented + planned) with applicable asset kinds/extensions, derived `defaultSeverity` (worst severity the rule can emit), flat `availableFixIds`, and issue codes. Filter by `asset_kind` / `extension` / `implemented_only`. Routes locally from the versioned rule catalog — never hits the live bridge or batch Unity. Use this before `scan_paths` / `validate_edit` to learn which rules apply to a given asset type without trial-and-error.
 - `unity_agent_generate_skill` — Generates a project-specific SKILL.md reflecting the actual project state: Unity version, installed packages (including bridge/verify versions), available tools and verify rules, key MonoBehaviour/ScriptableObject types discovered from source, and the mutate→gate→fix workflow. Set `write: true` to persist the file into `.claude/skills/`, `.cursor/skills/`, `.opencode/skills/`, or `.agents/skills/`. Regenerate after package or script changes.
 
 ### Typed editor tools (M16 planned)
@@ -192,6 +193,70 @@ Per-tool route details live on each tool entry (`routePolicy`, `batchCapable`, `
 - Planned typed tools and planned verify rules ship `implemented: false` with `status: "planned"` and a `guidance` string explaining the fallback — they never raise hard errors.
 - The rule catalog is versioned with the package, so the `implemented` flags reflect what ships in the matching bridge/verify release.
 
+## Rule selection: include / exclude
+
+`scan_paths` and `validate_edit` accept `include_rules` and `exclude_rules` to filter the resolved rule set without trial-and-error on `categories`. Composition rules:
+
+| Caller input | Behaviour |
+|---|---|
+| `categories` only | Run exactly the listed rules. |
+| `categories` + `include_rules` | Run the intersection (narrowing). |
+| `include_rules` only (no `categories`) | Additive: the auto-selected set ∪ the include list. |
+| `exclude_rules` (any combination) | Always wins. Excluded rules are dropped after every other step. |
+
+When the filters reduce the set to nothing, the tool returns an explicit empty result (no issues, `rulesApplied: []`) rather than running every rule. The response carries `rulesApplied` (post-filter effective set) alongside the legacy `categoriesRun`.
+
+### Issue payload fields
+
+Every issue in `scan_paths` / `validate_edit` responses carries:
+
+| Field | Description |
+|---|---|
+| `ruleId` / `categoryId` | The verify rule that emitted the issue (aliases — same value). |
+| `severity` | `"Error"` or `"Warning"`. |
+| `code` / `issueCode` | The stable issue code (e.g. `missing_script`). Aliases — same value. |
+| `assetPath` | The asset the issue is on. |
+| `description` | Human-readable description. |
+| `fixId` / `fixSafe` | Present when a fix is registered for this issue. `fixSafe: true` means the gate will auto-suggest it. |
+
+`scan_paths` additionally carries `failOnSeverity` (the resolved threshold) and `rulesApplied` (the post-filter rule set).
+
+## Severity thresholds
+
+Projects differ in what counts as a failure. `scan_paths` / `validate_edit` / `regression_check` accept an explicit threshold; when omitted, `scan_paths` falls back to the project default.
+
+### Project default (`scan_paths`)
+
+`.unity-open-mcp/settings.json` carries a project-level default under the `verify` key:
+
+```json
+{
+  "verify": { "severityThreshold": "warning" }
+}
+```
+
+Accepted values: `error` (default), `warning` (alias `warn`), `info`, `verbose`, `never` (alias `off`). With `warning`, a scan over an asset with only warnings still flips `passed: false`. `scan_paths` echoes the resolved `failOnSeverity` in its response so the caller can confirm whether the project default or a per-call value was applied. `validate_edit` is intentionally strict-error: it answers "is this asset currently healthy?", independent of the project threshold.
+
+### Per-call override
+
+`scan_paths` accepts `fail_on_severity` explicitly to override the project default for one call. Same enum as above.
+
+### Per-category regression thresholds (`regression_check`)
+
+`regression_check` compares the current error count against a baseline. The global `regression_threshold` (default `0`) is the max tolerated *total* error-count increase. `per_category_thresholds` adds per-rule overrides:
+
+```json
+{
+  "baseline_path": "CI/baseline.json",
+  "regression_threshold": 0,
+  "per_category_thresholds": { "missing_references": 2, "dependencies": 1 }
+}
+```
+
+- Rules named in the map use their per-rule threshold; rules not named fall back to `regression_threshold`.
+- The response carries a `regression.perRule` breakdown (ruleId, baselineError, currentError, errorDelta, errorThreshold, regressed) when any per-category threshold is set.
+- The overall `regressed` verdict is the OR of the global check and every per-rule check — a regression under any scope fails the gate.
+
 ## Skill generation
 
 `unity_agent_generate_skill` produces a project-specific SKILL.md that gives the LLM up-to-date context for the specific project — installed tool versions, available verify rules, key MonoBehaviour/ScriptableObject types, and the core workflow.
@@ -304,6 +369,8 @@ Behavior:
 - `mcp-server/src/batch-spawn.ts`
 - `mcp-server/src/compressible-router.ts`
 - `mcp-server/src/capabilities/build-capabilities.ts`
+- `mcp-server/src/capabilities/list-rules.ts`
+- `mcp-server/src/capabilities/rule-catalog.ts`
 - `mcp-server/src/skill/generate-skill.ts`
 - `mcp-server/src/skill/client-paths.ts`
 - `skills/client-paths.json` — single source of truth for project-relative skill install paths and the MCP-client → skill-target mapping (consumed by both the Hub wizard and `unity_agent_generate_skill`).

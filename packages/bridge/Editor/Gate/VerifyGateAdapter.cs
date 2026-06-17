@@ -82,6 +82,57 @@ namespace UnityOpenMcpBridge
             return ruleSet.ToArray();
         }
 
+        // Rule selection: explicit request -> auto-select -> fallback. Then
+        // apply includeRules (intersection / additive allow-list) and
+        // excludeRules (deny-list). includeRules is additive to the explicit
+        // list only when the caller provided no explicit `ruleIds`; otherwise
+        // the explicit list is the source of truth and includeRules narrows it.
+        // excludeRules always wins.
+        //
+        // Returns null when filters reduce the set to nothing — that null is a
+        // sentinel the tools check to short-circuit with an empty result rather
+        // than falling into VerifyRunner's "null ruleIds = run all" branch.
+        // Null/empty include and exclude arrays are no-ops so callers that
+        // don't care about filtering see the historical behaviour.
+        public static string[] ResolveRuleIds(
+            string[] paths,
+            string[] ruleIds,
+            string[] includeRules,
+            string[] excludeRules)
+        {
+            var requested = ruleIds != null && ruleIds.Length > 0
+                ? new HashSet<string>(ruleIds)
+                : new HashSet<string>(SelectRuleIds(paths));
+
+            if (includeRules != null && includeRules.Length > 0)
+            {
+                var include = new HashSet<string>(includeRules);
+                if (ruleIds != null && ruleIds.Length > 0)
+                {
+                    // Explicit list + includeRules: keep only rules that appear
+                    // in BOTH (narrowing). This lets an agent pin the gate to a
+                    // subset without re-listing every auto-selected rule.
+                    requested.IntersectWith(include);
+                }
+                else
+                {
+                    // No explicit list: includeRules is an additive allow-list
+                    // on top of the auto-selected set.
+                    requested.UnionWith(include);
+                }
+            }
+
+            if (excludeRules != null && excludeRules.Length > 0)
+            {
+                foreach (var id in excludeRules)
+                    requested.Remove(id);
+            }
+
+            // Sentinel: empty after filter — distinct from "caller asked for
+            // everything" (null). Tools check this to avoid running all rules.
+            return requested.Count == 0 ? null : requested.ToArray();
+        }
+
         public static CheckpointFingerprint CreateCheckpoint(string[] paths, string[] ruleIds)
         {
             var scope = new VerifyScope(paths);
@@ -98,6 +149,33 @@ namespace UnityOpenMcpBridge
             return result;
         }
 
+        // Validate with include/exclude filters. Returns the result plus the
+        // effective rule set used (after filtering) so the tool envelope can
+        // surface `rulesApplied` to the agent.
+        public static FilteredVerifyResult ValidateFiltered(
+            string[] paths,
+            string[] ruleIds,
+            string[] includeRules,
+            string[] excludeRules,
+            string source = null)
+        {
+            var effective = ResolveRuleIds(paths, ruleIds, includeRules, excludeRules);
+            if (effective == null)
+            {
+                // Filters narrowed the set to nothing — return an explicit
+                // empty result rather than running every registered rule.
+                return new FilteredVerifyResult
+                {
+                    Result = new VerifyResult(new List<VerifyIssue>(), new string[0], 0),
+                    RulesApplied = new string[0],
+                };
+            }
+            var scope = new VerifyScope(paths);
+            var result = VerifyRunner.RunScoped(scope, effective, VerifyRunMode.Validate);
+            VerifyCacheService.Record(result, source ?? VerifyCacheService.SourceValidateEdit);
+            return new FilteredVerifyResult { Result = result, RulesApplied = effective };
+        }
+
         public static VerifyResult ScanPaths(string[] paths, string[] ruleIds)
         {
             var scope = new VerifyScope(paths);
@@ -105,6 +183,27 @@ namespace UnityOpenMcpBridge
             var result = VerifyRunner.RunScoped(scope, ids, VerifyRunMode.Full);
             VerifyCacheService.Record(result, VerifyCacheService.SourceScanPaths);
             return result;
+        }
+
+        public static FilteredVerifyResult ScanFiltered(
+            string[] paths,
+            string[] ruleIds,
+            string[] includeRules,
+            string[] excludeRules)
+        {
+            var effective = ResolveRuleIds(paths, ruleIds, includeRules, excludeRules);
+            if (effective == null)
+            {
+                return new FilteredVerifyResult
+                {
+                    Result = new VerifyResult(new List<VerifyIssue>(), new string[0], 0),
+                    RulesApplied = new string[0],
+                };
+            }
+            var scope = new VerifyScope(paths);
+            var result = VerifyRunner.RunScoped(scope, effective, VerifyRunMode.Full);
+            VerifyCacheService.Record(result, VerifyCacheService.SourceScanPaths);
+            return new FilteredVerifyResult { Result = result, RulesApplied = effective };
         }
 
         public static DeltaData ComputeDelta(CheckpointFingerprint before, VerifyResult after)
@@ -195,5 +294,14 @@ namespace UnityOpenMcpBridge
                 TotalCount = totalCount
             };
         }
+    }
+
+    // Bundles a VerifyResult with the effective rule set after include/exclude
+    // filtering. The tools surface `rulesApplied` so agents can see which rules
+    // actually ran when they combine auto-select with include/exclude filters.
+    public struct FilteredVerifyResult
+    {
+        public VerifyResult Result;
+        public string[] RulesApplied;
     }
 }

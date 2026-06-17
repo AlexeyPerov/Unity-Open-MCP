@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs, extractCompilerErrors } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs, buildVerifyArgs, extractCompilerErrors } from "./batch-spawn.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 function parseBody(result: CallToolResult): Record<string, unknown> {
@@ -176,4 +176,68 @@ test("extractCompilerErrors dedupes repeated lines", () => {
   const out = `${line}\n${line}\n${line}`;
   const errors = extractCompilerErrors(out);
   assert.equal(errors.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// buildVerifyArgs — per-category thresholds forwarded to the CLI
+// ---------------------------------------------------------------------------
+
+test("buildVerifyArgs forwards regression_check args unchanged without per-category map", () => {
+  const cli = buildVerifyArgs("regression_check", {
+    baseline_path: "CI/baseline.json",
+    regression_threshold: 2,
+    platform_profile: "mobile",
+  });
+  assert.deepEqual(cli, [
+    "regression_check",
+    "--baseline-path", "CI/baseline.json",
+    "--regression-threshold", "2",
+    "--platform-profile", "mobile",
+  ]);
+});
+
+test("buildVerifyArgs emits per-category threshold flags in stable key order", () => {
+  // Insertion order is intentionally non-alphabetical; the builder must sort
+  // by key so the spawn line is deterministic for CI snapshots.
+  const cli = buildVerifyArgs("regression_check", {
+    baseline_path: "baseline.json",
+    per_category_thresholds: {
+      dependencies: 3,
+      missing_references: 1,
+    },
+  });
+  assert.deepEqual(cli, [
+    "regression_check",
+    "--baseline-path", "baseline.json",
+    "--per-category-threshold", "dependencies=3",
+    "--per-category-threshold", "missing_references=1",
+  ]);
+});
+
+test("buildVerifyArgs truncates non-integer per-category values", () => {
+  const cli = buildVerifyArgs("regression_check", {
+    baseline_path: "b.json",
+    per_category_thresholds: { missing_references: 2.9 },
+  });
+  assert.deepEqual(cli, [
+    "regression_check",
+    "--baseline-path", "b.json",
+    "--per-category-threshold", "missing_references=2",
+  ]);
+});
+
+test("buildVerifyArgs drops negative or non-finite per-category values", () => {
+  const cli = buildVerifyArgs("regression_check", {
+    baseline_path: "b.json",
+    per_category_thresholds: {
+      missing_references: -1,
+      dependencies: Number.POSITIVE_INFINITY,
+      scene_prefab_health: 0,
+    },
+  });
+  assert.deepEqual(cli, [
+    "regression_check",
+    "--baseline-path", "b.json",
+    "--per-category-threshold", "scene_prefab_health=0",
+  ]);
 });

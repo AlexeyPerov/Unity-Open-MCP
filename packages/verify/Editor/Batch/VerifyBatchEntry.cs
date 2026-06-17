@@ -189,7 +189,10 @@ namespace UnityOpenMcpVerify.Batch
             VerifyCacheService.Record(result, VerifyCacheService.SourceScanAll);
 
             var current = BaselineStore.CreateFromResult(result, profile);
-            var regression = BaselineStore.Compare(current, baseline, threshold);
+            // Per-category thresholds are optional; null map reduces to the
+            // historical global-only comparison.
+            var regression = BaselineStore.Compare(
+                current, baseline, threshold, parsed.perCategoryThresholds);
 
             var batchResult = BuildBatchResult("regression_check", profile, result, sw.ElapsedMilliseconds);
             batchResult.baselinePath = parsed.baselinePath;
@@ -269,6 +272,10 @@ namespace UnityOpenMcpVerify.Batch
             public string outputPath;
             public string baselinePath;
             public int regressionThreshold;
+            // Per-rule error thresholds. Null when the caller did not pass any
+            // --per-category-threshold flag; the comparison then uses the global
+            // --regression-threshold only.
+            public Dictionary<string, int> perCategoryThresholds;
             public string error;
         }
 
@@ -355,6 +362,37 @@ namespace UnityOpenMcpVerify.Batch
                             return p;
                         }
                         p.regressionThreshold = threshold;
+                        break;
+
+                    case "--per-category-threshold":
+                        // Repeatable: --per-category-threshold <ruleId>=<int>.
+                        // A per-rule override for the regression gate; rules not
+                        // named here fall back to --regression-threshold.
+                        if (i + 1 >= args.Length)
+                        {
+                            p.error = "--per-category-threshold requires a value of the form <ruleId>=<int>.";
+                            return p;
+                        }
+                        {
+                            var raw = args[++i];
+                            var eq = raw.IndexOf('=');
+                            if (eq <= 0 || eq == raw.Length - 1)
+                            {
+                                p.error = $"Invalid --per-category-threshold '{raw}'. " +
+                                          "Expected form <ruleId>=<int>.";
+                                return p;
+                            }
+                            var ruleId = raw.Substring(0, eq);
+                            if (!int.TryParse(raw.Substring(eq + 1), out int perRuleThreshold) || perRuleThreshold < 0)
+                            {
+                                p.error = $"Invalid --per-category-threshold '{raw}'. " +
+                                          "Threshold must be a non-negative integer.";
+                                return p;
+                            }
+                            if (p.perCategoryThresholds == null)
+                                p.perCategoryThresholds = new Dictionary<string, int>();
+                            p.perCategoryThresholds[ruleId] = perRuleThreshold;
+                        }
                         break;
 
                     default:

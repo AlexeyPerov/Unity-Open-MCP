@@ -6,6 +6,7 @@ import { AssetModelCache, isCompressible, routeCompressible } from "./compressib
 import { listAssetsOffline, findReferencesOffline } from "./offline.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
+import { listRules } from "./capabilities/list-rules.js";
 import { generateSkill } from "./skill/generate-skill.js";
 import { knownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
@@ -55,6 +56,13 @@ export class ToolRouter implements Router {
     // capabilities — local capability-discovery surface (no live/batch hop).
     if (toolName === "unity_open_mcp_capabilities") {
       return this.routeCapabilities(args);
+    }
+
+    // list_rules — local rule catalog (no live/batch hop). Lets an agent
+    // discover which rules apply to which asset kinds before calling
+    // scan_paths / validate_edit.
+    if (toolName === "unity_agent_list_rules") {
+      return this.routeListRules(args);
     }
 
     // generate_skill — local skill generation (no live/batch hop).
@@ -195,6 +203,27 @@ export class ToolRouter implements Router {
         fixes: FIX_CATALOG,
       },
       { kind, includePlanned },
+    );
+    return {
+      content: [
+        { type: "text", text: JSON.stringify({ ...result, _source: "local" }) },
+      ],
+      isError: false,
+    };
+  }
+
+  private async routeListRules(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const assetKind =
+      typeof args.asset_kind === "string" ? args.asset_kind : undefined;
+    const extension =
+      typeof args.extension === "string" ? args.extension : undefined;
+    const implementedOnly = args.implemented_only === true;
+
+    const result = listRules(
+      { rules: RULE_CATALOG, fixes: FIX_CATALOG },
+      { assetKind, extension, implementedOnly },
     );
     return {
       content: [

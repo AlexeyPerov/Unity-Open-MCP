@@ -228,5 +228,135 @@ namespace UnityOpenMcpBridge.Tests
             var ids = VerifyGateAdapter.SelectRuleIds(new[] { "Assets/P.PREFAB" });
             CollectionAssert.AreEquivalent(new[] { "missing_references", "scene_prefab_health", "dependencies" }, ids);
         }
+
+        // -------------------------------------------------------------------
+        // ResolveRuleIds — include / exclude filter composition (T2.6)
+        // -------------------------------------------------------------------
+
+        [Test]
+        public static void ResolveRuleIds_NoFilters_MatchesSelectRuleIds()
+        {
+            var ids = VerifyGateAdapter.ResolveRuleIds(
+                new[] { "Assets/P.prefab" }, null, null, null);
+            CollectionAssert.AreEquivalent(
+                new[] { "missing_references", "scene_prefab_health", "dependencies" }, ids);
+        }
+
+        [Test]
+        public static void ResolveRuleIds_NullFilters_NoOp()
+        {
+            var ids = VerifyGateAdapter.ResolveRuleIds(
+                new[] { "Assets/P.prefab" },
+                new[] { "missing_references", "scene_prefab_health", "dependencies" },
+                null, null);
+            CollectionAssert.AreEquivalent(
+                new[] { "missing_references", "scene_prefab_health", "dependencies" }, ids);
+        }
+
+        [Test]
+        public static void ResolveRuleIds_EmptyFilters_NoOp()
+        {
+            var ids = VerifyGateAdapter.ResolveRuleIds(
+                new[] { "Assets/P.prefab" },
+                null,
+                new string[0],
+                new string[0]);
+            CollectionAssert.AreEquivalent(
+                new[] { "missing_references", "scene_prefab_health", "dependencies" }, ids);
+        }
+
+        [Test]
+        public static void ResolveRuleIds_IncludeWithoutExplicit_IsAdditive()
+        {
+            // include_rules is additive when no explicit categories list — the
+            // union of the auto-selected set and the include list.
+            var ids = VerifyGateAdapter.ResolveRuleIds(
+                new[] { "Assets/P.prefab" },
+                null,
+                new[] { "textures", "audio_analysis" },
+                null);
+            CollectionAssert.AreEquivalent(
+                new[]
+                {
+                    "missing_references", "scene_prefab_health", "dependencies",
+                    "textures", "audio_analysis"
+                }, ids);
+        }
+
+        [Test]
+        public static void ResolveRuleIds_IncludeWithoutExplicit_CanAddToAndNarrowWithAutoSelect()
+        {
+            // When the include list is a subset of auto-select, the union is
+            // unchanged (auto-select already covers it).
+            var ids = VerifyGateAdapter.ResolveRuleIds(
+                new[] { "Assets/P.prefab" },
+                null,
+                new[] { "missing_references" },
+                null);
+            CollectionAssert.AreEquivalent(
+                new[] { "missing_references", "scene_prefab_health", "dependencies" }, ids);
+        }
+
+        [Test]
+        public static void ResolveRuleIds_IncludeWithExplicit_NarrowsToIntersection()
+        {
+            // Explicit categories + include -> intersection only.
+            var ids = VerifyGateAdapter.ResolveRuleIds(
+                new[] { "Assets/P.prefab" },
+                new[] { "missing_references", "scene_prefab_health", "dependencies" },
+                new[] { "missing_references", "scene_prefab_health" },
+                null);
+            CollectionAssert.AreEquivalent(
+                new[] { "missing_references", "scene_prefab_health" }, ids);
+        }
+
+        [Test]
+        public static void ResolveRuleIds_ExcludeWins_OverAutoSelect()
+        {
+            var ids = VerifyGateAdapter.ResolveRuleIds(
+                new[] { "Assets/P.prefab" },
+                null,
+                null,
+                new[] { "scene_prefab_health" });
+            CollectionAssert.AreEquivalent(
+                new[] { "missing_references", "dependencies" }, ids);
+        }
+
+        [Test]
+        public static void ResolveRuleIds_ExcludeWins_OverExplicitAndInclude()
+        {
+            var ids = VerifyGateAdapter.ResolveRuleIds(
+                new[] { "Assets/P.prefab" },
+                new[] { "missing_references", "scene_prefab_health", "dependencies" },
+                new[] { "missing_references", "scene_prefab_health", "dependencies" },
+                new[] { "missing_references", "dependencies" });
+            CollectionAssert.AreEquivalent(new[] { "scene_prefab_health" }, ids);
+        }
+
+        [Test]
+        public static void ResolveRuleIds_EmptyAfterFilter_ReturnsNullSentinel()
+        {
+            // Excluding everything must return null, NOT an empty array. The
+            // tools check this sentinel to avoid falling into VerifyRunner's
+            // "null ruleIds = run all" branch.
+            var ids = VerifyGateAdapter.ResolveRuleIds(
+                new[] { "Assets/P.prefab" },
+                null,
+                null,
+                new[] { "missing_references", "scene_prefab_health", "dependencies" });
+            Assert.IsNull(ids);
+        }
+
+        [Test]
+        public static void ResolveRuleIds_IncludeNarrowingEverything_ReturnsNullSentinel()
+        {
+            // Explicit list + include with no overlap -> empty -> null.
+            var ids = VerifyGateAdapter.ResolveRuleIds(
+                new[] { "Assets/P.prefab" },
+                new[] { "missing_references" },
+                new[] { "textures" },
+                null);
+            Assert.IsNull(ids);
+        }
     }
 }

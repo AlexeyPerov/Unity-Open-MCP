@@ -89,6 +89,103 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
+        // Per-category thresholds (T2.5)
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void Compare_WithNullPerCategoryMap_LeavesPerRuleNull_AndMatchesGlobalOnly()
+        {
+            var baseline = BaselineWithRules(("missing_references", 1), ("dependencies", 2));
+            var current = BaselineWithRules(("missing_references", 4), ("dependencies", 2));
+
+            var detail = BaselineStore.Compare(current, baseline, errorThreshold: 0, perCategoryThresholds: null);
+
+            Assert.IsNull(detail.perRule, "null map => no per-rule breakdown (legacy shape)");
+            // Global gate still fires: +3 errors overall vs threshold 0.
+            Assert.IsTrue(detail.regressed);
+        }
+
+        [Test]
+        public void Compare_WithPerCategoryMap_ProducesPerRuleBreakdown()
+        {
+            var baseline = BaselineWithRules(("missing_references", 1), ("dependencies", 2));
+            var current = BaselineWithRules(("missing_references", 4), ("dependencies", 2));
+
+            var map = new Dictionary<string, int> { { "missing_references", 2 } };
+            var detail = BaselineStore.Compare(current, baseline, errorThreshold: 0, perCategoryThresholds: map);
+
+            Assert.IsNotNull(detail.perRule);
+            var mr = detail.perRule.Find(r => r.ruleId == "missing_references");
+            Assert.AreEqual(1, mr.baselineError);
+            Assert.AreEqual(4, mr.currentError);
+            Assert.AreEqual(3, mr.errorDelta);
+            Assert.AreEqual(2, mr.errorThreshold, "per-rule threshold from the map wins over global");
+            Assert.IsTrue(mr.regressed, "delta 3 > threshold 2");
+
+            var dep = detail.perRule.Find(r => r.ruleId == "dependencies");
+            Assert.AreEqual(0, dep.errorDelta);
+            Assert.AreEqual(0, dep.errorThreshold, "rules absent from map fall back to global threshold");
+            Assert.IsFalse(dep.regressed);
+
+            // Overall regression is the OR of every per-rule check.
+            Assert.IsTrue(detail.regressed, "missing_references regressed -> overall regressed");
+        }
+
+        [Test]
+        public void Compare_PerCategoryMap_ToleratesRule_WithBaselineEntryOnly()
+        {
+            // A rule present in the baseline but absent in current (errors
+            // resolved) must still appear in the per-rule breakdown.
+            var baseline = BaselineWithRules(("missing_references", 5));
+            var current = BaselineWithRules(("missing_references", 0));
+
+            var map = new Dictionary<string, int> { { "missing_references", 0 } };
+            var detail = BaselineStore.Compare(current, baseline, errorThreshold: 0, perCategoryThresholds: map);
+
+            var mr = detail.perRule.Find(r => r.ruleId == "missing_references");
+            Assert.AreEqual(-5, mr.errorDelta);
+            Assert.IsFalse(mr.regressed, "fewer errors than baseline is improvement");
+            Assert.IsFalse(detail.regressed);
+        }
+
+        [Test]
+        public void Compare_PerCategoryMap_IncludesExplicitlyNamedRules_EvenIfAbsentFromBothSides()
+        {
+            // A threshold named in the map for a rule that has no entries on
+            // either side should still surface so an agent can confirm it was
+            // applied (delta 0, threshold N, not regressed).
+            var baseline = BaselineWithRules(("missing_references", 0));
+            var current = BaselineWithRules(("missing_references", 0));
+
+            var map = new Dictionary<string, int> { { "shader_analysis", 5 } };
+            var detail = BaselineStore.Compare(current, baseline, errorThreshold: 0, perCategoryThresholds: map);
+
+            var shader = detail.perRule.Find(r => r.ruleId == "shader_analysis");
+            Assert.IsNotNull(shader, "named-but-absent rule must still appear");
+            Assert.AreEqual(0, shader.errorDelta);
+            Assert.AreEqual(5, shader.errorThreshold);
+            Assert.IsFalse(shader.regressed);
+        }
+
+        [Test]
+        public void Compare_PerCategoryMap_RegressesWhenAnyRuleExceedsItsThreshold()
+        {
+            var baseline = BaselineWithRules(("missing_references", 0), ("dependencies", 0));
+            var current = BaselineWithRules(("missing_references", 0), ("dependencies", 1));
+
+            // dependencies threshold 0 -> delta 1 regresses; missing_references
+            // threshold 100 -> delta 0 does not. Overall must regress.
+            var map = new Dictionary<string, int>
+            {
+                { "missing_references", 100 },
+                { "dependencies", 0 },
+            };
+            var detail = BaselineStore.Compare(current, baseline, errorThreshold: 100, perCategoryThresholds: map);
+
+            Assert.IsTrue(detail.regressed, "any per-rule regression fails the gate");
+        }
+
+        // -------------------------------------------------------------------
         // CreateFromResult — BuildSummary + BuildRuleEntries
         // -------------------------------------------------------------------
 
@@ -230,6 +327,33 @@ namespace UnityOpenMcpVerify.Tests
                 schemaVersion = BaselineSchema.Version,
                 summary = new SeveritySummary(errors, 0, 0),
             };
+        }
+
+        /// <summary>Builds a baseline with per-rule error counts. The summary
+        /// totals the per-rule counts so the global gate stays consistent.
+        /// </summary>
+        private static BaselineFile BaselineWithRules(params (string ruleId, int errors)[] rules)
+        {
+            var file = new BaselineFile
+            {
+                schemaVersion = BaselineSchema.Version,
+                summary = new SeveritySummary(),
+            };
+            int total = 0;
+            foreach (var (ruleId, errors) in rules)
+            {
+                total += errors;
+                file.rules.Add(new RuleBaselineEntry
+                {
+                    ruleId = ruleId,
+                    error = errors,
+                    warn = 0,
+                    info = 0,
+                    issueKeys = new List<string>(),
+                });
+            }
+            file.summary = new SeveritySummary(total, 0, 0);
+            return file;
         }
 
         private static VerifyResult ResultWith(int errors, int warnings, string[] categories)
