@@ -58,6 +58,7 @@ namespace UnityOpenMcpBridge
                         readOnlyHint: attr.ReadOnlyHint,
                         idempotentHint: attr.IdempotentHint,
                         destructiveHint: attr.DestructiveHint,
+                        lifecycle: attr.Lifecycle,
                         enabled: attr.Enabled,
                         method: method
                     );

@@ -11,7 +11,7 @@ namespace UnityOpenMcpBridge.TestRunner
     public class Tool_TestRunner
     {
         [BridgeTool("unity_agent_run_tests", Title = "Run Tests",
-            IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off)]
+            IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.CustomConfirmation)]
         [System.ComponentModel.Description(
             "Run Unity EditMode or PlayMode tests. Returns a runId for result polling. " +
             "EditMode results are typically available within seconds; PlayMode requires " +

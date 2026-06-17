@@ -13,6 +13,7 @@ namespace UnityOpenMcpBridge
         public bool ReadOnlyHint { get; }
         public bool IdempotentHint { get; }
         public bool DestructiveHint { get; }
+        public LifecyclePolicy Lifecycle { get; }
         public bool Enabled { get; }
         public MethodInfo Method { get; }
         public ParameterInfo[] Parameters { get; }
@@ -28,6 +29,7 @@ namespace UnityOpenMcpBridge
             bool readOnlyHint,
             bool idempotentHint,
             bool destructiveHint,
+            LifecyclePolicy lifecycle,
             bool enabled,
             MethodInfo method)
         {
@@ -38,6 +40,7 @@ namespace UnityOpenMcpBridge
             ReadOnlyHint = readOnlyHint;
             IdempotentHint = idempotentHint;
             DestructiveHint = destructiveHint;
+            Lifecycle = lifecycle;
             Enabled = enabled;
             Method = method;
             Parameters = method.GetParameters();

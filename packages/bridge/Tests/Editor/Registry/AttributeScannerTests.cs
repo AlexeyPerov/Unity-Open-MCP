@@ -109,6 +109,26 @@ namespace UnityOpenMcpBridge.Tests
         }
     }
 
+    namespace TestFixtureI
+    {
+        // M13 T4.1 — verifies [BridgeTool(Lifecycle = ...)] flows through the
+        // registry scanner onto the BridgeToolEntry so the dispatcher and dirty
+        // guard see the declared policy.
+        [BridgeToolType]
+        public class Tool_WithLifecycle
+        {
+            [BridgeTool("test_lifecycle_settle_tool",
+                IsMutating = true, Gate = GateMode.Enforce,
+                Lifecycle = LifecyclePolicy.EditorSettle)]
+            public string Settle() => "settled";
+
+            [BridgeTool("test_lifecycle_restart_tool",
+                IsMutating = true, Gate = GateMode.Enforce,
+                Lifecycle = LifecyclePolicy.RestartThenSettle)]
+            public string Restart() => "restarted";
+        }
+    }
+
     public class AttributeScannerTests
     {
         [Test]
@@ -184,6 +204,28 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsNotNull(result, "Missing required parameter must not map to unknown-tool (null)");
             Assert.IsFalse(result.Success, "Dispatch must fail when a required parameter is missing");
             Assert.AreEqual("missing_parameter", result.ErrorCode);
+        }
+
+        // M13 T4.1 — [BridgeTool(Lifecycle = ...)] must flow onto the entry so
+        // the dispatcher and dirty guard see the declared policy.
+        [Test]
+        public static void Scan_LifecycleAttribute_FlowsToEntry()
+        {
+            Assert.IsTrue(BridgeToolRegistry.TryGet("test_lifecycle_settle_tool", out var settleEntry));
+            Assert.AreEqual(LifecyclePolicy.EditorSettle, settleEntry.Lifecycle);
+
+            Assert.IsTrue(BridgeToolRegistry.TryGet("test_lifecycle_restart_tool", out var restartEntry));
+            Assert.AreEqual(LifecyclePolicy.RestartThenSettle, restartEntry.Lifecycle);
+        }
+
+        [Test]
+        public static void Scan_LifecycleDefault_IsNoneWhenOmitted()
+        {
+            // Tools that don't declare a lifecycle must default to None (read-
+            // only safe default), not be inferred from IsMutating.
+            Assert.IsTrue(BridgeToolRegistry.TryGet("test_mutating_tool", out var mutatingEntry));
+            Assert.AreEqual(LifecyclePolicy.None, mutatingEntry.Lifecycle,
+                "Omitted lifecycle defaults to None even on mutating tools — policy is explicit.");
         }
     }
 }

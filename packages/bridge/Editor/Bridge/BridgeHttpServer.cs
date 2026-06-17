@@ -468,9 +468,23 @@ namespace UnityOpenMcpBridge
 
                 var result = task.Result;
                 sw.Stop();
+
+                // M13 T4.1 — compile-settle wait. Done on THIS worker thread,
+                // not the main thread that DispatchWithGate ran on, because the
+                // main thread is the one doing the compiling. Only wait when the
+                // mutation actually succeeded and the policy requires it; a
+                // failed mutation (e.g. scene_dirty refusal) should return
+                // immediately with no settle wait.
+                var lifecycle = ToolLifecycle.Resolve(toolName);
+                if (result.Mutation != null && result.Mutation.Success
+                    && ToolLifecycle.RequiresSettleWait(lifecycle))
+                {
+                    result.SettleMs = EditorSettleWait.Wait(lifecycle);
+                }
+
                 RecordGateRun(toolName, effectiveGateMode, result);
                 ApplyToolResultToActivity(activity, result, sw.ElapsedMilliseconds);
-                SendJson(context, 200, BuildGateEnvelope(result, effectiveGateMode));
+                SendJson(context, 200, BuildGateEnvelope(result, effectiveGateMode, lifecycle));
             }
             catch (AggregateException ae)
             {
@@ -571,6 +585,29 @@ namespace UnityOpenMcpBridge
 
             var mode = GatePolicy.ParseMode(gateMode);
 
+            // M13 T4.2 — active-scene dirty guard. Only ops that can disrupt the
+            // editor (recompile / scene switch) are preflighted; mutating-but-
+            // settled ops (apply_fix, reserialize) never trigger the native save
+            // modal, so guarding them would just add friction. Runs on the main
+            // thread (this whole method is dispatched via MainThreadDispatcher),
+            // which is required for EditorSceneManager access.
+            if (SceneDirtyGuard.AppliesTo(toolName, body))
+            {
+                var guard = SceneDirtyGuard.Check();
+                if (!guard.Allowed)
+                {
+                    return new GateDispatchResult
+                    {
+                        Mutation = ToolDispatchResult.Fail("scene_dirty", guard.RefusalMessage),
+                        GateRan = false,
+                        Outcome = GateOutcome.Failed,
+                        GateFailed = true,
+                        DirtyScenePaths = guard.DirtyScenePaths,
+                        AgentNextSteps = BuildSceneDirtyNextSteps(guard.DirtyScenePaths)
+                    };
+                }
+            }
+
             if (!isMutating)
             {
                 var nonMutatingResult = DispatchTool(toolName, body);
@@ -584,6 +621,26 @@ namespace UnityOpenMcpBridge
             }
 
             return GatePolicy.Execute(mode, pathsHint, () => DispatchTool(toolName, body));
+        }
+
+        static string[] BuildSceneDirtyNextSteps(string[] dirtyPaths)
+        {
+            var list = new List<string>(3);
+            if (dirtyPaths == null || dirtyPaths.Length == 0)
+            {
+                list.Add("Save or discard the active scene's unsaved changes, then retry.");
+            }
+            else
+            {
+                list.Add("Save or discard changes to the dirty scene(s) before retrying: "
+                    + string.Join(", ", dirtyPaths) + ".");
+            }
+            list.Add("To save via the bridge: unity_open_mcp_execute_csharp with " +
+                     "EditorSceneManager.SaveScene(EditorSceneManager.GetSceneManagerSetup()[0].path) " +
+                     "(or MarkSceneDirty + SaveScene for an unsaved scene).");
+            list.Add("To discard: EditorSceneManager.RestoreSavedSceneState(), or retry the " +
+                     "original call with ignore_scene_dirty: true to proceed and accept the risk.");
+            return list.ToArray();
         }
 
         static ToolDispatchResult DispatchTool(string toolName, string body)
@@ -634,7 +691,7 @@ namespace UnityOpenMcpBridge
                 sw.Stop();
                 RecordGateRun("unity_open_mcp_apply_fix", gateMode, gateResult);
                 ApplyToolResultToActivity(activity, gateResult, sw.ElapsedMilliseconds);
-                SendJson(context, 200, BuildGateEnvelope(gateResult, gateMode));
+                SendJson(context, 200, BuildGateEnvelope(gateResult, gateMode, LifecyclePolicy.EditorSettle));
             }
             catch (AggregateException ae)
             {
@@ -764,7 +821,7 @@ namespace UnityOpenMcpBridge
             return new[] { assetPath };
         }
 
-        static string BuildGateEnvelope(GateDispatchResult result, string gateMode)
+        static string BuildGateEnvelope(GateDispatchResult result, string gateMode, LifecyclePolicy lifecycle)
         {
             var sb = new StringBuilder(1024);
 
@@ -836,6 +893,30 @@ namespace UnityOpenMcpBridge
             }
 
             sb.Append('}');
+
+            // M13 T4.1 — lifecycle hint + settle telemetry. Emitted on every
+            // gate envelope so agents know whether the op was read-only, may
+            // have settled, or survived a domain reload. settleMs is the time
+            // the bridge blocked waiting for the editor to finish compiling.
+            sb.Append(",\"lifecycle\":\"").Append(lifecycle.ToWireString()).Append("\"");
+            sb.Append(",\"settleMs\":").Append(result.SettleMs);
+
+            // M13 T4.2 — dirty-scene paths when the op was refused by the
+            // active-scene guard. Omitted (null) when allowed.
+            if (result.DirtyScenePaths != null && result.DirtyScenePaths.Length > 0)
+            {
+                sb.Append(",\"dirtyScenes\":[");
+                for (int i = 0; i < result.DirtyScenePaths.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(EscapeStringContent(result.DirtyScenePaths[i])).Append('"');
+                }
+                sb.Append("]");
+            }
+            else
+            {
+                sb.Append(",\"dirtyScenes\":null");
+            }
 
             sb.Append(",\"agentNextSteps\":[");
             var steps = result.AgentNextSteps;

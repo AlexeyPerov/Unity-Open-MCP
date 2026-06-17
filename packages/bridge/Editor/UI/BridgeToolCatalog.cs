@@ -69,6 +69,7 @@ namespace UnityOpenMcpBridge
         public bool ReadOnlyHint;
         public bool IdempotentHint;
         public bool DestructiveHint;
+        public LifecyclePolicy Lifecycle; // M13 T4.1 — settle/retry policy
         public string DeclaringTypeName; // for registry tools
         public List<BridgeToolParameterSummary> Parameters = new List<BridgeToolParameterSummary>();
     }
@@ -99,20 +100,21 @@ namespace UnityOpenMcpBridge
 
             foreach (var hc in HardcodedTools)
             {
-                items.Add(new BridgeToolCatalogItem
-                {
-                    Name = hc.Name,
-                    Title = hc.Title,
-                    Source = BridgeToolSource.Hardcoded,
-                    Mutability = hc.IsMutating ? BridgeToolMutability.Mutating : BridgeToolMutability.ReadOnly,
-                    GateMode = hc.Gate,
-                    ReadOnlyHint = !hc.IsMutating,
-                    IdempotentHint = false,
-                    DestructiveHint = false,
-                    DeclaringTypeName = null,
-                    Parameters = HardcodedParameterSummary(hc.Name)
-                });
-                seen.Add(hc.Name);
+                    items.Add(new BridgeToolCatalogItem
+                    {
+                        Name = hc.Name,
+                        Title = hc.Title,
+                        Source = BridgeToolSource.Hardcoded,
+                        Mutability = hc.IsMutating ? BridgeToolMutability.Mutating : BridgeToolMutability.ReadOnly,
+                        GateMode = hc.Gate,
+                        ReadOnlyHint = !hc.IsMutating,
+                        IdempotentHint = false,
+                        DestructiveHint = false,
+                        Lifecycle = ToolLifecycle.Resolve(hc.Name),
+                        DeclaringTypeName = null,
+                        Parameters = HardcodedParameterSummary(hc.Name)
+                    });
+                    seen.Add(hc.Name);
             }
 
             try
@@ -132,6 +134,7 @@ namespace UnityOpenMcpBridge
                         ReadOnlyHint = entry.ReadOnlyHint || !entry.IsMutating,
                         IdempotentHint = entry.IdempotentHint,
                         DestructiveHint = entry.DestructiveHint,
+                        Lifecycle = entry.Lifecycle,
                         DeclaringTypeName = entry.DeclaringType != null ? entry.DeclaringType.FullName : null,
                         Parameters = RegistryParameterSummary(entry)
                     });

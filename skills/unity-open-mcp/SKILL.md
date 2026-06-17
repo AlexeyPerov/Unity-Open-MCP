@@ -45,6 +45,25 @@ Full route-policy and batch tables live in `docs/api/mcp-tools.md` (human/contri
 
 **Principle: mutation success ≠ project safe.** A successful C# compile can still break prefab references. The gate is the safety net.
 
+### Lifecycle & scene safety
+
+Every tool declares a **lifecycle policy** (surfaced in the mutation envelope as `lifecycle` and in the bridge window Tools tab) so you know which ops are cheap, which settle, and which survive a domain reload:
+
+| Policy | Meaning | Tools |
+|---|---|---|
+| `none` | Read-only, returns immediately. | `ping`, `find_members`, `validate_edit`, `checkpoint_create`, `delta`, `find_references`, `scan_paths`, `read_asset`, `search_assets`, `list_assets`, `editor_status`, `read_console`, `screenshot`, `profiler_*`, `spatial_query` |
+| `editor_settle` | Mutating; bridge waits for asset refresh/serialization to finish before returning (`settleMs` in the envelope). | `apply_fix`, `reserialize` |
+| `restart_then_settle` | Mutating; may trigger a domain reload. The bridge blocks until the editor finishes compiling (cap 60s) so you never observe a half-compiled state. The HTTP listener survives the reload, so `/ping` after the call reflects the post-reload state automatically. | `execute_csharp`, `invoke_method`, `execute_menu`, `compile_check` |
+| `custom_confirmation` | Async; returns immediately and the result arrives via an external completion signal you poll. | `run_tests` (file-handoff poll on the MCP server) |
+
+**Active-scene dirty guard.** Before any `restart_then_settle` op, the bridge preflights the loaded scenes. If any scene has unsaved changes, the call is refused with `error.code = "scene_dirty"`, a `dirtyScenes[]` list, and `agentNextSteps` — so Unity's native save modal never interrupts the flow. Recover by:
+
+- saving the scene first (`unity_open_mcp_execute_csharp` with `EditorSceneManager.SaveScene(...)`), or
+- discarding (`EditorSceneManager.RestoreSavedSceneState()`), or
+- passing `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu` to proceed and accept the risk of a native save prompt.
+
+`apply_fix` and `reserialize` are **not** guarded — they never trigger the native save modal.
+
 ### Gate modes
 
 | Mode | When |

@@ -45,6 +45,13 @@ namespace UnityOpenMcpBridge
         public DeltaData Delta;
         public bool GateFailed;
         public string[] AgentNextSteps;
+        // M13 T4.1 — milliseconds spent waiting for the editor to finish
+        // compiling after the mutation. Surfaced in the response envelope as
+        // settleMs so callers know whether the op blocked on a settle/reload.
+        public long SettleMs;
+        // M13 T4.2 — dirty-scene paths collected by SceneDirtyGuard when the
+        // op was refused because of unsaved scene changes. Null when allowed.
+        public string[] DirtyScenePaths;
     }
 
     public static class GatePolicy

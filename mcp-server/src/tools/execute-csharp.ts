@@ -34,6 +34,16 @@ export const executeCsharp: Tool = {
         description:
           "Asset paths likely touched; drives scoped gate validation",
       },
+      ignore_scene_dirty: {
+        type: "boolean",
+        default: false,
+        description:
+          "Bypass the active-scene dirty guard. By default a disruptive op " +
+          "(recompile / scene switch) is refused with scene_dirty when any " +
+          "loaded scene has unsaved changes, so Unity's native save modal " +
+          "never interrupts the flow. Set true to proceed and accept the risk " +
+          "of a native save prompt.",
+      },
       gate: {
         enum: ["enforce", "warn", "off"],
         default: "enforce",

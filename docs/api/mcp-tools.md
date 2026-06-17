@@ -361,6 +361,19 @@ Behavior:
 - Input schema and descriptions live in each tool file under `mcp-server/src/tools/`.
 - Errors are returned as JSON text payloads with `error.code` and `error.message`.
 
+## Lifecycle policy
+
+Every bridge tool declares a **lifecycle policy** so callers know which ops are cheap, which settle, and which survive a domain reload. It is classified in the bridge (the source of truth — `[BridgeTool(Lifecycle = ...)]` for registry tools, `ToolLifecycle.Map` for legacy hardcoded tools) and surfaced in the gate response envelope as `lifecycle` + `settleMs`.
+
+| Policy | Meaning |
+|---|---|
+| `none` | Read-only, returns immediately. Most tools. |
+| `editor_settle` | Mutating; bridge waits for asset refresh/serialization (`apply_fix`, `reserialize`). |
+| `restart_then_settle` | Mutating; may trigger a domain reload. Bridge blocks until the editor finishes compiling (cap 60s) so the caller never observes a half-compiled state (`execute_csharp`, `invoke_method`, `execute_menu`, `compile_check`). |
+| `custom_confirmation` | Async; returns immediately, result arrives via an external completion signal (`run_tests`). |
+
+**Active-scene dirty guard.** `restart_then_settle` tools are refused with `error.code = "scene_dirty"` when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Recover by saving/discarding the scene, or pass `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu`. See [bridge-http.md](bridge-http.md#active-scene-dirty-guard) for the envelope shape.
+
 ## Source-of-truth files
 
 - `mcp-server/src/index.ts`

@@ -623,6 +623,10 @@ namespace UnityOpenMcpBridge
             if (item.IdempotentHint) parts.Add("idempotent");
             if (item.DestructiveHint) parts.Add("destructive");
             if (item.Mutability == BridgeToolMutability.Mutating) parts.Add($"gate default: {item.GateMode}");
+            // M13 T4.1 — surface the lifecycle policy so operators can see which
+            // tools settle-wait or survive a domain reload without reading code.
+            if (item.Lifecycle != LifecyclePolicy.None)
+                parts.Add($"lifecycle: {item.Lifecycle.ToWireString()}");
             return parts.Count == 0 ? "" : string.Join(", ", parts);
         }
 

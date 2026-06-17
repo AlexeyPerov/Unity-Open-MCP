@@ -46,18 +46,72 @@ If the bridge session is not initialized yet, endpoint may return `503` with a f
 - `tool_not_found`
 - `method_not_allowed`
 - `paths_hint_required` (mutating tool without scope hints)
+- `scene_dirty` (disruptive op refused because a loaded scene has unsaved changes — see [Scene dirty guard](#active-scene-dirty-guard))
 - `timeout`
 - `execution_error`
 - `bridge_internal_error`
+
+### Lifecycle policy
+
+Every dispatched tool declares a **lifecycle policy** that tells the dispatcher how long to wait before returning and whether the op may survive a domain reload. The policy is surfaced in the gate response envelope as `lifecycle` (snake_case token) and `settleMs` (milliseconds the bridge blocked waiting for the editor to finish compiling).
+
+| Policy | Token | Behaviour |
+|---|---|---|
+| `None` | `none` | Read-only, returns immediately. No settle wait. |
+| `EditorSettle` | `editor_settle` | Mutating; the bridge waits for asset refresh/serialization to finish (cap ~5s) before returning. |
+| `RestartThenSettle` | `restart_then_settle` | Mutating; may trigger a domain reload. The bridge blocks until the editor finishes compiling (cap ~60s) so the caller never observes a half-compiled state. The HTTP listener survives the reload, so a follow-up `/ping` reflects the post-reload state automatically. |
+| `CustomConfirmation` | `custom_confirmation` | Async; returns immediately and the result arrives via an external completion signal (e.g. `run_tests` file-handoff poll on the MCP server). |
+
+Classification lives in two places that never drift: the `[BridgeTool(Lifecycle = ...)]` attribute for registry-discovered tools, and `ToolLifecycle.Map` for the legacy hardcoded meta-tools. Unknown tools default to `None` (read-only safe default).
+
+Tool → policy assignment:
+
+| Policy | Tools |
+|---|---|
+| `none` | `ping`, `find_members`, `validate_edit`, `checkpoint_create`, `delta`, `find_references`, `scan_paths`, `read_asset`, `search_assets`, `list_assets`, `editor_status`, `read_console`, `screenshot`, `profiler_capture`, `profiler_memory`, `profiler_rendering`, `spatial_query` |
+| `editor_settle` | `apply_fix`, `reserialize` |
+| `restart_then_settle` | `execute_csharp`, `invoke_method`, `execute_menu`, `compile_check` |
+| `custom_confirmation` | `run_tests` |
+
+### Active-scene dirty guard
+
+Before any `restart_then_settle` op, the bridge preflights the loaded scenes via `EditorSceneManager.GetSceneManagerSetup()`. If any scene has unsaved changes (`isDirty`), the call is **refused** so Unity's native save modal never interrupts the flow:
+
+```json
+{
+  "mutation": {
+    "success": false,
+    "output": null,
+    "error": {
+      "code": "scene_dirty",
+      "message": "Active scene has unsaved changes (dirty): Assets/Scenes/Main.unity. ..."
+    }
+  },
+  "gate": { "mode": "enforce", "skipped": true, "validation": null, "delta": null },
+  "lifecycle": "restart_then_settle",
+  "settleMs": 0,
+  "dirtyScenes": ["Assets/Scenes/Main.unity"],
+  "agentNextSteps": [
+    "Save or discard changes to the dirty scene(s) before retrying: Assets/Scenes/Main.unity.",
+    "To save via the bridge: unity_open_mcp_execute_csharp with EditorSceneManager.SaveScene(...).",
+    "To discard: EditorSceneManager.RestoreSavedSceneState(), or retry with ignore_scene_dirty: true."
+  ]
+}
+```
+
+Recover by saving the scene first, discarding, or passing `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu` to proceed and accept the risk of a native save prompt. The guard is **not** applied to `apply_fix` / `reserialize` (they never trigger the native save modal).
 
 ### Gate envelope behavior
 
 Mutating tools return a gate-aware envelope with:
 - `mutation` (success/output/error)
 - `gate` (mode/checkpoint/validation/delta/skipped flags)
+- `lifecycle` — the resolved lifecycle policy token (see [Lifecycle policy](#lifecycle-policy))
+- `settleMs` — milliseconds the bridge blocked waiting for the editor to finish compiling (0 when no settle wait ran)
+- `dirtyScenes` — present (array of scene paths) only when the active-scene dirty guard refused the op; `null` otherwise
 - `agentNextSteps` (actionable guidance)
 
-Non-mutating direct-response tools return tool payloads directly (or direct error JSON).
+Non-mutating direct-response tools return tool payloads directly (or direct error JSON); they do not carry the gate/lifecycle envelope.
 
 ## Known built-in tool names
 

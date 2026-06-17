@@ -32,7 +32,7 @@ namespace UnityOpenMcpBridge.Profiler
         // ============================ capture ============================
 
         [BridgeTool("unity_agent_profiler_capture", Title = "Profiler Capture",
-            IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off)]
+            IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
             "Capture the Unity Profiler frame hierarchy with drill-down and " +
             "multi-frame averaging. Requires the Profiler to be enabled and to " +
@@ -151,7 +151,7 @@ namespace UnityOpenMcpBridge.Profiler
         // ============================ memory ============================
 
         [BridgeTool("unity_agent_profiler_memory", Title = "Profiler Memory",
-            IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off)]
+            IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
             "Snapshot live Unity memory allocator stats: total allocated, reserved, " +
             "unused reserved, temp allocator size, and the managed (GC) heap. " +
@@ -203,7 +203,7 @@ namespace UnityOpenMcpBridge.Profiler
         // ============================ rendering ============================
 
         [BridgeTool("unity_agent_profiler_rendering", Title = "Profiler Rendering",
-            IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off)]
+            IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
             "Snapshot the rendering environment: GPU / SystemInfo, active render " +
             "pipeline, QualitySettings, screen resolution, target frame rate, and " +

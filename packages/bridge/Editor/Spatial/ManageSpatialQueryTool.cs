@@ -49,7 +49,7 @@ namespace UnityOpenMcpBridge.Spatial
         // ============================ dispatch ============================
 
         [BridgeTool("unity_agent_spatial_query", Title = "Spatial Query",
-            IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off)]
+            IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
             "Physics-based spatial queries against the current scene state: " +
             "raycast, overlap, bounds, ground_check, nearest. Requires a loaded " +
