@@ -7,6 +7,7 @@ Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeH
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/ping` | `GET` | Bridge/editor health snapshot. |
+| `/instance` | `GET` | Live instance lock + heartbeat snapshot (M13). |
 | `/tools/{toolName}` | `POST` | Execute bridge tool by name. |
 | `/resources` | `GET` | List bridge-registered resources. |
 | `/resources/{route}` | `GET` | Read one bridge resource payload. |
@@ -14,10 +15,24 @@ Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeH
 ## Listener and port
 
 - Default bind address: `127.0.0.1`
-- Default port: `19120`
-- Port overrides:
+- Default port: **deterministic per project** — `20000 + (sha256(projectPath) % 10000)`. Two Unity projects running bridges simultaneously get two distinct ports with no configuration.
+- Port overrides (both win over the deterministic default):
   - env var `UNITY_OPEN_MCP_BRIDGE_PORT`
   - Unity arg `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>`
+- The hash formula takes the first 8 bytes of SHA256 of the normalized project path (forward slashes, trailing slash trimmed), interprets them as a big-endian 64-bit unsigned integer, and applies `% 10000`. Both the bridge (`InstancePortResolver.ComputePort`) and the MCP server (`mcp-server/src/instance-discovery.ts`) implement it identically.
+
+## Multi-instance discovery (M13)
+
+Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
+
+Lock / heartbeat fields:
+- `pid`, `port`, `projectPath`, `projectHash`
+- `startedAt`, `updatedAt`, `heartbeatAt` (ISO-8601 UTC)
+- `state` — `idle` | `compiling` | `reloading` | `entering_playmode` | `playing` | `exiting_playmode`
+- `isPlaying`, `isCompiling`
+- `bridgeVersion`, `unityVersion`
+
+The MCP server reads this file (no HTTP round-trip needed) to pick the right bridge port per project; stale locks whose `pid` is no longer alive are ignored and cleaned up by the next bridge that starts. `GET /instance` returns the same JSON the bridge just wrote, for clients that want to verify the live bridge against the on-disk lock.
 
 ## `/ping` response
 
@@ -31,6 +46,10 @@ Success payload fields:
 - `isPlaying`
 
 If the bridge session is not initialized yet, endpoint may return `503` with a fallback payload where `connected` is `false`.
+
+## `/instance` response (M13)
+
+Returns the live lock JSON described under [Multi-instance discovery](#multi-instance-discovery-m13). Returns `503` with `{"error":{"code":"no_instance", ...}}` when the bridge has not acquired a lock yet (listener started but lock write failed — e.g. the `~/.unity-agent/instances/` directory could not be created).
 
 ## `/tools/{toolName}` behavior
 

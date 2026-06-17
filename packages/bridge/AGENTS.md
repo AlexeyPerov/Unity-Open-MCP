@@ -32,6 +32,15 @@ Rules for `packages/bridge/` — the Unity Editor HTTP bridge (`com.alexeyperov.
 - All Unity API calls happen on the main thread via `MainThreadDispatcher`. Never call `UnityEditor`/`UnityEngine` Editor APIs from the listener worker thread.
 - JSON is hand-rolled via `StringBuilder` (no Newtonsoft dependency in the bridge). Follow the existing `EscapeString`/`Build*Envelope` patterns; do not introduce a JSON serializer dependency.
 
+## Multi-instance port + discovery (M13)
+
+- The bridge port is **deterministic per project**: `20000 + (sha256(projectPath) % 10000)`, implemented in `InstancePortResolver`. The formula must stay byte-for-byte identical to the MCP server mirror at `mcp-server/src/instance-discovery.ts` (`computePort`); cross-side consistency is pinned by `InstancePortResolverTests.cs` and `instance-discovery.test.ts`. If either side changes, update both in the same task.
+- `UNITY_OPEN_MCP_BRIDGE_PORT` (env) and `-UNITY_OPEN_MCP_BRIDGE_PORT=<n>` (Unity arg) override the deterministic default — override always wins, so existing pinned-port configs keep working.
+- Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json` via `BridgeInstanceLock`. The file doubles as the heartbeat (`BridgeHeartbeat` rewrites it every 0.5s + on forced state transitions: compile, play-mode change, domain reload).
+- Stale locks (crashed Unity) are swept on `Acquire` by PID-liveness (`Process.GetProcessById` — throws on dead pid). The MCP server is read-only on the lock and falls back to the hash when a lock's pid is dead; do not add lock mutation on the MCP side.
+- New editor states go through `BridgeInstanceLock.State*` constants so both sides agree on the vocabulary (`idle`/`compiling`/`reloading`/`entering_playmode`/`playing`/`exiting_playmode`).
+- `InstancePortResolver.InstancesDirOverride` is a test-only hook for sandboxing lock I/O — never set it in production code.
+
 ## UI
 
 - `Editor/UI/UnityOpenMcpBridgeWindow.cs` is the single EditorWindow (5 tabs). Add new surfaces as tab sections, not separate windows, unless there is a strong reason.

@@ -68,10 +68,12 @@ The MCP server is a Node process. Point your client at `mcp-server/dist/index.js
 | Variable | Required | Purpose |
 |---|---|---|
 | `UNITY_PROJECT_PATH` | yes | Absolute path to your Unity project root. |
-| `UNITY_OPEN_MCP_BRIDGE_PORT` | no | Bridge HTTP port; default `19120`. |
+| `UNITY_OPEN_MCP_BRIDGE_PORT` | no | Bridge HTTP port override. When unset, the port is derived deterministically from the project path (`20000 + sha256(path) % 10000`) and discovered via the bridge's lock file — see [Multi-instance](#multi-instance-optional). |
 | `UNITY_PATH` | no | Unity Editor executable for batch-only tools. |
 
 Use absolute paths. On Windows, use forward slashes or escaped backslashes in JSON.
+
+The examples below pin `UNITY_OPEN_MCP_BRIDGE_PORT` to `19120` for backward compatibility. You can **omit it entirely** — when unset, the MCP server discovers the bridge port automatically from the project path (see [Multi-instance](#multi-instance-optional)). Pin a port only if you want a fixed value across restarts.
 
 ### Cursor or Claude Desktop
 
@@ -155,14 +157,14 @@ Adjust flags to match your installed Claude Code version if the CLI syntax diffe
 
 ## 4. Launch Unity with the bridge
 
-Open your Unity project in the Editor. The bridge package starts an HTTP listener on the port from `UNITY_OPEN_MCP_BRIDGE_PORT` (default `19120`).
+Open your Unity project in the Editor. The bridge package starts an HTTP listener. The port is derived **deterministically from the project path** (`20000 + sha256(path) % 10000`), so two projects running bridges simultaneously get two distinct ports with no configuration. The MCP server discovers the right bridge per project by reading a lock file the bridge writes at `~/.unity-agent/instances/<hash>.json` — no shared config required.
 
-You can override the port when launching Unity:
+You can override the port (it wins over the deterministic default):
 
-- Environment variable: `UNITY_OPEN_MCP_BRIDGE_PORT=19120`
-- Command line: `-UNITY_OPEN_MCP_BRIDGE_PORT=19120`
+- Environment variable: `UNITY_OPEN_MCP_BRIDGE_PORT=22028`
+- Command line: `-UNITY_OPEN_MCP_BRIDGE_PORT=22028`
 
-Use the same port in your MCP client config and when launching Unity.
+If you pin a port, use the same value in your MCP client config and when launching Unity. When unset, both sides compute the same hash and meet automatically.
 
 Wait for scripts to compile. The bridge is not useful until compilation finishes.
 
@@ -174,10 +176,16 @@ Reload or restart the client so it picks up the new MCP server entry (Cursor, Cl
 
 ### Bridge HTTP check
 
-With Unity running and the project open:
+With Unity running and the project open, find the port the bridge picked (the MCP server logs it on startup as `Bridge port resolved to <port>`), then:
 
 ```bash
-curl -s "http://127.0.0.1:19120/ping"
+curl -s "http://127.0.0.1:<port>/ping"
+```
+
+To see which port a running bridge is on without launching the MCP server, read its lock file:
+
+```bash
+cat ~/.unity-agent/instances/*.json | grep -E '"port"|"projectPath"'
 ```
 
 Expect JSON with bridge status fields (for example `connected`). If the connection is refused, Unity may still be compiling or the port may not match your config.
@@ -219,14 +227,28 @@ ZCode also discovers project skills under `.agents/skills/` — copy the templat
 
 To generate a **project-specific** skill (Unity version, installed packages, key types) instead of the static template, run `unity_agent_generate_skill` with `{ "write": true, "clients": ["cursor"] }` once the MCP server is connected. Regenerate after package or script changes.
 
+## Multi-instance (optional)
+
+Multiple Unity projects can run bridges concurrently with no port management:
+
+- Each project's bridge binds a **deterministic port** derived from its path: `20000 + (sha256(projectPath) % 10000)`. No two projects share a port.
+- Each bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json` with its `pid`, `port`, project path, and current editor state. The file doubles as a heartbeat, rewritten every 0.5s and on every compile / play-mode / domain-reload transition.
+- The MCP server reads that lock file to find the right bridge for a given project — no env var needed when `UNITY_PROJECT_PATH` is set correctly.
+- Stale locks (Unity crashed) are cleaned up automatically by the next bridge that starts: any lock whose `pid` is no longer alive is deleted.
+
+To run two projects side by side, just open both in Unity with the bridge package installed and point two MCP server instances at the two project paths. Each picks its own port.
+
+`UNITY_OPEN_MCP_BRIDGE_PORT` still overrides the deterministic default when you want to pin a specific port (CI, pinned dev setup). The override applies on both sides — set it in the MCP server env and pass `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>` to Unity.
+
 ## Troubleshooting
 
 | Symptom | What to try |
 |---|---|
 | Package resolve fails in Unity | Check git URL, tag, or `file:` path; ensure Unity 6+. |
 | MCP server fails to start | Run `node mcp-server/dist/index.js` manually and read stderr; fix missing `UNITY_PROJECT_PATH`. |
-| `/ping` connection refused | Launch Unity for the same project; wait for compile; align bridge port everywhere. |
+| `/ping` connection refused | Launch Unity for the same project; wait for compile; check the port the bridge picked via `~/.unity-agent/instances/*.json` or the MCP server's startup log (`Bridge port resolved to <port>`). |
 | Tools work but live calls fail | Bridge may be disconnected — check `/ping` `connected` and that the Editor has the project focused/open. |
+| Wrong project picked up by the MCP server | Confirm `UNITY_PROJECT_PATH` matches the open project root exactly; the deterministic port is derived from this path. |
 
 ## Related docs
 

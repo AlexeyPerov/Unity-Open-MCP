@@ -58,8 +58,10 @@
 
 - Server bootstrap and env requirements: `mcp-server/src/index.ts`
 - Route policy and fallback logic: `mcp-server/src/tool-router.ts`
+- Per-project bridge port + instance lock discovery: `mcp-server/src/instance-discovery.ts` (mirror of `packages/bridge/Editor/Bridge/InstancePortResolver.cs`)
 - Batch spawn behavior and supported batch tools: `mcp-server/src/batch-spawn.ts`
 - Bridge listener endpoints and gate envelopes: `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`
+- Bridge instance lock + heartbeat: `packages/bridge/Editor/Bridge/BridgeInstanceLock.cs`, `packages/bridge/Editor/Bridge/BridgeHeartbeat.cs`
 
 ## Update triggers
 

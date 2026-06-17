@@ -16,7 +16,6 @@ namespace UnityOpenMcpBridge
     {
         const string PortEnvVar = "UNITY_OPEN_MCP_BRIDGE_PORT";
         const string PortArgPrefix = "-UNITY_OPEN_MCP_BRIDGE_PORT=";
-        const int DefaultPort = 19120;
         const string BindAddress = "127.0.0.1";
         const int DefaultTimeoutMs = 30000;
         const int MinTimeoutMs = 1000;
@@ -107,27 +106,64 @@ namespace UnityOpenMcpBridge
             EditorApplication.quitting += Stop;
         }
 
+        // M13 T4.3 — Per-project port with override precedence:
+        //   1. UNITY_OPEN_MCP_BRIDGE_PORT env var
+        //   2. -UNITY_OPEN_MCP_BRIDGE_PORT=<n> CLI arg
+        //   3. deterministic hash of the project path (20000 + sha256 % 10000)
+        // An explicit override always wins so existing configs that pin a port
+        // keep working; the hash default lets two projects run bridges
+        // concurrently on different ports with zero configuration. The MCP
+        // server computes the same hash and reads the lock file, so it finds
+        // the right bridge per project without sharing config.
         static int ResolvePort()
         {
+            int? envPort = null;
             var envValue = Environment.GetEnvironmentVariable(PortEnvVar);
-            if (!string.IsNullOrEmpty(envValue) && int.TryParse(envValue, out var envPort) && IsValidPort(envPort))
-                return envPort;
+            if (!string.IsNullOrEmpty(envValue) && int.TryParse(envValue, out var envParsed)
+                && InstancePortResolver.IsValidPort(envParsed))
+            {
+                envPort = envParsed;
+            }
 
+            int? argPort = null;
             var args = Environment.GetCommandLineArgs();
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i].StartsWith(PortArgPrefix, StringComparison.OrdinalIgnoreCase))
                 {
                     var argPortStr = args[i].Substring(PortArgPrefix.Length);
-                    if (int.TryParse(argPortStr, out var argPort) && IsValidPort(argPort))
-                        return argPort;
+                    if (int.TryParse(argPortStr, out var argParsed)
+                        && InstancePortResolver.IsValidPort(argParsed))
+                    {
+                        argPort = argParsed;
+                    }
                 }
             }
 
-            return DefaultPort;
+            return InstancePortResolver.ResolvePort(GetProjectPathForPort(), envPort, argPort);
         }
 
-        static bool IsValidPort(int port) => port is >= 1 and <= 65535;
+        // The project path used for port hashing. Falls back to a stable
+        // placeholder if the editor hasn't initialized Application.dataPath
+        // yet — in practice this runs inside [InitializeOnLoad] after the
+        // project is loaded, but we never want to throw during static init.
+        static string GetProjectPathForPort()
+        {
+            try
+            {
+                var dataPath = UnityEngine.Application.dataPath;
+                if (!string.IsNullOrEmpty(dataPath))
+                {
+                    var parent = System.IO.Directory.GetParent(dataPath)?.FullName ?? dataPath;
+                    return parent;
+                }
+            }
+            catch { }
+            // Last-resort fallback so ResolvePort never throws. Hashes to a
+            // stable but generic port; the lock acquire will retry with the
+            // real path once BridgeSession.ProjectPath is available.
+            return "unity-open-mcp-unknown-project";
+        }
 
         public static void Start()
         {
@@ -148,6 +184,14 @@ namespace UnityOpenMcpBridge
                 };
                 _listenerThread.Start();
 
+                // M13 T4.3/T4.7 — publish our instance + start the heartbeat
+                // only after the listener is bound, so the lock never
+                // advertises a port nothing is listening on. Acquire rewrites
+                // the path/port from BridgeSession (the authoritative source)
+                // rather than the port-resolver fallback used at static init.
+                BridgeInstanceLock.Acquire(BridgeSession.ProjectPath ?? GetProjectPathForPort(), _port);
+                BridgeHeartbeat.Start();
+
                 UnityEngine.Debug.Log($"[Unity Open MCP Bridge] Listening on http://{BindAddress}:{_port}/");
             }
             catch (System.Exception e)
@@ -163,6 +207,12 @@ namespace UnityOpenMcpBridge
             if (!_running) return;
             _running = false;
             BridgeSession.SetConnected(false);
+
+            // M13 T4.7 — stop the heartbeat first so it can't rewrite the
+            // lock after Release() deletes it. Best-effort: a Stop during a
+            // domain reload fires before the next tick anyway.
+            try { BridgeHeartbeat.Stop(); } catch { }
+            try { BridgeInstanceLock.Release(); } catch { }
 
             try
             {
@@ -216,6 +266,10 @@ namespace UnityOpenMcpBridge
                     case "/ping":
                         activity.Kind = BridgeActivityKind.Ping;
                         HandlePing(context);
+                        break;
+                    case "/instance":
+                        activity.Kind = BridgeActivityKind.Ping;
+                        HandleInstance(context);
                         break;
                     case "/resources":
                         if (context.Request.HttpMethod == "GET")
@@ -357,6 +411,21 @@ namespace UnityOpenMcpBridge
                 return;
             }
             var json = BuildPingJson();
+            SendJson(context, 200, json);
+        }
+
+        // M13 T4.3 — /instance returns the live instance lock JSON so the MCP
+        // server can verify the on-disk lock matches the live bridge (and
+        // read the heartbeat state without an HTTP round-trip via the file).
+        // Falls back to 503 when the bridge hasn't acquired a lock yet.
+        static void HandleInstance(HttpListenerContext context)
+        {
+            var json = BridgeInstanceLock.ReadCurrentJson();
+            if (json == null)
+            {
+                SendJson(context, 503, "{\"error\":{\"code\":\"no_instance\",\"message\":\"Bridge has not acquired an instance lock.\"}}");
+                return;
+            }
             SendJson(context, 200, json);
         }
 

@@ -27,6 +27,13 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Inherits ro
 - Do not add a new route type without updating `docs/architecture.md` and the route-policy table in `docs/api/mcp-tools.md`.
 - Capability-discovery (`unity_open_mcp_capabilities`) and skill generation (`unity_agent_generate_skill`) are **local-only** — they must never depend on the live bridge or batch Unity.
 
+## Instance discovery (M13)
+
+- Bridge port resolution lives in `src/instance-discovery.ts`. Precedence: `UNITY_OPEN_MCP_BRIDGE_PORT` env var → `~/.unity-agent/instances/<sha256(projectPath)>.json` lock file (when its `pid` is alive) → deterministic hash `20000 + (sha256(path) % 10000)`.
+- The hash formula must stay byte-for-byte identical to the bridge mirror at `packages/bridge/Editor/Bridge/InstancePortResolver.cs` (`ComputePort`). Cross-side consistency is pinned by `instance-discovery.test.ts` and the bridge `InstancePortResolverTests.cs` — if either side changes, update both in the same task.
+- The MCP server is **read-only** on the lock file. Stale-lock cleanup (PID-liveness sweep) is the bridge's job on its next `Acquire`; never delete or rewrite locks from this package.
+- No new runtime deps: the module uses only `node:crypto`, `node:fs`, `node:os`, `node:path`.
+
 ## Offline reads
 
 - The offline-read path (`src/offline.ts`, `src/compressible-router.ts`) deliberately avoids persistent on-disk caches. GUID indices and YAML parses are rebuilt per request. Do not add a disk cache without explicit approval — the no-cache philosophy is documented in `docs/architecture.md`.

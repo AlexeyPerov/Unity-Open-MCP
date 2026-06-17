@@ -16,15 +16,23 @@ import { ToolRouter } from "./tool-router.js";
 import { PingCache } from "./ping-cache.js";
 import { ResourceRouter } from "./resource-router.js";
 import { withSchemaDefaults } from "./schema-defaults.js";
+import { resolvePort } from "./instance-discovery.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-
-const DEFAULT_PORT = 19120;
 
 /** Name → tool lookup, built once for default-injection in the CallTool handler. */
 const TOOL_BY_NAME = new Map<string, Tool>(
   ALL_TOOLS.map((t) => [t.name, t]),
 );
 
+/**
+ * Resolve env for the MCP server. UNITY_PROJECT_PATH is mandatory. The port
+ * uses M13 T4.3 instance discovery:
+ *   1. UNITY_OPEN_MCP_BRIDGE_PORT env var (override wins; users who pin a
+ *      port keep working as before)
+ *   2. ~/.unity-agent/instances/<hash>.json lock file (when its pid is alive)
+ *   3. deterministic hash of the project path (20000 + sha256 % 10000)
+ * The resolved port is logged so users can see which bridge was picked.
+ */
 function getEnv(): { projectPath: string; port: number } {
   const projectPath = process.env.UNITY_PROJECT_PATH;
   if (!projectPath) {
@@ -33,9 +41,19 @@ function getEnv(): { projectPath: string; port: number } {
     );
     process.exit(1);
   }
-  const port = process.env.UNITY_OPEN_MCP_BRIDGE_PORT
-    ? parseInt(process.env.UNITY_OPEN_MCP_BRIDGE_PORT, 10)
-    : DEFAULT_PORT;
+  const rawEnvPort = process.env.UNITY_OPEN_MCP_BRIDGE_PORT;
+  const envPort = rawEnvPort ? parseInt(rawEnvPort, 10) : undefined;
+  const port = resolvePort(
+    projectPath,
+    Number.isInteger(envPort) ? envPort : undefined,
+  );
+  const source =
+    rawEnvPort && Number.isInteger(envPort)
+      ? "env override"
+      : "instance discovery";
+  console.error(
+    `[unity-open-mcp] Bridge port resolved to ${port} (${source}) for project ${projectPath}`,
+  );
   return { projectPath, port };
 }
 
