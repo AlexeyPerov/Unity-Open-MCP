@@ -153,6 +153,19 @@ const SCENE_PREFAB_HEALTH_ISSUES: RuleIssueDescriptor[] = [
   },
 ];
 
+const DEPENDENCIES_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "broken_dependency",
+    severity: "Error",
+    fixIds: [],
+  },
+  {
+    code: "dependency_cycle",
+    severity: "Warning",
+    fixIds: [],
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Planned rules — mirror stubs in VerifyGateAdapter.SelectRuleIds
 // ---------------------------------------------------------------------------
@@ -280,6 +293,20 @@ export const RULE_CATALOG: RuleCapability[] = [
     implemented: true,
     status: "implemented",
     issues: SCENE_PREFAB_HEALTH_ISSUES,
+  },
+  {
+    id: "dependencies",
+    title: "Forward dependency graph",
+    description:
+      "Forward-graph view of what each scoped asset depends on. Complements the reverse " +
+      "find_references lookup and the per-PPtr-field missing_references rule: catches " +
+      "asset-graph edges (PPtr, AssetReference, addressable) that do not resolve, plus " +
+      "forward dependency cycles scoped to paths_hint.",
+    applicableAssetKinds: ["prefab", "scene", "scriptable_object", "material", "animation"],
+    applicableExtensions: [".prefab", ".unity", ".asset", ".mat", ".controller", ".anim"],
+    implemented: true,
+    status: "implemented",
+    issues: DEPENDENCIES_ISSUES,
   },
   ...PLANNED_RULES,
 ];

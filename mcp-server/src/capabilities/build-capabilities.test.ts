@@ -62,10 +62,11 @@ const DEPS = {
 // Rule catalog
 // ---------------------------------------------------------------------------
 
-test("rule catalog contains both implemented rules", () => {
+test("rule catalog contains all implemented rules", () => {
   const ids = RULE_CATALOG.filter((r) => r.implemented).map((r) => r.id);
   assert.ok(ids.includes("missing_references"));
   assert.ok(ids.includes("scene_prefab_health"));
+  assert.ok(ids.includes("dependencies"));
 });
 
 test("implemented rules declare issue codes with severities", () => {

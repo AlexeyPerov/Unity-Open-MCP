@@ -20,6 +20,7 @@ namespace UnityOpenMcpVerify
             {
                 RegisteredRules.Add(new Rules.MissingReferencesRule());
                 RegisteredRules.Add(new Rules.ScenePrefabHealthRule());
+                RegisteredRules.Add(new Rules.DependenciesRule());
             }
         }
 

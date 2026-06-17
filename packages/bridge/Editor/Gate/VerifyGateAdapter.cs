@@ -10,7 +10,7 @@ namespace UnityOpenMcpBridge
 {
     public static class VerifyGateAdapter
     {
-        static readonly string[] FallbackRuleIds = { "missing_references" };
+        static readonly string[] FallbackRuleIds = { "missing_references", "dependencies" };
 
         public static string[] SelectRuleIds(string[] paths)
         {
@@ -29,6 +29,7 @@ namespace UnityOpenMcpBridge
                     case ".unity":
                         ruleSet.Add("missing_references");
                         ruleSet.Add("scene_prefab_health");
+                        ruleSet.Add("dependencies");
                         hasKnownExtension = true;
                         break;
                     case ".cs":
@@ -41,6 +42,7 @@ namespace UnityOpenMcpBridge
                     case ".shader":
                     case ".shadergraph":
                         ruleSet.Add("missing_references");
+                        ruleSet.Add("dependencies");
                         ruleSet.Add("materials");
                         ruleSet.Add("shader_analysis");
                         hasKnownExtension = true;
@@ -56,7 +58,13 @@ namespace UnityOpenMcpBridge
                     case ".controller":
                     case ".anim":
                         ruleSet.Add("animation_analysis");
+                        ruleSet.Add("dependencies");
                         ruleSet.Add("missing_references");
+                        hasKnownExtension = true;
+                        break;
+                    case ".asset":
+                        ruleSet.Add("missing_references");
+                        ruleSet.Add("dependencies");
                         hasKnownExtension = true;
                         break;
                     case ".wav":

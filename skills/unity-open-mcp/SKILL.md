@@ -89,6 +89,16 @@ Full route-policy and batch tables live in `docs/api/mcp-tools.md` (human/contri
 
 On success the same envelope returns `validation.passed: true`, empty `issues`, and `agentNextSteps: []`.
 
+### Verify rules and issue codes
+
+The capabilities response is authoritative (call `unity_open_mcp_capabilities` for the live list). The implemented rules and their issue codes:
+
+- **`missing_references`** — per-PPtr-field view. Codes: `missing_guid` (Error), `missing_fileid` (Error), `missing_script` (Error, fix `remove_missing_script`), `missing_local_fileid` (Warning), `empty_local_ref` (Warning), `missing_method` / `type_mismatch` / `duplicate_component` / `invalid_layer` (Warning, full-scan only).
+- **`scene_prefab_health`** — structural health. Codes: `broken_reference` (Error), `high_risk_bootstrap`, `scene_object_count`, `component_hotspot`, `inactive_expensive`, `inactive_heavy`, `deep_nesting`, `override_explosion` (Warning).
+- **`dependencies`** — forward-graph view of what each scoped asset depends on. Codes: `broken_dependency` (Error — an asset-graph edge to a missing asset; complements `missing_references` which scans PPtr fields), `dependency_cycle` (Warning — the scoped asset participates in a forward cycle).
+
+Issue keys in `gate.delta.newIssues` are `ruleId|severity|assetPath|issueCode` (severity is `ERROR` / `WARN`).
+
 ## Key workflows
 
 ### Reserialize after direct YAML edits

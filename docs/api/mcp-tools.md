@@ -117,6 +117,17 @@ Planned categories:
       ]
     },
     {
+      "id": "dependencies",
+      "implemented": true,
+      "status": "implemented",
+      "title": "Forward dependency graph",
+      "applicableAssetKinds": ["prefab", "scene", "scriptable_object", "material", "animation"],
+      "issues": [
+        { "code": "broken_dependency", "severity": "Error", "fixIds": [] },
+        { "code": "dependency_cycle", "severity": "Warning", "fixIds": [] }
+      ]
+    },
+    {
       "id": "materials",
       "implemented": false,
       "status": "planned",
@@ -129,7 +140,7 @@ Planned categories:
   "counts": {
     "toolsImplemented": 28,
     "toolsPlanned": 14,
-    "rulesImplemented": 2,
+    "rulesImplemented": 3,
     "rulesPlanned": 7,
     "fixesImplemented": 1,
     "fixesPlanned": 0

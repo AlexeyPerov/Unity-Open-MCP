@@ -152,27 +152,28 @@ namespace UnityOpenMcpBridge.Tests
         public static void SelectRuleIds_NullPaths_ReturnsFallback()
         {
             var ids = VerifyGateAdapter.SelectRuleIds(null);
-            CollectionAssert.AreEquivalent(new[] { "missing_references" }, ids);
+            CollectionAssert.AreEquivalent(new[] { "missing_references", "dependencies" }, ids);
         }
 
         [Test]
         public static void SelectRuleIds_EmptyPaths_ReturnsFallback()
         {
             var ids = VerifyGateAdapter.SelectRuleIds(new string[0]);
-            CollectionAssert.AreEquivalent(new[] { "missing_references" }, ids);
+            CollectionAssert.AreEquivalent(new[] { "missing_references", "dependencies" }, ids);
         }
 
-        [TestCase("Assets/P.prefab", new[] { "missing_references", "scene_prefab_health" })]
-        [TestCase("Assets/S.unity", new[] { "missing_references", "scene_prefab_health" })]
+        [TestCase("Assets/P.prefab", new[] { "missing_references", "scene_prefab_health", "dependencies" })]
+        [TestCase("Assets/S.unity", new[] { "missing_references", "scene_prefab_health", "dependencies" })]
         [TestCase("Assets/S.cs", new[] { "missing_references", "asmdef_audit" })]
         [TestCase("Assets/A.asmdef", new[] { "missing_references", "asmdef_audit" })]
-        [TestCase("Assets/M.mat", new[] { "missing_references", "materials", "shader_analysis" })]
-        [TestCase("Assets/Sh.shader", new[] { "missing_references", "materials", "shader_analysis" })]
-        [TestCase("Assets/G.shadergraph", new[] { "missing_references", "materials", "shader_analysis" })]
+        [TestCase("Assets/M.mat", new[] { "missing_references", "dependencies", "materials", "shader_analysis" })]
+        [TestCase("Assets/Sh.shader", new[] { "missing_references", "dependencies", "materials", "shader_analysis" })]
+        [TestCase("Assets/G.shadergraph", new[] { "missing_references", "dependencies", "materials", "shader_analysis" })]
         [TestCase("Assets/T.png", new[] { "textures", "sprite_2d_analysis" })]
         [TestCase("Assets/T.jpg", new[] { "textures", "sprite_2d_analysis" })]
-        [TestCase("Assets/Ac.controller", new[] { "animation_analysis", "missing_references" })]
-        [TestCase("Assets/An.anim", new[] { "animation_analysis", "missing_references" })]
+        [TestCase("Assets/Ac.controller", new[] { "animation_analysis", "missing_references", "dependencies" })]
+        [TestCase("Assets/An.anim", new[] { "animation_analysis", "missing_references", "dependencies" })]
+        [TestCase("Assets/So.asset", new[] { "missing_references", "dependencies" })]
         [TestCase("Assets/S.wav", new[] { "audio_analysis" })]
         [TestCase("Assets/S.mp3", new[] { "audio_analysis" })]
         public static void SelectRuleIds_KnownExtension_RoutesToExpectedRules(string path, string[] expected)
@@ -185,14 +186,14 @@ namespace UnityOpenMcpBridge.Tests
         public static void SelectRuleIds_UnknownExtension_ReturnsFallback()
         {
             var ids = VerifyGateAdapter.SelectRuleIds(new[] { "Assets/readme.txt" });
-            CollectionAssert.AreEquivalent(new[] { "missing_references" }, ids);
+            CollectionAssert.AreEquivalent(new[] { "missing_references", "dependencies" }, ids);
         }
 
         [Test]
         public static void SelectRuleIds_ExtensionlessPath_ReturnsFallback()
         {
             var ids = VerifyGateAdapter.SelectRuleIds(new[] { "Assets/SomeFolder" });
-            CollectionAssert.AreEquivalent(new[] { "missing_references" }, ids);
+            CollectionAssert.AreEquivalent(new[] { "missing_references", "dependencies" }, ids);
         }
 
         [Test]
@@ -200,12 +201,12 @@ namespace UnityOpenMcpBridge.Tests
         {
             var ids = VerifyGateAdapter.SelectRuleIds(new[]
             {
-                "Assets/P.prefab",   // missing_references + scene_prefab_health
+                "Assets/P.prefab",   // missing_references + scene_prefab_health + dependencies
                 "Assets/T.png",      // textures + sprite_2d_analysis
             });
 
             CollectionAssert.AreEquivalent(
-                new[] { "missing_references", "scene_prefab_health", "textures", "sprite_2d_analysis" },
+                new[] { "missing_references", "scene_prefab_health", "dependencies", "textures", "sprite_2d_analysis" },
                 ids);
         }
 
@@ -218,14 +219,14 @@ namespace UnityOpenMcpBridge.Tests
                 "Assets/unknown.xyz",    // unknown -> would normally fall back, but a known path exists
             });
 
-            CollectionAssert.AreEquivalent(new[] { "missing_references", "scene_prefab_health" }, ids);
+            CollectionAssert.AreEquivalent(new[] { "missing_references", "scene_prefab_health", "dependencies" }, ids);
         }
 
         [Test]
         public static void SelectRuleIds_IsCaseInsensitive_OnExtension()
         {
             var ids = VerifyGateAdapter.SelectRuleIds(new[] { "Assets/P.PREFAB" });
-            CollectionAssert.AreEquivalent(new[] { "missing_references", "scene_prefab_health" }, ids);
+            CollectionAssert.AreEquivalent(new[] { "missing_references", "scene_prefab_health", "dependencies" }, ids);
         }
     }
 }
