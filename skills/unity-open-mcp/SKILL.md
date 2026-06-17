@@ -93,9 +93,20 @@ On success the same envelope returns `validation.passed: true`, empty `issues`, 
 
 The capabilities response is authoritative (call `unity_open_mcp_capabilities` for the live list). The implemented rules and their issue codes:
 
-- **`missing_references`** — per-PPtr-field view. Codes: `missing_guid` (Error), `missing_fileid` (Error), `missing_script` (Error, fix `remove_missing_script`), `missing_local_fileid` (Warning), `empty_local_ref` (Warning), `missing_method` / `type_mismatch` / `duplicate_component` / `invalid_layer` (Warning, full-scan only).
+- **`missing_references`** — per-PPtr-field view. Codes: `missing_guid` (Error, fix `relink_broken_guid` — unsafe, needs `target_guid`), `missing_fileid` (Error), `missing_script` (Error, fix `remove_missing_script`), `missing_local_fileid` (Warning), `empty_local_ref` (Warning), `missing_method` / `type_mismatch` / `duplicate_component` / `invalid_layer` (Warning, full-scan only).
 - **`scene_prefab_health`** — structural health. Codes: `broken_reference` (Error), `high_risk_bootstrap`, `scene_object_count`, `component_hotspot`, `inactive_expensive`, `inactive_heavy`, `deep_nesting`, `override_explosion` (Warning).
-- **`dependencies`** — forward-graph view of what each scoped asset depends on. Codes: `broken_dependency` (Error — an asset-graph edge to a missing asset; complements `missing_references` which scans PPtr fields), `dependency_cycle` (Warning — the scoped asset participates in a forward cycle).
+- **`dependencies`** — forward-graph view of what each scoped asset depends on. Codes: `broken_dependency` (Error — an asset-graph edge to a missing asset; fix `relink_broken_guid` — unsafe, needs `target_guid`; complements `missing_references` which scans PPtr fields), `dependency_cycle` (Warning — the scoped asset participates in a forward cycle).
+
+### Fixes
+
+`unity_open_mcp_apply_fix` always defaults to `dry_run: true` (the dry-run short-circuits the gate entirely — it returns the fix description / candidates without checkpoint+validate). Implemented fixes:
+
+- **`remove_missing_script`** (safe) — strips `MonoBehaviour` components whose script GUID no longer resolves. Works on `.prefab` and `.unity`.
+- **`relink_broken_guid`** (unsafe) — rewrites a broken external GUID reference to a chosen replacement. Dry-run advertises candidate targets (matched by name/type heuristics); apply requires `target_guid` (the chosen replacement). Never auto-applied — wrong choices silently rewire the asset graph.
+
+Planned fixes (no rule emits them yet; capabilities advertises them with guidance): `remove_orphan_meta`, `fix_duplicate_guid`, `reassign_missing_texture`, `reassign_missing_shader`.
+
+If `fix_id` is omitted, the response lists every fix that can resolve the given `issue_id` — use it when capabilities shows more than one applicable fix.
 
 Issue keys in `gate.delta.newIssues` are `ruleId|severity|assetPath|issueCode` (severity is `ERROR` / `WARN`).
 
@@ -148,7 +159,7 @@ All accept `gate` (`enforce` / `warn` / `off`, default `enforce`) and require a 
 - `unity_open_mcp_execute_csharp` — compile + run a C# snippet.
 - `unity_open_mcp_invoke_method` — call a method via reflection.
 - `unity_open_mcp_execute_menu` — run a Unity Editor menu item.
-- `unity_open_mcp_apply_fix` — apply a verify rule fix (e.g. `remove_missing_script`).
+- `unity_open_mcp_apply_fix` — apply a verify rule fix (e.g. `remove_missing_script`, `relink_broken_guid`).
 - `unity_open_mcp_reserialize` — round-trip text assets through Unity's serializer.
 
 ### Return serialization (execute_csharp / invoke_method)

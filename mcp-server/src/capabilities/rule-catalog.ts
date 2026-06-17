@@ -62,7 +62,7 @@ const MISSING_REFERENCES_ISSUES: RuleIssueDescriptor[] = [
   {
     code: "missing_guid",
     severity: "Error",
-    fixIds: [],
+    fixIds: ["relink_broken_guid"],
   },
   {
     code: "missing_fileid",
@@ -157,7 +157,7 @@ const DEPENDENCIES_ISSUES: RuleIssueDescriptor[] = [
   {
     code: "broken_dependency",
     severity: "Error",
-    fixIds: [],
+    fixIds: ["relink_broken_guid"],
   },
   {
     code: "dependency_cycle",
@@ -311,6 +311,66 @@ export const RULE_CATALOG: RuleCapability[] = [
   ...PLANNED_RULES,
 ];
 
+// ---------------------------------------------------------------------------
+// Planned fixes — deferred from M12 T2.4 (no emitting rule yet)
+// ---------------------------------------------------------------------------
+//
+// These targets have no implemented rule today (orphan_meta / duplicate_guid
+// are not emitted by any rule; reassign_missing_* wait on the `materials` rule
+// which is deferred to M17). They are advertised as planned so agents get a
+// structured "not yet available" signal instead of trial-and-error.
+
+const PLANNED_FIXES: FixCapability[] = [
+  {
+    id: "remove_orphan_meta",
+    implemented: false,
+    status: "planned",
+    rules: [],
+    issueCodes: [],
+    safe: true,
+    guidance:
+      "Not yet ported. No rule emits an orphan_meta issue today. " +
+      "Find .meta files whose asset was deleted manually via find_members or " +
+      "AssetDatabase and delete them with execute_csharp in the meantime.",
+  },
+  {
+    id: "fix_duplicate_guid",
+    implemented: false,
+    status: "planned",
+    rules: [],
+    issueCodes: [],
+    safe: false,
+    guidance:
+      "Not yet ported. No rule emits a duplicate_guid issue today. " +
+      "Inspect .meta files manually (or via execute_csharp) and regenerate the " +
+      "duplicated GUID on the less-referenced asset, then update references.",
+  },
+  {
+    id: "reassign_missing_texture",
+    implemented: false,
+    status: "planned",
+    rules: ["materials"],
+    issueCodes: [],
+    safe: false,
+    guidance:
+      "Not yet ported — depends on the `materials` rule (deferred to M17). " +
+      "Use read_asset on the .mat file and execute_csharp to reassign the " +
+      "_MainTex / texture properties in the meantime.",
+  },
+  {
+    id: "reassign_missing_shader",
+    implemented: false,
+    status: "planned",
+    rules: ["materials"],
+    issueCodes: [],
+    safe: false,
+    guidance:
+      "Not yet ported — depends on the `materials` rule (deferred to M17). " +
+      "Use find_references to locate the intended shader and execute_csharp " +
+      "to reassign m_Shader on the material in the meantime.",
+  },
+];
+
 export const FIX_CATALOG: FixCapability[] = [
   {
     id: "remove_missing_script",
@@ -320,6 +380,17 @@ export const FIX_CATALOG: FixCapability[] = [
     issueCodes: ["missing_script"],
     safe: true,
   },
+  {
+    id: "relink_broken_guid",
+    implemented: true,
+    status: "implemented",
+    rules: ["missing_references", "dependencies"],
+    issueCodes: ["missing_guid", "broken_dependency"],
+    // Mutates references and a wrong choice silently rewires the asset graph;
+    // never auto-applied under enforce. Apply via apply_fix with target_guid.
+    safe: false,
+  },
+  ...PLANNED_FIXES,
 ];
 
 export function implementedRules(): RuleCapability[] {

@@ -292,9 +292,25 @@ namespace UnityOpenMcpBridge
 
         static bool TryFixIdForIssue(string categoryId, string issueCode, out string fixId)
         {
-            if (categoryId == "missing_references" && issueCode == "MISSING_SCRIPT")
+            // Issue codes are emitted in lowercase by the rule issue mappers, but
+            // legacy delta keys (and older test fixtures) used UPPERCASE codes —
+            // match case-insensitively so next-step guidance stays accurate
+            // regardless of how the key was built.
+            var code = issueCode ?? "";
+
+            if (categoryId == "missing_references" &&
+                code.Equals("missing_script", System.StringComparison.OrdinalIgnoreCase))
             {
                 fixId = "remove_missing_script";
+                return true;
+            }
+
+            if ((categoryId == "missing_references" &&
+                    code.Equals("missing_guid", System.StringComparison.OrdinalIgnoreCase)) ||
+                (categoryId == "dependencies" &&
+                    code.Equals("broken_dependency", System.StringComparison.OrdinalIgnoreCase)))
+            {
+                fixId = "relink_broken_guid";
                 return true;
             }
 

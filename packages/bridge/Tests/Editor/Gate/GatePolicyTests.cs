@@ -96,6 +96,31 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void NextSteps_Failed_MissingGuidKey_SuggestsRelinkBrokenGuidFix()
+        {
+            // T2.4: broken PPtr GUIDs (missing_guid) now have a fix provider —
+            // next-step guidance must point at relink_broken_guid.
+            var delta = Delta(errors: 1, issueKeys: new[] { "missing_references|ERROR|Assets/A.prefab|missing_guid" });
+            var steps = GatePolicy.GenerateAgentNextSteps(delta, GateOutcome.Failed);
+
+            Assert.That(Join(steps), Does.Contain("relink_broken_guid"),
+                "must link the relink fix for missing_guid");
+            Assert.That(Join(steps), Does.Contain("apply_fix"));
+        }
+
+        [Test]
+        public void NextSteps_Failed_BrokenDependencyKey_SuggestsRelinkBrokenGuidFix()
+        {
+            // T2.4: forward-graph broken_dependency issues share the same
+            // root cause (unresolved external GUID) and use the same fix.
+            var delta = Delta(errors: 1, issueKeys: new[] { "dependencies|ERROR|Assets/A.prefab|broken_dependency" });
+            var steps = GatePolicy.GenerateAgentNextSteps(delta, GateOutcome.Failed);
+
+            Assert.That(Join(steps), Does.Contain("relink_broken_guid"),
+                "must link the relink fix for broken_dependency");
+        }
+
+        [Test]
         public void NextSteps_Warned_WithErrors_UsesWarnModeLabel()
         {
             var delta = Delta(errors: 1, issueKeys: new[] { "scene_prefab_health|ERROR|Assets/S.unity|hotspot" });

@@ -113,6 +113,7 @@ Planned categories:
       "title": "Missing references",
       "applicableAssetKinds": ["prefab", "scene", "scriptable_object"],
       "issues": [
+        { "code": "missing_guid", "severity": "Error", "fixIds": ["relink_broken_guid"] },
         { "code": "missing_script", "severity": "Error", "fixIds": ["remove_missing_script"] }
       ]
     },
@@ -123,7 +124,7 @@ Planned categories:
       "title": "Forward dependency graph",
       "applicableAssetKinds": ["prefab", "scene", "scriptable_object", "material", "animation"],
       "issues": [
-        { "code": "broken_dependency", "severity": "Error", "fixIds": [] },
+        { "code": "broken_dependency", "severity": "Error", "fixIds": ["relink_broken_guid"] },
         { "code": "dependency_cycle", "severity": "Warning", "fixIds": [] }
       ]
     },
@@ -135,15 +136,17 @@ Planned categories:
     }
   ],
   "fixes": [
-    { "id": "remove_missing_script", "implemented": true, "safe": true, "rules": ["missing_references"] }
+    { "id": "remove_missing_script", "implemented": true, "safe": true, "rules": ["missing_references"] },
+    { "id": "relink_broken_guid", "implemented": true, "safe": false, "rules": ["missing_references", "dependencies"] },
+    { "id": "fix_duplicate_guid", "implemented": false, "status": "planned", "safe": false, "guidance": "Not yet ported ..." }
   ],
   "counts": {
     "toolsImplemented": 28,
     "toolsPlanned": 14,
     "rulesImplemented": 3,
     "rulesPlanned": 7,
-    "fixesImplemented": 1,
-    "fixesPlanned": 0
+    "fixesImplemented": 2,
+    "fixesPlanned": 4
   },
   "routing": {
     "liveDefault": true,

@@ -94,6 +94,24 @@ test("missing_script issue maps to remove_missing_script fix", () => {
   assert.deepEqual(issue!.fixIds, ["remove_missing_script"]);
 });
 
+// T2.4 — broken-GUID fixes now have a provider.
+
+test("missing_guid issue maps to relink_broken_guid fix", () => {
+  const rule = RULE_CATALOG.find((r) => r.id === "missing_references");
+  assert.ok(rule);
+  const issue = rule!.issues.find((i) => i.code === "missing_guid");
+  assert.ok(issue, "missing_guid must be a declared issue code");
+  assert.deepEqual(issue!.fixIds, ["relink_broken_guid"]);
+});
+
+test("broken_dependency issue maps to relink_broken_guid fix", () => {
+  const rule = RULE_CATALOG.find((r) => r.id === "dependencies");
+  assert.ok(rule);
+  const issue = rule!.issues.find((i) => i.code === "broken_dependency");
+  assert.ok(issue);
+  assert.deepEqual(issue!.fixIds, ["relink_broken_guid"]);
+});
+
 test("planned rules carry status and guidance, no hard errors", () => {
   const planned = plannedRules();
   assert.ok(planned.length >= 1, "should have at least one planned rule");
@@ -135,6 +153,40 @@ test("remove_missing_script fix is registered and safe", () => {
   assert.equal(fix!.safe, true);
   assert.ok(fix!.rules.includes("missing_references"));
   assert.ok(fix!.issueCodes.includes("missing_script"));
+});
+
+// T2.4 — relink_broken_guid is the unsafe provider for broken GUIDs.
+
+test("relink_broken_guid fix is registered and unsafe", () => {
+  const fix = implementedFixes().find((f) => f.id === "relink_broken_guid");
+  assert.ok(fix, "relink_broken_guid must be in the implemented fix surface");
+  assert.equal(fix!.implemented, true);
+  assert.equal(fix!.safe, false, "relink mutates references — must be unsafe");
+  assert.ok(fix!.rules.includes("missing_references"));
+  assert.ok(fix!.rules.includes("dependencies"));
+  assert.ok(fix!.issueCodes.includes("missing_guid"));
+  assert.ok(fix!.issueCodes.includes("broken_dependency"));
+});
+
+test("planned fixes deferred from M12 are advertised with guidance", () => {
+  // T2.4 deferred: orphan meta, duplicate guid, material texture/shader.
+  const plannedIds = FIX_CATALOG.filter((f) => !f.implemented).map((f) => f.id);
+  const expected = [
+    "remove_orphan_meta",
+    "fix_duplicate_guid",
+    "reassign_missing_texture",
+    "reassign_missing_shader",
+  ];
+  for (const id of expected) {
+    assert.ok(plannedIds.includes(id), `planned fix ${id} must be advertised`);
+    const fix = FIX_CATALOG.find((f) => f.id === id);
+    assert.equal(fix!.implemented, false);
+    assert.equal(fix!.status, "planned");
+    assert.ok(
+      typeof fix!.guidance === "string" && fix!.guidance.length > 0,
+      `${id} planned fix must carry guidance`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------

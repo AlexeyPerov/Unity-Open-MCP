@@ -396,6 +396,16 @@ namespace UnityOpenMcpBridge
             bool isMutating = MutatingTools.Contains(toolName) || (isRegistryTool && registryEntry.IsMutating);
             string effectiveGateMode = gateMode;
 
+            // apply_fix in dry_run mode is a no-op mutation — the gate would run a
+            // full checkpoint+validate cycle around a Describe() call that changes
+            // nothing. Short-circuit to DispatchTool directly so dry-run previews
+            // stay cheap (matches the MCP tool description: "Ignored for dry_run").
+            if (toolName == "unity_open_mcp_apply_fix" && JsonBody.GetBool(body, "dry_run", true))
+            {
+                HandleDryRunApplyFix(context, body, gateMode, timeoutMs, activity, sw);
+                return;
+            }
+
             if (activity != null)
             {
                 activity.GateMode = effectiveGateMode;
@@ -596,6 +606,57 @@ namespace UnityOpenMcpBridge
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };
+        }
+
+        // dry_run apply_fix short-circuit — runs the fix preview (Describe / fix
+        // list / unknown-fix listing) without invoking the gate. The gate only
+        // has something to validate when the project actually changes, and a
+        // dry-run never changes the project.
+        static void HandleDryRunApplyFix(
+            HttpListenerContext context, string body, string gateMode,
+            int timeoutMs, BridgeActivityEvent activity, Stopwatch sw)
+        {
+            try
+            {
+                var task = MainThreadDispatcher.EnqueueAsync(
+                    () => ApplyFixTool.Execute(body), timeoutMs);
+                var mutation = task.Result;
+
+                // Build a minimal gate envelope that records the run as Skipped.
+                var gateResult = new GateDispatchResult
+                {
+                    Mutation = mutation,
+                    GateRan = false,
+                    Outcome = mutation.Success ? GateOutcome.Skipped : GateOutcome.Failed,
+                    GateFailed = !mutation.Success,
+                };
+
+                sw.Stop();
+                RecordGateRun("unity_open_mcp_apply_fix", gateMode, gateResult);
+                ApplyToolResultToActivity(activity, gateResult, sw.ElapsedMilliseconds);
+                SendJson(context, 200, BuildGateEnvelope(gateResult, gateMode));
+            }
+            catch (AggregateException ae)
+            {
+                sw.Stop();
+                var inner = ae.InnerException;
+                if (inner is TimeoutException)
+                {
+                    ApplyToolFailureToActivity(activity, "timeout", inner.Message, sw.ElapsedMilliseconds);
+                    SendJson(context, 200, BuildTimeoutEnvelope("unity_open_mcp_apply_fix", gateMode, timeoutMs));
+                }
+                else
+                {
+                    ApplyToolFailureToActivity(activity, "execution_error", inner?.Message, sw.ElapsedMilliseconds);
+                    SendJson(context, 200, BuildFaultEnvelope(inner, gateMode));
+                }
+            }
+            catch (System.Exception e)
+            {
+                sw.Stop();
+                ApplyToolFailureToActivity(activity, "execution_error", e.Message, sw.ElapsedMilliseconds);
+                SendJson(context, 200, BuildFaultEnvelope(e, gateMode));
+            }
         }
 
         static void HandleDirectResponseTool(HttpListenerContext context, string toolName, string body, int timeoutMs)
