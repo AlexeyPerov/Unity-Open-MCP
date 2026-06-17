@@ -51,9 +51,25 @@ namespace UnityOpenMcpBridge.MetaTools
                     "Field 'menu_path' is required and must be non-empty. " +
                     "Example: 'Assets/Refresh', 'File/Save Project'.");
 
-            if (IsBlocked(menuPath))
+            // M14 T5.3 — configurable regex deny heuristic. Bypass contract is
+            // the same as execute_csharp: gate: "off" + confirm_bypass: true.
+            var bypass = BridgeDenyBypass.IsRequestedFromBody(body);
+            var deny = BridgeDenyList.EvaluateMenu(
+                menuPath, BridgeProjectSettings.MenuDenyPatterns, bypass);
+            if (!deny.Allowed)
+            {
                 return ToolDispatchResult.Fail("menu_blocked",
-                    $"Menu '{menuPath}' is blocked for safety reasons. " +
+                    $"{deny.Reason} Suggestion: {deny.Suggestion} " +
+                    $"Matched pattern: {deny.MatchedPattern}.");
+            }
+
+            // Hardcoded last-resort block. The regex list is configurable and
+            // can be disabled (empty array); this set is not, so a destructive
+            // menu can never reach ExecuteMenuItem even if the operator wiped
+            // the configurable list. File/Quit is the canonical entry here.
+            if (IsHardBlocked(menuPath))
+                return ToolDispatchResult.Fail("menu_blocked",
+                    $"Menu '{menuPath}' is hard-blocked for safety reasons. " +
                     "Destructive menus cannot be executed through this tool.");
 
             try
@@ -74,7 +90,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        static bool IsBlocked(string menuPath)
+        static bool IsHardBlocked(string menuPath)
         {
             return BlockedMenus.Contains(menuPath);
         }

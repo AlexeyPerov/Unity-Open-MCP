@@ -1,6 +1,6 @@
 # Bridge HTTP API
 
-Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeHttpServer.cs` on `127.0.0.1`.
+Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`. Default bind is `127.0.0.1` (loopback); remote bind (`0.0.0.0`) is opt-in and requires auth — see [Remote bind (M14)](#remote-bind-m14-t54).
 
 ## Endpoint summary
 
@@ -16,7 +16,7 @@ Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeH
 
 ## Listener and port
 
-- Default bind address: `127.0.0.1`
+- Default bind address: `127.0.0.1` (loopback). Configurable via `bindAddress` in `.unity-open-mcp/settings.json` — see [Remote bind](#remote-bind-m14-t54).
 - Default port: **deterministic per project** — `20000 + (sha256(projectPath) % 10000)`. Two Unity projects running bridges simultaneously get two distinct ports with no configuration.
 - Port overrides (both win over the deterministic default):
   - env var `UNITY_OPEN_MCP_BRIDGE_PORT`
@@ -48,7 +48,259 @@ The bridge mints a 256-bit per-session bearer token into the instance lock (`aut
 
 All endpoints are gated equally — there are no exempt paths. The MCP server auto-discovers the token from the lock file (see [Manual setup](../manual-setup.md#authentication-m14)), so no client-side configuration is needed; a project can be flipped from `none` to `required` purely on the bridge side.
 
-The comparison is constant-time and unknown `authMode` values fail closed (treated as `required`), so a corrupt settings file cannot silently disable auth. The bridge still binds `127.0.0.1` only; `required` adds defense for shared machines where another local process might otherwise reach the listener.
+The comparison is constant-time and unknown `authMode` values fail closed (treated as `required`), so a corrupt settings file cannot silently disable auth. `required` is **mandatory** for [remote bind](#remote-bind-m14-t54) and recommended on shared machines where another local process might otherwise reach the listener.
+
+## Remote bind (M14 T5.4)
+
+The bridge binds loopback (`127.0.0.1`) by default. Remote bind (`0.0.0.0`) — for a shared dev machine, a CI runner accessed over the network, or a remote pair-programming setup — is opt-in via `bindAddress` in `.unity-open-mcp/settings.json` and is **refused at listener start unless `authMode` is `required`**:
+
+```json
+{
+  "bindAddress": "0.0.0.0",
+  "authMode": "required"
+}
+```
+
+The listener checks the pair via `BridgeBindAddress.Decide` before opening the socket, so a misconfigured project fails fast with an actionable log line instead of exposing an unauthenticated listener. Unknown `bindAddress` values coerce to `127.0.0.1`. The effective bind is logged on every start (`Listening on http://0.0.0.0:<port>/ (remote — authMode required)`).
+
+### Threat model
+
+- **Loopback (default).** The trust boundary is the local OS account. Any process owned by the same user (or with loopback access) can reach the bridge. `authMode: "none"` is acceptable here; `required` is extra defense for shared dev machines.
+- **Remote (`0.0.0.0`).** The bridge is reachable from every host that can route to this machine — LAN, VPN, and anything routable on the interface. Token auth is mandatory because the network is untrusted. **The bearer token is sent in cleartext over HTTP** — the bridge does not terminate TLS, so an attacker on the path could sniff it. Treat remote bind as: "convenient for a trusted LAN/VPN behind a reverse proxy or ssh tunnel that provides TLS." For anything stronger, terminate TLS upstream and do not expose the bridge directly. The token also grants full editor control (any tool call), so compromise is equivalent to arbitrary code execution in the editor.
+- **TLS.** The bridge itself does not support TLS and there are no plans to add it. Use a reverse proxy (nginx, Caddy) or an `ssh -L` tunnel for transport encryption. This keeps the bridge dependency-free.
+
+## Power-tool deny lists (M14 T5.2 / T5.3)
+
+`execute_csharp` and `execute_menu` can do anything — quit the editor, delete assets, build the player. The gate verifies *new project errors* after a mutation, but several destructive ops produce no verify signal (the editor just closes) or are themselves the threat (bulk asset delete). The deny heuristic refuses these **before** the mutation runs.
+
+### Built-in defaults
+
+| Tool | Blocked patterns (regex, case-sensitive) |
+|---|---|
+| `execute_csharp` | `EditorApplication\.Exit`, `Application\.Quit`, `AssetDatabase\.DeleteAsset`, `BuildPipeline\.BuildPlayer`, `Directory\.Delete\s*\([^)]*Assets` |
+| `execute_menu` | `^File/Quit# Bridge HTTP API
+
+Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`. Default bind is `127.0.0.1` (loopback); remote bind (`0.0.0.0`) is opt-in and requires auth — see [Remote bind (M14)](#remote-bind-m14-t54).
+
+## Endpoint summary
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/ping` | `GET` | Bridge/editor health snapshot. |
+| `/instance` | `GET` | Live instance lock + heartbeat snapshot (M13). |
+| `/events` | `GET` | SSE stream of console logs + editor-state transitions (M13 T4.4). |
+| `/events/poll` | `GET` | Drain the event queue as a single JSON envelope (M13 T4.4). |
+| `/tools/{toolName}` | `POST` | Execute bridge tool by name. |
+| `/resources` | `GET` | List bridge-registered resources. |
+| `/resources/{route}` | `GET` | Read one bridge resource payload. |
+
+## Listener and port
+
+- Default bind address: `127.0.0.1` (loopback). Configurable via `bindAddress` in `.unity-open-mcp/settings.json` — see [Remote bind](#remote-bind-m14-t54).
+- Default port: **deterministic per project** — `20000 + (sha256(projectPath) % 10000)`. Two Unity projects running bridges simultaneously get two distinct ports with no configuration.
+- Port overrides (both win over the deterministic default):
+  - env var `UNITY_OPEN_MCP_BRIDGE_PORT`
+  - Unity arg `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>`
+- The hash formula takes the first 8 bytes of SHA256 of the normalized project path (forward slashes, trailing slash trimmed), interprets them as a big-endian 64-bit unsigned integer, and applies `% 10000`. Both the bridge (`InstancePortResolver.ComputePort`) and the MCP server (`mcp-server/src/instance-discovery.ts`) implement it identically.
+
+## Multi-instance discovery (M13)
+
+Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
+
+Lock / heartbeat fields:
+- `pid`, `port`, `projectPath`, `projectHash`
+- `authToken` — per-session bearer token (M14); see [Authentication](#authentication-m14)
+- `startedAt`, `updatedAt`, `heartbeatAt` (ISO-8601 UTC)
+- `state` — `idle` | `compiling` | `reloading` | `entering_playmode` | `playing` | `exiting_playmode`
+- `isPlaying`, `isCompiling`
+- `bridgeVersion`, `unityVersion`
+
+The MCP server reads this file (no HTTP round-trip needed) to pick the right bridge port per project; stale locks whose `pid` is no longer alive are ignored and cleaned up by the next bridge that starts. `GET /instance` returns the same JSON the bridge just wrote, for clients that want to verify the live bridge against the on-disk lock.
+
+## Authentication (M14)
+
+The bridge mints a 256-bit per-session bearer token into the instance lock (`authToken` field above) on every start. Whether the HTTP layer *enforces* it is controlled by `authMode` in `.unity-open-mcp/settings.json`:
+
+| `authMode` | Behavior |
+|---|---|
+| `none` (default) | Every request is accepted. The token is still minted into the lock so flipping to `required` needs no restart. |
+| `required` | Every request must carry `Authorization: Bearer <token>` matching the live instance's token. Mismatched/missing → `401 {"error":{"code":"unauthorized", ...}}`. |
+
+, `^File/Exit# Bridge HTTP API
+
+Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`. Default bind is `127.0.0.1` (loopback); remote bind (`0.0.0.0`) is opt-in and requires auth — see [Remote bind (M14)](#remote-bind-m14-t54).
+
+## Endpoint summary
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/ping` | `GET` | Bridge/editor health snapshot. |
+| `/instance` | `GET` | Live instance lock + heartbeat snapshot (M13). |
+| `/events` | `GET` | SSE stream of console logs + editor-state transitions (M13 T4.4). |
+| `/events/poll` | `GET` | Drain the event queue as a single JSON envelope (M13 T4.4). |
+| `/tools/{toolName}` | `POST` | Execute bridge tool by name. |
+| `/resources` | `GET` | List bridge-registered resources. |
+| `/resources/{route}` | `GET` | Read one bridge resource payload. |
+
+## Listener and port
+
+- Default bind address: `127.0.0.1` (loopback). Configurable via `bindAddress` in `.unity-open-mcp/settings.json` — see [Remote bind](#remote-bind-m14-t54).
+- Default port: **deterministic per project** — `20000 + (sha256(projectPath) % 10000)`. Two Unity projects running bridges simultaneously get two distinct ports with no configuration.
+- Port overrides (both win over the deterministic default):
+  - env var `UNITY_OPEN_MCP_BRIDGE_PORT`
+  - Unity arg `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>`
+- The hash formula takes the first 8 bytes of SHA256 of the normalized project path (forward slashes, trailing slash trimmed), interprets them as a big-endian 64-bit unsigned integer, and applies `% 10000`. Both the bridge (`InstancePortResolver.ComputePort`) and the MCP server (`mcp-server/src/instance-discovery.ts`) implement it identically.
+
+## Multi-instance discovery (M13)
+
+Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
+
+Lock / heartbeat fields:
+- `pid`, `port`, `projectPath`, `projectHash`
+- `authToken` — per-session bearer token (M14); see [Authentication](#authentication-m14)
+- `startedAt`, `updatedAt`, `heartbeatAt` (ISO-8601 UTC)
+- `state` — `idle` | `compiling` | `reloading` | `entering_playmode` | `playing` | `exiting_playmode`
+- `isPlaying`, `isCompiling`
+- `bridgeVersion`, `unityVersion`
+
+The MCP server reads this file (no HTTP round-trip needed) to pick the right bridge port per project; stale locks whose `pid` is no longer alive are ignored and cleaned up by the next bridge that starts. `GET /instance` returns the same JSON the bridge just wrote, for clients that want to verify the live bridge against the on-disk lock.
+
+## Authentication (M14)
+
+The bridge mints a 256-bit per-session bearer token into the instance lock (`authToken` field above) on every start. Whether the HTTP layer *enforces* it is controlled by `authMode` in `.unity-open-mcp/settings.json`:
+
+| `authMode` | Behavior |
+|---|---|
+| `none` (default) | Every request is accepted. The token is still minted into the lock so flipping to `required` needs no restart. |
+| `required` | Every request must carry `Authorization: Bearer <token>` matching the live instance's token. Mismatched/missing → `401 {"error":{"code":"unauthorized", ...}}`. |
+
+, `^Assets/Reimport All# Bridge HTTP API
+
+Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`. Default bind is `127.0.0.1` (loopback); remote bind (`0.0.0.0`) is opt-in and requires auth — see [Remote bind (M14)](#remote-bind-m14-t54).
+
+## Endpoint summary
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/ping` | `GET` | Bridge/editor health snapshot. |
+| `/instance` | `GET` | Live instance lock + heartbeat snapshot (M13). |
+| `/events` | `GET` | SSE stream of console logs + editor-state transitions (M13 T4.4). |
+| `/events/poll` | `GET` | Drain the event queue as a single JSON envelope (M13 T4.4). |
+| `/tools/{toolName}` | `POST` | Execute bridge tool by name. |
+| `/resources` | `GET` | List bridge-registered resources. |
+| `/resources/{route}` | `GET` | Read one bridge resource payload. |
+
+## Listener and port
+
+- Default bind address: `127.0.0.1` (loopback). Configurable via `bindAddress` in `.unity-open-mcp/settings.json` — see [Remote bind](#remote-bind-m14-t54).
+- Default port: **deterministic per project** — `20000 + (sha256(projectPath) % 10000)`. Two Unity projects running bridges simultaneously get two distinct ports with no configuration.
+- Port overrides (both win over the deterministic default):
+  - env var `UNITY_OPEN_MCP_BRIDGE_PORT`
+  - Unity arg `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>`
+- The hash formula takes the first 8 bytes of SHA256 of the normalized project path (forward slashes, trailing slash trimmed), interprets them as a big-endian 64-bit unsigned integer, and applies `% 10000`. Both the bridge (`InstancePortResolver.ComputePort`) and the MCP server (`mcp-server/src/instance-discovery.ts`) implement it identically.
+
+## Multi-instance discovery (M13)
+
+Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
+
+Lock / heartbeat fields:
+- `pid`, `port`, `projectPath`, `projectHash`
+- `authToken` — per-session bearer token (M14); see [Authentication](#authentication-m14)
+- `startedAt`, `updatedAt`, `heartbeatAt` (ISO-8601 UTC)
+- `state` — `idle` | `compiling` | `reloading` | `entering_playmode` | `playing` | `exiting_playmode`
+- `isPlaying`, `isCompiling`
+- `bridgeVersion`, `unityVersion`
+
+The MCP server reads this file (no HTTP round-trip needed) to pick the right bridge port per project; stale locks whose `pid` is no longer alive are ignored and cleaned up by the next bridge that starts. `GET /instance` returns the same JSON the bridge just wrote, for clients that want to verify the live bridge against the on-disk lock.
+
+## Authentication (M14)
+
+The bridge mints a 256-bit per-session bearer token into the instance lock (`authToken` field above) on every start. Whether the HTTP layer *enforces* it is controlled by `authMode` in `.unity-open-mcp/settings.json`:
+
+| `authMode` | Behavior |
+|---|---|
+| `none` (default) | Every request is accepted. The token is still minted into the lock so flipping to `required` needs no restart. |
+| `required` | Every request must carry `Authorization: Bearer <token>` matching the live instance's token. Mismatched/missing → `401 {"error":{"code":"unauthorized", ...}}`. |
+
+ |
+
+`execute_menu` additionally hard-blocks `File/Quit` (not configurable away) as a last-resort guard.
+
+### Configuring
+
+Override the defaults in `.unity-open-mcp/settings.json`. A non-empty array replaces the defaults for that tool; `null`/unset/empty array ⇒ built-in defaults.
+
+```json
+{
+  "csharpDenyPatterns": ["DangerousApi\\.Foo", "ClassifiedStuff"],
+  "menuDenyPatterns": ["^Edit/Clear$"]
+}
+```
+
+Invalid regexes and whitespace-only entries are dropped at settings-load time (logged once to the console). The Settings tab shows the active count per tool. To run an otherwise-blocked op without disabling the list project-wide, use the per-request bypass below.
+
+### Bypass (audited)
+
+A request bypasses the deny heuristic only when it passes **both**:
+
+- `gate: "off"` — opt out of post-mutation verification, AND
+- `confirm_bypass: true` — explicit acknowledgement.
+
+A single flag is not enough, so a careless agent can't talk its way past the list. Bypasses and refusals are recorded in the [audit log](#on-disk-audit-log-m14-t55) (when enabled) and always in the in-memory activity log with `gate.mode = off`. A denied request returns:
+
+```json
+{
+  "mutation": {
+    "success": false,
+    "output": null,
+    "error": {
+      "code": "denied_by_policy",
+      "message": "execute_csharp matched the configured deny pattern 'EditorApplication.Exit'. ... Suggestion: ... Matched pattern: EditorApplication.Exit."
+    }
+  },
+  "gate": { "mode": "enforce", "skipped": true, "validation": null, "delta": null },
+  "agentNextSteps": [ "..." ]
+}
+```
+
+(`execute_menu` returns the same shape with `code: "menu_blocked"`.)
+
+## On-disk audit log (M14 T5.5)
+
+The in-memory activity log (`BridgeActivityLog`, capacity 100) is session-scoped and cleared on domain reload. For security-sensitive contexts, opt in to a persistent on-disk audit log via `auditLogEnabled` in `.unity-open-mcp/settings.json` (Settings tab → On-disk audit log).
+
+When enabled, every gate mutation (pass / fail / warn) and every deny-list refusal/bypass is appended as one JSON-lines record to a rolling file:
+
+```
+~/.unity-agent/audit/audit-<projectHash>.jsonl
+```
+
+Rotation: when the active file exceeds 5 MiB it is renamed to `.1`, `.1` → `.2`, …, and the oldest of 5 retained files is dropped. Records survive domain reload and editor restart (the file is reopened on each write, not held open).
+
+Record shape (one JSON object per line):
+
+```json
+{
+  "ts": "2026-06-17T12:00:00.0000000Z",
+  "projectHash": "a1b2...",
+  "tool": "unity_open_mcp_execute_csharp",
+  "gate": "enforce",
+  "pathsHint": null,
+  "outcome": "denied",
+  "gateRan": false,
+  "newErrors": 0,
+  "newWarnings": 0,
+  "resolvedErrors": 0,
+  "resolvedWarnings": 0,
+  "checkpointId": null,
+  "totalGateMs": 0,
+  "mutationError": "denied_by_policy",
+  "bypassedDenyList": false,
+  "deniedPattern": "EditorApplication.Exit"
+}
+```
+
+`outcome` is one of `passed` | `warned` | `failed` | `skipped` | `denied`. `bypassedDenyList` is `true` when the request used the `gate: "off"` + `confirm_bypass: true` escape hatch. `deniedPattern` carries the matched regex when the deny heuristic refused the request. Best-effort: an I/O failure is logged once and the record dropped — audit logging never breaks the dispatch path.
 
 ## `/ping` response
 
@@ -131,6 +383,8 @@ Response shape:
 - `method_not_allowed`
 - `paths_hint_required` (mutating tool without scope hints)
 - `scene_dirty` (disruptive op refused because a loaded scene has unsaved changes — see [Scene dirty guard](#active-scene-dirty-guard))
+- `denied_by_policy` (`execute_csharp` refused by the deny heuristic — see [Power-tool deny lists](#power-tool-deny-lists-m14-t52--t53))
+- `menu_blocked` (`execute_menu` refused by the deny heuristic or the hard blocklist — see [Power-tool deny lists](#power-tool-deny-lists-m14-t52--t53))
 - `timeout`
 - `execution_error`
 - `bridge_internal_error`

@@ -257,9 +257,17 @@ To require the token (recommended on shared machines where another local process
 
 2. Reload the bridge. The MCP server picks up the token from the lock file on its next start — no env var, no client-side change.
 
-A request without the header (or with the wrong token) gets `401 {"error":{"code":"unauthorized", ...}}`. The bridge binds `127.0.0.1` only either way; `required` is an extra layer, not a substitute for loopback binding. See [Bridge HTTP API → Authentication](api/bridge-http.md#authentication-m14) for the full policy.
+A request without the header (or with the wrong token) gets `401 {"error":{"code":"unauthorized", ...}}`. The bridge binds `127.0.0.1` by default; `required` is an extra layer for shared machines and **mandatory** for remote bind. See [Bridge HTTP API → Authentication](api/bridge-http.md#authentication-m14) for the full policy.
 
 > Note: when you pin `UNITY_OPEN_MCP_BRIDGE_PORT` on both sides, the MCP server skips reading the lock file, so it has no token to send — in that pinned-port setup, keep `authMode` as `none`.
+
+## Remote bind & power-tool deny lists (M14)
+
+Three opt-in security surfaces round out M14 — all controlled from the bridge **Settings** tab or `.unity-open-mcp/settings.json`:
+
+- **Remote bind** — set `bindAddress` to `0.0.0.0` to expose the bridge beyond loopback (shared dev machine, CI runner reached over the network). **Requires `authMode: "required"`** — the bridge refuses to start on a non-loopback interface without token auth. The bearer token travels in cleartext over HTTP, so terminate TLS upstream (reverse proxy / `ssh -L` tunnel). See [Bridge HTTP API → Remote bind](api/bridge-http.md#remote-bind-m14-t54) for the full threat model.
+- **Power-tool deny lists** — `execute_csharp` and `execute_menu` are blocked from destructive patterns (editor exit, bulk asset delete, unbounded builds, `File/Quit`) by default. Override via `csharpDenyPatterns` / `menuDenyPatterns` (non-empty regex arrays replace the defaults; null/empty = defaults). Bypass per-request with `gate: "off"` + `confirm_bypass: true` (audited). See [Bridge HTTP API → Power-tool deny lists](api/bridge-http.md#power-tool-deny-lists-m14-t52--t53).
+- **On-disk audit log** — set `auditLogEnabled: true` to persist every gate mutation and deny-list refusal to a rolling JSON-lines file under `~/.unity-agent/audit/`. Survives domain reload and editor restart. Off by default.
 
 ## Launch dialog auto-dismiss
 

@@ -64,6 +64,8 @@ Every tool declares a **lifecycle policy** (surfaced in the mutation envelope as
 
 `apply_fix` and `reserialize` are **not** guarded — they never trigger the native save modal.
 
+**Power-tool deny heuristic.** `execute_csharp` and `execute_menu` are blocked from destructive patterns by default (`EditorApplication.Exit`, `Application.Quit`, `AssetDatabase.DeleteAsset`, `BuildPipeline.BuildPlayer`, `File/Quit`, etc.). A refused call returns `error.code = "denied_by_policy"` (csharp) or `"menu_blocked"` (menu) with the matched pattern and an alternative. If you genuinely need one of these ops, set **both** `gate: "off"` and `confirm_bypass: true` on the request — the bypass is audited. Prefer the scoped typed tools (`apply_fix`, `reserialize`, `invoke_method`) over raw snippets for destructive work.
+
 ### Gate modes
 
 | Mode | When |

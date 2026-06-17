@@ -16,7 +16,6 @@ namespace UnityOpenMcpBridge
     {
         const string PortEnvVar = "UNITY_OPEN_MCP_BRIDGE_PORT";
         const string PortArgPrefix = "-UNITY_OPEN_MCP_BRIDGE_PORT=";
-        const string BindAddress = "127.0.0.1";
         const int DefaultTimeoutMs = 30000;
         const int MinTimeoutMs = 1000;
         // Matches the documented maximum in the run-tests tool schema
@@ -185,10 +184,27 @@ namespace UnityOpenMcpBridge
         {
             if (_running) return;
 
+            // M14 T5.4 — resolve the bind address through the policy. Remote
+            // (0.0.0.0) is refused unless authMode is "required". The decision
+            // is made BEFORE touching HttpListener so a misconfigured project
+            // fails fast with the actionable refusal message instead of a
+            // generic listener exception.
+            var bindAddress = BridgeProjectSettings.BindAddress;
+            var bindDecision = BridgeBindAddress.Decide(bindAddress, BridgeAuthPolicy.GetDefault());
+            if (!bindDecision.Allowed)
+            {
+                UnityEngine.Debug.LogError(
+                    $"[Unity Open MCP Bridge] Refusing to start: {bindDecision.RefusalReason}");
+                _running = false;
+                BridgeSession.SetConnected(false);
+                return;
+            }
+            var effectiveBind = bindDecision.ResolvedAddress;
+
             try
             {
                 _listener = new HttpListener();
-                _listener.Prefixes.Add($"http://{BindAddress}:{_port}/");
+                _listener.Prefixes.Add($"http://{effectiveBind}:{_port}/");
                 _listener.Start();
                 _running = true;
                 BridgeSession.SetConnected(true);
@@ -208,7 +224,10 @@ namespace UnityOpenMcpBridge
                 BridgeInstanceLock.Acquire(BridgeSession.ProjectPath ?? GetProjectPathForPort(), _port);
                 BridgeHeartbeat.Start();
 
-                UnityEngine.Debug.Log($"[Unity Open MCP Bridge] Listening on http://{BindAddress}:{_port}/");
+                var bindNote = BridgeBindAddress.IsRemote(effectiveBind)
+                    ? " (remote — authMode required)"
+                    : "";
+                UnityEngine.Debug.Log($"[Unity Open MCP Bridge] Listening on http://{effectiveBind}:{_port}/{bindNote}");
             }
             catch (System.Exception e)
             {
@@ -754,7 +773,7 @@ namespace UnityOpenMcpBridge
                     result.SettleMs = EditorSettleWait.Wait(lifecycle);
                 }
 
-                RecordGateRun(toolName, effectiveGateMode, result);
+                RecordGateRun(toolName, effectiveGateMode, result, pathsHint);
                 ApplyToolResultToActivity(activity, result, sw.ElapsedMilliseconds);
                 SendJson(context, 200, BuildGateEnvelope(result, effectiveGateMode, lifecycle));
             }
@@ -818,7 +837,7 @@ namespace UnityOpenMcpBridge
             return message.Length <= max ? message : message.Substring(0, max) + "…";
         }
 
-        static void RecordGateRun(string toolName, string effectiveMode, GateDispatchResult result)
+        static void RecordGateRun(string toolName, string effectiveMode, GateDispatchResult result, string[] pathsHint)
         {
             try
             {
@@ -848,6 +867,77 @@ namespace UnityOpenMcpBridge
             {
                 // History capture is best-effort; never let it break the response.
             }
+
+            // M14 T5.5 — on-disk audit log (opt-in). Mirrors the gate-run
+            // record shape so an auditor can correlate the two. Best-effort:
+            // a write failure is logged once and the record dropped, never
+            // breaking the dispatch path.
+            try
+            {
+                RecordAudit(toolName, effectiveMode, result, pathsHint);
+            }
+            catch
+            {
+                // ignored — audit logging is non-essential
+            }
+        }
+
+        // M14 T5.5 — build + persist the audit record. Outcome vocabulary is
+        // the GateOutcome enum lowercased, plus "denied" when the deny
+        // heuristic refused the mutation (carried as the mutation error code).
+        static void RecordAudit(string toolName, string effectiveMode, GateDispatchResult result, string[] pathsHint)
+        {
+            if (!BridgeAuditLog.Enabled) return;
+
+            var mutationError = result.Mutation?.ErrorCode;
+            var denied = mutationError == "denied_by_policy" || mutationError == "menu_blocked";
+            var outcome = denied
+                ? "denied"
+                : result.Outcome.ToString().ToLowerInvariant();
+
+            var record = new BridgeAuditRecord
+            {
+                Timestamp = DateTime.UtcNow,
+                ProjectHash = ResolveAuditProjectHash(),
+                Tool = toolName,
+                GateMode = effectiveMode,
+                PathsHint = pathsHint,
+                Outcome = outcome,
+                GateRan = result.GateRan,
+                NewErrors = result.Delta?.NewErrors ?? 0,
+                NewWarnings = result.Delta?.NewWarnings ?? 0,
+                ResolvedErrors = result.Delta?.ResolvedErrors ?? 0,
+                ResolvedWarnings = result.Delta?.ResolvedWarnings ?? 0,
+                CheckpointId = result.CheckpointId,
+                TotalGateDurationMs = result.TotalGateDurationMs,
+                MutationErrorCode = mutationError,
+                BypassedDenyList = effectiveMode == BridgeGateDefaultPolicy.Off && !denied,
+                DeniedPattern = ExtractDeniedPattern(result.Mutation?.ErrorMessage)
+            };
+            BridgeAuditLog.Record(record);
+        }
+
+        static string ResolveAuditProjectHash()
+        {
+            var projectPath = BridgeSession.ProjectPath ?? GetProjectPathForPort();
+            try { return InstancePortResolver.ProjectHash(projectPath); }
+            catch { return "unknown"; }
+        }
+
+        // The deny heuristic embeds "Matched pattern: <pat>." in the error
+        // message. Extract it so the audit record has a structured field for
+        // grep / SIEM correlation. Returns null when the message isn't a deny
+        // refusal.
+        static string ExtractDeniedPattern(string errorMessage)
+        {
+            if (string.IsNullOrEmpty(errorMessage)) return null;
+            const string marker = "Matched pattern: ";
+            var idx = errorMessage.IndexOf(marker, StringComparison.Ordinal);
+            if (idx < 0) return null;
+            var start = idx + marker.Length;
+            var end = errorMessage.IndexOf('.', start);
+            if (end < 0) end = errorMessage.Length;
+            return errorMessage.Substring(start, end - start);
         }
 
         static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint)
@@ -961,7 +1051,7 @@ namespace UnityOpenMcpBridge
                 };
 
                 sw.Stop();
-                RecordGateRun("unity_open_mcp_apply_fix", gateMode, gateResult);
+                RecordGateRun("unity_open_mcp_apply_fix", gateMode, gateResult, null);
                 ApplyToolResultToActivity(activity, gateResult, sw.ElapsedMilliseconds);
                 SendJson(context, 200, BuildGateEnvelope(gateResult, gateMode, LifecyclePolicy.EditorSettle));
             }

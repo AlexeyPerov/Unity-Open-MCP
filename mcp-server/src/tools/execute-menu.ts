@@ -25,6 +25,14 @@ export const executeMenu: Tool = {
           "so Unity's native save modal never interrupts the flow. Set true to " +
           "proceed and accept the risk of a native save prompt.",
       },
+      confirm_bypass: {
+        type: "boolean",
+        default: false,
+        description:
+          "Bypass the deny heuristic for destructive menu paths " +
+          "(File/Quit, File/Exit, Assets/Reimport All). Requires gate: \"off\" " +
+          "as well — both flags must be set. The bypass is audited.",
+      },
       gate: {
         enum: ["enforce", "warn", "off"],
         default: "enforce",

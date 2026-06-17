@@ -29,6 +29,21 @@ namespace UnityOpenMcpBridge.MetaTools
                 return ToolDispatchResult.Fail("validation_error",
                     "Field 'code' is required and must be non-empty");
 
+            // M14 T5.2 — deny heuristic runs before compile. The bypass contract
+            // (gate: "off" + confirm_bypass: true) is evaluated from the request
+            // body so the heuristic fires even before the dispatcher has resolved
+            // the effective gate mode. The dispatcher also records the bypass in
+            // the audit log via the gate envelope.
+            var bypass = BridgeDenyBypass.IsRequestedFromBody(body);
+            var deny = BridgeDenyList.EvaluateCSharp(
+                code, BridgeProjectSettings.CSharpDenyPatterns, bypass);
+            if (!deny.Allowed)
+            {
+                return ToolDispatchResult.Fail("denied_by_policy",
+                    $"{deny.Reason} Suggestion: {deny.Suggestion} " +
+                    $"Matched pattern: {deny.MatchedPattern}.");
+            }
+
             var extraUsings = JsonBody.GetStringArray(body, "usings");
             var allUsings = DefaultUsings
                 .Concat(extraUsings ?? Array.Empty<string>())

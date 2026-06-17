@@ -1290,6 +1290,12 @@ namespace UnityOpenMcpBridge
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawAuthSection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawBindAddressSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawDenyListsSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawAuditLogSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawActivityLogSection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawSettingsStorageSection();
@@ -1346,7 +1352,8 @@ namespace UnityOpenMcpBridge
                 "Controls whether the bridge HTTP listener requires a bearer token. " +
                 "A per-session token is always minted into the instance lock and auto-discovered " +
                 "by the MCP server, so enabling `required` needs no client-side config change. " +
-                "The bridge binds 127.0.0.1 only; `required` adds defense for shared machines.",
+                "`required` is mandatory for remote bind (see Listener bind below) and recommended " +
+                "on shared machines.",
                 MessageType.None);
 
             var current = BridgeAuthPolicy.GetDefault();
@@ -1357,6 +1364,129 @@ namespace UnityOpenMcpBridge
             if (newIndex != IndexOfAuthMode(current))
             {
                 BridgeAuthPolicy.SetDefault(BridgeAuthPolicy.ValidModes[newIndex]);
+            }
+        }
+
+        void DrawBindAddressSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Listener bind", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "Address the HTTP listener binds. Loopback (127.0.0.1, default) is reachable " +
+                "only from this machine. Remote (0.0.0.0) exposes the bridge to the network and " +
+                "is refused at start unless Auth mode is `required` — remote access without token " +
+                "auth is unsafe. Effective on the next listener start (bridge restart / domain reload).",
+                MessageType.None);
+
+            var current = BridgeProjectSettings.BindAddress;
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Bind address", GUILayout.Width(120));
+            var newIndex = EditorGUILayout.Popup(IndexOfBindAddress(current), BindAddressLabels());
+            EditorGUILayout.EndHorizontal();
+            if (newIndex != IndexOfBindAddress(current))
+            {
+                var next = BridgeBindAddress.ValidAddresses[newIndex];
+                // Surface the remote-requires-auth rule immediately so the
+                // operator knows why the next start may refuse.
+                var decision = BridgeBindAddress.Decide(next, BridgeAuthPolicy.GetDefault());
+                if (!decision.Allowed)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Remote bind will be refused at start: set Auth mode to `required` first. " +
+                        decision.RefusalReason,
+                        MessageType.Warning);
+                }
+                BridgeProjectSettings.SetBindAddress(next);
+            }
+        }
+
+        static GUIContent[] BindAddressLabels()
+        {
+            var labels = new GUIContent[BridgeBindAddress.ValidAddresses.Length];
+            for (int i = 0; i < labels.Length; i++)
+            {
+                labels[i] = new GUIContent(BindAddressDescriptor(BridgeBindAddress.ValidAddresses[i]));
+            }
+            return labels;
+        }
+
+        static int IndexOfBindAddress(string address)
+        {
+            for (int i = 0; i < BridgeBindAddress.ValidAddresses.Length; i++)
+            {
+                if (BridgeBindAddress.ValidAddresses[i] == address) return i;
+            }
+            return 0;
+        }
+
+        static string BindAddressDescriptor(string address)
+        {
+            return address switch
+            {
+                BridgeBindAddress.Loopback => "127.0.0.1  (loopback only — default)",
+                BridgeBindAddress.Remote   => "0.0.0.0  (remote — requires auth)",
+                _ => address ?? BridgeBindAddress.Default
+            };
+        }
+
+        void DrawDenyListsSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Power-tool deny lists", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "Regex patterns that block destructive execute_csharp snippets and execute_menu " +
+                "paths BEFORE they run. Built-in defaults block editor exit, bulk asset deletion, " +
+                "and unbounded builds. Override with your own list, or set the field to empty to " +
+                "disable. Bypass per-request via gate: \"off\" + confirm_bypass: true (audited). " +
+                "Edit the patterns directly in the settings file shown under Storage.",
+                MessageType.None);
+
+            var csharpDefaults = BridgeDenyList.DefaultCSharpDenyPatterns;
+            var menuDefaults = BridgeDenyList.DefaultMenuDenyPatterns;
+            var csharpActive = BridgeProjectSettings.CSharpDenyPatterns;
+            var menuActive = BridgeProjectSettings.MenuDenyPatterns;
+
+            DrawDenyListSummary("execute_csharp", csharpActive, csharpDefaults);
+            DrawDenyListSummary("execute_menu", menuActive, menuDefaults);
+        }
+
+        static void DrawDenyListSummary(string tool, string[] active, string[] defaults)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(tool, GUILayout.Width(120));
+            string summary;
+            // null/empty both mean "built-in defaults" (JsonUtility serializes
+            // null as [] on disk, so the distinction is lost across reload).
+            var hasCustom = active != null && active.Length > 0;
+            if (!hasCustom)
+                summary = $"defaults ({defaults.Length} patterns)";
+            else
+                summary = $"{active.Length} custom pattern(s)";
+            EditorGUILayout.LabelField(summary);
+            EditorGUILayout.EndHorizontal();
+        }
+
+        void DrawAuditLogSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("On-disk audit log", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "When ON, every gate mutation (pass / fail / warn) and deny-list refusal is appended " +
+                "to a rolling JSON-lines file under ~/.unity-agent/audit/. Survives domain reload and " +
+                "editor restart. Off by default — opt in for security-sensitive contexts.",
+                MessageType.None);
+
+            var prev = BridgeProjectSettings.AuditLogEnabled;
+            var next = EditorGUILayout.ToggleLeft(
+                "Persist gate-run audit records to disk", prev);
+            if (next != prev)
+            {
+                BridgeProjectSettings.SetAuditLogEnabled(next);
+            }
+
+            if (prev || next)
+            {
+                EditorGUILayout.LabelField("Audit dir", BridgeAuditLog.AuditDir, EditorStyles.miniLabel);
             }
         }
 
@@ -1430,6 +1560,10 @@ namespace UnityOpenMcpBridge
                 "  - autoStart: bool\n" +
                 "  - verboseActivityLog: bool\n" +
                 "  - authMode: \"none\" | \"required\"\n" +
+                "  - bindAddress: \"127.0.0.1\" | \"0.0.0.0\"\n" +
+                "  - csharpDenyPatterns: string[] (regex; non-empty overrides defaults)\n" +
+                "  - menuDenyPatterns: string[] (regex; non-empty overrides defaults)\n" +
+                "  - auditLogEnabled: bool\n" +
                 "Future fields can extend this schema in place without breaking v1 readers.",
                 MessageType.None);
         }
