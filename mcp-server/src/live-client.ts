@@ -6,6 +6,11 @@ import { deriveIsError } from "./gate-error.js";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import {
+  pollAndDismissLaunchErrors,
+  readDismissConfig,
+  type PollAndDismissOptions,
+} from "./dialog-dismiss.js";
 
 const MAX_COMPILE_WAIT_MS = 120_000;
 const COMPILE_POLL_INTERVAL_MS = 2_000;
@@ -74,10 +79,22 @@ const OFFLINE_HINT =
 export class LiveClient implements Router {
   private baseUrl: string;
   private pingCache: PingCache;
+  private dismissEnabled: boolean;
+  private dismissTimeoutMs: number;
+  private dismissIntervalMs: number;
 
   constructor(port: number, pingCache: PingCache) {
     this.baseUrl = `http://127.0.0.1:${port}`;
     this.pingCache = pingCache;
+    // M13 T4.5 — launch-errors / Safe Mode dialog auto-dismissal. Resolved
+    // once at construction; the env vars do not change mid-process. The
+    // feature is enabled by default (Unity-MCP parity) and runs concurrently
+    // with every compile/bridge readiness wait so it ticks on the same stall
+    // points agents hit, not only at process spawn.
+    const dismissCfg = readDismissConfig();
+    this.dismissEnabled = dismissCfg.enabled;
+    this.dismissTimeoutMs = dismissCfg.timeoutMs;
+    this.dismissIntervalMs = dismissCfg.intervalMs;
   }
 
   async isLiveAvailable(): Promise<boolean> {
@@ -359,34 +376,74 @@ export class LiveClient implements Router {
   private async waitForCompile(): Promise<CallToolResult | null> {
     const deadline = Date.now() + MAX_COMPILE_WAIT_MS;
 
-    while (Date.now() < deadline) {
-      await sleep(COMPILE_POLL_INTERVAL_MS);
-
-      try {
-        const res = await this.fetchWithTimeout("/ping", { method: "GET" });
-
-        if (res.status === 503) continue;
-
-        if (!res.ok) continue;
-
-        const body = (await res.json()) as PingResponse;
-
-        if (!body.compiling && body.connected) return null;
-      } catch {
-        continue;
-      }
+    // M13 T4.5 — run the launch-errors / Safe Mode dialog auto-dismiss loop
+    // CONCURRENTLY with the compile poll. The dismiss loop ticks on the same
+    // stall point this method represents (UCP bridge-wait pattern): if a
+    // native modal is blocking the Editor, the compile poll below will spin
+    // until timeout with no recovery. The dismiss loop clicks Ignore on that
+    // modal; the moment compile resolves (compiling → idle), we abort the
+    // loop — there is no launch dialog left to dismiss once Unity is idle.
+    //
+    // When auto-dismiss is opted out (UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1),
+    // `dismissEnabled` is false and this branch is skipped entirely,
+    // preserving the pre-feature baseline.
+    let dismissAbort: AbortController | null = null;
+    let dismissDone: Promise<void> | null = null;
+    if (this.dismissEnabled) {
+      dismissAbort = new AbortController();
+      const dismissOpts: PollAndDismissOptions = {
+        timeoutMs: this.dismissTimeoutMs,
+        intervalMs: this.dismissIntervalMs,
+        abortSignal: dismissAbort.signal,
+      };
+      dismissDone = this.runDismissLoop(dismissOpts);
     }
 
-    return makeErrorResult(
-      `Unity is still compiling after ${MAX_COMPILE_WAIT_MS / 1000}s. ` +
-        "The compile-wait timeout was exceeded.",
-      {
-        error: {
-          code: "compile_timeout",
-          message: `Compile-wait exceeded ${MAX_COMPILE_WAIT_MS / 1000}s`,
+    try {
+      while (Date.now() < deadline) {
+        await sleep(COMPILE_POLL_INTERVAL_MS);
+
+        try {
+          const res = await this.fetchWithTimeout("/ping", { method: "GET" });
+
+          if (res.status === 503) continue;
+
+          if (!res.ok) continue;
+
+          const body = (await res.json()) as PingResponse;
+
+          if (!body.compiling && body.connected) return null;
+        } catch {
+          continue;
+        }
+      }
+
+      return makeErrorResult(
+        `Unity is still compiling after ${MAX_COMPILE_WAIT_MS / 1000}s. ` +
+          "The compile-wait timeout was exceeded.",
+        {
+          error: {
+            code: "compile_timeout",
+            message: `Compile-wait exceeded ${MAX_COMPILE_WAIT_MS / 1000}s`,
+          },
         },
-      },
-    );
+      );
+    } finally {
+      // Compile wait resolved (idle) OR timed out — either way there is
+      // nothing more to dismiss. Aborting unblocks the dismiss loop's sleep.
+      dismissAbort?.abort();
+      await dismissDone;
+    }
+  }
+
+  /**
+   * Run the launch-errors dismiss polling loop. Indirected through a method
+   * so unit tests can stub the OS-clicking loop without invoking
+   * PowerShell / osascript / xdotool. Production uses the real
+   * `pollAndDismissLaunchErrors`.
+   */
+  protected runDismissLoop(opts: PollAndDismissOptions): Promise<void> {
+    return pollAndDismissLaunchErrors(opts);
   }
 
   async readResource(route: string): Promise<Record<string, unknown>> {

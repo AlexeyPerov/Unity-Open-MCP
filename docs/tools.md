@@ -40,6 +40,9 @@ Optional:
 - `UNITY_OPEN_MCP_BRIDGE_PORT` - live bridge port, default `19120`.
 - `UNITY_PATH` - Unity executable path for batch fallback tools.
 - `UNITY_OPEN_MCP_BATCH_TIMEOUT_MS` - batch timeout override.
+- `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS` - set to `1` to disable auto-dismissal of Unity's "compile errors at launch" / Safe Mode dialog (enabled by default).
+- `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS` - overall budget (ms) for a launch-dialog dismiss pass (default `30000`).
+- `UNITY_OPEN_MCP_DISMISS_INTERVAL_MS` - poll interval (ms) for launch-dialog probes (default `1500`).
 
 ### Bridge (Unity Editor process)
 

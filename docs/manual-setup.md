@@ -69,6 +69,9 @@ The MCP server is a Node process. Point your client at `mcp-server/dist/index.js
 |---|---|---|
 | `UNITY_PROJECT_PATH` | yes | Absolute path to your Unity project root. |
 | `UNITY_OPEN_MCP_BRIDGE_PORT` | no | Bridge HTTP port override. When unset, the port is derived deterministically from the project path (`20000 + sha256(path) % 10000`) and discovered via the bridge's lock file — see [Multi-instance](#multi-instance-optional). |
+| `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS` | no | Set to `1` to disable auto-dismissal of Unity's "compile errors at launch" / Safe Mode dialog. Default: auto-dismiss **enabled** — see [Launch dialog auto-dismiss](#launch-dialog-auto-dismiss). |
+| `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS` | no | Overall budget (ms) for a single launch-dialog dismiss pass. Default `30000`. |
+| `UNITY_OPEN_MCP_DISMISS_INTERVAL_MS` | no | Poll interval (ms) between launch-dialog probes. Default `1500`. |
 | `UNITY_PATH` | no | Unity Editor executable for batch-only tools. |
 
 Use absolute paths. On Windows, use forward slashes or escaped backslashes in JSON.
@@ -240,6 +243,20 @@ To run two projects side by side, just open both in Unity with the bridge packag
 
 `UNITY_OPEN_MCP_BRIDGE_PORT` still overrides the deterministic default when you want to pin a specific port (CI, pinned dev setup). The override applies on both sides — set it in the MCP server env and pass `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>` to Unity.
 
+## Launch dialog auto-dismiss
+
+When Unity starts with compile errors, it blocks behind a native modal — the "compile errors at launch" / "Enter Safe Mode?" prompt. The MCP server would then stall on `/ping` and compile-wait loops with no way to recover, which matters most in unattended / CI flows.
+
+By default the MCP server **auto-dismisses** that dialog by clicking **Ignore** while it waits for the bridge to become ready. It probes the OS desktop on the same cadence as the compile/bridge poll (not only at process spawn) and logs each dismissal to stderr for auditability.
+
+- **Enabled by default.** Set `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` to preserve the pre-feature behavior (no OS clicks).
+- Tune the budget with `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS` (default `30000`) and the poll interval with `UNITY_OPEN_MCP_DISMISS_INTERVAL_MS` (default `1500`).
+- **macOS:** uses AppleScript (`osascript`). Grant Accessibility permission to your terminal / `node` binary once in System Settings → Privacy & Security → Accessibility, or the dismiss will report a permission error (logged once) and continue without clicking.
+- **Windows:** uses Win32 `BM_CLICK` via PowerShell (no focus stealing).
+- **Linux:** uses `xdotool` (X11). Wayland is not supported — install `xdotool` (e.g. `sudo apt-get install xdotool`) to enable it.
+
+Only the launch-errors / Safe Mode dialog is auto-dismissed. Destructive startup dialogs (project upgrade, version mismatch) are intentionally left for a human — see the backlog for a future per-dialog policy.
+
 ## Troubleshooting
 
 | Symptom | What to try |
@@ -249,6 +266,7 @@ To run two projects side by side, just open both in Unity with the bridge packag
 | `/ping` connection refused | Launch Unity for the same project; wait for compile; check the port the bridge picked via `~/.unity-agent/instances/*.json` or the MCP server's startup log (`Bridge port resolved to <port>`). |
 | Tools work but live calls fail | Bridge may be disconnected — check `/ping` `connected` and that the Editor has the project focused/open. |
 | Wrong project picked up by the MCP server | Confirm `UNITY_PROJECT_PATH` matches the open project root exactly; the deterministic port is derived from this path. |
+| MCP server stalls on first call after a compile-error launch | Expected if the Safe Mode dialog is up. Auto-dismiss clicks **Ignore** by default; if you disabled it (`UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1`) or hit a permission error (macOS Accessibility), dismiss the dialog manually. Dismissals and errors are logged to the MCP server's stderr. |
 
 ## Related docs
 
