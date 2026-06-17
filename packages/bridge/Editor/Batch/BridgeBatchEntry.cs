@@ -13,11 +13,25 @@ namespace UnityOpenMcpBridge.Batch
         public const int ExitPass = 0;
         public const int ExitFail = 1;
 
-        static readonly string[] SupportedOperations = { "find_members" };
+        static readonly string[] SupportedOperations = { "find_members", "compile_check" };
 
         public static void Run()
         {
             var args = Environment.GetCommandLineArgs();
+
+            // compile_check is asynchronous: it must wait for project compilation
+            // to settle across a domain reload, so it cannot follow the sync
+            // Execute() -> print markers -> Exit() path. Hand off to the
+            // CompileCheckState machine, which finalizes (and exits) from the
+            // EditorApplication.update loop once compilation finishes. Early-out
+            // here so the synchronous exit below does not run for it.
+            var (isCompileCheck, timeoutMs) = DetectCompileCheck(args);
+            if (isCompileCheck)
+            {
+                CompileCheckState.Start(timeoutMs);
+                return;
+            }
+
             int exitCode;
             string json;
 
@@ -52,6 +66,28 @@ namespace UnityOpenMcpBridge.Batch
             }
         }
 
+        // Inspects the post-`--` tool args for the compile_check operation and an
+        // optional --timeout-ms flag. Returns timeoutMs=0 when the flag is absent;
+        // CompileCheckState.Start applies its own default and clamps. Kept here
+        // (not in CompileCheckState) so the decision to branch is local to the
+        // entry point, matching how Execute() dispatches the synchronous ops.
+        static (bool isCompileCheck, long timeoutMs) DetectCompileCheck(string[] allArgs)
+        {
+            var toolArgs = ExtractToolArgs(allArgs);
+            if (toolArgs.Length == 0 || toolArgs[0] != "compile_check")
+                return (false, 0);
+
+            long timeoutMs = 0;
+            for (int i = 1; i < toolArgs.Length; i++)
+            {
+                if (toolArgs[i] == "--timeout-ms" && i + 1 < toolArgs.Length)
+                {
+                    long.TryParse(toolArgs[++i], out timeoutMs);
+                }
+            }
+            return (true, timeoutMs);
+        }
+
         internal static (int exitCode, string json) Execute(string[] allArgs)
         {
             var toolArgs = ExtractToolArgs(allArgs);
@@ -73,6 +109,13 @@ namespace UnityOpenMcpBridge.Batch
             {
                 case "find_members":
                     return RunFindMembers(flagArgs);
+                case "compile_check":
+                    // Intercepted by Run() before reaching here (async handoff);
+                    // arriving synchronously means the async branch misrouted.
+                    return Fail(
+                        "compile_check must be dispatched via the async " +
+                        "CompileCheckState path. This is an internal error."
+                    );
                 default:
                     return Fail(
                         $"Unknown meta-tool operation '{operation}'. " +
@@ -310,6 +353,27 @@ namespace UnityOpenMcpBridge.Batch
         static string ErrorEnvelope(string code, string message)
         {
             return BuildFailureEnvelope(code, message);
+        }
+
+        /// <summary>
+        /// Terminal output/exit path for the async compile_check operation.
+        /// Called from <see cref="CompileCheckState"/> once compilation settles.
+        /// The compile result body is wrapped in the same success envelope the
+        /// synchronous path uses — a completed check is a successful tool call
+        /// regardless of whether compilation passed; agents read <c>status</c>.
+        /// </summary>
+        public static void EmitCompileResult(string compileResultJson, int exitCode)
+        {
+            var wrapped = BuildSuccessEnvelope(compileResultJson);
+
+            System.Console.WriteLine(OutputBegin);
+            System.Console.WriteLine(wrapped);
+            System.Console.WriteLine(OutputEnd);
+
+            if (Application.isBatchMode)
+            {
+                UnityEditor.EditorApplication.Exit(exitCode);
+            }
         }
 
         #endregion

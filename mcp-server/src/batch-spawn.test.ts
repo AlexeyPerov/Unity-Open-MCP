@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs, extractCompilerErrors } from "./batch-spawn.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 function parseBody(result: CallToolResult): Record<string, unknown> {
@@ -128,4 +128,52 @@ test("find_members without UNITY_PATH returns path error, not batch_not_supporte
   } finally {
     if (savedPath) process.env.UNITY_PATH = savedPath;
   }
+});
+
+// --- compile_check wiring --------------------------------------------------
+
+test("BATCH_TOOL_NAMES includes compile_check", () => {
+  assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_compile_check"));
+});
+
+test("isBatchTool returns true for compile_check", () => {
+  const batch = new BatchSpawn();
+  assert.ok(batch.isBatchTool("unity_open_mcp_compile_check"));
+});
+
+test("buildMetaArgs passes through timeout_ms for compile_check", () => {
+  const cli = buildMetaArgs("compile_check", { timeout_ms: 120000 });
+  assert.deepEqual(cli, ["compile_check", "--timeout-ms", "120000"]);
+});
+
+test("buildMetaArgs omits timeout_ms when not supplied for compile_check", () => {
+  const cli = buildMetaArgs("compile_check", {});
+  assert.deepEqual(cli, ["compile_check"]);
+});
+
+test("extractCompilerErrors pulls CSxxxx lines from raw output", () => {
+  const out = [
+    "Some preamble line",
+    "Assets/Broken.cs(10,14): error CS0246: The type or namespace name 'Foo' could not be found",
+    "Assets/Broken.cs(20,2): error CS0103: The name 'Bar' does not exist in the current context",
+    "a non-error line",
+    "  error CS1002: ; expected (indented variant)",
+  ].join("\n");
+  const errors = extractCompilerErrors(out);
+  assert.equal(errors.length, 3);
+  assert.ok(errors[0].includes("CS0246"));
+  assert.ok(errors[1].includes("CS0103"));
+  assert.ok(errors[2].includes("CS1002"), "indented error lines are captured");
+});
+
+test("extractCompilerErrors returns [] when no CS errors present", () => {
+  assert.deepEqual(extractCompilerErrors("all good, no errors here"), []);
+  assert.deepEqual(extractCompilerErrors(""), []);
+});
+
+test("extractCompilerErrors dedupes repeated lines", () => {
+  const line = "Assets/Broken.cs(10,14): error CS0246: The type 'Foo' could not be found";
+  const out = `${line}\n${line}\n${line}`;
+  const errors = extractCompilerErrors(out);
+  assert.equal(errors.length, 1);
 });

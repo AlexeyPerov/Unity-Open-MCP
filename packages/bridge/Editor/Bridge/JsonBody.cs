@@ -119,6 +119,72 @@ namespace UnityOpenMcpBridge
             return defaultValue;
         }
 
+        public static long GetLong(string json, string key, long defaultValue = 0)
+        {
+            var raw = GetRawValue(json, key);
+            if (raw == null) return defaultValue;
+            if (long.TryParse(raw.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var val)) return val;
+            return defaultValue;
+        }
+
+        /// <summary>
+        /// Returns the raw JSON string for each element of an array value whose
+        /// elements are objects (e.g. <c>[{"a":1},{"b":2}]</c>). Each returned
+        /// string is the inner object text (without surrounding whitespace) and
+        /// can be fed back through <see cref="GetString"/>/<see cref="GetLong"/>
+        /// etc. Returns null when the key is missing or the value is not an array.
+        /// </summary>
+        public static string[] GetObjectArray(string json, string key)
+        {
+            var raw = GetRawValue(json, key);
+            if (raw == null) return null;
+            raw = raw.Trim();
+            if (raw == "null" || !raw.StartsWith("[")) return null;
+
+            var items = new List<string>();
+            var i = 0;
+            // Skip the opening '['.
+            i++;
+            while (i < raw.Length)
+            {
+                while (i < raw.Length && char.IsWhiteSpace(raw[i])) i++;
+                if (i >= raw.Length || raw[i] == ']') break;
+
+                if (raw[i] == '{')
+                {
+                    var depth = 1;
+                    var start = i;
+                    i++;
+                    while (i < raw.Length && depth > 0)
+                    {
+                        if (raw[i] == '"')
+                        {
+                            i++;
+                            while (i < raw.Length)
+                            {
+                                if (raw[i] == '\\') { i += 2; continue; }
+                                if (raw[i] == '"') { i++; break; }
+                                i++;
+                            }
+                            continue;
+                        }
+                        if (raw[i] == '{') depth++;
+                        else if (raw[i] == '}') depth--;
+                        i++;
+                    }
+                    items.Add(raw.Substring(start, i - start));
+                }
+                else
+                {
+                    // Non-object element — skip to the next comma.
+                    while (i < raw.Length && raw[i] != ',') i++;
+                }
+
+                while (i < raw.Length && (raw[i] == ',' || char.IsWhiteSpace(raw[i]))) i++;
+            }
+            return items.ToArray();
+        }
+
         public static string GetRawValue(string json, string key)
         {
             if (string.IsNullOrEmpty(json)) return null;

@@ -266,6 +266,29 @@ test("route: batch tool falls back to batch with _route=batch when live is down"
   assert.equal((parseBody(result)._route as { fallbackReason?: string }).fallbackReason, "live_unavailable");
 });
 
+test("route: compile_check always routes to batch even when live is available", async () => {
+  // The whole point of compile_check is to recompile from scratch; routing it
+  // to a live Editor that already compiled would trivially report success.
+  const live = makeFakeLive({ available: true });
+  const batch = makeFakeBatch({
+    batchTools: new Set(["unity_open_mcp_compile_check"]),
+    result: {
+      content: [{ type: "text", text: JSON.stringify({ status: "compile_passed", errorCount: 0, errors: [] }) }],
+      isError: false,
+    },
+  });
+  const router = new ToolRouter(live, batch, "/proj");
+
+  const result = await router.route("unity_open_mcp_compile_check", {});
+  assert.equal(live.calls.length, 0, "compile_check must never hit the live bridge");
+  assert.equal(batch.calls.length, 1, "compile_check must always go to batch");
+  assert.equal(routeOf(result), "batch");
+  assert.equal(
+    (parseBody(result)._route as { fallbackReason?: string }).fallbackReason,
+    "compile_check_always_batch",
+  );
+});
+
 // ---------------------------------------------------------------------------
 // ping
 // ---------------------------------------------------------------------------

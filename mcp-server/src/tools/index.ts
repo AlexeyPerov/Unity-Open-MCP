@@ -4,6 +4,7 @@ import { executeCsharp } from "./execute-csharp.js";
 import { invokeMethod } from "./invoke-method.js";
 import { executeMenu } from "./execute-menu.js";
 import { findMembers } from "./find-members.js";
+import { compileCheck } from "./compile-check.js";
 import { editorStatus } from "./editor-status.js";
 import { validateEdit } from "./validate-edit.js";
 import { checkpointCreate } from "./checkpoint-create.js";
@@ -34,6 +35,7 @@ export const M2_TOOLS: Tool[] = [
   invokeMethod,
   executeMenu,
   findMembers,
+  compileCheck,
 ];
 
 export const M2_5_TOOLS: Tool[] = [editorStatus];

@@ -21,6 +21,7 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 - `unity_open_mcp_invoke_method`
 - `unity_open_mcp_execute_menu`
 - `unity_open_mcp_find_members`
+- `unity_open_mcp_compile_check`
 - `unity_open_mcp_editor_status`
 
 ### Gate and validation tools (M3 + M5)
@@ -232,6 +233,7 @@ Route selection is implemented in `mcp-server/src/tool-router.ts`.
 - `unity_agent_generate_skill`: always local route (reads project files from disk).
 - `unity_open_mcp_find_references`: live when available, otherwise offline reader.
 - `unity_open_mcp_read_asset` and `unity_open_mcp_search_assets`: compressible router with offline-first behavior and live fallback.
+- `unity_open_mcp_compile_check`: **always** routes to batch (a fresh Unity recompiling from scratch), even when the live bridge is connected — running it against an Editor that already compiled would never surface a broken build. Response `_route.fallbackReason` is `"compile_check_always_batch"`.
 - Other tools:
   - prefer live bridge when connected,
   - use batch fallback only for tools in batch-eligible set,
@@ -240,6 +242,7 @@ Route selection is implemented in `mcp-server/src/tool-router.ts`.
 Tool responses include route metadata under `_route`:
 - live: `{ route: "live" }`
 - batch fallback: `{ route: "batch", fallbackReason: "live_unavailable" }`
+- compile check: `{ route: "batch", fallbackReason: "compile_check_always_batch" }`
 
 ## Batch support
 
@@ -250,6 +253,7 @@ Supported operations:
 - `unity_open_mcp_baseline_create`
 - `unity_open_mcp_regression_check`
 - `unity_open_mcp_find_members`
+- `unity_open_mcp_compile_check` — headless compile check; **always** routes to batch (spawns a fresh Unity that recompiles from scratch), even when the live bridge is available. Returns structured compiler errors (`status`, `errorCount`, `errors[]` with `code`/`file`/`line`/`message`). When the bridge assembly itself fails to compile, the JSON markers never print — batch-spawn then extracts `error CSxxxx` lines from the Unity log and surfaces them in the rejection so every batch tool self-diagnoses a broken build.
 
 Recognized but intentionally blocked in batch mode (`batch_not_supported`):
 - `unity_open_mcp_execute_csharp`

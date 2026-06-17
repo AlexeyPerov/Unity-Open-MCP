@@ -18,6 +18,7 @@ const VERIFY_TOOL_TO_OPERATION: Record<string, string> = {
 
 const META_TOOL_TO_OPERATION: Record<string, string> = {
   unity_open_mcp_find_members: "find_members",
+  unity_open_mcp_compile_check: "compile_check",
 };
 
 const LIMITED_META_TOOLS: ReadonlySet<string> = new Set([
@@ -59,6 +60,36 @@ function extractJson(stdout: string): string | null {
   return stdout.slice(jsonStart, endIdx).trim();
 }
 
+// Captures C# compiler errors surfaced via the Editor log/stderr when the bridge
+// assembly itself fails to compile. In that catastrophic case the
+// BridgeBatchEntry.Run() markers never print (the entry point never runs), so
+// the spawn sees no JSON and would otherwise reject with an opaque "did not
+// contain JSON markers" message. This pulls structured CSxxxx lines out of the
+// raw output so the rejection names the actual errors — used by every batch
+// tool, not just compile_check.
+//
+// Unity formats compiler diagnostics as
+//   Assets/Path.cs(line,col): error CSxxxx: message
+// so "error CSxxxx:" appears mid-line after the asset locator — match it
+// anywhere on a line rather than anchoring to line start.
+const COMPILER_ERROR_RE = /error\s+CS\d{4}:[^\n]+/g;
+export function extractCompilerErrors(output: string): string[] {
+  if (!output) return [];
+  const seen = new Set<string>();
+  const errors: string[] = [];
+  let m: RegExpExecArray | null;
+  COMPILER_ERROR_RE.lastIndex = 0;
+  while ((m = COMPILER_ERROR_RE.exec(output)) !== null) {
+    const line = m[0].trim();
+    if (line && !seen.has(line)) {
+      seen.add(line);
+      errors.push(line);
+      if (errors.length >= 50) break; // bounded; agent can fix-and-recheck
+    }
+  }
+  return errors;
+}
+
 function buildVerifyArgs(
   operation: string,
   args: Record<string, unknown>,
@@ -96,6 +127,8 @@ export function buildMetaArgs(
     if (args.include_unity_editor !== undefined) cli.push("--include-unity-editor", String(args.include_unity_editor));
     if (args.include_project !== undefined) cli.push("--include-project", String(args.include_project));
     if (args.max_results !== undefined) cli.push("--max-results", String(args.max_results));
+  } else if (operation === "compile_check") {
+    if (args.timeout_ms !== undefined) cli.push("--timeout-ms", String(args.timeout_ms));
   }
 
   return cli;
@@ -302,7 +335,21 @@ export class BatchSpawn implements Router {
 
         const jsonStr = extractJson(stdout);
         if (!jsonStr) {
+          // Most common cause: the bridge assembly failed to compile, so the
+          // batch entry point (BridgeBatchEntry.Run()) never ran and emitted
+          // no markers. Surface the C# compiler errors directly rather than an
+          // opaque "no markers" message.
+          const combined = `${stdout}\n${stderr}`;
+          const csErrors = extractCompilerErrors(combined);
           const tail = stderr.trim().slice(-500) || stdout.trim().slice(-500);
+          if (csErrors.length > 0) {
+            reject(new Error(
+              `Batch output did not contain JSON markers (exit ${exitCode}). ` +
+                `The bridge assembly likely failed to compile:\n` +
+                csErrors.join("\n"),
+            ));
+            return;
+          }
           reject(new Error(
             `Batch output did not contain JSON markers. Exit code: ${exitCode}.` +
               (tail ? ` Last output: ${tail}` : ""),

@@ -47,6 +47,7 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_invoke_method: "core",
   unity_open_mcp_execute_menu: "core",
   unity_open_mcp_find_members: "core",
+  unity_open_mcp_compile_check: "diagnostics",
   unity_open_mcp_editor_status: "core",
   unity_open_mcp_validate_edit: "gate-and-verify",
   unity_open_mcp_checkpoint_create: "gate-and-verify",

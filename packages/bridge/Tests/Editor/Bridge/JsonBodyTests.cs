@@ -121,5 +121,52 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsNull(JsonBody.GetString("", "code"));
             Assert.IsNull(JsonBody.GetString(null, "code"));
         }
+
+        [Test]
+        public static void GetLong_ParsesLargeValue()
+        {
+            var json = "{\"startedAtMs\":1718000000000}";
+            Assert.AreEqual(1718000000000L, JsonBody.GetLong(json, "startedAtMs"));
+        }
+
+        [Test]
+        public static void GetLong_ReturnsDefault_WhenMissing()
+        {
+            Assert.AreEqual(300_000L, JsonBody.GetLong("{}", "startedAtMs", 300_000L));
+        }
+
+        [Test]
+        public static void GetObjectArray_ReturnsEachObjectElement()
+        {
+            var json = "{\"errors\":[{\"code\":\"CS0246\",\"line\":10},{\"code\":\"CS0103\",\"line\":20}]}";
+            var items = JsonBody.GetObjectArray(json, "errors");
+            Assert.IsNotNull(items);
+            Assert.AreEqual(2, items.Length);
+            // Each returned string is the inner object text — fields parse back.
+            Assert.AreEqual("CS0246", JsonBody.GetString(items[0], "code"));
+            Assert.AreEqual(10, JsonBody.GetInt(items[0], "line"));
+            Assert.AreEqual("CS0103", JsonBody.GetString(items[1], "code"));
+            Assert.AreEqual(20, JsonBody.GetInt(items[1], "line"));
+        }
+
+        [Test]
+        public static void GetObjectArray_HandlesNestedBracesInStrings()
+        {
+            // A brace inside a string value must not confuse the brace-depth
+            // scanner. The message below contains a literal '}' inside quotes.
+            var json = "{\"errors\":[{\"message\":\"unexpected } token\"}]}";
+            var items = JsonBody.GetObjectArray(json, "errors");
+            Assert.IsNotNull(items);
+            Assert.AreEqual(1, items.Length);
+            Assert.AreEqual("unexpected } token", JsonBody.GetString(items[0], "message"));
+        }
+
+        [Test]
+        public static void GetObjectArray_ReturnsNull_WhenNotArray()
+        {
+            Assert.IsNull(JsonBody.GetObjectArray("{\"errors\":42}", "errors"));
+            Assert.IsNull(JsonBody.GetObjectArray("{\"errors\":null}", "errors"));
+            Assert.IsNull(JsonBody.GetObjectArray("{}", "errors"));
+        }
     }
 }

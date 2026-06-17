@@ -30,6 +30,7 @@ The per-tool `routePolicy` and `batchCapable` fields on the capabilities respons
 - **Batch fallback** spawns a headless Unity (`-batchmode`) **only** when a tool has `batchCapable: true` AND the live bridge is unavailable. Batch requires `UNITY_PATH` + `UNITY_PROJECT_PATH` env vars. Mutating meta-tools (`execute_csharp`, `invoke_method`, `execute_menu`) are blocked in batch — they need a live Editor.
 - **Agent senses are live-only.** `unity_agent_run_tests`, screenshots, profiler, console, and spatial queries have no batch form — they need a running Editor.
 - **Offline reads** (`list_assets`, `find_references`, `read_asset`, `search_assets`) parse the project from disk and never need Unity.
+- **`compile_check` is always batch.** It spawns a fresh headless Unity that recompiles from scratch, even when the live bridge is up — running it against an Editor that already compiled would never surface a broken build. Use it to self-diagnose compile state.
 
 Full route-policy and batch tables live in `docs/api/mcp-tools.md` (human/contributor docs). Do not copy them here — read them from `routing` + per-tool fields on the capabilities response.
 
@@ -109,6 +110,14 @@ For large refactors: `unity_open_mcp_checkpoint_create` with scoped paths → ru
 ### find_references before delete
 
 Before deleting or moving an asset, call **`unity_open_mcp_find_references`** to see who depends on it. Offline-first (no live bridge needed for text-serialized assets).
+
+### Diagnose a broken build (compile_check)
+
+When a C# edit breaks compilation so badly the bridge assembly won't load, the live Editor enters a bad state and every live tool refuses — including the usual `unity_agent_read_console` health check. **`unity_open_mcp_compile_check`** is the recovery path: it spawns a fresh headless Unity, recompiles from scratch, and returns structured compiler errors (`status`, `errorCount`, `errors[]` with `code`/`file`/`line`/`message`) without needing the live bridge.
+
+- Call it when `unity_open_mcp_ping`/`editor_status` say the bridge is down after a C# change.
+- Read `errors[].code` (e.g. `CS0246`) and `file`/`line` to locate the break, fix, then re-check.
+- If the break is in the bridge assembly itself, the tool's JSON markers never print; the MCP server then extracts `error CSxxxx` lines from the Unity log and surfaces them in the error so you still see what failed.
 
 ## Agent senses (live-only)
 

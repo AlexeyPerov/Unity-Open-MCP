@@ -85,6 +85,22 @@ export class ToolRouter implements Router {
     const canBatch = this.batch.isBatchTool(toolName);
     const isPing = toolName === "unity_open_mcp_ping";
 
+    // compile_check always routes to batch — even when the live bridge is up.
+    // The whole point is to spawn a FRESH Unity that recompiles from scratch;
+    // running it against a live Editor that already compiled successfully
+    // would trivially report "compile_passed" and never surface the broken
+    // state the tool exists to diagnose.
+    if (toolName === "unity_open_mcp_compile_check") {
+      console.error(
+        `[unity-open-mcp] Route: ${toolName} -> batch (compile check always spawns fresh)`,
+      );
+      const result = await this.batch.route(toolName, args);
+      return injectRouteMeta(result, {
+        route: "batch",
+        fallbackReason: "compile_check_always_batch",
+      });
+    }
+
     if (!canBatch && !isPing) {
       const result = await this.live.route(toolName, args);
       return injectRouteMeta(result, { route: "live" });
