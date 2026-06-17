@@ -7,7 +7,7 @@ namespace UnityOpenMcpBridge.Tests
     // M14 — Unit tests for the token mint + comparison helpers. These run
     // without a live HttpListener (unlike BridgeHttpServerTests) because the
     // auth decision itself is pure: BridgeAuthCheck calls into this class.
-    public static class BridgeAuthTokenTests
+    public class BridgeAuthTokenTests
     {
         [Test]
         public void Generate_Returns64LowerHexChars()

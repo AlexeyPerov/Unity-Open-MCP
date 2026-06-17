@@ -13,7 +13,7 @@ namespace UnityOpenMcpBridge.Tests
     // fake a different PID (Acquire writes the current Editor's PID), so the
     // stale-lock cleanup test plants a fake lock JSON with a guaranteed-dead
     // PID before calling Acquire, then verifies it disappeared.
-    public static class BridgeInstanceLockTests
+    public class BridgeInstanceLockTests
     {
         const string TestProjectPath = "/test/MyGame";
         const string OtherProjectPath = "/test/OtherGame";
