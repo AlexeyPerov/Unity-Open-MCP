@@ -61,6 +61,7 @@ export class BridgeEventStream {
   constructor(
     private readonly baseUrl: string,
     subscriberId?: string,
+    private readonly authToken?: string,
   ) {
     this.subscriberId =
       subscriberId ?? randomBytes(16).toString("hex");
@@ -85,10 +86,13 @@ export class BridgeEventStream {
     )}&max_per_poll=100`;
 
     // SSE read is streaming; consume body manually so we can split on
-    // double-newline event boundaries.
+    // double-newline event boundaries. M14 — carry the bearer token so the
+    // stream is gated the same way as tool/ping requests.
+    const headers: Record<string, string> = { Accept: "text/event-stream" };
+    if (this.authToken) headers["Authorization"] = `Bearer ${this.authToken}`;
     fetch(url, {
       method: "GET",
-      headers: { Accept: "text/event-stream" },
+      headers,
       signal: this.abortController.signal,
     })
       .then((res) => {

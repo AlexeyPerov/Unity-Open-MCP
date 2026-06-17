@@ -33,6 +33,7 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Inherits ro
 - The hash formula must stay byte-for-byte identical to the bridge mirror at `packages/bridge/Editor/Bridge/InstancePortResolver.cs` (`ComputePort`). Cross-side consistency is pinned by `instance-discovery.test.ts` and the bridge `InstancePortResolverTests.cs` — if either side changes, update both in the same task.
 - The MCP server is **read-only** on the lock file. Stale-lock cleanup (PID-liveness sweep) is the bridge's job on its next `Acquire`; never delete or rewrite locks from this package.
 - No new runtime deps: the module uses only `node:crypto`, `node:fs`, `node:os`, `node:path`.
+- M14 — the same lock file carries an `authToken`. `resolveAuthToken` reads it and the token is threaded into `LiveClient` and `BridgeEventStream`, which attach `Authorization: Bearer <token>` to every request. When no token is discoverable (older bridge, dead-pid lock, or an explicit `UNITY_OPEN_MCP_BRIDGE_PORT` override that skips the lock read) no header is sent and the bridge must be in `authMode "none"`. The `InstanceLock` interface must mirror the bridge's lock schema; adding/removing a lock field is a cross-side change.
 
 ## Offline reads
 

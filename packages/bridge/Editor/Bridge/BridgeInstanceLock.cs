@@ -55,9 +55,16 @@ namespace UnityOpenMcpBridge
         static int _pid;
         static DateTime _startedAt;
 
+        // M14 — per-session bearer token. Always minted on Acquire so the MCP
+        // server can send it regardless of the project's authMode; enforcement
+        // is decided by BridgeAuthPolicy at request time. Read by the HTTP
+        // auth check (BridgeHttpServer) and mirrored into the lock JSON below.
+        static string _authToken;
+
         public static bool IsAcquired => _acquired;
         public static string CurrentProjectPath => _acquiredProjectPath;
         public static int CurrentPort => _acquiredPort;
+        public static string AuthToken => _authToken;
 
         // Write the initial lock and sweep stale locks. Safe to call on the
         // listener worker thread (BridgeHttpServer.Start) — no Unity APIs.
@@ -87,6 +94,9 @@ namespace UnityOpenMcpBridge
             _acquiredProjectHash = InstancePortResolver.ProjectHash(projectPath);
             _pid = Process.GetCurrentProcess().Id;
             _startedAt = DateTime.UtcNow;
+            // M14 — mint a fresh token on every Acquire so a bridge restart
+            // invalidates any previously discovered token.
+            _authToken = BridgeAuthToken.Generate();
 
             try
             {
@@ -135,6 +145,7 @@ namespace UnityOpenMcpBridge
             finally
             {
                 _acquired = false;
+                _authToken = null;
             }
         }
 
@@ -180,6 +191,9 @@ namespace UnityOpenMcpBridge
             sb.Append('{');
             sb.Append("\"pid\":").Append(_pid).Append(',');
             sb.Append("\"port\":").Append(_acquiredPort).Append(',');
+            // M14 — always written so the MCP server can present it. Mirrors
+            // the TS-side InstanceLock.authToken field in instance-discovery.ts.
+            sb.Append("\"authToken\":").Append(Escape(NullToEmpty(_authToken))).Append(',');
             sb.Append("\"projectPath\":").Append(Escape(NullToEmpty(_acquiredProjectPath))).Append(',');
             sb.Append("\"projectHash\":").Append(Escape(NullToEmpty(_acquiredProjectHash))).Append(',');
             sb.Append("\"startedAt\":").Append(Escape(IsoUtc(_startedAt))).Append(',');

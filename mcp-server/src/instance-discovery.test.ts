@@ -9,6 +9,7 @@ import {
   projectHash,
   normalizePath,
   resolvePort,
+  resolveAuthToken,
   isPidAlive,
   PORT_RANGE_START,
   PORT_RANGE_SIZE,
@@ -161,6 +162,86 @@ test("resolvePort: env override beats a live lock file", () => {
   }
 });
 
+// ----- resolveAuthToken (M14) -----
+
+test("resolveAuthToken: live lock supplies the token", () => {
+  const sandbox = makeSandbox();
+  try {
+    plantLock(sandbox, SAMPLE_PATH, {
+      port: 23456,
+      pid: process.pid,
+      authToken: "deadbeef".repeat(8),
+    });
+    assert.equal(resolveAuthToken(SAMPLE_PATH, undefined), "deadbeef".repeat(8));
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("resolveAuthToken: stale lock (dead pid) returns undefined", () => {
+  const sandbox = makeSandbox();
+  try {
+    plantLock(sandbox, SAMPLE_PATH, {
+      port: 23456,
+      pid: 4_000_000,
+      authToken: "deadbeef".repeat(8),
+    });
+    assert.equal(resolveAuthToken(SAMPLE_PATH, undefined), undefined);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("resolveAuthToken: tokenless lock (older bridge) returns undefined", () => {
+  const sandbox = makeSandbox();
+  try {
+    plantLock(sandbox, SAMPLE_PATH, { port: 23456, pid: process.pid });
+    assert.equal(resolveAuthToken(SAMPLE_PATH, undefined), undefined);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("resolveAuthToken: empty-string token treated as absent", () => {
+  const sandbox = makeSandbox();
+  try {
+    plantLock(sandbox, SAMPLE_PATH, {
+      port: 23456,
+      pid: process.pid,
+      authToken: "",
+    });
+    assert.equal(resolveAuthToken(SAMPLE_PATH, undefined), undefined);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("resolveAuthToken: env port override returns undefined (no lock read)", () => {
+  const sandbox = makeSandbox();
+  try {
+    plantLock(sandbox, SAMPLE_PATH, {
+      port: 23456,
+      pid: process.pid,
+      authToken: "deadbeef".repeat(8),
+    });
+    // With an explicit port there's no lock to read → no token to discover.
+    assert.equal(resolveAuthToken(SAMPLE_PATH, 19120), undefined);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("resolveAuthToken: missing lock returns undefined", () => {
+  const sandbox = makeSandbox();
+  try {
+    process.env.HOME = sandbox.dir;
+    process.env.USERPROFILE = sandbox.dir;
+    assert.equal(resolveAuthToken(SAMPLE_PATH, undefined), undefined);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
 // ----- sandbox helpers -----
 //
 // instance-discovery reads ~/.unity-agent/instances/<hash>.json via homedir().
@@ -198,6 +279,7 @@ function cleanupSandbox(s: Sandbox): void {
 interface PlantOpts {
   port: number;
   pid: number;
+  authToken?: string;
 }
 
 function plantLock(sandbox: Sandbox, projectPath: string, opts: PlantOpts): void {
@@ -210,21 +292,22 @@ function plantLock(sandbox: Sandbox, projectPath: string, opts: PlantOpts): void
   const dir = join(sandbox.dir, ".unity-agent", "instances");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const path = join(dir, `${hash}.json`);
-  writeFileSync(
-    path,
-    JSON.stringify({
-      pid: opts.pid,
-      port: opts.port,
-      projectPath,
-      projectHash: hash,
-      startedAt: "2026-06-17T00:00:00.000Z",
-      updatedAt: "2026-06-17T00:00:00.000Z",
-      heartbeatAt: "2026-06-17T00:00:00.000Z",
-      state: "idle",
-      isPlaying: false,
-      isCompiling: false,
-      bridgeVersion: "0.1.0",
-      unityVersion: "6000.0.0f1",
-    }),
-  );
+  const payload: Record<string, unknown> = {
+    pid: opts.pid,
+    port: opts.port,
+    projectPath,
+    projectHash: hash,
+    startedAt: "2026-06-17T00:00:00.000Z",
+    updatedAt: "2026-06-17T00:00:00.000Z",
+    heartbeatAt: "2026-06-17T00:00:00.000Z",
+    state: "idle",
+    isPlaying: false,
+    isCompiling: false,
+    bridgeVersion: "0.1.0",
+    unityVersion: "6000.0.0f1",
+  };
+  // M14 — only include authToken when explicitly planted, so older-bridge
+  // (tokenless lock) cases are testable.
+  if (opts.authToken !== undefined) payload.authToken = opts.authToken;
+  writeFileSync(path, JSON.stringify(payload));
 }

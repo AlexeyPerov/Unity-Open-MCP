@@ -40,6 +40,10 @@ export type InstanceState =
 export interface InstanceLock {
   pid: number;
   port: number;
+  /** M14 — per-session bearer token. Optional for back-compat with locks
+   *  written by older bridges; when absent the MCP client sends no header
+   *  (authMode "none" accepts that). */
+  authToken?: string;
   projectPath: string;
   projectHash: string;
   startedAt: string;
@@ -153,4 +157,28 @@ export function resolvePort(projectPath: string, envPort?: number): number {
   }
 
   return computePort(projectPath);
+}
+
+/**
+ * M14 — Resolve the bridge's per-session bearer token for a project.
+ *
+ * The token is only discoverable from a live instance lock (the same file we
+ * read the port from). When an explicit env port override is in use there is
+ * no lock file to read, so this returns undefined — in that case the MCP
+ * client sends no Authorization header and the bridge must be in authMode
+ * "none" for the request to succeed. Returns undefined when the lock is
+ * missing, stale (dead pid), or predates the token field.
+ *
+ * @param projectPath absolute Unity project root
+ * @param envPort     parsed UNITY_OPEN_MCP_BRIDGE_PORT, or undefined. When set,
+ *                    skips the lock read (no token to discover).
+ */
+export function resolveAuthToken(projectPath: string, envPort?: number): string | undefined {
+  if (typeof envPort === "number" && Number.isInteger(envPort) && envPort >= 1 && envPort <= 65535) {
+    return undefined;
+  }
+  const lock = readInstanceLock(projectPath);
+  if (!lock || !isPidAlive(lock.pid)) return undefined;
+  const token = lock.authToken;
+  return typeof token === "string" && token.length > 0 ? token : undefined;
 }

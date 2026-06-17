@@ -82,10 +82,16 @@ export class LiveClient implements Router {
   private dismissEnabled: boolean;
   private dismissTimeoutMs: number;
   private dismissIntervalMs: number;
+  /** M14 — per-session bearer token auto-discovered from the instance lock.
+   *  Undefined when no live lock was found (older bridge / env port override);
+   *  in that case no Authorization header is sent and the bridge must be in
+   *  authMode "none" for requests to succeed. */
+  private authToken: string | undefined;
 
-  constructor(port: number, pingCache: PingCache) {
+  constructor(port: number, pingCache: PingCache, authToken?: string) {
     this.baseUrl = `http://127.0.0.1:${port}`;
     this.pingCache = pingCache;
+    this.authToken = authToken;
     // M13 T4.5 — launch-errors / Safe Mode dialog auto-dismissal. Resolved
     // once at construction; the env vars do not change mid-process. The
     // feature is enabled by default (Unity-MCP parity) and runs concurrently
@@ -485,8 +491,17 @@ export class LiveClient implements Router {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+    // M14 — attach the bearer token to every request when one was discovered
+    // from the instance lock. Merge with any caller-supplied headers so we
+    // never clobber a per-request value.
+    const headers = new Headers(init.headers);
+    if (this.authToken && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${this.authToken}`);
+    }
+
     return fetch(`${this.baseUrl}${path}`, {
       ...init,
+      headers,
       signal: controller.signal,
     }).finally(() => clearTimeout(timer));
   }

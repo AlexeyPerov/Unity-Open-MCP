@@ -1,5 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import {
+  createServer,
+  type Server as HttpServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { BridgeEventStream } from "./event-stream.js";
 
 // M13 T4.4 — SSE parser unit tests. The parser is the contract surface
@@ -106,4 +112,85 @@ test("stop: is idempotent and clears connection state", () => {
   stream.stop();
   stream.stop();
   assert.equal(stream.isConnected, false);
+});
+
+// ----- M14: bearer token header on the SSE connection -----
+
+interface StubHandle {
+  server: HttpServer;
+  port: number;
+  close(): Promise<void>;
+}
+
+function startSseStub(capture: { auth?: string | null }): Promise<StubHandle> {
+  return new Promise((resolve) => {
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      if (capture.auth === undefined) {
+        capture.auth = req.headers["authorization"] ?? null;
+      }
+      // Minimal valid SSE response so connect()'s res.ok check passes and the
+      // reader enters its loop; we close immediately after to end the test.
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      res.write("event: ready\ndata: {}\n\n");
+      res.end();
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      resolve({
+        server,
+        port,
+        close: () => new Promise<void>((r) => server.close(() => r())),
+      });
+    });
+  });
+}
+
+test("BridgeEventStream: sends Authorization: Bearer when a token was provided", async () => {
+  const seen: { auth?: string | null } = {};
+  const stub = await startSseStub(seen);
+  try {
+    const token = "deadbeef".repeat(8);
+    const stream = new BridgeEventStream(
+      `http://127.0.0.1:${stub.port}`,
+      "test-sub",
+      token,
+    );
+    stream.ensureSubscription();
+    // Give the fetch + handler a tick to land.
+    await new Promise((r) => setTimeout(r, 50));
+    stream.stop();
+    assert.equal(
+      seen.auth,
+      `Bearer ${token}`,
+      "SSE connection must carry the discovered bearer token",
+    );
+  } finally {
+    await stub.close();
+  }
+});
+
+test("BridgeEventStream: omits Authorization when no token was provided", async () => {
+  const seen: { auth?: string | null } = {};
+  const stub = await startSseStub(seen);
+  try {
+    const stream = new BridgeEventStream(
+      `http://127.0.0.1:${stub.port}`,
+      "test-sub",
+    );
+    stream.ensureSubscription();
+    await new Promise((r) => setTimeout(r, 50));
+    stream.stop();
+    assert.equal(
+      seen.auth,
+      null,
+      "No Authorization header when the stream has no token (authMode \"none\")",
+    );
+  } finally {
+    await stub.close();
+  }
 });

@@ -1288,6 +1288,8 @@ namespace UnityOpenMcpBridge
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawDefaultGateModeSection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawAuthSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawActivityLogSection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawSettingsStorageSection();
@@ -1336,6 +1338,57 @@ namespace UnityOpenMcpBridge
             }
         }
 
+        void DrawAuthSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Bridge auth", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "Controls whether the bridge HTTP listener requires a bearer token. " +
+                "A per-session token is always minted into the instance lock and auto-discovered " +
+                "by the MCP server, so enabling `required` needs no client-side config change. " +
+                "The bridge binds 127.0.0.1 only; `required` adds defense for shared machines.",
+                MessageType.None);
+
+            var current = BridgeAuthPolicy.GetDefault();
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Auth mode", GUILayout.Width(120));
+            var newIndex = EditorGUILayout.Popup(IndexOfAuthMode(current), AuthModeLabels());
+            EditorGUILayout.EndHorizontal();
+            if (newIndex != IndexOfAuthMode(current))
+            {
+                BridgeAuthPolicy.SetDefault(BridgeAuthPolicy.ValidModes[newIndex]);
+            }
+        }
+
+        static GUIContent[] AuthModeLabels()
+        {
+            var labels = new GUIContent[BridgeAuthPolicy.ValidModes.Length];
+            for (int i = 0; i < labels.Length; i++)
+            {
+                labels[i] = new GUIContent(AuthModeDescriptor(BridgeAuthPolicy.ValidModes[i]));
+            }
+            return labels;
+        }
+
+        static int IndexOfAuthMode(string mode)
+        {
+            for (int i = 0; i < BridgeAuthPolicy.ValidModes.Length; i++)
+            {
+                if (BridgeAuthPolicy.ValidModes[i] == mode) return i;
+            }
+            return 0;
+        }
+
+        static string AuthModeDescriptor(string mode)
+        {
+            return mode switch
+            {
+                "none"     => "none  (default — accept any loopback request)",
+                "required" => "required  (require Authorization: Bearer <token>)",
+                _ => mode ?? BridgeAuthPolicy.Default
+            };
+        }
+
         void DrawActivityLogSection()
         {
             EditorGUILayout.Space(4);
@@ -1376,6 +1429,7 @@ namespace UnityOpenMcpBridge
                 "  - defaultGateMode: \"enforce\" | \"warn\" | \"off\"\n" +
                 "  - autoStart: bool\n" +
                 "  - verboseActivityLog: bool\n" +
+                "  - authMode: \"none\" | \"required\"\n" +
                 "Future fields can extend this schema in place without breaking v1 readers.",
                 MessageType.None);
         }

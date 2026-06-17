@@ -260,6 +260,16 @@ namespace UnityOpenMcpBridge
             _currentActivity = activity;
             try
             {
+                // M14 — auth check runs before routing so every endpoint
+                // (/ping, /instance, /tools/*, /events, ...) is gated equally
+                // when authMode is "required". The MCP client always carries
+                // the bearer from the instance lock; a hand-rolled curl without
+                // it gets a 401. No endpoint is exempt.
+                if (!CheckAuth(context, activity))
+                {
+                    return;
+                }
+
                 var path = context.Request.Url.AbsolutePath.TrimEnd('/');
                 switch (path)
                 {
@@ -383,6 +393,31 @@ namespace UnityOpenMcpBridge
                     try { context.Response.Close(); } catch { }
                 }
             }
+        }
+
+        // M14 — bridge auth gate. Returns true when the request may proceed,
+        // false when CheckAuth has already written a 401. Pure decision lives
+        // in BridgeAuthCheck so it can be unit-tested without HttpListener.
+        // The activity is annotated for the activity log regardless of outcome.
+        static bool CheckAuth(HttpListenerContext context, BridgeActivityEvent activity)
+        {
+            string headerValue = null;
+            try { headerValue = context.Request.Headers["Authorization"]; }
+            catch { /* malformed header — treat as missing */ }
+
+            var policy = BridgeAuthPolicy.GetDefault();
+            var expected = BridgeInstanceLock.AuthToken;
+
+            if (BridgeAuthCheck.IsAuthorized(policy, headerValue, expected))
+                return true;
+
+            activity.Kind = BridgeActivityKind.UnknownPath;
+            activity.Outcome = BridgeActivityOutcome.Failed;
+            activity.ErrorCode = "unauthorized";
+            SendJsonError(context, 401, "unauthorized",
+                "Missing or invalid Authorization header. Set authMode to \"none\" in " +
+                ".unity-open-mcp/settings.json, or send Authorization: Bearer <token>.");
+            return false;
         }
 
         static BridgeActivityEvent BeginActivity(HttpListenerContext context)

@@ -66,7 +66,7 @@ namespace UnityOpenMcpBridge.Tests
             // InstanceLock type in instance-discovery.ts.
             foreach (var field in new[]
             {
-                "\"pid\"", "\"port\"", "\"projectPath\"", "\"projectHash\"",
+                "\"pid\"", "\"port\"", "\"authToken\"", "\"projectPath\"", "\"projectHash\"",
                 "\"startedAt\"", "\"updatedAt\"", "\"heartbeatAt\"",
                 "\"state\"", "\"isPlaying\"", "\"isCompiling\"",
                 "\"bridgeVersion\"", "\"unityVersion\""
@@ -96,6 +96,56 @@ namespace UnityOpenMcpBridge.Tests
 
             Assert.AreNotEqual(first, second, "Lock should reflect the new port");
             StringAssert.Contains("\"port\":22029", second);
+        }
+
+        // M14 — the per-session bearer token is written into the lock so the
+        // MCP server can discover it. Mirror the TS-side InstanceLock.authToken
+        // field. Token is always minted regardless of authMode.
+        [Test]
+        public void Acquire_WritesAuthToken_OfExpectedShape()
+        {
+            BridgeInstanceLock.Acquire(TestProjectPath, 22028);
+
+            var json = File.ReadAllText(InstancePortResolver.LockPath(TestProjectPath));
+
+            // Field present and a 64-char hex value (32 bytes hex-encoded).
+            var match = Regex.Match(json, "\"authToken\":\"([0-9a-f]+)\"");
+            Assert.IsTrue(match.Success,
+                $"Lock JSON should carry a hex authToken. Got: {json}");
+            Assert.AreEqual(BridgeAuthToken.HexLength, match.Groups[1].Value.Length,
+                $"authToken must be {BridgeAuthToken.HexLength} hex chars (256-bit). Got: {match.Groups[1].Value}");
+
+            // The in-memory accessor must match the on-disk value so the HTTP
+            // auth check compares against what the client discovered.
+            Assert.AreEqual(match.Groups[1].Value, BridgeInstanceLock.AuthToken);
+        }
+
+        [Test]
+        public void Acquire_MintsFreshToken_OnEachAcquire()
+        {
+            BridgeInstanceLock.Acquire(TestProjectPath, 22028);
+            var firstToken = BridgeInstanceLock.AuthToken;
+            Assert.IsNotNull(firstToken);
+
+            BridgeInstanceLock.Acquire(TestProjectPath, 22029);
+            var secondToken = BridgeInstanceLock.AuthToken;
+
+            Assert.AreNotEqual(firstToken, secondToken,
+                "A fresh Acquire must mint a fresh token so a bridge restart " +
+                "invalidates any previously discovered token.");
+        }
+
+        [Test]
+        public void Release_ClearsAuthToken()
+        {
+            BridgeInstanceLock.Acquire(TestProjectPath, 22028);
+            Assert.IsNotNull(BridgeInstanceLock.AuthToken);
+
+            BridgeInstanceLock.Release();
+
+            Assert.IsNull(BridgeInstanceLock.AuthToken,
+                "Release must clear the in-memory token so a stale handle " +
+                "can't be used to authorize post-shutdown traffic.");
         }
 
         [Test]

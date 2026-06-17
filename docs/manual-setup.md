@@ -243,6 +243,24 @@ To run two projects side by side, just open both in Unity with the bridge packag
 
 `UNITY_OPEN_MCP_BRIDGE_PORT` still overrides the deterministic default when you want to pin a specific port (CI, pinned dev setup). The override applies on both sides — set it in the MCP server env and pass `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>` to Unity.
 
+## Authentication (M14)
+
+The bridge mints a per-session bearer token into the same lock file described above, and the MCP server reads it automatically — so **no configuration is needed for the default (`authMode: "none"`) or for `required` mode**. The MCP server always sends `Authorization: Bearer <token>` when it can discover one, and the bridge ignores it unless the project asks for enforcement.
+
+To require the token (recommended on shared machines where another local process might reach the loopback listener):
+
+1. In Unity, open the bridge window → **Settings** tab → **Bridge auth** → set **Auth mode** to `required`. Or edit `.unity-open-mcp/settings.json` directly:
+
+   ```json
+   { "authMode": "required" }
+   ```
+
+2. Reload the bridge. The MCP server picks up the token from the lock file on its next start — no env var, no client-side change.
+
+A request without the header (or with the wrong token) gets `401 {"error":{"code":"unauthorized", ...}}`. The bridge binds `127.0.0.1` only either way; `required` is an extra layer, not a substitute for loopback binding. See [Bridge HTTP API → Authentication](api/bridge-http.md#authentication-m14) for the full policy.
+
+> Note: when you pin `UNITY_OPEN_MCP_BRIDGE_PORT` on both sides, the MCP server skips reading the lock file, so it has no token to send — in that pinned-port setup, keep `authMode` as `none`.
+
 ## Launch dialog auto-dismiss
 
 When Unity starts with compile errors, it blocks behind a native modal — the "compile errors at launch" / "Enter Safe Mode?" prompt. The MCP server would then stall on `/ping` and compile-wait loops with no way to recover, which matters most in unattended / CI flows.

@@ -29,12 +29,26 @@ Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(proj
 
 Lock / heartbeat fields:
 - `pid`, `port`, `projectPath`, `projectHash`
+- `authToken` — per-session bearer token (M14); see [Authentication](#authentication-m14)
 - `startedAt`, `updatedAt`, `heartbeatAt` (ISO-8601 UTC)
 - `state` — `idle` | `compiling` | `reloading` | `entering_playmode` | `playing` | `exiting_playmode`
 - `isPlaying`, `isCompiling`
 - `bridgeVersion`, `unityVersion`
 
 The MCP server reads this file (no HTTP round-trip needed) to pick the right bridge port per project; stale locks whose `pid` is no longer alive are ignored and cleaned up by the next bridge that starts. `GET /instance` returns the same JSON the bridge just wrote, for clients that want to verify the live bridge against the on-disk lock.
+
+## Authentication (M14)
+
+The bridge mints a 256-bit per-session bearer token into the instance lock (`authToken` field above) on every start. Whether the HTTP layer *enforces* it is controlled by `authMode` in `.unity-open-mcp/settings.json`:
+
+| `authMode` | Behavior |
+|---|---|
+| `none` (default) | Every request is accepted. The token is still minted into the lock so flipping to `required` needs no restart. |
+| `required` | Every request must carry `Authorization: Bearer <token>` matching the live instance's token. Mismatched/missing → `401 {"error":{"code":"unauthorized", ...}}`. |
+
+All endpoints are gated equally — there are no exempt paths. The MCP server auto-discovers the token from the lock file (see [Manual setup](../manual-setup.md#authentication-m14)), so no client-side configuration is needed; a project can be flipped from `none` to `required` purely on the bridge side.
+
+The comparison is constant-time and unknown `authMode` values fail closed (treated as `required`), so a corrupt settings file cannot silently disable auth. The bridge still binds `127.0.0.1` only; `required` adds defense for shared machines where another local process might otherwise reach the listener.
 
 ## `/ping` response
 

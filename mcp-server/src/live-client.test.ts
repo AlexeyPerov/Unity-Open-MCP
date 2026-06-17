@@ -175,3 +175,69 @@ test("LiveClient: dismiss loop is skipped when opted out via env", async () => {
     else process.env.UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS = prev;
   }
 });
+
+// ----- M14: bearer token header -----
+
+/**
+ * Handler that records the Authorization header of the first /ping request it
+ * sees, then responds with an idle 200. Used to assert LiveClient attaches the
+ * bearer token discovered from the instance lock.
+ */
+function headerCapturingHandler(
+  seen: { auth?: string | null },
+): (req: IncomingMessage, res: ServerResponse) => void {
+  return (req, res) => {
+    if (req.url === "/ping" && seen.auth === undefined) {
+      seen.auth = req.headers["authorization"] ?? null;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (req.url === "/ping") {
+      res.end(
+        JSON.stringify({
+          connected: true,
+          projectPath: "/proj",
+          unityVersion: "6000.0.0f1",
+          bridgeVersion: "0.1.0",
+          mode: "live",
+          compiling: false,
+          isPlaying: false,
+        }),
+      );
+      return;
+    }
+    res.end(JSON.stringify({ ok: true }));
+  };
+}
+
+test("LiveClient: sends Authorization: Bearer <token> when a token was provided", async () => {
+  const seen: { auth?: string | null } = {};
+  const bridge = await startBridgeStub(headerCapturingHandler(seen));
+  try {
+    const token = "deadbeef".repeat(8);
+    const client = new LiveClient(bridge.port, new PingCache(), token);
+    await client.isLiveAvailable();
+    assert.equal(
+      seen.auth,
+      `Bearer ${token}`,
+      "Authorization header must carry the discovered token",
+    );
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("LiveClient: omits Authorization header when no token was provided", async () => {
+  const seen: { auth?: string | null } = {};
+  const bridge = await startBridgeStub(headerCapturingHandler(seen));
+  try {
+    const client = new LiveClient(bridge.port, new PingCache());
+    await client.isLiveAvailable();
+    assert.equal(
+      seen.auth,
+      null,
+      "No Authorization header when the client has no token (authMode \"none\")",
+    );
+  } finally {
+    await bridge.close();
+  }
+});

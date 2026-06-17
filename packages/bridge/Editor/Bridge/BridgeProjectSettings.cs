@@ -5,6 +5,7 @@
 //   - defaultGateMode (Plan 3)
 //   - autoStart (Plan 4)
 //   - verboseActivityLog (Plan 4)
+//   - authMode (M14): "none" (default) | "required"
 //
 // Unknown fields in the file are preserved on save so future Hub / MCP tooling can extend
 // the same file without a v1 migration step. Missing / unreadable files produce an empty
@@ -26,6 +27,10 @@ namespace UnityOpenMcpBridge
         public string defaultGateMode = "enforce";
         public bool autoStart = true;
         public bool verboseActivityLog = false;
+        // M14 — bridge auth policy. "none" ignores the bearer token the client
+        // sends; "required" enforces it. The token is always minted into the
+        // instance lock so the project can flip to "required" with no restart.
+        public string authMode = "none";
     }
 
     public static class BridgeProjectSettings
@@ -79,6 +84,9 @@ namespace UnityOpenMcpBridge
                         _data.disabledTools = Array.Empty<string>();
                     if (string.IsNullOrEmpty(_data.defaultGateMode))
                         _data.defaultGateMode = "enforce";
+                    // M14 — coerce missing/invalid authMode to the safe default.
+                    if (!BridgeAuthPolicy.IsValid(_data.authMode))
+                        _data.authMode = BridgeAuthPolicy.Default;
                 }
             }
             catch (Exception e)
@@ -192,6 +200,35 @@ namespace UnityOpenMcpBridge
             if (!_loaded) Load();
             if (_data.verboseActivityLog == value) return;
             _data.verboseActivityLog = value;
+            Save();
+        }
+
+        // M14 — bridge auth policy accessor. Canonicalized through
+        // BridgeAuthPolicy so callers never see an out-of-set value. The raw
+        // field on BridgeProjectSettingsData is the persistence shape; this is
+        // the read/write contract the UI and HTTP layer use.
+        public static string AuthMode
+        {
+            get
+            {
+                if (!_loaded) Load();
+                return BridgeAuthPolicy.IsValid(_data.authMode)
+                    ? _data.authMode
+                    : BridgeAuthPolicy.Default;
+            }
+        }
+
+        public static void SetAuthMode(string value)
+        {
+            if (!_loaded) Load();
+            if (!BridgeAuthPolicy.IsValid(value))
+            {
+                Debug.LogWarning($"[BridgeProjectSettings] Ignoring invalid authMode '{value}'. " +
+                                 $"Valid values: {string.Join(", ", BridgeAuthPolicy.ValidModes)}.");
+                return;
+            }
+            if (_data.authMode == value) return;
+            _data.authMode = value;
             Save();
         }
 

@@ -16,7 +16,7 @@ import { ToolRouter } from "./tool-router.js";
 import { PingCache } from "./ping-cache.js";
 import { ResourceRouter } from "./resource-router.js";
 import { withSchemaDefaults } from "./schema-defaults.js";
-import { resolvePort } from "./instance-discovery.js";
+import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
 import { BridgeEventStream } from "./event-stream.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 
@@ -34,7 +34,7 @@ const TOOL_BY_NAME = new Map<string, Tool>(
  *   3. deterministic hash of the project path (20000 + sha256 % 10000)
  * The resolved port is logged so users can see which bridge was picked.
  */
-function getEnv(): { projectPath: string; port: number } {
+function getEnv(): { projectPath: string; port: number; authToken?: string } {
   const projectPath = process.env.UNITY_PROJECT_PATH;
   if (!projectPath) {
     console.error(
@@ -55,23 +55,46 @@ function getEnv(): { projectPath: string; port: number } {
   console.error(
     `[unity-open-mcp] Bridge port resolved to ${port} (${source}) for project ${projectPath}`,
   );
-  return { projectPath, port };
+  // M14 — auto-discover the bridge's per-session bearer token from the same
+  // instance lock we read the port from. Undefined when no live lock exists
+  // (older bridge / env port override); in that case the client sends no
+  // Authorization header and the bridge must be in authMode "none".
+  const authToken = resolveAuthToken(
+    projectPath,
+    Number.isInteger(envPort) ? envPort : undefined,
+  );
+  if (authToken) {
+    console.error("[unity-open-mcp] Bridge auth token discovered from instance lock.");
+  } else {
+    console.error(
+      "[unity-open-mcp] No bridge auth token discovered (authMode must be \"none\").",
+    );
+  }
+  return { projectPath, port, authToken };
 }
 
-export function createServer(projectPath: string, port: number): Server {
+export function createServer(
+  projectPath: string,
+  port: number,
+  authToken?: string,
+): Server {
   const server = new Server(
     { name: "unity-open-mcp", version: "0.1.0" },
     { capabilities: { tools: {}, resources: {} } },
   );
 
   const pingCache = new PingCache();
-  const liveClient = new LiveClient(port, pingCache);
+  const liveClient = new LiveClient(port, pingCache, authToken);
   const batchSpawn = new BatchSpawn();
   // M13 T4.4 — one SSE subscription per server process. The MCP server is the
   // only long-lived hop between the bridge and the LLM; a per-process reader
   // amortizes the connection and lets every `unity_agent_pull_events` call
   // share the same buffered queue.
-  const eventStream = new BridgeEventStream(`http://127.0.0.1:${port}`);
+  const eventStream = new BridgeEventStream(
+    `http://127.0.0.1:${port}`,
+    undefined,
+    authToken,
+  );
   const router = new ToolRouter(liveClient, batchSpawn, projectPath, eventStream);
   const resourceRouter = new ResourceRouter({
     live: liveClient,
@@ -112,8 +135,8 @@ export function createServer(projectPath: string, port: number): Server {
 }
 
 async function main() {
-  const { port, projectPath } = getEnv();
-  const server = createServer(projectPath, port);
+  const { port, projectPath, authToken } = getEnv();
+  const server = createServer(projectPath, port, authToken);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
