@@ -34,9 +34,17 @@ namespace UnityOpenMcpBridge.MetaTools
                 return ToolDispatchResult.Fail("invalid_paths",
                     "One or more paths failed pre-flight checks: " + string.Join("; ", invalid));
 
+            // Default: assets-only round-trip (ReserializeAssets) so a direct YAML
+            // edit on the asset body does not churn the companion .meta with empty
+            // importer-field whitespace (userData:/assetBundleName:). Callers that
+            // need to round-trip importer metadata (upgrade workflows) opt in via
+            // include_meta: true -> ReserializeAssetsAndMetadata.
+            var includeMeta = JsonBody.GetBool(body, "include_meta", false);
+            var options = ResolveOptions(includeMeta);
+
             try
             {
-                AssetDatabase.ForceReserializeAssets(normalized);
+                AssetDatabase.ForceReserializeAssets(normalized, options);
                 AssetDatabase.Refresh();
             }
             catch (System.Exception e)
@@ -45,7 +53,17 @@ namespace UnityOpenMcpBridge.MetaTools
                     $"AssetDatabase.ForceReserializeAssets threw: {e.Message}");
             }
 
-            return ToolDispatchResult.Ok(BuildResult(normalized));
+            return ToolDispatchResult.Ok(BuildResult(normalized, includeMeta));
+        }
+
+        // Maps the user-facing include_meta flag to Unity's ForceReserializeAssetsOptions.
+        // Exposed as a pure function so the mapping can be unit-tested without driving
+        // AssetDatabase from EditMode.
+        public static ForceReserializeAssetsOptions ResolveOptions(bool includeMeta)
+        {
+            return includeMeta
+                ? ForceReserializeAssetsOptions.ReserializeAssetsAndMetadata
+                : ForceReserializeAssetsOptions.ReserializeAssets;
         }
 
         // Normalize for AssetDatabase: forward slashes, no leading slash, rooted under Assets/.
@@ -100,7 +118,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return invalid;
         }
 
-        static string BuildResult(System.Collections.Generic.List<string> paths)
+        static string BuildResult(System.Collections.Generic.List<string> paths, bool includeMeta)
         {
             var sb = new StringBuilder(256 + paths.Count * 64);
             sb.Append("{\"reserialized\":[");
@@ -111,6 +129,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
             sb.Append("],\"totalCount\":").Append(paths.Count);
             sb.Append(",\"wholeProject\":false");
+            sb.Append(",\"includeMeta\":").Append(includeMeta ? "true" : "false");
             sb.Append('}');
             return sb.ToString();
         }

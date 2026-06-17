@@ -116,6 +116,8 @@ Issue keys in `gate.delta.newIssues` are `ruleId|severity|assetPath|issueCode` (
 
 When you edit a `.prefab` / `.unity` / `.asset` / `.mat` / `.controller` / `.anim` file directly as YAML text, run **`unity_open_mcp_reserialize`** with the touched `paths` (the `paths` array doubles as the gate scope). The round-trip rewrites the file canonically so missing fields, wrong indentation, and stale `fileID` references surface in `gate.delta`. Supported extensions: `.prefab`, `.unity`, `.asset`, `.mat`, `.controller`, `.anim`. Whole-project reserialize is intentionally unsupported — enumerate the assets you edited.
 
+By default the round-trip targets **asset YAML only** — the companion `.meta` is left untouched, so a body-only edit produces no `.meta` diff. Pass `include_meta: true` only when you intentionally round-trip importer metadata (upgrade / importer-change workflows).
+
 **Principle: edit freely, but always reserialize before trusting a direct YAML change.**
 
 ### read_asset: map, not dump

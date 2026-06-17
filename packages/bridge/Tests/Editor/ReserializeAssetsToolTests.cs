@@ -4,6 +4,7 @@
 // the live demo project and would mutate fixtures).
 using NUnit.Framework;
 using UnityOpenMcpBridge.MetaTools;
+using UnityEditor;
 
 namespace UnityOpenMcpBridge.Tests
 {
@@ -69,6 +70,28 @@ namespace UnityOpenMcpBridge.Tests
             CollectionAssert.Contains(ReserializeAssetsTool.SupportedExtensions, ".mat");
             CollectionAssert.Contains(ReserializeAssetsTool.SupportedExtensions, ".controller");
             CollectionAssert.Contains(ReserializeAssetsTool.SupportedExtensions, ".anim");
+        }
+
+        // T2.7 — by default reserialize targets asset YAML only so a direct body
+        // edit does not churn the companion .meta with empty importer-field
+        // whitespace (userData:/assetBundleName:). include_meta: true opts in to
+        // importer-metadata round-trip for upgrade/importer-change workflows.
+        // ResolveOptions is a pure function so the mapping can be unit-tested
+        // without driving AssetDatabase.ForceReserializeAssets from EditMode.
+        [Test]
+        public void ResolveOptions_Default_ReturnsAssetsOnly()
+        {
+            Assert.AreEqual(
+                ForceReserializeAssetsOptions.ReserializeAssets,
+                ReserializeAssetsTool.ResolveOptions(false));
+        }
+
+        [Test]
+        public void ResolveOptions_IncludeMeta_ReturnsAssetsAndMetadata()
+        {
+            Assert.AreEqual(
+                ForceReserializeAssetsOptions.ReserializeAssetsAndMetadata,
+                ReserializeAssetsTool.ResolveOptions(true));
         }
     }
 }
