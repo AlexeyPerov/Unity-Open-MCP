@@ -81,6 +81,16 @@ function categoryFor(toolName: string): string {
 // ---------------------------------------------------------------------------
 // Planned typed tools — the curated editor surface (forward-looking)
 // ---------------------------------------------------------------------------
+//
+// Single source of truth for the planned typed-editor surface. Each entry is a
+// concrete tool name (not a wildcard) so `unity_open_mcp_capabilities` can
+// advertise the full planned surface with per-tool guidance, letting agents
+// learn the shape of upcoming typed tools without discovering gaps by trial.
+//
+// This list is synchronized with the per-plan typed-tool tables in
+// `specs/execution/M16/execution-plan-*.md`. When a plan implements a tool,
+// move it out of here (it becomes a real Tool in `src/tools/`). When the
+// planned surface changes, update both this array and the matching plan table.
 
 export interface PlannedTool {
   name: string;
@@ -89,87 +99,494 @@ export interface PlannedTool {
   guidance: string;
 }
 
+// Generic guidance reused across many planned typed tools.
+const MUTATE_VIA_EXECUTE_CSHARP =
+  "Planned typed surface. Use execute_csharp / invoke_method today.";
+
 export const PLANNED_TOOLS: PlannedTool[] = [
+  // --- Plan 1: Assets -----------------------------------------------------
   {
-    name: "unity_open_mcp_assets_*",
+    name: "unity_open_mcp_assets_create_folder",
     category: "typed-editor",
-    description:
-      "Typed asset CRUD, material, and prefab staging helpers.",
-    guidance:
-      "Planned typed surface. Use execute_csharp / invoke_method for asset CRUD today.",
+    description: "Create a folder asset under Assets/.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
   },
   {
-    name: "unity_open_mcp_gameobject_*",
+    name: "unity_open_mcp_assets_copy",
     category: "typed-editor",
-    description: "Typed GameObject and component lifecycle operations.",
-    guidance:
-      "Planned typed surface. Use invoke_method or execute_csharp for hierarchy/component edits today.",
+    description: "Copy asset(s) to new project paths.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
   },
   {
-    name: "unity_open_mcp_scene_*",
+    name: "unity_open_mcp_assets_move",
     category: "typed-editor",
-    description: "Typed scene lifecycle and data operations.",
-    guidance:
-      "Planned typed surface. Use execute_csharp for scene open/save/additive today.",
+    description: "Move or rename asset(s).",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
   },
   {
-    name: "unity_open_mcp_package_*",
+    name: "unity_open_mcp_assets_delete",
     category: "typed-editor",
-    description:
-      "Package manager list/add/remove/search.",
-    guidance:
-      "Planned typed surface. Read Packages/manifest.json directly or use execute_csharp with PackageManagerClient today.",
+    description: "Delete asset(s).",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
   },
+  {
+    name: "unity_open_mcp_assets_refresh",
+    category: "typed-editor",
+    description: "Refresh the AssetDatabase (optionally wait for compile).",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_material_create",
+    category: "typed-editor",
+    description: "Create a new Material asset.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_material_get_properties",
+    category: "typed-editor",
+    description: "List all properties of a Material.",
+    guidance: "Planned typed surface. Use read_asset on the .mat today.",
+  },
+  {
+    name: "unity_open_mcp_material_set_property",
+    category: "typed-editor",
+    description: "Set a Material property (color/float/int/vector/texture).",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_material_get_keywords",
+    category: "typed-editor",
+    description: "List enabled shader keywords on a Material.",
+    guidance: "Planned typed surface. Use read_asset on the .mat today.",
+  },
+  {
+    name: "unity_open_mcp_material_set_keyword",
+    category: "typed-editor",
+    description: "Enable or disable a shader keyword on a Material.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_material_set_shader",
+    category: "typed-editor",
+    description: "Change a Material's shader.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_shader_list_all",
+    category: "typed-editor",
+    description: "List all shaders in the project.",
+    guidance: "Planned typed surface. Use search_assets with t:Shader today.",
+  },
+  {
+    name: "unity_open_mcp_shader_get_data",
+    category: "typed-editor",
+    description: "Read shader properties, passes, and compile errors.",
+    guidance: "Planned typed surface. Use read_asset on the .shader today.",
+  },
+  {
+    name: "unity_open_mcp_prefab_instantiate",
+    category: "typed-editor",
+    description: "Instantiate a prefab into the active scene.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_prefab_create",
+    category: "typed-editor",
+    description: "Create a prefab (or variant) asset from a scene object.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_prefab_open",
+    category: "typed-editor",
+    description: "Open the prefab edit stage.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_prefab_close",
+    category: "typed-editor",
+    description: "Close the prefab edit stage.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_prefab_save",
+    category: "typed-editor",
+    description: "Save the opened prefab stage back to the asset.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_prefab_apply",
+    category: "typed-editor",
+    description: "Apply instance overrides back to the prefab asset.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_prefab_revert",
+    category: "typed-editor",
+    description: "Revert a prefab instance to match the asset.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_prefab_unpack",
+    category: "typed-editor",
+    description: "Unpack a prefab instance into a plain GameObject.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_prefab_get_overrides",
+    category: "typed-editor",
+    description: "List property overrides on a prefab instance.",
+    guidance: "Planned typed surface. Use read_asset on the instance today.",
+  },
+  {
+    name: "unity_open_mcp_prefab_status",
+    category: "typed-editor",
+    description: "Report the prefab-ness of a GameObject.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+
+  // --- Plan 2: GameObject & Components ------------------------------------
+  {
+    name: "unity_open_mcp_gameobject_create",
+    category: "typed-editor",
+    description: "Create a GameObject (empty or primitive).",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_gameobject_destroy",
+    category: "typed-editor",
+    description: "Destroy a GameObject.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_gameobject_duplicate",
+    category: "typed-editor",
+    description: "Duplicate a GameObject.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_gameobject_find",
+    category: "typed-editor",
+    description: "Find a GameObject by path/name/instance_id.",
+    guidance: "Planned typed surface. Use invoke_method with GameObject.Find* today.",
+  },
+  {
+    name: "unity_open_mcp_gameobject_modify",
+    category: "typed-editor",
+    description: "Modify a GameObject (transform, name, tag, layer, active).",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_gameobject_set_parent",
+    category: "typed-editor",
+    description: "Reparent a GameObject.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_component_add",
+    category: "typed-editor",
+    description: "Add a component to a GameObject by type name.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_component_destroy",
+    category: "typed-editor",
+    description: "Destroy a component from a GameObject.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_component_get",
+    category: "typed-editor",
+    description: "Read a component's serialized data.",
+    guidance: "Planned typed surface. Use invoke_method / read_asset today.",
+  },
+  {
+    name: "unity_open_mcp_component_modify",
+    category: "typed-editor",
+    description: "Modify a component's fields/properties.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_component_list_all",
+    category: "typed-editor",
+    description: "List attachable component types (paginated).",
+    guidance: "Planned typed surface. Use find_members with kind=type today.",
+  },
+
+  // --- Plan 3: Scene ------------------------------------------------------
+  {
+    name: "unity_open_mcp_scene_create",
+    category: "typed-editor",
+    description: "Create a new scene asset.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_scene_open",
+    category: "typed-editor",
+    description: "Open a scene (single or additive).",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_scene_save",
+    category: "typed-editor",
+    description: "Save an opened scene.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_scene_unload",
+    category: "typed-editor",
+    description: "Unload an opened scene.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_scene_set_active",
+    category: "typed-editor",
+    description: "Mark an opened scene as active.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_scene_list_opened",
+    category: "typed-editor",
+    description: "List currently opened scenes.",
+    guidance: "Planned typed surface. Use execute_csharp with SceneManager today.",
+  },
+  {
+    name: "unity_open_mcp_scene_get_data",
+    category: "typed-editor",
+    description: "Read scene hierarchy as compact, drill-down structured data.",
+    guidance: "Planned typed surface. Use read_asset on the .unity today.",
+  },
+  {
+    name: "unity_open_mcp_scene_get_dirty_summary",
+    category: "typed-editor",
+    description: "Summarize unsaved changes per opened scene.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_scene_focus",
+    category: "typed-editor",
+    description: "Focus the SceneView camera on a GameObject.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+
+  // --- Plan 4: Packages ---------------------------------------------------
+  {
+    name: "unity_open_mcp_package_list",
+    category: "typed-editor",
+    description: "List installed UPM packages.",
+    guidance: "Planned typed surface. Read Packages/manifest.json directly today.",
+  },
+  {
+    name: "unity_open_mcp_package_search",
+    category: "typed-editor",
+    description: "Search UPM registry + local packages.",
+    guidance: "Planned typed surface. Read Packages/manifest.json directly today.",
+  },
+  {
+    name: "unity_open_mcp_package_add",
+    category: "typed-editor",
+    description: "Install a UPM package.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_package_remove",
+    category: "typed-editor",
+    description: "Remove a UPM package.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_package_get_info",
+    category: "typed-editor",
+    description: "Inspect one package (deps, source, version).",
+    guidance: "Planned typed surface. Read Packages/manifest.json directly today.",
+  },
+  {
+    name: "unity_open_mcp_package_get_dependencies",
+    category: "typed-editor",
+    description: "List manifest dependencies.",
+    guidance: "Planned typed surface. Read Packages/manifest.json directly today.",
+  },
+  {
+    name: "unity_open_mcp_package_check",
+    category: "typed-editor",
+    description: "Check presence/version of a packageId.",
+    guidance: "Planned typed surface. Read Packages/manifest.json directly today.",
+  },
+
+  // --- Plan 5: Console + Editor state/selection/tags/layers/undo ----------
   {
     name: "unity_open_mcp_console_clear",
     category: "typed-editor",
     description: "Clear the Unity console.",
-    guidance:
-      "Planned typed surface. Use execute_csharp with LogEntries.Clear() today.",
+    guidance: "Planned typed surface. Use execute_csharp with LogEntries.Clear() today.",
+  },
+  {
+    name: "unity_open_mcp_console_log",
+    category: "typed-editor",
+    description: "Write a log/warning/error to the console.",
+    guidance: "Planned typed surface. Use execute_csharp with Debug.Log today.",
   },
   {
     name: "unity_open_mcp_editor_set_state",
     category: "typed-editor",
-    description: "Set Editor play/pause state.",
-    guidance:
-      "Planned typed surface. Use execute_csharp with EditorApplication.isPlaying today.",
+    description: "Set Editor play/pause/stop state.",
+    guidance: "Planned typed surface. Use execute_csharp with EditorApplication.isPlaying today.",
   },
   {
-    name: "unity_open_mcp_selection_*",
+    name: "unity_open_mcp_selection_get",
     category: "typed-editor",
-    description: "Get/set the active Editor selection.",
-    guidance:
-      "Planned typed surface. Use execute_csharp with Selection.activeObject today.",
+    description: "Get the current Editor selection.",
+    guidance: "Planned typed surface. Use execute_csharp with Selection.activeObject today.",
   },
+  {
+    name: "unity_open_mcp_selection_set",
+    category: "typed-editor",
+    description: "Set the current Editor selection.",
+    guidance: "Planned typed surface. Use execute_csharp with Selection.activeObject today.",
+  },
+  {
+    name: "unity_open_mcp_editor_undo",
+    category: "typed-editor",
+    description: "Perform an editor Undo.",
+    guidance: "Planned typed surface. Use execute_csharp with Undo.PerformUndo today.",
+  },
+  {
+    name: "unity_open_mcp_editor_redo",
+    category: "typed-editor",
+    description: "Perform an editor Redo.",
+    guidance: "Planned typed surface. Use execute_csharp with Undo.PerformRedo today.",
+  },
+  {
+    name: "unity_open_mcp_editor_get_tags",
+    category: "typed-editor",
+    description: "List configured tags.",
+    guidance: "Planned typed surface. Use execute_csharp with InternalEditorUtility.tags today.",
+  },
+  {
+    name: "unity_open_mcp_editor_get_layers",
+    category: "typed-editor",
+    description: "List configured layers.",
+    guidance: "Planned typed surface. Use execute_csharp with InternalEditorUtility.layers today.",
+  },
+  {
+    name: "unity_open_mcp_editor_add_tag",
+    category: "typed-editor",
+    description: "Add a tag.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_editor_add_layer",
+    category: "typed-editor",
+    description: "Add a layer.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+
+  // --- Plan 6: Reflection, scripts, objects -------------------------------
   {
     name: "unity_open_mcp_type_schema",
     category: "reflection",
-    description:
-      "Generate a JSON schema for any loadable C# type's public fields/properties.",
-    guidance:
-      "Planned reflection surface. Use find_members to inspect type members today.",
+    description: "Generate a JSON schema for a loadable C# type's public fields/properties.",
+    guidance: "Planned reflection surface. Use find_members to inspect type members today.",
   },
   {
-    name: "unity_open_mcp_script_*",
+    name: "unity_open_mcp_script_read",
     category: "reflection",
-    description: "Read/write/delete project script files.",
-    guidance:
-      "Planned reflection surface. Use execute_csharp with File IO today.",
+    description: "Read a .cs file (with optional line slicing).",
+    guidance: "Planned reflection surface. Use execute_csharp with File IO today.",
   },
   {
-    name: "unity_open_mcp_object_*",
+    name: "unity_open_mcp_script_write",
     category: "reflection",
-    description: "Get/modify serialized object data.",
-    guidance:
-      "Planned reflection surface. Use invoke_method or execute_csharp with SerializedObject today.",
+    description: "Create or overwrite a .cs file (Roslyn-validated).",
+    guidance: "Planned reflection surface. Use execute_csharp with File IO today.",
   },
   {
-    name: "unity_open_mcp_profiler_*",
+    name: "unity_open_mcp_script_delete",
+    category: "reflection",
+    description: "Delete .cs file(s).",
+    guidance: "Planned reflection surface. Use execute_csharp with File IO today.",
+  },
+  {
+    name: "unity_open_mcp_object_get_data",
+    category: "reflection",
+    description: "Read serialized data of a UnityEngine.Object.",
+    guidance: "Planned reflection surface. Use read_asset / invoke_method today.",
+  },
+  {
+    name: "unity_open_mcp_object_modify",
+    category: "reflection",
+    description: "Modify a UnityEngine.Object's fields/properties.",
+    guidance: "Planned reflection surface. Use invoke_method or execute_csharp with SerializedObject today.",
+  },
+
+  // --- Plan 7: Profiler session ------------------------------------------
+  {
+    name: "unity_open_mcp_profiler_start",
     category: "diagnostics",
-    description: "Profiler session/module/save/load/clear helpers.",
-    guidance:
-      "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+    description: "Start the runtime profiler.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
   },
+  {
+    name: "unity_open_mcp_profiler_stop",
+    category: "diagnostics",
+    description: "Stop the runtime profiler.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+  },
+  {
+    name: "unity_open_mcp_profiler_get_status",
+    category: "diagnostics",
+    description: "Report profiler enabled state, modules, and memory.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+  },
+  {
+    name: "unity_open_mcp_profiler_get_config",
+    category: "diagnostics",
+    description: "Read profiler config.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+  },
+  {
+    name: "unity_open_mcp_profiler_set_config",
+    category: "diagnostics",
+    description: "Update profiler config.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+  },
+  {
+    name: "unity_open_mcp_profiler_list_modules",
+    category: "diagnostics",
+    description: "List profiler module names with enabled flags.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+  },
+  {
+    name: "unity_open_mcp_profiler_enable_module",
+    category: "diagnostics",
+    description: "Toggle a profiler module's enabled flag.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+  },
+  {
+    name: "unity_open_mcp_profiler_clear_data",
+    category: "diagnostics",
+    description: "Clear buffered profiler frames.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+  },
+  {
+    name: "unity_open_mcp_profiler_save_data",
+    category: "diagnostics",
+    description: "Save a profiler snapshot to a path.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+  },
+  {
+    name: "unity_open_mcp_profiler_load_data",
+    category: "diagnostics",
+    description: "Load a saved profiler snapshot.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+  },
+  {
+    name: "unity_open_mcp_profiler_get_script_stats",
+    category: "diagnostics",
+    description: "Read script execution timing and Mono/GC memory.",
+    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
+  },
+
+  // --- Plan 8: Gate intelligence -----------------------------------------
   {
     name: "unity_open_mcp_impact_preview",
     category: "gate-intelligence",
@@ -188,6 +605,104 @@ export const PLANNED_TOOLS: PlannedTool[] = [
     description: "Explain what a mutation did and why the gate flagged it.",
     guidance:
       "Planned gate-intelligence surface. Read gate.delta and agentNextSteps in mutation responses today.",
+  },
+
+  // --- Plan 10: Build & Settings -----------------------------------------
+  {
+    name: "unity_open_mcp_build_get_targets",
+    category: "typed-editor-build-settings",
+    description: "List available build targets.",
+    guidance: "Planned build surface. Use execute_csharp with BuildPipeline today.",
+  },
+  {
+    name: "unity_open_mcp_build_get_active_target",
+    category: "typed-editor-build-settings",
+    description: "Get the active build target.",
+    guidance: "Planned build surface. Use execute_csharp with EditorUserBuildSettings today.",
+  },
+  {
+    name: "unity_open_mcp_build_set_target",
+    category: "typed-editor-build-settings",
+    description: "Switch the active build target (may recompile).",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_build_get_scenes",
+    category: "typed-editor-build-settings",
+    description: "List scenes in build settings.",
+    guidance: "Planned build surface. Read EditorBuildSettings via execute_csharp today.",
+  },
+  {
+    name: "unity_open_mcp_build_set_scenes",
+    category: "typed-editor-build-settings",
+    description: "Set the build scene list.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_build_start",
+    category: "typed-editor-build-settings",
+    description: "Trigger a player build (destructive — gated).",
+    guidance: "Planned build surface. Use execute_csharp with BuildPipeline.BuildPlayer today.",
+  },
+  {
+    name: "unity_open_mcp_build_get_defines",
+    category: "typed-editor-build-settings",
+    description: "Read scripting define symbols.",
+    guidance: "Planned build surface. Use execute_csharp with PlayerSettings.GetScriptingDefineSymbols today.",
+  },
+  {
+    name: "unity_open_mcp_build_set_defines",
+    category: "typed-editor-build-settings",
+    description: "Set scripting define symbols.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_settings_get_player",
+    category: "typed-editor-build-settings",
+    description: "Read PlayerSettings.",
+    guidance: "Planned settings surface. Read ProjectSettings/ProjectSettings.asset today.",
+  },
+  {
+    name: "unity_open_mcp_settings_set_player",
+    category: "typed-editor-build-settings",
+    description: "Set a PlayerSettings value.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_settings_get_quality",
+    category: "typed-editor-build-settings",
+    description: "Read QualitySettings.",
+    guidance: "Planned settings surface. Read ProjectSettings/QualitySettings.asset today.",
+  },
+  {
+    name: "unity_open_mcp_settings_set_quality",
+    category: "typed-editor-build-settings",
+    description: "Set a QualitySettings value.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_settings_get_physics",
+    category: "typed-editor-build-settings",
+    description: "Read Physics / Physics2D settings.",
+    guidance: "Planned settings surface. Read ProjectSettings/DynamicsManager.asset today.",
+  },
+  {
+    name: "unity_open_mcp_settings_set_physics",
+    category: "typed-editor-build-settings",
+    description: "Set a Physics / Physics2D setting.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
+  },
+  {
+    name: "unity_open_mcp_settings_get_lighting",
+    category: "typed-editor-build-settings",
+    description: "Read render/lighting settings.",
+    guidance: "Planned settings surface. Read lighting/render settings assets today.",
+  },
+  {
+    name: "unity_open_mcp_settings_set_lighting",
+    category: "typed-editor-build-settings",
+    description: "Set a render/lighting setting.",
+    guidance: MUTATE_VIA_EXECUTE_CSHARP,
   },
 ];
 

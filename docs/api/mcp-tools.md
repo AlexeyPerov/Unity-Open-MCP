@@ -77,16 +77,17 @@ M16 adds a curated typed surface on top of existing meta-tools. Duplicates are i
 - keep M9 read/list/search/reserialize as the asset intelligence baseline
 - keep M10 sense tools for screenshots/test run/profiler capture/memory/rendering/spatial
 
-Planned categories:
+The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabilities` (each entry carries `status: "planned"` and a fallback `guidance` string). The source of truth is `mcp-server/src/capabilities/build-capabilities.ts`, synchronized with the per-plan tables in `specs/execution/M16/execution-plan-*.md`. Planned categories:
 
-- **Project & Asset Management:** typed asset CRUD/material/prefab stage helpers (`unity_open_mcp_assets_*`)
-- **GameObject & Components:** typed hierarchy/component lifecycle (`unity_open_mcp_gameobject_*`)
-- **Scene Management:** typed scene lifecycle/data (`unity_open_mcp_scene_*`)
-- **Package Manager:** `unity_open_mcp_package_list`, `unity_open_mcp_package_add`, `unity_open_mcp_package_remove`, `unity_open_mcp_package_search`
-- **Console + Editor state/selection:** `unity_open_mcp_console_clear`, `unity_open_mcp_editor_set_state`, `unity_open_mcp_selection_get`, `unity_open_mcp_selection_set`
-- **Reflection/scripts/object data:** `unity_open_mcp_type_schema`, `unity_open_mcp_script_read`, `unity_open_mcp_script_write`, `unity_open_mcp_script_delete`, `unity_open_mcp_object_get_data`, `unity_open_mcp_object_modify`
-- **Profiler & Diagnostics session:** `unity_open_mcp_profiler_*` session/module/save/load/clear helpers (non-duplicate with M10 capture/memory/rendering)
-- **Gate intelligence:** `unity_open_mcp_impact_preview`, `unity_open_mcp_gate_budget_estimate`, `unity_open_mcp_mutation_explain`
+- **Project & Asset Management:** typed asset CRUD (`assets_create_folder`, `assets_copy`, `assets_move`, `assets_delete`, `assets_refresh`), material helpers (`material_create`, `material_get/set_property`, `material_get/set_keywords`, `material_set_shader`), shader reads (`shader_list_all`, `shader_get_data`), and prefab lifecycle (`prefab_instantiate/create/open/close/save` + `prefab_apply/revert/unpack/get_overrides/status`)
+- **GameObject & Components:** typed hierarchy/component lifecycle (`gameobject_create/destroy/duplicate/find/modify/set_parent`, `component_add/destroy/get/modify/list_all`)
+- **Scene Management:** typed scene lifecycle/data (`scene_create/open/save/unload/set_active/list_opened`, `scene_get_data`, `scene_get_dirty_summary`, `scene_focus`)
+- **Package Manager:** `package_list`, `package_search`, `package_add`, `package_remove`, `package_get_info`, `package_get_dependencies`, `package_check`
+- **Console + Editor state/selection/tags/layers/undo:** `console_clear`, `console_log`, `editor_set_state`, `selection_get`, `selection_set`, `editor_undo`, `editor_redo`, `editor_get_tags`, `editor_get_layers`, `editor_add_tag`, `editor_add_layer`
+- **Reflection/scripts/object data:** `type_schema`, `script_read`, `script_write`, `script_delete`, `object_get_data`, `object_modify`
+- **Profiler & Diagnostics session:** `profiler_start/stop/get_status`, `profiler_get/set_config`, `profiler_list_modules`, `profiler_enable_module`, `profiler_clear_data`, `profiler_save_data`, `profiler_load_data`, `profiler_get_script_stats` (non-duplicate with M10 capture/memory/rendering)
+- **Gate intelligence:** `impact_preview`, `gate_budget_estimate`, `mutation_explain`
+- **Project configuration & build:** build pipeline (`build_get_targets`, `build_get/set_target`, `build_get/set_scenes`, `build_start`, `build_get/set_defines`) and project settings (`settings_get/set_player/quality/physics/lighting`)
 
 ## Capability discovery
 
@@ -153,8 +154,8 @@ Planned categories:
     { "id": "fix_duplicate_guid", "implemented": false, "status": "planned", "safe": false, "guidance": "Not yet ported ..." }
   ],
   "counts": {
-    "toolsImplemented": 28,
-    "toolsPlanned": 14,
+    "toolsImplemented": 32,
+    "toolsPlanned": 97,
     "rulesImplemented": 3,
     "rulesPlanned": 7,
     "fixesImplemented": 2,
