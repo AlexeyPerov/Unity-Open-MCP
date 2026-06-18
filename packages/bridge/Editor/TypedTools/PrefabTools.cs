@@ -156,10 +156,19 @@ namespace UnityOpenMcpBridge.TypedTools
             if (stage == null)
                 return ToolDispatchResult.Ok("{\"status\":\"noop\",\"note\":\"No prefab stage is currently open.\"}");
 
+            var prefabContentsRoot = stage.prefabContentsRoot;
+            var assetPath = stage.prefabAssetPath;
+
             try
             {
-                if (save) stage.Save();
-                stage.Close();
+                if (save && prefabContentsRoot != null && !string.IsNullOrEmpty(assetPath))
+                    PrefabUtility.SaveAsPrefabAsset(prefabContentsRoot, assetPath);
+                // ClearDirtiness + GoBackToPreviousStage are the supported way
+                // to exit a prefab stage. PrefabStage.Save()/Close() exist but
+                // are protected/internal (CS0122) — this pattern matches the
+                // Unity-MCP reference implementation.
+                stage.ClearDirtiness();
+                StageUtility.GoBackToPreviousStage();
             }
             catch (System.Exception e)
             {
@@ -168,7 +177,8 @@ namespace UnityOpenMcpBridge.TypedTools
 
             var sb = new StringBuilder(96);
             sb.Append("{\"status\":\"ok\",\"saved\":").Append(save ? "true" : "false");
-            sb.Append(",\"stageOpen\":false}");
+            sb.Append(",\"prefabAssetPath\":\"").Append(TypedTargets.Esc(assetPath));
+            sb.Append("\",\"stageOpen\":false}");
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
@@ -178,11 +188,23 @@ namespace UnityOpenMcpBridge.TypedTools
             if (stage == null)
                 return ToolDispatchResult.Ok("{\"status\":\"noop\",\"note\":\"No prefab stage is currently open.\"}");
 
-            try { stage.Save(); }
+            var prefabContentsRoot = stage.prefabContentsRoot;
+            var assetPath = stage.prefabAssetPath;
+            if (prefabContentsRoot == null || string.IsNullOrEmpty(assetPath))
+                return ToolDispatchResult.Fail("save_failed",
+                    "Open prefab stage is missing prefabContentsRoot or assetPath.");
+
+            try
+            {
+                // SaveAsPrefabAsset + ClearDirtiness mirrors the Unity-MCP
+                // reference; PrefabStage.Save() is protected (CS0122).
+                PrefabUtility.SaveAsPrefabAsset(prefabContentsRoot, assetPath);
+                stage.ClearDirtiness();
+            }
             catch (System.Exception e) { return ToolDispatchResult.Fail("save_failed", e.Message); }
 
             var sb = new StringBuilder(96);
-            sb.Append("{\"status\":\"ok\",\"prefabAssetPath\":\"").Append(TypedTargets.Esc(stage.prefabAssetPath));
+            sb.Append("{\"status\":\"ok\",\"prefabAssetPath\":\"").Append(TypedTargets.Esc(assetPath));
             sb.Append("\",\"saved\":true}");
             return ToolDispatchResult.Ok(sb.ToString());
         }

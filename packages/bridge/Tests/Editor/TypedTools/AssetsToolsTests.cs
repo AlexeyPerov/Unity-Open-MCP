@@ -107,10 +107,10 @@ namespace UnityOpenMcpBridge.Tests
         public void InvalidFileNameChars_IncludesSlashAndBackslash()
         {
             // Cross-platform invalid character list (mirrors Unity-MCP).
-            System.Collections.Generic.CollectionAssert.Contains(AssetsTools.InvalidFileNameChars, '/');
-            System.Collections.Generic.CollectionAssert.Contains(AssetsTools.InvalidFileNameChars, '\\');
-            System.Collections.Generic.CollectionAssert.Contains(AssetsTools.InvalidFileNameChars, ':');
-            System.Collections.Generic.CollectionAssert.Contains(AssetsTools.InvalidFileNameChars, '*');
+            Assert.Contains('/', AssetsTools.InvalidFileNameChars);
+            Assert.Contains('\\', AssetsTools.InvalidFileNameChars);
+            Assert.Contains(':', AssetsTools.InvalidFileNameChars);
+            Assert.Contains('*', AssetsTools.InvalidFileNameChars);
         }
     }
 }
