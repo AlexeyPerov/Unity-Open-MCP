@@ -93,6 +93,19 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_package_get_info",
             "unity_open_mcp_package_get_dependencies",
             "unity_open_mcp_package_check",
+            // M16 Plan 5 — typed console / editor state / selection / undo /
+            // tags / layers tools.
+            "unity_open_mcp_console_clear",
+            "unity_open_mcp_console_log",
+            "unity_open_mcp_editor_set_state",
+            "unity_open_mcp_selection_get",
+            "unity_open_mcp_selection_set",
+            "unity_open_mcp_editor_undo",
+            "unity_open_mcp_editor_redo",
+            "unity_open_mcp_editor_get_tags",
+            "unity_open_mcp_editor_get_layers",
+            "unity_open_mcp_editor_add_tag",
+            "unity_open_mcp_editor_add_layer",
             "unity_senses_run_tests",
             "unity_senses_screenshot",
             "unity_senses_read_console",
@@ -147,7 +160,24 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_package_search",
             "unity_open_mcp_package_get_info",
             "unity_open_mcp_package_get_dependencies",
-            "unity_open_mcp_package_check"
+            "unity_open_mcp_package_check",
+            // M16 Plan 5 — gate-free typed editor-state tools. They mutate
+            // editor state (console, selection, play mode, undo/redo) but
+            // write NO assets, so the gate (asset-reference validation) has
+            // nothing to validate. editor_set_state runs its own inline dirty
+            // guard (entering play mode can trigger Unity's native save modal).
+            // editor_get_tags / editor_get_layers are pure reads.
+            // editor_add_tag / editor_add_layer are NOT here — they write
+            // TagManager.asset and run the full gate (see MutatingTools).
+            "unity_open_mcp_console_clear",
+            "unity_open_mcp_console_log",
+            "unity_open_mcp_editor_set_state",
+            "unity_open_mcp_selection_get",
+            "unity_open_mcp_selection_set",
+            "unity_open_mcp_editor_undo",
+            "unity_open_mcp_editor_redo",
+            "unity_open_mcp_editor_get_tags",
+            "unity_open_mcp_editor_get_layers"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -203,7 +233,15 @@ namespace UnityOpenMcpBridge
             // caller must scope paths_hint to "Packages/manifest.json"
             // (the lock file is touched implicitly).
             "unity_open_mcp_package_add",
-            "unity_open_mcp_package_remove"
+            "unity_open_mcp_package_remove",
+            // M16 Plan 5 — typed TagManager mutators. Each rewrites
+            // ProjectSettings/TagManager.asset; the caller must scope
+            // paths_hint to that asset. The other Plan 5 tools mutate editor
+            // state (console, selection, play mode, undo/redo) but write NO
+            // assets, so they are NOT mutating in gate terms — they route as
+            // gate-free direct-response tools (see DirectResponseTools).
+            "unity_open_mcp_editor_add_tag",
+            "unity_open_mcp_editor_add_layer"
         };
 
         static HttpListener _listener;
@@ -1217,6 +1255,25 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_package_get_info" => PackagesTools.GetInfo(body),
                 "unity_open_mcp_package_get_dependencies" => PackagesTools.GetDependencies(body),
                 "unity_open_mcp_package_check" => PackagesTools.Check(body),
+                // M16 Plan 5 — typed console / editor state / selection / undo
+                // / tags / layers tools. console_clear / console_log /
+                // editor_set_state / selection_get / selection_set /
+                // editor_undo / editor_redo / editor_get_tags /
+                // editor_get_layers are gate-free direct-response tools (they
+                // mutate editor state but write no assets). editor_add_tag /
+                // editor_add_layer write ProjectSettings/TagManager.asset and
+                // run the full gate path (MutatingTools below).
+                "unity_open_mcp_console_clear" => EditorConsoleSelectionTools.ConsoleClear(body),
+                "unity_open_mcp_console_log" => EditorConsoleSelectionTools.ConsoleLog(body),
+                "unity_open_mcp_editor_set_state" => EditorConsoleSelectionTools.EditorSetState(body),
+                "unity_open_mcp_selection_get" => EditorConsoleSelectionTools.SelectionGet(body),
+                "unity_open_mcp_selection_set" => EditorConsoleSelectionTools.SelectionSet(body),
+                "unity_open_mcp_editor_undo" => EditorConsoleSelectionTools.EditorUndo(body),
+                "unity_open_mcp_editor_redo" => EditorConsoleSelectionTools.EditorRedo(body),
+                "unity_open_mcp_editor_get_tags" => EditorConsoleSelectionTools.EditorGetTags(body),
+                "unity_open_mcp_editor_get_layers" => EditorConsoleSelectionTools.EditorGetLayers(body),
+                "unity_open_mcp_editor_add_tag" => EditorConsoleSelectionTools.EditorAddTag(body),
+                "unity_open_mcp_editor_add_layer" => EditorConsoleSelectionTools.EditorAddLayer(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

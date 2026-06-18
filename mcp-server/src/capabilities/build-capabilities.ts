@@ -116,6 +116,18 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_package_get_info: "typed-editor",
   unity_open_mcp_package_get_dependencies: "typed-editor",
   unity_open_mcp_package_check: "typed-editor",
+  // M16 Plan 5 — typed console / editor state / selection / undo / tags / layers.
+  unity_open_mcp_console_clear: "typed-editor",
+  unity_open_mcp_console_log: "typed-editor",
+  unity_open_mcp_editor_set_state: "typed-editor",
+  unity_open_mcp_selection_get: "typed-editor",
+  unity_open_mcp_selection_set: "typed-editor",
+  unity_open_mcp_editor_undo: "typed-editor",
+  unity_open_mcp_editor_redo: "typed-editor",
+  unity_open_mcp_editor_get_tags: "typed-editor",
+  unity_open_mcp_editor_get_layers: "typed-editor",
+  unity_open_mcp_editor_add_tag: "typed-editor",
+  unity_open_mcp_editor_add_layer: "typed-editor",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
@@ -176,72 +188,8 @@ export const PLANNED_TOOLS: PlannedTool[] = [
   // The entries that used to live here have been removed.
 
   // --- Plan 5: Console + Editor state/selection/tags/layers/undo ----------
-  {
-    name: "unity_open_mcp_console_clear",
-    category: "typed-editor",
-    description: "Clear the Unity console.",
-    guidance: "Planned typed surface. Use execute_csharp with LogEntries.Clear() today.",
-  },
-  {
-    name: "unity_open_mcp_console_log",
-    category: "typed-editor",
-    description: "Write a log/warning/error to the console.",
-    guidance: "Planned typed surface. Use execute_csharp with Debug.Log today.",
-  },
-  {
-    name: "unity_open_mcp_editor_set_state",
-    category: "typed-editor",
-    description: "Set Editor play/pause/stop state.",
-    guidance: "Planned typed surface. Use execute_csharp with EditorApplication.isPlaying today.",
-  },
-  {
-    name: "unity_open_mcp_selection_get",
-    category: "typed-editor",
-    description: "Get the current Editor selection.",
-    guidance: "Planned typed surface. Use execute_csharp with Selection.activeObject today.",
-  },
-  {
-    name: "unity_open_mcp_selection_set",
-    category: "typed-editor",
-    description: "Set the current Editor selection.",
-    guidance: "Planned typed surface. Use execute_csharp with Selection.activeObject today.",
-  },
-  {
-    name: "unity_open_mcp_editor_undo",
-    category: "typed-editor",
-    description: "Perform an editor Undo.",
-    guidance: "Planned typed surface. Use execute_csharp with Undo.PerformUndo today.",
-  },
-  {
-    name: "unity_open_mcp_editor_redo",
-    category: "typed-editor",
-    description: "Perform an editor Redo.",
-    guidance: "Planned typed surface. Use execute_csharp with Undo.PerformRedo today.",
-  },
-  {
-    name: "unity_open_mcp_editor_get_tags",
-    category: "typed-editor",
-    description: "List configured tags.",
-    guidance: "Planned typed surface. Use execute_csharp with InternalEditorUtility.tags today.",
-  },
-  {
-    name: "unity_open_mcp_editor_get_layers",
-    category: "typed-editor",
-    description: "List configured layers.",
-    guidance: "Planned typed surface. Use execute_csharp with InternalEditorUtility.layers today.",
-  },
-  {
-    name: "unity_open_mcp_editor_add_tag",
-    category: "typed-editor",
-    description: "Add a tag.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_editor_add_layer",
-    category: "typed-editor",
-    description: "Add a layer.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
+  // Plan 5 typed tools are now implemented (see mcp-server/src/tools/).
+  // The entries that used to live here have been removed.
 
   // --- Plan 6: Reflection, scripts, objects -------------------------------
   {

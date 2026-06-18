@@ -1,8 +1,15 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using UnityEditor;
 using UnityEditor.PackageManager;
+using UnityEditor.PackageManager.Requests;
+// NOTE: do NOT add `using UnityEditor;` here. In Unity 6 the root
+// UnityEditor namespace exposes a `PackageInfo` type that makes the
+// PackageManager.PackageInfo references below ambiguous (CS0104). This file
+// uses only UnityEditor.PackageManager (+ .Requests) types plus
+// UnityEngine.Application.dataPath, all of which resolve unambiguously
+// without the root UnityEditor import. Mirrors UCP PackagesController's
+// import set.
 
 namespace UnityOpenMcpBridge.TypedTools
 {
@@ -179,7 +186,10 @@ namespace UnityOpenMcpBridge.TypedTools
 
             if (results.Count < maxResults)
             {
-                SearchAllRequest cacheReq;
+                // Client.SearchAll(bool offline) returns a SearchRequest in
+                // modern Unity (the legacy SearchAllRequest type was removed).
+                // Same Request<T> shape, so WaitForRequest works unchanged.
+                SearchRequest cacheReq;
                 try { cacheReq = Client.SearchAll(true); }
                 catch (System.Exception e)
                 {
@@ -219,7 +229,11 @@ namespace UnityOpenMcpBridge.TypedTools
             {
                 if (i > 0) sb.Append(',');
                 var pkg = results[i];
-                bool isInstalled = installed != null && installed.TryGetValue(pkg.name, out var installedPkg);
+                // Split the TryGetValue from the null check so the compiler's
+                // definite-assignment analysis can see installedPkg is always
+                // assigned before use (CS0165 with the combined && expression).
+                PackageInfo installedPkg = null;
+                bool isInstalled = installed != null && installed.TryGetValue(pkg.name, out installedPkg);
                 sb.Append("{\"name\":\"").Append(Esc(pkg.name));
                 sb.Append("\",\"displayName\":\"").Append(Esc(pkg.displayName ?? pkg.name));
                 sb.Append("\",\"version\":\"").Append(Esc(pkg.version));
@@ -339,11 +353,13 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append("{\"status\":\"ok\",\"manifestPath\":\"Packages/manifest.json\",");
             sb.Append("\"count\":").Append(deps.Count);
             sb.Append(",\"dependencies\":[");
-            for (int i = 0; i < deps.Count; i++)
+            bool first = true;
+            foreach (var dep in deps)
             {
-                if (i > 0) sb.Append(',');
-                sb.Append("{\"name\":\"").Append(Esc(deps[i].Key));
-                sb.Append("\",\"reference\":\"").Append(Esc(deps[i].Value)).Append("\"}");
+                if (!first) sb.Append(',');
+                first = false;
+                sb.Append("{\"name\":\"").Append(Esc(dep.Key));
+                sb.Append("\",\"reference\":\"").Append(Esc(dep.Value)).Append("\"}");
             }
             sb.Append("]}");
             return ToolDispatchResult.Ok(sb.ToString());

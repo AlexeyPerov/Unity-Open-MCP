@@ -247,6 +247,17 @@ Workflow: `scene_list_opened` → `scene_get_data` to see what's there → mutat
 
 Workflow: `package_check` (fast manifest hit) → `package_search` if not installed → `package_add` with `paths_hint: ["Packages/manifest.json"]` → after the post-add settle, `package_get_info` to confirm the resolved version. `package_get_dependencies` is the fastest manifest snapshot (no UPM round-trip).
 
+**Typed console / editor state / selection / undo / tags / layers tools (M16 Plan 5).** These complement existing reads — `unity_senses_read_console` (console read) and `unity_open_mcp_editor_status` (state read) — without duplicating them. Most mutate editor state but write NO assets, so the gate (asset-reference validation) has nothing to validate: they are gate-free direct-response tools that return JSON without the gate envelope.
+
+- Console: `console_clear` (clear the console — folds `read_console`'s `clear: true`) / `console_log` (`level: log|warning|error`, optional `context_instance_id` / `context_asset_path` to attach a ping target).
+- Editor state: `editor_set_state` (`state: play|pause|stop`) — writes no assets (gate-free) but runs the active-scene dirty guard inline, so entering play mode with a dirty scene refuses with `scene_dirty`; pass `ignore_scene_dirty: true` to accept. Poll `editor_status` after to confirm the transition settled.
+- Selection: `selection_get` (active object + full `selection[]`, with `isAsset` / `assetPath` / scene `path`) / `selection_set` (single target by `instance_id` / `asset_path` / `path` / `name`, or `targets[]` for multi-selection; `clear: true` to clear; returns `target_not_found` when nothing resolved).
+- Undo / redo: `editor_undo` / `editor_redo` (`steps`, default 1) — surface the post-op active selection.
+- Tags / layers reads (gate-free): `editor_get_tags` / `editor_get_layers` (layers include slot indices for `gameobject_modify`).
+- Tags / layers mutators (gate-aware, `paths_hint = ["ProjectSettings/TagManager.asset"]`): `editor_add_tag` (idempotent; refuses reserved built-in names) / `editor_add_layer` (first empty slot 8–31 by default, or explicit `slot` 8–31; refuses reserved names + occupied slots).
+
+Workflow: `editor_get_tags` / `editor_get_layers` to discover valid names → `gameobject_modify` to apply → `editor_add_tag` / `editor_add_layer` to create new ones. For "see what the human clicked": `selection_get` → mutate via typed tools → `selection_set` (pairs with `scene_focus`).
+
 ### Return serialization (execute_csharp / invoke_method)
 
 Results are walked by a depth-limited reflective serializer before becoming `mutation.output`:

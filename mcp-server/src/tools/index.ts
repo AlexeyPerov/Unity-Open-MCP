@@ -85,6 +85,18 @@ import { packageRemove } from "./package-remove.js";
 import { packageGetInfo } from "./package-get-info.js";
 import { packageGetDependencies } from "./package-get-dependencies.js";
 import { packageCheck } from "./package-check.js";
+// M16 Plan 5 — typed console / editor state / selection / undo / tags / layers.
+import { consoleClear } from "./console-clear.js";
+import { consoleLog } from "./console-log.js";
+import { editorSetState } from "./editor-set-state.js";
+import { selectionGet } from "./selection-get.js";
+import { selectionSet } from "./selection-set.js";
+import { editorUndo } from "./editor-undo.js";
+import { editorRedo } from "./editor-redo.js";
+import { editorGetTags } from "./editor-get-tags.js";
+import { editorGetLayers } from "./editor-get-layers.js";
+import { editorAddTag } from "./editor-add-tag.js";
+import { editorAddLayer } from "./editor-add-layer.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -203,6 +215,28 @@ export const M16_PLAN4_TOOLS: Tool[] = [
   packageCheck,
 ];
 
+// M16 Plan 5 — Console + editor state / selection / undo / tags / layers typed
+// tools. Most mutate editor state but write no assets (console, editor state,
+// selection, undo/redo) — they are gate-free direct-response tools (the gate
+// validates asset-reference fallout, which does not apply). editor_set_state
+// still runs the active-scene dirty guard (entering play mode can trigger
+// Unity's native save modal). editor_add_tag / editor_add_layer write
+// ProjectSettings/TagManager.asset and run the full gate path with `paths_hint`
+// scoped to it; editor_get_tags / editor_get_layers are read-only gate-free.
+export const M16_PLAN5_TOOLS: Tool[] = [
+  consoleClear,
+  consoleLog,
+  editorSetState,
+  selectionGet,
+  selectionSet,
+  editorUndo,
+  editorRedo,
+  editorGetTags,
+  editorGetLayers,
+  editorAddTag,
+  editorAddLayer,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -218,4 +252,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN2_TOOLS,
   ...M16_PLAN3_TOOLS,
   ...M16_PLAN4_TOOLS,
+  ...M16_PLAN5_TOOLS,
 ];

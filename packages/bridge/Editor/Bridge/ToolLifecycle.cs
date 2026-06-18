@@ -87,6 +87,19 @@ namespace UnityOpenMcpBridge
             // the None default below (they are gate-free, dispatched direct).
             { "unity_open_mcp_package_add",         LifecyclePolicy.RestartThenSettle },
             { "unity_open_mcp_package_remove",      LifecyclePolicy.RestartThenSettle },
+            // M16 Plan 5 — typed TagManager mutators. add_tag / add_layer
+            // rewrite ProjectSettings/TagManager.asset and refresh the asset
+            // database. None of them recompile editor scripts, so EditorSettle
+            // is enough — no domain-reload risk. The other Plan 5 tools
+            // (console_clear / console_log / editor_set_state /
+            // selection_get / selection_set / editor_undo / editor_redo /
+            // editor_get_tags / editor_get_layers) mutate editor state but
+            // write NO assets — they route as gate-free direct-response tools
+            // and fall through to the None default below. editor_set_state
+            // runs its own inline dirty guard (entering play mode can trigger
+            // the native save modal) since it is NOT in the lifecycle table.
+            { "unity_open_mcp_editor_add_tag",      LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_editor_add_layer",    LifecyclePolicy.EditorSettle },
 
             // ----- RestartThenSettle: may trigger a domain reload -----
             // execute_csharp / invoke_method can recompile; execute_menu can

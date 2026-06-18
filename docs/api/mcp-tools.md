@@ -83,7 +83,7 @@ The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabiliti
 - **GameObject & Components:** typed hierarchy/component lifecycle (`gameobject_create/destroy/duplicate/find/modify/set_parent`, `component_add/destroy/get/modify/list_all`) — **implemented in Plan 2**
 - **Scene Management:** typed scene lifecycle/data (`scene_create/open/save/unload/set_active/list_opened`, `scene_get_data`, `scene_get_dirty_summary`, `scene_focus`) — **implemented in Plan 3**
 - **Package Manager:** `package_list`, `package_search`, `package_add`, `package_remove`, `package_get_info`, `package_get_dependencies`, `package_check` — **implemented in Plan 4**
-- **Console + Editor state/selection/tags/layers/undo:** `console_clear`, `console_log`, `editor_set_state`, `selection_get`, `selection_set`, `editor_undo`, `editor_redo`, `editor_get_tags`, `editor_get_layers`, `editor_add_tag`, `editor_add_layer`
+- **Console + Editor state/selection/tags/layers/undo:** `console_clear`, `console_log`, `editor_set_state`, `selection_get`, `selection_set`, `editor_undo`, `editor_redo`, `editor_get_tags`, `editor_get_layers`, `editor_add_tag`, `editor_add_layer` — **implemented in Plan 5**
 - **Reflection/scripts/object data:** `type_schema`, `script_read`, `script_write`, `script_delete`, `object_get_data`, `object_modify`
 - **Profiler & Diagnostics session:** `profiler_start/stop/get_status`, `profiler_get/set_config`, `profiler_list_modules`, `profiler_enable_module`, `profiler_clear_data`, `profiler_save_data`, `profiler_load_data`, `profiler_get_script_stats` (non-duplicate with M10 capture/memory/rendering)
 - **Gate intelligence:** `impact_preview`, `gate_budget_estimate`, `mutation_explain`
@@ -177,6 +177,38 @@ Mutating members (`package_add` / `package_remove`) run the full gate path with 
 - `unity_open_mcp_package_check` — Read-only: presence + pinned reference for one package id against `Packages/manifest.json` (read directly, no UPM request). Accepts a versioned input — the check runs against the name half. Returns `{ installed, reference }`. Gate-free.
 
 Workflow: `package_check` (fast manifest hit) → if not installed, `package_search` to discover the id → `package_add` with `paths_hint: ["Packages/manifest.json"]` → after the post-add compile settles, `package_get_info` to confirm the resolved version. Before `package_remove`, run `package_get_info` to confirm the package is present and not depended-on by others.
+
+#### Console + Editor state / selection / undo / tags / layers (M16 Plan 5 — implemented)
+
+Most of these mutate editor state but write NO assets, so the gate (which validates asset-reference fallout) has nothing to validate — they route as gate-free direct-response tools (returned as direct JSON without the gate envelope) and use `lifecycle: "none"`. The exceptions are `editor_add_tag` / `editor_add_layer`, which rewrite `ProjectSettings/TagManager.asset` and run the full gate path with `paths_hint = ["ProjectSettings/TagManager.asset"]` and `lifecycle: "editor_settle"`.
+
+Console:
+
+- `unity_open_mcp_console_clear` — Clear the Editor console (reflects `LogEntries.Clear`). Mutates console state only (no asset writes); gate-free. Complements `unity_senses_read_console` (the read side, which can also clear via `clear: true`).
+- `unity_open_mcp_console_log` — Write a `log` / `warning` / `error` entry from the agent (`level` controls `Debug.Log` / `LogWarning` / `LogError`). Optional `context_instance_id` (scene GameObject/Component) or `context_asset_path` attaches a `UnityEngine.Object` so the Console pings it on click. Mutates console state only; gate-free. The entry surfaces in the next `read_console` / `pull_events` call.
+
+Editor state:
+
+- `unity_open_mcp_editor_set_state` — Set play / pause / stop. Complements `unity_open_mcp_editor_status` (the read side). Writes no assets; gate-free and returns the post-transition state directly. Entering play mode is disruptive — when a loaded scene has unsaved changes Unity's native save modal can interrupt the flow, so the tool runs the active-scene dirty guard inline and refuses with code `scene_dirty`; pass `ignore_scene_dirty: true` to accept the risk. `play` refuses when already playing unless `force: true`; `pause` toggles pause (no-op when not playing); `stop` exits play mode (no-op when not playing). Poll `editor_status` to confirm the transition settled.
+
+Selection:
+
+- `unity_open_mcp_selection_get` — Read-only: report the current selection. Returns the active object (`instanceId` / `name` / `type` / `assetPath` when asset-backed, plus `path` for scene GameObjects) and the full `selection[]` array. Token-bounded by `max_results`. Gate-free.
+- `unity_open_mcp_selection_set` — Set the selection. Mutates selection state only (no asset writes); gate-free. Resolve a single target by `instance_id` (scene object) > `asset_path` (asset on disk) > `path` (hierarchy) > `name`, or pass a `targets[]` array for multi-selection (each entry resolves by the same fields; `asset_path` wins for assets). `clear: true` (or an empty target set) clears the selection. Returns `target_not_found` when none of the provided targets resolved.
+
+Undo / redo:
+
+- `unity_open_mcp_editor_undo` — Perform `Undo.PerformUndo` `steps` times (default 1). Mutates undo state only; gate-free. Surfaces the post-undo active selection so the agent knows what reverted. Works against every undo-recorded action the bridge takes plus human actions.
+- `unity_open_mcp_editor_redo` — Perform `Undo.PerformRedo` `steps` times (default 1). Mutates undo state only; gate-free. Surfaces the post-redo active selection.
+
+Tags / layers:
+
+- `unity_open_mcp_editor_get_tags` — Read-only: list every configured tag (built-in + user). Gate-free. Use before `gameobject_modify` (tag) or `editor_add_tag`.
+- `unity_open_mcp_editor_get_layers` — Read-only: list every non-empty layer slot (`index` 0–31 + `name`). Gate-free. Use before `gameobject_modify` (layer) or `editor_add_layer`.
+- `unity_open_mcp_editor_add_tag` — Add a user tag. Mutating; `paths_hint = ["ProjectSettings/TagManager.asset"]`. Idempotent (existing tag → `saved: false`); refuses reserved built-in names (`Untagged`, `Respawn`, `Finish`, `EditorOnly`, `MainCamera`, `Player`, `GameController`).
+- `unity_open_mcp_editor_add_layer` — Add a user layer. Mutating; `paths_hint = ["ProjectSettings/TagManager.asset"]`. By default picks the first empty slot in 8–31 (0–7 are reserved for built-ins); pass `slot` (8–31) to assign a specific index. Refuses reserved built-in names (`Default`, `TransparentFX`, `IgnoreRaycast`, `Water`, `UI`), occupied slots, and the no-free-slot case (`no_free_slot`).
+
+Workflow: `editor_get_tags` / `editor_get_layers` to discover current state → `gameobject_modify` to apply a tag/layer to objects → `editor_add_tag` / `editor_add_layer` to add new ones when needed. For selection: `selection_get` to read the human's current click → mutate via the typed tools → `selection_set` to drive the editor focus (pairs with `scene_focus`).
 
 ## Capability discovery
 

@@ -207,23 +207,24 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("invalid_parameter",
                     $"Cannot unload '{name}': it is the only opened scene. Open another scene first.");
 
-            bool ok;
+            // EditorSceneManager.UnloadSceneAsync returns AsyncOperation (Unity
+            // 6+; it returned bool in older versions). The editor unload is
+            // effectively synchronous — the scene is removed from the loaded
+            // hierarchy before the call returns — so we treat a null return /
+            // thrown exception as failure rather than awaiting the operation.
+            // We are NOT using the runtime SceneManager overload; the editor
+            // surface is correct here because we are not in play mode.
             try
             {
-                // EditorSceneManager.UnloadSceneAsync(Scene) returns bool in the
-                // editor (synchronous dispatch). We are NOT using the runtime
-                // UnityEngine.SceneManagement.SceneManager overload (which
-                // returns AsyncOperation) — the editor is the right surface
-                // here because we are not in play mode.
-                ok = EditorSceneManager.UnloadSceneAsync(scene);
+                var op = EditorSceneManager.UnloadSceneAsync(scene);
+                if (op == null)
+                    return ToolDispatchResult.Fail("unload_failed",
+                        $"EditorSceneManager.UnloadSceneAsync returned null for '{name}'.");
             }
             catch (System.Exception e)
             {
                 return ToolDispatchResult.Fail("unload_failed", e.Message);
             }
-            if (!ok)
-                return ToolDispatchResult.Fail("unload_failed",
-                    $"EditorSceneManager.UnloadSceneAsync returned false for '{name}'.");
 
             return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("unloaded", name));
         }

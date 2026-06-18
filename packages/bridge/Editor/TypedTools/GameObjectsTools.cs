@@ -150,9 +150,13 @@ namespace UnityOpenMcpBridge.TypedTools
                 var go = TypedTargets.ResolveGameObject(instanceId, path, name);
                 if (go == null)
                 {
-                    var sb = new StringBuilder(64);
-                    sb.Append("{\"objects\":[],\"count\":0,\"truncated\":0,\"notFound\":true}");
-                    return ToolDispatchResult.Ok(sb.ToString());
+                    // NOTE: named sbNotFound (not sb) — a `var sb` here would
+                    // collide with the list-mode sb declared below in this
+                    // method (CS0136: nested local cannot reuse an enclosing
+                    // scope name).
+                    var sbNotFound = new StringBuilder(64);
+                    sbNotFound.Append("{\"objects\":[],\"count\":0,\"truncated\":0,\"notFound\":true}");
+                    return ToolDispatchResult.Ok(sbNotFound.ToString());
                 }
                 var one = BuildGameObjectSummary(go);
                 var sbOne = new StringBuilder(64 + one.Length);
