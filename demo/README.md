@@ -4,7 +4,7 @@ Minimal Unity project for testing the Unity Open MCP Bridge and MCP tools locall
 
 ## Requirements
 
-- **Unity 6** (6000.0.23f1 or later)
+- **Unity 6** (6000.0.23f1 or later) — the demo project pins Unity 6 URP packages. The bridge and verify packages themselves support 2022.3 LTS+ (see [Unity version compatibility](../docs/unity-version-compat.md)); this demo is just pinned to Unity 6 for its render pipeline.
 - **Node.js** 18+ (for MCP server)
 
 ## Quick Start

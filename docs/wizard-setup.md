@@ -8,7 +8,7 @@ For setup without Unity Hub Pro, see [manual-setup.md](manual-setup.md).
 
 | Requirement | Notes |
 |---|---|
-| Unity 6 (6000.0+) | Required by the bridge package. |
+| Unity 2022.3 LTS+ (Unity 6 recommended) | Required by the bridge package. See [Unity version compatibility](unity-version-compat.md). |
 | Node.js 18+ | Runs the MCP server (`mcp-server/dist/index.js`). |
 | This repository | Clone or download the `unity-open-mcp` monorepo. |
 | Unity Hub Pro | Desktop app in [hub/](../hub/). |

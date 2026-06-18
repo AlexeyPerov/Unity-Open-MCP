@@ -8,7 +8,7 @@ For the guided wizard in Unity Hub Pro, see [wizard-setup.md](wizard-setup.md).
 
 | Requirement | Notes |
 |---|---|
-| Unity 6 (6000.0+) | Required by the bridge package. |
+| Unity 2022.3 LTS+ (Unity 6 recommended) | Required by the bridge package. See [Unity version compatibility](unity-version-compat.md). |
 | Node.js 18+ | Runs the MCP server (`mcp-server/dist/index.js`). |
 | This repository | Clone or download the `unity-open-mcp` monorepo. |
 | An MCP client | Cursor, Claude Desktop, OpenCode, ZCode, or any MCP stdio client. |
@@ -361,7 +361,7 @@ Only the launch-errors / Safe Mode dialog is auto-dismissed. Destructive startup
 
 | Symptom | What to try |
 |---|---|
-| Package resolve fails in Unity | Check git URL, tag, or `file:` path; ensure Unity 6+. |
+| Package resolve fails in Unity | Check git URL, tag, or `file:` path; ensure Unity 2022.3 LTS or newer (Unity 6 recommended) — see [Unity version compatibility](unity-version-compat.md). |
 | MCP server fails to start | Run `node mcp-server/dist/index.js` manually and read stderr; fix missing `UNITY_PROJECT_PATH`. |
 | `/ping` connection refused | Launch Unity for the same project; wait for compile; check the port the bridge picked via `~/.unity-open-mcp/instances/*.json` or the MCP server's startup log (`Bridge port resolved to <port>`). |
 | Tools work but live calls fail | Bridge may be disconnected — check `/ping` `connected` and that the Editor has the project focused/open. |

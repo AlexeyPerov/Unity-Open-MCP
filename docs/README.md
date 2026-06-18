@@ -8,6 +8,7 @@ Use this folder for version-controlled documentation that should stay aligned wi
 |---|---|
 | [manual-setup.md](manual-setup.md) | Manual MCP setup without Unity Hub Pro (packages, client config, verify). |
 | [wizard-setup.md](wizard-setup.md) | Step-by-step setup using the AI Setup wizard in Unity Hub Pro. |
+| [unity-version-compat.md](unity-version-compat.md) | Which Unity versions are supported, version-gated APIs, and CI coverage. |
 | [architecture.md](architecture.md) | Repo structure, package boundaries, runtime interactions, and routing flows. |
 | [tools.md](tools.md) | Toolchain, scripts, and runtime environment requirements by workspace area. |
 | [api.md](api.md) | Index for HTTP/MCP/API contracts and protocol surfaces. |
@@ -31,6 +32,7 @@ Use this folder for version-controlled documentation that should stay aligned wi
 | Which package owns a feature area? | `architecture.md` |
 | How do I run tests locally, and what does CI run? | `tools.md` (Testing) |
 | How do I drive the MCP server from a script or CI pipeline? | `manual-setup.md` (CLI for CI / automation) |
+| Which Unity versions are supported / recommended? | `unity-version-compat.md` |
 
 ## Maintenance rules
 

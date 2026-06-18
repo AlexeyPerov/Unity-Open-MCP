@@ -1,17 +1,27 @@
 # Unity Open MCP Verify — Dogfood CI
 #
 # Exercises the M5 batch flow (scan_all, baseline_create, regression_check)
-# against the demo/ project in this repository.
+# against the demo/ project in this repository, plus the package Test Runner.
 #
 # This workflow mirrors templates/github-actions/unity-open-mcp-verify.yml but is
 # scoped to the monorepo demo project.
 #
-# Runner assumption: self-hosted with Unity 6 installed and licensed locally.
-# UNITY_PATH is read from the runner environment or repo variable.
+# Runner assumption: self-hosted runner(s) labelled "unity", each with one or
+# more Unity editors installed and licensed locally. Each test job fans out
+# across the supported editor range via `strategy.matrix.version`.
+#
+# Unity version matrix — each job runs once per supported editor. The editor
+# binary for a leg is resolved from a repo variable (preferred) or the runner
+# environment, in this order:
+#   unity-6          → vars.UNITY_PATH_UNITY_6,          fallback env.UNITY_PATH
+#   unity-2022-lts   → vars.UNITY_PATH_UNITY_2022_LTS
+# A leg is skipped when its variable is unset, so a runner with only one editor
+# installed still works (the other leg is reported as skipped, not failed).
 # No GitHub-hosted license secrets are stored in this public repo.
 #
-# To enable: register a self-hosted runner with the label "unity" and ensure
-# UNITY_PATH is set in the runner's environment or as a repo variable.
+# To enable: register a self-hosted runner labelled "unity" and set
+# UNITY_PATH_UNITY_6 (and UNITY_PATH_UNITY_2022_LTS, if you have that editor)
+# as repo variables (Settings → Secrets and variables → Actions → Variables).
 
 name: unity-open-mcp-verify-demo
 
@@ -36,30 +46,49 @@ env:
   UNITY_LOG_PATH: ${{ github.workspace }}/unity-batch.log
   UNITY_TEST_RESULTS_PATH: ${{ github.workspace }}/test-results/nunit-results.xml
 
+# Shared matrix definition for the compile/test jobs. Reused via
+# `strategy.matrix` on each job below — kept identical so a new editor leg only
+# has to be added once per job (GitHub Actions has no anchored matrix reuse).
 jobs:
   regression-check:
-    name: Regression check (demo)
+    name: Regression check (${{ matrix.version }})
     runs-on: unity
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["unity-6", "unity-2022-lts"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify Unity is available
+      - name: Resolve Unity binary for this leg
+        id: unity
+        env:
+          # Per-leg repo variable, with a legacy UNITY_PATH fallback for the
+          # unity-6 leg (so an existing single-editor runner keeps working).
+          CANDIDATE: ${{ matrix.version == 'unity-6' && (vars.UNITY_PATH_UNITY_6 || env.UNITY_PATH) || vars.UNITY_PATH_UNITY_2022_LTS }}
         run: |
-          if [ -z "$UNITY_PATH" ]; then
-            echo "::error::UNITY_PATH is not set. Set it as a repo variable or in the runner environment."
+          if [ -z "$CANDIDATE" ]; then
+            echo "No editor configured for the '${{ matrix.version }}' leg."
+            echo "Set UNITY_PATH_${{ matrix.version }} as a repo variable to enable it."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ ! -f "$CANDIDATE" ]; then
+            echo "::error::Editor for '${{ matrix.version }}' ('$CANDIDATE') does not exist or is not a file."
             exit 1
           fi
-          if [ ! -f "$UNITY_PATH" ]; then
-            echo "::error::UNITY_PATH '$UNITY_PATH' does not exist or is not a file."
-            exit 1
-          fi
-          echo "Unity: $UNITY_PATH"
+          echo "Unity (${{ matrix.version }}): $CANDIDATE"
+          echo "path=$CANDIDATE" >> "$GITHUB_OUTPUT"
 
       - name: Run regression check
+        if: steps.unity.outputs.skip != 'true' && matrix.version == 'unity-6'
+        # Only the Unity 6 leg guards the checked-in baseline — the baseline was
+        # captured on Unity 6 (see baseline-update job), so comparing a 2022 run
+        # against it would report spurious version-driven deltas.
         run: |
           echo "::group::Unity batch — regression_check"
-          "$UNITY_PATH" \
+          "${{ steps.unity.outputs.path }}" \
             -batchmode \
             -quit \
             -nographics \
@@ -72,9 +101,7 @@ jobs:
                --platform-profile desktop
           EXIT_CODE=$?
           echo "::endgroup::"
-
           echo "Batch exit code: $EXIT_CODE"
-
           if [ $EXIT_CODE -ne 0 ]; then
             echo "::error::Regression check failed (exit $EXIT_CODE). New issues detected vs baseline."
             echo "::group::Unity log (last 100 lines)"
@@ -82,40 +109,81 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
-
           echo "✓ No regression detected."
+
+      - name: Compile-only smoke (non-baseline leg)
+        if: steps.unity.outputs.skip != 'true' && matrix.version != 'unity-6'
+        # The 2022 leg still compiles + imports the project, which is the
+        # version-compat signal we want from it (the packages declare
+        # `unity: "2022.3"`; this leg proves they resolve and compile there).
+        run: |
+          echo "::group::Unity batch — import + compile (${{ matrix.version }})"
+          "${{ steps.unity.outputs.path }}" \
+            -batchmode \
+            -quit \
+            -nographics \
+            -projectPath "$UNITY_PROJECT_PATH" \
+            -logFile "$UNITY_LOG_PATH"
+          EXIT_CODE=$?
+          echo "::endgroup::"
+          echo "Import/compile exit code: $EXIT_CODE"
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Project failed to import/compile on ${{ matrix.version }} (exit $EXIT_CODE)."
+            echo "::group::Unity log (last 100 lines)"
+            tail -n 100 "$UNITY_LOG_PATH" || true
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "✓ Project imports + compiles on ${{ matrix.version }}."
+
+      - name: Report skipped leg
+        if: steps.unity.outputs.skip == 'true'
+        run: echo "::notice::Skipped '${{ matrix.version }}' leg — no editor configured."
 
       - name: Upload Unity log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: demo-regression-unity-log
+          name: demo-regression-unity-log-${{ matrix.version }}
           path: ${{ env.UNITY_LOG_PATH }}
           retention-days: 7
 
   scan-all:
-    name: Scan all (demo)
+    name: Scan all (${{ matrix.version }})
     runs-on: unity
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["unity-6", "unity-2022-lts"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify Unity is available
+      - name: Resolve Unity binary for this leg
+        id: unity
+        env:
+          CANDIDATE: ${{ matrix.version == 'unity-6' && (vars.UNITY_PATH_UNITY_6 || env.UNITY_PATH) || vars.UNITY_PATH_UNITY_2022_LTS }}
         run: |
-          if [ -z "$UNITY_PATH" ]; then
-            echo "::error::UNITY_PATH is not set. Set it as a repo variable or in the runner environment."
+          if [ -z "$CANDIDATE" ]; then
+            echo "No editor configured for the '${{ matrix.version }}' leg."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ ! -f "$CANDIDATE" ]; then
+            echo "::error::Editor for '${{ matrix.version }}' ('$CANDIDATE') does not exist or is not a file."
             exit 1
           fi
-          if [ ! -f "$UNITY_PATH" ]; then
-            echo "::error::UNITY_PATH '$UNITY_PATH' does not exist or is not a file."
-            exit 1
-          fi
-          echo "Unity: $UNITY_PATH"
+          echo "Unity (${{ matrix.version }}): $CANDIDATE"
+          echo "path=$CANDIDATE" >> "$GITHUB_OUTPUT"
 
       - name: Run scan_all
+        # Scan baseline is a Unity-6 artifact; only run the full scan on the
+        # Unity 6 leg. The 2022 leg still proves compile via the regression-check
+        # job above, so scan-all doesn't need to repeat that here.
+        if: steps.unity.outputs.skip != 'true' && matrix.version == 'unity-6'
         run: |
           echo "::group::Unity batch — scan_all"
-          "$UNITY_PATH" \
+          "${{ steps.unity.outputs.path }}" \
             -batchmode \
             -quit \
             -nographics \
@@ -128,9 +196,7 @@ jobs:
                --output-path CI/scan-report.json
           EXIT_CODE=$?
           echo "::endgroup::"
-
           echo "Batch exit code: $EXIT_CODE"
-
           if [ $EXIT_CODE -ne 0 ]; then
             echo "::error::Scan failed (exit $EXIT_CODE). Issues at or above 'error' severity."
             echo "::group::Scan report"
@@ -141,11 +207,14 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
-
           echo "✓ Scan passed (no errors)."
 
+      - name: Report skipped leg
+        if: steps.unity.outputs.skip == 'true' || matrix.version != 'unity-6'
+        run: echo "::notice::scan-all only runs on the unity-6 leg (baseline is a Unity 6 artifact). '${{ matrix.version }}' skipped."
+
       - name: Upload scan report
-        if: always()
+        if: always() && matrix.version == 'unity-6'
         uses: actions/upload-artifact@v4
         with:
           name: demo-scan-report
@@ -157,36 +226,49 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: demo-scan-unity-log
+          name: demo-scan-unity-log-${{ matrix.version }}
           path: ${{ env.UNITY_LOG_PATH }}
           retention-days: 7
 
   run-tests:
-    name: Run tests (demo)
+    name: Run tests (${{ matrix.version }})
     runs-on: unity
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["unity-6", "unity-2022-lts"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify Unity is available
+      - name: Resolve Unity binary for this leg
+        id: unity
+        env:
+          CANDIDATE: ${{ matrix.version == 'unity-6' && (vars.UNITY_PATH_UNITY_6 || env.UNITY_PATH) || vars.UNITY_PATH_UNITY_2022_LTS }}
         run: |
-          if [ -z "$UNITY_PATH" ]; then
-            echo "::error::UNITY_PATH is not set. Set it as a repo variable or in the runner environment."
+          if [ -z "$CANDIDATE" ]; then
+            echo "No editor configured for the '${{ matrix.version }}' leg."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ ! -f "$CANDIDATE" ]; then
+            echo "::error::Editor for '${{ matrix.version }}' ('$CANDIDATE') does not exist or is not a file."
             exit 1
           fi
-          if [ ! -f "$UNITY_PATH" ]; then
-            echo "::error::UNITY_PATH '$UNITY_PATH' does not exist or is not a file."
-            exit 1
-          fi
-          echo "Unity: $UNITY_PATH"
+          echo "Unity (${{ matrix.version }}): $CANDIDATE"
+          echo "path=$CANDIDATE" >> "$GITHUB_OUTPUT"
 
       - name: Create test-results directory
+        if: steps.unity.outputs.skip != 'true'
         run: mkdir -p "$(dirname "$UNITY_TEST_RESULTS_PATH")"
 
       - name: Run Unity Test Runner (package tests, EditMode)
+        if: steps.unity.outputs.skip != 'true'
+        # The marquee version-compat check: both package assemblies must import
+        # and their EditMode tests must pass on every supported editor.
         run: |
-          echo "::group::Unity Test Runner — EditMode package tests"
-          "$UNITY_PATH" \
+          echo "::group::Unity Test Runner — EditMode package tests (${{ matrix.version }})"
+          "${{ steps.unity.outputs.path }}" \
             -batchmode \
             -quit \
             -nographics \
@@ -198,24 +280,25 @@ jobs:
             -testResults "$UNITY_TEST_RESULTS_PATH"
           EXIT_CODE=$?
           echo "::endgroup::"
-
           echo "Test runner exit code: $EXIT_CODE"
-
           if [ $EXIT_CODE -ne 0 ]; then
-            echo "::error::Unity tests failed (exit $EXIT_CODE)."
+            echo "::error::Unity tests failed (exit $EXIT_CODE) on ${{ matrix.version }}."
             echo "::group::Unity log (last 100 lines)"
             tail -n 100 "$UNITY_LOG_PATH" || true
             echo "::endgroup::"
             exit 1
           fi
+          echo "✓ All package tests passed on ${{ matrix.version }}."
 
-          echo "✓ All package tests passed."
+      - name: Report skipped leg
+        if: steps.unity.outputs.skip == 'true'
+        run: echo "::notice::Skipped '${{ matrix.version }}' leg — no editor configured."
 
       - name: Upload test results
-        if: always()
+        if: always() && steps.unity.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: demo-test-results
+          name: demo-test-results-${{ matrix.version }}
           path: ${{ env.UNITY_TEST_RESULTS_PATH }}
           if-no-files-found: ignore
           retention-days: 7
@@ -224,30 +307,34 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: demo-tests-unity-log
+          name: demo-tests-unity-log-${{ matrix.version }}
           path: ${{ env.UNITY_LOG_PATH }}
           retention-days: 7
 
   baseline-update:
     name: Update baseline (demo)
+    # Baseline is a Unity 6 artifact by definition — captured on the recommended
+    # version and compared against on the unity-6 regression leg. No matrix here.
     runs-on: unity
     if: github.event_name == 'workflow_dispatch'
+    env:
+      UNITY_PATH_FOR_JOB: ${{ vars.UNITY_PATH_UNITY_6 != '' && vars.UNITY_PATH_UNITY_6 || env.UNITY_PATH }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Verify Unity is available
         run: |
-          if [ -z "$UNITY_PATH" ]; then
-            echo "::error::UNITY_PATH is not set."
+          if [ -z "$UNITY_PATH_FOR_JOB" ]; then
+            echo "::error::UNITY_PATH_UNITY_6 (or legacy UNITY_PATH) is not set."
             exit 1
           fi
-          echo "Unity: $UNITY_PATH"
+          echo "Unity (unity-6): $UNITY_PATH_FOR_JOB"
 
       - name: Run baseline_create
         run: |
           echo "::group::Unity batch — baseline_create"
-          "$UNITY_PATH" \
+          "$UNITY_PATH_FOR_JOB" \
             -batchmode \
             -quit \
             -nographics \
@@ -259,9 +346,7 @@ jobs:
                --platform-profile desktop
           EXIT_CODE=$?
           echo "::endgroup::"
-
           echo "Batch exit code: $EXIT_CODE"
-
           if [ $EXIT_CODE -ne 0 ]; then
             echo "::error::Baseline creation failed (exit $EXIT_CODE)."
             echo "::group::Unity log (last 100 lines)"
@@ -269,7 +354,6 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
-
           echo "✓ Baseline written to demo/CI/unity-open-mcp-baseline.json"
 
       - name: Commit baseline

@@ -858,8 +858,12 @@ export interface ProjectState {
   isValidUnityProject: boolean;
   /** Raw `m_EditorVersion` from `ProjectSettings/ProjectVersion.txt`. */
   unityVersion: string | null;
-  /** `true` when `unityVersion` parses to a major ≥ 6000 (Unity 6). */
+  /** `true` when `unityVersion` parses to a `(major, minor)` ≥ 2022.3. */
   meetsMinUnityVersion: boolean;
+  /** `true` when `unityVersion` parses to a major ≥ 6000 (Unity 6).
+   * Projects that meet the minimum but not the recommended version
+   * render an amber warning in the wizard — never a hard block. */
+  meetsRecommendedUnityVersion: boolean;
   manifestPresent: boolean;
   bridgeInstalled: boolean;
   verifyInstalled: boolean;

@@ -255,6 +255,10 @@
   function isEnvironmentReady(): boolean {
     if (!nodeProbe?.ok) return false;
     if (!toolkitValidation?.ok) return false;
+    // Below the supported minimum (2022.3) hard-blocks: the package
+    // manifests declare `unity: "2022.3"`, so UPM would refuse to
+    // resolve anyway. Below the *recommended* Unity 6 only warns.
+    if (!detection?.isValidUnityProject) return false;
     if (!detection?.meetsMinUnityVersion) return false;
     if (!detection?.manifestWritable) return false;
     return true;
@@ -1366,13 +1370,28 @@
   }
 
   // --- Step 2 derived display helpers -------------------------------
+  // Hard block: ProjectVersion.txt missing/empty, or version below
+  // the supported minimum (2022.3). UPM refuses the packages below
+  // this floor, so the wizard mirrors that here.
   let unityBlockReason = $derived.by(() => {
     if (!detection) return null;
     if (detection.isValidUnityProject && !detection.unityVersion) {
       return "ProjectSettings/ProjectVersion.txt is missing or empty.";
     }
     if (!detection.meetsMinUnityVersion) {
-      return `Detected Unity ${detection.unityVersion ?? "unknown"} — Unity Open MCP Bridge requires Unity 6 (6000.0+).`;
+      return `Detected Unity ${detection.unityVersion ?? "unknown"} — Unity Open MCP Bridge requires Unity 2022.3 LTS or newer.`;
+    }
+    return null;
+  });
+
+  // Soft warning (never blocks): meets the minimum but below the
+  // recommended Unity 6. The toolbar toggle falls back to a legacy
+  // button injection path on these versions; everything else works.
+  let unityVersionWarning = $derived.by(() => {
+    if (!detection) return null;
+    if (unityBlockReason) return null;
+    if (!detection.meetsRecommendedUnityVersion) {
+      return `Unity 6 is recommended. Unity ${detection.unityVersion} is supported, but uses the legacy toolbar button fallback instead of the native Unity 6 toolbar element.`;
     }
     return null;
   });
@@ -1525,10 +1544,12 @@
                   <dd>
                     {#if detection.unityVersion}
                       <code>{detection.unityVersion}</code>
-                      {#if detection.meetsMinUnityVersion}
+                      {#if !detection.meetsMinUnityVersion}
+                        <span class="wiz-tag wiz-tag-warn">below minimum</span>
+                      {:else if detection.meetsRecommendedUnityVersion}
                         <span class="wiz-tag wiz-tag-ok">Unity 6+</span>
                       {:else}
-                        <span class="wiz-tag wiz-tag-warn">below Unity 6</span>
+                        <span class="wiz-tag wiz-tag-warn">supported (legacy toolbar)</span>
                       {/if}
                     {:else}
                       <em>unknown</em>
@@ -1591,10 +1612,15 @@
                   <strong>Unity {detection.unityVersion ?? "unknown"} does not meet the minimum.</strong>
                   {unityBlockReason}
                 </div>
-              {:else if detection.meetsMinUnityVersion}
+              {:else if unityVersionWarning}
+                <div class="wiz-block wiz-block-warn" role="status">
+                  <strong>Unity {detection.unityVersion}</strong>
+                  {unityVersionWarning}
+                </div>
+              {:else}
                 <p class="wiz-hint wiz-hint-ok">
                   Detected <strong>Unity {detection.unityVersion}</strong> — meets the
-                  <strong>Unity 6 (6000.0+)</strong> requirement.
+                  recommended <strong>Unity 6 (6000.0+)</strong>.
                 </p>
               {/if}
             </div>
@@ -2312,10 +2338,12 @@
               <dd>
                 {#if detection?.unityVersion}
                   <code>{detection.unityVersion}</code>
-                  {#if detection.meetsMinUnityVersion}
-                    <StatusChip tone="ok" label="meets minimum" />
-                  {:else}
+                  {#if !detection.meetsMinUnityVersion}
                     <StatusChip tone="warn" label="below minimum" />
+                  {:else if detection.meetsRecommendedUnityVersion}
+                    <StatusChip tone="ok" label="Unity 6+" />
+                  {:else}
+                    <StatusChip tone="warn" label="supported (legacy toolbar)" />
                   {/if}
                 {:else}
                   <em>unknown</em>
@@ -2908,6 +2936,18 @@
 
   .wiz-block-ok strong {
     color: #bbf7d0;
+  }
+
+  /* Amber soft warning — mirrors .wiz-tag-warn tokens. Never blocks;
+   * used for "meets the supported minimum but below recommended". */
+  .wiz-block-warn {
+    border-color: rgba(251, 191, 36, 0.35);
+    background: rgba(251, 191, 36, 0.08);
+    color: #fbbf24;
+  }
+
+  .wiz-block-warn strong {
+    color: #fde68a;
   }
 
   .wiz-done-banner {

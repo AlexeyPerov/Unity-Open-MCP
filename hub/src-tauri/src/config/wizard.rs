@@ -28,10 +28,19 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// M4: Unity minimum major version. The bridge package requires
-/// Unity 6 (per `packages/bridge.md` §UPM identity) and the wizard
-/// hard-blocks below this threshold (questions-4 Q10 = A).
-pub const MIN_UNITY_MAJOR: u32 = 6000;
+/// Minimum supported Unity version. The bridge and verify packages
+/// declare `unity: "2022.3"` in their manifests, and the wizard
+/// hard-blocks any project below this floor. Unity 6 remains the
+/// recommended version (see [`RECOMMENDED_UNITY_MAJOR`]) — below it
+/// the wizard shows an amber warning instead of blocking.
+pub const MIN_UNITY_MAJOR: u32 = 2022;
+pub const MIN_UNITY_MINOR: u32 = 3;
+
+/// Recommended Unity major version (Unity 6). Projects at or above
+/// the minimum but below this version install and run, but surface a
+/// soft warning in the wizard (older editors get the legacy toolbar
+/// fallback path). Never a hard block. See `docs/unity-version-compat.md`.
+pub const RECOMMENDED_UNITY_MAJOR: u32 = 6000;
 
 /// UPM package id for the bridge package. Used by detect (is the
 /// package already installed?) and by the merge (target entry).
@@ -147,8 +156,14 @@ pub struct ProjectState {
     /// (e.g. `"6000.0.1f1"`). `None` when the file is missing.
     pub unity_version: Option<String>,
     /// `true` when `unity_version` is `Some` and parses to a
-    /// major version at or above `MIN_UNITY_MAJOR` (6000).
+    /// major.minor at or above `(MIN_UNITY_MAJOR, MIN_UNITY_MINOR)`
+    /// (2022.3). The wizard hard-blocks when this is `false`.
     pub meets_min_unity_version: bool,
+    /// `true` when `unity_version` parses to a major at or above
+    /// `RECOMMENDED_UNITY_MAJOR` (Unity 6). Projects that meet the
+    /// minimum but not the recommended version render an amber
+    /// warning in the wizard — never a hard block.
+    pub meets_recommended_unity_version: bool,
     /// `true` when `Packages/manifest.json` exists (even if it
     /// fails to parse — that case is surfaced separately by the
     /// Step 3 read command).
@@ -668,6 +683,10 @@ pub fn detect_project_state_at(project: &Path) -> ProjectState {
         .as_deref()
         .map(meets_min_unity_version)
         .unwrap_or(false);
+    let meets_recommended = unity_version
+        .as_deref()
+        .map(meets_recommended_unity_version)
+        .unwrap_or(false);
 
     let manifest_path = project.join("Packages").join("manifest.json");
     let manifest_present = manifest_path.exists();
@@ -691,6 +710,7 @@ pub fn detect_project_state_at(project: &Path) -> ProjectState {
         is_valid_unity_project,
         unity_version,
         meets_min_unity_version: meets_min,
+        meets_recommended_unity_version: meets_recommended,
         manifest_present,
         bridge_installed,
         verify_installed,
@@ -701,13 +721,23 @@ pub fn detect_project_state_at(project: &Path) -> ProjectState {
     }
 }
 
-/// `true` when the Unity version string parses to a major at or
-/// above `MIN_UNITY_MAJOR` (6000). Returns `false` for unparsable
-/// strings — the spec treats those as "below minimum" so the
-/// wizard blocks with a clear "could not parse" message.
+/// `true` when the Unity version string parses to a `(major, minor)`
+/// at or above `(MIN_UNITY_MAJOR, MIN_UNITY_MINOR)` (2022.3) — the
+/// hard floor declared by both package manifests. Returns `false` for
+/// unparsable strings; the wizard blocks those with a clear message.
 pub fn meets_min_unity_version(raw: &str) -> bool {
     parse_unity_major_minor(raw)
-        .map(|(major, _)| major >= MIN_UNITY_MAJOR)
+        .map(|(major, minor)| (major, minor) >= (MIN_UNITY_MAJOR, MIN_UNITY_MINOR))
+        .unwrap_or(false)
+}
+
+/// `true` when the Unity version string parses to a major at or
+/// above `RECOMMENDED_UNITY_MAJOR` (Unity 6). Never gates the
+/// wizard — only drives the amber "recommended" warning vs. the
+/// green "meets recommended" chip.
+pub fn meets_recommended_unity_version(raw: &str) -> bool {
+    parse_unity_major_minor(raw)
+        .map(|(major, _)| major >= RECOMMENDED_UNITY_MAJOR)
         .unwrap_or(false)
 }
 
@@ -1280,12 +1310,30 @@ mod tests {
     }
 
     #[test]
-    fn meets_min_unity_version_blocks_below_minimum() {
+    fn meets_min_unity_version_uses_2022_3_floor() {
+        // Unity 6 (and any newer) clears the floor and is recommended.
         assert!(meets_min_unity_version("6000.0.1f1"));
         assert!(meets_min_unity_version("6000.0"));
-        assert!(!meets_min_unity_version("2022.3.62f3"));
-        assert!(!meets_min_unity_version("5999.9.1f1"));
+        // Previous LTS — the new minimum.
+        assert!(meets_min_unity_version("2022.3.62f3"));
+        // One patch older than the 2022.3 LTS floor still blocks.
+        assert!(!meets_min_unity_version("2022.2.5f1"));
+        // 2021 LTS and earlier are below the supported floor.
+        assert!(!meets_min_unity_version("2021.3.45f1"));
+        assert!(!meets_min_unity_version("2019.4.40f1"));
+        // Unparsable strings block with a clear message upstream.
         assert!(!meets_min_unity_version("not-a-version"));
+    }
+
+    #[test]
+    fn meets_recommended_unity_version_uses_unity_6_tier() {
+        // Unity 6 and newer are recommended.
+        assert!(meets_recommended_unity_version("6000.0.1f1"));
+        assert!(meets_recommended_unity_version("6000.1.0a1"));
+        // 2022 LTS is supported but not recommended.
+        assert!(!meets_recommended_unity_version("2022.3.62f3"));
+        // Garbage is never recommended.
+        assert!(!meets_recommended_unity_version("not-a-version"));
     }
 
     #[test]
@@ -1313,6 +1361,7 @@ mod tests {
         assert!(state.is_valid_unity_project);
         assert_eq!(state.unity_version.as_deref(), Some("6000.0.1f1"));
         assert!(state.meets_min_unity_version);
+        assert!(state.meets_recommended_unity_version);
         assert!(state.bridge_installed);
         assert!(!state.verify_installed);
         assert!(state.manifest_present);
