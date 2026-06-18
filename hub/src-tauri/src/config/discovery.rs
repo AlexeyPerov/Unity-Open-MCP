@@ -190,40 +190,59 @@ pub fn discover_unity_installations(settings: &Settings) -> DiscoveryResult {
     }
 }
 
-fn run_discovery(state: &State<AppState>) -> DiscoveryResult {
-    let settings = state.settings.lock().unwrap().clone();
-    discover_unity_installations(&settings)
-}
+/// Tauri requires async commands that borrow `State` (a reference) to
+/// return a `Result`. On the JS side `Ok(T)` is unwrapped to `T`, so the
+/// frontend contract is unchanged; an `Err` rejects the invoke promise and
+/// is surfaced by the discovery store's existing `try/catch`.
+type DiscoveryCommandResult = Result<DiscoveryResult, String>;
 
 #[tauri::command]
-pub fn discover_installations(state: State<AppState>) -> DiscoveryResult {
+pub async fn discover_installations(state: State<'_, AppState>) -> DiscoveryCommandResult {
+    // The cache check is a cheap Mutex read; keep it on the async task
+    // so a warm cache returns without a thread-pool hop.
     {
         let cache = state.discovery_cache.lock().unwrap();
         if let Some(ref result) = *cache {
-            return result.clone();
+            return Ok(result.clone());
         }
     }
 
-    let result = run_discovery(&state);
+    // `discover_unity_installations` does `read_dir` + per-entry stat
+    // across every configured parent folder, the OS default, and the
+    // `UNITY_HUB` env path. On a slow / networked volume that stalls
+    // for the filesystem timeout, so run it on the blocking pool to
+    // keep the webview thread responsive (the Unity Versions tab fires
+    // this on mount and on every manual refresh).
+    let settings = state.settings.lock().unwrap().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        discover_unity_installations(&settings)
+    })
+    .await
+    .map_err(|e| format!("discovery task failed: {e}"))?;
 
     {
         let mut cache = state.discovery_cache.lock().unwrap();
         *cache = Some(result.clone());
     }
 
-    result
+    Ok(result)
 }
 
 #[tauri::command]
-pub fn refresh_discovery(state: State<AppState>) -> DiscoveryResult {
-    let result = run_discovery(&state);
+pub async fn refresh_discovery(state: State<'_, AppState>) -> DiscoveryCommandResult {
+    let settings = state.settings.lock().unwrap().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        discover_unity_installations(&settings)
+    })
+    .await
+    .map_err(|e| format!("discovery task failed: {e}"))?;
 
     {
         let mut cache = state.discovery_cache.lock().unwrap();
         *cache = Some(result.clone());
     }
 
-    result
+    Ok(result)
 }
 
 #[cfg(test)]

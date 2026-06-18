@@ -64,10 +64,12 @@ fn compute_size(dir: &Path, patterns: &[String]) -> u64 {
     total
 }
 
-#[tauri::command]
-pub fn get_project_sizes(paths: Vec<String>) -> HashMap<String, u64> {
+/// Recursively sizes every project root. Runs on the blocking thread
+/// pool (see `get_project_sizes`) so a slow disk / large tree never
+/// stalls the webview thread. Kept sync for direct unit testing.
+fn compute_project_sizes(paths: &[String]) -> HashMap<String, u64> {
     let mut result: HashMap<String, u64> = HashMap::with_capacity(paths.len());
-    for path in &paths {
+    for path in paths {
         let p = Path::new(path);
         if !p.exists() {
             result.insert(path.clone(), 0);
@@ -80,6 +82,19 @@ pub fn get_project_sizes(paths: Vec<String>) -> HashMap<String, u64> {
     result
 }
 
+/// `paths` → size in bytes. `async` + `spawn_blocking` so the recursive
+/// directory walk (potentially tens of thousands of `metadata()` calls
+/// per Unity project) runs off the main/webview thread. This is the
+/// dominant launch-path freeze on cold caches or spun-down/external
+/// drives; keeping it off the webview thread keeps the window
+/// responsive while sizes are still being computed.
+#[tauri::command]
+pub async fn get_project_sizes(paths: Vec<String>) -> HashMap<String, u64> {
+    tauri::async_runtime::spawn_blocking(move || compute_project_sizes(&paths))
+        .await
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,7 +104,7 @@ mod tests {
     fn empty_dir_returns_zero() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_string_lossy().to_string();
-        let result = get_project_sizes(vec![path.clone()]);
+        let result = compute_project_sizes(&[path.clone()]);
         assert_eq!(result.get(&path), Some(&0u64));
     }
 
@@ -100,7 +115,7 @@ mod tests {
         let mut f = fs::File::create(&file_path).unwrap();
         f.write_all(b"hello world").unwrap();
         let path = dir.path().to_string_lossy().to_string();
-        let result = get_project_sizes(vec![path.clone()]);
+        let result = compute_project_sizes(&[path.clone()]);
         assert_eq!(result.get(&path), Some(&11u64));
     }
 
@@ -113,13 +128,13 @@ mod tests {
         let mut f = fs::File::create(&file_path).unwrap();
         f.write_all(b"x".repeat(1000).as_slice()).unwrap();
         let path = dir.path().to_string_lossy().to_string();
-        let result = get_project_sizes(vec![path.clone()]);
+        let result = compute_project_sizes(&[path.clone()]);
         assert_eq!(result.get(&path), Some(&0u64));
     }
 
     #[test]
     fn missing_path_returns_zero() {
-        let result = get_project_sizes(vec!["/nonexistent/path".to_string()]);
+        let result = compute_project_sizes(&["/nonexistent/path".to_string()]);
         assert_eq!(result.get("/nonexistent/path"), Some(&0u64));
     }
 
@@ -140,7 +155,7 @@ mod tests {
         let mut f = fs::File::create(&asset_file).unwrap();
         f.write_all(b"code").unwrap();
         let path = dir.path().to_string_lossy().to_string();
-        let result = get_project_sizes(vec![path.clone()]);
+        let result = compute_project_sizes(&[path.clone()]);
         let gitignore_size = fs::metadata(&gitignore).unwrap().len();
         let asset_size = fs::metadata(&asset_file).unwrap().len();
         assert_eq!(result.get(&path), Some(&(gitignore_size + asset_size)));

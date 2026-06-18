@@ -129,8 +129,10 @@ pub struct UnityDiscoverySettings {
     /// Polling interval (in seconds) for the running-Unity process scan that
     /// powers the `running` chip on the Projects tab. Added in M1.5-10.
     /// `#[serde(default = "default_scan_interval_seconds")]` keeps legacy
-    /// `settings.json` files loadable; the documented default is `5` per
-    /// the task spec.
+    /// `settings.json` files loadable; the default is `30` (raised from `5`
+    /// — the scan shells out to `ps`/PowerShell, so a longer cadence avoids
+    /// idle CPU churn and re-render storms while still catching starts/stops
+    /// promptly enough for a status chip).
     #[serde(default = "default_scan_interval_seconds")]
     pub scan_interval_seconds: u32,
     /// M1.5-11: walk-up directory scan roots. Each entry is a folder the
@@ -169,7 +171,7 @@ pub struct UnityDiscoverySettings {
 }
 
 fn default_scan_interval_seconds() -> u32 {
-    5
+    30
 }
 
 fn default_walk_up_max_depth() -> u32 {
@@ -452,8 +454,9 @@ mod tests {
     #[test]
     fn settings_loads_legacy_discovery_without_scan_interval() {
         // Pre-M1.5-10 settings.json files do not carry `scanIntervalSeconds`.
-        // The deserializer must default to 5 so existing configs are not
-        // rejected (the same pattern as `showGitBranchColumn`).
+        // The deserializer must fall back to the documented default (30) so
+        // existing configs are not rejected (the same pattern as
+        // `showGitBranchColumn`).
         let legacy = r#"{
             "version": 1,
             "launch": { "mode": "openProject", "rememberLastSelection": true },
@@ -466,7 +469,7 @@ mod tests {
             "unityDiscovery": { "parentFolders": [] }
         }"#;
         let restored: Settings = serde_json::from_str(legacy).unwrap();
-        assert_eq!(restored.unity_discovery.scan_interval_seconds, 5);
+        assert_eq!(restored.unity_discovery.scan_interval_seconds, 30);
     }
 
     #[test]

@@ -14,7 +14,7 @@ import { settingsStore } from "$lib/state/settings.svelte";
  * tick updates the UI in one pass.
  *
  * The poll cadence is driven by `settings.discovery.scanIntervalSeconds`
- * (default 5s, exposed in Settings → Discovery). We restart the timer
+ * (default 30s, exposed in Settings → Discovery). We restart the timer
  * whenever the user changes the interval so the new cadence takes
  * effect on the next tick without a full app reload.
  */
@@ -79,7 +79,7 @@ class RunningUnityStore {
     if (typeof stored === "number" && Number.isFinite(stored) && stored > 0) {
       return Math.min(600, Math.max(1, Math.round(stored)));
     }
-    return 5;
+    return 30;
   }
 
   /**

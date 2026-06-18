@@ -11,7 +11,7 @@ use crate::config::env_vars;
 use crate::config::launch_log::{self, LaunchOutcome, LaunchRecord};
 use crate::config::persistence;
 use crate::config::projects::read_dir_mtime_iso;
-use crate::config::running_unity::{scan_running_unity, RunningUnity};
+use crate::config::running_unity::{detect_running_unity, RunningUnity};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -405,7 +405,7 @@ fn launch_project_inner(
         Ok(p) => p.to_string_lossy().to_string(),
         Err(_) => project_path_str.clone(),
     };
-    let scan = scan_running_unity();
+    let scan = detect_running_unity();
     if let Some((conflict_pid, conflict_path)) = is_already_running(
         &scan,
         &project_path_canon,

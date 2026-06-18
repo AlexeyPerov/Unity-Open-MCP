@@ -200,17 +200,19 @@
     return BUILD_TARGET_LABELS[target] ?? target;
   }
 
-  onMount(() => {
+    onMount(() => {
     let cancelled = false;
     (async () => {
       await projectsStore.load();
       if (cancelled) return;
-      await refreshPathExistence();
-      await loadSizes();
-      await loadGitBranches();
+      // Path existence, sizes, and git branches are independent of each
+      // other — run them concurrently. The backing Tauri commands are
+      // `async` + `spawn_blocking`, so they no longer serialize on the
+      // webview thread and the window stays responsive while they run.
+      await Promise.all([refreshPathExistence(), loadSizes(), loadGitBranches()]);
     })();
     // Start the running-Unity polling loop. The cadence is read from
-    // `settings.discovery.scanIntervalSeconds` (default 5s, M1.5-10);
+    // `settings.discovery.scanIntervalSeconds` (default 30s, M1.5-10);
     // the store internally restarts the timer when the user edits the
     // setting. The polling stops on teardown so we don't leak the
     // interval while the user is on another tab.
@@ -528,12 +530,14 @@
     const q = search.trim().toLowerCase();
     const includePath = projectsStore.settings?.projectList.searchIncludesPath ?? true;
     const sortBy = projectsStore.settings?.projectList.sortBy ?? "frecency";
-    // Touch the running-Unity store so the `running` filter and the
-    // chip re-render on every scan tick, even if no project field
-    // changes between ticks (e.g. the list is empty, or a still-running
-    // Unity happens to be on a path whose row hasn't been edited).
-    const runningTick = runningUnityStore.lastScanAt;
-    void runningTick;
+    // The `running` chip and the "running" filter are reactive through
+    // `statusFor` → `isRunningForPath`/`isRunningForPid`, which read the
+    // running-Unity store's `paths` / `byPid` (`$state`). We deliberately
+    // do NOT touch `runningUnityStore.lastScanAt` here: doing so forced a
+    // full filter + re-sort of every row on each 30s poll tick even when
+    // the running set was unchanged. The derive now only recomputes when
+    // something visible changes — a project starts/stops running (which
+    // mutates `byPid`/`paths`), or a project field / filter / sort changes.
     const list = projectsStore.projects.filter((p) => {
       // M1.5-15: hidden rows are removed from the default view but
       // re-surface when the "Show hidden" toolbar chip is active. The

@@ -27,7 +27,7 @@
 //! acceptable options. We use the OS-native commands to keep the binary
 //! dependency surface small and to avoid the `sysinfo` crate's runtime
 //! cost on the idle Hub. The scan is rate-limited from the frontend via
-//! `settings.discovery.scanIntervalSeconds` (default 5s), so the cost of
+//! `settings.discovery.scanIntervalSeconds` (default 30s), so the cost of
 //! spawning a short-lived process on each tick is negligible.
 //!
 //! ## Killing is intentionally not implemented here
@@ -121,10 +121,14 @@ fn normalize_path(path: &str) -> String {
     }
 }
 
-/// Public entry point. Returns one `RunningUnity` per live Unity process
-/// on macOS / Windows. Other targets get an empty list.
-#[tauri::command]
-pub fn scan_running_unity() -> Vec<RunningUnity> {
+/// Platform-dispatched scan of live Unity processes. Returns one
+/// `RunningUnity` per running Unity editor on macOS / Windows; other
+/// targets get an empty list. Shared by the async `scan_running_unity`
+/// command (frontend poll) and the sync `launch_project` double-launch
+/// guard. Kept as a plain sync fn so internal callers that already
+/// hold a blocking context (e.g. inside another command body) can use
+/// it directly.
+pub fn detect_running_unity() -> Vec<RunningUnity> {
     #[cfg(target_os = "macos")]
     {
         scan_macos()
@@ -137,6 +141,20 @@ pub fn scan_running_unity() -> Vec<RunningUnity> {
     {
         Vec::new()
     }
+}
+
+/// Public entry point for the frontend's 5-second running-Unity poll.
+/// `async` + `spawn_blocking` so the underlying `ps` (macOS) /
+/// PowerShell (Windows) subprocess — which can take hundreds of ms to
+/// seconds on a busy machine or under a slow Windows cold-start —
+/// never blocks the webview thread. The first poll fires immediately
+/// on Projects-tab mount, so keeping it off the main thread is what
+/// stops an extra freeze on top of the other launch-path commands.
+#[tauri::command]
+pub async fn scan_running_unity() -> Vec<RunningUnity> {
+    tauri::async_runtime::spawn_blocking(detect_running_unity)
+        .await
+        .unwrap_or_default()
 }
 
 #[cfg(target_os = "macos")]

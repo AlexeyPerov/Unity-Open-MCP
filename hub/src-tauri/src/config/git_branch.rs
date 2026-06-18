@@ -81,8 +81,11 @@ fn is_detached_sha(s: &str) -> bool {
 /// background (per spec) and update `gitBranch` on the in-memory store
 /// only — we never persist on this path; the persisted `gitBranch` is
 /// refreshed by `refresh_all_projects`.
-#[tauri::command]
-pub fn get_git_branches(paths: Vec<String>) -> HashMap<String, Option<String>> {
+///
+/// Sync inner helper kept so unit tests exercise the per-project read
+/// without a Tauri runtime; the command below offloads it to the
+/// blocking thread pool.
+fn read_git_branches(paths: Vec<String>) -> HashMap<String, Option<String>> {
     let mut result = HashMap::with_capacity(paths.len());
     for path in paths {
         let p = PathBuf::from(&path);
@@ -90,6 +93,18 @@ pub fn get_git_branches(paths: Vec<String>) -> HashMap<String, Option<String>> {
         result.insert(path, value);
     }
     result
+}
+
+/// `paths` → branch name (if any) keyed by input path. `async` +
+/// `spawn_blocking` so a `.git/HEAD` read against a path on a slow /
+/// networked volume does not stall the webview thread at launch.
+#[tauri::command]
+pub async fn get_git_branches(
+    paths: Vec<String>,
+) -> HashMap<String, Option<String>> {
+    tauri::async_runtime::spawn_blocking(move || read_git_branches(paths))
+        .await
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -196,7 +211,7 @@ mod tests {
             project_a.to_string_lossy().to_string(),
             project_b.to_string_lossy().to_string(),
         ];
-        let result = get_git_branches(paths.clone());
+        let result = read_git_branches(paths.clone());
         assert_eq!(result.len(), 2);
         assert_eq!(
             result.get(&paths[0]).cloned().flatten(),

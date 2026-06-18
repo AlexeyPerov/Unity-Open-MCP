@@ -244,7 +244,7 @@ class SettingsStore {
 
   /**
    * M1.5-10: the running-Unity scan cadence. The Rust layer defaults
-   * to 5s and tolerates legacy `settings.json` files via
+   * to 30s and tolerates legacy `settings.json` files via
    * `#[serde(default)]`, so we mirror that on the TS side: the field is
    * optional in `UnityDiscoverySettings`, and we resolve the effective
    * interval inside the running-Unity store. Persisting here

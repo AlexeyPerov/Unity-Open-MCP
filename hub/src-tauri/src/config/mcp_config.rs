@@ -737,7 +737,7 @@ fn command_for(params: &McpConfigParams, resolved_index: &str, _is_cli_only: boo
 // Do not add per-client path constants here — edit the manifest.
 
 /// In-memory mirror of `skills/client-paths.json`. The Hub and the
-/// mcp-server (`unity_agent_generate_skill`) resolve identical paths
+/// mcp-server (`unity_open_mcp_generate_skill`) resolve identical paths
 /// from the same file, so a new client is added once in the manifest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -745,7 +745,7 @@ pub struct ClientPathsManifest {
     pub skill_id: String,
     pub template_relative_path: String,
     /// Map of client key → `{ relativePath }`. Keys are the canonical
-    /// client identifiers also used by `unity_agent_generate_skill`.
+    /// client identifiers also used by `unity_open_mcp_generate_skill`.
     pub clients: std::collections::BTreeMap<String, ClientPathEntry>,
     /// Map of `McpClientId`-equivalent wire key → client keys.
     pub mcp_client_mapping: std::collections::BTreeMap<String, Vec<String>>,

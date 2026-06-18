@@ -895,7 +895,7 @@
                   <span class="check-desc">
                     How often the Projects tab polls the OS for live
                     <code>Unity</code> processes to drive the
-                    <code>running</code> status chip. Default 5s; lower
+                    <code>running</code> status chip. Default 30s; lower
                     values are more responsive at the cost of idle CPU.
                   </span>
                 </span>
@@ -907,7 +907,7 @@
                   min="1"
                   max="600"
                   step="1"
-                  value={settings.unityDiscovery.scanIntervalSeconds ?? 5}
+                  value={settings.unityDiscovery.scanIntervalSeconds ?? 30}
                   onchange={(e) => {
                     const raw = Number((e.currentTarget as HTMLInputElement).value);
                     if (Number.isFinite(raw) && raw > 0) {
