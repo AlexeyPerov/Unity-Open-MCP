@@ -18,7 +18,11 @@ import { ResourceRouter } from "./resource-router.js";
 import { withSchemaDefaults } from "./schema-defaults.js";
 import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
 import { BridgeEventStream } from "./event-stream.js";
+import { KNOWN_COMMANDS } from "./cli/args.js";
+import { runCli } from "./cli/cli.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+
+const PACKAGE_VERSION = "0.1.0";
 
 /** Name → tool lookup, built once for default-injection in the CallTool handler. */
 const TOOL_BY_NAME = new Map<string, Tool>(
@@ -30,7 +34,7 @@ const TOOL_BY_NAME = new Map<string, Tool>(
  * uses M13 T4.3 instance discovery:
  *   1. UNITY_OPEN_MCP_BRIDGE_PORT env var (override wins; users who pin a
  *      port keep working as before)
- *   2. ~/.unity-agent/instances/<hash>.json lock file (when its pid is alive)
+ *   2. ~/.unity-open-mcp/instances/<hash>.json lock file (when its pid is alive)
  *   3. deterministic hash of the project path (20000 + sha256 % 10000)
  * The resolved port is logged so users can see which bridge was picked.
  */
@@ -79,7 +83,7 @@ export function createServer(
   authToken?: string,
 ): Server {
   const server = new Server(
-    { name: "unity-open-mcp", version: "0.1.0" },
+    { name: "unity-open-mcp", version: PACKAGE_VERSION },
     { capabilities: { tools: {}, resources: {} } },
   );
 
@@ -88,7 +92,7 @@ export function createServer(
   const batchSpawn = new BatchSpawn();
   // M13 T4.4 — one SSE subscription per server process. The MCP server is the
   // only long-lived hop between the bridge and the LLM; a per-process reader
-  // amortizes the connection and lets every `unity_agent_pull_events` call
+  // amortizes the connection and lets every `unity_senses_pull_events` call
   // share the same buffered queue.
   const eventStream = new BridgeEventStream(
     `http://127.0.0.1:${port}`,
@@ -135,6 +139,27 @@ export function createServer(
 }
 
 async function main() {
+  // M15 T6.1 — CLI dispatch. When argv[0] is a known subcommand (ping,
+  // wait-for-ready, status, run-tool) or an explicit --help/--version, run
+  // the thin CLI and exit. Otherwise fall through to the stdio MCP server so
+  // a single `bin` works for both MCP clients and scripting.
+  const firstArg = process.argv[2];
+  const looksLikeCli =
+    firstArg !== undefined &&
+    (KNOWN_COMMANDS.includes(firstArg) ||
+      firstArg === "--help" ||
+      firstArg === "-h" ||
+      firstArg === "--version" ||
+      firstArg === "-V");
+  if (looksLikeCli) {
+    const outcome = await runCli({ version: PACKAGE_VERSION });
+    if (outcome.handled) {
+      process.exit(outcome.exitCode);
+    }
+    // runCli only returns handled:false when argv had no recognized command;
+    // in that case fall through to the stdio server below.
+  }
+
   const { port, projectPath, authToken } = getEnv();
   const server = createServer(projectPath, port, authToken);
   const transport = new StdioServerTransport();

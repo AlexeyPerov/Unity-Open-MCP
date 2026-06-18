@@ -30,6 +30,7 @@ Use this folder for version-controlled documentation that should stay aligned wi
 | What env vars are required to run the MCP server? | `tools.md` |
 | Which package owns a feature area? | `architecture.md` |
 | How do I run tests locally, and what does CI run? | `tools.md` (Testing) |
+| How do I drive the MCP server from a script or CI pipeline? | `manual-setup.md` (CLI for CI / automation) |
 
 ## Maintenance rules
 

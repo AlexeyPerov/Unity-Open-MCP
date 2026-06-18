@@ -2,6 +2,12 @@
 
 MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the stdio server in `mcp-server/src/index.ts`.
 
+> **CLI surface.** The same tool set is reachable from a thin CLI
+> (`unity-open-mcp run-tool <name>`), which shares the routing layer with the
+> stdio server. A CLI invocation returns the same JSON an MCP client would
+> receive. See [Manual setup → CLI for CI / automation](../manual-setup.md#cli-for-ci--automation)
+> for command shapes and examples.
+
 ## Quick lookup
 
 | Question | Section |
@@ -46,23 +52,23 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 
 ### Agent senses tools (M10)
 
-- `unity_agent_run_tests` — EditMode + PlayMode test runner with per-test pass/fail, filter by assembly/namespace/class/method, domain-reload-safe PlayMode via file handoff.
-- `unity_agent_screenshot` — Capture Scene view, Game view, or isolated 2×2 composite (Front/Right/Back/Top) of a single GameObject with layer culling. Returns saved PNG file path.
-- `unity_agent_read_console` — Read Unity console entries via reflection on internal `LogEntries`. Filter by type (error/warning/log/all), user-code stack filter, optional clear, token-bounded output.
-- `unity_agent_profiler_capture` — Read the Unity Profiler frame hierarchy via `ProfilerDriver.GetHierarchyFrameDataView`. Drill-down by parent ID / root name-substring / depth, multi-frame averaging, token-bounded top-N by self/total/calls.
-- `unity_agent_profiler_memory` — Live memory allocator stats (allocated/reserved/unused/temp/managed heap) with optional GC first.
-- `unity_agent_profiler_rendering` — Rendering environment batch: GPU/SystemInfo, active render pipeline, QualitySettings, screen resolution, target frame rate, Time stats.
-- `unity_agent_spatial_query` — Physics-based spatial reasoning (raycast / overlap / bounds / ground_check / nearest) against the live scene. Targets addressed by instance_id/path/name; returns hit object instanceId/name/path.
+- `unity_senses_run_tests` — EditMode + PlayMode test runner with per-test pass/fail, filter by assembly/namespace/class/method, domain-reload-safe PlayMode via file handoff.
+- `unity_senses_screenshot` — Capture Scene view, Game view, or isolated 2×2 composite (Front/Right/Back/Top) of a single GameObject with layer culling. Returns saved PNG file path.
+- `unity_senses_read_console` — Read Unity console entries via reflection on internal `LogEntries`. Filter by type (error/warning/log/all), user-code stack filter, optional clear, token-bounded output.
+- `unity_senses_profiler_capture` — Read the Unity Profiler frame hierarchy via `ProfilerDriver.GetHierarchyFrameDataView`. Drill-down by parent ID / root name-substring / depth, multi-frame averaging, token-bounded top-N by self/total/calls.
+- `unity_senses_profiler_memory` — Live memory allocator stats (allocated/reserved/unused/temp/managed heap) with optional GC first.
+- `unity_senses_profiler_rendering` — Rendering environment batch: GPU/SystemInfo, active render pipeline, QualitySettings, screen resolution, target frame rate, Time stats.
+- `unity_senses_spatial_query` — Physics-based spatial reasoning (raycast / overlap / bounds / ground_check / nearest) against the live scene. Targets addressed by instance_id/path/name; returns hit object instanceId/name/path.
 
 ### Capability discovery
 
 - `unity_open_mcp_capabilities` — Returns the full capability surface in one call: every tool with its input schema and route policy, every verify rule with applicable asset kinds and issue severities, and every available fix. Each capability carries an `implemented` boolean; planned-but-unbuilt items return with `status: "planned"` and guidance instead of failing. Call this first to learn what is available.
-- `unity_agent_list_rules` — Purpose-built rule discovery. Lists every verify rule (implemented + planned) with applicable asset kinds/extensions, derived `defaultSeverity` (worst severity the rule can emit), flat `availableFixIds`, and issue codes. Filter by `asset_kind` / `extension` / `implemented_only`. Routes locally from the versioned rule catalog — never hits the live bridge or batch Unity. Use this before `scan_paths` / `validate_edit` to learn which rules apply to a given asset type without trial-and-error.
-- `unity_agent_generate_skill` — Generates a project-specific SKILL.md reflecting the actual project state: Unity version, installed packages (including bridge/verify versions), available tools and verify rules, key MonoBehaviour/ScriptableObject types discovered from source, and the mutate→gate→fix workflow. Set `write: true` to persist the file into `.claude/skills/`, `.cursor/skills/`, `.opencode/skills/`, or `.agents/skills/`. Regenerate after package or script changes.
+- `unity_open_mcp_list_rules` — Purpose-built rule discovery. Lists every verify rule (implemented + planned) with applicable asset kinds/extensions, derived `defaultSeverity` (worst severity the rule can emit), flat `availableFixIds`, and issue codes. Filter by `asset_kind` / `extension` / `implemented_only`. Routes locally from the versioned rule catalog — never hits the live bridge or batch Unity. Use this before `scan_paths` / `validate_edit` to learn which rules apply to a given asset type without trial-and-error.
+- `unity_open_mcp_generate_skill` — Generates a project-specific SKILL.md reflecting the actual project state: Unity version, installed packages (including bridge/verify versions), available tools and verify rules, key MonoBehaviour/ScriptableObject types discovered from source, and the mutate→gate→fix workflow. Set `write: true` to persist the file into `.claude/skills/`, `.cursor/skills/`, `.opencode/skills/`, or `.agents/skills/`. Regenerate after package or script changes.
 
 ### Streaming & event pull (M13)
 
-- `unity_agent_pull_events` — Drains incremental bridge events (console logs + editor-state transitions) since the previous call. The first call opens a server-side SSE subscription to the bridge's `GET /events` stream; later calls return only new events. Use this after `execute_csharp` / mutations to stream console output without polling `/ping` or re-reading the full console. Each event carries `seq`, `ts`, `type` (`log` | `editor_state`), and type-specific fields (`logType`/`message`/`stack` for logs, `state`/`isCompiling`/`isPlaying` for state). `dropped` reports events evicted from the queue before this pull; `connected` reports the SSE reader state. Live-only — returns `bridge_unavailable` when the bridge is down.
+- `unity_senses_pull_events` — Drains incremental bridge events (console logs + editor-state transitions) since the previous call. The first call opens a server-side SSE subscription to the bridge's `GET /events` stream; later calls return only new events. Use this after `execute_csharp` / mutations to stream console output without polling `/ping` or re-reading the full console. Each event carries `seq`, `ts`, `type` (`log` | `editor_state`), and type-specific fields (`logType`/`message`/`stack` for logs, `state`/`isCompiling`/`isPlaying` for state). `dropped` reports events evicted from the queue before this pull; `connected` reports the SSE reader state. Live-only — returns `bridge_unavailable` when the bridge is down.
 
 ### Typed editor tools (M16 planned)
 
@@ -264,7 +270,7 @@ Accepted values: `error` (default), `warning` (alias `warn`), `info`, `verbose`,
 
 ## Skill generation
 
-`unity_agent_generate_skill` produces a project-specific SKILL.md that gives the LLM up-to-date context for the specific project — installed tool versions, available verify rules, key MonoBehaviour/ScriptableObject types, and the core workflow.
+`unity_open_mcp_generate_skill` produces a project-specific SKILL.md that gives the LLM up-to-date context for the specific project — installed tool versions, available verify rules, key MonoBehaviour/ScriptableObject types, and the core workflow.
 
 - Implementation: `mcp-server/src/skill/generate-skill.ts`.
 - Routes locally (`_source: "local"`) — reads `ProjectSettings/ProjectVersion.txt`, `Packages/manifest.json`, and scans `.cs` files under `Assets/` for type declarations. Never hits the live bridge or batch Unity.
@@ -315,11 +321,11 @@ Route selection is implemented in `mcp-server/src/tool-router.ts`.
 - `unity_open_mcp_list_assets`: always offline route.
 - `unity_open_mcp_read_compile_errors`: always offline route. Reads Unity's `Editor.log` directly — the one channel that works when the bridge assembly itself has failed to compile (every in-bridge channel is dead with it, and `compile_check` can't run because its batch entry point shares the broken assembly and Unity's per-project lock blocks a second instance). No bridge, no Unity spawn.
 - `unity_open_mcp_capabilities`: always local route (static catalog).
-- `unity_agent_generate_skill`: always local route (reads project files from disk).
+- `unity_open_mcp_generate_skill`: always local route (reads project files from disk).
 - `unity_open_mcp_find_references`: live when available, otherwise offline reader.
 - `unity_open_mcp_read_asset` and `unity_open_mcp_search_assets`: compressible router with offline-first behavior and live fallback.
 - `unity_open_mcp_compile_check`: **always** routes to batch (a fresh Unity recompiling from scratch), even when the live bridge is connected — running it against an Editor that already compiled would never surface a broken build. Response `_route.fallbackReason` is `"compile_check_always_batch"`. Note: `compile_check` is **not** a recovery path for a broken bridge assembly (its entry point lives in that assembly); use `read_compile_errors` for that case.
-- `unity_agent_pull_events`: live-only. Drains a per-process SSE subscription against the bridge `GET /events` endpoint; returns `bridge_unavailable` when the live bridge is down. See [Streaming & event pull](#streaming--event-pull-m13).
+- `unity_senses_pull_events`: live-only. Drains a per-process SSE subscription against the bridge `GET /events` endpoint; returns `bridge_unavailable` when the live bridge is down. See [Streaming & event pull](#streaming--event-pull-m13).
 - Other tools:
   - prefer live bridge when connected,
   - use batch fallback only for tools in batch-eligible set,
@@ -416,11 +422,11 @@ When the cap is not hit, the count is `0` (or omitted for legacy fields); a miss
 
 The bridge emits console-log and editor-state (compile / play-mode) notifications over an SSE stream at `GET /events`. See [bridge-http.md](bridge-http.md#events-sse--events-poll-m13) for the wire format.
 
-`unity_agent_pull_events` is the MCP surface for that stream:
+`unity_senses_pull_events` is the MCP surface for that stream:
 
 - The MCP server opens one SSE subscription per process on first call (lazy), keeps it connected across calls, and buffers events into a 500-entry queue.
 - Each call drains up to `max_events` events and advances the cursor; calling again immediately returns only events that arrived since.
-- The subscriber id is server-scoped — a restarted MCP server begins "now"; agents that need historical logs should still call `unity_agent_read_console`.
+- The subscriber id is server-scoped — a restarted MCP server begins "now"; agents that need historical logs should still call `unity_senses_read_console`.
 - Returns `bridge_unavailable` when the live bridge is down (no batch fallback — there is no headless Unity console to stream).
 
 `pull_events` vs `read_console`: `read_console` is a snapshot of the *current* console contents (every call returns the whole buffered log). `pull_events` is *incremental* — it returns only logs emitted since the previous pull, plus editor-state transitions that never appear in the console (compile start/stop, play-mode changes). For a "what happened after my mutation" check, `pull_events` is cheaper; for a "what's the full current state" check, use `read_console`.
@@ -440,4 +446,4 @@ The bridge emits console-log and editor-state (compile / play-mode) notification
 - `mcp-server/src/capabilities/rule-catalog.ts`
 - `mcp-server/src/skill/generate-skill.ts`
 - `mcp-server/src/skill/client-paths.ts`
-- `skills/client-paths.json` — single source of truth for project-relative skill install paths and the MCP-client → skill-target mapping (consumed by both the Hub wizard and `unity_agent_generate_skill`).
+- `skills/client-paths.json` — single source of truth for project-relative skill install paths and the MCP-client → skill-target mapping (consumed by both the Hub wizard and `unity_open_mcp_generate_skill`).

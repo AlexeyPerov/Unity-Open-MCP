@@ -145,7 +145,7 @@ Edit `~/.zcode/cli/config.json` (global) — ZCode nests MCP servers three level
 
 For a project-scoped config, put the same `mcp.servers.unity-open-mcp` block in `.zcode/cli/config.json` at your Unity project root.
 
-ZCode also discovers project skills under `.agents/skills/`. Run `unity_agent_generate_skill` with `clients: ["agents"]` (or use the Hub wizard, which writes `.agents/skills/unity-open-mcp/SKILL.md` when ZCode is selected) to give the agent a project-specific Unity skill.
+ZCode also discovers project skills under `.agents/skills/`. Run `unity_open_mcp_generate_skill` with `clients: ["agents"]` (or use the Hub wizard, which writes `.agents/skills/unity-open-mcp/SKILL.md` when ZCode is selected) to give the agent a project-specific Unity skill.
 
 ### Claude Code (CLI)
 
@@ -160,7 +160,7 @@ Adjust flags to match your installed Claude Code version if the CLI syntax diffe
 
 ## 4. Launch Unity with the bridge
 
-Open your Unity project in the Editor. The bridge package starts an HTTP listener. The port is derived **deterministically from the project path** (`20000 + sha256(path) % 10000`), so two projects running bridges simultaneously get two distinct ports with no configuration. The MCP server discovers the right bridge per project by reading a lock file the bridge writes at `~/.unity-agent/instances/<hash>.json` — no shared config required.
+Open your Unity project in the Editor. The bridge package starts an HTTP listener. The port is derived **deterministically from the project path** (`20000 + sha256(path) % 10000`), so two projects running bridges simultaneously get two distinct ports with no configuration. The MCP server discovers the right bridge per project by reading a lock file the bridge writes at `~/.unity-open-mcp/instances/<hash>.json` — no shared config required.
 
 You can override the port (it wins over the deterministic default):
 
@@ -188,7 +188,7 @@ curl -s "http://127.0.0.1:<port>/ping"
 To see which port a running bridge is on without launching the MCP server, read its lock file:
 
 ```bash
-cat ~/.unity-agent/instances/*.json | grep -E '"port"|"projectPath"'
+cat ~/.unity-open-mcp/instances/*.json | grep -E '"port"|"projectPath"'
 ```
 
 Expect JSON with bridge status fields (for example `connected`). If the connection is refused, Unity may still be compiling or the port may not match your config.
@@ -206,9 +206,83 @@ In your AI client, use a Unity-related MCP tool or resource. If tools fail:
 
 For MCP tool routing and offline fallbacks, see [api/mcp-tools.md](api/mcp-tools.md).
 
+## CLI for CI / automation
+
+The MCP server ships a thin CLI for scripting and CI pipelines. It shares the
+same routing layer as the stdio server, so a CLI invocation returns the same
+JSON an MCP client would receive. From the repository:
+
+```bash
+cd mcp-server
+node dist/index.js <command> [options]
+```
+
+Once the package is published to npm (see the distribution milestone), the
+same binary is invocable as `npx unity-open-mcp <command>`.
+
+Commands:
+
+| Command | Purpose | Exit code |
+|---|---|---|
+| `ping` | One `/ping` against the resolved bridge. | `0` if ready, `1` otherwise. |
+| `wait-for-ready` | Poll `/ping` until the bridge is connected and idle (compile-aware). Fails fast on a dead-bridge assembly. | `0` on ready, `1` on timeout / dead bridge. |
+| `status` | Print resolved port, instance lock classification, auth token presence, and a cheap readiness probe. Always `0`. | `0`. |
+| `run-tool <name>` | Invoke any MCP tool by name and print its JSON result. | `0` on success, `1` on tool error, `2` on unknown tool. |
+| `--help` / `-h` | Show help. | `0`. |
+| `--version` / `-V` | Print the package version. | `0`. |
+
+Every command accepts `--json` to emit machine-readable JSON instead of the
+human-readable summary.
+
+Options:
+
+| Option | Purpose |
+|---|---|
+| `--project <path>` / `-P <path>` | Unity project path. Defaults to `UNITY_PROJECT_PATH`. |
+| `--port <n>` / `-p <n>` | Bridge port override. Defaults to `UNITY_OPEN_MCP_BRIDGE_PORT`, then deterministic discovery. |
+| `--timeout-ms <n>` | Ping / wait-for-ready overall timeout (ms). |
+| `--interval-ms <n>` | wait-for-ready poll interval (ms). |
+| `--args '<json>'` | JSON object of tool args (`run-tool`). |
+| `--arg key=value` | One tool arg (`run-tool`, repeatable; JSON-parsed when the value is valid JSON). |
+
+Examples:
+
+```bash
+# Block until the bridge is ready (typical CI gate before running tools).
+node dist/index.js wait-for-ready --project /path/to/MyGame
+
+# Probe and exit — useful as a health check.
+node dist/index.js ping --project /path/to/MyGame --json
+
+# Show the resolved bridge port + instance state without waiting.
+node dist/index.js status --project /path/to/MyGame --json
+
+# Run a tool exactly like an MCP client would; parse the JSON downstream.
+node dist/index.js run-tool unity_open_mcp_capabilities \
+  --project /path/to/MyGame --json --arg include_planned=false
+
+# Offline-only tools (no bridge required) also work via the CLI.
+node dist/index.js run-tool unity_open_mcp_list_assets \
+  --project /path/to/MyGame --arg folder=Assets --arg max_per_folder=10
+```
+
+`wait-for-ready` is compile-aware: a 503 response or `compiling: true` body
+keeps the wait alive, and a stale-heartbeat + live-PID signature (the bridge
+assembly failed to recompile) fails fast with a pointer at
+`run-tool unity_open_mcp_read_compile_errors` instead of spinning to the
+timeout. See [Bridge HTTP API](api/bridge-http.md) for the `/ping` body.
+
+> **npm / `npx` distribution.** The CLI is designed to be invoked as
+> `npx unity-open-mcp <command>` once the package is published to npm. The
+> `bin` field in `mcp-server/package.json` already points at the same
+> `dist/index.js` that handles both the stdio server and the CLI subcommands,
+> so the publish flow is the remaining piece — see the distribution milestone.
+> Until then, use `node mcp-server/dist/index.js <command>` against your
+> checkout.
+
 ## Optional: install the agent skill
 
-The agent skill (`skills/unity-open-mcp/SKILL.md` in this repo) gives your AI client workflow guidance for the Unity MCP tools — the mutate→gate→fix loop, capabilities-first discovery, and the agent senses (tests, profiler, screenshots). It is optional: the MCP tools work without it, but agents miss the workflow narrative and the `unity_agent_run_tests` verification habit.
+The agent skill (`skills/unity-open-mcp/SKILL.md` in this repo) gives your AI client workflow guidance for the Unity MCP tools — the mutate→gate→fix loop, capabilities-first discovery, and the agent senses (tests, profiler, screenshots). It is optional: the MCP tools work without it, but agents miss the workflow narrative and the `unity_senses_run_tests` verification habit.
 
 Install paths are derived from the single-source manifest at [`skills/client-paths.json`](../skills/client-paths.json). Copy the template to the project-relative folder for your client:
 
@@ -228,14 +302,14 @@ cp /path/to/unity-open-mcp/skills/unity-open-mcp/SKILL.md .cursor/skills/unity-o
 
 ZCode also discovers project skills under `.agents/skills/` — copy the template there for ZCode.
 
-To generate a **project-specific** skill (Unity version, installed packages, key types) instead of the static template, run `unity_agent_generate_skill` with `{ "write": true, "clients": ["cursor"] }` once the MCP server is connected. Regenerate after package or script changes.
+To generate a **project-specific** skill (Unity version, installed packages, key types) instead of the static template, run `unity_open_mcp_generate_skill` with `{ "write": true, "clients": ["cursor"] }` once the MCP server is connected. Regenerate after package or script changes.
 
 ## Multi-instance (optional)
 
 Multiple Unity projects can run bridges concurrently with no port management:
 
 - Each project's bridge binds a **deterministic port** derived from its path: `20000 + (sha256(projectPath) % 10000)`. No two projects share a port.
-- Each bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json` with its `pid`, `port`, project path, and current editor state. The file doubles as a heartbeat, rewritten every 0.5s and on every compile / play-mode / domain-reload transition.
+- Each bridge writes a lock file at `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` with its `pid`, `port`, project path, and current editor state. The file doubles as a heartbeat, rewritten every 0.5s and on every compile / play-mode / domain-reload transition.
 - The MCP server reads that lock file to find the right bridge for a given project — no env var needed when `UNITY_PROJECT_PATH` is set correctly.
 - Stale locks (Unity crashed) are cleaned up automatically by the next bridge that starts: any lock whose `pid` is no longer alive is deleted.
 
@@ -267,7 +341,7 @@ Three opt-in security surfaces round out M14 — all controlled from the bridge 
 
 - **Remote bind** — set `bindAddress` to `0.0.0.0` to expose the bridge beyond loopback (shared dev machine, CI runner reached over the network). **Requires `authMode: "required"`** — the bridge refuses to start on a non-loopback interface without token auth. The bearer token travels in cleartext over HTTP, so terminate TLS upstream (reverse proxy / `ssh -L` tunnel). See [Bridge HTTP API → Remote bind](api/bridge-http.md#remote-bind-m14-t54) for the full threat model.
 - **Power-tool deny lists** — `execute_csharp` and `execute_menu` are blocked from destructive patterns (editor exit, bulk asset delete, unbounded builds, `File/Quit`) by default. Override via `csharpDenyPatterns` / `menuDenyPatterns` (non-empty regex arrays replace the defaults; null/empty = defaults). Bypass per-request with `gate: "off"` + `confirm_bypass: true` (audited). See [Bridge HTTP API → Power-tool deny lists](api/bridge-http.md#power-tool-deny-lists-m14-t52--t53).
-- **On-disk audit log** — set `auditLogEnabled: true` to persist every gate mutation and deny-list refusal to a rolling JSON-lines file under `~/.unity-agent/audit/`. Survives domain reload and editor restart. Off by default.
+- **On-disk audit log** — set `auditLogEnabled: true` to persist every gate mutation and deny-list refusal to a rolling JSON-lines file under `~/.unity-open-mcp/audit/`. Survives domain reload and editor restart. Off by default.
 
 ## Launch dialog auto-dismiss
 
@@ -289,7 +363,7 @@ Only the launch-errors / Safe Mode dialog is auto-dismissed. Destructive startup
 |---|---|
 | Package resolve fails in Unity | Check git URL, tag, or `file:` path; ensure Unity 6+. |
 | MCP server fails to start | Run `node mcp-server/dist/index.js` manually and read stderr; fix missing `UNITY_PROJECT_PATH`. |
-| `/ping` connection refused | Launch Unity for the same project; wait for compile; check the port the bridge picked via `~/.unity-agent/instances/*.json` or the MCP server's startup log (`Bridge port resolved to <port>`). |
+| `/ping` connection refused | Launch Unity for the same project; wait for compile; check the port the bridge picked via `~/.unity-open-mcp/instances/*.json` or the MCP server's startup log (`Bridge port resolved to <port>`). |
 | Tools work but live calls fail | Bridge may be disconnected — check `/ping` `connected` and that the Editor has the project focused/open. |
 | Wrong project picked up by the MCP server | Confirm `UNITY_PROJECT_PATH` matches the open project root exactly; the deterministic port is derived from this path. |
 | MCP server stalls on first call after a compile-error launch | Expected if the Safe Mode dialog is up. Auto-dismiss clicks **Ignore** by default; if you disabled it (`UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1`) or hit a permission error (macOS Accessibility), dismiss the dialog manually. Dismissals and errors are logged to the MCP server's stderr. |
