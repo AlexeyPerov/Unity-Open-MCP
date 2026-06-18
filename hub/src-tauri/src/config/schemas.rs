@@ -315,6 +315,23 @@ pub struct ProjectEntry {
     /// map (the documented default).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env_vars: BTreeMap<String, String>,
+    /// M15 T6.4: cached render-pipeline label for the project, read
+    /// from `ProjectSettings/GraphicsSettings.asset` (URP / HDRP /
+    /// Built-in). Stored as a short kebab string so the frontend can
+    /// render a chip without re-running detection on every paint.
+    /// `#[serde(default, skip_serializing_if = "Option::is_none")]`
+    /// keeps legacy `projects.json` files loadable and the on-disk
+    /// shape compact when the value has not been computed yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_pipeline: Option<String>,
+    /// M15 T6.4: cached default build target read from
+    /// `ProjectSettings/ProjectSettings.asset` (`m_BuildTarget` /
+    /// `m_BuildTargetGroup`). `None` for projects that have never been
+    /// opened by a Unity Editor (Unity writes the keys on first save).
+    /// `#[serde(default, skip_serializing_if = "Option::is_none")]`
+    /// keeps legacy `projects.json` files loadable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_build_target: Option<String>,
 }
 
 fn default_project_source() -> String {
@@ -626,6 +643,8 @@ mod tests {
                     ("MY_KEY".to_string(), "hello".to_string()),
                     ("DEBUG_LEVEL".to_string(), "verbose".to_string()),
                 ]),
+                render_pipeline: Some("URP".to_string()),
+                default_build_target: Some("StandaloneWindows64".to_string()),
             }],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -652,6 +671,12 @@ mod tests {
         assert_eq!(
             p.env_vars.get("DEBUG_LEVEL").map(String::as_str),
             Some("verbose")
+        );
+        // M15 T6.4: renderPipeline + defaultBuildTarget round-trip.
+        assert_eq!(p.render_pipeline.as_deref(), Some("URP"));
+        assert_eq!(
+            p.default_build_target.as_deref(),
+            Some("StandaloneWindows64")
         );
     }
 
@@ -684,6 +709,8 @@ mod tests {
             hidden: false,
             stale: false,
             env_vars: BTreeMap::new(),
+            render_pipeline: None,
+            default_build_target: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(!json.contains("unityVersion"));
@@ -701,6 +728,10 @@ mod tests {
         // M1.5-17: envVars is skipped on serialize when the map is
         // empty so the on-disk file stays compact for the common case.
         assert!(!json.contains("envVars"));
+        // M15 T6.4: renderPipeline / defaultBuildTarget are skipped on
+        // serialize when `None` so legacy on-disk files stay compact.
+        assert!(!json.contains("renderPipeline"));
+        assert!(!json.contains("defaultBuildTarget"));
     }
 
     #[test]
@@ -745,6 +776,22 @@ mod tests {
         }"#;
         let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
         assert_eq!(entry.source, "manual");
+    }
+
+    #[test]
+    fn project_entry_render_pipeline_defaults_to_none_for_legacy_json() {
+        // M15 T6.4: pre-M15 entries have no `renderPipeline` field. The
+        // deserializer must default to `None` so existing user configs
+        // are not rejected and the Projects tab renders the chip only
+        // once the value has been computed by `refresh_all_projects`.
+        let legacy = r#"{
+            "id": "abc",
+            "name": "Proj",
+            "path": "/p"
+        }"#;
+        let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
+        assert!(entry.render_pipeline.is_none());
+        assert!(entry.default_build_target.is_none());
     }
 
     #[test]

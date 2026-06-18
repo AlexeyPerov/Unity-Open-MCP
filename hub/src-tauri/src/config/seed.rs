@@ -137,7 +137,7 @@ pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
         entries.push(ProjectEntry {
             id: uuid::Uuid::new_v4().to_string(),
             name: hub_project.title,
-            path: hub_project.path,
+            path: hub_project.path.clone(),
             unity_version: hub_project.version,
             last_opened_at: None,
             last_modified_at,
@@ -151,6 +151,27 @@ pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
             hidden: false,
             stale: false,
             env_vars: Default::default(),
+            // M15 T6.4: enrich the seeded rows with SRP + build-target
+            // metadata so they show the same chips as manually-added
+            // rows. We only run detection when the path actually
+            // exists — a Hub entry pointing at a removed folder is
+            // still seeded (so the user can relink it) but cannot be
+            // inspected.
+            render_pipeline: if path_exists {
+                Some(
+                    crate::config::render_pipeline::read_render_pipeline(Path::new(&hub_project.path))
+                        .label()
+                        .to_string(),
+                )
+            } else {
+                None
+            },
+            default_build_target: if path_exists {
+                crate::config::build_target::read_default_build_target(Path::new(&hub_project.path))
+                    .target
+            } else {
+                None
+            },
         });
     }
 
@@ -195,4 +216,133 @@ pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
         skipped_paths,
         error: None,
     }
+}
+
+/// M15 T6.4: candidate project from a Unity Hub scan. The candidate
+/// shape is a slimmed-down `ProjectEntry` (no `id`, `frecency`, or
+/// per-project settings) plus the path-exists flag so the UI can show
+/// "missing path" candidates the same way it shows missing tracked
+/// rows. The frontend never persists these directly — each candidate
+/// the user accepts goes through `add_project`, which produces a real
+/// `ProjectEntry` and writes it to `projects.json`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubProjectCandidate {
+    pub name: String,
+    pub path: String,
+    pub exists: bool,
+    pub unity_version: Option<String>,
+    pub last_modified_at: Option<String>,
+    pub render_pipeline: Option<String>,
+    pub default_build_target: Option<String>,
+    /// `true` when the candidate's canonical path already matches an
+    /// entry in `projects.json` — the frontend renders these as
+    /// "tracked" and hides the import button.
+    pub already_tracked: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubCandidatesResult {
+    pub candidates: Vec<HubProjectCandidate>,
+    /// `None` when the scan succeeded (even with zero candidates).
+    /// `Some(message)` when Unity Hub's data directory or projects
+    /// file could not be read — the UI surfaces the message inline
+    /// rather than as a hard error.
+    pub error: Option<String>,
+}
+
+/// Live, read-only scan of Unity Hub's recent-projects list. Mirrors
+/// the UnityLauncherPro `GetProjects.VisitProjectsInUnityHubJson` flow:
+/// the `projects-v1.json` file under Hub's data directory is the
+/// authoritative source for "what Unity Hub thinks the user has been
+/// working on". Unlike `seed_from_unity_hub`, this command does **not**
+/// mutate `projects.json` — it returns the candidate list so the UI can
+/// render an "import from Hub" panel and the user can pick which
+/// candidates to add.
+///
+/// The candidate list is merged with the current `projects.json` so
+/// `already_tracked` is correct: every candidate whose canonical path
+/// matches an existing entry is flagged, regardless of how that entry
+/// was originally added (hub-seed, manual, walk-up).
+#[tauri::command]
+pub fn discover_hub_projects(state: State<AppState>) -> HubCandidatesResult {
+    let (hub_entries, _schema) = match read_hub_projects() {
+        Ok(v) => v,
+        Err(e) => {
+            log::info!("Hub candidate scan skipped: {}", e);
+            return HubCandidatesResult {
+                candidates: Vec::new(),
+                error: Some(e),
+            };
+        }
+    };
+
+    // Snapshot the current tracked paths so we can flag duplicates
+    // without holding the lock through the per-candidate filesystem
+    // probes (a path on a spun-down drive can stall for the filesystem
+    // timeout).
+    let tracked_paths: std::collections::HashSet<String> = {
+        let guard = state.projects.lock().unwrap();
+        guard
+            .projects
+            .iter()
+            .map(|p| canonicalize_for_compare(&p.path))
+            .collect()
+    };
+
+    let mut candidates: Vec<HubProjectCandidate> = Vec::new();
+    for hub_project in hub_entries {
+        let path_exists = Path::new(&hub_project.path).exists();
+        let already_tracked = tracked_paths.contains(&canonicalize_for_compare(&hub_project.path));
+        // SRP + build-target are only computed when the path actually
+        // exists — a missing candidate keeps the fields `None` so the
+        // UI can still show the entry (with a "missing path" chip) and
+        // let the user relink it via Add Project.
+        let (render_pipeline, default_build_target) = if path_exists {
+            (
+                Some(
+                    crate::config::render_pipeline::read_render_pipeline(Path::new(&hub_project.path))
+                        .label()
+                        .to_string(),
+                ),
+                crate::config::build_target::read_default_build_target(Path::new(&hub_project.path))
+                    .target,
+            )
+        } else {
+            (None, None)
+        };
+        candidates.push(HubProjectCandidate {
+            name: hub_project.title,
+            path: hub_project.path,
+            exists: path_exists,
+            unity_version: hub_project.version,
+            last_modified_at: hub_project.last_modified.and_then(unix_ms_to_iso8601),
+            render_pipeline,
+            default_build_target,
+            already_tracked,
+        });
+    }
+
+    // Sort most-recent first so the UI defaults to the projects the
+    // user actually opened lately. `Option<&String>::cmp` puts `None`
+    // last in a descending sort.
+    candidates.sort_by(|a, b| b.last_modified_at.as_ref().cmp(&a.last_modified_at.as_ref()));
+
+    HubCandidatesResult {
+        candidates,
+        error: None,
+    }
+}
+
+/// Canonicalise a path for the duplicate check. Mirrors
+/// `projects::canonicalize_for_compare` but lives here so the seed
+/// module stays self-contained — both helpers must agree on the
+/// canonical form or `already_tracked` would falsely report a fresh
+/// candidate for a path Hub happens to spell differently.
+fn canonicalize_for_compare(path: &str) -> String {
+    let p = PathBuf::from(path);
+    fs::canonicalize(&p)
+        .map(|c| c.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string())
 }

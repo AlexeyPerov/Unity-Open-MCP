@@ -153,6 +153,25 @@
     }
   }
 
+  /**
+   * M15 T6.4: tone for a `UnityInstallation.releaseType` chip. Mirrors
+   * `streamTone` but works on the short label string the discovery
+   * scan produces (`"LTS"` / `"TECH"` / `"Beta"` / `"Alpha"`).
+   */
+  function streamToneForRelease(release: string): "ok" | "warn" | "missing" {
+    switch (release) {
+      case "LTS":
+        return "ok";
+      case "TECH":
+        return "warn";
+      case "Beta":
+      case "Alpha":
+        return "missing";
+      default:
+        return "warn";
+    }
+  }
+
   async function openReleaseNotes(url: string) {
     try {
       await openUrl(url);
@@ -491,10 +510,12 @@
   {/if}
 
   <div class:hidden={viewMode !== "installed"}>
-    <div class="table" role="grid" aria-rowcount={filtered.length + 1} aria-colcount={5}>
+    <div class="table" role="grid" aria-rowcount={filtered.length + 1} aria-colcount={7}>
     <div class="table-head" role="row">
       <div class="th" role="columnheader">Version</div>
+      <div class="th" role="columnheader">Stream</div>
       <div class="th" role="columnheader">Source</div>
+      <div class="th" role="columnheader">Platforms</div>
       <div class="th" role="columnheader">Path</div>
       <div class="th th-num" role="columnheader">Projects</div>
       <div class="th" role="columnheader">Installed</div>
@@ -506,6 +527,8 @@
           {@const health = healthFor(inst)}
           {@const chip = chipForHealth(health)}
           {@const projectCount = buckets.get(inst.version) ?? 0}
+          {@const platforms = inst.platforms ?? []}
+          {@const stream = inst.releaseType ?? ""}
           <div
             class="row"
             class:row-selected={selectedVersion === inst.version}
@@ -527,7 +550,23 @@
               </div>
             </div>
             <div class="cell" role="gridcell">
+              {#if stream}
+                <StatusChip
+                  tone={streamToneForRelease(stream)}
+                  label={stream}
+                  title={`Unity ${inst.version} is on the ${stream} stream`}
+                />
+              {/if}
+            </div>
+            <div class="cell" role="gridcell">
               <span class="source-text">{inst.source || "Manual"}</span>
+            </div>
+            <div class="cell cell-platforms" role="gridcell" title={platforms.join(", ")}>
+              {#if platforms.length === 0}
+                <span class="muted">—</span>
+              {:else}
+                <span class="platforms-text">{platforms.join(", ")}</span>
+              {/if}
             </div>
             <div class="cell cell-path" role="gridcell" title={inst.path}>
               <span class="path-text">{inst.path}</span>
@@ -926,7 +965,7 @@
 
   .table-head {
     display: grid;
-    grid-template-columns: minmax(10rem, 1.2fr) minmax(4.5rem, 0.7fr) minmax(12rem, 2.4fr) minmax(4rem, 0.6fr) minmax(6rem, 0.7fr);
+    grid-template-columns: minmax(10rem, 1.2fr) minmax(4rem, 0.5fr) minmax(4rem, 0.6fr) minmax(4rem, 0.7fr) minmax(2.5fr) minmax(3.5rem, 0.5fr) minmax(5rem, 0.6fr);
     flex-shrink: 0;
     background: var(--hub-surface);
     border-bottom: 1px solid var(--hub-border);
@@ -957,7 +996,7 @@
 
   .row {
     display: grid;
-    grid-template-columns: minmax(10rem, 1.2fr) minmax(4.5rem, 0.7fr) minmax(12rem, 2.4fr) minmax(4rem, 0.6fr) minmax(6rem, 0.7fr);
+    grid-template-columns: minmax(10rem, 1.2fr) minmax(4rem, 0.5fr) minmax(4rem, 0.6fr) minmax(4rem, 0.7fr) minmax(2.5fr) minmax(3.5rem, 0.5fr) minmax(5rem, 0.6fr);
     align-items: center;
     border-bottom: 1px solid var(--hub-card);
     padding: 0 0.25rem;
@@ -1035,6 +1074,22 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.74rem;
     color: var(--hub-text-muted);
+  }
+
+  .cell-platforms {
+    min-width: 0;
+  }
+
+  .platforms-text {
+    font-size: 0.74rem;
+    color: var(--hub-text-dim);
+    /* Keep long platform lists on a single line; the full list is
+       already exposed via the cell's `title` tooltip. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+    max-width: 100%;
   }
 
   .count-text {

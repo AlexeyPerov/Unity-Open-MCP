@@ -192,6 +192,19 @@ pub fn add_project(
         hidden: false,
         stale: false,
         env_vars: Default::default(),
+        // M15 T6.4: populate the discovery-enriched metadata so the
+        // row shows the right SRP / build-target chips from the first
+        // paint. Both helpers fall back to BIRP / `None` for projects
+        // that have not been opened by a Unity Editor yet.
+        render_pipeline: Some(
+            crate::config::render_pipeline::read_render_pipeline(&project_path)
+                .label()
+                .to_string(),
+        ),
+        default_build_target: crate::config::build_target::read_default_build_target(
+            &project_path,
+        )
+        .target,
     };
 
     let mut projects = state.projects.lock().unwrap().clone();
@@ -227,13 +240,29 @@ pub fn refresh_all_projects(state: State<AppState>) -> RefreshOutcome {
         let new_version = read_unity_version(&project_path);
         let new_mtime = read_dir_mtime_iso(&project_path);
         let new_branch = git_branch::read_git_branch(&project_path);
+        // M15 T6.4: refresh the SRP label and default build target
+        // alongside the other disk-derived fields. Both helpers fall
+        // back to BIRP / `None` for projects without the relevant
+        // asset file so the row always has a value (no `Option` to
+        // thread through the diff check).
+        let new_render_pipeline = Some(
+            crate::config::render_pipeline::read_render_pipeline(&project_path)
+                .label()
+                .to_string(),
+        );
+        let new_default_build_target =
+            crate::config::build_target::read_default_build_target(&project_path).target;
         if new_version != project.unity_version
             || new_mtime != project.last_modified_at
             || new_branch != project.git_branch
+            || new_render_pipeline != project.render_pipeline
+            || new_default_build_target != project.default_build_target
         {
             project.unity_version = new_version;
             project.last_modified_at = new_mtime;
             project.git_branch = new_branch;
+            project.render_pipeline = new_render_pipeline;
+            project.default_build_target = new_default_build_target;
             updated.push(project.id.clone());
         }
     }
@@ -582,6 +611,8 @@ mod tests {
             hidden: false,
             stale: false,
             env_vars: Default::default(),
+            render_pipeline: None,
+            default_build_target: None,
         }
     }
 

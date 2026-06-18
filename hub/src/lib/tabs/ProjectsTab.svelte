@@ -11,6 +11,7 @@
     addProject,
     checkPathsExists,
     createNewProject,
+    discoverHubProjects,
     envVarCollisions,
     getCrashLogPath,
     getDefaultBuildTarget,
@@ -33,6 +34,8 @@
     upgradeUnity,
     type AddProjectError,
     type BundleStrategy,
+    type HubCandidatesResult,
+    type HubProjectCandidate,
     type HubTemplateEntry,
     type HubTemplatesResult,
     type KillUnityResult,
@@ -108,6 +111,16 @@
   let relinkingId = $state<string | null>(null);
   let walkUpModalOpen = $state(false);
   let pickingWalkUpFolder = $state(false);
+  // M15 T6.4: "Import from Hub" modal — live, read-only scan of Unity
+  // Hub's `projects-v1.json`. The candidate list is merged with the
+  // current `projects.json` so already-tracked paths show as such;
+  // the user picks which untracked candidates to import via the
+  // normal `addProject` flow.
+  let hubImportModalOpen = $state(false);
+  let hubImportLoading = $state(false);
+  let hubImportError = $state<string | null>(null);
+  let hubImportCandidates = $state<HubProjectCandidate[]>([]);
+  let hubImportAddingPath = $state<string | null>(null);
   // M1.5-14: Unity upgrade modal.
   let upgradeModalProjectId = $state<string | null>(null);
   let upgradeCandidatesList = $state<string[]>([]);
@@ -1427,6 +1440,68 @@
     walkUpModalOpen = false;
   }
 
+  /**
+   * M15 T6.4: open the "Import from Hub" modal. The modal opens
+   * immediately and then fetches the live candidate list from Unity
+   * Hub's `projects-v1.json`. The scan is non-mutating — the user
+   * picks which untracked candidates to import via `addProject`.
+   */
+  async function openHubImportModal() {
+    if (hubImportModalOpen) return;
+    hubImportModalOpen = true;
+    hubImportError = null;
+    hubImportCandidates = [];
+    await loadHubCandidates();
+  }
+
+  function closeHubImportModal() {
+    // Block close while an `addProject` is mid-flight so the user
+    // does not lose the visible "Adding…" state on the row.
+    if (hubImportAddingPath) return;
+    hubImportModalOpen = false;
+  }
+
+  async function loadHubCandidates() {
+    hubImportLoading = true;
+    hubImportError = null;
+    try {
+      const result: HubCandidatesResult = await discoverHubProjects();
+      hubImportCandidates = result.candidates;
+      if (result.error) {
+        hubImportError = result.error;
+      }
+    } catch (e) {
+      hubImportError = e instanceof Error ? e.message : String(e);
+      hubImportCandidates = [];
+    } finally {
+      hubImportLoading = false;
+    }
+  }
+
+  /**
+   * Import a single Hub candidate via the normal `addProject` flow so
+   * the new row gets a real `ProjectEntry` (with id, frecency,
+   * renderPipeline, etc.) and is persisted to `projects.json`.
+   * Re-throws nothing — errors are surfaced inline next to the row.
+   */
+  async function importHubCandidate(candidate: HubProjectCandidate) {
+    if (hubImportAddingPath) return;
+    hubImportAddingPath = candidate.path;
+    try {
+      await addProject(candidate.path);
+      // Mark this candidate as tracked in-place so the UI updates
+      // without a full reload.
+      candidate.alreadyTracked = true;
+      hubImportCandidates = [...hubImportCandidates];
+      S.appendDrawerLog(`imported from Hub: ${candidate.name} (${candidate.path})`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`Hub import failed for ${candidate.path}: ${msg}`);
+    } finally {
+      hubImportAddingPath = null;
+    }
+  }
+
   async function startWalkUpFromModal() {
     const settings = settingsStore.current;
     if (!settings) {
@@ -2452,6 +2527,14 @@
       >
         {walkUpScanStore.scanning ? "Scanning…" : "Add Multiple Projects"}
       </Button>
+      <Button
+        variant="secondary"
+        onclick={openHubImportModal}
+        disabled={hubImportLoading}
+        title="Import from Hub — scan Unity Hub's recent-projects list and pick entries to add"
+      >
+        {hubImportLoading ? "Scanning…" : "Import from Hub"}
+      </Button>
       <button
         type="button"
         class="icon-btn"
@@ -2587,6 +2670,18 @@
                   <span class="version-text">{project.unityVersion}</span>
                 {:else}
                   <span class="muted">—</span>
+                {/if}
+                {#if project.renderPipeline}
+                  <span
+                    class="meta-chip meta-chip-{(project.renderPipeline ?? "").toLowerCase()}"
+                    title={`Render pipeline: ${project.renderPipeline} (read from ProjectSettings/GraphicsSettings.asset)`}
+                  >{project.renderPipeline}</span>
+                {/if}
+                {#if project.defaultBuildTarget}
+                  <span
+                    class="meta-chip meta-chip-target"
+                    title={`Default build target: ${project.defaultBuildTarget} (read from ProjectSettings/ProjectSettings.asset)`}
+                  >{project.defaultBuildTarget}</span>
                 {/if}
               </div>
               {#if showModified}
@@ -3065,6 +3160,101 @@
           disabled={newProjectCreating || !isNewProjectFormValid()}
         >
           {newProjectCreating ? "Creating…" : "Create project"}
+        </Button>
+      </footer>
+    </div>
+  </div>
+{/if}
+
+{#if hubImportModalOpen}
+  <!-- M15 T6.4: live, read-only Unity Hub candidate list. The user
+       picks which untracked entries to import; each click goes
+       through `addProject` so the new row is a real `ProjectEntry`. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="hub-import-overlay"
+    role="dialog"
+    tabindex="-1"
+    aria-modal="true"
+    aria-labelledby="hub-import-title"
+    onclick={(e: MouseEvent) => {
+      if (e.target === e.currentTarget) closeHubImportModal();
+    }}
+    onkeydown={(e: KeyboardEvent) => {
+      if (e.key === "Escape") closeHubImportModal();
+    }}
+  >
+    <div class="hub-import-modal">
+      <header class="hub-import-header">
+        <h2 id="hub-import-title">Import from Unity Hub</h2>
+        <button
+          type="button"
+          class="hub-import-close"
+          onclick={closeHubImportModal}
+          disabled={!!hubImportAddingPath}
+          aria-label="Close"
+          title={hubImportAddingPath ? "Wait for the in-flight import to finish" : "Close"}
+        >×</button>
+      </header>
+
+      <div class="hub-import-body">
+        <p class="hub-import-help">
+          Unity Hub tracks every project you open with it. This list is a live, read-only
+          view of that registry — pick the entries you want to add to your Hub project list.
+          Already-tracked paths are shown greyed out.
+        </p>
+
+        {#if hubImportLoading}
+          <p class="hub-import-empty">Scanning Unity Hub data…</p>
+        {:else if hubImportError}
+          <p class="hub-import-error" role="alert">{hubImportError}</p>
+          <Button variant="secondary" onclick={loadHubCandidates}>Retry</Button>
+        {:else if hubImportCandidates.length === 0}
+          <p class="hub-import-empty">No projects found in Unity Hub's registry.</p>
+        {:else}
+          <ul class="hub-import-list" role="list">
+            {#each hubImportCandidates as candidate (candidate.path)}
+              <li class="hub-import-row" class:tracked={candidate.alreadyTracked}>
+                <div class="hub-import-row-main">
+                  <span class="hub-import-row-name">{candidate.name}</span>
+                  <span class="hub-import-row-path" title={candidate.path}>{candidate.path}</span>
+                  <span class="hub-import-row-meta">
+                    {#if candidate.unityVersion}<span>{candidate.unityVersion}</span>{/if}
+                    {#if candidate.renderPipeline}<span>{candidate.renderPipeline}</span>{/if}
+                    {#if candidate.defaultBuildTarget}<span>{candidate.defaultBuildTarget}</span>{/if}
+                    {#if !candidate.exists}<span class="hub-import-missing">missing path</span>{/if}
+                  </span>
+                </div>
+                <div class="hub-import-row-action">
+                  {#if candidate.alreadyTracked}
+                    <span class="hub-import-tracked" title="Already in your project list">tracked</span>
+                  {:else}
+                    <Button
+                      variant="primary"
+                      onclick={() => importHubCandidate(candidate)}
+                      disabled={!!hubImportAddingPath || !candidate.exists}
+                      title={
+                        !candidate.exists
+                          ? "Path is missing — relink via Add Project after the folder is back"
+                          : hubImportAddingPath === candidate.path
+                            ? "Adding…"
+                            : `Add ${candidate.name} to your project list`
+                      }
+                    >
+                      {hubImportAddingPath === candidate.path ? "Adding…" : "Add"}
+                    </Button>
+                  {/if}
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+
+      <footer class="hub-import-footer">
+        <Button variant="secondary" onclick={closeHubImportModal} disabled={!!hubImportAddingPath}>
+          Done
         </Button>
       </footer>
     </div>
@@ -4220,6 +4410,46 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.76rem;
     color: var(--hub-text-dim);
+  }
+
+  /* M15 T6.4: SRP + build-target chips stacked under the version
+     string. Kept compact (small font, no border) so the row does not
+     grow taller when both are present. */
+  .cell-version .meta-chip {
+    display: block;
+    margin-top: 0.18rem;
+    padding: 0.04rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    line-height: 1.35;
+    width: fit-content;
+    color: var(--hub-text-dim);
+    background: var(--hub-surface);
+    border: 1px solid var(--hub-border-light);
+  }
+
+  .cell-version .meta-chip-urp {
+    color: var(--hub-ok-fg, var(--hub-text-dim));
+    border-color: var(--hub-ok-border, var(--hub-border-light));
+  }
+
+  .cell-version .meta-chip-hdrp {
+    color: var(--hub-accent, var(--hub-text-dim));
+    border-color: var(--hub-accent, var(--hub-border-light));
+  }
+
+  .cell-version .meta-chip-birp {
+    color: var(--hub-text-muted);
+  }
+
+  .cell-version .meta-chip-target {
+    color: var(--hub-text-muted);
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
   }
 
   .cell-size .size-text {
@@ -5431,5 +5661,170 @@
   .ctx-item-ai-setup:hover:not(:disabled),
   .more-item-ai-setup:hover:not(:disabled) {
     background: rgba(92, 124, 250, 0.18);
+  }
+
+  /* M15 T6.4: "Import from Hub" modal — mirrors the upgrade modal's
+     overlay/panel shape. The list shows live Unity Hub candidates
+     with already-tracked paths greyed out. */
+  .hub-import-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 9, 13, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+  }
+
+  .hub-import-modal {
+    width: min(46rem, 92vw);
+    max-height: 82vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--hub-bg);
+    border: 1px solid var(--hub-border-light);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .hub-import-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.85rem 1.1rem;
+    border-bottom: 1px solid var(--hub-border);
+  }
+
+  .hub-import-header h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .hub-import-close {
+    background: none;
+    border: none;
+    color: var(--hub-text-muted);
+    font-size: 1.4rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.2rem 0.45rem;
+    border-radius: 4px;
+  }
+
+  .hub-import-close:hover:not(:disabled) {
+    background: var(--hub-surface);
+    color: var(--hub-text);
+  }
+
+  .hub-import-close:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .hub-import-body {
+    padding: 0.9rem 1.1rem;
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+
+  .hub-import-help {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--hub-text-muted);
+    line-height: 1.45;
+  }
+
+  .hub-import-empty,
+  .hub-import-error {
+    margin: 0;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.82rem;
+    color: var(--hub-text-dim);
+  }
+
+  .hub-import-error {
+    color: var(--hub-error-fg);
+    background: var(--hub-error-bg);
+    border: 1px solid var(--hub-error-fg);
+    border-radius: 6px;
+  }
+
+  .hub-import-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .hub-import-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.7rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--hub-border);
+    border-radius: 6px;
+    background: var(--hub-surface);
+  }
+
+  .hub-import-row.tracked {
+    opacity: 0.55;
+  }
+
+  .hub-import-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .hub-import-row-name {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--hub-text);
+  }
+
+  .hub-import-row-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--hub-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .hub-import-row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    font-size: 0.68rem;
+    color: var(--hub-text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .hub-import-missing {
+    color: var(--hub-error-fg);
+  }
+
+  .hub-import-tracked {
+    font-size: 0.72rem;
+    color: var(--hub-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .hub-import-footer {
+    padding: 0.65rem 1.1rem;
+    border-top: 1px solid var(--hub-border);
+    display: flex;
+    justify-content: flex-end;
   }
 </style>

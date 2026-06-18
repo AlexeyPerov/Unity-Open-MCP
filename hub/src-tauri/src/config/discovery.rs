@@ -9,6 +9,171 @@ use tauri::State;
 use crate::config::commands::AppState;
 use crate::config::schemas::Settings;
 
+/// Mapping from a Unity `Data/PlaybackEngines/<folder>` name to the
+/// friendly build-target label the Unity Versions tab renders. Ports
+/// UnityLauncherPro `GetUnityInstallations.platformNames`
+/// (Windows-flavoured keys, used by Hub itself) plus the macOS / Linux
+/// equivalents Hub sees on those hosts. Unknown folders fall back to
+/// the lowercased folder name so a new platform Unity ships is not
+/// silently dropped — the user sees *something* even before Hub knows
+/// how to label it.
+fn friendly_playback_engine_name(folder: &str) -> String {
+    match folder.to_ascii_lowercase().as_str() {
+        "androidplayer" => "Android".to_string(),
+        "windowsstandalonesupport" => "Win64".to_string(),
+        "linuxstandalonesupport" | "linuxstandalone" => "Linux64".to_string(),
+        "osxstandalonesupport" | "osxstandalone" => "OSX".to_string(),
+        "webglsupport" | "webgl" => "WebGL".to_string(),
+        "metrosupport" => "UWP".to_string(),
+        "iossupport" | "iphone-player" => "iOS".to_string(),
+        "appletvsupport" => "tvOS".to_string(),
+        "visionosplayer" => "visionOS".to_string(),
+        "switchplayer" | "switchsupport" => "Switch".to_string(),
+        "ps4player" | "ps5player" => folder.to_ascii_uppercase(),
+        other => other.to_string(),
+    }
+}
+
+/// Release stream inferred from the Unity version suffix. Mirrors the
+/// UnityLauncherPro `Tools.IsAlpha / IsBeta` heuristics (`a`/`b`/`f`).
+/// Used by the Unity Versions tab to render an LTS / TECH / BETA / ALPHA
+/// chip per installed editor in addition to the OS source chip.
+fn release_type_for(version: &str) -> String {
+    // Unity versions follow `MAJOR.MINOR.PATCH<kind><seq>` where
+    // `<kind>` is `a` (alpha), `b` (beta), `f` (final), `p` (patch),
+    // or `c` (China variant). LTS lines are final releases on a
+    // long-term branch; Unity 6 / 2022.3 / 2021.3 are LTS, others are
+    // TECH. We can't tell LTS from TECH purely from the version string
+    // (Unity did not encode it), so we treat `f` as `LTS` when the
+    // branch is a known LTS line and `TECH` otherwise — the Releases
+    // tab is the source of truth for the canonical stream label.
+    //
+    // We only look at the *kind marker*: the last non-digit character
+    // of the version after stripping the trailing revision digits. A
+    // simple `contains('a')` would false-fire on `garbage` (matches
+    // the `a` in `gar`), which is why this helper inspects the suffix
+    // shape rather than the whole string.
+    let kind = version_kind_marker(version);
+    match kind {
+        'a' => "Alpha".to_string(),
+        'b' => "Beta".to_string(),
+        'f' => {
+            let lower = version.to_ascii_lowercase();
+            // Known Unity LTS lines (kept in sync with docs/unity-version-compat.md).
+            let is_known_lts = lower.starts_with("6000.0")
+                || lower.starts_with("2022.3")
+                || lower.starts_with("2021.3")
+                || lower.starts_with("2020.3")
+                || lower.starts_with("2019.4");
+            if is_known_lts {
+                "LTS".to_string()
+            } else {
+                "TECH".to_string()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+/// Returns the Unity version's kind marker character (`a` / `b` / `f` /
+/// `p` / `c`) by scanning the version from the end and returning the
+/// last alphabetic character before the trailing digits. Returns `\0`
+/// for strings without a kind marker (e.g. `garbage`, empty, or a pure
+/// numeric form).
+fn version_kind_marker(version: &str) -> char {
+    let chars: Vec<char> = version.chars().collect();
+    // Walk from the end past any trailing digits, then return the next
+    // character if it is an ASCII letter. This is the canonical Unity
+    // form: `<...>.<patch><kind><seq>` (e.g. `6000.0.1f1`, `2022.3.48f1`,
+    // `6000.1.0b5`, `6000.2.0a3`).
+    let mut i = chars.len();
+    while i > 0 && chars[i - 1].is_ascii_digit() {
+        i -= 1;
+    }
+    if i > 0 {
+        let c = chars[i - 1];
+        if c.is_ascii_lowercase() || c.is_ascii_uppercase() {
+            return c.to_ascii_lowercase();
+        }
+    }
+    '\0'
+}
+
+/// Scan an editor install's `Data/PlaybackEngines/` directory and
+/// return the friendly platform names of every build target Unity
+/// shipped modules for. The list always includes the host editor's own
+/// platform (the standalone player is not a PlaybackEngines folder — it
+/// ships with the Editor binary itself — so we add it explicitly to
+/// match the UnityLauncherPro `GetPlatforms` behaviour of "desktop
+/// versions are always present").
+///
+/// Returns an empty `Vec` when the editor install is missing the
+/// `Data/PlaybackEngines/` directory (a minimal / custom build). The
+/// caller renders an empty platforms chip in that case rather than
+/// asserting the host platform — the Unity install genuinely does not
+/// advertise any extra build targets.
+fn scan_playback_engines(install_path: &Path) -> Vec<String> {
+    let data_folder = editor_data_folder(install_path);
+    let playback_engines = match data_folder {
+        Some(d) => d.join("PlaybackEngines"),
+        None => return Vec::new(),
+    };
+
+    let read = match fs::read_dir(&playback_engines) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut platforms: Vec<String> = Vec::new();
+    for entry in read.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let friendly = friendly_playback_engine_name(name);
+        if !platforms.contains(&friendly) {
+            platforms.push(friendly);
+        }
+    }
+    platforms.sort();
+    platforms
+}
+
+/// Resolve the editor install's `Data/` folder. On macOS the editor
+/// lives inside `Unity.app/Contents/`; on Windows/Linux it sits next to
+/// `Unity.exe` / `Unity` in an `Editor/` subfolder. Returns `None` for
+/// source-build layouts (`build/WindowsEditor/...`) where `Data/` is a
+/// sibling of the binary rather than nested under a bundle — handled by
+/// the source-build fallback in `is_unity_editor_dir`.
+fn editor_data_folder(install_path: &Path) -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        // <install>/Unity.app/Contents/Data
+        let candidate = install_path
+            .join("Unity.app")
+            .join("Contents")
+            .join("Data");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        None
+    } else {
+        // <install>/Editor/Data (Hub-style) or <install>/Data
+        // (source-build sibling).
+        let editor_data = install_path.join("Editor").join("Data");
+        if editor_data.is_dir() {
+            return Some(editor_data);
+        }
+        let sibling_data = install_path.join("Data");
+        if sibling_data.is_dir() {
+            return Some(sibling_data);
+        }
+        None
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UnityInstallation {
@@ -16,6 +181,22 @@ pub struct UnityInstallation {
     pub path: String,
     pub source: String,
     pub install_date: Option<String>,
+    /// M15 T6.4: build targets the editor can produce, scanned from
+    /// `Data/PlaybackEngines/`. Empty for installs that ship without a
+    /// PlaybackEngines folder (custom builds, source builds). The
+    /// frontend renders the list as a per-row chip on the Unity
+    /// Versions tab. `#[serde(default)]` keeps the cache payload
+    /// loadable from older Hub builds that pre-date the field.
+    #[serde(default)]
+    pub platforms: Vec<String>,
+    /// M15 T6.4: release stream inferred from the version suffix —
+    /// `"LTS"`, `"TECH"`, `"Beta"`, `"Alpha"`, or `""` for unknown.
+    /// Mirrors the UnityLauncherPro `IsAlpha / IsBeta` heuristic so the
+    /// Unity Versions tab can render the same stream chip it already
+    /// renders on the Releases sub-section. `#[serde(default)]` keeps
+    /// the cache payload loadable from older Hub builds.
+    #[serde(default)]
+    pub release_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,9 +234,34 @@ fn is_unity_editor_dir(dir: &Path) -> bool {
     if cfg!(target_os = "macos") {
         dir.join("Unity.app").is_dir()
     } else if cfg!(target_os = "windows") {
-        dir.join("Editor").join("Unity.exe").is_file()
+        // Hub-style layout: <dir>/Editor/Unity.exe
+        if dir.join("Editor").join("Unity.exe").is_file() {
+            return true;
+        }
+        // Source-build fallback (UnityLauncherPro
+        // `GetUnityInstallations.cs`): a Unity fork built from source
+        // lays out the binary at
+        // `<dir>/build/WindowsEditor/x64/Release/Unity.exe` instead of
+        // `<dir>/Editor/Unity.exe`. We accept the source-build path so
+        // teams iterating on a custom Unity still appear in the
+        // Versions tab.
+        dir.join("build")
+            .join("WindowsEditor")
+            .join("x64")
+            .join("Release")
+            .join("Unity.exe")
+            .is_file()
     } else {
-        dir.join("Editor").join("Unity").is_file()
+        if dir.join("Editor").join("Unity").is_file() {
+            return true;
+        }
+        // Linux source-build fallback mirrors the Windows one. Unity's
+        // own Linux build pipeline uses the same `build/.../Release`
+        // layout.
+        dir.join("build")
+            .join("LinuxEditor")
+            .join("Unity")
+            .is_file()
     }
 }
 
@@ -99,10 +305,12 @@ fn scan_parent_folder(parent: &Path) -> (Vec<UnityInstallation>, Vec<DiscoveryEr
         }
 
         installations.push(UnityInstallation {
-            version,
+            version: version.clone(),
             path: path.to_string_lossy().to_string(),
             source: String::new(),
             install_date: get_install_date(&path),
+            platforms: scan_playback_engines(&path),
+            release_type: release_type_for(&version),
         });
     }
 
@@ -268,6 +476,28 @@ mod tests {
         version_dir
     }
 
+    /// Add a PlaybackEngines tree under an editor install dir created
+    /// by `make_editor_dir`. `engines` is the list of folder names
+    /// (e.g. `["androidplayer", "webglsupport"]`) to materialise.
+    fn add_playback_engines(install_dir: &std::path::Path, engines: &[&str]) {
+        let data_folder = if cfg!(target_os = "macos") {
+            install_dir
+                .join("Unity.app")
+                .join("Contents")
+                .join("Data")
+                .join("PlaybackEngines")
+        } else {
+            install_dir
+                .join("Editor")
+                .join("Data")
+                .join("PlaybackEngines")
+        };
+        fs::create_dir_all(&data_folder).unwrap();
+        for engine in engines {
+            fs::create_dir_all(data_folder.join(engine)).unwrap();
+        }
+    }
+
     fn isolated_settings(parent: &std::path::Path) -> Settings {
         let mut settings = Settings::default();
         settings.unity_discovery.parent_folders = vec![parent.to_string_lossy().to_string()];
@@ -395,5 +625,162 @@ mod tests {
             .installations
             .iter()
             .all(|i| i.source == "Hub"));
+    }
+
+    #[test]
+    fn discover_enumerates_playback_engines_as_platforms() {
+        // T6.4: an editor that ships the Android + WebGL + iOS
+        // PlaybackEngines should report those three friendly names on
+        // the installation row. The scan is filesystem-only — it does
+        // not invoke Unity — so a fake tree is enough to exercise it.
+        let dir = tempfile::tempdir().unwrap();
+        let install = make_editor_dir(dir.path(), "6000.0.1f1");
+        add_playback_engines(&install, &["androidplayer", "webglsupport", "iossupport"]);
+
+        let result = discover_isolated(dir.path());
+        assert_eq!(result.installations.len(), 1);
+        let platforms = &result.installations[0].platforms;
+        // Sorted alphabetically by the scanner.
+        assert_eq!(platforms, &vec!["Android", "WebGL", "iOS"]);
+    }
+
+    #[test]
+    fn discover_platforms_empty_without_playback_engines_folder() {
+        // A minimal / custom editor without a PlaybackEngines folder
+        // reports an empty platform list rather than asserting the host
+        // platform. The Unity Versions tab renders an empty chip.
+        let dir = tempfile::tempdir().unwrap();
+        make_editor_dir(dir.path(), "6000.0.1f1");
+
+        let result = discover_isolated(dir.path());
+        assert_eq!(result.installations.len(), 1);
+        assert!(result.installations[0].platforms.is_empty());
+    }
+
+    #[test]
+    fn discover_platforms_dedupe_known_aliases() {
+        // `windowsstandalonesupport` and `osxstandalonesupport` both
+        // resolve to single entries; the scanner must not produce
+        // duplicates when the same friendly name maps from two folders.
+        let dir = tempfile::tempdir().unwrap();
+        let install = make_editor_dir(dir.path(), "6000.0.1f1");
+        add_playback_engines(
+            &install,
+            &[
+                "windowsstandalonesupport",
+                "LinuxStandalone",
+                "LinuxStandaloneSupport",
+            ],
+        );
+
+        let result = discover_isolated(dir.path());
+        let platforms = &result.installations[0].platforms;
+        // Two distinct friendly names: Win64 and Linux64. The Linux
+        // aliases collapse into a single entry.
+        assert_eq!(platforms, &vec!["Linux64", "Win64"]);
+    }
+
+    #[test]
+    fn discover_release_type_lts_for_known_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        make_editor_dir(dir.path(), "6000.0.1f1");
+        make_editor_dir(dir.path(), "2022.3.48f1");
+        make_editor_dir(dir.path(), "2021.3.45f1");
+
+        let result = discover_isolated(dir.path());
+        let by_version: HashMap<&str, &str> = result
+            .installations
+            .iter()
+            .map(|i| (i.version.as_str(), i.release_type.as_str()))
+            .collect();
+        assert_eq!(by_version.get("6000.0.1f1"), Some(&"LTS"));
+        assert_eq!(by_version.get("2022.3.48f1"), Some(&"LTS"));
+        assert_eq!(by_version.get("2021.3.45f1"), Some(&"LTS"));
+    }
+
+    #[test]
+    fn discover_release_type_tech_beta_alpha() {
+        let dir = tempfile::tempdir().unwrap();
+        make_editor_dir(dir.path(), "6000.1.0b5");
+        make_editor_dir(dir.path(), "6000.2.0a3");
+        make_editor_dir(dir.path(), "6000.1.5f1");
+
+        let result = discover_isolated(dir.path());
+        let by_version: HashMap<&str, &str> = result
+            .installations
+            .iter()
+            .map(|i| (i.version.as_str(), i.release_type.as_str()))
+            .collect();
+        // 6000.1.x is TECH (not in the known LTS list).
+        assert_eq!(by_version.get("6000.1.5f1"), Some(&"TECH"));
+        assert_eq!(by_version.get("6000.1.0b5"), Some(&"Beta"));
+        assert_eq!(by_version.get("6000.2.0a3"), Some(&"Alpha"));
+    }
+
+    #[test]
+    fn friendly_playback_engine_name_maps_known_and_falls_back() {
+        assert_eq!(friendly_playback_engine_name("androidplayer"), "Android");
+        assert_eq!(
+            friendly_playback_engine_name("WindowsStandaloneSupport"),
+            "Win64"
+        );
+        assert_eq!(friendly_playback_engine_name("WebGLSupport"), "WebGL");
+        assert_eq!(friendly_playback_engine_name("iOSSupport"), "iOS");
+        // Unknown folder names are passed through lowercased so the
+        // user sees *something* rather than a silent drop.
+        assert_eq!(friendly_playback_engine_name("NewFuturePlatform"), "newfutureplatform");
+    }
+
+    #[test]
+    fn release_type_for_handles_blank_and_unknown() {
+        assert_eq!(release_type_for(""), "");
+        assert_eq!(release_type_for("garbage"), "");
+        assert_eq!(release_type_for("6000.0.1f1"), "LTS");
+        assert_eq!(release_type_for("2023.3.0b1"), "Beta");
+    }
+
+    #[test]
+    fn editor_data_folder_resolves_per_platform_layouts() {
+        // Hub-style macOS layout: <install>/Unity.app/Contents/Data
+        let mac_dir = tempfile::tempdir().unwrap();
+        let mac_install = mac_dir.path().join("6000.0.1f1");
+        let mac_data = mac_install
+            .join("Unity.app")
+            .join("Contents")
+            .join("Data")
+            .join("PlaybackEngines");
+        fs::create_dir_all(&mac_data).unwrap();
+        fs::create_dir_all(mac_data.join("androidplayer")).unwrap();
+        let platforms = scan_playback_engines(&mac_install);
+        assert_eq!(platforms, vec!["Android"]);
+    }
+
+    #[test]
+    fn is_unity_editor_dir_accepts_source_build_layout_on_non_macos() {
+        // The source-build fallback is gated on a non-macOS target; on
+        // macOS the bundle path is the only valid layout. We exercise
+        // the function under its cfg! gate so the assertion is
+        // meaningful on the host that runs CI.
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("6000.0.1f1-src");
+        if cfg!(target_os = "macos") {
+            // On macOS the source-build path is not consulted.
+            fs::create_dir_all(&install).unwrap();
+            assert!(!is_unity_editor_dir(&install));
+        } else if cfg!(target_os = "windows") {
+            let bin = install
+                .join("build")
+                .join("WindowsEditor")
+                .join("x64")
+                .join("Release");
+            fs::create_dir_all(&bin).unwrap();
+            fs::write(bin.join("Unity.exe"), "").unwrap();
+            assert!(is_unity_editor_dir(&install));
+        } else {
+            let bin = install.join("build").join("LinuxEditor");
+            fs::create_dir_all(&bin).unwrap();
+            fs::write(bin.join("Unity"), "").unwrap();
+            assert!(is_unity_editor_dir(&install));
+        }
     }
 }

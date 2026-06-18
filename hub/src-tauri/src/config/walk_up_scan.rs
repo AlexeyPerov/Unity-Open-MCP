@@ -297,6 +297,16 @@ fn walk_dir(
             hidden: false,
             stale: false,
             env_vars: Default::default(),
+            // M15 T6.4: enrich walk-up discovered rows with the SRP +
+            // build-target labels so they show the same chips as rows
+            // added via the "Add Project" flow.
+            render_pipeline: Some(
+                crate::config::render_pipeline::read_render_pipeline(dir)
+                    .label()
+                    .to_string(),
+            ),
+            default_build_target: crate::config::build_target::read_default_build_target(dir)
+                .target,
         };
         ctx.found.push(entry.clone());
         // Mark the canonical path as seen so nested project roots

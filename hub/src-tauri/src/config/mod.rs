@@ -25,3 +25,4 @@ pub mod ai_toolkit;
 pub mod wizard;
 pub mod mcp_config;
 pub mod launch_verify;
+pub mod render_pipeline;

@@ -628,6 +628,16 @@ pub fn create_new_project(
     // Register the new project. We register *after* the rename so
     // projects.json never references a path that is not on disk.
     let now_iso = chrono::Utc::now().to_rfc3339();
+    // M15 T6.4: stamp the chosen pipeline onto the row so the Projects
+    // tab shows the right chip from the first paint, before the user
+    // has opened the project. The label mirrors the canonical short
+    // form the SRP detector produces (`URP` / `HDRP` / `BIRP`); `None`
+    // is the Built-in Render Pipeline.
+    let render_pipeline_label = match params.pipeline {
+        RenderPipeline::URP => "URP".to_string(),
+        RenderPipeline::HDRP => "HDRP".to_string(),
+        RenderPipeline::None => "BIRP".to_string(),
+    };
     let entry = ProjectEntry {
         id: uuid::Uuid::new_v4().to_string(),
         name: name.clone(),
@@ -653,6 +663,12 @@ pub fn create_new_project(
         hidden: false,
         stale: false,
         env_vars: Default::default(),
+        render_pipeline: Some(render_pipeline_label),
+        // A brand-new project has no recorded build target yet (Unity
+        // writes `m_BuildTarget` on first save). The next refresh
+        // picks it up; we leave it `None` here rather than asserting
+        // a platform the user did not choose.
+        default_build_target: None,
     };
 
     let mut projects = state.projects.lock().unwrap().clone();
@@ -1222,6 +1238,8 @@ mod tests {
                 hidden: false,
                 stale: false,
                 env_vars: Default::default(),
+                render_pipeline: Some("URP".to_string()),
+                default_build_target: None,
             },
             projects: ProjectsFile {
                 version: 1,

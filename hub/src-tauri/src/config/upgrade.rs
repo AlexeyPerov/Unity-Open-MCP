@@ -1021,6 +1021,8 @@ mod tests {
                 hidden: false,
                 stale: false,
                 env_vars: Default::default(),
+                render_pipeline: None,
+                default_build_target: None,
             },
             unity_version: "6000.0.1f1".to_string(),
             bundle_version: "1.0.1".to_string(),

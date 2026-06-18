@@ -174,6 +174,23 @@ export interface ProjectEntry {
    * parent on key collision). Empty map for legacy entries.
    */
   envVars?: Record<string, string>;
+  /**
+   * M15 T6.4: cached render-pipeline label read from
+   * `ProjectSettings/GraphicsSettings.asset`. One of `"URP"`,
+   * `"HDRP"`, `"BIRP"` (Built-in Render Pipeline). `undefined` for
+   * legacy entries and projects that have not been refreshed since
+   * the field was added. The Projects tab renders a chip from this
+   * label.
+   */
+  renderPipeline?: string;
+  /**
+   * M15 T6.4: cached default build target read from
+   * `ProjectSettings/ProjectSettings.asset` (`m_BuildTarget` /
+   * `m_BuildTargetGroup`). `undefined` for projects that have never
+   * been opened by a Unity Editor (Unity writes the keys on first
+   * save).
+   */
+  defaultBuildTarget?: string;
 }
 
 export interface ProjectsFile {
@@ -186,6 +203,21 @@ export interface UnityInstallation {
   path: string;
   source: string;
   installDate?: string;
+  /**
+   * M15 T6.4: build targets the editor can produce, scanned from
+   * `Data/PlaybackEngines/`. Friendly names (`Android`, `WebGL`,
+   * `Win64`, `iOS`, …). Empty for installs that ship without a
+   * PlaybackEngines folder (custom builds, source builds). Mirrors
+   * the Rust `#[serde(default)]` so older cache payloads still load.
+   */
+  platforms?: string[];
+  /**
+   * M15 T6.4: release stream inferred from the version suffix —
+   * `"LTS"`, `"TECH"`, `"Beta"`, `"Alpha"`, or `""` for unknown.
+   * Mirrors the Rust `#[serde(default)]` so older cache payloads
+   * still load.
+   */
+  releaseType?: string;
 }
 
 export interface DiscoveryError {
@@ -348,6 +380,46 @@ export async function seedFromUnityHub(): Promise<SeedResult> {
   return invoke<SeedResult>("seed_from_unity_hub");
 }
 
+/**
+ * M15 T6.4: candidate project surfaced by a live, read-only scan of
+ * Unity Hub's `projects-v1.json`. Mirrors the Rust
+ * `seed::HubProjectCandidate`. The frontend never persists these
+ * directly — each candidate the user accepts goes through `addProject`,
+ * which produces a real `ProjectEntry` and writes it to `projects.json`.
+ */
+export interface HubProjectCandidate {
+  name: string;
+  path: string;
+  exists: boolean;
+  unityVersion?: string;
+  lastModifiedAt?: string;
+  renderPipeline?: string;
+  defaultBuildTarget?: string;
+  /** `true` when the candidate's path already matches an entry in
+   *  `projects.json` — the UI renders these as "tracked" and hides
+   *  the import button. */
+  alreadyTracked: boolean;
+}
+
+export interface HubCandidatesResult {
+  candidates: HubProjectCandidate[];
+  /** `undefined` when the scan succeeded (even with zero candidates).
+   *  Present when Unity Hub's data directory or projects file could
+   *  not be read — the UI surfaces the message inline. */
+  error?: string;
+}
+
+/**
+ * Live, read-only scan of Unity Hub's recent-projects list. Returns
+ * the candidate list (Hub JSON entries merged with the current
+ * `projects.json` so `alreadyTracked` is correct). Does not mutate
+ * `projects.json` — the user picks which candidates to import via
+ * `addProject`.
+ */
+export async function discoverHubProjects(): Promise<HubCandidatesResult> {
+  return invoke<HubCandidatesResult>("discover_hub_projects");
+}
+
 export async function discoverInstallations(): Promise<DiscoveryResult> {
   return invoke<DiscoveryResult>("discover_installations");
 }
@@ -441,6 +513,24 @@ export async function getDefaultBuildTarget(
   projectPath: string
 ): Promise<DefaultBuildTarget> {
   return invoke<DefaultBuildTarget>("get_default_build_target", { projectPath });
+}
+
+/**
+ * M15 T6.4: render pipeline read from
+ * `ProjectSettings/GraphicsSettings.asset`. Mirrors the Rust
+ * `render_pipeline::RenderPipeline` enum (camelCase serialisation).
+ * - `"builtIn"` — Built-in Render Pipeline (the Unity default before
+ *   any SRP asset is assigned).
+ * - `"urp"` — Universal Render Pipeline.
+ * - `"hdrp"` — High Definition Render Pipeline.
+ * - `"unknown"` — file present but no recognisable marker.
+ */
+export type RenderPipelineKind = "builtIn" | "urp" | "hdrp" | "unknown";
+
+export async function getRenderPipeline(
+  projectPath: string
+): Promise<RenderPipelineKind> {
+  return invoke<RenderPipelineKind>("get_render_pipeline", { projectPath });
 }
 
 /**
