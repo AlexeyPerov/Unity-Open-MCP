@@ -34,11 +34,12 @@ This document tracks primary technologies, scripts, and runtime requirements use
 ### MCP server
 
 Required:
-- `UNITY_PROJECT_PATH` - absolute path to Unity project root.
+- `UNITY_PROJECT_PATH` - absolute path to Unity project root. Optional when a bridge instance lock exists for the project (the lock records the path); required otherwise.
 
 Optional:
 - `UNITY_OPEN_MCP_BRIDGE_PORT` - override the live bridge port. When unset, the port is the per-project deterministic hash `20000 + (sha256(UNITY_PROJECT_PATH) % 10000)`, discovered at startup from `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` when a live bridge lock exists. `19120` is a legacy backward-compat pin only.
-- `UNITY_PATH` - Unity executable path for batch fallback tools.
+- `UNITY_PATH` - **optional** Unity executable path for batch fallback tools. When unset, the MCP server auto-discovers Unity from the OS-default Hub install paths (macOS `/Applications/Unity/Hub/Editor`, Windows `C:\Program Files\Unity\Hub\Editor`, Linux `~/Unity/Hub/Editor`). On multi-version machines discovery matches the running bridge's `unityVersion` when known, else picks the newest. Set this only to force a specific editor.
+- `UNITY_HUB` - **optional** override for the Hub install root scanned by Unity auto-discovery (use when Unity is installed outside the OS-default path). Ignored when `UNITY_PATH` is set.
 - `UNITY_OPEN_MCP_BATCH_TIMEOUT_MS` - batch timeout override.
 - `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS` - set to `1` to disable auto-dismissal of Unity's "compile errors at launch" / Safe Mode dialog (enabled by default).
 - `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS` - overall budget (ms) for a launch-dialog dismiss pass (default `30000`).

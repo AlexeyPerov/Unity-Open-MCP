@@ -7,7 +7,10 @@ export const compileCheck: Tool = {
     "structured C# compiler errors (CSxxxx code, file, line, message) collected across " +
     "all assemblies. Use this when the live bridge is offline (a compile error put the " +
     "Editor in a bad state) to self-diagnose whether a project compiles. " +
-    "Batch-only — requires UNITY_PATH + UNITY_PROJECT_PATH.",
+    "Batch-only — uses the auto-discovered Unity (OS-default Hub install paths + " +
+    "UNITY_HUB env override), or UNITY_PATH when set. UNITY_PROJECT_PATH is used when " +
+    "set, else the instance lock's projectPath. Returns unity_not_discovered when no " +
+    "Unity install can be found.",
   inputSchema: {
     type: "object",
     properties: {

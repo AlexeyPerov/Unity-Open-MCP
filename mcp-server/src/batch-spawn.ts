@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
+import { resolveUnityPath, scannedHubRoots } from "./unity-install-discovery.js";
+import { readInstanceLock } from "./instance-discovery.js";
 
 const VERIFY_EXECUTE_METHOD = "UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run";
 const BRIDGE_EXECUTE_METHOD = "UnityOpenMcpBridge.Batch.BridgeBatchEntry.Run";
@@ -143,14 +145,57 @@ const LIMITED_META_MESSAGES: Record<string, string> = {
     "Only find_members is available in batch mode.",
 };
 
+export interface BatchSpawnOptions {
+  /**
+   * Optional override for the Unity-install discovery roots (test hook).
+   * When omitted, the real OS-default Hub paths (+ UNITY_HUB env override)
+   * are scanned. Pass an empty array to force the "nothing discovered"
+   * path in tests.
+   */
+  discoveryRoots?: string[];
+  /**
+   * Optional explicit project path (test hook). When omitted, falls back to
+   * UNITY_PROJECT_PATH env var, then the instance lock's projectPath.
+   */
+  projectPath?: string;
+}
+
 export class BatchSpawn implements Router {
   private unityPath: string;
+  private unityPathSource: "env" | "discovered" | "none";
   private projectPath: string;
   private timeoutMs: number;
+  private readonly discoveryRoots?: string[];
 
-  constructor() {
-    this.unityPath = process.env.UNITY_PATH ?? "";
-    this.projectPath = process.env.UNITY_PROJECT_PATH ?? "";
+  constructor(options: BatchSpawnOptions = {}) {
+    this.discoveryRoots = options.discoveryRoots;
+
+    // UNITY_PATH env (validated, wins) -> auto-discovered install (preferred
+    // version from the running bridge's lock when available) -> none.
+    const lock = readInstanceLock(options.projectPath ?? process.env.UNITY_PROJECT_PATH ?? "");
+    const resolved = resolveUnityPath(lock?.unityVersion, this.discoveryRoots);
+    if (resolved) {
+      this.unityPath = resolved.path;
+      this.unityPathSource = resolved.source;
+      if (resolved.source === "discovered") {
+        console.error(
+          `[unity-open-mcp] Unity path auto-discovered: ${resolved.path} (version ${resolved.version}). Set UNITY_PATH to override.`,
+        );
+      }
+    } else {
+      this.unityPath = "";
+      this.unityPathSource = "none";
+    }
+
+    // UNITY_PROJECT_PATH env -> instance lock's projectPath (so batch works
+    // with zero env vars when the bridge has run the project at least once)
+    // -> empty.
+    this.projectPath =
+      options.projectPath ??
+      process.env.UNITY_PROJECT_PATH ??
+      lock?.projectPath ??
+      "";
+
     this.timeoutMs = process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS
       ? parseInt(process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS, 10)
       : DEFAULT_BATCH_TIMEOUT_MS;
@@ -188,7 +233,9 @@ export class BatchSpawn implements Router {
     if (!this.projectPath) {
       return makeErrorResult(
         "project_path_missing",
-        "UNITY_PROJECT_PATH environment variable is required for batch operations.",
+        "UNITY_PROJECT_PATH environment variable is required for batch operations " +
+          "(or open the project in Unity once so the instance lock records its path — " +
+          "the MCP server falls back to the lock's projectPath when the env var is unset).",
       );
     }
 
@@ -232,10 +279,19 @@ export class BatchSpawn implements Router {
 
   private async validateUnityPath(): Promise<CallToolResult | null> {
     if (!this.unityPath) {
+      // No explicit UNITY_PATH AND auto-discovery found nothing. List the
+      // scanned roots so the user/agent knows where to install Unity or set
+      // the env var. `unity_not_discovered` is distinct from the legacy
+      // `unity_path_missing` so an agent can tell "I looked, nothing here"
+      // from "discovery was disabled".
+      const roots = this.discoveryRoots ?? scannedHubRoots();
+      const rootList = roots.length > 0 ? roots.join(", ") : "(no Hub paths found for this OS)";
       return makeErrorResult(
-        "unity_path_missing",
-        "UNITY_PATH environment variable is required for batch operations. " +
-          "Set it to the Unity Editor executable path " +
+        "unity_not_discovered",
+        "No Unity Editor found. The MCP server auto-discovers Unity from the " +
+          "OS-default Unity Hub install paths (+ UNITY_HUB env override); " +
+          `scanned: ${rootList}. Either install Unity there, or set UNITY_PATH ` +
+          "to an explicit editor executable " +
           "(macOS: /Applications/Unity/Hub/Editor/<version>/Unity.app/Contents/MacOS/Unity, " +
           "Windows: C:\\Program Files\\Unity\\Hub\\Editor\\<version>\\Editor\\Unity.exe, " +
           "Linux: ~/Unity/Hub/Editor/<version>/Unity).",
@@ -247,14 +303,14 @@ export class BatchSpawn implements Router {
       if (!s.isFile()) {
         return makeErrorResult(
           "unity_path_invalid",
-          `UNITY_PATH '${this.unityPath}' is not a file. ` +
-            "Set it to the Unity Editor executable.",
+          `Unity path '${this.unityPath}' is not a file. ` +
+            "Set UNITY_PATH to the Unity Editor executable.",
         );
       }
     } catch {
       return makeErrorResult(
         "unity_path_not_found",
-        `UNITY_PATH '${this.unityPath}' does not exist or is not accessible. ` +
+        `Unity path '${this.unityPath}' does not exist or is not accessible. ` +
           "Verify the path points to a valid Unity Editor executable.",
       );
     }

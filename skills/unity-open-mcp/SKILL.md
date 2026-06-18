@@ -28,12 +28,13 @@ cat ~/.unity-open-mcp/instances/*.json
 
 **Auth.** The lock's `authToken` is sent as `Authorization: Bearer <token>`. The MCP server does this automatically; if you're debugging a 401 from a hand-rolled request, that token is the source.
 
-**Batch fallback.** `compile_check` is always batch (it spawns a fresh headless Unity to surface broken builds, even when the live bridge is up). Any other tool falls back to batch only when the live bridge is down. Both require:
+**Batch fallback.** `compile_check` is always batch (it spawns a fresh headless Unity to surface broken builds, even when the live bridge is up). Any other tool falls back to batch only when the live bridge is down. The MCP server auto-discovers Unity from the OS-default Hub install paths (macOS `/Applications/Unity/Hub/Editor`, Windows `C:\Program Files\Unity\Hub\Editor`, Linux `~/Unity/Hub/Editor`) plus the `UNITY_HUB` env override — so on a machine with Unity installed you usually don't need to set anything. When several versions are installed, discovery picks the newest unless the instance lock records a `unityVersion`, in which case it matches that minor line; set `UNITY_PATH` to force a specific editor executable (highest priority). For the project path, `UNITY_PROJECT_PATH` is used if set, else the lock's `projectPath` (so batch works with zero env vars once the bridge has run the project once). Explicit env vars:
 
-- `UNITY_PATH` — Unity executable: macOS `/Applications/Unity/Hub/Editor/<version>/Unity.app/Contents/MacOS/Unity`, Windows `C:\Program Files\Unity\Hub\Editor\<version>\Editor\Unity.exe`, Linux `~/Unity/Hub/Editor/<version>/Unity`.
-- `UNITY_PROJECT_PATH` — absolute path to the project root (the folder containing `Assets/`).
+- `UNITY_PATH` — **optional**. Override the auto-discovered Unity executable: macOS `/Applications/Unity/Hub/Editor/<version>/Unity.app/Contents/MacOS/Unity`, Windows `C:\Program Files\Unity\Hub\Editor\<version>\Editor\Unity.exe`, Linux `~/Unity/Hub/Editor/<version>/Unity`.
+- `UNITY_PROJECT_PATH` — absolute path to the project root (the folder containing `Assets/`). Optional when a bridge instance lock exists.
+- `UNITY_HUB` — **optional**. Override the Hub install root scanned by discovery (use when Unity is installed outside the OS-default path).
 
-If both env vars are unset and the live bridge is down, the only tools that work are the offline reads (`list_assets`, `find_references`, `read_asset`, `search_assets`) and `read_compile_errors`.
+If Unity can't be found at all (not installed, or installed somewhere discovery doesn't look), batch tools return `unity_not_discovered` listing the scanned paths; the only tools that still work are the offline reads (`list_assets`, `find_references`, `read_asset`, `search_assets`) and `read_compile_errors`.
 
 ## Discover first
 
