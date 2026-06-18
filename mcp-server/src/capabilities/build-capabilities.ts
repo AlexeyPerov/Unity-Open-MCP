@@ -62,6 +62,30 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_read_asset: "asset-intelligence",
   unity_open_mcp_search_assets: "asset-intelligence",
   unity_open_mcp_list_assets: "asset-intelligence",
+  // M16 Plan 1 — typed project & asset management tools.
+  unity_open_mcp_assets_create_folder: "typed-editor",
+  unity_open_mcp_assets_copy: "typed-editor",
+  unity_open_mcp_assets_move: "typed-editor",
+  unity_open_mcp_assets_delete: "typed-editor",
+  unity_open_mcp_assets_refresh: "typed-editor",
+  unity_open_mcp_material_create: "typed-editor",
+  unity_open_mcp_material_get_properties: "typed-editor",
+  unity_open_mcp_material_set_property: "typed-editor",
+  unity_open_mcp_material_get_keywords: "typed-editor",
+  unity_open_mcp_material_set_keyword: "typed-editor",
+  unity_open_mcp_material_set_shader: "typed-editor",
+  unity_open_mcp_shader_list_all: "typed-editor",
+  unity_open_mcp_shader_get_data: "typed-editor",
+  unity_open_mcp_prefab_instantiate: "typed-editor",
+  unity_open_mcp_prefab_create: "typed-editor",
+  unity_open_mcp_prefab_open: "typed-editor",
+  unity_open_mcp_prefab_close: "typed-editor",
+  unity_open_mcp_prefab_save: "typed-editor",
+  unity_open_mcp_prefab_apply: "typed-editor",
+  unity_open_mcp_prefab_revert: "typed-editor",
+  unity_open_mcp_prefab_unpack: "typed-editor",
+  unity_open_mcp_prefab_get_overrides: "typed-editor",
+  unity_open_mcp_prefab_status: "typed-editor",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
@@ -105,144 +129,9 @@ const MUTATE_VIA_EXECUTE_CSHARP =
 
 export const PLANNED_TOOLS: PlannedTool[] = [
   // --- Plan 1: Assets -----------------------------------------------------
-  {
-    name: "unity_open_mcp_assets_create_folder",
-    category: "typed-editor",
-    description: "Create a folder asset under Assets/.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_assets_copy",
-    category: "typed-editor",
-    description: "Copy asset(s) to new project paths.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_assets_move",
-    category: "typed-editor",
-    description: "Move or rename asset(s).",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_assets_delete",
-    category: "typed-editor",
-    description: "Delete asset(s).",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_assets_refresh",
-    category: "typed-editor",
-    description: "Refresh the AssetDatabase (optionally wait for compile).",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_material_create",
-    category: "typed-editor",
-    description: "Create a new Material asset.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_material_get_properties",
-    category: "typed-editor",
-    description: "List all properties of a Material.",
-    guidance: "Planned typed surface. Use read_asset on the .mat today.",
-  },
-  {
-    name: "unity_open_mcp_material_set_property",
-    category: "typed-editor",
-    description: "Set a Material property (color/float/int/vector/texture).",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_material_get_keywords",
-    category: "typed-editor",
-    description: "List enabled shader keywords on a Material.",
-    guidance: "Planned typed surface. Use read_asset on the .mat today.",
-  },
-  {
-    name: "unity_open_mcp_material_set_keyword",
-    category: "typed-editor",
-    description: "Enable or disable a shader keyword on a Material.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_material_set_shader",
-    category: "typed-editor",
-    description: "Change a Material's shader.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_shader_list_all",
-    category: "typed-editor",
-    description: "List all shaders in the project.",
-    guidance: "Planned typed surface. Use search_assets with t:Shader today.",
-  },
-  {
-    name: "unity_open_mcp_shader_get_data",
-    category: "typed-editor",
-    description: "Read shader properties, passes, and compile errors.",
-    guidance: "Planned typed surface. Use read_asset on the .shader today.",
-  },
-  {
-    name: "unity_open_mcp_prefab_instantiate",
-    category: "typed-editor",
-    description: "Instantiate a prefab into the active scene.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_prefab_create",
-    category: "typed-editor",
-    description: "Create a prefab (or variant) asset from a scene object.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_prefab_open",
-    category: "typed-editor",
-    description: "Open the prefab edit stage.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_prefab_close",
-    category: "typed-editor",
-    description: "Close the prefab edit stage.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_prefab_save",
-    category: "typed-editor",
-    description: "Save the opened prefab stage back to the asset.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_prefab_apply",
-    category: "typed-editor",
-    description: "Apply instance overrides back to the prefab asset.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_prefab_revert",
-    category: "typed-editor",
-    description: "Revert a prefab instance to match the asset.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_prefab_unpack",
-    category: "typed-editor",
-    description: "Unpack a prefab instance into a plain GameObject.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_prefab_get_overrides",
-    category: "typed-editor",
-    description: "List property overrides on a prefab instance.",
-    guidance: "Planned typed surface. Use read_asset on the instance today.",
-  },
-  {
-    name: "unity_open_mcp_prefab_status",
-    category: "typed-editor",
-    description: "Report the prefab-ness of a GameObject.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
+  // Plan 1 typed tools are now implemented (see mcp-server/src/tools/).
+  // The entries that used to live here have been removed; the remaining
+  // Plan 1 references (none) live as real Tool definitions.
 
   // --- Plan 2: GameObject & Components ------------------------------------
   {

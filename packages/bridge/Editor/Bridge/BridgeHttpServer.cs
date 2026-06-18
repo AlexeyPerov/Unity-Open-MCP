@@ -8,6 +8,7 @@ using System.Threading;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge.MetaTools;
+using UnityOpenMcpBridge.TypedTools;
 
 namespace UnityOpenMcpBridge
 {
@@ -38,6 +39,30 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_reserialize",
             "unity_open_mcp_read_asset",
             "unity_open_mcp_search_assets",
+            // M16 Plan 1 — typed asset/material/shader/prefab tools.
+            "unity_open_mcp_assets_create_folder",
+            "unity_open_mcp_assets_copy",
+            "unity_open_mcp_assets_move",
+            "unity_open_mcp_assets_delete",
+            "unity_open_mcp_assets_refresh",
+            "unity_open_mcp_material_create",
+            "unity_open_mcp_material_get_properties",
+            "unity_open_mcp_material_set_property",
+            "unity_open_mcp_material_get_keywords",
+            "unity_open_mcp_material_set_keyword",
+            "unity_open_mcp_material_set_shader",
+            "unity_open_mcp_shader_list_all",
+            "unity_open_mcp_shader_get_data",
+            "unity_open_mcp_prefab_instantiate",
+            "unity_open_mcp_prefab_create",
+            "unity_open_mcp_prefab_open",
+            "unity_open_mcp_prefab_close",
+            "unity_open_mcp_prefab_save",
+            "unity_open_mcp_prefab_apply",
+            "unity_open_mcp_prefab_revert",
+            "unity_open_mcp_prefab_unpack",
+            "unity_open_mcp_prefab_get_overrides",
+            "unity_open_mcp_prefab_status",
             "unity_senses_run_tests",
             "unity_senses_screenshot",
             "unity_senses_read_console",
@@ -66,7 +91,15 @@ namespace UnityOpenMcpBridge
             "unity_senses_profiler_capture",
             "unity_senses_profiler_memory",
             "unity_senses_profiler_rendering",
-            "unity_senses_spatial_query"
+            "unity_senses_spatial_query",
+            // M16 Plan 1 — read-only typed tools (gate-free). They return JSON
+            // directly without the gate envelope, matching search_assets/read_asset.
+            "unity_open_mcp_material_get_properties",
+            "unity_open_mcp_material_get_keywords",
+            "unity_open_mcp_shader_list_all",
+            "unity_open_mcp_shader_get_data",
+            "unity_open_mcp_prefab_get_overrides",
+            "unity_open_mcp_prefab_status"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -75,7 +108,27 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_invoke_method",
             "unity_open_mcp_execute_menu",
             "unity_open_mcp_apply_fix",
-            "unity_open_mcp_reserialize"
+            "unity_open_mcp_reserialize",
+            // M16 Plan 1 — typed asset/material/prefab mutators. Each requires
+            // paths_hint; assets_refresh is a light mutation that may bind
+            // whole-project scope when whole_project: true (handled below).
+            "unity_open_mcp_assets_create_folder",
+            "unity_open_mcp_assets_copy",
+            "unity_open_mcp_assets_move",
+            "unity_open_mcp_assets_delete",
+            "unity_open_mcp_assets_refresh",
+            "unity_open_mcp_material_create",
+            "unity_open_mcp_material_set_property",
+            "unity_open_mcp_material_set_keyword",
+            "unity_open_mcp_material_set_shader",
+            "unity_open_mcp_prefab_instantiate",
+            "unity_open_mcp_prefab_create",
+            "unity_open_mcp_prefab_open",
+            "unity_open_mcp_prefab_close",
+            "unity_open_mcp_prefab_save",
+            "unity_open_mcp_prefab_apply",
+            "unity_open_mcp_prefab_revert",
+            "unity_open_mcp_prefab_unpack"
         };
 
         static HttpListener _listener;
@@ -731,6 +784,16 @@ namespace UnityOpenMcpBridge
                         // reserialize's `paths` array IS the mutation scope — reuse it as the gate hint.
                         pathsHint = JsonBody.GetStringArray(body, "paths");
                     }
+                    else if (toolName == "unity_open_mcp_assets_refresh")
+                    {
+                        // Refresh is whole-project by nature: when whole_project
+                        // is true (default), paths_hint may be empty. Otherwise
+                        // (scoped refresh) the caller must enumerate paths.
+                        if (JsonBody.GetBool(body, "whole_project", true))
+                        {
+                            pathsHint = new[] { "Assets" };
+                        }
+                    }
 
                     if (pathsHint == null || pathsHint.Length == 0)
                     {
@@ -1022,6 +1085,30 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_reserialize" => ReserializeAssetsTool.Execute(body),
                 "unity_open_mcp_read_asset" => ReadAssetTool.Execute(body),
                 "unity_open_mcp_search_assets" => SearchAssetsTool.Execute(body),
+                // M16 Plan 1 — typed asset/material/shader/prefab tools.
+                "unity_open_mcp_assets_create_folder" => AssetsTools.CreateFolder(body),
+                "unity_open_mcp_assets_copy" => AssetsTools.Copy(body),
+                "unity_open_mcp_assets_move" => AssetsTools.Move(body),
+                "unity_open_mcp_assets_delete" => AssetsTools.Delete(body),
+                "unity_open_mcp_assets_refresh" => AssetsTools.Refresh(body),
+                "unity_open_mcp_material_create" => MaterialTools.Create(body),
+                "unity_open_mcp_material_get_properties" => MaterialTools.GetProperties(body),
+                "unity_open_mcp_material_set_property" => MaterialTools.SetProperty(body),
+                "unity_open_mcp_material_get_keywords" => MaterialTools.GetKeywords(body),
+                "unity_open_mcp_material_set_keyword" => MaterialTools.SetKeyword(body),
+                "unity_open_mcp_material_set_shader" => MaterialTools.SetShader(body),
+                "unity_open_mcp_shader_list_all" => ShaderTools.ListAll(body),
+                "unity_open_mcp_shader_get_data" => ShaderTools.GetData(body),
+                "unity_open_mcp_prefab_instantiate" => PrefabTools.Instantiate(body),
+                "unity_open_mcp_prefab_create" => PrefabTools.Create(body),
+                "unity_open_mcp_prefab_open" => PrefabTools.Open(body),
+                "unity_open_mcp_prefab_close" => PrefabTools.Close(body),
+                "unity_open_mcp_prefab_save" => PrefabTools.Save(body),
+                "unity_open_mcp_prefab_apply" => PrefabTools.Apply(body),
+                "unity_open_mcp_prefab_revert" => PrefabTools.Revert(body),
+                "unity_open_mcp_prefab_unpack" => PrefabTools.Unpack(body),
+                "unity_open_mcp_prefab_get_overrides" => PrefabTools.GetOverrides(body),
+                "unity_open_mcp_prefab_status" => PrefabTools.Status(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

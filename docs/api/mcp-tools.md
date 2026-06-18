@@ -70,16 +70,16 @@ MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the s
 
 - `unity_senses_pull_events` — Drains incremental bridge events (console logs + editor-state transitions) since the previous call. The first call opens a server-side SSE subscription to the bridge's `GET /events` stream; later calls return only new events. Use this after `execute_csharp` / mutations to stream console output without polling `/ping` or re-reading the full console. Each event carries `seq`, `ts`, `type` (`log` | `editor_state`), and type-specific fields (`logType`/`message`/`stack` for logs, `state`/`isCompiling`/`isPlaying` for state). `dropped` reports events evicted from the queue before this pull; `connected` reports the SSE reader state. Live-only — returns `bridge_unavailable` when the bridge is down.
 
-### Typed editor tools (M16 planned)
+### Typed editor tools (M16)
 
 M16 adds a curated typed surface on top of existing meta-tools. Duplicates are intentionally avoided:
 - keep `unity_open_mcp_execute_csharp`, `unity_open_mcp_invoke_method`, `unity_open_mcp_find_members` as core
 - keep M9 read/list/search/reserialize as the asset intelligence baseline
 - keep M10 sense tools for screenshots/test run/profiler capture/memory/rendering/spatial
 
-The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabilities` (each entry carries `status: "planned"` and a fallback `guidance` string). The source of truth is `mcp-server/src/capabilities/build-capabilities.ts`, synchronized with the per-plan tables in `specs/execution/M16/execution-plan-*.md`. Planned categories:
+The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabilities` (each entry carries `status: "planned"` until implemented). The source of truth is `mcp-server/src/capabilities/build-capabilities.ts`, synchronized with the per-plan tables in `specs/execution/M16/execution-plan-*.md`. Planned categories:
 
-- **Project & Asset Management:** typed asset CRUD (`assets_create_folder`, `assets_copy`, `assets_move`, `assets_delete`, `assets_refresh`), material helpers (`material_create`, `material_get/set_property`, `material_get/set_keywords`, `material_set_shader`), shader reads (`shader_list_all`, `shader_get_data`), and prefab lifecycle (`prefab_instantiate/create/open/close/save` + `prefab_apply/revert/unpack/get_overrides/status`)
+- **Project & Asset Management:** typed asset CRUD (`assets_create_folder`, `assets_copy`, `assets_move`, `assets_delete`, `assets_refresh`), material helpers (`material_create`, `material_get/set_property`, `material_get/set_keywords`, `material_set_shader`), shader reads (`shader_list_all`, `shader_get_data`), and prefab lifecycle (`prefab_instantiate/create/open/close/save` + `prefab_apply/revert/unpack/get_overrides/status`) — **implemented in Plan 1**
 - **GameObject & Components:** typed hierarchy/component lifecycle (`gameobject_create/destroy/duplicate/find/modify/set_parent`, `component_add/destroy/get/modify/list_all`)
 - **Scene Management:** typed scene lifecycle/data (`scene_create/open/save/unload/set_active/list_opened`, `scene_get_data`, `scene_get_dirty_summary`, `scene_focus`)
 - **Package Manager:** `package_list`, `package_search`, `package_add`, `package_remove`, `package_get_info`, `package_get_dependencies`, `package_check`
@@ -88,6 +88,41 @@ The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabiliti
 - **Profiler & Diagnostics session:** `profiler_start/stop/get_status`, `profiler_get/set_config`, `profiler_list_modules`, `profiler_enable_module`, `profiler_clear_data`, `profiler_save_data`, `profiler_load_data`, `profiler_get_script_stats` (non-duplicate with M10 capture/memory/rendering)
 - **Gate intelligence:** `impact_preview`, `gate_budget_estimate`, `mutation_explain`
 - **Project configuration & build:** build pipeline (`build_get_targets`, `build_get/set_target`, `build_get/set_scenes`, `build_start`, `build_get/set_defines`) and project settings (`settings_get/set_player/quality/physics/lighting`)
+
+#### Project & Asset Management (M16 Plan 1 — implemented)
+
+Mutating members run the full gate path with `paths_hint`; read-only members are gate-free (returned as direct JSON without the gate envelope). Asset/material/prefab mutators use `lifecycle: "editor_settle"` (wait for asset refresh); the read-only members use `lifecycle: "none"`.
+
+Folder / filesystem asset operations:
+
+- `unity_open_mcp_assets_create_folder` — Create folders under Assets/. `paths_hint` enumerates each new folder path.
+- `unity_open_mcp_assets_copy` — Copy asset(s) (`{source, destination}` pairs). `paths_hint` = destinations.
+- `unity_open_mcp_assets_move` — Move / rename asset(s). `paths_hint` should include BOTH source and destination paths so the gate can flag dangling references.
+- `unity_open_mcp_assets_delete` — Delete asset(s). `paths_hint` = deleted paths. Prefer `unity_open_mcp_find_references` first.
+- `unity_open_mcp_assets_refresh` — Refresh AssetDatabase. Light mutation; when `whole_project: true` (default), `paths_hint` may be omitted (refresh is whole-project by nature).
+
+Material helpers (resolved by `asset_path` (.mat) or `instance_id` of a scene GameObject whose Renderer.sharedMaterial is read, or the Material instance directly):
+
+- `unity_open_mcp_material_create` — Create a `.mat` at a path with a named shader (defaults to URP/Lit or Standard). `paths_hint` = new .mat path.
+- `unity_open_mcp_material_get_properties` — List all shader properties with values. Read-only, gate-free, token-bounded by `max_results`.
+- `unity_open_mcp_material_set_property` — Set one property; `type` infers value kind (color/float/int/vector/texture). Undo-recorded. `paths_hint` = .mat or scene path.
+- `unity_open_mcp_material_get_keywords` — List enabled shader keywords. Read-only, gate-free.
+- `unity_open_mcp_material_set_keyword` — Enable/disable a keyword. Undo-recorded. `paths_hint` = .mat or scene path.
+- `unity_open_mcp_material_set_shader` — Swap shader (gate delta surfaces missing-property references). Undo-recorded. `paths_hint` = .mat or scene path.
+
+Shader helpers (read-only, gate-free):
+
+- `unity_open_mcp_shader_list_all` — List shader assets with name + asset path. Token-bounded by `max_results`.
+- `unity_open_mcp_shader_get_data` — Read shader properties, attributes, subshader info, and compile errors (`errors[]` folds UCP `shader/errors`). Resolve by `asset_path` or `name`.
+
+Prefab lifecycle (scene instances resolved by `instance_id` > `path` > `name`, matching `spatial_query`):
+
+- `unity_open_mcp_prefab_instantiate` — Instantiate a prefab into the active scene. Returns the new instance's instanceId/name/path.
+- `unity_open_mcp_prefab_create` — Create prefab (or variant) asset from a scene GameObject.
+- `unity_open_mcp_prefab_open` / `prefab_close` / `prefab_save` — Prefab edit stage lifecycle. `close`/`save` are no-ops with a note when no stage is open.
+- `unity_open_mcp_prefab_apply` / `prefab_revert` / `prefab_unpack` — Apply instance overrides to the asset / revert to the asset / unpack into a plain GameObject.
+- `unity_open_mcp_prefab_get_overrides` — Read-only: list propertyModifications / addedComponents / removedComponents on an instance. Gate-free.
+- `unity_open_mcp_prefab_status` — Read-only: report isPrefab/isInstance/isRoot/hasOverrides + source asset. Gate-free.
 
 ## Capability discovery
 

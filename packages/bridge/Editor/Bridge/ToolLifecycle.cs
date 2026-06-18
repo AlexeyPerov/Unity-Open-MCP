@@ -35,6 +35,27 @@ namespace UnityOpenMcpBridge
             // ----- EditorSettle: wait for asset refresh + serialization -----
             { "unity_open_mcp_apply_fix",        LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_reserialize",      LifecyclePolicy.EditorSettle },
+            // M16 Plan 1 — typed asset/material/prefab mutators. They touch
+            // Assets/ (write .mat/.prefab, refresh AssetDatabase, mutate scene
+            // instances). None of them recompile editor scripts, so they wait
+            // for asset refresh but do not need the restart-then-settle path.
+            { "unity_open_mcp_assets_create_folder", LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_assets_copy",         LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_assets_move",         LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_assets_delete",       LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_assets_refresh",      LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_material_create",     LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_material_set_property",LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_material_set_keyword",LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_material_set_shader", LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_prefab_instantiate",  LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_prefab_create",       LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_prefab_open",         LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_prefab_close",        LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_prefab_save",         LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_prefab_apply",        LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_prefab_revert",       LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_prefab_unpack",       LifecyclePolicy.EditorSettle },
 
             // ----- RestartThenSettle: may trigger a domain reload -----
             // execute_csharp / invoke_method can recompile; execute_menu can

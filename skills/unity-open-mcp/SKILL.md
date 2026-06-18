@@ -189,6 +189,15 @@ All accept `gate` (`enforce` / `warn` / `off`, default `enforce`) and require a 
 - `unity_open_mcp_apply_fix` — apply a verify rule fix (e.g. `remove_missing_script`, `relink_broken_guid`).
 - `unity_open_mcp_reserialize` — round-trip text assets through Unity's serializer.
 
+**Typed project & asset tools (M16 Plan 1).** Prefer these over `execute_csharp` for routine asset/material/prefab workflows — they have explicit schemas, run the same gate envelope, and surface structured results:
+
+- Asset CRUD: `unity_open_mcp_assets_create_folder` / `assets_copy` / `assets_move` / `assets_delete` / `assets_refresh` (`assets_refresh` may bind whole-project scope via `whole_project: true`).
+- Material helpers: `unity_open_mcp_material_create` / `material_get_properties` / `material_set_property` (typed by `type: color|float|int|vector|texture`) / `material_get_keywords` / `material_set_keyword` / `material_set_shader`.
+- Shader reads (gate-free): `unity_open_mcp_shader_list_all` / `shader_get_data` (folds compile errors into `errors[]`).
+- Prefab lifecycle: `prefab_instantiate` / `prefab_create` / `prefab_open` / `prefab_close` / `prefab_save` / `prefab_apply` / `prefab_revert` / `prefab_unpack`. Read-only: `prefab_get_overrides` / `prefab_status`. Address scene instances by `instance_id` > `path` > `name` (same model as `spatial_query`).
+
+Materials resolve by `asset_path` (.mat) or `instance_id` of a scene GameObject whose Renderer.sharedMaterial is read (or the Material instance directly). Use `shader_list_all` to discover valid shader names before `material_create` / `material_set_shader`.
+
 ### Return serialization (execute_csharp / invoke_method)
 
 Results are walked by a depth-limited reflective serializer before becoming `mutation.output`:
