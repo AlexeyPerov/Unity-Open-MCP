@@ -85,6 +85,14 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_scene_get_data",
             "unity_open_mcp_scene_get_dirty_summary",
             "unity_open_mcp_scene_focus",
+            // M16 Plan 4 — typed Package Manager tools.
+            "unity_open_mcp_package_list",
+            "unity_open_mcp_package_search",
+            "unity_open_mcp_package_add",
+            "unity_open_mcp_package_remove",
+            "unity_open_mcp_package_get_info",
+            "unity_open_mcp_package_get_dependencies",
+            "unity_open_mcp_package_check",
             "unity_senses_run_tests",
             "unity_senses_screenshot",
             "unity_senses_read_console",
@@ -131,7 +139,15 @@ namespace UnityOpenMcpBridge
             // standalone M10 scene snapshot.
             "unity_open_mcp_scene_list_opened",
             "unity_open_mcp_scene_get_data",
-            "unity_open_mcp_scene_get_dirty_summary"
+            "unity_open_mcp_scene_get_dirty_summary",
+            // M16 Plan 4 — read-only typed Package Manager tools (gate-free).
+            // list / search / get_info hit UPM async requests;
+            // get_dependencies / check read Packages/manifest.json directly.
+            "unity_open_mcp_package_list",
+            "unity_open_mcp_package_search",
+            "unity_open_mcp_package_get_info",
+            "unity_open_mcp_package_get_dependencies",
+            "unity_open_mcp_package_check"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -181,7 +197,13 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_scene_save",
             "unity_open_mcp_scene_unload",
             "unity_open_mcp_scene_set_active",
-            "unity_open_mcp_scene_focus"
+            "unity_open_mcp_scene_focus",
+            // M16 Plan 4 — typed Package Manager mutators. Each writes
+            // Packages/manifest.json and triggers package resolution; the
+            // caller must scope paths_hint to "Packages/manifest.json"
+            // (the lock file is touched implicitly).
+            "unity_open_mcp_package_add",
+            "unity_open_mcp_package_remove"
         };
 
         static HttpListener _listener;
@@ -1184,6 +1206,17 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_scene_get_data" => ScenesTools.GetData(body),
                 "unity_open_mcp_scene_get_dirty_summary" => ScenesTools.GetDirtySummary(body),
                 "unity_open_mcp_scene_focus" => ScenesTools.Focus(body),
+                // M16 Plan 4 — typed Package Manager tools. list / search /
+                // get_info hit UPM async requests; get_dependencies / check
+                // read Packages/manifest.json directly. add / remove write
+                // manifest.json (paths_hint scoped to it by the caller).
+                "unity_open_mcp_package_list" => PackagesTools.List(body),
+                "unity_open_mcp_package_search" => PackagesTools.Search(body),
+                "unity_open_mcp_package_add" => PackagesTools.Add(body),
+                "unity_open_mcp_package_remove" => PackagesTools.Remove(body),
+                "unity_open_mcp_package_get_info" => PackagesTools.GetInfo(body),
+                "unity_open_mcp_package_get_dependencies" => PackagesTools.GetDependencies(body),
+                "unity_open_mcp_package_check" => PackagesTools.Check(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

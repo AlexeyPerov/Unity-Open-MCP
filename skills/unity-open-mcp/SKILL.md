@@ -240,6 +240,13 @@ Resolve components by `component_instance_id` (specific instance) or `type_name`
 
 Workflow: `scene_list_opened` → `scene_get_data` to see what's there → mutate via GameObject/component tools → `scene_get_dirty_summary` to confirm → `scene_save`. Before opening a new scene in Single mode, check `scene_get_dirty_summary` and save first to avoid the dirty-scene refusal.
 
+**Typed Package Manager tools (M16 Plan 4).** Prefer these over `execute_csharp` for UPM workflows. `paths_hint` for the mutating tools is `["Packages/manifest.json"]` (packages-lock.json is touched implicitly — do not list it separately).
+
+- Mutating (gate-aware, `restart_then_settle` — UPM resolution can domain-reload; the dirty guard preflights them, pass `ignore_scene_dirty: true` to opt out): `package_add` (registry id / `name@version` / Git URL / `file:../path` / `.tgz`) / `package_remove` (by name; trailing `@version` stripped; refuses packages not installed or depended-on by others).
+- Read-only (gate-free): `package_list` (filter by `source` / `name_filter` / `direct_dependencies_only`; `include_indirect`; `offline: true` default) / `package_search` (substring over name/displayName/description; `offline: false` hits live registry for exact matches) / `package_get_info` (one package by name/id/displayName; falls back to registry when not installed and `offline: false`) / `package_get_dependencies` (top-level manifest entries parsed directly, no UPM request) / `package_check` (presence + pinned reference for one id, reads manifest directly).
+
+Workflow: `package_check` (fast manifest hit) → `package_search` if not installed → `package_add` with `paths_hint: ["Packages/manifest.json"]` → after the post-add settle, `package_get_info` to confirm the resolved version. `package_get_dependencies` is the fastest manifest snapshot (no UPM round-trip).
+
 ### Return serialization (execute_csharp / invoke_method)
 
 Results are walked by a depth-limited reflective serializer before becoming `mutation.output`:

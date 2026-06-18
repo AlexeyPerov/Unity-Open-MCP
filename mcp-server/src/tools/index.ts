@@ -77,6 +77,14 @@ import { sceneListOpened } from "./scene-list-opened.js";
 import { sceneGetData } from "./scene-get-data.js";
 import { sceneGetDirtySummary } from "./scene-get-dirty-summary.js";
 import { sceneFocus } from "./scene-focus.js";
+// M16 Plan 4 — typed Package Manager tools.
+import { packageList } from "./package-list.js";
+import { packageSearch } from "./package-search.js";
+import { packageAdd } from "./package-add.js";
+import { packageRemove } from "./package-remove.js";
+import { packageGetInfo } from "./package-get-info.js";
+import { packageGetDependencies } from "./package-get-dependencies.js";
+import { packageCheck } from "./package-check.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -179,6 +187,22 @@ export const M16_PLAN3_TOOLS: Tool[] = [
   sceneFocus,
 ];
 
+// M16 Plan 4 — Package Manager typed tools. Mutating members (add / remove)
+// run the full gate path with `paths_hint` = ["Packages/manifest.json"] and
+// use the restart_then_settle lifecycle (UPM resolution may domain-reload);
+// read-only members (list / search / get_info / get_dependencies / check)
+// are gate-free. get_dependencies + check read Packages/manifest.json
+// directly (no UPM request) for fast manifest snapshots.
+export const M16_PLAN4_TOOLS: Tool[] = [
+  packageList,
+  packageSearch,
+  packageAdd,
+  packageRemove,
+  packageGetInfo,
+  packageGetDependencies,
+  packageCheck,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -193,4 +217,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN1_TOOLS,
   ...M16_PLAN2_TOOLS,
   ...M16_PLAN3_TOOLS,
+  ...M16_PLAN4_TOOLS,
 ];

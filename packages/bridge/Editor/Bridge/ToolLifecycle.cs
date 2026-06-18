@@ -79,6 +79,14 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_scene_unload",        LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_scene_set_active",    LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_scene_focus",         LifecyclePolicy.EditorSettle },
+            // M16 Plan 4 — typed Package Manager mutators. add / remove
+            // rewrite Packages/manifest.json and trigger UPM resolution,
+            // which can install/remove assemblies and force a domain reload.
+            // RestartThenSettle so the dispatcher blocks until the editor
+            // finishes compiling; the read-only package tools fall through to
+            // the None default below (they are gate-free, dispatched direct).
+            { "unity_open_mcp_package_add",         LifecyclePolicy.RestartThenSettle },
+            { "unity_open_mcp_package_remove",      LifecyclePolicy.RestartThenSettle },
 
             // ----- RestartThenSettle: may trigger a domain reload -----
             // execute_csharp / invoke_method can recompile; execute_menu can

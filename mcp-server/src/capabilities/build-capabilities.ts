@@ -108,6 +108,14 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_scene_get_data: "typed-editor",
   unity_open_mcp_scene_get_dirty_summary: "typed-editor",
   unity_open_mcp_scene_focus: "typed-editor",
+  // M16 Plan 4 — typed Package Manager tools.
+  unity_open_mcp_package_list: "typed-editor",
+  unity_open_mcp_package_search: "typed-editor",
+  unity_open_mcp_package_add: "typed-editor",
+  unity_open_mcp_package_remove: "typed-editor",
+  unity_open_mcp_package_get_info: "typed-editor",
+  unity_open_mcp_package_get_dependencies: "typed-editor",
+  unity_open_mcp_package_check: "typed-editor",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
@@ -164,48 +172,8 @@ export const PLANNED_TOOLS: PlannedTool[] = [
   // The entries that used to live here have been removed.
 
   // --- Plan 4: Packages ---------------------------------------------------
-  {
-    name: "unity_open_mcp_package_list",
-    category: "typed-editor",
-    description: "List installed UPM packages.",
-    guidance: "Planned typed surface. Read Packages/manifest.json directly today.",
-  },
-  {
-    name: "unity_open_mcp_package_search",
-    category: "typed-editor",
-    description: "Search UPM registry + local packages.",
-    guidance: "Planned typed surface. Read Packages/manifest.json directly today.",
-  },
-  {
-    name: "unity_open_mcp_package_add",
-    category: "typed-editor",
-    description: "Install a UPM package.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_package_remove",
-    category: "typed-editor",
-    description: "Remove a UPM package.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_package_get_info",
-    category: "typed-editor",
-    description: "Inspect one package (deps, source, version).",
-    guidance: "Planned typed surface. Read Packages/manifest.json directly today.",
-  },
-  {
-    name: "unity_open_mcp_package_get_dependencies",
-    category: "typed-editor",
-    description: "List manifest dependencies.",
-    guidance: "Planned typed surface. Read Packages/manifest.json directly today.",
-  },
-  {
-    name: "unity_open_mcp_package_check",
-    category: "typed-editor",
-    description: "Check presence/version of a packageId.",
-    guidance: "Planned typed surface. Read Packages/manifest.json directly today.",
-  },
+  // Plan 4 typed tools are now implemented (see mcp-server/src/tools/).
+  // The entries that used to live here have been removed.
 
   // --- Plan 5: Console + Editor state/selection/tags/layers/undo ----------
   {
