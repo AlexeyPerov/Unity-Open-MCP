@@ -13,7 +13,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // keeps the model in the loop and lets an agent decide when to drain (e.g.
 // right after a mutation that may produce logs).
 export const pullEvents: Tool = {
-  name: "unity_agent_pull_events",
+  name: "unity_senses_pull_events",
   description:
     "Drain incremental bridge events (console logs + editor-state transitions) since the previous call. " +
     "The first call opens a server-side SSE subscription; later calls return only new events. " +

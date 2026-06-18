@@ -9,32 +9,32 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void ReadConsoleTool_RegisteredInRegistry()
         {
-            Assert.IsTrue(BridgeToolRegistry.Contains("unity_agent_read_console"),
-                "unity_agent_read_console should be discovered by the registry");
+            Assert.IsTrue(BridgeToolRegistry.Contains("unity_senses_read_console"),
+                "unity_senses_read_console should be discovered by the registry");
         }
 
         [Test]
         public static void ReadConsoleTool_IsNonMutating()
         {
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_read_console", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_read_console", out var entry));
             Assert.IsFalse(entry.IsMutating,
-                "unity_agent_read_console should be non-mutating (read-only)");
+                "unity_senses_read_console should be non-mutating (read-only)");
         }
 
         [Test]
         public static void ReadConsoleTool_GateIsOff()
         {
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_read_console", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_read_console", out var entry));
             Assert.AreEqual(GateMode.Off, entry.Gate,
-                "unity_agent_read_console should have gate off (non-mutating)");
+                "unity_senses_read_console should have gate off (non-mutating)");
         }
 
         [Test]
         public static void ReadConsoleTool_HasReadOnlyHint()
         {
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_read_console", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_read_console", out var entry));
             Assert.IsTrue(entry.ReadOnlyHint,
-                "unity_agent_read_console should have ReadOnlyHint = true");
+                "unity_senses_read_console should have ReadOnlyHint = true");
         }
 
         [Test]
@@ -47,7 +47,7 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void ReadConsoleTool_DispatchReturnsJson()
         {
-            var result = BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+            var result = BridgeToolRegistry.TryDispatch("unity_senses_read_console",
                 "{\"type\":\"all\",\"max_entries\":10}");
 
             Assert.IsNotNull(result, "Dispatch should return a result");
@@ -64,7 +64,7 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void ReadConsole_AlwaysReportsTruncated()
         {
-            var result = BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+            var result = BridgeToolRegistry.TryDispatch("unity_senses_read_console",
                 "{\"type\":\"all\",\"max_entries\":10}");
             Assert.IsNotNull(result);
             Assert.IsTrue(result.Success);
@@ -79,7 +79,7 @@ namespace UnityOpenMcpBridge.Tests
             UnityEngine.Debug.Log("m13_t46_summary_probe");
             try
             {
-                var result = BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+                var result = BridgeToolRegistry.TryDispatch("unity_senses_read_console",
                     "{\"type\":\"all\",\"detail\":\"summary\",\"max_entries\":50}");
                 Assert.IsNotNull(result);
                 Assert.IsTrue(result.Success);
@@ -91,7 +91,7 @@ namespace UnityOpenMcpBridge.Tests
             finally
             {
                 // best-effort cleanup so we don't pollute later tests
-                BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+                BridgeToolRegistry.TryDispatch("unity_senses_read_console",
                     "{\"type\":\"all\",\"clear\":true,\"max_entries\":1}");
             }
         }
@@ -102,7 +102,7 @@ namespace UnityOpenMcpBridge.Tests
             UnityEngine.Debug.Log("m13_t46_verbose_probe");
             try
             {
-                var result = BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+                var result = BridgeToolRegistry.TryDispatch("unity_senses_read_console",
                     "{\"type\":\"log\",\"detail\":\"verbose\",\"max_entries\":50}");
                 Assert.IsNotNull(result);
                 Assert.IsTrue(result.Success);
@@ -113,7 +113,7 @@ namespace UnityOpenMcpBridge.Tests
             }
             finally
             {
-                BridgeToolRegistry.TryDispatch("unity_agent_read_console",
+                BridgeToolRegistry.TryDispatch("unity_senses_read_console",
                     "{\"type\":\"all\",\"clear\":true,\"max_entries\":1}");
             }
         }

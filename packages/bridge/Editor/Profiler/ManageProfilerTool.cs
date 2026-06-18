@@ -13,10 +13,10 @@ namespace UnityOpenMcpBridge.Profiler
     //
     // Three read-only tools surface Unity Profiler data to agents for
     // performance work:
-    //   unity_agent_profiler_capture   — frame hierarchy with drill-down +
+    //   unity_senses_profiler_capture   — frame hierarchy with drill-down +
     //                                    multi-frame averaging
-    //   unity_agent_profiler_memory    — live memory allocator stats
-    //   unity_agent_profiler_rendering — rendering environment stats batch
+    //   unity_senses_profiler_memory    — live memory allocator stats
+    //   unity_senses_profiler_rendering — rendering environment stats batch
     //
     // Hierarchy logic is ported from unity-cli's ManageProfiler.cs (references/),
     // translated from Newtonsoft JObject to hand-rolled StringBuilder JSON and
@@ -31,7 +31,7 @@ namespace UnityOpenMcpBridge.Profiler
     {
         // ============================ capture ============================
 
-        [BridgeTool("unity_agent_profiler_capture", Title = "Profiler Capture",
+        [BridgeTool("unity_senses_profiler_capture", Title = "Profiler Capture",
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
             "Capture the Unity Profiler frame hierarchy with drill-down and " +
@@ -150,7 +150,7 @@ namespace UnityOpenMcpBridge.Profiler
 
         // ============================ memory ============================
 
-        [BridgeTool("unity_agent_profiler_memory", Title = "Profiler Memory",
+        [BridgeTool("unity_senses_profiler_memory", Title = "Profiler Memory",
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
             "Snapshot live Unity memory allocator stats: total allocated, reserved, " +
@@ -202,13 +202,13 @@ namespace UnityOpenMcpBridge.Profiler
 
         // ============================ rendering ============================
 
-        [BridgeTool("unity_agent_profiler_rendering", Title = "Profiler Rendering",
+        [BridgeTool("unity_senses_profiler_rendering", Title = "Profiler Rendering",
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
             "Snapshot the rendering environment: GPU / SystemInfo, active render " +
             "pipeline, QualitySettings, screen resolution, target frame rate, and " +
             "Time stats. For per-frame batch / draw-call counts use " +
-            "unity_agent_profiler_capture.")]
+            "unity_senses_profiler_capture.")]
         public string ProfilerRendering()
         {
             try

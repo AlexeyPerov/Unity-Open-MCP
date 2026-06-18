@@ -1,7 +1,7 @@
 // M14 — Per-session bearer token minted when the bridge acquires its instance
 // lock, plus a constant-time comparison helper for the HTTP auth check.
 //
-// The token is written into ~/.unity-agent/instances/<projectHash>.json so the
+// The token is written into ~/.unity-open-mcp/instances/<projectHash>.json so the
 // MCP server (and any other client that discovered the bridge via the lock
 // file) can present it back. Enforcement is opt-in via `authMode` in
 // .unity-open-mcp/settings.json (BridgeAuthPolicy): the token is always minted

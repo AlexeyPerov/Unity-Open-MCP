@@ -17,7 +17,7 @@ namespace UnityOpenMcpBridge.Screenshot
     [BridgeToolType]
     public class Tool_Screenshot
     {
-        [BridgeTool("unity_agent_screenshot", Title = "Screenshot",
+        [BridgeTool("unity_senses_screenshot", Title = "Screenshot",
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
             "Capture a screenshot from the Scene view, Game view, or an isolated " +

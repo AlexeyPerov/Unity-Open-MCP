@@ -6,7 +6,7 @@
 // the fact — surviving domain reloads and editor restarts.
 //
 // This module appends one JSON-lines record per gate run to a rolling file:
-//   ~/.unity-agent/audit/audit-<projectHash>-<seq>.jsonl
+//   ~/.unity-open-mcp/audit/audit-<projectHash>-<seq>.jsonl
 // Rolling: when the active file exceeds MaxFileBytes (default 5 MiB) it is
 // renamed to a .1 / .2 / ... suffix (MaxRetainedFiles kept) and a fresh file
 // started. This bounds disk usage without losing recent history.
@@ -18,7 +18,7 @@
 // thread that built the gate envelope). Writes are serialized through a lock;
 // a single process only writes its own audit file so there is no cross-process
 // contention. The audit dir is shared across projects (one file per project
-// hash), mirroring the ~/.unity-agent/instances/ layout.
+// hash), mirroring the ~/.unity-open-mcp/instances/ layout.
 using System;
 using System.Globalization;
 using System.IO;
@@ -35,7 +35,7 @@ namespace UnityOpenMcpBridge
         public const int MaxRetainedFiles = 5;
 
         // Test-only override for the audit directory. Production callers leave
-        // it null and the log lands under ~/.unity-agent/audit/.
+        // it null and the log lands under ~/.unity-open-mcp/audit/.
         public static string AuditDirOverride;
 
         static readonly object _writeLock = new object();
@@ -48,7 +48,7 @@ namespace UnityOpenMcpBridge
                 if (!string.IsNullOrEmpty(AuditDirOverride)) return AuditDirOverride;
                 return Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".unity-agent",
+                    ".unity-open-mcp",
                     "audit");
             }
         }

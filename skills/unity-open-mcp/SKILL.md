@@ -2,7 +2,7 @@
 
 Skill for AI agents driving a Unity project through the `unity-open-mcp` MCP server. Covers the gate + verify workflow, capabilities-first discovery, and the agent senses.
 
-> Tool prefixes: `unity_open_mcp_*` (bridge-routed) and `unity_agent_*` (standalone senses). The prefix signals routing — see below.
+> Tool prefixes: `unity_open_mcp_*` (bridge-routed) and `unity_senses_*` (standalone senses). The prefix signals routing — see below.
 
 ## Preconditions
 
@@ -28,7 +28,7 @@ The per-tool `routePolicy` and `batchCapable` fields on the capabilities respons
 
 - **Live is the default.** When the bridge is connected, most tools route to `POST /tools/{name}` on the Editor.
 - **Batch fallback** spawns a headless Unity (`-batchmode`) **only** when a tool has `batchCapable: true` AND the live bridge is unavailable. Batch requires `UNITY_PATH` + `UNITY_PROJECT_PATH` env vars. Mutating meta-tools (`execute_csharp`, `invoke_method`, `execute_menu`) are blocked in batch — they need a live Editor.
-- **Agent senses are live-only.** `unity_agent_run_tests`, screenshots, profiler, console, and spatial queries have no batch form — they need a running Editor.
+- **Agent senses are live-only.** `unity_senses_run_tests`, screenshots, profiler, console, and spatial queries have no batch form — they need a running Editor.
 - **Offline reads** (`list_assets`, `find_references`, `read_asset`, `search_assets`) parse the project from disk and never need Unity.
 - **`compile_check` is always batch.** It spawns a fresh headless Unity that recompiles from scratch, even when the live bridge is up — running it against an Editor that already compiled would never surface a broken build. Use it to self-diagnose compile state.
 
@@ -159,7 +159,7 @@ Before deleting or moving an asset, call **`unity_open_mcp_find_references`** to
 
 There are two distinct failure shapes, with different recovery paths:
 
-**Bridge offline after a C# edit — `bridge_compile_failed`.** If a tool call returns an error with `code: "bridge_compile_failed"`, the bridge assembly itself failed to recompile (the edit was in `packages/bridge/` or a dependency), so the live Editor is stuck and every live tool refuses — including `unity_agent_read_console`. In this state `compile_check` does **not** work either (its batch entry point lives in the same broken assembly, and Unity's per-project lock blocks a second instance). The one channel that survives is the live Editor's `Editor.log`, which Unity writes regardless of bridge health.
+**Bridge offline after a C# edit — `bridge_compile_failed`.** If a tool call returns an error with `code: "bridge_compile_failed"`, the bridge assembly itself failed to recompile (the edit was in `packages/bridge/` or a dependency), so the live Editor is stuck and every live tool refuses — including `unity_senses_read_console`. In this state `compile_check` does **not** work either (its batch entry point lives in the same broken assembly, and Unity's per-project lock blocks a second instance). The one channel that survives is the live Editor's `Editor.log`, which Unity writes regardless of bridge health.
 
 - Call **`unity_open_mcp_read_compile_errors`** — it reads the tail of Unity's `Editor.log` directly (offline, no bridge, no Unity spawn) and returns structured compiler errors (`status`, `errorCount`, `errors[]` with `code`/`file`/`line`/`message`).
 - Read `errors[].file`/`line`/`code` (e.g. `Assets/.../Foo.cs` line 75, `CS1061`) to locate the break, fix it, then trigger a recompile (a no-op edit + focus Unity, or `compile_check` once the source compiles). Once the bridge assembly recompiles, the listener reloads and live tools return.
@@ -170,14 +170,14 @@ There are two distinct failure shapes, with different recovery paths:
 
 These give you direct project feedback and are **live-only** (no batch fallback):
 
-- **`unity_agent_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Use this to verify your changes — e.g. after a C# edit, run the affected assembly's EditMode tests. PlayMode is domain-reload-safe via a file handoff. Set `include_passes: false` on large suites to avoid truncation.
-- **`unity_agent_read_console`** — Unity console entries via reflection. Filter `type: "error"` to confirm a clean compile after edits. Use `detail: "summary"` for messages only (no stack traces) to save tokens; `detail: "verbose"` includes Unity-internal frames.
-- **`unity_agent_screenshot`** — Scene / Game / isolated 2×2 composite of one GameObject.
-- **`unity_agent_profiler_capture`** / **`profiler_memory`** / **`profiler_rendering`** — frame hierarchy, memory allocators, rendering env.
-- **`unity_agent_spatial_query`** — physics-based raycast / overlap / bounds / ground_check / nearest against the live scene.
-- **`unity_agent_pull_events`** — incremental console logs + editor-state transitions (compile start/stop, play-mode). Cheaper than `read_console` for a "what happened since my last call" check; the first call opens the stream, later calls return only new events. Returns `bridge_unavailable` when the bridge is down.
+- **`unity_senses_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Use this to verify your changes — e.g. after a C# edit, run the affected assembly's EditMode tests. PlayMode is domain-reload-safe via a file handoff. Set `include_passes: false` on large suites to avoid truncation.
+- **`unity_senses_read_console`** — Unity console entries via reflection. Filter `type: "error"` to confirm a clean compile after edits. Use `detail: "summary"` for messages only (no stack traces) to save tokens; `detail: "verbose"` includes Unity-internal frames.
+- **`unity_senses_screenshot`** — Scene / Game / isolated 2×2 composite of one GameObject.
+- **`unity_senses_profiler_capture`** / **`profiler_memory`** / **`profiler_rendering`** — frame hierarchy, memory allocators, rendering env.
+- **`unity_senses_spatial_query`** — physics-based raycast / overlap / bounds / ground_check / nearest against the live scene.
+- **`unity_senses_pull_events`** — incremental console logs + editor-state transitions (compile start/stop, play-mode). Cheaper than `read_console` for a "what happened since my last call" check; the first call opens the stream, later calls return only new events. Returns `bridge_unavailable` when the bridge is down.
 
-**Verification habit:** after any C# change, run `unity_agent_read_console` with `type: "error"` (or `unity_agent_run_tests` on the affected assembly) to confirm the change compiled and tests pass before declaring done.
+**Verification habit:** after any C# change, run `unity_senses_read_console` with `type: "error"` (or `unity_senses_run_tests` on the affected assembly) to confirm the change compiled and tests pass before declaring done.
 
 ## Mutating tools (gate-aware)
 
@@ -201,7 +201,7 @@ Results are walked by a depth-limited reflective serializer before becoming `mut
 ## Read-only tools (no gate)
 
 - `unity_open_mcp_capabilities` — discover the surface (call first).
-- `unity_agent_list_rules` — list every verify rule (implemented + planned) with applicable asset kinds, default severity, and available fixes. Filter by `asset_kind` / `extension` before calling `scan_paths` so you know which rules apply.
+- `unity_open_mcp_list_rules` — list every verify rule (implemented + planned) with applicable asset kinds, default severity, and available fixes. Filter by `asset_kind` / `extension` before calling `scan_paths` so you know which rules apply.
 - `unity_open_mcp_ping` — bridge health.
 - `unity_open_mcp_find_members` — types, methods, properties.
 - `unity_open_mcp_validate_edit` — scoped health scan, no mutation (pre-commit check). Accepts `include_rules` / `exclude_rules` to filter the auto-selected rule set; each issue carries `ruleId`/`categoryId`, `severity`, `code`/`issueCode`, `assetPath`, `description`, `fixId`/`fixSafe`.
@@ -214,6 +214,6 @@ Results are walked by a depth-limited reflective serializer before becoming `mut
 
 ## Project-specific skill (optional)
 
-Call **`unity_agent_generate_skill`** with `{ "write": true }` to generate a project-specific SKILL.md reflecting the actual project — Unity version, installed packages, available verify rules, and key MonoBehaviour/ScriptableObject types from source. The `clients` parameter writes to the project-relative skill folder(s) declared in `skills/client-paths.json` (`cursor` / `claude` / `opencode` / `agents`). Regenerate after package or script changes.
+Call **`unity_open_mcp_generate_skill`** with `{ "write": true }` to generate a project-specific SKILL.md reflecting the actual project — Unity version, installed packages, available verify rules, and key MonoBehaviour/ScriptableObject types from source. The `clients` parameter writes to the project-relative skill folder(s) declared in `skills/client-paths.json` (`cursor` / `claude` / `opencode` / `agents`). Regenerate after package or script changes.
 
 For routing details, see the `routing` object on the capabilities response — not this file.

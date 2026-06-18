@@ -158,8 +158,8 @@ namespace UnityOpenMcpBridge.Tests
             var expectedSuffix = InstancePortResolver.ProjectHash(SamplePath) + ".json";
             Assert.IsTrue(path.EndsWith(expectedSuffix),
                 $"Expected lock path to end with {expectedSuffix}, got {path}");
-            Assert.IsTrue(path.Replace('\\', '/').Contains(".unity-agent/instances/"),
-                "Lock lives under ~/.unity-agent/instances/");
+            Assert.IsTrue(path.Replace('\\', '/').Contains(".unity-open-mcp/instances/"),
+                "Lock lives under ~/.unity-open-mcp/instances/");
         }
 
         [Test]

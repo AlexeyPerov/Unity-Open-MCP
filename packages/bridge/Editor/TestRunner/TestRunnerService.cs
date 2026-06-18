@@ -32,7 +32,7 @@ namespace UnityOpenMcpBridge.TestRunner
 
         internal static readonly string StatusDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".unity-agent");
+            ".unity-open-mcp");
 
         internal static string ResultsFilePath(string runId) =>
             Path.Combine(StatusDir, $"test-results-{runId}.json");

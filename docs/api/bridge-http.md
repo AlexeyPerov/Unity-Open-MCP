@@ -25,7 +25,7 @@ Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeH
 
 ## Multi-instance discovery (M13)
 
-Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
+Each running bridge writes a lock file at `~/.unity-open-mcp/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
 
 Lock / heartbeat fields:
 - `pid`, `port`, `projectPath`, `projectHash`
@@ -105,7 +105,7 @@ Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeH
 
 ## Multi-instance discovery (M13)
 
-Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
+Each running bridge writes a lock file at `~/.unity-open-mcp/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
 
 Lock / heartbeat fields:
 - `pid`, `port`, `projectPath`, `projectHash`
@@ -153,7 +153,7 @@ Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeH
 
 ## Multi-instance discovery (M13)
 
-Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
+Each running bridge writes a lock file at `~/.unity-open-mcp/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
 
 Lock / heartbeat fields:
 - `pid`, `port`, `projectPath`, `projectHash`
@@ -201,7 +201,7 @@ Unity bridge HTTP endpoints are served by `packages/bridge/Editor/Bridge/BridgeH
 
 ## Multi-instance discovery (M13)
 
-Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
+Each running bridge writes a lock file at `~/.unity-open-mcp/instances/<sha256(projectPath)>.json`. The file doubles as the heartbeat — it is rewritten every 0.5s and on every forced editor state transition (compile start, play-mode change, domain reload).
 
 Lock / heartbeat fields:
 - `pid`, `port`, `projectPath`, `projectHash`
@@ -272,7 +272,7 @@ The in-memory activity log (`BridgeActivityLog`, capacity 100) is session-scoped
 When enabled, every gate mutation (pass / fail / warn) and every deny-list refusal/bypass is appended as one JSON-lines record to a rolling file:
 
 ```
-~/.unity-agent/audit/audit-<projectHash>.jsonl
+~/.unity-open-mcp/audit/audit-<projectHash>.jsonl
 ```
 
 Rotation: when the active file exceeds 5 MiB it is renamed to `.1`, `.1` → `.2`, …, and the oldest of 5 retained files is dropped. Records survive domain reload and editor restart (the file is reopened on each write, not held open).
@@ -317,7 +317,7 @@ If the bridge session is not initialized yet, endpoint may return `503` with a f
 
 ## `/instance` response (M13)
 
-Returns the live lock JSON described under [Multi-instance discovery](#multi-instance-discovery-m13). Returns `503` with `{"error":{"code":"no_instance", ...}}` when the bridge has not acquired a lock yet (listener started but lock write failed — e.g. the `~/.unity-agent/instances/` directory could not be created).
+Returns the live lock JSON described under [Multi-instance discovery](#multi-instance-discovery-m13). Returns `503` with `{"error":{"code":"no_instance", ...}}` when the bridge has not acquired a lock yet (listener started but lock write failed — e.g. the `~/.unity-open-mcp/instances/` directory could not be created).
 
 ## `/events` SSE & `/events/poll` (M13 T4.4)
 
@@ -466,36 +466,36 @@ Non-mutating direct-response tools return tool payloads directly (or direct erro
 - `unity_open_mcp_reserialize`
 - `unity_open_mcp_read_asset`
 - `unity_open_mcp_search_assets`
-- `unity_agent_run_tests` (test runner; requires Unity Test Framework)
-- `unity_agent_screenshot` (scene/game/isolated screenshots)
-- `unity_agent_read_console` (console log reader)
-- `unity_agent_profiler_capture` (profiler frame hierarchy)
-- `unity_agent_profiler_memory` (memory allocator stats)
-- `unity_agent_profiler_rendering` (rendering environment stats)
-- `unity_agent_spatial_query` (physics raycast / overlap / bounds / ground / nearest)
+- `unity_senses_run_tests` (test runner; requires Unity Test Framework)
+- `unity_senses_screenshot` (scene/game/isolated screenshots)
+- `unity_senses_read_console` (console log reader)
+- `unity_senses_profiler_capture` (profiler frame hierarchy)
+- `unity_senses_profiler_memory` (memory allocator stats)
+- `unity_senses_profiler_rendering` (rendering environment stats)
+- `unity_senses_spatial_query` (physics raycast / overlap / bounds / ground / nearest)
 
 Typed tools discovered via `BridgeToolRegistry` are also callable through `/tools/{toolName}`.
 
-### Test runner (`unity_agent_run_tests`)
+### Test runner (`unity_senses_run_tests`)
 
 Direct-response tool that starts an async Unity test run and returns `{ "status": "started", "runId": "...", "mode": "EditMode|PlayMode" }`.
 
-- Results are written to `~/.unity-agent/test-results-<runId>.json` when the run completes.
+- Results are written to `~/.unity-open-mcp/test-results-<runId>.json` when the run completes.
 - PlayMode runs survive domain reload: a pending marker file (`test-pending-<runId>.json`) is written before the run, and `TestRunnerState` re-attaches callbacks after reload.
 - The MCP server polls the results file and returns structured pass/fail counts to the caller.
 - Lives in a separate assembly (`com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor`) that is conditionally compiled only when `com.unity.test-framework` is installed.
 
-### Screenshots (`unity_agent_screenshot`)
+### Screenshots (`unity_senses_screenshot`)
 
 Direct-response tool that captures a PNG screenshot and returns the saved file path.
 
 - `view: "scene"` — renders the last active Scene view camera.
 - `view: "game"` — renders the main game camera (or first camera found).
 - `view: "isolated"` — renders a single GameObject in a 2×2 composite (Front/Right/Back/Top) with layer culling, configurable background (transparent/solid/skybox), and guaranteed state restore.
-- Output is written to `~/.unity-agent/screenshots/screenshot-<view>-<timestamp>.png`.
+- Output is written to `~/.unity-open-mcp/screenshots/screenshot-<view>-<timestamp>.png`.
 - Parameters: `view`, `width` (default 1280), `height` (default 720), `object_path` (required for isolated), `background` (default skybox).
 
-### Console reader (`unity_agent_read_console`)
+### Console reader (`unity_senses_read_console`)
 
 Direct-response tool that reads Unity console entries via reflection on internal `LogEntries`.
 
@@ -505,7 +505,7 @@ Direct-response tool that reads Unity console entries via reflection on internal
 - `max_entries` (default 100) caps the returned entry count; `max_stack_frames` (default 20) truncates long stack traces.
 - `clear: true` empties the console after reading.
 
-### Profiler capture (`unity_agent_profiler_capture`)
+### Profiler capture (`unity_senses_profiler_capture`)
 
 Direct-response tool that reads the Unity Profiler frame hierarchy via `ProfilerDriver.GetHierarchyFrameDataView` (requires the Profiler to be enabled and to have captured frames).
 
@@ -515,14 +515,14 @@ Direct-response tool that reads the Unity Profiler frame hierarchy via `Profiler
 - Token-bounded via `depth` (1 = one level, 0 = unlimited), `min_ms`, `max_items` (default 30), and `sort` (`total`/`self`/`calls`).
 - Returns `profiler_empty` / `frame_out_of_range` / `no_frame_data` / `root_not_found` / `no_frames_in_range` error codes as appropriate.
 
-### Profiler memory (`unity_agent_profiler_memory`)
+### Profiler memory (`unity_senses_profiler_memory`)
 
 Direct-response tool that snapshots live memory allocator stats.
 
 - Returns raw byte counts (`allocatedBytes`, `reservedBytes`, `unusedReservedBytes`, `tempAllocatorBytes`, `managedHeapBytes`) plus a `humanReadable` block.
 - `gc_collect: true` runs a full GC (with finalizers) before sampling.
 
-### Profiler rendering (`unity_agent_profiler_rendering`)
+### Profiler rendering (`unity_senses_profiler_rendering`)
 
 Direct-response tool that snapshots the rendering environment (no parameters).
 
@@ -533,7 +533,7 @@ Direct-response tool that snapshots the rendering environment (no parameters).
 - `application` — target frame rate, run in background, is playing, Unity version.
 - `time` — frame count, rendered frame count, time scale, realtime since startup.
 
-### Spatial query (`unity_agent_spatial_query`)
+### Spatial query (`unity_senses_spatial_query`)
 
 Direct-response tool that runs physics-based spatial queries against the current scene (live-only; requires a loaded scene).
 
@@ -579,7 +579,7 @@ Live `UnityEngine.Object` values returned by `invoke_method` / `execute_csharp` 
 
 ### Domain-reload safety
 
-Instance IDs are invalidated by domain reload (recompilation, enter/exit Play Mode). Resolution uses a priority fallback chain: `objectId` → `assetPath` → `assetGuid` → `path` → component-on-parent → `name`. When all locators fail, the error includes guidance to re-acquire the object via `unity_agent_scene_snapshot`, `unity_agent_spatial_query`, or `unity_open_mcp_search_assets`.
+Instance IDs are invalidated by domain reload (recompilation, enter/exit Play Mode). Resolution uses a priority fallback chain: `objectId` → `assetPath` → `assetGuid` → `path` → component-on-parent → `name`. When all locators fail, the error includes guidance to re-acquire the object via `unity_senses_scene_snapshot`, `unity_senses_spatial_query`, or `unity_open_mcp_search_assets`.
 
 ## Source-of-truth files
 

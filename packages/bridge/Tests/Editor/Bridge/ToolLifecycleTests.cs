@@ -29,12 +29,12 @@ namespace UnityOpenMcpBridge.Tests
         // Registry-discovered read-only tools carry their policy on the attribute;
         // Resolve() must surface it, not fall through to the default.
         [TestCase("unity_open_mcp_editor_status", ExpectedResult = LifecyclePolicy.None)]
-        [TestCase("unity_agent_screenshot", ExpectedResult = LifecyclePolicy.None)]
-        [TestCase("unity_agent_read_console", ExpectedResult = LifecyclePolicy.None)]
-        [TestCase("unity_agent_profiler_capture", ExpectedResult = LifecyclePolicy.None)]
-        [TestCase("unity_agent_profiler_memory", ExpectedResult = LifecyclePolicy.None)]
-        [TestCase("unity_agent_profiler_rendering", ExpectedResult = LifecyclePolicy.None)]
-        [TestCase("unity_agent_spatial_query", ExpectedResult = LifecyclePolicy.None)]
+        [TestCase("unity_senses_screenshot", ExpectedResult = LifecyclePolicy.None)]
+        [TestCase("unity_senses_read_console", ExpectedResult = LifecyclePolicy.None)]
+        [TestCase("unity_senses_profiler_capture", ExpectedResult = LifecyclePolicy.None)]
+        [TestCase("unity_senses_profiler_memory", ExpectedResult = LifecyclePolicy.None)]
+        [TestCase("unity_senses_profiler_rendering", ExpectedResult = LifecyclePolicy.None)]
+        [TestCase("unity_senses_spatial_query", ExpectedResult = LifecyclePolicy.None)]
         public static LifecyclePolicy Resolve_ReadOnlyRegistryTools_None(string tool)
         {
             return ToolLifecycle.Resolve(tool);
@@ -65,7 +65,7 @@ namespace UnityOpenMcpBridge.Tests
         public static void Resolve_RunTests_CustomConfirmation()
         {
             Assert.AreEqual(LifecyclePolicy.CustomConfirmation,
-                ToolLifecycle.Resolve("unity_agent_run_tests"));
+                ToolLifecycle.Resolve("unity_senses_run_tests"));
         }
 
         // ----- defaults -----
@@ -118,7 +118,7 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_apply_fix"));
             Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_reserialize"));
             Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_find_members"));
-            Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_agent_run_tests"));
+            Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_senses_run_tests"));
         }
 
         // ----- wire string round-trip -----

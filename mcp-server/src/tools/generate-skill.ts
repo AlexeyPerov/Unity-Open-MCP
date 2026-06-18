@@ -8,7 +8,7 @@ const CLIENT_ENUM = knownClientKeys();
 const clientListDoc = CLIENT_ENUM.map((c) => `\`${c}\``).join(", ");
 
 export const generateSkill: Tool = {
-  name: "unity_agent_generate_skill",
+  name: "unity_open_mcp_generate_skill",
   description:
     "Generate a project-specific agent skill file (SKILL.md) that reflects the " +
     "actual project state: Unity version, installed packages (including bridge/verify " +

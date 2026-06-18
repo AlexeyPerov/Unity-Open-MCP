@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const listRules: Tool = {
-  name: "unity_agent_list_rules",
+  name: "unity_open_mcp_list_rules",
   description:
     "List every verify rule (implemented + planned) with applicable asset kinds, default severity, available fixIds, " +
     "and issue codes. Use this before scan_paths to discover which rules apply to a given asset type — no trial-and-error. " +

@@ -8,38 +8,38 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void SpatialQueryTool_RegisteredInRegistry()
         {
-            Assert.IsTrue(BridgeToolRegistry.Contains("unity_agent_spatial_query"),
-                "unity_agent_spatial_query should be discovered by the registry");
+            Assert.IsTrue(BridgeToolRegistry.Contains("unity_senses_spatial_query"),
+                "unity_senses_spatial_query should be discovered by the registry");
         }
 
         [Test]
         public static void SpatialQueryTool_IsNonMutating()
         {
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_spatial_query", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_spatial_query", out var entry));
             Assert.IsFalse(entry.IsMutating,
-                "unity_agent_spatial_query should be non-mutating (read-only)");
+                "unity_senses_spatial_query should be non-mutating (read-only)");
         }
 
         [Test]
         public static void SpatialQueryTool_GateIsOff()
         {
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_spatial_query", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_spatial_query", out var entry));
             Assert.AreEqual(GateMode.Off, entry.Gate,
-                "unity_agent_spatial_query should have gate off (non-mutating)");
+                "unity_senses_spatial_query should have gate off (non-mutating)");
         }
 
         [Test]
         public static void SpatialQueryTool_HasReadOnlyHint()
         {
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_spatial_query", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_spatial_query", out var entry));
             Assert.IsTrue(entry.ReadOnlyHint,
-                "unity_agent_spatial_query should have ReadOnlyHint = true");
+                "unity_senses_spatial_query should have ReadOnlyHint = true");
         }
 
         [Test]
         public static void SpatialQuery_UnknownActionReturnsErrorJson()
         {
-            var result = BridgeToolRegistry.TryDispatch("unity_agent_spatial_query", "{\"action\":\"bogus\"}");
+            var result = BridgeToolRegistry.TryDispatch("unity_senses_spatial_query", "{\"action\":\"bogus\"}");
 
             Assert.IsNotNull(result, "Dispatch should return a result");
             Assert.IsTrue(result.Success, "Dispatch should succeed (error is in-payload)");
@@ -53,7 +53,7 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void SpatialQuery_MissingActionReturnsErrorJson()
         {
-            var result = BridgeToolRegistry.TryDispatch("unity_agent_spatial_query", "{}");
+            var result = BridgeToolRegistry.TryDispatch("unity_senses_spatial_query", "{}");
 
             Assert.IsNotNull(result, "Dispatch should return a result");
             Assert.IsTrue(result.Success, "Dispatch should succeed (error is in-payload)");
@@ -66,7 +66,7 @@ namespace UnityOpenMcpBridge.Tests
         public static void SpatialQuery_RaycastMissingOriginReturnsErrorJson()
         {
             var result = BridgeToolRegistry.TryDispatch(
-                "unity_agent_spatial_query",
+                "unity_senses_spatial_query",
                 "{\"action\":\"raycast\",\"direction\":\"0,-1,0\"}");
 
             Assert.IsNotNull(result);

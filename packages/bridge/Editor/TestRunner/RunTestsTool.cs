@@ -10,7 +10,7 @@ namespace UnityOpenMcpBridge.TestRunner
     [BridgeToolType]
     public class Tool_TestRunner
     {
-        [BridgeTool("unity_agent_run_tests", Title = "Run Tests",
+        [BridgeTool("unity_senses_run_tests", Title = "Run Tests",
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.CustomConfirmation)]
         [System.ComponentModel.Description(
             "Run Unity EditMode or PlayMode tests. Returns a runId for result polling. " +

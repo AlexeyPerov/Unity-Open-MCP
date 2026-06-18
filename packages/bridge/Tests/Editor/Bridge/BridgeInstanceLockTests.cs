@@ -9,7 +9,7 @@ namespace UnityOpenMcpBridge.Tests
     // M13 T4.3 — Instance lock file + stale-lock cleanup.
     //
     // Lock I/O is sandboxed to a temp dir via InstancePortResolver.InstancesDirOverride
-    // so tests never touch the real ~/.unity-agent/instances. We can't easily
+    // so tests never touch the real ~/.unity-open-mcp/instances. We can't easily
     // fake a different PID (Acquire writes the current Editor's PID), so the
     // stale-lock cleanup test plants a fake lock JSON with a guaranteed-dead
     // PID before calling Acquire, then verifies it disappeared.

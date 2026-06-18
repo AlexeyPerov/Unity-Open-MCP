@@ -6,7 +6,7 @@
 // config:
 //
 //   1. UNITY_OPEN_MCP_BRIDGE_PORT env var (override wins)
-//   2. ~/.unity-agent/instances/<sha256(projectPath)>.json — the bridge's
+//   2. ~/.unity-open-mcp/instances/<sha256(projectPath)>.json — the bridge's
 //      instance lock / heartbeat file. We trust its `port` only when its
 //      `pid` is still alive; a stale lock (crashed Unity) falls through.
 //   3. deterministic hash of the project path (20000 + sha256 % 10000).
@@ -36,7 +36,7 @@ export type InstanceState =
   | "playing"
   | "exiting_playmode";
 
-/** Shape of ~/.unity-agent/instances/<hash>.json (bridge BridgeInstanceLock). */
+/** Shape of ~/.unity-open-mcp/instances/<hash>.json (bridge BridgeInstanceLock). */
 export interface InstanceLock {
   pid: number;
   port: number;
@@ -90,7 +90,7 @@ export function computePort(projectPath: string): number {
 
 /** Directory holding one lock file per running bridge instance. */
 export function instancesDir(): string {
-  return join(homedir(), ".unity-agent", "instances");
+  return join(homedir(), ".unity-open-mcp", "instances");
 }
 
 /** Path to this project's instance lock file. */

@@ -50,7 +50,7 @@ namespace UnityOpenMcpBridge
 
         // M14 T5.5 — opt-in on-disk audit log. When true, every gate mutation
         // (pass / fail / warn) is appended to a rolling JSON-lines file under
-        // .unity-agent/audit/. Survives domain reload and editor restart.
+        // .unity-open-mcp/audit/. Survives domain reload and editor restart.
         public bool auditLogEnabled = false;
     }
 

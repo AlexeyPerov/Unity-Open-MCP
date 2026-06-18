@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const profilerMemory: Tool = {
-  name: "unity_agent_profiler_memory",
+  name: "unity_senses_profiler_memory",
   description:
     "Snapshot live Unity memory allocator stats: total allocated, reserved, " +
     "unused reserved, temp allocator size, and the managed (GC) heap. Both " +

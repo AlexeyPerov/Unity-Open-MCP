@@ -282,7 +282,7 @@ function plantLock(
   process.env.HOME = s.dir;
   process.env.USERPROFILE = s.dir;
   const hash = projectHash(projectPath);
-  const dir = join(s.dir, ".unity-agent", "instances");
+  const dir = join(s.dir, ".unity-open-mcp", "instances");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const path = join(dir, `${hash}.json`);
   const heartbeatAt = new Date(Date.now() - heartbeatAgeMs).toISOString();

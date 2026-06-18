@@ -18,7 +18,7 @@ namespace UnityOpenMcpBridge.Spatial
     // A single read-only tool exposes 3D reasoning primitives so an agent can
     // answer geometric questions about the current scene instead of inferring
     // them from raw transforms:
-    //   unity_agent_spatial_query
+    //   unity_senses_spatial_query
     //     action: raycast | overlap | bounds | ground_check | nearest
     //
     // Physics queries (raycast / overlap / ground_check) hit colliders only —
@@ -48,7 +48,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ dispatch ============================
 
-        [BridgeTool("unity_agent_spatial_query", Title = "Spatial Query",
+        [BridgeTool("unity_senses_spatial_query", Title = "Spatial Query",
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
             "Physics-based spatial queries against the current scene state: " +

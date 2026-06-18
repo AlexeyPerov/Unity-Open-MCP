@@ -9,7 +9,7 @@ namespace UnityOpenMcpBridge
     // M13 T4.3 / T4.7 — Instance lock + heartbeat file.
     //
     // Each running bridge instance owns a lock file at
-    //   ~/.unity-agent/instances/<projectHash>.json
+    //   ~/.unity-open-mcp/instances/<projectHash>.json
     // The file doubles as the heartbeat (T4.7): it carries the current editor
     // state (idle / compiling / reloading / playing / ...) and is rewritten
     // every 0.5s by BridgeHeartbeat plus on every forced state transition.
@@ -256,7 +256,7 @@ namespace UnityOpenMcpBridge
             if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
         }
 
-        // Scan ~/.unity-agent/instances/*.json and delete any whose pid is no
+        // Scan ~/.unity-open-mcp/instances/*.json and delete any whose pid is no
         // longer alive. Treats parse errors and access errors as "leave it
         // alone" — a malformed lock for someone else's instance is not ours
         // to touch. We DO touch our own project's lock below in WriteLock

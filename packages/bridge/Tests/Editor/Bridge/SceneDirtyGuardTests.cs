@@ -26,7 +26,7 @@ namespace UnityOpenMcpBridge.Tests
         [TestCase("unity_open_mcp_apply_fix", ExpectedResult = false)]
         [TestCase("unity_open_mcp_reserialize", ExpectedResult = false)]
         [TestCase("unity_open_mcp_find_members", ExpectedResult = false)]
-        [TestCase("unity_agent_run_tests", ExpectedResult = false)]
+        [TestCase("unity_senses_run_tests", ExpectedResult = false)]
         [TestCase("unity_open_mcp_validate_edit", ExpectedResult = false)]
         public static bool AppliesTo_NonDisruptiveTools_NotGuarded(string tool)
         {

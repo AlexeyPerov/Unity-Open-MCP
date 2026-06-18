@@ -63,15 +63,15 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_search_assets: "asset-intelligence",
   unity_open_mcp_list_assets: "asset-intelligence",
   unity_open_mcp_capabilities: "capability-discovery",
-  unity_agent_list_rules: "capability-discovery",
-  unity_agent_generate_skill: "capability-discovery",
-  unity_agent_run_tests: "agent-senses",
-  unity_agent_screenshot: "agent-senses",
-  unity_agent_read_console: "agent-senses",
-  unity_agent_profiler_capture: "agent-senses",
-  unity_agent_profiler_memory: "agent-senses",
-  unity_agent_profiler_rendering: "agent-senses",
-  unity_agent_spatial_query: "agent-senses",
+  unity_open_mcp_list_rules: "capability-discovery",
+  unity_open_mcp_generate_skill: "capability-discovery",
+  unity_senses_run_tests: "agent-senses",
+  unity_senses_screenshot: "agent-senses",
+  unity_senses_read_console: "agent-senses",
+  unity_senses_profiler_capture: "agent-senses",
+  unity_senses_profiler_memory: "agent-senses",
+  unity_senses_profiler_rendering: "agent-senses",
+  unity_senses_spatial_query: "agent-senses",
 };
 
 function categoryFor(toolName: string): string {
@@ -168,7 +168,7 @@ export const PLANNED_TOOLS: PlannedTool[] = [
     category: "diagnostics",
     description: "Profiler session/module/save/load/clear helpers.",
     guidance:
-      "Planned diagnostics surface. Use unity_agent_profiler_capture for frame data today.",
+      "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
   },
   {
     name: "unity_open_mcp_impact_preview",

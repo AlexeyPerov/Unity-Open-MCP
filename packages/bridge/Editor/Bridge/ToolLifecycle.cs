@@ -47,7 +47,7 @@ namespace UnityOpenMcpBridge
             // ----- CustomConfirmation: external completion signal -----
             // run_tests is async + domain-reload-safe via a file handoff the
             // MCP server polls; the dispatcher does NOT settle-wait on it.
-            { "unity_agent_run_tests",           LifecyclePolicy.CustomConfirmation },
+            { "unity_senses_run_tests",           LifecyclePolicy.CustomConfirmation },
         };
 
         // Resolve the lifecycle policy for a dispatched tool.

@@ -188,7 +188,7 @@ test("route: list_rules returns local rule catalog with _source=local", async ()
     const batch = makeFakeBatch();
     const router = new ToolRouter(live, batch, tmp, makeFakeEventStream());
 
-    const res = await router.route("unity_agent_list_rules", {});
+    const res = await router.route("unity_open_mcp_list_rules", {});
     const body = parseBody(res);
     assert.equal(res.isError, false);
     assert.equal(body._source, "local");
@@ -201,7 +201,7 @@ test("route: list_rules returns local rule catalog with _source=local", async ()
 test("route: list_rules honors asset_kind filter locally", async () => {
   await withTmp("router-list-rules-filter-", async (tmp) => {
     const router = new ToolRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
-    const res = await router.route("unity_agent_list_rules", { asset_kind: "prefab" });
+    const res = await router.route("unity_open_mcp_list_rules", { asset_kind: "prefab" });
     const body = parseBody(res);
     const rules = body.rules as Array<{ id: string }>;
     const ids = rules.map((r) => r.id);
@@ -219,7 +219,7 @@ test("route: generate_skill returns local skill without writing", async () => {
     const batch = makeFakeBatch();
     const router = new ToolRouter(live, batch, tmp, makeFakeEventStream());
 
-    const result = await router.route("unity_agent_generate_skill", { write: false });
+    const result = await router.route("unity_open_mcp_generate_skill", { write: false });
     const body = parseBody(result);
     assert.equal(result.isError, false);
     assert.equal(body._source, "local");
@@ -237,7 +237,7 @@ test("route: pull_events returns bridge_unavailable when live is down", async ()
   const live = makeFakeLive({ available: false });
   const router = new ToolRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
-  const result = await router.route("unity_agent_pull_events", {});
+  const result = await router.route("unity_senses_pull_events", {});
   assert.equal(result.isError, true);
   assert.equal(errorCode(result), "bridge_unavailable");
 });
@@ -263,7 +263,7 @@ test("route: pull_events drains queued events when live is up", async () => {
   ];
   const router = new ToolRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream(events));
 
-  const result = await router.route("unity_agent_pull_events", { max_events: 10 });
+  const result = await router.route("unity_senses_pull_events", { max_events: 10 });
   const body = parseBody(result);
   assert.equal(result.isError, false);
   assert.ok(Array.isArray(body.events) && body.events.length === 2, "both events drained");
@@ -275,7 +275,7 @@ test("route: pull_events caps max_events at 1000", async () => {
   const live = makeFakeLive({ available: true });
   const router = new ToolRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
 
-  const result = await router.route("unity_agent_pull_events", { max_events: 999999 });
+  const result = await router.route("unity_senses_pull_events", { max_events: 999999 });
   const body = parseBody(result);
   assert.equal(result.isError, false);
   // The fake yields an empty list; we only assert the call accepted the cap

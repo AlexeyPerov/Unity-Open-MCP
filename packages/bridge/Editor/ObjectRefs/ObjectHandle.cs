@@ -254,8 +254,8 @@ namespace UnityOpenMcpBridge.ObjectRefs
             if (!string.IsNullOrEmpty(typeName))
                 sb.Append($" of type '{typeName}'");
             sb.Append(". Instance IDs change on domain reload (recompilation, enter/exit Play Mode). ");
-            sb.Append("Re-acquire the object via 'unity_agent_scene_snapshot', ");
-            sb.Append("'unity_agent_spatial_query', or 'unity_open_mcp_search_assets', ");
+            sb.Append("Re-acquire the object via 'unity_senses_scene_snapshot', ");
+            sb.Append("'unity_senses_spatial_query', or 'unity_open_mcp_search_assets', ");
             sb.Append("then retry with the fresh handle.");
             return sb.ToString();
         }

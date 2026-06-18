@@ -38,13 +38,13 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_reserialize",
             "unity_open_mcp_read_asset",
             "unity_open_mcp_search_assets",
-            "unity_agent_run_tests",
-            "unity_agent_screenshot",
-            "unity_agent_read_console",
-            "unity_agent_profiler_capture",
-            "unity_agent_profiler_memory",
-            "unity_agent_profiler_rendering",
-            "unity_agent_spatial_query"
+            "unity_senses_run_tests",
+            "unity_senses_screenshot",
+            "unity_senses_read_console",
+            "unity_senses_profiler_capture",
+            "unity_senses_profiler_memory",
+            "unity_senses_profiler_rendering",
+            "unity_senses_spatial_query"
         };
 
         static readonly HashSet<string> DirectResponseTools = new()
@@ -59,14 +59,14 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_read_asset",
             "unity_open_mcp_search_assets",
             // Test runner: starts async test run, returns { status, runId } directly.
-            "unity_agent_run_tests",
+            "unity_senses_run_tests",
             // Agent senses (non-mutating): return tool JSON directly.
-            "unity_agent_screenshot",
-            "unity_agent_read_console",
-            "unity_agent_profiler_capture",
-            "unity_agent_profiler_memory",
-            "unity_agent_profiler_rendering",
-            "unity_agent_spatial_query"
+            "unity_senses_screenshot",
+            "unity_senses_read_console",
+            "unity_senses_profiler_capture",
+            "unity_senses_profiler_memory",
+            "unity_senses_profiler_rendering",
+            "unity_senses_spatial_query"
         };
 
         static readonly HashSet<string> MutatingTools = new()

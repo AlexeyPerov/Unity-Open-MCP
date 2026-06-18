@@ -3,7 +3,7 @@ using NUnit.Framework;
 namespace UnityOpenMcpBridge.Tests
 {
     // Covers the timeout-extraction + clamping path that wraps every
-    // DirectResponseTool dispatch (including unity_agent_run_tests). The clamp
+    // DirectResponseTool dispatch (including unity_senses_run_tests). The clamp
     // ceiling must match the documented run-tests schema maximum; previously it
     // was 300000, silently truncating a caller's explicit large value below the
     // advertised 600000.

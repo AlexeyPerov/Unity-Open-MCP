@@ -13,7 +13,7 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Inherits ro
 ## Tool definitions
 
 - Every MCP tool is defined in `src/tools/{tool-name}.ts` and exported from `src/tools/index.ts`.
-- Tool names follow the `unity_open_mcp_*` (bridge-routed) or `unity_agent_*` (standalone) convention. The prefix signals routing to agents.
+- Tool names follow the `unity_open_mcp_*` (bridge-routed) or `unity_senses_*` (standalone) convention. The prefix signals routing to agents.
 - Every tool definition includes: `name`, `description`, `inputSchema` (JSON Schema), and a handler. Add the tool to the appropriate export array (`M11_TOOLS`, etc.) in `tools/index.ts`.
 - When a tool's schema changes, the bridge-side C# handler (`packages/bridge/`) must stay in sync in the same task — the bridge parses args by key name, not by schema validation.
 
@@ -25,11 +25,11 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Inherits ro
   - **offline** — local disk parsers, no Unity needed.
   - **local** — never hits Unity (capabilities, skill generation).
 - Do not add a new route type without updating `docs/architecture.md` and the route-policy table in `docs/api/mcp-tools.md`.
-- Capability-discovery (`unity_open_mcp_capabilities`) and skill generation (`unity_agent_generate_skill`) are **local-only** — they must never depend on the live bridge or batch Unity.
+- Capability-discovery (`unity_open_mcp_capabilities`) and skill generation (`unity_open_mcp_generate_skill`) are **local-only** — they must never depend on the live bridge or batch Unity.
 
 ## Instance discovery (M13)
 
-- Bridge port resolution lives in `src/instance-discovery.ts`. Precedence: `UNITY_OPEN_MCP_BRIDGE_PORT` env var → `~/.unity-agent/instances/<sha256(projectPath)>.json` lock file (when its `pid` is alive) → deterministic hash `20000 + (sha256(path) % 10000)`.
+- Bridge port resolution lives in `src/instance-discovery.ts`. Precedence: `UNITY_OPEN_MCP_BRIDGE_PORT` env var → `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` lock file (when its `pid` is alive) → deterministic hash `20000 + (sha256(path) % 10000)`.
 - The hash formula must stay byte-for-byte identical to the bridge mirror at `packages/bridge/Editor/Bridge/InstancePortResolver.cs` (`ComputePort`). Cross-side consistency is pinned by `instance-discovery.test.ts` and the bridge `InstancePortResolverTests.cs` — if either side changes, update both in the same task.
 - The MCP server is **read-only** on the lock file. Stale-lock cleanup (PID-liveness sweep) is the bridge's job on its next `Acquire`; never delete or rewrite locks from this package.
 - No new runtime deps: the module uses only `node:crypto`, `node:fs`, `node:os`, `node:path`.
@@ -69,6 +69,6 @@ Rules for the SKILL file:
 - Keep it lean (~150–200 lines): workflows, principles, one canonical example per concept, pointers to `unity_open_mcp_capabilities` for details. Do **not** copy the full `docs/api/mcp-tools.md` tables into the skill.
 - The `routing` object on the capabilities response is the machine-readable routing source — the SKILL only summarizes it.
 - Do **not** put MCP client config JSON, install path tables, or `Setup without Hub` content in the skill. Those live in `docs/manual-setup.md` / `docs/wizard-setup.md`.
-- The `unity_agent_generate_skill` output stays a **project inventory** (packages, types, tool list from catalog). Do not reintroduce install/MCP JSON into generated skills.
+- The `unity_open_mcp_generate_skill` output stays a **project inventory** (packages, types, tool list from catalog). Do not reintroduce install/MCP JSON into generated skills.
 
 The MCP package (this directory) owns SKILL sync with tool changes — same obligation as the api doc sync above.

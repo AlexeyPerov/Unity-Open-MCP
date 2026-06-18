@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://unity-open-mcp/skills/client-paths.schema.json",
   "title": "Unity Open MCP skill client-paths manifest",
-  "description": "Single source of truth for project-relative agent-skill install paths and the MCP-client to skill-target mapping. Read by the Hub wizard and unity_agent_generate_skill.",
+  "description": "Single source of truth for project-relative agent-skill install paths and the MCP-client to skill-target mapping. Read by the Hub wizard and unity_open_mcp_generate_skill.",
   "type": "object",
   "required": ["skillId", "templateRelativePath", "clients", "mcpClientMapping"],
   "additionalProperties": false,
@@ -21,7 +21,7 @@
     },
     "clients": {
       "type": "object",
-      "description": "Map of client key to project-relative install metadata. Keys are the canonical client identifiers also used by unity_agent_generate_skill's `clients` parameter.",
+      "description": "Map of client key to project-relative install metadata. Keys are the canonical client identifiers also used by unity_open_mcp_generate_skill's `clients` parameter.",
       "additionalProperties": {
         "type": "object",
         "required": ["relativePath"],

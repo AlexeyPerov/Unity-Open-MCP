@@ -1472,7 +1472,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.LabelField("On-disk audit log", EditorStyles.miniBoldLabel);
             EditorGUILayout.HelpBox(
                 "When ON, every gate mutation (pass / fail / warn) and deny-list refusal is appended " +
-                "to a rolling JSON-lines file under ~/.unity-agent/audit/. Survives domain reload and " +
+                "to a rolling JSON-lines file under ~/.unity-open-mcp/audit/. Survives domain reload and " +
                 "editor restart. Off by default — opt in for security-sensitive contexts.",
                 MessageType.None);
 

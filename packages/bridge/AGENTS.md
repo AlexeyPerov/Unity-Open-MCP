@@ -14,7 +14,7 @@ Rules for `packages/bridge/` — the Unity Editor HTTP bridge (`com.alexeyperov.
 
 - Registry tools are discovered via `[BridgeToolType]` on a class + `[BridgeTool]` on methods (`Editor/Bridge/Attributes/`). The HTTP server (`BridgeHttpServer.cs`) also has a hardcoded `KnownTools` set for legacy tools — prefer the registry path for new tools.
 - Every new tool must declare:
-  - A unique `Name` (the MCP tool name, `unity_open_mcp_*` / `unity_agent_*`).
+  - A unique `Name` (the MCP tool name, `unity_open_mcp_*` / `unity_senses_*`).
   - `IsMutating` — true if the tool changes Unity state.
   - `Gate` — the default gate mode for mutating tools (`Enforce` / `Warn` / `Off`).
 - Mutating tools must accept and honor the request-level `gate` value. Read-only tools set `Gate = Off` and `ReadOnlyHint = true`.
@@ -53,7 +53,7 @@ Rules for `packages/bridge/` — the Unity Editor HTTP bridge (`com.alexeyperov.
 
 ## On-disk audit log (M14 T5.5)
 
-- Opt-in via `auditLogEnabled` in `.unity-open-mcp/settings.json`. When on, every gate mutation (pass / fail / warn) and deny-list refusal is appended to a rolling JSON-lines file at `~/.unity-agent/audit/audit-<projectHash>.jsonl` (5 MiB active, 5 retained rotations).
+- Opt-in via `auditLogEnabled` in `.unity-open-mcp/settings.json`. When on, every gate mutation (pass / fail / warn) and deny-list refusal is appended to a rolling JSON-lines file at `~/.unity-open-mcp/audit/audit-<projectHash>.jsonl` (5 MiB active, 5 retained rotations).
 - Writes are serialized through a lock and best-effort: an I/O failure is logged once and the record dropped — audit logging never breaks the dispatch path. `BridgeAuditLog.AuditDirOverride` is a test-only hook (mirrors `InstancePortResolver.InstancesDirOverride`); never set it in production.
 - The audit record is built in `BridgeHttpServer.RecordAudit`, called from `RecordGateRun` alongside the in-memory history. The outcome vocabulary is `passed` | `warned` | `failed` | `skipped` | `denied`; `bypassedDenyList` flags the gate=off+confirm escape hatch.
 
@@ -61,7 +61,7 @@ Rules for `packages/bridge/` — the Unity Editor HTTP bridge (`com.alexeyperov.
 
 - The bridge port is **deterministic per project**: `20000 + (sha256(projectPath) % 10000)`, implemented in `InstancePortResolver`. The formula must stay byte-for-byte identical to the MCP server mirror at `mcp-server/src/instance-discovery.ts` (`computePort`); cross-side consistency is pinned by `InstancePortResolverTests.cs` and `instance-discovery.test.ts`. If either side changes, update both in the same task.
 - `UNITY_OPEN_MCP_BRIDGE_PORT` (env) and `-UNITY_OPEN_MCP_BRIDGE_PORT=<n>` (Unity arg) override the deterministic default — override always wins, so existing pinned-port configs keep working.
-- Each running bridge writes a lock file at `~/.unity-agent/instances/<sha256(projectPath)>.json` via `BridgeInstanceLock`. The file doubles as the heartbeat (`BridgeHeartbeat` rewrites it every 0.5s + on forced state transitions: compile, play-mode change, domain reload).
+- Each running bridge writes a lock file at `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` via `BridgeInstanceLock`. The file doubles as the heartbeat (`BridgeHeartbeat` rewrites it every 0.5s + on forced state transitions: compile, play-mode change, domain reload).
 - Stale locks (crashed Unity) are swept on `Acquire` by PID-liveness (`Process.GetProcessById` — throws on dead pid). The MCP server is read-only on the lock and falls back to the hash when a lock's pid is dead; do not add lock mutation on the MCP side.
 - **Lock retention on domain reload.** `BridgeHttpServer.Stop(releaseLock: false)` is called from `beforeAssemblyReload`; the lock is only deleted on graceful quit (`EditorApplication.quitting` → `Stop(releaseLock: true)`). This is deliberate: when the bridge assembly itself fails to compile, `[InitializeOnLoad]` never re-runs and the heartbeat stops advancing, leaving a lock whose PID is still alive (Unity is running, just stuck) but whose `heartbeatAt` is frozen. That stale-heartbeat + live-PID signature is the ONLY out-of-band signal the MCP server has to detect a dead bridge and fail fast instead of hanging on `/ping` (see `classifyInstance` in `mcp-server/src/instance-discovery.ts` and the `bridge_compile_failed` error in `live-client.ts`). Do not re-introduce a lock release on the reload path.
 - New editor states go through `BridgeInstanceLock.State*` constants so both sides agree on the vocabulary (`idle`/`compiling`/`reloading`/`entering_playmode`/`playing`/`exiting_playmode`).

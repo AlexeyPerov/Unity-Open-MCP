@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const readConsole: Tool = {
-  name: "unity_agent_read_console",
+  name: "unity_senses_read_console",
   description:
     "Read the Unity Editor console log entries. Filter by type (error/warning/log/all), " +
     "optionally clear the console, and get structured entries with stack traces. " +

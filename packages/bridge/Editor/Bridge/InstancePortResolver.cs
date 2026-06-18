@@ -37,11 +37,11 @@ namespace UnityOpenMcpBridge
         public const int PortRangeSize = 10000;
         public const int LegacyDefaultPort = 19120;
 
-        // instances/ lives under the existing ~/.unity-agent convention used
+        // instances/ lives under the existing ~/.unity-open-mcp convention used
         // by TestRunnerService / ScreenshotService / CompileCheckState. One
         // lock file per running bridge instance, keyed by project hash.
         // Overridable via InstancesDirOverride for tests (so they don't write
-        // into the real ~/.unity-agent). Production callers leave it null.
+        // into the real ~/.unity-open-mcp). Production callers leave it null.
         public static string InstancesDir
         {
             get
@@ -50,7 +50,7 @@ namespace UnityOpenMcpBridge
                     return InstancesDirOverride;
                 return Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".unity-agent",
+                    ".unity-open-mcp",
                     "instances");
             }
         }

@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const runTests: Tool = {
-  name: "unity_agent_run_tests",
+  name: "unity_senses_run_tests",
   description:
     "Run Unity EditMode or PlayMode tests and return structured results. " +
     "EditMode runs in-process and results are available within seconds. " +

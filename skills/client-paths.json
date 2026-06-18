@@ -2,7 +2,7 @@
   "$schema": "./client-paths.schema.json",
   "skillId": "unity-open-mcp",
   "templateRelativePath": "skills/unity-open-mcp/SKILL.md",
-  "description": "Single source of truth for project-relative agent-skill install paths and the MCP-client to skill-target mapping. Consumed by the Hub wizard (hub/src-tauri/src/config/mcp_config.rs) and unity_agent_generate_skill (mcp-server/src/skill/generate-skill.ts). To add or rename a client, edit this file — do not hand-maintain duplicate constants in Rust or TypeScript.",
+  "description": "Single source of truth for project-relative agent-skill install paths and the MCP-client to skill-target mapping. Consumed by the Hub wizard (hub/src-tauri/src/config/mcp_config.rs) and unity_open_mcp_generate_skill (mcp-server/src/skill/generate-skill.ts). To add or rename a client, edit this file — do not hand-maintain duplicate constants in Rust or TypeScript.",
   "clients": {
     "cursor": { "relativePath": ".cursor/skills/unity-open-mcp/SKILL.md" },
     "claude": { "relativePath": ".claude/skills/unity-open-mcp/SKILL.md" },

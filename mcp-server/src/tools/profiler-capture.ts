@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const profilerCapture: Tool = {
-  name: "unity_agent_profiler_capture",
+  name: "unity_senses_profiler_capture",
   description:
     "Capture the Unity Profiler frame hierarchy with drill-down and " +
     "multi-frame averaging. Requires the Profiler to be enabled and to have " +

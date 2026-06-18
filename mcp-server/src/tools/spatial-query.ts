@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const spatialQuery: Tool = {
-  name: "unity_agent_spatial_query",
+  name: "unity_senses_spatial_query",
   description:
     "Physics-based spatial queries against the current scene: raycast, " +
     "overlap, bounds, ground_check, nearest. Requires a loaded scene (live " +

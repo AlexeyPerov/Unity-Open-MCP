@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const screenshot: Tool = {
-  name: "unity_agent_screenshot",
+  name: "unity_senses_screenshot",
   description:
     "Capture a screenshot from the Unity Editor. Supports three views: " +
     "'scene' (the Scene view), 'game' (the main camera / Game view), and " +

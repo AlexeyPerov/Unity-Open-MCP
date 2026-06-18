@@ -1,4 +1,4 @@
-// Rule-listing builder for `unity_agent_list_rules`.
+// Rule-listing builder for `unity_open_mcp_list_rules`.
 //
 // Distinct from `unity_open_mcp_capabilities` (kind: "rules") in two ways:
 //   1. The response is purpose-built for "what rule should I run on this

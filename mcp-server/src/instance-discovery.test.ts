@@ -122,7 +122,7 @@ test("resolvePort: env override wins over everything", () => {
 });
 
 test("resolvePort: without override, falls back to deterministic hash", () => {
-  // No lock file exists for SAMPLE_PATH in the real ~/.unity-agent, so we
+  // No lock file exists for SAMPLE_PATH in the real ~/.unity-open-mcp, so we
   // expect the hash fallback. (This test is independent of the lock file
   // because we don't monkey-patch instancesDir here.)
   assert.equal(resolvePort(SAMPLE_PATH, undefined), SAMPLE_PATH_EXPECTED_PORT);
@@ -248,7 +248,7 @@ test("resolveAuthToken: missing lock returns undefined", () => {
 
 // ----- sandbox helpers -----
 //
-// instance-discovery reads ~/.unity-agent/instances/<hash>.json via homedir().
+// instance-discovery reads ~/.unity-open-mcp/instances/<hash>.json via homedir().
 // We redirect it by setting HOME (POSIX) / USERPROFILE (Windows) to a temp
 // dir for the lock-file tests, then restore the originals. The module reads
 // homedir() fresh on every call, so this is safe without module reloads.
@@ -291,9 +291,9 @@ function plantLock(sandbox: Sandbox, projectPath: string, opts: PlantOpts): void
   process.env.HOME = sandbox.dir;
   process.env.USERPROFILE = sandbox.dir;
 
-  // Mirror the module's own layout: <home>/.unity-agent/instances/<hash>.json
+  // Mirror the module's own layout: <home>/.unity-open-mcp/instances/<hash>.json
   const hash = projectHash(projectPath);
-  const dir = join(sandbox.dir, ".unity-agent", "instances");
+  const dir = join(sandbox.dir, ".unity-open-mcp", "instances");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const path = join(dir, `${hash}.json`);
   const payload: Record<string, unknown> = {

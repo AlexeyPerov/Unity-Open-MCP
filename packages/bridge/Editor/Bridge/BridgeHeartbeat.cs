@@ -8,7 +8,7 @@ namespace UnityOpenMcpBridge
     // state transitions (compiling / reloading / entering_playmode), so
     // clients can poll readiness precisely without an HTTP round-trip. Here
     // we complement /ping with the same idea: the instance lock file at
-    // ~/.unity-agent/instances/<hash>.json doubles as the heartbeat file
+    // ~/.unity-open-mcp/instances/<hash>.json doubles as the heartbeat file
     // (BridgeInstanceLock), rewritten every 0.5s and on every forced state
     // transition. The MCP server reads the file directly when it wants a
     // fast readiness check.

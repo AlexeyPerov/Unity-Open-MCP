@@ -28,7 +28,7 @@ namespace UnityOpenMcpBridge.Batch
     {
         internal static readonly string StatusDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".unity-agent");
+            ".unity-open-mcp");
 
         internal static string PendingFilePath => Path.Combine(StatusDir, "compile-check-pending.json");
 

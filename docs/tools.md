@@ -66,7 +66,7 @@ Two workflows run on pull requests and pushes to `main`:
 | `.github/workflows/typescript.yml` | GitHub-hosted Ubuntu, Node 22 | `npm ci`, `npm run check` + `npm test` for `hub/`; `npm ci`, `npm run typecheck` + `npm test` for `mcp-server/`. No Unity license needed. |
 | `.github/workflows/unity-open-mcp-verify-demo.yml` | Self-hosted `unity` runner with Unity 6 | Verify batch scan (regression check + scan-all) against `demo/`, **plus** a `run-tests` job that runs the Unity Test Runner in EditMode against the two package test assemblies. The `-runTests` step also serves as the project compilation check: Unity must import and compile the full `demo/` project (and both packages) before any test runs. |
 
-The Unity test job targets only `com.alexeyperov.unity-open-mcp-bridge.Editor.Tests` and `com.alexeyperov.unity-open-mcp-verify.Editor.Tests` via `-testAssembly`, so the demo's intentionally-failing sanity test stays available for manual / `unity_agent_run_tests` demonstration.
+The Unity test job targets only `com.alexeyperov.unity-open-mcp-bridge.Editor.Tests` and `com.alexeyperov.unity-open-mcp-verify.Editor.Tests` via `-testAssembly`, so the demo's intentionally-failing sanity test stays available for manual / `unity_senses_run_tests` demonstration.
 
 ## Key external dependencies
 

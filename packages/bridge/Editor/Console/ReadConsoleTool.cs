@@ -35,7 +35,7 @@ namespace UnityOpenMcpBridge.Console
     [BridgeToolType]
     public class Tool_ReadConsole
     {
-        [BridgeTool("unity_agent_read_console", Title = "Read Console",
+        [BridgeTool("unity_senses_read_console", Title = "Read Console",
             IsMutating = false, ReadOnlyHint = true, Gate = GateMode.Off, Lifecycle = LifecyclePolicy.None)]
         [System.ComponentModel.Description(
             "Read the Unity console log entries. Filter by type (error/warning/log/all), " +

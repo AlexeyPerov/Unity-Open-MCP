@@ -18,7 +18,7 @@ namespace UnityOpenMcpBridge.Screenshot
     {
         public static readonly string OutputDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".unity-agent", "screenshots");
+            ".unity-open-mcp", "screenshots");
 
         const TextureFormat CaptureFormat = TextureFormat.RGBA32;
         const bool CaptureMipChain = false;

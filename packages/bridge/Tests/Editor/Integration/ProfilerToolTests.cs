@@ -8,39 +8,39 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void ProfilerCaptureTool_RegisteredInRegistry()
         {
-            Assert.IsTrue(BridgeToolRegistry.Contains("unity_agent_profiler_capture"),
-                "unity_agent_profiler_capture should be discovered by the registry");
+            Assert.IsTrue(BridgeToolRegistry.Contains("unity_senses_profiler_capture"),
+                "unity_senses_profiler_capture should be discovered by the registry");
         }
 
         [Test]
         public static void ProfilerCaptureTool_IsNonMutating()
         {
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_profiler_capture", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_profiler_capture", out var entry));
             Assert.IsFalse(entry.IsMutating,
-                "unity_agent_profiler_capture should be non-mutating (read-only)");
+                "unity_senses_profiler_capture should be non-mutating (read-only)");
         }
 
         [Test]
         public static void ProfilerCaptureTool_GateIsOff()
         {
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_profiler_capture", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_profiler_capture", out var entry));
             Assert.AreEqual(GateMode.Off, entry.Gate,
-                "unity_agent_profiler_capture should have gate off (non-mutating)");
+                "unity_senses_profiler_capture should have gate off (non-mutating)");
         }
 
         [Test]
         public static void ProfilerCaptureTool_HasReadOnlyHint()
         {
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_profiler_capture", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_profiler_capture", out var entry));
             Assert.IsTrue(entry.ReadOnlyHint,
-                "unity_agent_profiler_capture should have ReadOnlyHint = true");
+                "unity_senses_profiler_capture should have ReadOnlyHint = true");
         }
 
         [Test]
         public static void ProfilerMemoryTool_RegisteredAndNonMutating()
         {
-            Assert.IsTrue(BridgeToolRegistry.Contains("unity_agent_profiler_memory"));
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_profiler_memory", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.Contains("unity_senses_profiler_memory"));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_profiler_memory", out var entry));
             Assert.IsFalse(entry.IsMutating);
             Assert.AreEqual(GateMode.Off, entry.Gate);
             Assert.IsTrue(entry.ReadOnlyHint);
@@ -49,8 +49,8 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void ProfilerRenderingTool_RegisteredAndNonMutating()
         {
-            Assert.IsTrue(BridgeToolRegistry.Contains("unity_agent_profiler_rendering"));
-            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_agent_profiler_rendering", out var entry));
+            Assert.IsTrue(BridgeToolRegistry.Contains("unity_senses_profiler_rendering"));
+            Assert.IsTrue(BridgeToolRegistry.TryGet("unity_senses_profiler_rendering", out var entry));
             Assert.IsFalse(entry.IsMutating);
             Assert.AreEqual(GateMode.Off, entry.Gate);
             Assert.IsTrue(entry.ReadOnlyHint);
@@ -59,7 +59,7 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void ProfilerMemory_DispatchReturnsJson()
         {
-            var result = BridgeToolRegistry.TryDispatch("unity_agent_profiler_memory", "{}");
+            var result = BridgeToolRegistry.TryDispatch("unity_senses_profiler_memory", "{}");
 
             Assert.IsNotNull(result, "Dispatch should return a result");
             Assert.IsTrue(result.Success, "Dispatch should succeed");
@@ -71,7 +71,7 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void ProfilerRendering_DispatchReturnsJson()
         {
-            var result = BridgeToolRegistry.TryDispatch("unity_agent_profiler_rendering", "{}");
+            var result = BridgeToolRegistry.TryDispatch("unity_senses_profiler_rendering", "{}");
 
             Assert.IsNotNull(result, "Dispatch should return a result");
             Assert.IsTrue(result.Success, "Dispatch should succeed");
@@ -87,7 +87,7 @@ namespace UnityOpenMcpBridge.Tests
         {
             // With no Profiler data captured this returns a profiler_empty error,
             // but the dispatch itself must succeed and return JSON.
-            var result = BridgeToolRegistry.TryDispatch("unity_agent_profiler_capture", "{}");
+            var result = BridgeToolRegistry.TryDispatch("unity_senses_profiler_capture", "{}");
 
             Assert.IsNotNull(result, "Dispatch should return a result");
             Assert.IsTrue(result.Success, "Dispatch should succeed (error is in-payload)");

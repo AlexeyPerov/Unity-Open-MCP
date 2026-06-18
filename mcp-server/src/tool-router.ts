@@ -70,7 +70,7 @@ export class ToolRouter implements Router {
     // the connection and shares the queue across pulls. Lives only when the
     // bridge is reachable; an unreachable bridge returns a clear error instead
     // of hanging on connect.
-    if (toolName === "unity_agent_pull_events") {
+    if (toolName === "unity_senses_pull_events") {
       return this.routePullEvents(args);
     }
 
@@ -82,12 +82,12 @@ export class ToolRouter implements Router {
     // list_rules — local rule catalog (no live/batch hop). Lets an agent
     // discover which rules apply to which asset kinds before calling
     // scan_paths / validate_edit.
-    if (toolName === "unity_agent_list_rules") {
+    if (toolName === "unity_open_mcp_list_rules") {
       return this.routeListRules(args);
     }
 
     // generate_skill — local skill generation (no live/batch hop).
-    if (toolName === "unity_agent_generate_skill") {
+    if (toolName === "unity_open_mcp_generate_skill") {
       return this.routeGenerateSkill(args);
     }
 
@@ -280,7 +280,7 @@ export class ToolRouter implements Router {
   // the previous drain. The subscription never buffers across server restarts
   // (a fresh subscriber id is minted per process), so a restarted MCP server
   // begins "now" — agents that care about historical logs should still call
-  // unity_agent_read_console.
+  // unity_senses_read_console.
   private async routePullEvents(
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {

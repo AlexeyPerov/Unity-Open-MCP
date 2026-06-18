@@ -29,14 +29,14 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_search_assets",
   // Test runner returns { status, runId } directly; LiveClient polls the
   // results file and returns the final result.
-  "unity_agent_run_tests",
+  "unity_senses_run_tests",
   // Agent senses (non-mutating): return tool JSON directly.
-  "unity_agent_screenshot",
-  "unity_agent_read_console",
-  "unity_agent_profiler_capture",
-  "unity_agent_profiler_memory",
-  "unity_agent_profiler_rendering",
-  "unity_agent_spatial_query",
+  "unity_senses_screenshot",
+  "unity_senses_read_console",
+  "unity_senses_profiler_capture",
+  "unity_senses_profiler_memory",
+  "unity_senses_profiler_rendering",
+  "unity_senses_spatial_query",
 ]);
 
 interface PingResponse {
@@ -135,7 +135,7 @@ export class LiveClient implements Router {
     if (toolName === "unity_open_mcp_ping") {
       return this.handlePing();
     }
-    if (toolName === "unity_agent_run_tests") {
+    if (toolName === "unity_senses_run_tests") {
       return this.handleRunTests(args);
     }
     return this.handleToolCall(toolName, args);
@@ -180,7 +180,7 @@ export class LiveClient implements Router {
     if (readyError) return readyError;
 
     const startResult = await this.postTool(
-      "unity_agent_run_tests",
+      "unity_senses_run_tests",
       args,
       true,
     );
@@ -221,7 +221,7 @@ export class LiveClient implements Router {
 
     const resultsPath = join(
       homedir(),
-      ".unity-agent",
+      ".unity-open-mcp",
       `test-results-${runId}.json`,
     );
 

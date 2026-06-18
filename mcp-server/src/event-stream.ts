@@ -3,7 +3,7 @@
 // The MCP server runs behind a stdio transport, so it can't directly forward
 // bridge SSE to MCP notifications without a background SSE reader. This module
 // owns that reader: a single SSE subscription per server process, parsed into
-// events and pushed into an in-memory queue. The `unity_agent_pull_events`
+// events and pushed into an in-memory queue. The `unity_senses_pull_events`
 // tool drains the queue per call so an agent can poll incremental console /
 // compile-state events without burning an HTTP round-trip on every check.
 //

@@ -37,7 +37,7 @@ test("loadClientPathsManifest always returns a usable manifest (bundled fallback
   // The loader walks up from this module looking for the manifest; in
   // the test environment it resolves the checked-in file. It must
   // never throw — the bundled fallback covers a missing manifest so
-  // unity_agent_generate_skill keeps working in a standalone install.
+  // unity_open_mcp_generate_skill keeps working in a standalone install.
   const manifest = loadClientPathsManifest();
   assert.equal(manifest.skillId, "unity-open-mcp");
   assert.ok(manifest.clients.cursor);

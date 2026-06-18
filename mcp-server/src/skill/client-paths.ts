@@ -141,7 +141,7 @@ export function clientSkillRelativePath(clientKey: string): string {
 
 /**
  * All known client keys from the manifest — used to derive the
- * `unity_agent_generate_skill` `clients` enum and the allowlist in
+ * `unity_open_mcp_generate_skill` `clients` enum and the allowlist in
  * the tool router.
  */
 export function knownClientKeys(): string[] {
