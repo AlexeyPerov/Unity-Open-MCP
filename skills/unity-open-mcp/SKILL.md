@@ -198,6 +198,14 @@ All accept `gate` (`enforce` / `warn` / `off`, default `enforce`) and require a 
 
 Materials resolve by `asset_path` (.mat) or `instance_id` of a scene GameObject whose Renderer.sharedMaterial is read (or the Material instance directly). Use `shader_list_all` to discover valid shader names before `material_create` / `material_set_shader`.
 
+**Typed GameObject & component tools (M16 Plan 2).** Prefer these over `execute_csharp` for hierarchy/component workflows. Address targets by `instance_id` > `path` > `name` (same model as `spatial_query` / prefab tools). GameObjects are scene-backed, so `paths_hint` for every mutating tool here is the active scene path. Every mutator is undo-recorded.
+
+- GameObject lifecycle: `gameobject_create` / `gameobject_destroy` / `gameobject_duplicate` / `gameobject_modify` (name/tag/layer/active + transform — note: target name is `name_target` so `name` stays free for the new value) / `gameobject_set_parent` (cycle-safe). `paths_hint` = scene path containing the target.
+- Component lifecycle: `component_add` (by `component_types[]`, full name preferred) / `component_destroy` / `component_modify` (per-path serialized patches via `fields: [{path, value, type?}]`). `paths_hint` = scene path containing the host.
+- Read-only: `gameobject_find` (targeted lookup or list mode with `name_contains`/`tag`/`component`/`root_only` filters) / `component_get` (serialized fields + public properties) / `component_list_all` (attachable types catalog from loaded assemblies). Gate-free.
+
+Resolve components by `component_instance_id` (specific instance) or `type_name` (full name preferred, class-name fallback). Use `component_list_all` to discover attachable types before `component_add`; use `component_get` to discover serialized paths before `component_modify`.
+
 ### Return serialization (execute_csharp / invoke_method)
 
 Results are walked by a depth-limited reflective serializer before becoming `mutation.output`:

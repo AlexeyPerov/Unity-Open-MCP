@@ -86,6 +86,18 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_prefab_unpack: "typed-editor",
   unity_open_mcp_prefab_get_overrides: "typed-editor",
   unity_open_mcp_prefab_status: "typed-editor",
+  // M16 Plan 2 — typed GameObject & component tools.
+  unity_open_mcp_gameobject_create: "typed-editor",
+  unity_open_mcp_gameobject_destroy: "typed-editor",
+  unity_open_mcp_gameobject_duplicate: "typed-editor",
+  unity_open_mcp_gameobject_find: "typed-editor",
+  unity_open_mcp_gameobject_modify: "typed-editor",
+  unity_open_mcp_gameobject_set_parent: "typed-editor",
+  unity_open_mcp_component_add: "typed-editor",
+  unity_open_mcp_component_destroy: "typed-editor",
+  unity_open_mcp_component_get: "typed-editor",
+  unity_open_mcp_component_modify: "typed-editor",
+  unity_open_mcp_component_list_all: "typed-editor",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
@@ -134,72 +146,8 @@ export const PLANNED_TOOLS: PlannedTool[] = [
   // Plan 1 references (none) live as real Tool definitions.
 
   // --- Plan 2: GameObject & Components ------------------------------------
-  {
-    name: "unity_open_mcp_gameobject_create",
-    category: "typed-editor",
-    description: "Create a GameObject (empty or primitive).",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_gameobject_destroy",
-    category: "typed-editor",
-    description: "Destroy a GameObject.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_gameobject_duplicate",
-    category: "typed-editor",
-    description: "Duplicate a GameObject.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_gameobject_find",
-    category: "typed-editor",
-    description: "Find a GameObject by path/name/instance_id.",
-    guidance: "Planned typed surface. Use invoke_method with GameObject.Find* today.",
-  },
-  {
-    name: "unity_open_mcp_gameobject_modify",
-    category: "typed-editor",
-    description: "Modify a GameObject (transform, name, tag, layer, active).",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_gameobject_set_parent",
-    category: "typed-editor",
-    description: "Reparent a GameObject.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_component_add",
-    category: "typed-editor",
-    description: "Add a component to a GameObject by type name.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_component_destroy",
-    category: "typed-editor",
-    description: "Destroy a component from a GameObject.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_component_get",
-    category: "typed-editor",
-    description: "Read a component's serialized data.",
-    guidance: "Planned typed surface. Use invoke_method / read_asset today.",
-  },
-  {
-    name: "unity_open_mcp_component_modify",
-    category: "typed-editor",
-    description: "Modify a component's fields/properties.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_component_list_all",
-    category: "typed-editor",
-    description: "List attachable component types (paginated).",
-    guidance: "Planned typed surface. Use find_members with kind=type today.",
-  },
+  // Plan 2 typed tools are now implemented (see mcp-server/src/tools/).
+  // The entries that used to live here have been removed.
 
   // --- Plan 3: Scene ------------------------------------------------------
   {

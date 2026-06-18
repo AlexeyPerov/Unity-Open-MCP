@@ -80,7 +80,7 @@ M16 adds a curated typed surface on top of existing meta-tools. Duplicates are i
 The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabilities` (each entry carries `status: "planned"` until implemented). The source of truth is `mcp-server/src/capabilities/build-capabilities.ts`, synchronized with the per-plan tables in `specs/execution/M16/execution-plan-*.md`. Planned categories:
 
 - **Project & Asset Management:** typed asset CRUD (`assets_create_folder`, `assets_copy`, `assets_move`, `assets_delete`, `assets_refresh`), material helpers (`material_create`, `material_get/set_property`, `material_get/set_keywords`, `material_set_shader`), shader reads (`shader_list_all`, `shader_get_data`), and prefab lifecycle (`prefab_instantiate/create/open/close/save` + `prefab_apply/revert/unpack/get_overrides/status`) — **implemented in Plan 1**
-- **GameObject & Components:** typed hierarchy/component lifecycle (`gameobject_create/destroy/duplicate/find/modify/set_parent`, `component_add/destroy/get/modify/list_all`)
+- **GameObject & Components:** typed hierarchy/component lifecycle (`gameobject_create/destroy/duplicate/find/modify/set_parent`, `component_add/destroy/get/modify/list_all`) — **implemented in Plan 2**
 - **Scene Management:** typed scene lifecycle/data (`scene_create/open/save/unload/set_active/list_opened`, `scene_get_data`, `scene_get_dirty_summary`, `scene_focus`)
 - **Package Manager:** `package_list`, `package_search`, `package_add`, `package_remove`, `package_get_info`, `package_get_dependencies`, `package_check`
 - **Console + Editor state/selection/tags/layers/undo:** `console_clear`, `console_log`, `editor_set_state`, `selection_get`, `selection_set`, `editor_undo`, `editor_redo`, `editor_get_tags`, `editor_get_layers`, `editor_add_tag`, `editor_add_layer`
@@ -123,6 +123,27 @@ Prefab lifecycle (scene instances resolved by `instance_id` > `path` > `name`, m
 - `unity_open_mcp_prefab_apply` / `prefab_revert` / `prefab_unpack` — Apply instance overrides to the asset / revert to the asset / unpack into a plain GameObject.
 - `unity_open_mcp_prefab_get_overrides` — Read-only: list propertyModifications / addedComponents / removedComponents on an instance. Gate-free.
 - `unity_open_mcp_prefab_status` — Read-only: report isPrefab/isInstance/isRoot/hasOverrides + source asset. Gate-free.
+
+#### GameObject & Components (M16 Plan 2 — implemented)
+
+Mutating members run the full gate path with `paths_hint`; read-only members are gate-free. GameObjects are scene-backed, so `paths_hint` for every mutating tool here is the active scene path (the GameObject is a scene side-effect). All mutating members are undo-recorded and mark the active scene dirty. Scene instances resolved by `instance_id` > `path` > `name`, matching `spatial_query`.
+
+GameObject lifecycle:
+
+- `unity_open_mcp_gameobject_create` — Create a new GameObject in the active scene (optionally parented and pre-positioned). Pass `primitive_type` (Cube/Sphere/Capsule/Cylinder/Plane/Quad) to spawn a primitive. `paths_hint` = destination scene path.
+- `unity_open_mcp_gameobject_destroy` — Destroy a GameObject (and its children). `paths_hint` = scene path containing the target.
+- `unity_open_mcp_gameobject_duplicate` — Duplicate a GameObject preserving parent + transform. `paths_hint` = scene path containing the source.
+- `unity_open_mcp_gameobject_modify` — Update name / tag / layer / active / transform in one call. Only provided fields are touched. Note: target name is `name_target` so `name` stays free for the new value. `paths_hint` = scene path containing the target.
+- `unity_open_mcp_gameobject_set_parent` — Reparent a GameObject; cycle-safe (refuses cycles). `paths_hint` = scene path containing the child.
+- `unity_open_mcp_gameobject_find` — Read-only: targeted lookup (instance_id/path/name → single object) OR list mode (no target) with optional `name_contains` / `tag` / `component` / `root_only` filters. Each result includes instanceId/name/path/active/tag/layer/scene/transform/components. Gate-free, token-bounded by `max_results`.
+
+Component lifecycle (host resolved by `instance_id` > `path` > `name`; component resolved by `component_instance_id` or `type_name`):
+
+- `unity_open_mcp_component_add` — Add one or more components by type name (full name preferred, class-name fallback). Per-type errors are accumulated. `paths_hint` = scene path containing the host.
+- `unity_open_mcp_component_destroy` — Remove components by type name. `paths_hint` = scene path containing the host.
+- `unity_open_mcp_component_modify` — Apply per-path serialized patches via `SerializedObject` (`fields: [{path, value, type?}]`). Per-entry errors are accumulated. Use `component_get` first to discover paths. `paths_hint` = scene path containing the host.
+- `unity_open_mcp_component_get` — Read-only: serialized fields + (optional) public properties for one component. Token-bounded by `max_fields`. Gate-free.
+- `unity_open_mcp_component_list_all` — Read-only: catalog of attachable component types from loaded assemblies (built-in + project MonoBehaviours). Token-bounded by `max_results`. Use `query` to narrow by namespace/class-name. Gate-free.
 
 ## Capability discovery
 

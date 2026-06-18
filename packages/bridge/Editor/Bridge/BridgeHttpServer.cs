@@ -63,6 +63,18 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_prefab_unpack",
             "unity_open_mcp_prefab_get_overrides",
             "unity_open_mcp_prefab_status",
+            // M16 Plan 2 — typed GameObject/component tools.
+            "unity_open_mcp_gameobject_create",
+            "unity_open_mcp_gameobject_destroy",
+            "unity_open_mcp_gameobject_duplicate",
+            "unity_open_mcp_gameobject_find",
+            "unity_open_mcp_gameobject_modify",
+            "unity_open_mcp_gameobject_set_parent",
+            "unity_open_mcp_component_add",
+            "unity_open_mcp_component_destroy",
+            "unity_open_mcp_component_get",
+            "unity_open_mcp_component_modify",
+            "unity_open_mcp_component_list_all",
             "unity_senses_run_tests",
             "unity_senses_screenshot",
             "unity_senses_read_console",
@@ -99,7 +111,11 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_shader_list_all",
             "unity_open_mcp_shader_get_data",
             "unity_open_mcp_prefab_get_overrides",
-            "unity_open_mcp_prefab_status"
+            "unity_open_mcp_prefab_status",
+            // M16 Plan 2 — read-only typed tools (gate-free).
+            "unity_open_mcp_gameobject_find",
+            "unity_open_mcp_component_get",
+            "unity_open_mcp_component_list_all"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -128,7 +144,18 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_prefab_save",
             "unity_open_mcp_prefab_apply",
             "unity_open_mcp_prefab_revert",
-            "unity_open_mcp_prefab_unpack"
+            "unity_open_mcp_prefab_unpack",
+            // M16 Plan 2 — typed GameObject/component mutators. Each requires
+            // paths_hint scoped to the scene that contains (or will contain)
+            // the target. They touch scene hierarchy only — no asset writes.
+            "unity_open_mcp_gameobject_create",
+            "unity_open_mcp_gameobject_destroy",
+            "unity_open_mcp_gameobject_duplicate",
+            "unity_open_mcp_gameobject_modify",
+            "unity_open_mcp_gameobject_set_parent",
+            "unity_open_mcp_component_add",
+            "unity_open_mcp_component_destroy",
+            "unity_open_mcp_component_modify"
         };
 
         static HttpListener _listener;
@@ -1109,6 +1136,18 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_prefab_unpack" => PrefabTools.Unpack(body),
                 "unity_open_mcp_prefab_get_overrides" => PrefabTools.GetOverrides(body),
                 "unity_open_mcp_prefab_status" => PrefabTools.Status(body),
+                // M16 Plan 2 — typed GameObject/component tools.
+                "unity_open_mcp_gameobject_create" => GameObjectsTools.Create(body),
+                "unity_open_mcp_gameobject_destroy" => GameObjectsTools.Destroy(body),
+                "unity_open_mcp_gameobject_duplicate" => GameObjectsTools.Duplicate(body),
+                "unity_open_mcp_gameobject_find" => GameObjectsTools.Find(body),
+                "unity_open_mcp_gameobject_modify" => GameObjectsTools.Modify(body),
+                "unity_open_mcp_gameobject_set_parent" => GameObjectsTools.SetParent(body),
+                "unity_open_mcp_component_add" => ComponentsTools.Add(body),
+                "unity_open_mcp_component_destroy" => ComponentsTools.Destroy(body),
+                "unity_open_mcp_component_get" => ComponentsTools.Get(body),
+                "unity_open_mcp_component_modify" => ComponentsTools.Modify(body),
+                "unity_open_mcp_component_list_all" => ComponentsTools.ListAll(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

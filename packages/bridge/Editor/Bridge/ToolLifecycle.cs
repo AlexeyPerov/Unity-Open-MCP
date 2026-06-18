@@ -56,6 +56,17 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_prefab_apply",        LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_prefab_revert",       LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_prefab_unpack",       LifecyclePolicy.EditorSettle },
+            // M16 Plan 2 — typed GameObject/component mutators. They mutate
+            // live scene hierarchy (no asset writes, no script recompile),
+            // so EditorSettle is enough — no domain-reload risk.
+            { "unity_open_mcp_gameobject_create",   LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_gameobject_destroy",  LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_gameobject_duplicate",LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_gameobject_modify",   LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_gameobject_set_parent",LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_component_add",       LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_component_destroy",   LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_component_modify",    LifecyclePolicy.EditorSettle },
 
             // ----- RestartThenSettle: may trigger a domain reload -----
             // execute_csharp / invoke_method can recompile; execute_menu can

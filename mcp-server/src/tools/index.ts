@@ -55,6 +55,18 @@ import { prefabRevert } from "./prefab-revert.js";
 import { prefabUnpack } from "./prefab-unpack.js";
 import { prefabGetOverrides } from "./prefab-get-overrides.js";
 import { prefabStatus } from "./prefab-status.js";
+// M16 Plan 2 — typed GameObject & component tools.
+import { gameobjectCreate } from "./gameobject-create.js";
+import { gameobjectDestroy } from "./gameobject-destroy.js";
+import { gameobjectDuplicate } from "./gameobject-duplicate.js";
+import { gameobjectFind } from "./gameobject-find.js";
+import { gameobjectModify } from "./gameobject-modify.js";
+import { gameobjectSetParent } from "./gameobject-set-parent.js";
+import { componentAdd } from "./component-add.js";
+import { componentDestroy } from "./component-destroy.js";
+import { componentGet } from "./component-get.js";
+import { componentModify } from "./component-modify.js";
+import { componentListAll } from "./component-list-all.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -123,6 +135,23 @@ export const M16_PLAN1_TOOLS: Tool[] = [
   prefabStatus,
 ];
 
+// M16 Plan 2 — GameObject & Components typed tools. Mutating members run the
+// full gate path with `paths_hint`; read-only members (gameobject_find,
+// component_get, component_list_all) are gate-free.
+export const M16_PLAN2_TOOLS: Tool[] = [
+  gameobjectCreate,
+  gameobjectDestroy,
+  gameobjectDuplicate,
+  gameobjectFind,
+  gameobjectModify,
+  gameobjectSetParent,
+  componentAdd,
+  componentDestroy,
+  componentGet,
+  componentModify,
+  componentListAll,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -135,4 +164,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M13_TOOLS,
   ...M14_TOOLS,
   ...M16_PLAN1_TOOLS,
+  ...M16_PLAN2_TOOLS,
 ];
