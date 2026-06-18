@@ -660,19 +660,22 @@
     // stale the backend will still catch it.
     if (isRunningFor(project)) {
       const pid = project.lastLaunchPid ?? 0;
-      const message = pid > 0
-        ? `launch refused: Unity is already running for "${project.name}" (pid ${pid}). Terminate it first, or click "Terminate & relaunch" in the status drawer.`
-        : `launch refused: Unity is already running for "${project.name}". Terminate it from the project menu before launching again.`;
-      S.appendErrorLog(message);
-      S.setLastLaunchFailure({
+      // Treat the "already running" precondition as an informational
+      // notice, not an error: surface a calm blue card (no red launch-
+      // failed chrome, no on-disk launch log tail dump) with an optional
+      // "Terminate & relaunch" quick action. Append a single calm log
+      // line via `appendDrawerLog` (not `appendErrorLog`) so the drawer
+      // is not force-expanded.
+      const notice = pid > 0
+        ? `Unity is already running for "${project.name}" (pid ${pid}).`
+        : `Unity is already running for "${project.name}".`;
+      S.appendDrawerLog(notice);
+      S.setLaunchInfoNotice({
         projectId: project.id,
         projectName: project.name,
-        projectPath: project.path,
-        timestamp: new Date().toISOString(),
-        isLikelyCrash: false,
-        launchLogPath: "",
-        crashLogPath: null,
+        message: notice,
         conflictPid: pid > 0 ? pid : null,
+        timestamp: new Date().toISOString(),
       });
       return;
     }
@@ -716,18 +719,32 @@
       );
       // A successful launch must never auto-open the drawer.
       S.clearLastLaunchFailure();
+      S.clearLaunchInfoNotice();
     } catch (e) {
       const err = e as LaunchError;
-      const message = formatLaunchError(err, project);
-      const autoOpen =
-        projectsStore.settings?.diagnostics.autoOpenDrawerOnLaunchFailure ?? true;
-      S.appendLaunchLog(message, autoOpen);
-      // For an `alreadyRunning` error coming back from the backend, lift
-      // the conflicting PID into the failure banner so the relaunch
-      // action targets the right process. A frontend pre-check
-      // (handleLaunch) sets the same field on the local rejection path.
-      const conflictPid = err.type === "alreadyRunning" ? err.pid : null;
-      await handleLaunchFailure(project, err, message, autoOpen, conflictPid);
+      // The backend double-launch guard returns `alreadyRunning` when a
+      // Unity process for this project is already alive. Like the
+      // frontend pre-check, treat this as an informational notice, not a
+      // launch failure: route to the calm blue card and skip
+      // `handleLaunchFailure` entirely so the on-disk launch log tail is
+      // not dumped into the drawer.
+      if (err.type === "alreadyRunning") {
+        const notice = `Unity is already running for "${project.name}" (pid ${err.pid}).`;
+        S.appendDrawerLog(notice);
+        S.setLaunchInfoNotice({
+          projectId: project.id,
+          projectName: project.name,
+          message: notice,
+          conflictPid: err.pid,
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        const message = formatLaunchError(err, project);
+        const autoOpen =
+          projectsStore.settings?.diagnostics.autoOpenDrawerOnLaunchFailure ?? true;
+        S.appendLaunchLog(message, autoOpen);
+        await handleLaunchFailure(project, err, message, autoOpen, null);
+      }
     } finally {
       launching = null;
     }
@@ -801,23 +818,34 @@
 
   /**
    * Terminate the Unity process that blocked a launch (the PID recorded
-   * on the latest `LastLaunchFailure.conflictPid`), wait for the OS to
-   * actually reap it, then retry the launch. Used by the status drawer's
-   * "Terminate & relaunch" quick action so a user who accidentally
-   * double-clicks Launch on a running project does not have to find the
-   * running row, open the popup, and click through the More menu.
+   * on the latest `LastLaunchFailure.conflictPid` or
+   * `LaunchInfoNotice.conflictPid`), wait for the OS to actually reap
+   * it, then retry the launch. Used by the status drawer's
+   * "Terminate & relaunch" quick action — invoked from both the red
+   * failure card (real spawn errors that happened to carry a conflict
+   * pid) and the calm blue "already running" notice.
    *
    * The kill reuses the existing `killUnity` Rust command (which
    * handles the SIGTERM → SIGKILL escalation) and polls the running-
    * Unity store for a cleared snapshot before re-launching. The backend
    * double-launch guard is the final safety net — if the polling misses
    * the process exit, the second `launchProject` call will return
-   * `alreadyRunning` and the user gets the same clear error message.
+   * `alreadyRunning` and the user gets the same calm notice again.
    */
   async function terminateAndRelaunch(projectId: string): Promise<void> {
+    // The conflict PID may live on either surface: the calm
+    // `launchInfoNotice` (the normal "already running" path) or the red
+    // `lastLaunchFailure` (kept for any non-alreadyRunning failure that
+    // still happens to carry a conflict pid). Prefer the notice.
+    const notice = S.launchInfoNotice;
     const failure = S.lastLaunchFailure;
-    if (!failure || failure.projectId !== projectId) return;
-    const pid = failure.conflictPid ?? 0;
+    const source = notice && notice.projectId === projectId
+      ? notice
+      : failure && failure.projectId === projectId
+        ? failure
+        : null;
+    if (!source) return;
+    const pid = source.conflictPid ?? 0;
     const project = projectsStore.find(projectId);
     if (!project) return;
     if (pid <= 0) {
@@ -869,6 +897,7 @@
       );
     }
     S.clearLastLaunchFailure();
+    S.clearLaunchInfoNotice();
     await handleLaunch(projectId);
   }
 

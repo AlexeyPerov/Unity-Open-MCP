@@ -28,6 +28,29 @@ export interface LastLaunchFailure {
   conflictPid: number | null;
 }
 
+/**
+ * Calm, dismissible, non-alarming notice for the "Unity is already
+ * running for this project" launch precondition. Distinct from
+ * `LastLaunchFailure` because the condition is informational (an
+ * expected state), not an error — it must not be rendered inside the
+ * red failure card, must not force the drawer open, and must not pull
+ * in the on-disk launch log tail. The status drawer renders it as a
+ * blue info card with an optional "Terminate & relaunch" quick action.
+ */
+export interface LaunchInfoNotice {
+  projectId: string;
+  projectName: string;
+  /** Friendly, non-scary one-line summary shown in the card body. */
+  message: string;
+  /**
+   * PID of the running Unity that blocked the launch, when known. The
+   * drawer offers a "Terminate & relaunch" quick action targeting it.
+   * `null` when the conflict was detected but no PID was identified.
+   */
+  conflictPid: number | null;
+  timestamp: string;
+}
+
 class AppState {
   activeTab = $state<Tab>("projects");
   showConfirmationModal = $state(false);
@@ -41,6 +64,15 @@ class AppState {
   private confirmationResolve: ((value: boolean) => void) | null = null;
 
   lastLaunchFailure = $state<LastLaunchFailure | null>(null);
+
+  /**
+   * Calm notice for the "already running" launch precondition. Set by
+   * `handleLaunch` (frontend pre-check) and by the backend
+   * `alreadyRunning` error branch instead of routing through
+   * `lastLaunchFailure`, so the user sees a friendly info card rather
+   * than the red launch-failed chrome.
+   */
+  launchInfoNotice = $state<LaunchInfoNotice | null>(null);
 
   async confirm(title: string, message: string): Promise<boolean> {
     this.confirmationTitle = title;
@@ -106,6 +138,14 @@ class AppState {
 
   setLastLaunchFailure(failure: LastLaunchFailure) {
     this.lastLaunchFailure = failure;
+  }
+
+  setLaunchInfoNotice(notice: LaunchInfoNotice) {
+    this.launchInfoNotice = notice;
+  }
+
+  clearLaunchInfoNotice() {
+    this.launchInfoNotice = null;
   }
 
   requestProjectsFilter(filter: ProjectsFilter) {

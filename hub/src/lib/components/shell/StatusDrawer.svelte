@@ -23,10 +23,18 @@
     S.clearLastLaunchFailure();
   }
 
+  function handleDismissNotice() {
+    S.clearLaunchInfoNotice();
+  }
+
   function handleTerminateAndRelaunch() {
-    const failure = S.lastLaunchFailure;
-    if (!failure) return;
-    void S.requestTerminateAndRelaunch(failure.projectId);
+    // The action is reachable from either the calm "already running"
+    // notice (the normal path) or the red launch-failed card. The
+    // registered handler in ProjectsTab resolves the conflict PID from
+    // whichever surface matches the project id.
+    const target = S.launchInfoNotice ?? S.lastLaunchFailure;
+    if (!target) return;
+    void S.requestTerminateAndRelaunch(target.projectId);
   }
 
   function formatFailureTime(iso: string): string {
@@ -69,6 +77,44 @@
   </div>
   {#if S.drawerExpanded}
     <div class="drawer-body">
+      {#if S.launchInfoNotice}
+        <div class="notice-card" role="status">
+          <div class="notice-head">
+            <div class="notice-title">
+              <span class="chip chip-info">already running</span>
+              <span class="notice-project">{S.launchInfoNotice.projectName}</span>
+              <span class="notice-time" title={S.launchInfoNotice.timestamp}>
+                {formatFailureTime(S.launchInfoNotice.timestamp)}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="drawer-action"
+              onclick={handleDismissNotice}
+              aria-label="Dismiss notice"
+              title="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+          <p class="notice-body">{S.launchInfoNotice.message}</p>
+          <div class="notice-actions">
+            {#if S.launchInfoNotice.conflictPid !== null}
+              <button
+                type="button"
+                class="drawer-action drawer-action-accent"
+                onclick={handleTerminateAndRelaunch}
+                title={`Terminate pid ${S.launchInfoNotice.conflictPid} and re-launch ${S.launchInfoNotice.projectName}`}
+              >
+                Terminate &amp; relaunch
+              </button>
+              <span class="notice-hint">
+                conflict pid {S.launchInfoNotice.conflictPid}
+              </span>
+            {/if}
+          </div>
+        </div>
+      {/if}
       {#if S.lastLaunchFailure}
         <div class="failure-card" role="alert">
           <div class="failure-head">
@@ -283,6 +329,75 @@
     border: 1px solid var(--hub-error-fg);
     border-radius: 6px;
     background: var(--hub-error-bg);
+  }
+
+  .notice-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.45rem 0.55rem;
+    margin-bottom: 0.45rem;
+    border: 1px solid var(--hub-info-fg);
+    border-radius: 6px;
+    background: var(--hub-info-bg);
+  }
+
+  .notice-head {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.45rem;
+  }
+
+  .notice-title {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .notice-project {
+    font-size: 0.78rem;
+    color: var(--hub-info-fg);
+    font-weight: 600;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .notice-time {
+    font-size: 0.7rem;
+    color: var(--hub-text-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .notice-body {
+    margin: 0;
+    font-size: 0.76rem;
+    color: var(--hub-text);
+    line-height: 1.4;
+  }
+
+  .notice-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+  }
+
+  .notice-hint {
+    font-size: 0.7rem;
+    color: var(--hub-text-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
   }
 
   .failure-head {
