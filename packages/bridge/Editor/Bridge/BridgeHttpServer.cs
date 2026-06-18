@@ -75,6 +75,16 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_component_get",
             "unity_open_mcp_component_modify",
             "unity_open_mcp_component_list_all",
+            // M16 Plan 3 — typed scene management tools.
+            "unity_open_mcp_scene_create",
+            "unity_open_mcp_scene_open",
+            "unity_open_mcp_scene_save",
+            "unity_open_mcp_scene_unload",
+            "unity_open_mcp_scene_set_active",
+            "unity_open_mcp_scene_list_opened",
+            "unity_open_mcp_scene_get_data",
+            "unity_open_mcp_scene_get_dirty_summary",
+            "unity_open_mcp_scene_focus",
             "unity_senses_run_tests",
             "unity_senses_screenshot",
             "unity_senses_read_console",
@@ -115,7 +125,13 @@ namespace UnityOpenMcpBridge
             // M16 Plan 2 — read-only typed tools (gate-free).
             "unity_open_mcp_gameobject_find",
             "unity_open_mcp_component_get",
-            "unity_open_mcp_component_list_all"
+            "unity_open_mcp_component_list_all",
+            // M16 Plan 3 — read-only typed tools (gate-free). scene_get_data
+            // is the structured scene hierarchy read that supersedes the
+            // standalone M10 scene snapshot.
+            "unity_open_mcp_scene_list_opened",
+            "unity_open_mcp_scene_get_data",
+            "unity_open_mcp_scene_get_dirty_summary"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -155,7 +171,17 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_gameobject_set_parent",
             "unity_open_mcp_component_add",
             "unity_open_mcp_component_destroy",
-            "unity_open_mcp_component_modify"
+            "unity_open_mcp_component_modify",
+            // M16 Plan 3 — typed scene mutators. paths_hint is the scene asset
+            // path (or scene hierarchy path for scene_focus). scene_open is
+            // RestartThenSettle (Single-mode open can lose unsaved changes in
+            // currently-open scenes — the dirty guard preflights it).
+            "unity_open_mcp_scene_create",
+            "unity_open_mcp_scene_open",
+            "unity_open_mcp_scene_save",
+            "unity_open_mcp_scene_unload",
+            "unity_open_mcp_scene_set_active",
+            "unity_open_mcp_scene_focus"
         };
 
         static HttpListener _listener;
@@ -1148,6 +1174,16 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_component_get" => ComponentsTools.Get(body),
                 "unity_open_mcp_component_modify" => ComponentsTools.Modify(body),
                 "unity_open_mcp_component_list_all" => ComponentsTools.ListAll(body),
+                // M16 Plan 3 — typed scene lifecycle and data tools.
+                "unity_open_mcp_scene_create" => ScenesTools.Create(body),
+                "unity_open_mcp_scene_open" => ScenesTools.Open(body),
+                "unity_open_mcp_scene_save" => ScenesTools.Save(body),
+                "unity_open_mcp_scene_unload" => ScenesTools.Unload(body),
+                "unity_open_mcp_scene_set_active" => ScenesTools.SetActive(body),
+                "unity_open_mcp_scene_list_opened" => ScenesTools.ListOpened(body),
+                "unity_open_mcp_scene_get_data" => ScenesTools.GetData(body),
+                "unity_open_mcp_scene_get_dirty_summary" => ScenesTools.GetDirtySummary(body),
+                "unity_open_mcp_scene_focus" => ScenesTools.Focus(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

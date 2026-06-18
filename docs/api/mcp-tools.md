@@ -81,7 +81,7 @@ The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabiliti
 
 - **Project & Asset Management:** typed asset CRUD (`assets_create_folder`, `assets_copy`, `assets_move`, `assets_delete`, `assets_refresh`), material helpers (`material_create`, `material_get/set_property`, `material_get/set_keywords`, `material_set_shader`), shader reads (`shader_list_all`, `shader_get_data`), and prefab lifecycle (`prefab_instantiate/create/open/close/save` + `prefab_apply/revert/unpack/get_overrides/status`) — **implemented in Plan 1**
 - **GameObject & Components:** typed hierarchy/component lifecycle (`gameobject_create/destroy/duplicate/find/modify/set_parent`, `component_add/destroy/get/modify/list_all`) — **implemented in Plan 2**
-- **Scene Management:** typed scene lifecycle/data (`scene_create/open/save/unload/set_active/list_opened`, `scene_get_data`, `scene_get_dirty_summary`, `scene_focus`)
+- **Scene Management:** typed scene lifecycle/data (`scene_create/open/save/unload/set_active/list_opened`, `scene_get_data`, `scene_get_dirty_summary`, `scene_focus`) — **implemented in Plan 3**
 - **Package Manager:** `package_list`, `package_search`, `package_add`, `package_remove`, `package_get_info`, `package_get_dependencies`, `package_check`
 - **Console + Editor state/selection/tags/layers/undo:** `console_clear`, `console_log`, `editor_set_state`, `selection_get`, `selection_set`, `editor_undo`, `editor_redo`, `editor_get_tags`, `editor_get_layers`, `editor_add_tag`, `editor_add_layer`
 - **Reflection/scripts/object data:** `type_schema`, `script_read`, `script_write`, `script_delete`, `object_get_data`, `object_modify`
@@ -144,6 +144,25 @@ Component lifecycle (host resolved by `instance_id` > `path` > `name`; component
 - `unity_open_mcp_component_modify` — Apply per-path serialized patches via `SerializedObject` (`fields: [{path, value, type?}]`). Per-entry errors are accumulated. Use `component_get` first to discover paths. `paths_hint` = scene path containing the host.
 - `unity_open_mcp_component_get` — Read-only: serialized fields + (optional) public properties for one component. Token-bounded by `max_fields`. Gate-free.
 - `unity_open_mcp_component_list_all` — Read-only: catalog of attachable component types from loaded assemblies (built-in + project MonoBehaviours). Token-bounded by `max_results`. Use `query` to narrow by namespace/class-name. Gate-free.
+
+#### Scene Management (M16 Plan 3 — implemented)
+
+Mutating members run the full gate path with `paths_hint` scoped to the scene asset path (or scene hierarchy path for `scene_focus`); read-only members are gate-free (returned as direct JSON without the gate envelope). `scene_open` is `lifecycle: "restart_then_settle"` (Single-mode open can lose unsaved changes in currently-open scenes — the active-scene dirty guard preflights it; pass `ignore_scene_dirty: true` to opt out); the other mutators use `lifecycle: "editor_settle"`; the read-only members use `lifecycle: "none"`.
+
+Scene lifecycle:
+
+- `unity_open_mcp_scene_create` — Create a new scene asset and save it at a `.unity` path (opening it). `setup: empty|default`, `mode: single|additive`. `paths_hint` = new `.unity` path.
+- `unity_open_mcp_scene_open` — Open a scene asset in Single or Additive mode. `paths_hint` = target `.unity` path (include currently-open paths when `mode: 'single'` would close them). Pass `ignore_scene_dirty: true` to skip the active-scene dirty guard.
+- `unity_open_mcp_scene_save` — Save an opened scene back to its asset (or a new `path`). `name` optional (active scene when omitted). Idempotent: `saved: false` with a note when the scene was not dirty. `paths_hint` = destination `.unity` path.
+- `unity_open_mcp_scene_unload` — Unload an opened scene (without saving — call `scene_save` first if needed). Refuses the last opened scene (open another first). `paths_hint` = scene asset path (or name).
+- `unity_open_mcp_scene_set_active` — Mark an opened scene as active. The target must already be opened (`scene_open` first). Idempotent no-op when already active. `paths_hint` = scene asset path.
+- `unity_open_mcp_scene_list_opened` — Read-only: every opened scene as a shallow snapshot (name/path/isDirty/isLoaded/rootCount/buildIndex/isActive) + the active-scene pointer. Gate-free.
+
+Scene data:
+
+- `unity_open_mcp_scene_get_data` — Read-only: compact, drill-down hierarchy of an opened scene. `detail: summary|normal|verbose` (default `summary` = scene overview + root roster, no nested children; `normal` = + nested children to `depth` with active/tag/layer/components; `verbose` = + per-node instance_id + transform). `max_nodes` caps total nodes (`truncated` reports the overflow; `moreHidden` reports per-parent hidden counts). Supersedes the standalone M10 scene snapshot — reflects unsaved editor state, unlike `read_asset` on the `.unity` file. Gate-free.
+- `unity_open_mcp_scene_get_dirty_summary` — Read-only: per-scene dirty flag + rootCount across every opened scene, with a `dirtySceneCount` tally. Use before `scene_save` / `scene_unload` / `scene_open`. Gate-free.
+- `unity_open_mcp_scene_focus` — Frame a GameObject in the SceneView camera (computes combined renderer+collider bounds); optional `axis: top|bottom|front|back|left|right` and `size`. Returns the resulting pivot/camera position/rotation/size. Resolve target by `instance_id` > `path` > `name`. `paths_hint` = scene path containing the target.
 
 ## Capability discovery
 
@@ -453,17 +472,17 @@ Every bridge tool declares a **lifecycle policy** so callers know which ops are 
 |---|---|
 | `none` | Read-only, returns immediately. Most tools. |
 | `editor_settle` | Mutating; bridge waits for asset refresh/serialization (`apply_fix`, `reserialize`). |
-| `restart_then_settle` | Mutating; may trigger a domain reload. Bridge blocks until the editor finishes compiling (cap 60s) so the caller never observes a half-compiled state (`execute_csharp`, `invoke_method`, `execute_menu`, `compile_check`). |
+| `restart_then_settle` | Mutating; may trigger a domain reload. Bridge blocks until the editor finishes compiling (cap 60s) so the caller never observes a half-compiled state (`execute_csharp`, `invoke_method`, `execute_menu`, `compile_check`, `scene_open`). |
 | `custom_confirmation` | Async; returns immediately, result arrives via an external completion signal (`run_tests`). |
 
-**Active-scene dirty guard.** `restart_then_settle` tools are refused with `error.code = "scene_dirty"` when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Recover by saving/discarding the scene, or pass `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu`. See [bridge-http.md](bridge-http.md#active-scene-dirty-guard) for the envelope shape.
+**Active-scene dirty guard.** `restart_then_settle` tools are refused with `error.code = "scene_dirty"` when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Recover by saving/discarding the scene, or pass `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu` / `scene_open`. See [bridge-http.md](bridge-http.md#active-scene-dirty-guard) for the envelope shape.
 
 ## Token-bounded output (M13 T4.6)
 
 Every list-returning tool honors the same three controls so agents can bound token cost without reading per-tool docs:
 
-- `detail: summary | normal | verbose` — compression level. Defaults vary per tool (`summary` for `read_asset`, `normal` for `read_console` / `find_references`). `summary` omits the largest sub-fields (component fields, stack traces, field locations); `verbose` lifts the per-item caps and includes Unity-internal frames.
-- `max_results` / `max_entries` / `max_items` — the cap on returned rows. Honored by `read_asset`, `search_assets`, `find_references`, `find_members`, `read_console`, `profiler_capture`, `list_assets`, and `pull_events`.
+- `detail: summary | normal | verbose` — compression level. Defaults vary per tool (`summary` for `read_asset` and `scene_get_data`, `normal` for `read_console` / `find_references`). `summary` omits the largest sub-fields (component fields, stack traces, field locations); `verbose` lifts the per-item caps and includes Unity-internal frames.
+- `max_results` / `max_entries` / `max_items` / `max_nodes` — the cap on returned rows. Honored by `read_asset`, `search_assets`, `find_references`, `find_members`, `read_console`, `profiler_capture`, `list_assets`, `scene_get_data`, and `pull_events`.
 - **Truncation is always reported.** Every capped response carries a count field so elision is never silent:
   - `read_asset` — `moreHidden` (folded tree rows past `limit`/`depth`).
   - `search_assets` — `truncated` (result files past `max_results`) and `moreObjectsHidden` per file.
@@ -471,6 +490,7 @@ Every list-returning tool honors the same three controls so agents can bound tok
   - `find_members` — `count` (returned) and `truncated` (additional matches dropped).
   - `read_console` — `truncated` (entries dropped by `max_entries`) and `totalAfterFilter` (post-type-filter count).
   - `profiler_capture` — `truncated` on nested enumerables.
+  - `scene_get_data` — `truncated` (nodes past `max_nodes`) and `moreHidden` (per-parent hidden child counts when `depth` caps the walk).
   - `pull_events` — `dropped` (events evicted from the in-memory queue before this pull).
 
 When the cap is not hit, the count is `0` (or omitted for legacy fields); a missing count never means "unknown".

@@ -119,6 +119,14 @@ namespace UnityOpenMcpBridge
             return defaultValue;
         }
 
+        public static float GetFloat(string json, string key, float defaultValue = 0f)
+        {
+            var raw = GetRawValue(json, key);
+            if (raw == null) return defaultValue;
+            if (float.TryParse(raw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var val)) return val;
+            return defaultValue;
+        }
+
         public static long GetLong(string json, string key, long defaultValue = 0)
         {
             var raw = GetRawValue(json, key);

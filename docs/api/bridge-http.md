@@ -579,7 +579,7 @@ Live `UnityEngine.Object` values returned by `invoke_method` / `execute_csharp` 
 
 ### Domain-reload safety
 
-Instance IDs are invalidated by domain reload (recompilation, enter/exit Play Mode). Resolution uses a priority fallback chain: `objectId` → `assetPath` → `assetGuid` → `path` → component-on-parent → `name`. When all locators fail, the error includes guidance to re-acquire the object via `unity_senses_scene_snapshot`, `unity_senses_spatial_query`, or `unity_open_mcp_search_assets`.
+Instance IDs are invalidated by domain reload (recompilation, enter/exit Play Mode). Resolution uses a priority fallback chain: `objectId` → `assetPath` → `assetGuid` → `path` → component-on-parent → `name`. When all locators fail, the error includes guidance to re-acquire the object via `unity_open_mcp_scene_get_data`, `unity_senses_spatial_query`, or `unity_open_mcp_search_assets`.
 
 ## Source-of-truth files
 

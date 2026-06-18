@@ -84,11 +84,11 @@ Every tool declares a **lifecycle policy** (surfaced in the mutation envelope as
 
 **Active-scene dirty guard.** Before any `restart_then_settle` op, the bridge preflights the loaded scenes. If any scene has unsaved changes, the call is refused with `error.code = "scene_dirty"`, a `dirtyScenes[]` list, and `agentNextSteps` — so Unity's native save modal never interrupts the flow. Recover by:
 
-- saving the scene first (`unity_open_mcp_execute_csharp` with `EditorSceneManager.SaveScene(...)`), or
+- saving the scene first (`unity_open_mcp_scene_save`, or `unity_open_mcp_execute_csharp` with `EditorSceneManager.SaveScene(...)`), or
 - discarding (`EditorSceneManager.RestoreSavedSceneState()`), or
-- passing `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu` to proceed and accept the risk of a native save prompt.
+- passing `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu` / `scene_open` to proceed and accept the risk of a native save prompt.
 
-`apply_fix` and `reserialize` are **not** guarded — they never trigger the native save modal.
+`apply_fix`, `reserialize`, and the non-`scene_open` scene mutators (`scene_create` / `scene_save` / `scene_unload` / `scene_set_active` / `scene_focus`) are **not** guarded — they never trigger the native save modal.
 
 **Power-tool deny heuristic.** `execute_csharp` and `execute_menu` are blocked from destructive patterns by default (`EditorApplication.Exit`, `Application.Quit`, `AssetDatabase.DeleteAsset`, `BuildPipeline.BuildPlayer`, `File/Quit`, etc.). A refused call returns `error.code = "denied_by_policy"` (csharp) or `"menu_blocked"` (menu) with the matched pattern and an alternative. If you genuinely need one of these ops, set **both** `gate: "off"` and `confirm_bypass: true` on the request — the bypass is audited. Prefer the scoped typed tools (`apply_fix`, `reserialize`, `invoke_method`) over raw snippets for destructive work.
 
@@ -231,6 +231,14 @@ Materials resolve by `asset_path` (.mat) or `instance_id` of a scene GameObject 
 - Read-only: `gameobject_find` (targeted lookup or list mode with `name_contains`/`tag`/`component`/`root_only` filters) / `component_get` (serialized fields + public properties) / `component_list_all` (attachable types catalog from loaded assemblies). Gate-free.
 
 Resolve components by `component_instance_id` (specific instance) or `type_name` (full name preferred, class-name fallback). Use `component_list_all` to discover attachable types before `component_add`; use `component_get` to discover serialized paths before `component_modify`.
+
+**Typed scene tools (M16 Plan 3).** Prefer these over `execute_csharp` for scene workflows. `paths_hint` for the mutating tools is the scene asset path (or scene hierarchy path for `scene_focus`).
+
+- Scene lifecycle: `scene_create` (`.unity` path, `setup: empty|default`, `mode: single|additive`) / `scene_open` (Single/Additive — Single mode is `restart_then_settle`, so the dirty guard preflights it; pass `ignore_scene_dirty: true` to skip) / `scene_save` (active scene when `name` omitted; idempotent on a clean scene) / `scene_unload` (refuses the last opened scene) / `scene_set_active` (target must already be opened).
+- Read-only: `scene_list_opened` (shallow snapshot of every opened scene + active-scene pointer) / `scene_get_data` (compact hierarchy with `detail: summary|normal|verbose`, `depth`, `max_nodes` — supersedes the M10 scene snapshot; reflects unsaved editor state, unlike `read_asset` on the `.unity`) / `scene_get_dirty_summary` (per-scene dirty tally). Gate-free.
+- `scene_focus` — frame a GameObject in the SceneView (target by `instance_id` > `path` > `name`); optional `axis: top|bottom|front|back|left|right`.
+
+Workflow: `scene_list_opened` → `scene_get_data` to see what's there → mutate via GameObject/component tools → `scene_get_dirty_summary` to confirm → `scene_save`. Before opening a new scene in Single mode, check `scene_get_dirty_summary` and save first to avoid the dirty-scene refusal.
 
 ### Return serialization (execute_csharp / invoke_method)
 

@@ -67,6 +67,18 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_component_add",       LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_component_destroy",   LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_component_modify",    LifecyclePolicy.EditorSettle },
+            // M16 Plan 3 — typed scene mutators. scene_create/save/unload/
+            // set_active/focus touch the scene setup or SceneView without
+            // forcing a domain reload, so EditorSettle is enough. scene_open
+            // is RestartThenSettle: Single-mode open can lose unsaved changes
+            // in currently-open scenes, so the active-scene dirty guard must
+            // preflight it (see SceneDirtyGuard.AppliesTo).
+            { "unity_open_mcp_scene_create",        LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_scene_open",          LifecyclePolicy.RestartThenSettle },
+            { "unity_open_mcp_scene_save",          LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_scene_unload",        LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_scene_set_active",    LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_scene_focus",         LifecyclePolicy.EditorSettle },
 
             // ----- RestartThenSettle: may trigger a domain reload -----
             // execute_csharp / invoke_method can recompile; execute_menu can

@@ -98,6 +98,16 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_component_get: "typed-editor",
   unity_open_mcp_component_modify: "typed-editor",
   unity_open_mcp_component_list_all: "typed-editor",
+  // M16 Plan 3 — typed scene management tools.
+  unity_open_mcp_scene_create: "typed-editor",
+  unity_open_mcp_scene_open: "typed-editor",
+  unity_open_mcp_scene_save: "typed-editor",
+  unity_open_mcp_scene_unload: "typed-editor",
+  unity_open_mcp_scene_set_active: "typed-editor",
+  unity_open_mcp_scene_list_opened: "typed-editor",
+  unity_open_mcp_scene_get_data: "typed-editor",
+  unity_open_mcp_scene_get_dirty_summary: "typed-editor",
+  unity_open_mcp_scene_focus: "typed-editor",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
@@ -150,60 +160,8 @@ export const PLANNED_TOOLS: PlannedTool[] = [
   // The entries that used to live here have been removed.
 
   // --- Plan 3: Scene ------------------------------------------------------
-  {
-    name: "unity_open_mcp_scene_create",
-    category: "typed-editor",
-    description: "Create a new scene asset.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_scene_open",
-    category: "typed-editor",
-    description: "Open a scene (single or additive).",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_scene_save",
-    category: "typed-editor",
-    description: "Save an opened scene.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_scene_unload",
-    category: "typed-editor",
-    description: "Unload an opened scene.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_scene_set_active",
-    category: "typed-editor",
-    description: "Mark an opened scene as active.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_scene_list_opened",
-    category: "typed-editor",
-    description: "List currently opened scenes.",
-    guidance: "Planned typed surface. Use execute_csharp with SceneManager today.",
-  },
-  {
-    name: "unity_open_mcp_scene_get_data",
-    category: "typed-editor",
-    description: "Read scene hierarchy as compact, drill-down structured data.",
-    guidance: "Planned typed surface. Use read_asset on the .unity today.",
-  },
-  {
-    name: "unity_open_mcp_scene_get_dirty_summary",
-    category: "typed-editor",
-    description: "Summarize unsaved changes per opened scene.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_scene_focus",
-    category: "typed-editor",
-    description: "Focus the SceneView camera on a GameObject.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
+  // Plan 3 typed tools are now implemented (see mcp-server/src/tools/).
+  // The entries that used to live here have been removed.
 
   // --- Plan 4: Packages ---------------------------------------------------
   {

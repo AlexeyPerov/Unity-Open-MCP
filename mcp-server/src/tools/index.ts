@@ -67,6 +67,16 @@ import { componentDestroy } from "./component-destroy.js";
 import { componentGet } from "./component-get.js";
 import { componentModify } from "./component-modify.js";
 import { componentListAll } from "./component-list-all.js";
+// M16 Plan 3 — typed scene management tools.
+import { sceneCreate } from "./scene-create.js";
+import { sceneOpen } from "./scene-open.js";
+import { sceneSave } from "./scene-save.js";
+import { sceneUnload } from "./scene-unload.js";
+import { sceneSetActive } from "./scene-set-active.js";
+import { sceneListOpened } from "./scene-list-opened.js";
+import { sceneGetData } from "./scene-get-data.js";
+import { sceneGetDirtySummary } from "./scene-get-dirty-summary.js";
+import { sceneFocus } from "./scene-focus.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -152,6 +162,23 @@ export const M16_PLAN2_TOOLS: Tool[] = [
   componentListAll,
 ];
 
+// M16 Plan 3 — Scene Management typed tools. Mutating members run the full
+// gate path with `paths_hint` scoped to the scene asset (or scene path for
+// scene_focus); read-only members (scene_list_opened, scene_get_data,
+// scene_get_dirty_summary) are gate-free. scene_get_data supersedes the
+// standalone M10 scene snapshot.
+export const M16_PLAN3_TOOLS: Tool[] = [
+  sceneCreate,
+  sceneOpen,
+  sceneSave,
+  sceneUnload,
+  sceneSetActive,
+  sceneListOpened,
+  sceneGetData,
+  sceneGetDirtySummary,
+  sceneFocus,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -165,4 +192,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M14_TOOLS,
   ...M16_PLAN1_TOOLS,
   ...M16_PLAN2_TOOLS,
+  ...M16_PLAN3_TOOLS,
 ];

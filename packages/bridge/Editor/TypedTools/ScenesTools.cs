@@ -1,0 +1,749 @@
+using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+namespace UnityOpenMcpBridge.TypedTools
+{
+    // M16 Plan 3 — typed scene lifecycle and data tools. Covers create / open /
+    // save / unload / set_active / list_opened / get_data / get_dirty_summary /
+    // focus. Mutation tools run through the gate envelope with paths_hint.
+    // list_opened / get_data / get_dirty_summary are gate-free reads.
+    //
+    // `scene_get_data` is the structured scene hierarchy read that supersedes
+    // the standalone M10 scene snapshot (T3.8) and folds UUMCP summarize /
+    // hierarchy_describe into the `detail` modes (summary / normal / verbose).
+    // It reflects unsaved editor state (unlike read_asset on the .unity file,
+    // which only shows the last-saved YAML).
+    //
+    // Mutating tools are undo-recorded where the Unity API supports it.
+    // `scene_open` runs on the RestartThenSettle lifecycle path so the active-
+    // scene dirty guard preflights it (Single-mode open can lose unsaved
+    // changes in currently-open scenes); the other mutators are EditorSettle.
+    //
+    // These tools are NOT registry-discovered: they are wired into
+    // BridgeHttpServer.DispatchTool alongside the other M16 typed tools so
+    // their snake_case schemas parse the same way.
+    public static class ScenesTools
+    {
+        // ------------------------- lifecycle ------------------------------
+
+        public static ToolDispatchResult Create(string body)
+        {
+            var path = JsonBody.GetString(body, "path");
+            if (string.IsNullOrWhiteSpace(path))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'path' is required and must be a non-empty string.");
+
+            var normalized = NormalizeScenePath(path);
+            if (normalized == null)
+                return ToolDispatchResult.Fail("invalid_parameter",
+                    $"'path' must end with '.unity': '{path}'.");
+
+            var setup = ParseSetup(JsonBody.GetString(body, "setup"), NewSceneSetup.EmptyScene);
+            var mode = ParseNewSceneMode(JsonBody.GetString(body, "mode"), NewSceneMode.Single);
+
+            // Ensure the parent folder exists so SaveScene does not fail
+            // silently — mirrors MaterialTools / prefab_create behavior.
+            var lastSlash = normalized.LastIndexOf('/');
+            if (lastSlash > 0)
+                MaterialTools.EnsureFolderRecursive(normalized.Substring(0, lastSlash));
+
+            Scene scene;
+            try
+            {
+                scene = EditorSceneManager.NewScene(setup, mode);
+            }
+            catch (System.Exception e)
+            {
+                return ToolDispatchResult.Fail("create_failed", e.Message);
+            }
+            if (!scene.IsValid())
+                return ToolDispatchResult.Fail("create_failed",
+                    "EditorSceneManager.NewScene returned an invalid scene.");
+
+            bool saved;
+            try
+            {
+                saved = EditorSceneManager.SaveScene(scene, normalized);
+            }
+            catch (System.Exception e)
+            {
+                return ToolDispatchResult.Fail("create_failed",
+                    $"Scene was created but could not be saved to '{normalized}': {e.Message}");
+            }
+            if (!saved)
+                return ToolDispatchResult.Fail("create_failed",
+                    $"Failed to save scene at '{normalized}'.");
+
+            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+
+            var sb = new StringBuilder(128);
+            sb.Append("{\"status\":\"ok\",\"action\":\"created\",");
+            sb.Append("\"scene\":").Append(BuildSceneShallow(scene)).Append('}');
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
+        public static ToolDispatchResult Open(string body)
+        {
+            var path = JsonBody.GetString(body, "path");
+            if (string.IsNullOrWhiteSpace(path))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'path' is required and must be a non-empty string.");
+
+            var normalized = NormalizeScenePath(path);
+            if (normalized == null)
+                return ToolDispatchResult.Fail("invalid_parameter",
+                    $"'path' must end with '.unity': '{path}'.");
+
+            if (!System.IO.File.Exists(System.IO.Path.GetFullPath(normalized)))
+                return ToolDispatchResult.Fail("scene_not_found",
+                    $"No scene file at '{normalized}'.");
+
+            var mode = ParseOpenSceneMode(JsonBody.GetString(body, "mode"), OpenSceneMode.Single);
+
+            Scene opened;
+            try
+            {
+                opened = EditorSceneManager.OpenScene(normalized, mode);
+            }
+            catch (System.Exception e)
+            {
+                return ToolDispatchResult.Fail("open_failed", e.Message);
+            }
+            if (!opened.IsValid() || !opened.isLoaded)
+                return ToolDispatchResult.Fail("open_failed",
+                    $"Failed to load scene at '{normalized}'.");
+
+            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("opened", opened.path));
+        }
+
+        public static ToolDispatchResult Save(string body)
+        {
+            var name = JsonBody.GetString(body, "name");
+            var destPath = JsonBody.GetString(body, "path");
+
+            Scene scene;
+            if (string.IsNullOrEmpty(name))
+            {
+                scene = SceneManager.GetActiveScene();
+            }
+            else
+            {
+                scene = ResolveOpenedByName(name);
+            }
+
+            if (!scene.IsValid() || !scene.isLoaded)
+                return ToolDispatchResult.Fail("scene_not_found",
+                    string.IsNullOrEmpty(name)
+                        ? "No active loaded scene to save."
+                        : $"No opened scene named '{name}'. Use unity_open_mcp_scene_list_opened to enumerate opened scenes.");
+
+            var savePath = string.IsNullOrEmpty(destPath) ? scene.path : NormalizeScenePath(destPath);
+            if (string.IsNullOrEmpty(savePath))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    $"Scene '{scene.name}' has no path. Provide 'path' (ending with '.unity') to save-as.");
+            if (savePath == null)
+                return ToolDispatchResult.Fail("invalid_parameter",
+                    $"'path' must end with '.unity': '{destPath}'.");
+
+            // Idempotent: a clean scene is reported as saved:false with a note
+            // (matches UCP scene/save-active). Only the asset-backed write
+            // counts as a mutation.
+            if (!scene.isDirty && savePath == scene.path && !string.IsNullOrEmpty(scene.path))
+            {
+                var noop = new StringBuilder(96);
+                noop.Append("{\"status\":\"ok\",\"saved\":false,\"name\":\"")
+                    .Append(TypedTargets.Esc(scene.name))
+                    .Append("\",\"path\":\"").Append(TypedTargets.Esc(savePath))
+                    .Append("\",\"note\":\"Scene was not dirty; no write performed.\"}");
+                return ToolDispatchResult.Ok(noop.ToString());
+            }
+
+            // Ensure the parent folder exists when save-as into a new location.
+            var lastSlash = savePath.LastIndexOf('/');
+            if (lastSlash > 0)
+                MaterialTools.EnsureFolderRecursive(savePath.Substring(0, lastSlash));
+
+            bool saved;
+            try
+            {
+                saved = EditorSceneManager.SaveScene(scene, savePath);
+            }
+            catch (System.Exception e)
+            {
+                return ToolDispatchResult.Fail("save_failed", e.Message);
+            }
+            if (!saved)
+                return ToolDispatchResult.Fail("save_failed",
+                    $"EditorSceneManager.SaveScene returned false for '{savePath}'.");
+
+            var sb = new StringBuilder(96);
+            sb.Append("{\"status\":\"ok\",\"saved\":true,\"name\":\"")
+              .Append(TypedTargets.Esc(scene.name))
+              .Append("\",\"path\":\"").Append(TypedTargets.Esc(savePath)).Append("\"}");
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
+        public static ToolDispatchResult Unload(string body)
+        {
+            var name = JsonBody.GetString(body, "name");
+            if (string.IsNullOrWhiteSpace(name))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'name' is required and must be a non-empty string.");
+
+            var scene = ResolveOpenedByName(name);
+            if (!scene.IsValid() || !scene.isLoaded)
+                return ToolDispatchResult.Fail("scene_not_found",
+                    $"No opened scene named '{name}'. Use unity_open_mcp_scene_list_opened to enumerate opened scenes.");
+
+            // Refuse to unload the last loaded scene — Unity leaves the editor
+            // in an awkward state (no active scene). The agent should open a
+            // replacement first.
+            if (CountOpenedScenes() <= 1)
+                return ToolDispatchResult.Fail("invalid_parameter",
+                    $"Cannot unload '{name}': it is the only opened scene. Open another scene first.");
+
+            bool ok;
+            try
+            {
+                // EditorSceneManager.UnloadSceneAsync(Scene) returns bool in the
+                // editor (synchronous dispatch). We are NOT using the runtime
+                // UnityEngine.SceneManagement.SceneManager overload (which
+                // returns AsyncOperation) — the editor is the right surface
+                // here because we are not in play mode.
+                ok = EditorSceneManager.UnloadSceneAsync(scene);
+            }
+            catch (System.Exception e)
+            {
+                return ToolDispatchResult.Fail("unload_failed", e.Message);
+            }
+            if (!ok)
+                return ToolDispatchResult.Fail("unload_failed",
+                    $"EditorSceneManager.UnloadSceneAsync returned false for '{name}'.");
+
+            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("unloaded", name));
+        }
+
+        public static ToolDispatchResult SetActive(string body)
+        {
+            var name = JsonBody.GetString(body, "name");
+            if (string.IsNullOrWhiteSpace(name))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'name' is required and must be a non-empty string.");
+
+            var scene = ResolveOpenedByName(name);
+            if (!scene.IsValid() || !scene.isLoaded)
+                return ToolDispatchResult.Fail("scene_not_found",
+                    $"No opened scene named '{name}'. The scene must be opened first (unity_open_mcp_scene_open).");
+
+            // Idempotent: a no-op when the scene is already active.
+            if (EditorSceneManager.GetActiveScene() == scene)
+                return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("set_active_noop", name));
+
+            bool ok;
+            try
+            {
+                ok = EditorSceneManager.SetActiveScene(scene);
+            }
+            catch (System.Exception e)
+            {
+                return ToolDispatchResult.Fail("set_active_failed", e.Message);
+            }
+            if (!ok)
+                return ToolDispatchResult.Fail("set_active_failed",
+                    $"EditorSceneManager.SetActiveScene returned false for '{name}'.");
+
+            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("set_active", name));
+        }
+
+        // --------------------------- reads ---------------------------------
+
+        // ListOpened returns a shallow snapshot of every opened scene. Gate-free.
+        public static ToolDispatchResult ListOpened(string body)
+        {
+            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("list_opened", null));
+        }
+
+        // GetDirtySummary reports the dirty flag + rootCount for every opened
+        // scene, highlighting dirty ones. Gate-free. Folds UCP scene/dirty-summary.
+        public static ToolDispatchResult GetDirtySummary(string body)
+        {
+            var sb = new StringBuilder(128);
+            sb.Append("{\"status\":\"ok\",\"scenes\":[");
+            int dirtyCount = 0;
+            var opened = OpenedScenes();
+            for (int i = 0; i < opened.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                var scene = opened[i];
+                if (scene.isDirty) dirtyCount++;
+                sb.Append("{\"name\":\"").Append(TypedTargets.Esc(scene.name));
+                sb.Append("\",\"path\":\"").Append(TypedTargets.Esc(scene.path));
+                sb.Append("\",\"isDirty\":").Append(scene.isDirty ? "true" : "false");
+                sb.Append(",\"isLoaded\":").Append(scene.isLoaded ? "true" : "false");
+                sb.Append(",\"rootCount\":").Append(scene.rootCount).Append('}');
+            }
+            sb.Append("],\"dirtySceneCount\":").Append(dirtyCount);
+            sb.Append(",\"openedSceneCount\":").Append(opened.Count).Append('}');
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
+        // GetData is the structured hierarchy read. detail controls verbosity:
+        //   summary  — scene overview + root roster (name/childCount/components)
+        //   normal   — + nested children to `depth` with active/tag/layer/components
+        //   verbose  — + per-node instanceId and transform
+        // max_nodes caps the total node count to bound token output.
+        public static ToolDispatchResult GetData(string body)
+        {
+            var name = JsonBody.GetString(body, "name");
+            Scene scene;
+            if (string.IsNullOrEmpty(name))
+            {
+                scene = SceneManager.GetActiveScene();
+            }
+            else
+            {
+                scene = ResolveOpenedByName(name);
+            }
+
+            if (!scene.IsValid() || !scene.isLoaded)
+                return ToolDispatchResult.Fail("scene_not_found",
+                    string.IsNullOrEmpty(name)
+                        ? "No active loaded scene."
+                        : $"No opened scene named '{name}'.");
+
+            var detail = ParseDetail(JsonBody.GetString(body, "detail"), DetailLevel.Summary);
+            int depth = JsonBody.GetInt(body, "depth", 3);
+            if (depth < 0) depth = 0;
+            int maxNodes = JsonBody.GetInt(body, "max_nodes", 200);
+            if (maxNodes < 1) maxNodes = 1;
+
+            var roots = scene.GetRootGameObjects();
+            var counter = new NodeCounter(maxNodes);
+
+            var sb = new StringBuilder(512);
+            sb.Append("{\"status\":\"ok\",\"scene\":{\"name\":\"")
+              .Append(TypedTargets.Esc(scene.name))
+              .Append("\",\"path\":\"").Append(TypedTargets.Esc(scene.path))
+              .Append("\",\"isDirty\":").Append(scene.isDirty ? "true" : "false")
+              .Append(",\"isLoaded\":").Append(scene.isLoaded ? "true" : "false")
+              .Append(",\"rootCount\":").Append(scene.rootCount)
+              .Append(",\"buildIndex\":").Append(scene.buildIndex)
+              .Append(",\"detail\":\"").Append(DetailToWire(detail)).Append("\",")
+              .Append("\"depth\":").Append(depth)
+              .Append(",\"maxNodes\":").Append(maxNodes)
+              .Append(",\"roots\":[");
+
+            for (int i = 0; i < roots.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                SerializeNode(sb, roots[i], detail, depth, 0, counter);
+            }
+            sb.Append("],\"moreHidden\":[");
+            for (int i = 0; i < counter.MoreHidden.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"name\":\"").Append(TypedTargets.Esc(counter.MoreHidden[i].Name));
+                sb.Append("\",\"count\":").Append(counter.MoreHidden[i].Count).Append('}');
+            }
+            sb.Append("],\"truncated\":").Append(counter.Truncated).Append('}');
+            sb.Append('}');
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
+        // --------------------------- focus ---------------------------------
+
+        // Focus frames a GameObject in the SceneView and optionally sets the
+        // view axis. Mutating (it moves the editor camera + sets Selection).
+        // Folds UCP scene/focus.
+        public static ToolDispatchResult Focus(string body)
+        {
+            var instanceId = JsonBody.GetInt(body, "instance_id", 0);
+            var path = JsonBody.GetString(body, "path");
+            var name = JsonBody.GetString(body, "name");
+            var target = TypedTargets.ResolveGameObject(instanceId, path, name);
+            if (target == null)
+                return ToolDispatchResult.Fail("gameobject_not_found",
+                    $"GameObject not found (instance_id={instanceId}, path='{path}', name='{name}').");
+
+            var sceneView = SceneView.lastActiveSceneView;
+            if (sceneView == null)
+            {
+                try
+                {
+                    sceneView = EditorWindow.GetWindow<SceneView>();
+                }
+                catch
+                {
+                    sceneView = null;
+                }
+            }
+            if (sceneView == null)
+                return ToolDispatchResult.Fail("focus_failed",
+                    "No SceneView available to focus. Open the Scene window in the editor and retry.");
+
+            var bounds = CalculateFocusBounds(target);
+            var focusPoint = bounds.center;
+            float focusSize = JsonBody.GetFloat(body, "size", Mathf.Max(bounds.extents.magnitude * 2f, 1f));
+
+            var axisWire = JsonBody.GetString(body, "axis");
+            var axis = ParseAxis(axisWire);
+
+            try
+            {
+                sceneView.Show();
+                sceneView.Focus();
+                Selection.activeGameObject = target;
+
+                if (axis.HasValue)
+                {
+                    var rotation = Quaternion.LookRotation(-axis.Value, SelectUpVector(axis.Value));
+                    sceneView.LookAtDirect(focusPoint, rotation, focusSize);
+                }
+                else
+                {
+                    sceneView.LookAtDirect(focusPoint, sceneView.rotation, focusSize);
+                }
+                sceneView.Repaint();
+            }
+            catch (System.Exception e)
+            {
+                return ToolDispatchResult.Fail("focus_failed", e.Message);
+            }
+
+            var sb = new StringBuilder(160);
+            sb.Append("{\"status\":\"ok\",\"focused\":true,");
+            sb.Append("\"instanceId\":").Append(target.GetInstanceID());
+            sb.Append(",\"name\":\"").Append(TypedTargets.Esc(target.name)).Append("\"");
+            sb.Append(",\"path\":\"").Append(TypedTargets.Esc(TypedTargets.HierarchyPath(target))).Append("\"");
+            sb.Append(",\"pivot\":");
+            AppendVector(sb, sceneView.pivot);
+            sb.Append(",\"cameraPosition\":");
+            AppendVector(sb, sceneView.camera.transform.position);
+            sb.Append(",\"cameraRotationEuler\":");
+            AppendVector(sb, sceneView.camera.transform.rotation.eulerAngles);
+            sb.Append(",\"size\":").Append(sceneView.size.ToString("R", CultureInfo.InvariantCulture));
+            if (axis.HasValue)
+            {
+                sb.Append(",\"axis\":");
+                AppendVector(sb, axis.Value.normalized);
+            }
+            else if (!string.IsNullOrEmpty(axisWire))
+            {
+                sb.Append(",\"axisRequested\":\"").Append(TypedTargets.Esc(axisWire)).Append("\",\"axisApplied\":false");
+            }
+            sb.Append('}');
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
+        // ----------------------------- helpers -----------------------------
+
+        enum DetailLevel { Summary, Normal, Verbose }
+
+        static string DetailToWire(DetailLevel d) => d switch
+        {
+            DetailLevel.Summary => "summary",
+            DetailLevel.Normal => "normal",
+            DetailLevel.Verbose => "verbose",
+            _ => "summary",
+        };
+
+        static DetailLevel ParseDetail(string raw, DetailLevel fallback)
+        {
+            if (string.IsNullOrEmpty(raw)) return fallback;
+            return raw.ToLowerInvariant() switch
+            {
+                "summary" => DetailLevel.Summary,
+                "normal" => DetailLevel.Normal,
+                "verbose" => DetailLevel.Verbose,
+                _ => fallback,
+            };
+        }
+
+        // Class, not struct: SerializeNode mutates Emitted/Truncated/MoreHidden
+        // across the recursive walk, and the caller reads those fields after
+        // the root loop. A struct passed by value would silently lose every
+        // mutation.
+        class NodeCounter
+        {
+            public int Emitted;
+            public readonly int Max;
+            public int Truncated;
+            public readonly List<MoreHiddenEntry> MoreHidden;
+
+            public NodeCounter(int max)
+            {
+                Emitted = 0;
+                Max = max;
+                Truncated = 0;
+                MoreHidden = new List<MoreHiddenEntry>();
+            }
+
+            public bool CanEmit => Emitted < Max;
+        }
+
+        struct MoreHiddenEntry
+        {
+            public string Name;
+            public int Count;
+        }
+
+        // Serialize one node + (when detail allows) its descendants up to depth.
+        // Nodes past max_nodes are counted in counter.Truncated and not emitted.
+        static void SerializeNode(StringBuilder sb, GameObject go, DetailLevel detail,
+            int maxDepth, int depth, NodeCounter counter)
+        {
+            if (!counter.CanEmit)
+            {
+                counter.Truncated++;
+                return;
+            }
+            counter.Emitted++;
+
+            sb.Append("{\"name\":\"").Append(TypedTargets.Esc(go.name)).Append("\"");
+            if (detail == DetailLevel.Verbose)
+            {
+                sb.Append(",\"instanceId\":").Append(go.GetInstanceID());
+            }
+            if (detail >= DetailLevel.Normal)
+            {
+                sb.Append(",\"active\":").Append(go.activeInHierarchy ? "true" : "false");
+                sb.Append(",\"tag\":\"").Append(TypedTargets.Esc(go.tag)).Append("\"");
+                sb.Append(",\"layer\":").Append(go.layer);
+            }
+            sb.Append(",\"childCount\":").Append(go.transform.childCount);
+
+            // Components: always emit (cheap, drives component_add/get chaining).
+            // Missing-script slots show as "<missing>" so agents can spot them.
+            var comps = go.GetComponents<Component>();
+            sb.Append(",\"components\":[");
+            for (int i = 0; i < comps.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                var c = comps[i];
+                sb.Append("{\"name\":\"").Append(TypedTargets.Esc(c == null ? "<missing>" : c.GetType().Name));
+                sb.Append("\",\"fullName\":\"").Append(TypedTargets.Esc(c == null ? "" : c.GetType().FullName));
+                sb.Append("\",\"instanceId\":").Append(c == null ? 0 : c.GetInstanceID()).Append('}');
+            }
+            sb.Append(']');
+
+            if (detail == DetailLevel.Verbose)
+            {
+                sb.Append(",\"transform\":");
+                AppendTransform(sb, go.transform);
+            }
+
+            // Children: only walked in normal/verbose. Summary stops at roots.
+            if (detail >= DetailLevel.Normal && depth < maxDepth && go.transform.childCount > 0)
+            {
+                sb.Append(",\"children\":[");
+                int emittedHere = 0;
+                int hiddenHere = 0;
+                for (int i = 0; i < go.transform.childCount; i++)
+                {
+                    if (!counter.CanEmit)
+                    {
+                        hiddenHere += go.transform.childCount - i;
+                        break;
+                    }
+                    if (emittedHere > 0) sb.Append(',');
+                    SerializeNode(sb, go.transform.GetChild(i).gameObject, detail, maxDepth, depth + 1, counter);
+                    emittedHere++;
+                }
+                sb.Append(']');
+                if (hiddenHere > 0)
+                {
+                    counter.MoreHidden.Add(new MoreHiddenEntry { Name = go.name, Count = hiddenHere });
+                }
+            }
+            else if (detail >= DetailLevel.Normal && depth >= maxDepth && go.transform.childCount > 0)
+            {
+                // Depth cap reached but this node has children — record them as
+                // hidden under this name so the agent knows to bump `depth`.
+                counter.MoreHidden.Add(new MoreHiddenEntry { Name = go.name, Count = go.transform.childCount });
+            }
+
+            sb.Append('}');
+        }
+
+        static void AppendTransform(StringBuilder sb, Transform t)
+        {
+            sb.Append("{\"position\":");
+            AppendVector(sb, t.position);
+            sb.Append(",\"rotation\":");
+            AppendVector(sb, t.eulerAngles);
+            sb.Append(",\"localScale\":");
+            AppendVector(sb, t.localScale);
+            sb.Append('}');
+        }
+
+        static void AppendVector(StringBuilder sb, Vector3 v)
+        {
+            sb.Append('[');
+            sb.Append(v.x.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(',').Append(v.y.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(',').Append(v.z.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(']');
+        }
+
+        static Bounds CalculateFocusBounds(GameObject target)
+        {
+            var hasBounds = false;
+            var bounds = new Bounds(target.transform.position, Vector3.one);
+
+            foreach (var renderer in target.GetComponentsInChildren<Renderer>())
+            {
+                if (!hasBounds) { bounds = renderer.bounds; hasBounds = true; }
+                else bounds.Encapsulate(renderer.bounds);
+            }
+            foreach (var collider in target.GetComponentsInChildren<Collider>())
+            {
+                if (!hasBounds) { bounds = collider.bounds; hasBounds = true; }
+                else bounds.Encapsulate(collider.bounds);
+            }
+
+            if (!hasBounds)
+                bounds = new Bounds(target.transform.position, Vector3.one);
+            return bounds;
+        }
+
+        static Vector3? ParseAxis(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return null;
+            return raw.ToLowerInvariant() switch
+            {
+                "top" => new Vector3(0, -1, 0),    // look straight down (−Y forward)
+                "bottom" => new Vector3(0, 1, 0),
+                "front" => new Vector3(0, 0, -1),
+                "back" => new Vector3(0, 0, 1),
+                "left" => new Vector3(1, 0, 0),
+                "right" => new Vector3(-1, 0, 0),
+                _ => null,
+            };
+        }
+
+        static Vector3 SelectUpVector(Vector3 forward)
+        {
+            if (Mathf.Abs(Vector3.Dot(forward, Vector3.up)) > 0.98f)
+                return Vector3.forward;
+            return Vector3.up;
+        }
+
+        // Normalize a caller-provided scene path to an Assets/-rooted .unity
+        // path. Returns null when the path does not end with '.unity'.
+        static string NormalizeScenePath(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return null;
+            var normalized = raw.Replace('\\', '/').Trim();
+            if (!normalized.EndsWith(".unity")) return null;
+            // Accept both "Assets/..." (already project-relative) and bare
+            // "Scenes/Foo.unity" (relative to Assets/). We do not rewrite
+            // absolute paths — those would let a caller reach outside Assets/.
+            return normalized;
+        }
+
+        static NewSceneSetup ParseSetup(string raw, NewSceneSetup fallback)
+        {
+            if (string.IsNullOrEmpty(raw)) return fallback;
+            return raw.ToLowerInvariant() switch
+            {
+                "empty" => NewSceneSetup.EmptyScene,
+                "default" => NewSceneSetup.DefaultGameObjects,
+                _ => fallback,
+            };
+        }
+
+        static NewSceneMode ParseNewSceneMode(string raw, NewSceneMode fallback)
+        {
+            if (string.IsNullOrEmpty(raw)) return fallback;
+            return raw.ToLowerInvariant() switch
+            {
+                "single" => NewSceneMode.Single,
+                "additive" => NewSceneMode.Additive,
+                _ => fallback,
+            };
+        }
+
+        static OpenSceneMode ParseOpenSceneMode(string raw, OpenSceneMode fallback)
+        {
+            if (string.IsNullOrEmpty(raw)) return fallback;
+            return raw.ToLowerInvariant() switch
+            {
+                "single" => OpenSceneMode.Single,
+                "additive" => OpenSceneMode.Additive,
+                _ => fallback,
+            };
+        }
+
+        static Scene ResolveOpenedByName(string name)
+        {
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var s = SceneManager.GetSceneAt(i);
+                if (s.isLoaded && s.name == name) return s;
+            }
+            return new Scene();
+        }
+
+        static int CountOpenedScenes()
+        {
+            int n = 0;
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+                if (SceneManager.GetSceneAt(i).isLoaded) n++;
+            return n;
+        }
+
+        static List<Scene> OpenedScenes()
+        {
+            var list = new List<Scene>(SceneManager.sceneCount);
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var s = SceneManager.GetSceneAt(i);
+                if (s.isLoaded) list.Add(s);
+            }
+            return list;
+        }
+
+        // Shallow per-scene snapshot shared by every lifecycle op response.
+        static string BuildSceneShallow(Scene scene)
+        {
+            var sb = new StringBuilder(128);
+            sb.Append("{\"name\":\"").Append(TypedTargets.Esc(scene.name));
+            sb.Append("\",\"path\":\"").Append(TypedTargets.Esc(scene.path));
+            sb.Append("\",\"isDirty\":").Append(scene.isDirty ? "true" : "false");
+            sb.Append(",\"isLoaded\":").Append(scene.isLoaded ? "true" : "false");
+            sb.Append(",\"rootCount\":").Append(scene.rootCount);
+            sb.Append(",\"buildIndex\":").Append(scene.buildIndex);
+            sb.Append(",\"isActive\":").Append(EditorSceneManager.GetActiveScene() == scene ? "true" : "false");
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        // Envelope listing all opened scenes — returned by open/unload/set_active
+        // and list_opened so the agent can confirm post-op state in one call.
+        static string BuildOpenedScenesEnvelope(string action, string subject)
+        {
+            var sb = new StringBuilder(256);
+            sb.Append("{\"status\":\"ok\",\"action\":\"").Append(TypedTargets.Esc(action)).Append("\"");
+            if (subject != null)
+            {
+                sb.Append(",\"subject\":\"").Append(TypedTargets.Esc(subject)).Append("\"");
+            }
+            sb.Append(",\"activeScene\":\"")
+              .Append(TypedTargets.Esc(EditorSceneManager.GetActiveScene().name));
+            sb.Append("\",\"scenes\":[");
+            var opened = OpenedScenes();
+            for (int i = 0; i < opened.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(BuildSceneShallow(opened[i]));
+            }
+            sb.Append("],\"openedSceneCount\":").Append(opened.Count).Append('}');
+            return sb.ToString();
+        }
+    }
+}
