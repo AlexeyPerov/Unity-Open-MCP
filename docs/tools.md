@@ -37,7 +37,7 @@ Required:
 - `UNITY_PROJECT_PATH` - absolute path to Unity project root.
 
 Optional:
-- `UNITY_OPEN_MCP_BRIDGE_PORT` - live bridge port, default `19120`.
+- `UNITY_OPEN_MCP_BRIDGE_PORT` - override the live bridge port. When unset, the port is the per-project deterministic hash `20000 + (sha256(UNITY_PROJECT_PATH) % 10000)`, discovered at startup from `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` when a live bridge lock exists. `19120` is a legacy backward-compat pin only.
 - `UNITY_PATH` - Unity executable path for batch fallback tools.
 - `UNITY_OPEN_MCP_BATCH_TIMEOUT_MS` - batch timeout override.
 - `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS` - set to `1` to disable auto-dismissal of Unity's "compile errors at launch" / Safe Mode dialog (enabled by default).

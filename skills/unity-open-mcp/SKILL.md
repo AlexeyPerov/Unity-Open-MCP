@@ -10,6 +10,31 @@ Skill for AI agents driving a Unity project through the `unity-open-mcp` MCP ser
 - `unity_open_mcp_ping` returns `connected: true`.
 - If you only need offline reads (asset search, find_references, read_asset), the bridge is optional — those routes parse the project from disk.
 
+## Live bridge discovery (when a tool returns `bridge_offline`)
+
+The bridge port is **per-project** — `20000 + (sha256(projectPath) % 10000)` — NOT a fixed 19120. Two projects = two ports, zero config. The MCP server resolves it at startup, but if a tool returns `bridge_offline` do NOT assume Unity isn't running — verify first.
+
+**Step 1 — read the instance lock.** The bridge writes `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` (lowercase hex sha256 of the absolute project path, forward slashes, no trailing slash). It carries: `pid`, `port`, `authToken`, `projectPath`, `state` (`idle` / `compiling` / `reloading`), `heartbeatAt` (ISO-8601 UTC, refreshed every 0.5s), `isCompiling`, `unityVersion`. To list every bridge the machine knows about:
+
+```bash
+cat ~/.unity-open-mcp/instances/*.json
+```
+
+**Step 2 — decide from the lock state:**
+
+1. **Lock missing, or `pid` not alive** → Unity isn't running with the bridge. Open the project in Unity (the bridge auto-starts), or use the batch fallback (see below). Verify pid-aliveness with `kill -0 <pid>` (exit 0 = alive).
+2. **`pid` alive, `state: "reloading"`, heartbeat stale (>10s old) but pid still alive** → the bridge assembly itself failed to compile (Unity is stuck mid-reload). Use `unity_open_mcp_read_compile_errors` to read `Editor.log` offline — it works even when the bridge is dead.
+3. **`pid` alive and heartbeat fresh** → Unity IS running but the MCP server aimed at the wrong port. Either restart the MCP server (it re-runs discovery), or set `UNITY_OPEN_MCP_BRIDGE_PORT` to the lock's `port` value and restart.
+
+**Auth.** The lock's `authToken` is sent as `Authorization: Bearer <token>`. The MCP server does this automatically; if you're debugging a 401 from a hand-rolled request, that token is the source.
+
+**Batch fallback.** `compile_check` is always batch (it spawns a fresh headless Unity to surface broken builds, even when the live bridge is up). Any other tool falls back to batch only when the live bridge is down. Both require:
+
+- `UNITY_PATH` — Unity executable: macOS `/Applications/Unity/Hub/Editor/<version>/Unity.app/Contents/MacOS/Unity`, Windows `C:\Program Files\Unity\Hub\Editor\<version>\Editor\Unity.exe`, Linux `~/Unity/Hub/Editor/<version>/Unity`.
+- `UNITY_PROJECT_PATH` — absolute path to the project root (the folder containing `Assets/`).
+
+If both env vars are unset and the live bridge is down, the only tools that work are the offline reads (`list_assets`, `find_references`, `read_asset`, `search_assets`) and `read_compile_errors`.
+
 ## Discover first
 
 Call **`unity_open_mcp_capabilities`** (no args) before guessing which tools, verify rules, or fixes exist. It returns, in one local call:

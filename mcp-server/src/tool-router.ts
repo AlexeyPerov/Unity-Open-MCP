@@ -13,6 +13,7 @@ import { listRules } from "./capabilities/list-rules.js";
 import { generateSkill } from "./skill/generate-skill.js";
 import { knownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
+import { lockPath } from "./instance-discovery.js";
 import { BATCH_TOOL_NAMES } from "./batch-spawn.js";
 
 export interface RouteMeta {
@@ -295,7 +296,10 @@ export class ToolRouter implements Router {
                 code: "bridge_unavailable",
                 message:
                   "Bridge event stream requires a live Unity Editor connection. " +
-                  "Ensure the Unity Editor is open with the Agent Bridge running.",
+                  "Ensure the Unity Editor is open with the Agent Bridge running. " +
+                  "The bridge port is per-project (20000 + sha256(projectPath) % 10000), not fixed — " +
+                  `if Unity is open, check the instance lock at ${lockPath(this.projectPath)} ` +
+                  "for the live port/pid, or set UNITY_OPEN_MCP_BRIDGE_PORT.",
               },
             }),
           },

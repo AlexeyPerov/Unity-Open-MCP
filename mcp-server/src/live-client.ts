@@ -11,7 +11,7 @@ import {
   readDismissConfig,
   type PollAndDismissOptions,
 } from "./dialog-dismiss.js";
-import { readInstanceLock, classifyInstance } from "./instance-discovery.js";
+import { readInstanceLock, classifyInstance, lockPath } from "./instance-discovery.js";
 
 const MAX_COMPILE_WAIT_MS = 120_000;
 const COMPILE_POLL_INTERVAL_MS = 2_000;
@@ -75,7 +75,33 @@ function makeErrorResult(message: string, detail?: unknown): CallToolResult {
 }
 
 const OFFLINE_HINT =
-  "Ensure the Unity Editor is open with the Agent Bridge running.";
+  "Ensure the Unity Editor is open with the Agent Bridge running. " +
+  "The bridge port is per-project (20000 + sha256(projectPath) % 10000), not " +
+  "fixed — if Unity is open the MCP server may be aimed at the wrong port. " +
+  "Check the instance lock at ~/.unity-open-mcp/instances/<sha256(projectPath)>.json " +
+  "for the live port/pid, or set UNITY_OPEN_MCP_BRIDGE_PORT. If Unity is not " +
+  "open, launch it (or set UNITY_PATH + UNITY_PROJECT_PATH for batch fallback).";
+
+/**
+ * Build a per-instance offline hint that names THIS project's lock file path
+ * and (when the lock is readable) its port/pid/state, so an agent debugging a
+ * `bridge_offline` knows exactly where to look. Falls back to OFFLINE_HINT
+ * when the project path is unknown (older callers / tests).
+ */
+function buildOfflineHint(projectPath: string | undefined): string {
+  if (!projectPath) return OFFLINE_HINT;
+  const lock = lockPath(projectPath);
+  const base = `${OFFLINE_HINT} This project's lock file: ${lock}`;
+  try {
+    const inst = readInstanceLock(projectPath);
+    if (inst) {
+      return `${base}. Lock state: pid=${inst.pid}, port=${inst.port}, state=${inst.state}`;
+    }
+  } catch {
+    // best-effort — fall through to the base hint
+  }
+  return `${base} (lock not readable — Unity may not be running).`;
+}
 
 export class LiveClient implements Router {
   private baseUrl: string;
@@ -152,7 +178,7 @@ export class LiveClient implements Router {
       };
     } catch {
       return makeErrorResult(
-        `Bridge is not reachable at ${this.baseUrl}. ${OFFLINE_HINT}`,
+        `Bridge is not reachable at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
         {
           error: {
             code: "bridge_offline",
@@ -333,7 +359,7 @@ export class LiveClient implements Router {
       };
     } catch {
       return makeErrorResult(
-        `Failed to reach bridge at ${this.baseUrl}. ${OFFLINE_HINT}`,
+        `Failed to reach bridge at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
         {
           error: {
             code: "bridge_offline",
@@ -389,7 +415,7 @@ export class LiveClient implements Router {
       if (deadBridge) return deadBridge;
 
       return makeErrorResult(
-        `Bridge is not reachable at ${this.baseUrl}. ${OFFLINE_HINT}`,
+        `Bridge is not reachable at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
         {
           error: {
             code: "bridge_offline",
