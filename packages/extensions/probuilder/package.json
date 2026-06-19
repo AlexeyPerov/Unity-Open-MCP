@@ -18,6 +18,6 @@
   ],
   "dependencies": {
     "com.alexeyperov.unity-open-mcp-bridge": "0.1.0",
-    "com.unity.probuilder": "6.0.4"
+    "com.unity.probuilder": "6.0.9"
   }
 }
