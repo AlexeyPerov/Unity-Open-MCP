@@ -137,6 +137,21 @@ import { settingsGetPhysics } from "./settings-get-physics.js";
 import { settingsSetPhysics } from "./settings-set-physics.js";
 import { settingsGetLighting } from "./settings-get-lighting.js";
 import { settingsSetLighting } from "./settings-set-lighting.js";
+// M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tools. Each tool is
+// gated on the `com.alexeyperov.unity-open-mcp-ext-navigation` extension pack
+// being installed in the target project; the tool definitions live in core so
+// capabilities discovery advertises the surface even before the pack is added.
+import { navigationSurfaceAdd } from "./navigation-surface-add.js";
+import { navigationSetBakeSettings } from "./navigation-set-bake-settings.js";
+import { navigationSurfaceBake } from "./navigation-surface-bake.js";
+import { navigationModifierAdd } from "./navigation-modifier-add.js";
+import { navigationModifierVolumeAdd } from "./navigation-modifier-volume-add.js";
+import { navigationLinkAdd } from "./navigation-link-add.js";
+import { navigationAgentAdd } from "./navigation-agent-add.js";
+import { navigationAgentSetDestination } from "./navigation-agent-set-destination.js";
+import { navigationList } from "./navigation-list.js";
+import { navigationGet } from "./navigation-get.js";
+import { navigationModify } from "./navigation-modify.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -359,6 +374,30 @@ export const M16_PLAN9_TOOLS: Tool[] = [
   settingsSetLighting,
 ];
 
+// M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tools. Extension pack
+// tools ship their tool definitions in the core MCP server (so capabilities
+// advertises the surface) but require the matching extension UPM package
+// installed in the target project for the bridge-side handler to exist.
+// Mutating members (surface_add / set_bake_settings / surface_bake /
+// modifier_add / modifier_volume_add / link_add / agent_add /
+// agent_set_destination / modify) run the full gate path with paths_hint
+// scoped to the host scene path; surface_bake is the heavy op (EditorSettle).
+// Read-only members (list / get) are gate-free. The eleven tools mirror the
+// kebab `navigation-*` ids in the upstream Unity-MCP reference pack.
+export const M16_PLAN10_TOOLS: Tool[] = [
+  navigationSurfaceAdd,
+  navigationSetBakeSettings,
+  navigationSurfaceBake,
+  navigationModifierAdd,
+  navigationModifierVolumeAdd,
+  navigationLinkAdd,
+  navigationAgentAdd,
+  navigationAgentSetDestination,
+  navigationList,
+  navigationGet,
+  navigationModify,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -379,4 +418,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN7_TOOLS,
   ...M16_PLAN8_TOOLS,
   ...M16_PLAN9_TOOLS,
+  ...M16_PLAN10_TOOLS,
 ];

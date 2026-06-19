@@ -1,0 +1,23 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-ext-navigation",
+  "displayName": "Unity Open MCP — Navigation (NavMesh) Extension",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "NavMesh / AI Navigation typed helpers for Unity Open MCP. Wraps NavMeshSurface bake, agent setup, off-mesh links, and navigation modifiers behind schema-validated tools.",
+  "author": {
+    "name": "Alexey Perov",
+    "url": "https://github.com/AlexeyPerov/unity-open-mcp"
+  },
+  "keywords": [
+    "unity-open-mcp",
+    "mcp",
+    "extension",
+    "navigation",
+    "navmesh",
+    "ai"
+  ],
+  "dependencies": {
+    "com.alexeyperov.unity-open-mcp-bridge": "0.1.0",
+    "com.unity.ai.navigation": "2.0.0"
+  }
+}

@@ -22,7 +22,8 @@ namespace UnityOpenMcpBridge
         Tools,
         Gate,
         Activity,
-        Settings
+        Settings,
+        Extensions
     }
 
     public class UnityOpenMcpBridgeWindow : EditorWindow
@@ -165,6 +166,7 @@ namespace UnityOpenMcpBridge
                 BridgeWindowTab.Gate => "Gate",
                 BridgeWindowTab.Activity => "Activity",
                 BridgeWindowTab.Settings => "Settings",
+                BridgeWindowTab.Extensions => "Extensions",
                 _ => tab.ToString()
             };
         }
@@ -188,6 +190,9 @@ namespace UnityOpenMcpBridge
                     break;
                 case BridgeWindowTab.Settings:
                     DrawSettingsTab();
+                    break;
+                case BridgeWindowTab.Extensions:
+                    DrawExtensionsTab();
                     break;
             }
             EditorGUILayout.EndScrollView();
@@ -1591,6 +1596,125 @@ namespace UnityOpenMcpBridge
                 "in a dedicated batch panel in a future update. v1 ships a passive hint only " +
                 "— no batch execution controls are exposed in the bridge window.",
                 MessageType.None);
+        }
+
+        // ---------- Extensions tab (M16 Plan 10) ----------
+
+        [NonSerialized] Vector2 _extensionsTabScroll;
+
+        // The extension pack catalog ships with the bridge assembly, so this
+        // tab needs no live network round-trip — every pack entry is static
+        // metadata. Installed detection uses the same registry scan result
+        // the Tools tab already depends on.
+        void DrawExtensionsTab()
+        {
+            _extensionsTabScroll = EditorGUILayout.BeginScrollView(_extensionsTabScroll);
+
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("Extension packs", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Optional domain extension packs add typed NavMesh / Input System / " +
+                "ProBuilder / Splines / Terrain / Tilemap / Particle System / Animation " +
+                "tools. Each pack is a separate UPM package — install the ones you need " +
+                "via Packages/manifest.json (or the Hub AI Setup wizard's optional " +
+                "checkboxes). The bridge auto-discovers tools in any installed pack — " +
+                "no per-pack wiring in the core bridge.",
+                MessageType.None);
+
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+
+            var installedCount = 0;
+            foreach (var pack in ExtensionCatalog.Packs)
+            {
+                if (DrawExtensionPackRow(pack)) installedCount++;
+            }
+
+            BridgeGUIUtilities.HorizontalLine(2, 4);
+            EditorGUILayout.LabelField(
+                $"Installed: {installedCount} / {ExtensionCatalog.Packs.Length}",
+                EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(
+                "Catalog source: packages/bridge/Editor/UI/ExtensionCatalog.cs " +
+                "(add a new pack here + mirror it in hub/src/lib/services/extensions.ts).",
+                EditorStyles.miniLabel);
+
+            EditorGUILayout.EndScrollView();
+        }
+
+        // Returns true when the pack is installed in this project.
+        bool DrawExtensionPackRow(ExtensionPack pack)
+        {
+            var installed = IsExtensionPackInstalled(pack);
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+
+            // Status dot + display name.
+            var dotColor = !pack.Shipped
+                ? new Color(0.7f, 0.7f, 0.7f)
+                : installed
+                    ? new Color(0.6f, 0.9f, 0.6f)
+                    : new Color(1f, 0.85f, 0.4f);
+            var prev = GUI.color;
+            GUI.color = dotColor;
+            GUILayout.Label("●", EditorStyles.boldLabel, GUILayout.Width(18));
+            GUI.color = prev;
+
+            EditorGUILayout.LabelField(pack.DisplayName, EditorStyles.boldLabel);
+            GUILayout.FlexibleSpace();
+
+            BridgeGUIUtilities.DrawColoredLabel(
+                !pack.Shipped ? "planned" : (installed ? "installed" : "available"),
+                dotColor, 90);
+
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.LabelField(pack.Description, EditorStyles.wordWrappedMiniLabel);
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Package", GUILayout.Width(70));
+            EditorGUILayout.SelectableLabel(pack.Id, EditorStyles.textField,
+                GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            EditorGUILayout.EndHorizontal();
+
+            if (!string.IsNullOrEmpty(pack.UpmDependency))
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Unity dep", GUILayout.Width(70));
+                EditorGUILayout.LabelField(pack.UpmDependency, EditorStyles.miniLabel);
+                EditorGUILayout.EndHorizontal();
+            }
+
+            if (pack.ToolIds != null && pack.ToolIds.Length > 0)
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Tools", GUILayout.Width(70));
+                EditorGUILayout.LabelField(
+                    $"{pack.ToolIds.Length} tool(s) — {pack.ToolIds[0]}…",
+                    EditorStyles.miniLabel);
+                EditorGUILayout.EndHorizontal();
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Install", GUILayout.Width(70));
+            EditorGUILayout.SelectableLabel(
+                $"\"{pack.Id}\": \"file:../../{pack.LocalPath}\"",
+                EditorStyles.textField,
+                GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.EndVertical();
+            return installed;
+        }
+
+        // A pack is installed when at least one of its tool ids is registered
+        // (the extension assembly is loaded → BridgeToolRegistry picked it up).
+        // Planned packs (shipped:false) report as not-installed by definition.
+        static bool IsExtensionPackInstalled(ExtensionPack pack)
+        {
+            if (!pack.Shipped || pack.ToolIds == null || pack.ToolIds.Length == 0)
+                return false;
+            return BridgeToolRegistry.Contains(pack.ToolIds[0]);
         }
     }
 }

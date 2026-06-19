@@ -1,0 +1,20 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-ext-template",
+  "displayName": "Unity Open MCP — Extension Template",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "Reference template for Unity Open MCP domain extension packs. Copy this folder, rename the package, and add typed [BridgeTool] helpers for your domain. Not intended to be installed directly.",
+  "author": {
+    "name": "Alexey Perov",
+    "url": "https://github.com/AlexeyPerov/unity-open-mcp"
+  },
+  "keywords": [
+    "unity-open-mcp",
+    "mcp",
+    "extension",
+    "template"
+  ],
+  "dependencies": {
+    "com.alexeyperov.unity-open-mcp-bridge": "0.1.0"
+  }
+}

@@ -4,6 +4,7 @@
   - Root (`AGENTS.md`) — cross-cutting rules (specs/ is gitignored, no migrations, docs ownership).
   - `packages/bridge/AGENTS.md` — bridge transport, tool registration, gate policy.
   - `packages/verify/AGENTS.md` — verify rules (must declare issue codes), fixes, capability catalog sync.
+  - `packages/extensions/AGENTS.md` — optional domain extension packs (NavMesh, Input System, …).
   - `mcp-server/AGENTS.md` — tool definitions, routing, offline-read no-cache philosophy.
   - `hub/AGENTS.md` — SvelteKit/Tauri UI, state/data, platform neutrality.
 

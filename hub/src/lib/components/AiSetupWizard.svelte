@@ -61,6 +61,11 @@
     summarizeChanges,
   } from "$lib/services/manifest";
   import {
+    EXTENSION_PACKS,
+    localPackageEntry,
+    shippedPacks,
+  } from "$lib/services/extensions";
+  import {
     DEFAULT_BRIDGE_PORT,
     type McpClientId,
   } from "$lib/services/ai_toolkit";
@@ -161,6 +166,18 @@
   let mergeError = $state<string | null>(null);
   let showDiff = $state(false);
   let upgradeAcknowledged = $state(false);
+
+  // Step 3 — optional extension packs (opt-in checkbox group). Selections
+  // surface the exact manifest line to add; the core merge planner focuses on
+  // bridge + verify, so extensions are surfaced as copy-paste lines (or via
+  // the bridge window's Extensions tab once the project is open).
+  let selectedExtensionPacks = $state<Set<string>>(new Set());
+
+  // Static catalog snapshot — extension packs advertised by the wizard. Only
+  // shipped packs are selectable; planned packs render as disabled rows so the
+  // user knows what's coming.
+  const shippedExtensionPacks = shippedPacks();
+  const plannedExtensionPacks = EXTENSION_PACKS.filter((p) => !p.shipped);
 
   // Step 4 — MCP client state.
   let mcpClient = $state<McpClientId>("cursor");
@@ -1846,6 +1863,64 @@
             </div>
           </details>
 
+          <details class="wiz-advanced">
+            <summary>Optional extension packs</summary>
+            <p class="wiz-hint">
+              Optional domain packs add typed NavMesh / Input System / ProBuilder
+              / Splines / Terrain / Tilemap / Particle System / Animation tools.
+              Each pack is a separate UPM package — opt in to the ones you need.
+              The wizard surfaces the exact manifest line to add (the core merge
+              planner focuses on bridge + verify); the bridge window's Extensions
+              tab is the second install path.
+            </p>
+
+            {#if shippedExtensionPacks.length === 0}
+              <p class="wiz-hint">No extension packs shipped with this toolkit version.</p>
+            {:else}
+              <ul class="wiz-extension-packs">
+                {#each shippedExtensionPacks as pack (pack.id)}
+                  {@const checked = selectedExtensionPacks.has(pack.id)}
+                  <li class="wiz-extension-pack">
+                    <label class="wiz-toggle">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onchange={(e) => {
+                          const next = new Set(selectedExtensionPacks);
+                          if ((e.currentTarget as HTMLInputElement).checked) {
+                            next.add(pack.id);
+                          } else {
+                            next.delete(pack.id);
+                          }
+                          selectedExtensionPacks = next;
+                        }}
+                      />
+                      <span>
+                        <strong>{pack.displayName}</strong>
+                        {#if pack.upmDependency}
+                          <small>requires <code>{pack.upmDependency}</code></small>
+                        {/if}
+                        <small>{pack.description}</small>
+                      </span>
+                    </label>
+                    {#if checked}
+                      <code class="wiz-extension-pack-entry">
+                        "{pack.id}": "{localPackageEntry(pack)}"
+                      </code>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+
+            {#if plannedExtensionPacks.length > 0}
+              <p class="wiz-hint wiz-hint-info">
+                Planned (not yet shipped):
+                {plannedExtensionPacks.map((p) => p.displayName).join(", ")}.
+              </p>
+            {/if}
+          </details>
+
           <div class="wiz-field">
             <span class="wiz-label">Manifest status</span>
             {#if !installBridge && !installVerify}
@@ -2858,6 +2933,48 @@
     justify-content: space-between;
     gap: 0.5rem;
     font-size: 0.76rem;
+  }
+
+  .wiz-extension-packs {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .wiz-extension-pack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--hub-border-light);
+    border-radius: 6px;
+    background: var(--hub-card);
+  }
+
+  .wiz-extension-pack .wiz-toggle {
+    align-items: flex-start;
+  }
+
+  .wiz-extension-pack .wiz-toggle small {
+    display: block;
+    color: var(--hub-text-muted);
+    font-size: 0.72rem;
+    margin-top: 0.15rem;
+  }
+
+  .wiz-extension-pack-entry {
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--hub-text);
+    background: var(--hub-card-inset, rgba(0, 0, 0, 0.04));
+    padding: 0.3rem 0.4rem;
+    border-radius: 4px;
+    word-break: break-all;
+    user-select: all;
   }
 
   .wiz-fp-name code {

@@ -179,6 +179,21 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_settings_set_physics: "build-settings",
   unity_open_mcp_settings_get_lighting: "build-settings",
   unity_open_mcp_settings_set_lighting: "build-settings",
+  // M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tools. Extension
+  // pack tools ship tool definitions in the core MCP server (so capabilities
+  // advertises the surface) but require the matching extension UPM package
+  // installed in the target project for the bridge-side handler to exist.
+  unity_open_mcp_navigation_surface_add: "navigation",
+  unity_open_mcp_navigation_set_bake_settings: "navigation",
+  unity_open_mcp_navigation_surface_bake: "navigation",
+  unity_open_mcp_navigation_modifier_add: "navigation",
+  unity_open_mcp_navigation_modifier_volume_add: "navigation",
+  unity_open_mcp_navigation_link_add: "navigation",
+  unity_open_mcp_navigation_agent_add: "navigation",
+  unity_open_mcp_navigation_agent_set_destination: "navigation",
+  unity_open_mcp_navigation_list: "navigation",
+  unity_open_mcp_navigation_get: "navigation",
+  unity_open_mcp_navigation_modify: "navigation",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",

@@ -8,6 +8,9 @@
 
 - `hub/`: desktop UI application and local orchestration experience.
 - `packages/`: reusable packages, including bridge logic and tests.
+  - `packages/bridge/`: core Unity Editor HTTP bridge + typed tool registry.
+  - `packages/verify/`: scoped health-check verify rules + fixes.
+  - `packages/extensions/`: optional domain extension packs (NavMesh, planned Input System / ProBuilder / Splines / Terrain / Tilemap / Particle System / Animation). See [extensions.md](extensions.md).
 - `mcp-server/`: MCP-facing server implementation.
 - `demo/`: demo assets and local end-to-end scenarios.
 - `templates/`: reusable repository and workflow templates.
@@ -95,5 +98,6 @@ Update this document when:
 | Root | `AGENTS.md` | Cross-cutting rules (specs/ gitignored, no migrations, docs ownership). |
 | Bridge | `packages/bridge/AGENTS.md` | Bridge transport, tool registration, gate policy. |
 | Verify | `packages/verify/AGENTS.md` | Verify rules (must declare issue codes), fixes, capability catalog sync. |
+| Extensions | `packages/extensions/AGENTS.md` | Optional domain extension packs (NavMesh, Input System, …). |
 | MCP server | `mcp-server/AGENTS.md` | Tool definitions, routing, offline-read no-cache philosophy. |
 | Hub | `hub/AGENTS.md` | SvelteKit/Tauri UI, state/data, platform neutrality. |

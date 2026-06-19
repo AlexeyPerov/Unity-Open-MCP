@@ -11,6 +11,7 @@ Use this folder for version-controlled documentation that should stay aligned wi
 | [unity-version-compat.md](unity-version-compat.md) | Which Unity versions are supported, version-gated APIs, and CI coverage. |
 | [architecture.md](architecture.md) | Repo structure, package boundaries, runtime interactions, and routing flows. |
 | [tools.md](tools.md) | Toolchain, scripts, and runtime environment requirements by workspace area. |
+| [extensions.md](extensions.md) | Extension packs: catalog, install paths, and authoring a new pack. |
 | [api.md](api.md) | Index for HTTP/MCP/API contracts and protocol surfaces. |
 
 ## API and protocol docs
@@ -30,6 +31,7 @@ Use this folder for version-controlled documentation that should stay aligned wi
 | What MCP resources are available and what do they return? | `api/resources.md` |
 | What env vars are required to run the MCP server? | `tools.md` |
 | Which package owns a feature area? | `architecture.md` |
+| How do I add or install an extension pack? | `extensions.md` |
 | How do I run tests locally, and what does CI run? | `tools.md` (Testing) |
 | How do I drive the MCP server from a script or CI pipeline? | `manual-setup.md` (CLI for CI / automation) |
 | Which Unity versions are supported / recommended? | `unity-version-compat.md` |

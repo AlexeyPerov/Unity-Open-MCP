@@ -323,6 +323,26 @@ Project settings mutators (each takes a `fields: [{key, value}]` patch array; pe
 
 Workflow: CI build prep — `build_get_scenes` (audit the scene list) → `build_set_scenes` (fix the list) → `build_get_defines` / `build_set_defines` (configure per-build defines) → `build_get_active_target` / `build_set_target` (pin the target) → `build_start` (gate `"off"` + `confirm_bypass: true`). Settings audit — read each `settings_get_*` surface, then batch-patch via the matching `settings_set_*` tool.
 
+#### Navigation / NavMesh (M16 Plan 10 / T6.6.2 — implemented; extension pack)
+
+NavMesh (AI Navigation) typed tools. **Opt-in** — the tool definitions ship in the core MCP server (so capabilities advertises the surface) but the bridge-side handler exists only when the `com.alexeyperov.unity-open-mcp-ext-navigation` extension pack is installed in the target project. A call to a navigation tool when the pack is absent returns `tool_not_found`. Install via the Hub AI Setup wizard's "Optional extension packs" checkbox or by adding `"com.alexeyperov.unity-open-mcp-ext-navigation"` to `Packages/manifest.json`.
+
+Mutating tools run the full gate path with `paths_hint` scoped to the host's scene path; `surface_bake` is the heavy op (`editor_settle` — the dispatcher waits for asset refresh so the baked NavMesh asset is on disk before the next call). Read-only tools (`navigation_list`, `navigation_get`) are gate-free. Address every target by `instance_id` > `path` > `name` (same model as `gameobject_*` / `component_*`).
+
+- `unity_open_mcp_navigation_surface_add` — Mutating: add a `NavMeshSurface` (idempotent — re-using reports `added:false`). `agent_type` (default "Humanoid"), `collect_objects` ("All" | "Volume"), optional `collection_extent` (x,y,z).
+- `unity_open_mcp_navigation_set_bake_settings` — Mutating: configure an existing surface's agent type / collect-objects / extent. Refuses if the host has no NavMeshSurface.
+- `unity_open_mcp_navigation_surface_bake` — Mutating (heavy): bake the NavMesh synchronously. Returns `durationMs` + `hasNavMeshData` + `navMeshDataInstanceId`.
+- `unity_open_mcp_navigation_modifier_add` — Mutating: add a `NavMeshModifier` (area override or `ignore: true` to skip baking).
+- `unity_open_mcp_navigation_modifier_volume_add` — Mutating: add a `NavMeshModifierVolume` and size it (re-tags NavMesh inside the volume).
+- `unity_open_mcp_navigation_link_add` — Mutating: add a `NavMeshLink` (off-mesh traversal — jumps, drops, gaps).
+- `unity_open_mcp_navigation_agent_add` — Mutating: add a `NavMeshAgent` and configure radius / height / speed / angular_speed / acceleration / stopping_distance.
+- `unity_open_mcp_navigation_agent_set_destination` — Mutating: set an agent's world-space destination. **Requires Play Mode** — the pathfinder only runs at runtime; returns `pathPending` + `pathStatus` (Valid / Partial / Invalid) + `isPlaying`.
+- `unity_open_mcp_navigation_list` — Read-only (gate-free): list every NavMesh component in the open scene(s) with host name / instance id / path.
+- `unity_open_mcp_navigation_get` — Read-only (gate-free): full detail for one target's NavMesh components (serialized fields).
+- `unity_open_mcp_navigation_modify` — Mutating: reflective field setter for niche fields not covered by the typed mutators. `component_type` selects `NavMeshSurface` / `NavMeshAgent` / `NavMeshLink` / `NavMeshModifier` / `NavMeshModifierVolume`; `fields_json` is a JSON array of `{field, value, type?}` patches.
+
+Workflow: walkable agent — `navigation_list` (discover) → `navigation_surface_add` (host + agent type) → `navigation_surface_bake` (wait for `hasNavMeshData:true`) → `navigation_agent_add` (player) → enter Play Mode (`editor_set_state`) → `navigation_agent_set_destination`. See `skills/extensions/navigation/SKILL.md` for the full agent playbook.
+
 ## Capability discovery
 
 `unity_open_mcp_capabilities` lets an agent self-discover the entire tool + rule + fix surface in a single call, including what is planned but not yet built.

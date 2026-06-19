@@ -1,0 +1,19 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-ext-template.Editor.Tests",
+  "rootNamespace": "UnityOpenMcpExtensions.Template.Tests",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "com.alexeyperov.unity-open-mcp-ext-template.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
