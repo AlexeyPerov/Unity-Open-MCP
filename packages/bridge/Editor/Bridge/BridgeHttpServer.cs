@@ -127,6 +127,10 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_profiler_save_data",
             "unity_open_mcp_profiler_load_data",
             "unity_open_mcp_profiler_get_script_stats",
+            // M16 Plan 8 — typed gate intelligence tools (read-only).
+            "unity_open_mcp_impact_preview",
+            "unity_open_mcp_gate_budget_estimate",
+            "unity_open_mcp_mutation_explain",
             "unity_senses_run_tests",
             "unity_senses_screenshot",
             "unity_senses_read_console",
@@ -223,7 +227,14 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_profiler_enable_module",
             "unity_open_mcp_profiler_clear_data",
             "unity_open_mcp_profiler_load_data",
-            "unity_open_mcp_profiler_get_script_stats"
+            "unity_open_mcp_profiler_get_script_stats",
+            // M16 Plan 8 — read-only gate intelligence tools (gate-free). They
+            // compose checkpoint / validate / delta / run-history foundations
+            // to project pre-mutation scope risk + cost and post-mutation
+            // narrative. None mutate project state.
+            "unity_open_mcp_impact_preview",
+            "unity_open_mcp_gate_budget_estimate",
+            "unity_open_mcp_mutation_explain"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -1366,6 +1377,14 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_profiler_save_data" => ProfilerSessionTools.SaveData(body),
                 "unity_open_mcp_profiler_load_data" => ProfilerSessionTools.LoadData(body),
                 "unity_open_mcp_profiler_get_script_stats" => ProfilerSessionTools.GetScriptStats(body),
+                // M16 Plan 8 — typed gate intelligence tools. All read-only
+                // direct-response tools (gate-free). impact_preview +
+                // gate_budget_estimate are pre-mutation (scope-first);
+                // mutation_explain is post-mutation (latest gate run or an
+                // explicit checkpoint_id).
+                "unity_open_mcp_impact_preview" => GateIntelligenceTools.ImpactPreview(body),
+                "unity_open_mcp_gate_budget_estimate" => GateIntelligenceTools.GateBudgetEstimate(body),
+                "unity_open_mcp_mutation_explain" => GateIntelligenceTools.MutationExplain(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

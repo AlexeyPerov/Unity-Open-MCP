@@ -177,6 +177,16 @@ Use **`unity_open_mcp_search_assets`** to locate prefabs/components/GUIDs; each 
 
 For large refactors: `unity_open_mcp_checkpoint_create` with scoped paths → run mutations (`gate: off` for bulk, or `enforce` per call) → `unity_open_mcp_delta` against the checkpoint for a single verification pass.
 
+### Plan before, explain after (gate intelligence)
+
+Three read-only, gate-free tools compose the gate foundations into agent-actionable shapes. They do NOT run a rule scan and do NOT mutate — treat their outputs as guidance (every response carries a `heuristicNote` stating its confidence bounds).
+
+- **Before mutating** — `unity_open_mcp_impact_preview` (`paths_hint`): resolves the auto-selected rule set for the scope, classifies each path (exists / folder / asset kind / rules-for-extension), and reports a coarse `risk.band` (`low` / `moderate` / `high`) with `confidence`. Use it to size risk before paying for a checkpoint. Confidence drops to `low` when paths are missing (a create op the gate cannot yet see).
+- **Before mutating** — `unity_open_mcp_gate_budget_estimate` (`paths_hint`, `mode: "cache"` | `"sample"`): forecasts `estimatedDurationMs` (a lower bound — checkpoint-mode is lighter than full validation) and `estimatedIssueBudget` (an upper bound), with `basis` + `confidence`. `mode: "sample"` runs a cheap checkpoint scan for a grounded, high-confidence number; `cache` inspects the latest VerifyCacheService snapshot (cheap, coarse — the cache is global); falls back to a pure heuristic when neither is available.
+- **After mutating** — `unity_open_mcp_mutation_explain` (`checkpoint_id?`, `tool_name?`): projects the most recent gate run into a `narrative` + structured `summary` (outcome, new/resolved counts, durations, `agentNextSteps`). Pass `checkpoint_id` to compare a known checkpoint against current state; pass `tool_name` to target the latest run of a specific mutating tool.
+
+Typical sequence: `impact_preview` (size) → `gate_budget_estimate` `mode: "sample"` (cost) → mutate → `mutation_explain` (narrate).
+
 ### find_references before delete
 
 Before deleting or moving an asset, call **`unity_open_mcp_find_references`** to see who depends on it. Offline-first (no live bridge needed for text-serialized assets).

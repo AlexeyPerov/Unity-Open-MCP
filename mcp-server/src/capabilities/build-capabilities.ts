@@ -152,6 +152,13 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_profiler_save_data: "diagnostics",
   unity_open_mcp_profiler_load_data: "diagnostics",
   unity_open_mcp_profiler_get_script_stats: "diagnostics",
+  // M16 Plan 8 — typed gate intelligence tools. All read-only, gate-free
+  // direct-response tools that compose checkpoint / validate / delta / verify
+  // / run-history foundations. impact_preview + gate_budget_estimate are
+  // pre-mutation; mutation_explain is post-mutation.
+  unity_open_mcp_impact_preview: "gate-intelligence",
+  unity_open_mcp_gate_budget_estimate: "gate-intelligence",
+  unity_open_mcp_mutation_explain: "gate-intelligence",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
@@ -224,25 +231,8 @@ export const PLANNED_TOOLS: PlannedTool[] = [
   // The entries that used to live here have been removed.
 
   // --- Plan 8: Gate intelligence -----------------------------------------
-  {
-    name: "unity_open_mcp_impact_preview",
-    category: "gate-intelligence",
-    description: "Preview the gate impact of a planned mutation.",
-    guidance: "Planned gate-intelligence surface. Run validate_edit before mutating today.",
-  },
-  {
-    name: "unity_open_mcp_gate_budget_estimate",
-    category: "gate-intelligence",
-    description: "Estimate gate cost/scope before a mutation.",
-    guidance: "Planned gate-intelligence surface. Scope paths_hint tightly to limit gate cost today.",
-  },
-  {
-    name: "unity_open_mcp_mutation_explain",
-    category: "gate-intelligence",
-    description: "Explain what a mutation did and why the gate flagged it.",
-    guidance:
-      "Planned gate-intelligence surface. Read gate.delta and agentNextSteps in mutation responses today.",
-  },
+  // Plan 8 typed tools are now implemented (see mcp-server/src/tools/).
+  // The entries that used to live here have been removed.
 
   // --- Plan 10: Build & Settings -----------------------------------------
   {

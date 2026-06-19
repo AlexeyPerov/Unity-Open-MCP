@@ -116,6 +116,10 @@ import { profilerClearData } from "./profiler-clear-data.js";
 import { profilerSaveData } from "./profiler-save-data.js";
 import { profilerLoadData } from "./profiler-load-data.js";
 import { profilerGetScriptStats } from "./profiler-get-script-stats.js";
+// M16 Plan 8 — typed gate intelligence tools.
+import { impactPreview } from "./impact-preview.js";
+import { gateBudgetEstimate } from "./gate-budget-estimate.js";
+import { mutationExplain } from "./mutation-explain.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -295,6 +299,20 @@ export const M16_PLAN7_TOOLS: Tool[] = [
   profilerGetScriptStats,
 ];
 
+// M16 Plan 8 — gate intelligence typed tools. All three are read-only, gate-
+// free direct-response tools that compose existing checkpoint / validate /
+// delta / verify / run-history foundations — they add NO new verify rules and
+// re-implement NO existing tool. impact_preview + gate_budget_estimate are
+// pre-mutation (scope-first, deterministic); mutation_explain is post-
+// mutation (projects the latest gate run or an explicit checkpoint into a
+// narrative + structured summary). confidence / heuristic boundaries are
+// stated in each tool's response so agents treat the outputs as guidance.
+export const M16_PLAN8_TOOLS: Tool[] = [
+  impactPreview,
+  gateBudgetEstimate,
+  mutationExplain,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -313,4 +331,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN5_TOOLS,
   ...M16_PLAN6_TOOLS,
   ...M16_PLAN7_TOOLS,
+  ...M16_PLAN8_TOOLS,
 ];
