@@ -104,6 +104,18 @@ import { scriptWrite } from "./script-write.js";
 import { scriptDelete } from "./script-delete.js";
 import { objectGetData } from "./object-get-data.js";
 import { objectModify } from "./object-modify.js";
+// M16 Plan 7 — typed profiler session / diagnostics tools.
+import { profilerStart } from "./profiler-start.js";
+import { profilerStop } from "./profiler-stop.js";
+import { profilerGetStatus } from "./profiler-get-status.js";
+import { profilerGetConfig } from "./profiler-get-config.js";
+import { profilerSetConfig } from "./profiler-set-config.js";
+import { profilerListModules } from "./profiler-list-modules.js";
+import { profilerEnableModule } from "./profiler-enable-module.js";
+import { profilerClearData } from "./profiler-clear-data.js";
+import { profilerSaveData } from "./profiler-save-data.js";
+import { profilerLoadData } from "./profiler-load-data.js";
+import { profilerGetScriptStats } from "./profiler-get-script-stats.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -260,6 +272,29 @@ export const M16_PLAN6_TOOLS: Tool[] = [
   objectModify,
 ];
 
+// M16 Plan 7 — typed profiler session / diagnostics tools. Most mutate editor
+// state but write NO assets (start / stop / set_config / enable_module /
+// clear_data) — they are gate-free direct-response tools (the gate validates
+// asset-reference fallout, which does not apply). Read-only members
+// (get_status / get_config / list_modules / load_data / get_script_stats) are
+// gate-free as well. save_data is the lone asset-writing mutator and runs the
+// full gate path with paths_hint scoped to the destination .json path. The
+// M10 capture / memory / rendering reads are NOT duplicated — agents use them
+// for per-frame hierarchy / allocator bytes / GPU + QualitySettings batch.
+export const M16_PLAN7_TOOLS: Tool[] = [
+  profilerStart,
+  profilerStop,
+  profilerGetStatus,
+  profilerGetConfig,
+  profilerSetConfig,
+  profilerListModules,
+  profilerEnableModule,
+  profilerClearData,
+  profilerSaveData,
+  profilerLoadData,
+  profilerGetScriptStats,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -277,4 +312,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN4_TOOLS,
   ...M16_PLAN5_TOOLS,
   ...M16_PLAN6_TOOLS,
+  ...M16_PLAN7_TOOLS,
 ];

@@ -267,6 +267,17 @@ Workflow: `editor_get_tags` / `editor_get_layers` to discover valid names → `g
 
 Workflow: `find_members` → `type_schema` for the one type → `invoke_method` (with `generic_arg_types` / `arg_type_names` for generic/overloaded calls). For authoring: `script_read` → edit → `script_write` → `compile_check` / `read_compile_errors`.
 
+**Typed profiler session / diagnostics tools (M16 Plan 7).** These complement the M10 senses (`unity_senses_profiler_capture` / `profiler_memory` / `profiler_rendering`) — they are the runtime/session layer (enabled flag, modules, config knobs, buffered-frames clear, snapshot save/load, script timing), NOT a second per-frame hierarchy read. Most mutate editor state but write NO assets, so they are gate-free direct-response tools; only `profiler_save_data` writes a `.json` snapshot and runs the gate (paths_hint scoped to the destination `.json`).
+
+- Session: `profiler_start` (enable runtime + open window; `open_window: false` skips the menu) / `profiler_stop` (disable runtime). Idempotent.
+- Status / config reads (gate-free): `profiler_get_status` (enabled / supported / max-used-memory / active module bookkeeping) / `profiler_get_config` (driverEnabled, profileEditor, deepProfile, allocationCallstacks, binaryLog, logFile, maxUsedMemory, available+enabled categories — version-gated knobs return false / empty with a warning). `profiler_get_script_stats` is a single-frame Time + Mono/GC snapshot.
+- Config mutator (gate-free): `profiler_set_config` (mode `play`/`edit`, `deep_profile`, `allocation_callstacks`, `binary_log`, `output`, `max_used_memory`, `enable_categories[]` / `disable_categories[]`). Non-applicable knobs are recorded + surfaced as warnings, not silently dropped.
+- Module bookkeeping (gate-free): `profiler_list_modules` (canonical CPU/GPU/Memory/.../VirtualTexturing list) / `profiler_enable_module` (toggle a name in the local set — Unity's runtime API does not expose per-module control; use the Profiler window for actual visibility).
+- Buffered frames: `profiler_clear_data` (ProfilerDriver.ClearAllFrames — destructive; save first if needed).
+- Snapshots: `profiler_save_data` (mutating, gate-aware; writes status + rendering + script to a `.json` under the project root) / `profiler_load_data` (read-only; raw JSON + optional `add_to_profiler` for raw-binary captures).
+
+Workflow: `profiler_start` → poll `profiler_get_status` to confirm recording → run the workload → `unity_senses_profiler_capture` for frame data → `profiler_save_data` to persist → `profiler_stop`. The M10 senses stay the per-frame reads; this surface is the runtime/session layer.
+
 ### Return serialization (execute_csharp / invoke_method)
 
 Results are walked by a depth-limited reflective serializer before becoming `mutation.output`:

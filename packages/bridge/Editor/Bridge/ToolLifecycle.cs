@@ -100,6 +100,11 @@ namespace UnityOpenMcpBridge
             // the native save modal) since it is NOT in the lifecycle table.
             { "unity_open_mcp_editor_add_tag",      LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_editor_add_layer",    LifecyclePolicy.EditorSettle },
+            // M16 Plan 7 — typed profiler mutator. profiler_save_data writes a
+            // .json snapshot (no script recompile) — EditorSettle. The other
+            // Plan 7 tools mutate editor state / bookkeeping but write no
+            // assets (gate-free direct-response); they fall through to None.
+            { "unity_open_mcp_profiler_save_data",  LifecyclePolicy.EditorSettle },
 
             // ----- RestartThenSettle: may trigger a domain reload -----
             // execute_csharp / invoke_method can recompile; execute_menu can

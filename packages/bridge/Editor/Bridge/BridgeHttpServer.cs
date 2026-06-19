@@ -113,6 +113,20 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_script_delete",
             "unity_open_mcp_object_get_data",
             "unity_open_mcp_object_modify",
+            // M16 Plan 7 — typed profiler session / diagnostics tools. Most
+            // mutate editor state but write no assets (gate-free); save_data
+            // writes a .json snapshot (MutatingTools below).
+            "unity_open_mcp_profiler_start",
+            "unity_open_mcp_profiler_stop",
+            "unity_open_mcp_profiler_get_status",
+            "unity_open_mcp_profiler_get_config",
+            "unity_open_mcp_profiler_set_config",
+            "unity_open_mcp_profiler_list_modules",
+            "unity_open_mcp_profiler_enable_module",
+            "unity_open_mcp_profiler_clear_data",
+            "unity_open_mcp_profiler_save_data",
+            "unity_open_mcp_profiler_load_data",
+            "unity_open_mcp_profiler_get_script_stats",
             "unity_senses_run_tests",
             "unity_senses_screenshot",
             "unity_senses_read_console",
@@ -191,7 +205,25 @@ namespace UnityOpenMcpBridge
             // UnityEngine.Object. None mutate project state.
             "unity_open_mcp_type_schema",
             "unity_open_mcp_script_read",
-            "unity_open_mcp_object_get_data"
+            "unity_open_mcp_object_get_data",
+            // M16 Plan 7 — typed profiler tools that mutate editor state but
+            // write NO assets (start / stop / set_config / enable_module /
+            // clear_data) plus the read-only members (get_status /
+            // get_config / list_modules / load_data / get_script_stats). The
+            // gate validates asset-reference fallout, which does not apply —
+            // they route as direct-response tools. profiler_save_data is NOT
+            // here — it writes a .json snapshot and runs the full gate
+            // (MutatingTools).
+            "unity_open_mcp_profiler_start",
+            "unity_open_mcp_profiler_stop",
+            "unity_open_mcp_profiler_get_status",
+            "unity_open_mcp_profiler_get_config",
+            "unity_open_mcp_profiler_set_config",
+            "unity_open_mcp_profiler_list_modules",
+            "unity_open_mcp_profiler_enable_module",
+            "unity_open_mcp_profiler_clear_data",
+            "unity_open_mcp_profiler_load_data",
+            "unity_open_mcp_profiler_get_script_stats"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -265,7 +297,14 @@ namespace UnityOpenMcpBridge
             // asset / scene.
             "unity_open_mcp_script_write",
             "unity_open_mcp_script_delete",
-            "unity_open_mcp_object_modify"
+            "unity_open_mcp_object_modify",
+            // M16 Plan 7 — typed profiler mutator. profiler_save_data writes a
+            // .json snapshot to disk (composed from the read surfaces in this
+            // tool family); the caller must scope paths_hint to the
+            // destination .json path. The other Plan 7 tools mutate editor
+            // state but write no assets and route as gate-free direct-
+            // response tools (DirectResponseTools).
+            "unity_open_mcp_profiler_save_data"
         };
 
         static HttpListener _listener;
@@ -1310,6 +1349,23 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_script_delete" => ReflectionScriptsObjectsTools.ScriptDelete(body),
                 "unity_open_mcp_object_get_data" => ReflectionScriptsObjectsTools.ObjectGetData(body),
                 "unity_open_mcp_object_modify" => ReflectionScriptsObjectsTools.ObjectModify(body),
+                // M16 Plan 7 — typed profiler session / diagnostics tools. All
+                // are gate-free direct-response tools except profiler_save_data
+                // (a mutator that writes a .json snapshot — MutatingTools).
+                // The M10 capture / memory / rendering reads are NOT duplicated
+                // — agents use them for per-frame hierarchy / allocator bytes
+                // / GPU + QualitySettings batch.
+                "unity_open_mcp_profiler_start" => ProfilerSessionTools.Start(body),
+                "unity_open_mcp_profiler_stop" => ProfilerSessionTools.Stop(body),
+                "unity_open_mcp_profiler_get_status" => ProfilerSessionTools.GetStatus(body),
+                "unity_open_mcp_profiler_get_config" => ProfilerSessionTools.GetConfig(body),
+                "unity_open_mcp_profiler_set_config" => ProfilerSessionTools.SetConfig(body),
+                "unity_open_mcp_profiler_list_modules" => ProfilerSessionTools.ListModules(body),
+                "unity_open_mcp_profiler_enable_module" => ProfilerSessionTools.EnableModule(body),
+                "unity_open_mcp_profiler_clear_data" => ProfilerSessionTools.ClearData(body),
+                "unity_open_mcp_profiler_save_data" => ProfilerSessionTools.SaveData(body),
+                "unity_open_mcp_profiler_load_data" => ProfilerSessionTools.LoadData(body),
+                "unity_open_mcp_profiler_get_script_stats" => ProfilerSessionTools.GetScriptStats(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

@@ -137,6 +137,21 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_script_delete: "typed-editor",
   unity_open_mcp_object_get_data: "typed-editor",
   unity_open_mcp_object_modify: "typed-editor",
+  // M16 Plan 7 — typed profiler session / diagnostics tools. Most mutate
+  // editor state (no asset writes) — gate-free direct-response tools.
+  // profiler_save_data is the lone asset-writing mutator (paths_hint scoped
+  // to the destination .json).
+  unity_open_mcp_profiler_start: "diagnostics",
+  unity_open_mcp_profiler_stop: "diagnostics",
+  unity_open_mcp_profiler_get_status: "diagnostics",
+  unity_open_mcp_profiler_get_config: "diagnostics",
+  unity_open_mcp_profiler_set_config: "diagnostics",
+  unity_open_mcp_profiler_list_modules: "diagnostics",
+  unity_open_mcp_profiler_enable_module: "diagnostics",
+  unity_open_mcp_profiler_clear_data: "diagnostics",
+  unity_open_mcp_profiler_save_data: "diagnostics",
+  unity_open_mcp_profiler_load_data: "diagnostics",
+  unity_open_mcp_profiler_get_script_stats: "diagnostics",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
@@ -205,72 +220,8 @@ export const PLANNED_TOOLS: PlannedTool[] = [
   // The entries that used to live here have been removed.
 
   // --- Plan 7: Profiler session ------------------------------------------
-  {
-    name: "unity_open_mcp_profiler_start",
-    category: "diagnostics",
-    description: "Start the runtime profiler.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
-  {
-    name: "unity_open_mcp_profiler_stop",
-    category: "diagnostics",
-    description: "Stop the runtime profiler.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
-  {
-    name: "unity_open_mcp_profiler_get_status",
-    category: "diagnostics",
-    description: "Report profiler enabled state, modules, and memory.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
-  {
-    name: "unity_open_mcp_profiler_get_config",
-    category: "diagnostics",
-    description: "Read profiler config.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
-  {
-    name: "unity_open_mcp_profiler_set_config",
-    category: "diagnostics",
-    description: "Update profiler config.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
-  {
-    name: "unity_open_mcp_profiler_list_modules",
-    category: "diagnostics",
-    description: "List profiler module names with enabled flags.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
-  {
-    name: "unity_open_mcp_profiler_enable_module",
-    category: "diagnostics",
-    description: "Toggle a profiler module's enabled flag.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
-  {
-    name: "unity_open_mcp_profiler_clear_data",
-    category: "diagnostics",
-    description: "Clear buffered profiler frames.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
-  {
-    name: "unity_open_mcp_profiler_save_data",
-    category: "diagnostics",
-    description: "Save a profiler snapshot to a path.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
-  {
-    name: "unity_open_mcp_profiler_load_data",
-    category: "diagnostics",
-    description: "Load a saved profiler snapshot.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
-  {
-    name: "unity_open_mcp_profiler_get_script_stats",
-    category: "diagnostics",
-    description: "Read script execution timing and Mono/GC memory.",
-    guidance: "Planned diagnostics surface. Use unity_senses_profiler_capture for frame data today.",
-  },
+  // Plan 7 typed tools are now implemented (see mcp-server/src/tools/).
+  // The entries that used to live here have been removed.
 
   // --- Plan 8: Gate intelligence -----------------------------------------
   {

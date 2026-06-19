@@ -85,7 +85,7 @@ The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabiliti
 - **Package Manager:** `package_list`, `package_search`, `package_add`, `package_remove`, `package_get_info`, `package_get_dependencies`, `package_check` — **implemented in Plan 4**
 - **Console + Editor state/selection/tags/layers/undo:** `console_clear`, `console_log`, `editor_set_state`, `selection_get`, `selection_set`, `editor_undo`, `editor_redo`, `editor_get_tags`, `editor_get_layers`, `editor_add_tag`, `editor_add_layer` — **implemented in Plan 5**
 - **Reflection/scripts/object data:** `type_schema`, `script_read`, `script_write`, `script_delete`, `object_get_data`, `object_modify` — **implemented in Plan 6**
-- **Profiler & Diagnostics session:** `profiler_start/stop/get_status`, `profiler_get/set_config`, `profiler_list_modules`, `profiler_enable_module`, `profiler_clear_data`, `profiler_save_data`, `profiler_load_data`, `profiler_get_script_stats` (non-duplicate with M10 capture/memory/rendering)
+- **Profiler & Diagnostics session:** `profiler_start/stop/get_status`, `profiler_get/set_config`, `profiler_list_modules`, `profiler_enable_module`, `profiler_clear_data`, `profiler_save_data`, `profiler_load_data`, `profiler_get_script_stats` — **implemented in Plan 7** (non-duplicate with M10 capture/memory/rendering)
 - **Gate intelligence:** `impact_preview`, `gate_budget_estimate`, `mutation_explain`
 - **Project configuration & build:** build pipeline (`build_get_targets`, `build_get/set_target`, `build_get/set_scenes`, `build_start`, `build_get/set_defines`) and project settings (`settings_get/set_player/quality/physics/lighting`)
 
@@ -235,6 +235,41 @@ Enhanced core reflection (in place):
 - `unity_open_mcp_invoke_method` — now accepts `generic_arg_types` (type-name strings substituted for the method's generic parameters, enabling `GetComponent<Rigidbody>()`-style calls) and `arg_type_names` (explicit parameter type names to disambiguate overloads when several share a name). Without either, the legacy single-overload resolution runs unchanged.
 
 Workflow: `find_members` to discover members → `type_schema` for the structured schema of the one type you'll call into → `invoke_method` (with `generic_arg_types` / `arg_type_names` for generic/overloaded calls) to execute. For script authoring: `script_read` the existing file → edit → `script_write` (Roslyn-validated) → `compile_check` / `read_compile_errors` to confirm. For object data: `object_get_data` to inspect → `object_modify` to patch; use `component_get` / `component_modify` for Component Inspector fields.
+
+#### Profiler session / diagnostics (M16 Plan 7 — implemented)
+
+These complement the M10 senses (`unity_senses_profiler_capture` / `profiler_memory` / `profiler_rendering`) — they are the runtime/session layer (enabled flag, modules, config knobs, buffered-frames clear, snapshot save/load, script timing), NOT a second per-frame hierarchy read. Most mutate editor state but write NO assets (the gate validates asset-reference fallout, which does not apply): they route as gate-free direct-response tools (returned as direct JSON without the gate envelope) and use `lifecycle: "none"`. The exception is `profiler_save_data`, which writes a `.json` snapshot to disk and runs the full gate path with `paths_hint = ["<the .json path>"]` and `lifecycle: "editor_settle"`.
+
+Session control (gate-free; idempotent):
+
+- `unity_open_mcp_profiler_start` — Enable the runtime profiler (`Profiler.enabled = true`) and optionally open the Profiler window (`open_window: true` default). Recording starts at the next frame — poll `profiler_get_status` or `unity_senses_profiler_capture` to confirm. Enabling adds runtime overhead — disable via `profiler_stop` when done.
+- `unity_open_mcp_profiler_stop` — Disable the runtime profiler. Buffered frames stay in memory — call `profiler_clear_data` to discard them, or `profiler_save_data` to persist a snapshot first.
+
+Status / config reads (gate-free):
+
+- `unity_open_mcp_profiler_get_status` — `enabled`, `supported`, `maxUsedMemoryBytes` / `maxUsedMemoryMB`, and the local `activeModules[]` bookkeeping set. Lightweight runtime flag surface; use `unity_senses_profiler_memory` for live allocator bytes.
+- `unity_open_mcp_profiler_get_config` — Full ProfilerDriver / Profiler knob snapshot (`driverEnabled`, `profileEditor`, `deepProfile`, `allocationCallstacks`, `binaryLog`, `outputPath`, `maxUsedMemory`, `availableCategories[]`, `enabledCategories[]`) plus a `warnings[]` list flagging any version-gated knob that was unavailable. Some knobs return false / empty on Unity versions where the underlying API is missing.
+- `unity_open_mcp_profiler_get_script_stats` — Single-frame snapshot from `Time` + Mono/GC: `frameTimeMs`, `fixedDeltaTimeMs`, `timeScale`, `totalFrameCount`, `realtimeSinceStartup`, `monoMemoryUsageBytes/MB`, `gcMemoryUsageBytes/MB`. For historical frame data use `unity_senses_profiler_capture`.
+
+Config mutator (gate-free):
+
+- `unity_open_mcp_profiler_set_config` — Update one or more runtime knobs in a single call: `mode` (`"play"` / `"edit"` — edit targeting is version-gated), `deep_profile` (high overhead), `allocation_callstacks` (high overhead), `binary_log` (Editor usually ignores it; reported as a warning), `output` (`Profiler.logFile` path; parent dirs created), `max_used_memory` (bytes; clamped to a safe editor budget), `enable_categories[]` / `disable_categories[]` (`ProfilerCategory` name toggles). Returns the post-write config plus a `warnings[]` list of any knobs recorded but not applied on this Unity version. Use `profiler_start` / `profiler_stop` for the enabled flag itself.
+
+Module bookkeeping (gate-free):
+
+- `unity_open_mcp_profiler_list_modules` — Canonical Profiler window module names (CPU / GPU / Rendering / Memory / Audio / Video / Physics / Physics2D / NetworkMessages / NetworkOperations / UI / UIDetails / GlobalIllumination / VirtualTexturing) with the local enabled bookkeeping flag each. Unity's runtime API does not expose per-module toggling — the flag is bookkeeping only; use the Profiler window for actual visibility.
+- `unity_open_mcp_profiler_enable_module` — Toggle one module name in the local bookkeeping set (`module` required, `enabled` default true). Refuses unknown names with `unknown_module`.
+
+Buffered frames (gate-free; destructive):
+
+- `unity_open_mcp_profiler_clear_data` — `ProfilerDriver.ClearAllFrames()`. Cannot be undone — call `profiler_save_data` first if a snapshot is wanted. Returns `clear_unavailable` on Unity versions where the API is missing.
+
+Snapshots:
+
+- `unity_open_mcp_profiler_save_data` — Mutating: compose a structured JSON snapshot (status + rendering + script — re-emitted by the same read tools so the shape stays in sync) and write it. `paths_hint = ["<the .json path>"]`. Destination must live under the project root, end in `.json`, and contain no `..`. Parent directories are created.
+- `unity_open_mcp_profiler_load_data` — Read-only: read back a previously-saved snapshot (returns its raw JSON as `content`). Source must live under the project root, end in `.json`, and be under 10 MB. `add_to_profiler: true` (default false) also calls `Profiler.AddFramesFromFile` so the frames are browsable in the Profiler window — JSON snapshots saved by `profiler_save_data` are NOT raw binary captures, so `AddFramesFromFile` will refuse them (the request surfaces as a warning and the raw JSON is still returned).
+
+Workflow: `profiler_start` → poll `profiler_get_status` to confirm recording → run the workload → `unity_senses_profiler_capture` for per-frame data → `profiler_save_data` to persist → `profiler_stop`. The M10 senses stay the per-frame / allocator / GPU batch reads; this surface is the runtime/session layer. For deep-profile / allocation-callstacks / category toggles, use `profiler_set_config` (warns on version-gated knobs).
 
 ## Capability discovery
 
