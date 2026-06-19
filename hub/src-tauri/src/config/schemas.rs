@@ -30,6 +30,18 @@ pub struct Settings {
     /// `[data-theme="…"]` attribute on `<html>` from this field.
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Multi-type: when the on-disk size of a project is below this
+    /// threshold (in MiB), the git popup auto-calculates and caches a
+    /// line count so a passive stat is shown. Above it, the popup shows
+    /// a hint instead and the user can run the manual counter. Default
+    /// 30 MiB per the brief. `#[serde(default)]` keeps legacy files
+    /// loadable.
+    #[serde(default = "default_line_count_threshold_mb")]
+    pub line_count_auto_calc_threshold_mb: u32,
+}
+
+fn default_line_count_threshold_mb() -> u32 {
+    30
 }
 
 fn default_theme() -> String {
@@ -241,6 +253,7 @@ impl Default for Settings {
             },
             ai_toolkit: AiToolkitSettings::default(),
             theme: default_theme(),
+            line_count_auto_calc_threshold_mb: default_line_count_threshold_mb(),
         }
     }
 }
@@ -332,6 +345,79 @@ pub struct ProjectEntry {
     /// keeps legacy `projects.json` files loadable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_build_target: Option<String>,
+    /// Multi-type support: discriminator for how the hub treats this
+    /// folder. `Unity` is the default for legacy entries (the only kind
+    /// the hub tracked before multi-type), so `#[serde(default = …)]`
+    /// keeps existing `projects.json` files loadable with no migration.
+    #[serde(default = "default_project_kind")]
+    pub kind: ProjectKind,
+    /// For Package / OpenMcp kinds: relative path to the package
+    /// manifest from the project root (`package.json`). `None` for
+    /// Unity / Custom kinds. Stored so the UI does not have to re-detect
+    /// it on every paint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_manifest_path: Option<String>,
+    /// Per-package saved source folder for the "Migrate" feature in the
+    /// Package settings popup. Persisted across sessions per the brief.
+    /// `None` for kinds that do not support migrate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migrate_source_folder: Option<String>,
+    /// Cached output of the line counter (§7). Populated by the manual
+    /// "Run line count" button and, when the project is small enough,
+    /// by the git-popup auto-calc path. `None` until first run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_count_stats: Option<LineCountStats>,
+}
+
+/// The four kinds of folder the hub tracks. Ordering follows the
+/// detection precedence in `project_kind::detect_kind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProjectKind {
+    Unity,
+    Package,
+    OpenMcp,
+    Custom,
+}
+
+impl Default for ProjectKind {
+    fn default() -> Self {
+        ProjectKind::Unity
+    }
+}
+
+impl ProjectKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProjectKind::Unity => "unity",
+            ProjectKind::Package => "package",
+            ProjectKind::OpenMcp => "openMcp",
+            ProjectKind::Custom => "custom",
+        }
+    }
+}
+
+fn default_project_kind() -> ProjectKind {
+    ProjectKind::Unity
+}
+
+/// Cached line-counter result. The `details` string is the same
+/// 4-section report the CLI emits (extensions counted/ignored, skipped
+/// dirs, `.gitignore` respected), suitable for appending to the app
+/// logs without re-formatting.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineCountStats {
+    pub total_lines: u64,
+    pub code_files: u32,
+    pub ignored_files: u32,
+    pub skipped_dirs: u32,
+    /// ISO-8601 timestamp of the scan; shown in the settings popup so
+    /// the user knows how stale the cached number is.
+    pub scanned_at: String,
+    /// Human-readable report (the four LineWalker sections). Surfaced
+    /// to the app logs by the manual "Run line count" button.
+    pub details: String,
 }
 
 fn default_project_source() -> String {
@@ -645,6 +731,10 @@ mod tests {
                 ]),
                 render_pipeline: Some("URP".to_string()),
                 default_build_target: Some("StandaloneWindows64".to_string()),
+                kind: ProjectKind::Unity,
+                package_manifest_path: None,
+                migrate_source_folder: None,
+                line_count_stats: None,
             }],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -711,6 +801,10 @@ mod tests {
             env_vars: BTreeMap::new(),
             render_pipeline: None,
             default_build_target: None,
+            kind: ProjectKind::Unity,
+            package_manifest_path: None,
+            migrate_source_folder: None,
+            line_count_stats: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(!json.contains("unityVersion"));
@@ -792,6 +886,84 @@ mod tests {
         let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
         assert!(entry.render_pipeline.is_none());
         assert!(entry.default_build_target.is_none());
+    }
+
+    #[test]
+    fn project_entry_kind_defaults_to_unity_for_legacy_json() {
+        // Multi-type: pre-multi-type entries have no `kind` field. They
+        // must default to `Unity` so the existing Unity-only behavior is
+        // preserved without a migration. The other multi-type fields
+        // (packageManifestPath / migrateSourceFolder / lineCountStats)
+        // all default to `None` and stay off the on-disk shape until set.
+        let legacy = r#"{
+            "id": "abc",
+            "name": "Proj",
+            "path": "/p"
+        }"#;
+        let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
+        assert_eq!(entry.kind, ProjectKind::Unity);
+        assert!(entry.package_manifest_path.is_none());
+        assert!(entry.migrate_source_folder.is_none());
+        assert!(entry.line_count_stats.is_none());
+    }
+
+    #[test]
+    fn project_entry_kind_roundtrips_all_variants() {
+        // `kind` is a non-optional field that must serialize in the
+        // camelCase form the frontend expects and round-trip cleanly.
+        for kind in [
+            ProjectKind::Unity,
+            ProjectKind::Package,
+            ProjectKind::OpenMcp,
+            ProjectKind::Custom,
+        ] {
+            let entry = ProjectEntry {
+                id: "id".to_string(),
+                name: "N".to_string(),
+                path: "/p".to_string(),
+                unity_version: None,
+                last_opened_at: None,
+                last_modified_at: None,
+                launch_args: None,
+                platform_intent: None,
+                last_launch_pid: None,
+                last_launch_at: None,
+                frecency: 0,
+                git_branch: None,
+                source: "manual".to_string(),
+                hidden: false,
+                stale: false,
+                env_vars: BTreeMap::new(),
+                render_pipeline: None,
+                default_build_target: None,
+                kind,
+                package_manifest_path: None,
+                migrate_source_folder: None,
+                line_count_stats: None,
+            };
+            let json = serde_json::to_string(&entry).unwrap();
+            let restored: ProjectEntry = serde_json::from_str(&json).unwrap();
+            assert_eq!(restored.kind, kind, "kind {:?} did not round-trip", kind);
+        }
+    }
+
+    #[test]
+    fn settings_line_count_threshold_defaults_to_30() {
+        // Multi-type: the git-popup auto-calc threshold has a documented
+        // default of 30 MiB and must default in for legacy settings.
+        let legacy = r#"{
+            "version": 1,
+            "launch": { "mode": "openProject", "rememberLastSelection": true },
+            "projectList": {
+                "showPathColumn": true,
+                "showModifiedColumn": true,
+                "searchIncludesPath": true
+            },
+            "safety": { "confirmKillUnity": true, "confirmRemoveProject": true },
+            "unityDiscovery": { "parentFolders": [] }
+        }"#;
+        let restored: Settings = serde_json::from_str(legacy).unwrap();
+        assert_eq!(restored.line_count_auto_calc_threshold_mb, 30);
     }
 
     #[test]

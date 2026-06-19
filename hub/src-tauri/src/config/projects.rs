@@ -8,15 +8,13 @@ use crate::config::commands::AppState;
 use crate::config::discovery;
 use crate::config::git_branch;
 use crate::config::persistence;
-use crate::config::schemas::{ProjectEntry, ProjectsFile};
+use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AddProjectError {
     #[serde(rename_all = "camelCase")]
     NotADirectory { path: String },
-    #[serde(rename_all = "camelCase")]
-    NotAUnityProject { path: String, reason: String },
     #[serde(rename_all = "camelCase")]
     Duplicate { path: String },
     #[serde(rename_all = "camelCase")]
@@ -152,12 +150,12 @@ pub fn add_project(
         return Err(AddProjectError::NotADirectory { path: path.clone() });
     }
 
-    if let Err(reason) = is_unity_project_root(&project_path) {
-        return Err(AddProjectError::NotAUnityProject {
-            path: path.clone(),
-            reason,
-        });
-    }
+    // Multi-type: any directory is accepted. `detect_kind` classifies
+    // the folder (Unity → OpenMcp → Package → Custom) so the row and
+    // settings popup can adapt per type. The Unity-only enrichments
+    // below (render pipeline / build target / unity version) only run
+    // for the Unity branch; other kinds get `None` for those fields.
+    let kind = crate::config::project_kind::detect_kind(&project_path);
 
     let canonical = canonicalize_for_compare(&path);
 
@@ -172,8 +170,29 @@ pub fn add_project(
         }
     }
 
-    let unity_version = read_unity_version(&project_path);
     let last_modified_at = read_dir_mtime_iso(&project_path);
+
+    // Unity-only enrichments. The render-pipeline / build-target
+    // helpers read Unity-specific asset files that do not exist for
+    // other kinds, so we skip the work entirely outside the Unity
+    // branch (they fall back to BIRP / `None` internally anyway, but
+    // running them on a package folder is wasted I/O).
+    let (unity_version, render_pipeline, default_build_target) = match kind {
+        ProjectKind::Unity => {
+            let version = read_unity_version(&project_path);
+            let rp = Some(
+                crate::config::render_pipeline::read_render_pipeline(&project_path)
+                    .label()
+                    .to_string(),
+            );
+            let bt = crate::config::build_target::read_default_build_target(&project_path).target;
+            (version, rp, bt)
+        }
+        ProjectKind::Package | ProjectKind::OpenMcp | ProjectKind::Custom => (None, None, None),
+    };
+
+    let package_manifest_path = crate::config::project_kind::package_manifest_relative(kind)
+        .map(|s| s.to_string());
 
     let entry = ProjectEntry {
         id: uuid::Uuid::new_v4().to_string(),
@@ -192,19 +211,12 @@ pub fn add_project(
         hidden: false,
         stale: false,
         env_vars: Default::default(),
-        // M15 T6.4: populate the discovery-enriched metadata so the
-        // row shows the right SRP / build-target chips from the first
-        // paint. Both helpers fall back to BIRP / `None` for projects
-        // that have not been opened by a Unity Editor yet.
-        render_pipeline: Some(
-            crate::config::render_pipeline::read_render_pipeline(&project_path)
-                .label()
-                .to_string(),
-        ),
-        default_build_target: crate::config::build_target::read_default_build_target(
-            &project_path,
-        )
-        .target,
+        render_pipeline,
+        default_build_target,
+        kind,
+        package_manifest_path,
+        migrate_source_folder: None,
+        line_count_stats: None,
     };
 
     let mut projects = state.projects.lock().unwrap().clone();
@@ -613,6 +625,10 @@ mod tests {
             env_vars: Default::default(),
             render_pipeline: None,
             default_build_target: None,
+            kind: ProjectKind::Unity,
+            package_manifest_path: None,
+            migrate_source_folder: None,
+            line_count_stats: None,
         }
     }
 

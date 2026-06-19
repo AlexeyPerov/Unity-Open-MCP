@@ -65,7 +65,7 @@ use tauri::State;
 
 use crate::config::commands::AppState;
 use crate::config::persistence;
-use crate::config::schemas::{ProjectEntry, ProjectsFile};
+use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -669,6 +669,10 @@ pub fn create_new_project(
         // picks it up; we leave it `None` here rather than asserting
         // a platform the user did not choose.
         default_build_target: None,
+        kind: ProjectKind::Unity,
+        package_manifest_path: None,
+        migrate_source_folder: None,
+        line_count_stats: None,
     };
 
     let mut projects = state.projects.lock().unwrap().clone();
@@ -1240,6 +1244,10 @@ mod tests {
                 env_vars: Default::default(),
                 render_pipeline: Some("URP".to_string()),
                 default_build_target: None,
+                kind: ProjectKind::Unity,
+                package_manifest_path: None,
+                migrate_source_folder: None,
+                line_count_stats: None,
             },
             projects: ProjectsFile {
                 version: 1,

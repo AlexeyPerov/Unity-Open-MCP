@@ -7,7 +7,7 @@ Includes a Unity Hub Pro launcher with wizard setup for this MCP.
 
 - MCP server workspace under [mcp-server/](mcp-server/).
 - Bridge package and tests under [packages/](packages/).
-- Unity Hub Pro desktop app scaffold under [hub/](hub/).
+- Unity Hub Pro desktop app scaffold under [hub/](hub/). The hub manages Unity projects, UPM packages, Open-MCP repositories, and arbitrary folders — each classified automatically and given a type-specific settings popup, git status view, and line counter.
 - Demo and templates for local experimentation and automation under [demo/](demo/) and [templates/](templates/).
 
 ## Repository layout

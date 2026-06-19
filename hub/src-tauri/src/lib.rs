@@ -16,6 +16,7 @@ pub fn run() {
             walk_up_registry: Mutex::new(config::walk_up_scan::WalkUpRegistry::default()),
             install_in_progress: Mutex::new(false),
         })
+        .manage(config::command_runner::CommandRunnerState::default())
         .invoke_handler(tauri::generate_handler![
             config::commands::load_settings,
             config::commands::save_settings,
@@ -72,6 +73,20 @@ pub fn run() {
             config::mcp_config::copy_skill_files,
             config::launch_verify::launch_for_verify,
             config::launch_verify::poll_bridge_ping,
+            config::line_count::count_lines,
+            config::line_count::count_lines_cached,
+            config::git_status::git_status,
+            config::upm::manifest::read_package_manifest,
+            config::upm::manifest::write_package_manifest,
+            config::upm::migrate::migrate_package_files,
+            config::upm::meta::regenerate_package_meta_guids,
+            config::upm::meta::add_missing_package_meta,
+            config::upm::create::create_package,
+            config::command_runner::run_project_build,
+            config::command_runner::run_project_test,
+            config::command_runner::run_project_custom,
+            config::command_runner::stop_project_command,
+            config::command_runner::project_command_running,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

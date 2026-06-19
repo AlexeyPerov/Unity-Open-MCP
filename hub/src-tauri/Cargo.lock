@@ -1611,6 +1611,7 @@ dependencies = [
  "chrono",
  "dirs",
  "env_logger",
+ "libc",
  "log",
  "serde",
  "serde_json",

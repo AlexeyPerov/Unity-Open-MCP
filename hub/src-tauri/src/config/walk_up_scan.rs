@@ -49,7 +49,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::config::commands::AppState;
 use crate::config::persistence;
-use crate::config::schemas::{ProjectEntry, ProjectsFile};
+use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile};
 
 /// Hard upper bound on the configurable walk-up depth. The Settings
 /// UI can offer 1..=MAX_DEPTH, the user can also type a value via the
@@ -307,6 +307,10 @@ fn walk_dir(
             ),
             default_build_target: crate::config::build_target::read_default_build_target(dir)
                 .target,
+            kind: ProjectKind::Unity,
+            package_manifest_path: None,
+            migrate_source_folder: None,
+            line_count_stats: None,
         };
         ctx.found.push(entry.clone());
         // Mark the canonical path as seen so nested project roots

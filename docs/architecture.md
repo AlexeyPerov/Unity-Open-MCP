@@ -63,6 +63,22 @@
 - Bridge listener endpoints and gate envelopes: `packages/bridge/Editor/Bridge/BridgeHttpServer.cs`
 - Bridge instance lock + heartbeat: `packages/bridge/Editor/Bridge/BridgeInstanceLock.cs`, `packages/bridge/Editor/Bridge/BridgeHeartbeat.cs`
 
+## Hub project kinds (multi-type)
+
+The hub tracks four kinds of folder, classified automatically on add by `hub/src-tauri/src/config/project_kind.rs` with precedence Unity → Open-MCP → Package → Custom. Each kind gets a tailored list row and settings popup:
+
+- **Unity** (`Assets/` + `ProjectSettings/`): launchable, AI Setup, render-pipeline/build-target chips, full settings popup (launch args, platform intent, env vars).
+- **Open-MCP** (`mcp-server/` + root `package.json`): read-only git status, line counter, and a command runner (`npm run build` / `npm test` / custom) with live streaming logs via `hub/src-tauri/src/config/command_runner.rs`.
+- **Package** (root `package.json`): UPM manifest editor (`hub/src-tauri/src/config/upm/`), `.meta` GUID regeneration, missing-meta fixup, and an append-and-replace file migrator.
+- **Custom** (any other folder): read-only git status + line counter only.
+
+Cross-cutting surfaces for all kinds:
+
+- **Git widget** — the branch chip in the list is clickable for every kind and opens a read-only popup showing branch, ahead/behind, and pending files. Shells out to the `git` CLI from `hub/src-tauri/src/config/git_status.rs`.
+- **Line counter** — ports the LineWalker algorithm (`hub/src-tauri/src/config/line_count.rs`); auto-calculates in the git popup for small projects (threshold in app settings, default 30 MiB) and is available as an explicit "Run line count" button in every settings popup.
+
+The hub's Rust commands are registered in `hub/src-tauri/src/lib.rs`; the frontend TS wrappers live in `hub/src/lib/services/config.ts`.
+
 ## Update triggers
 
 Update this document when:

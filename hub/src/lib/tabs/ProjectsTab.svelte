@@ -32,17 +32,25 @@
     setProjectStale,
     upgradeCandidates,
     upgradeUnity,
+    gitStatus,
+    countLinesCached,
+    createPackage,
     type AddProjectError,
     type BundleStrategy,
+    type CreatePackageError,
+    type GitStatus,
+    type GitStatusError,
     type HubCandidatesResult,
     type HubProjectCandidate,
     type HubTemplateEntry,
     type HubTemplatesResult,
     type KillUnityResult,
     type LaunchError,
+    type LineCountStats,
     type LogPaths,
     type NewProjectError,
     type ProjectEntry,
+    type ProjectKind,
     type RelinkProjectError,
     type RemoveProjectError,
     type RenderPipeline,
@@ -62,7 +70,42 @@
   import StatusChip from "$lib/components/StatusChip.svelte";
   import RelativeTime from "$lib/components/RelativeTime.svelte";
   import AiSetupWizard from "$lib/components/AiSetupWizard.svelte";
-  import { AI_SETUP_ENABLED } from "$lib/features";
+  import PackageProjectSettings from "$lib/components/project-settings/PackageProjectSettings.svelte";
+  import OpenMcpProjectSettings from "$lib/components/project-settings/OpenMcpProjectSettings.svelte";
+  import CustomProjectSettings from "$lib/components/project-settings/CustomProjectSettings.svelte";
+  import { AI_SETUP_ENABLED, MULTI_PROJECT_TYPES_ENABLED } from "$lib/features";
+
+  /**
+   * Normalizes a project's `kind` to the four-value union. Legacy
+   * entries (added before multi-type support) have no `kind` field on
+   * disk and deserialize as `undefined`; they are always Unity
+   * projects, matching the Rust default in `schemas::ProjectKind`.
+   * When `MULTI_PROJECT_TYPES_ENABLED` is `false` the frontend forces
+   * every row to look like Unity so the type chip stays hidden and the
+   * launch/AI affordances behave as before.
+   */
+  function projectKindOf(project: ProjectEntry): ProjectKind {
+    if (!MULTI_PROJECT_TYPES_ENABLED) return "unity";
+    return project.kind ?? "unity";
+  }
+
+  /**
+   * Short human label for the type chip in the projects list. Kept
+   * compact so the chip fits the existing column width alongside the
+   * project name.
+   */
+  function kindLabel(kind: ProjectKind): string {
+    switch (kind) {
+      case "unity":
+        return "Unity";
+      case "package":
+        return "Package";
+      case "openMcp":
+        return "Open-MCP";
+      case "custom":
+        return "Custom";
+    }
+  }
 
   type FilterPreset = "all" | "launchable" | "missingVersion" | "missingPath" | "missingOrStale" | "running";
   type StatusKind =
@@ -160,6 +203,22 @@
   let newProjectError = $state<string | null>(null);
   let newProjectCreating = $state(false);
   let newProjectOverwriteConfirm = $state<string | null>(null);
+
+  // Multi-type: the New Project modal has a Project | Package tab.
+  // The Project tab is the existing Unity scaffold flow; the Package
+  // tab scaffolds a UPM package (see create_package backend).
+  type NewProjectMode = "project" | "package";
+  let newProjectMode = $state<NewProjectMode>("project");
+  // Package-tab form fields.
+  let pkgName = $state("");
+  let pkgVersion = $state("1.0.0");
+  let pkgDisplayName = $state("");
+  let pkgDescription = $state("");
+  let pkgUnity = $state("2022.3");
+  let pkgKeywords = $state("");
+  let pkgAuthorName = $state("");
+  let pkgAuthorUrl = $state("");
+  let pkgIncludeExtras = $state(true);
   // M4 Plan 2 (M4-4 / M4-5): AI Setup wizard. The wizard's own state
   // lives entirely inside `AiSetupWizard.svelte`; the Projects tab
   // only owns the "open / close" handle and the live project
@@ -646,6 +705,12 @@
     if (launching) return;
     const project = projectsStore.find(id);
     if (!project) return;
+    // Multi-type: only Unity projects are launchable. The row for other
+    // kinds is not wired to call this handler, but the early-return
+    // here is the authoritative guard so a stray click (e.g. keyboard
+    // activation) cannot try to spawn a Unity editor against a package
+    // or arbitrary folder.
+    if (projectKindOf(project) !== "unity") return;
     const status = statusFor(project);
     if (status.pathExists === false) {
       S.appendErrorLog(`cannot launch: path missing — ${project.path}`);
@@ -928,7 +993,7 @@
       const selected = await openDialog({
         directory: true,
         multiple: false,
-        title: "Select Unity project root",
+        title: "Select folder",
       });
       if (!selected || typeof selected !== "string") {
         return;
@@ -938,9 +1003,20 @@
         projectsStore.add(result.project);
         await refreshPathExistence();
         await loadSizes();
-        S.appendDrawerLog(
-          `added project ${result.project.name} (${result.project.unityVersion ?? "version unknown"})`
-        );
+        // Multi-type: log the detected kind so the drawer confirms
+        // how the folder was classified (Unity / Package / Open-MCP /
+        // Custom). Unity rows keep the version line; other kinds
+        // surface the kind label instead.
+        const kind = projectKindOf(result.project);
+        if (kind === "unity") {
+          S.appendDrawerLog(
+            `added project ${result.project.name} (${result.project.unityVersion ?? "version unknown"})`
+          );
+        } else {
+          S.appendDrawerLog(
+            `added ${kindLabel(kind).toLowerCase()} ${result.project.name}`
+          );
+        }
       } catch (e) {
         const err = e as AddProjectError;
         addError = formatAddProjectError(err);
@@ -958,8 +1034,6 @@
     switch (err.type) {
       case "notADirectory":
         return `not a directory — ${err.path}`;
-      case "notAUnityProject":
-        return `not a Unity project (${err.reason}) — ${err.path}`;
       case "duplicate":
         return `already in list — ${err.path}`;
       case "persistFailed":
@@ -1873,6 +1947,103 @@
   }
 
   /**
+   * Multi-type: scaffolds a new UPM package on disk and registers it
+   * as a tracked Package project. Mirrors submitNewProject's error /
+   * overwrite-confirm flow but for the Package tab.
+   */
+  function isPackageFormValid(): boolean {
+    return newProjectParent.trim().length > 0 && /^[a-z0-9][a-z0-9.-]*$/.test(pkgName.trim());
+  }
+
+  function formatCreatePackageError(err: CreatePackageError): string {
+    switch (err.type) {
+      case "parentNotADirectory":
+        return `parent is not a directory — ${err.path}`;
+      case "invalidName":
+        return `invalid package name: ${err.reason}`;
+      case "targetExists":
+        return `folder already exists — ${err.path}`;
+      case "scaffoldFailed":
+        return `scaffold failed: ${err.message}`;
+      case "duplicate":
+        return `already in list — ${err.path}`;
+      case "persistFailed":
+        return `failed to save: ${err.message}`;
+      default:
+        return `unknown error: ${JSON.stringify(err)}`;
+    }
+  }
+
+  async function submitNewPackage() {
+    if (!isPackageFormValid() || newProjectCreating) return;
+    newProjectCreating = true;
+    newProjectError = null;
+    newProjectOverwriteConfirm = null;
+    try {
+      const result = await createPackage({
+        parent: newProjectParent.trim(),
+        name: pkgName.trim(),
+        version: pkgVersion.trim() || undefined,
+        displayName: pkgDisplayName.trim() || undefined,
+        description: pkgDescription.trim() || undefined,
+        unity: pkgUnity.trim() || undefined,
+        keywords: pkgKeywords.split(",").map((k) => k.trim()).filter((k) => k.length > 0),
+        authorName: pkgAuthorName.trim() || undefined,
+        authorUrl: pkgAuthorUrl.trim() || undefined,
+        includeExtras: pkgIncludeExtras,
+      });
+      projectsStore.replaceAll(result.projects.projects);
+      projectsStore.select(result.project.id);
+      await refreshPathExistence();
+      newProjectModalOpen = false;
+      S.appendDrawerLog(`created package ${result.project.name}`);
+    } catch (e) {
+      const err = e as CreatePackageError;
+      if (err.type === "targetExists") {
+        newProjectOverwriteConfirm = `${newProjectParent.trim()}/${pkgName.trim()}`;
+      }
+      const message = formatCreatePackageError(err);
+      newProjectError = message;
+      S.appendErrorLog(`new package failed: ${message}`);
+    } finally {
+      newProjectCreating = false;
+    }
+  }
+
+  async function submitNewPackageOverwrite() {
+    if (!isPackageFormValid() || newProjectCreating) return;
+    newProjectCreating = true;
+    try {
+      const result = await createPackage({
+        parent: newProjectParent.trim(),
+        name: pkgName.trim(),
+        version: pkgVersion.trim() || undefined,
+        displayName: pkgDisplayName.trim() || undefined,
+        description: pkgDescription.trim() || undefined,
+        unity: pkgUnity.trim() || undefined,
+        keywords: pkgKeywords.split(",").map((k) => k.trim()).filter((k) => k.length > 0),
+        authorName: pkgAuthorName.trim() || undefined,
+        authorUrl: pkgAuthorUrl.trim() || undefined,
+        includeExtras: pkgIncludeExtras,
+        overwrite: true,
+      });
+      projectsStore.replaceAll(result.projects.projects);
+      projectsStore.select(result.project.id);
+      await refreshPathExistence();
+      newProjectModalOpen = false;
+      newProjectOverwriteConfirm = null;
+      S.appendDrawerLog(`replaced package ${result.project.name}`);
+    } catch (e) {
+      const err = e as CreatePackageError;
+      const message = formatCreatePackageError(err);
+      newProjectError = message;
+      S.appendErrorLog(`new package (overwrite) failed: ${message}`);
+    } finally {
+      newProjectCreating = false;
+    }
+  }
+
+  /**
    * M1.5-11: summary line for the modal's "done" panel. Reads the
    * store's `lastResult` so the message survives a tab switch and
    * is available after the scan closes out. Returns null when no
@@ -2028,6 +2199,10 @@
     if (!id) return "disabled";
     const project = projectsStore.find(id);
     if (!project) return "disabled";
+    // Multi-type: AI Setup only applies to Unity projects. Selecting a
+    // package / open-mcp / custom row disables the toolbar button so
+    // the user cannot start the wizard against a non-Unity folder.
+    if (projectKindOf(project) !== "unity") return "disabled";
     const s = statusFor(project);
     if (s.pathExists !== true) return "disabled";
     if (!s.hasVersion) return "disabled";
@@ -2182,6 +2357,21 @@
     settingsPopupFor ? projectsStore.find(settingsPopupFor) ?? null : null
   );
 
+  // Multi-type: git popup state. Loaded on-demand when the branch chip
+  // is clicked; the cheap `.git/HEAD` branch read still drives the
+  // list-row paint. `gitPopupFor` holds the project id, `gitStatus`
+  // holds the parsed result (or null while loading / on error).
+  let gitPopupFor = $state<string | null>(null);
+  let gitStatusData = $state<GitStatus | null>(null);
+  let gitStatusLoading = $state(false);
+  let gitStatusError = $state<string | null>(null);
+  // Cached line-count stat for the git popup's passive display.
+  let gitPopupLineStats = $state<LineCountStats | null>(null);
+
+  let gitPopupProject = $derived(
+    gitPopupFor ? projectsStore.find(gitPopupFor) ?? null : null
+  );
+
   let popupDefaultBuildTarget = $derived(
     popupProject ? defaultBuildTargetMap[popupProject.id] : undefined
   );
@@ -2304,6 +2494,91 @@
 
   function closeSettingsPopup() {
     settingsPopupFor = null;
+  }
+
+  /**
+   * Multi-type: child settings components (Package / Open-MCP / Custom)
+   * call this when they mutate a project's persisted fields (manifest
+   * edits, migrate source folder, line-count cache, etc.) so the
+   * ProjectsTab store and the open popup both reflect the new state.
+   * The child is responsible for calling `saveProjects` itself before
+   * invoking this; we just refresh the in-memory list.
+   */
+  function handlePopupProjectMutated(updated: ProjectEntry) {
+    const nextList = projectsStore.projects.map((p) =>
+      p.id === updated.id ? updated : p,
+    );
+    projectsStore.replaceAll(nextList);
+  }
+
+  /**
+   * Multi-type: opens the read-only git popup for a project and loads
+   * the full status (branch + ahead/behind + pending file list). The
+   * line-count auto-calc stat is also probed so a small project shows
+   * its total lines under the branch line without the user having to
+   * open the settings popup.
+   */
+  async function openGitPopup(id: string) {
+    gitPopupFor = id;
+    gitStatusData = null;
+    gitStatusError = null;
+    gitPopupLineStats = null;
+    gitStatusLoading = true;
+    const project = projectsStore.find(id);
+    if (!project) {
+      gitStatusLoading = false;
+      return;
+    }
+    // Load status + cached line stats in parallel.
+    const [statusResult, statsResult] = await Promise.allSettled([
+      gitStatus(project.path),
+      countLinesCached(project.id),
+    ]);
+    gitStatusLoading = false;
+    if (statusResult.status === "fulfilled") {
+      gitStatusData = statusResult.value;
+    } else {
+      const err = statusResult.reason as GitStatusError;
+      gitStatusError = formatGitStatusError(err);
+    }
+    if (statsResult.status === "fulfilled") {
+      gitPopupLineStats = statsResult.value;
+    }
+  }
+
+  function closeGitPopup() {
+    gitPopupFor = null;
+    gitStatusData = null;
+    gitStatusError = null;
+    gitPopupLineStats = null;
+  }
+
+  async function refreshGitStatus() {
+    const project = gitPopupProject;
+    if (!project) return;
+    gitStatusLoading = true;
+    gitStatusError = null;
+    try {
+      gitStatusData = await gitStatus(project.path);
+    } catch (e) {
+      const err = e as GitStatusError;
+      gitStatusError = formatGitStatusError(err);
+    } finally {
+      gitStatusLoading = false;
+    }
+  }
+
+  function formatGitStatusError(err: GitStatusError): string {
+    switch (err.type) {
+      case "notARepo":
+        return `not a git repository — ${err.path}`;
+      case "gitMissingBinary":
+        return "git is not installed or not on PATH";
+      case "gitFailed":
+        return `git failed: ${err.message}`;
+      default:
+        return `unknown git error: ${JSON.stringify(err)}`;
+    }
   }
 
   async function handlePopupLaunch() {
@@ -2643,7 +2918,7 @@
         <div class="empty-state">
           {#if projectsStore.projects.length === 0}
             <p>No projects yet.</p>
-            <p class="empty-hint">Use <strong>Add Project</strong> to register a Unity project folder.</p>
+            <p class="empty-hint">Use <strong>Add Project</strong> to register a folder — Unity project, UPM package, Open-MCP repo, or any other folder.</p>
           {:else}
             <p>No projects match the current filter.</p>
           {/if}
@@ -2651,6 +2926,7 @@
       {:else}
         {#each filtered as project, index (project.id)}
           {@const s = rowStatus(project)}
+          {@const kind = projectKindOf(project)}
           <div class="row-wrapper">
             <!-- svelte-ignore a11y_interactive_supports_focus -->
             <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -2660,16 +2936,24 @@
               class:row-stale={s.kind === "stale"}
               class:row-hidden={project.hidden === true}
               class:row-selected={projectsStore.selectedProjectId === project.id}
+              class:row-nonlaunchable={kind !== "unity"}
               role="row"
               aria-selected={projectsStore.selectedProjectId === project.id}
               style="grid-template-columns: {gridTemplate};"
-              onclick={() => handleLaunch(project.id)}
+              onclick={() => { if (kind === "unity") handleLaunch(project.id); }}
               oncontextmenu={(e) => openContextMenu(e, project.id)}
             >
               <div class="cell cell-name" role="gridcell">
                 <div class="name-path">
                   <span class="name-text">
                     {project.name}
+                    {#if kind !== "unity"}
+                      <span
+                        class="source-tag source-kind source-kind-{kind}"
+                        title={`Folder type: ${kindLabel(kind)}`}
+                      >{kindLabel(kind)}</span
+                      >
+                    {/if}
                     {#if project.source === "walk-up"}
                       <span
                         class="source-tag source-walkup"
@@ -2721,17 +3005,24 @@
               {#if showGitBranch}
                 <div class="cell cell-branch" role="gridcell">
                   {#if project.gitBranch}
-                    {#if project.gitBranch.startsWith("detached:")}
-                      <span
-                        class="branch-chip branch-detached"
-                        title={project.gitBranch}
-                      >detached</span>
-                    {:else}
-                      <span
-                        class="branch-chip"
-                        title={project.gitBranch}
-                      >{project.gitBranch}</span>
-                    {/if}
+                    <!-- Multi-type: the branch chip is clickable for
+                         every kind where git is detected — it opens a
+                         read-only git popup (branch + ahead/behind +
+                         pending file list). stopPropagation so the row
+                         launch handler does not also fire. -->
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <span
+                      class="branch-chip branch-clickable"
+                      title="Click for git status"
+                      onclick={(e: MouseEvent) => { e.stopPropagation(); openGitPopup(project.id); }}
+                    >
+                      {#if project.gitBranch.startsWith("detached:")}
+                        <span class="branch-detached">detached</span>
+                      {:else}
+                        <span>{project.gitBranch}</span>
+                      {/if}
+                    </span>
                   {/if}
                 </div>
               {/if}
@@ -2746,7 +3037,7 @@
                 </div>
               </div>
               <div class="cell cell-settings" role="gridcell">
-                {#if AI_SETUP_ENABLED && s.pathExists === true && s.hasVersion && !s.stale}
+                {#if AI_SETUP_ENABLED && kind === "unity" && s.pathExists === true && s.hasVersion && !s.stale}
                   <button
                     type="button"
                     class="row-action-btn ai-row-btn ai-setup-btn ai-setup-{s.launchable ? 'ready' : 'incomplete'}"
@@ -2961,6 +3252,24 @@
       </header>
 
       <div class="newproj-body">
+        <nav class="newproj-tabs">
+          <button
+            type="button"
+            class="newproj-tab"
+            class:active={newProjectMode === "project"}
+            onclick={() => (newProjectMode = "project")}
+            disabled={newProjectCreating}
+          >Unity project</button>
+          <button
+            type="button"
+            class="newproj-tab"
+            class:active={newProjectMode === "package"}
+            onclick={() => (newProjectMode = "package")}
+            disabled={newProjectCreating}
+          >UPM package</button>
+        </nav>
+
+        {#if newProjectMode === "project"}
         <p class="newproj-desc">
           Scaffold a fresh Unity project on disk and register it in
           Hub. The project will appear at the top of the list once
@@ -3158,6 +3467,136 @@
             {/if}
           </div>
         </section>
+        {:else}
+          <!-- Multi-type: Package tab. Scaffolds a UPM package with
+               package.json + Editor/ asmdef + optional README/CHANGELOG. -->
+          <p class="newproj-desc">
+            Scaffold a fresh UPM package on disk and register it in Hub.
+            The package will appear at the top of the list once the modal
+            closes, tracked as a <strong>Package</strong>.
+          </p>
+
+          <section class="newproj-field">
+            <label class="newproj-label" for="pkg-parent">Parent folder</label>
+            <div class="newproj-input-row">
+              <input
+                id="pkg-parent"
+                type="text"
+                class="newproj-input"
+                placeholder="/Users/you/Projects"
+                bind:value={newProjectParent}
+                disabled={newProjectCreating}
+              />
+              <Button variant="secondary" onclick={pickNewProjectParent} disabled={newProjectCreating}>
+                Browse…
+              </Button>
+            </div>
+          </section>
+
+          <section class="newproj-field">
+            <label class="newproj-label" for="pkg-name">Package name</label>
+            <input
+              id="pkg-name"
+              type="text"
+              class="newproj-input"
+              placeholder="com.author.my-package"
+              bind:value={pkgName}
+              disabled={newProjectCreating}
+              spellcheck="false"
+            />
+          </section>
+
+          <section class="newproj-field">
+            <label class="newproj-label" for="pkg-display">Display name</label>
+            <input
+              id="pkg-display"
+              type="text"
+              class="newproj-input"
+              placeholder="My Package"
+              bind:value={pkgDisplayName}
+              disabled={newProjectCreating}
+            />
+          </section>
+
+          <section class="newproj-field">
+            <label class="newproj-label" for="pkg-version">Version</label>
+            <input
+              id="pkg-version"
+              type="text"
+              class="newproj-input"
+              bind:value={pkgVersion}
+              disabled={newProjectCreating}
+              spellcheck="false"
+            />
+          </section>
+
+          <section class="newproj-field">
+            <label class="newproj-label" for="pkg-unity">Unity version</label>
+            <input
+              id="pkg-unity"
+              type="text"
+              class="newproj-input"
+              placeholder="2022.3"
+              bind:value={pkgUnity}
+              disabled={newProjectCreating}
+              spellcheck="false"
+            />
+          </section>
+
+          <section class="newproj-field">
+            <label class="newproj-label" for="pkg-desc">Description</label>
+            <input
+              id="pkg-desc"
+              type="text"
+              class="newproj-input"
+              placeholder="What the package does"
+              bind:value={pkgDescription}
+              disabled={newProjectCreating}
+            />
+          </section>
+
+          <section class="newproj-field">
+            <label class="newproj-label" for="pkg-keywords">Keywords (comma-separated)</label>
+            <input
+              id="pkg-keywords"
+              type="text"
+              class="newproj-input"
+              placeholder="tool, utility"
+              bind:value={pkgKeywords}
+              disabled={newProjectCreating}
+              spellcheck="false"
+            />
+          </section>
+
+          <section class="newproj-field">
+            <label class="newproj-label" for="pkg-author">Author name</label>
+            <input
+              id="pkg-author"
+              type="text"
+              class="newproj-input"
+              bind:value={pkgAuthorName}
+              disabled={newProjectCreating}
+            />
+          </section>
+
+          <section class="newproj-field">
+            <label class="newproj-label" for="pkg-author-url">Author URL</label>
+            <input
+              id="pkg-author-url"
+              type="text"
+              class="newproj-input"
+              placeholder="https://github.com/…"
+              bind:value={pkgAuthorUrl}
+              disabled={newProjectCreating}
+              spellcheck="false"
+            />
+          </section>
+
+          <label class="checkbox-row">
+            <input type="checkbox" bind:checked={pkgIncludeExtras} disabled={newProjectCreating} />
+            <span>Include README.md, CHANGELOG.md, LICENSE.md, and Samples~/</span>
+          </label>
+        {/if}
 
         {#if newProjectError}
           <p class="newproj-error" role="alert">{newProjectError}</p>
@@ -3165,7 +3604,7 @@
             <div class="newproj-overwrite">
               <Button
                 variant="destructive"
-                onclick={submitNewProjectOverwrite}
+                onclick={newProjectMode === "package" ? submitNewPackageOverwrite : submitNewProjectOverwrite}
                 disabled={newProjectCreating}
               >
                 {newProjectCreating ? "Replacing…" : "Overwrite existing folder"}
@@ -3185,10 +3624,10 @@
         </Button>
         <Button
           variant="primary"
-          onclick={submitNewProject}
-          disabled={newProjectCreating || !isNewProjectFormValid()}
+          onclick={newProjectMode === "package" ? submitNewPackage : submitNewProject}
+          disabled={newProjectCreating || (newProjectMode === "package" ? !isPackageFormValid() : !isNewProjectFormValid())}
         >
-          {newProjectCreating ? "Creating…" : "Create project"}
+          {newProjectCreating ? "Creating…" : (newProjectMode === "package" ? "Create package" : "Create project")}
         </Button>
       </footer>
     </div>
@@ -3670,6 +4109,7 @@
 {#if popupProject}
   {@const ps = statusFor(popupProject)}
   {@const popupIsMoreOpen = moreMenuOpenFor === popupProject.id}
+  {@const popupKind = projectKindOf(popupProject)}
   <div
     class="settings-overlay"
     role="presentation"
@@ -3690,7 +4130,12 @@
     >
       <div class="settings-modal-header">
         <div class="settings-modal-titles">
-          <h2>{popupProject.name}</h2>
+          <h2>
+            {popupProject.name}
+            {#if popupKind !== "unity"}
+              <span class="source-tag source-kind source-kind-{popupKind}">{kindLabel(popupKind)}</span>
+            {/if}
+          </h2>
           <span class="settings-modal-path" title={popupProject.path}>{popupProject.path}</span>
         </div>
         <button
@@ -3706,6 +4151,7 @@
         </button>
       </div>
       <div class="settings-modal-body">
+        {#if popupKind === "unity"}
         <div class="settings-actions">
           <Button
             variant="primary"
@@ -4029,6 +4475,124 @@
             </div>
           </section>
         </div>
+        {:else if popupKind === "package"}
+          <PackageProjectSettings project={popupProject} onMutated={handlePopupProjectMutated} />
+        {:else if popupKind === "openMcp"}
+          <OpenMcpProjectSettings project={popupProject} onMutated={handlePopupProjectMutated} />
+        {:else}
+          <CustomProjectSettings project={popupProject} onMutated={handlePopupProjectMutated} />
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if gitPopupProject}
+  <div
+    class="settings-overlay"
+    role="presentation"
+    onclick={closeGitPopup}
+    onkeydown={(e) => { if (e.key === "Escape") closeGitPopup(); }}
+  >
+    <div
+      class="settings-modal git-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="git-popup-title"
+      tabindex="-1"
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => { if (e.key === "Escape") closeGitPopup(); }}
+    >
+      <div class="settings-modal-header">
+        <div class="settings-modal-titles">
+          <h2 id="git-popup-title">
+            Git status
+            <span class="source-tag source-kind source-kind-{projectKindOf(gitPopupProject)}">
+              {kindLabel(projectKindOf(gitPopupProject))}
+            </span>
+          </h2>
+          <span class="settings-modal-path" title={gitPopupProject.path}>{gitPopupProject.path}</span>
+        </div>
+        <button
+          type="button"
+          class="modal-close-btn"
+          aria-label="Close"
+          onclick={closeGitPopup}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="settings-modal-body">
+        {#if gitStatusLoading}
+          <p class="muted">Loading git status…</p>
+        {:else if gitStatusError}
+          <p class="error-text">{gitStatusError}</p>
+        {:else if gitStatusData}
+          <section class="git-summary">
+            <div class="git-summary-row">
+              <span class="git-label">Branch:</span>
+              <span class="git-value">
+                {gitStatusData.branch ?? "—"}
+              </span>
+            </div>
+            {#if !gitStatusData.noUpstream}
+              <div class="git-summary-row">
+                <span class="git-label">Ahead / behind:</span>
+                <span class="git-value">
+                  <span class="git-ahead">↑{gitStatusData.ahead}</span>
+                  <span class="git-behind">↓{gitStatusData.behind}</span>
+                </span>
+              </div>
+            {:else}
+              <div class="git-summary-row">
+                <span class="git-label">Upstream:</span>
+                <span class="git-value muted">no upstream branch</span>
+              </div>
+            {/if}
+            <div class="git-summary-row">
+              <span class="git-label">Pending files:</span>
+              <span class="git-value">{gitStatusData.pending.length}</span>
+            </div>
+            {#if gitPopupLineStats}
+              <div class="git-summary-row">
+                <span class="git-label">Lines (auto):</span>
+                <span class="git-value">
+                  {gitPopupLineStats.totalLines.toLocaleString()}
+                  <span class="muted small">— scanned {new Date(gitPopupLineStats.scannedAt).toLocaleString()}</span>
+                </span>
+              </div>
+            {/if}
+          </section>
+          <section class="git-pending">
+            <h3>Pending changes</h3>
+            {#if gitStatusData.pending.length === 0}
+              <p class="muted">Working tree clean.</p>
+            {:else}
+              <ul class="pending-list">
+                {#each gitStatusData.pending as file}
+                  <li class="pending-item">
+                    <span class="pending-status pending-{file.status}">{file.status}</span>
+                    {#if file.staged}
+                      <span class="pending-staged" title="Staged">●</span>
+                    {/if}
+                    <span class="pending-path" title={file.path}>{file.path}</span>
+                    {#if file.renameFrom}
+                      <span class="pending-rename">← {file.renameFrom}</span>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </section>
+          <div class="git-actions">
+            <Button variant="secondary" onclick={refreshGitStatus}>Refresh</Button>
+          </div>
+        {:else}
+          <p class="muted">No git status available.</p>
+        {/if}
       </div>
     </div>
   </div>
@@ -4315,6 +4879,11 @@
     transition: background 0.08s ease;
   }
 
+  /* Multi-type: non-Unity rows are not launchable, so drop the
+     pointer cursor to signal that a click will not open Unity. The
+     row stays interactive for selection / context menu / settings. */
+  .row-nonlaunchable { cursor: default; }
+
   .row:hover { background: var(--hub-surface); }
 
   .row-selected {
@@ -4426,6 +4995,27 @@
     border-color: rgba(110, 118, 140, 0.45);
   }
 
+  /* Multi-type: the kind chip is the primary type discriminator in
+     the list (Unity rows show no chip so existing Unity users see no
+     visual change). Each non-Unity kind gets a distinct accent so the
+     four kinds are scannable at a glance. */
+  .source-kind { min-width: 3.2rem; justify-content: center; }
+  .source-kind-package {
+    background: rgba(86, 180, 130, 0.18);
+    color: #56b482;
+    border-color: rgba(86, 180, 130, 0.45);
+  }
+  .source-kind-openMcp {
+    background: rgba(192, 132, 252, 0.18);
+    color: #c084fc;
+    border-color: rgba(192, 132, 252, 0.45);
+  }
+  .source-kind-custom {
+    background: rgba(234, 179, 8, 0.18);
+    color: #d4a017;
+    border-color: rgba(234, 179, 8, 0.45);
+  }
+
   .path-text {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.7rem;
@@ -4508,6 +5098,110 @@
     background: var(--hub-branch-detached-bg);
     color: var(--hub-branch-detached-fg);
   }
+
+  /* Multi-type: the branch chip is clickable to open the read-only
+     git popup. Hover/focus feedback signals interactivity without
+     changing the chip's compact shape. */
+  .branch-clickable {
+    cursor: pointer;
+    transition: border-color 0.08s ease, background 0.08s ease;
+  }
+  .branch-clickable:hover {
+    border-color: var(--hub-accent, #5c7cfa);
+    background: rgba(92, 124, 250, 0.12);
+  }
+
+  /* Git popup */
+  .git-modal { max-width: 640px; }
+  .git-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.8rem;
+    border-radius: 0.5rem;
+    background: var(--hub-card);
+    border: 1px solid var(--hub-border);
+    margin-bottom: 1rem;
+  }
+  .git-summary-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+  }
+  .git-label {
+    font-size: 0.75rem;
+    color: var(--hub-text-dim);
+    min-width: 8rem;
+  }
+  .git-value {
+    font-size: 0.8rem;
+    color: var(--hub-text);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .git-ahead { color: #56b482; font-weight: 600; }
+  .git-behind { color: #e0a230; font-weight: 600; }
+  .git-pending h3 {
+    font-size: 0.8rem;
+    margin: 0 0 0.4rem;
+    color: var(--hub-text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .pending-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--hub-border);
+    border-radius: 0.5rem;
+  }
+  .pending-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--hub-border);
+    font-size: 0.75rem;
+  }
+  .pending-item:last-child { border-bottom: none; }
+  .pending-status {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 0.05rem 0.3rem;
+    border-radius: 3px;
+    background: var(--hub-card);
+    color: var(--hub-text-dim);
+    min-width: 4rem;
+    text-align: center;
+  }
+  .pending-modified { color: #e0a230; }
+  .pending-added { color: #56b482; }
+  .pending-deleted { color: #e05656; }
+  .pending-untracked { color: var(--hub-text-dim); }
+  .pending-unmerged { color: #c084fc; }
+  .pending-staged { color: #56b482; font-size: 0.6rem; }
+  .pending-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: var(--hub-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pending-rename {
+    color: var(--hub-text-dim);
+    font-size: 0.7rem;
+    font-style: italic;
+  }
+  .git-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+  .error-text { color: var(--hub-danger); font-size: 0.8rem; }
 
   .muted { color: var(--hub-text-placeholder); }
 
@@ -5247,6 +5941,38 @@
     font-size: 1rem;
     font-weight: 600;
     color: var(--hub-text);
+  }
+
+  /* Multi-type: Project | Package tab switch at the top of the modal. */
+  .newproj-tabs {
+    display: flex;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--hub-border-light);
+    margin-bottom: 0.3rem;
+  }
+  .newproj-tab {
+    padding: 0.4rem 0.8rem;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--hub-text-dim);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .newproj-tab.active {
+    color: var(--hub-text);
+    border-bottom-color: var(--hub-accent, #5c7cfa);
+  }
+  .newproj-tab:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--hub-text-dim);
   }
 
   .newproj-body {

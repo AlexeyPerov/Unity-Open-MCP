@@ -182,7 +182,7 @@ fn export_diagnostics_inner(
 mod tests {
     use super::*;
 use crate::config::paths;
-use crate::config::schemas::{ProjectEntry, ProjectsFile, Settings};
+use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile, Settings};
 
     fn write_settings(dir: &Path) {
         let s = Settings::default();
@@ -212,6 +212,10 @@ use crate::config::schemas::{ProjectEntry, ProjectsFile, Settings};
                 env_vars: Default::default(),
                 render_pipeline: None,
                 default_build_target: None,
+                kind: ProjectKind::Unity,
+                package_manifest_path: None,
+                migrate_source_folder: None,
+                line_count_stats: None,
             }],
         };
         let json = serde_json::to_string_pretty(&p).unwrap();

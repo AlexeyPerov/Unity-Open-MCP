@@ -119,12 +119,56 @@ export interface Settings {
   /** M1.5-18: active theme. Defaults to `"system"`; legacy
    *  `settings.json` files (pre-M1.5-18) load with `"system"`. */
   theme?: Theme;
+  /** Multi-type: when a project's on-disk size is below this threshold
+   *  (in MiB), the git popup auto-calculates a line count and caches it
+   *  so a passive stat is shown. Above it, the popup shows a hint and
+   *  the user runs the manual counter from the settings popup. Default
+   *  30. Legacy `settings.json` files load with 30. */
+  lineCountAutoCalcThresholdMb?: number;
+}
+
+/**
+ * Multi-type support: how the hub treats a tracked folder. Detection
+ * precedence lives in the Rust `project_kind::detect_kind` helper:
+ * Unity (Assets/ + ProjectSettings/) → OpenMcp (mcp-server/ +
+ * package.json) → Package (package.json) → Custom (anything else).
+ * Legacy entries (no `kind` field on disk) load as `"unity"`.
+ */
+export type ProjectKind = "unity" | "package" | "openMcp" | "custom";
+
+/**
+ * Cached line-counter output (§7). `details` is the same 4-section
+ * report the LineWalker CLI emits, suitable for appending to the app
+ * logs without re-formatting.
+ */
+export interface LineCountStats {
+  totalLines: number;
+  codeFiles: number;
+  ignoredFiles: number;
+  skippedDirs: number;
+  /** ISO-8601 scan timestamp; shown in the settings popup so the user
+   *  knows how stale the cached number is. */
+  scannedAt: string;
+  /** Human-readable report (extensions counted/ignored, skipped dirs,
+   *  `.gitignore` respected). Surfaced to app logs by "Run line count". */
+  details: string;
 }
 
 export interface ProjectEntry {
   id: string;
   name: string;
   path: string;
+  /** Multi-type discriminator. Legacy entries (omitted on disk)
+   *  deserialize as `"unity"` so the hub stays backwards compatible. */
+  kind?: ProjectKind;
+  /** For package/openMcp kinds: relative path to the manifest from the
+   *  project root (`package.json`). `undefined` for unity/custom. */
+  packageManifestPath?: string;
+  /** Per-package saved source folder for the "Migrate" feature in the
+   *  Package settings popup; persisted across sessions. */
+  migrateSourceFolder?: string;
+  /** Cached line-counter output (§7). `undefined` until first run. */
+  lineCountStats?: LineCountStats;
   unityVersion?: string;
   lastOpenedAt?: string;
   lastModifiedAt?: string;
@@ -309,7 +353,6 @@ export interface VersionRefreshResult {
 
 export type AddProjectError =
   | { type: "notADirectory"; path: string }
-  | { type: "notAUnityProject"; path: string; reason: string }
   | { type: "duplicate"; path: string }
   | { type: "persistFailed"; message: string };
 
@@ -543,6 +586,258 @@ export async function getGitBranches(
   paths: string[]
 ): Promise<Record<string, string | null>> {
   return invoke<Record<string, string | null>>("get_git_branches", { paths });
+}
+
+/**
+ * Multi-type: read-only git status (branch + ahead/behind + pending
+ * file list) for the git popup. Shells out to the `git` CLI from
+ * Rust; the popup never mutates the repo (no pull/commit/stage).
+ */
+export interface GitPendingFile {
+  path: string;
+  status: string;
+  staged: boolean;
+  renameFrom?: string;
+}
+
+export interface GitStatus {
+  branch?: string;
+  ahead: number;
+  behind: number;
+  noUpstream: boolean;
+  pending: GitPendingFile[];
+}
+
+export type GitStatusError =
+  | { type: "notARepo"; path: string }
+  | { type: "gitMissingBinary" }
+  | { type: "gitFailed"; message: string };
+
+export async function gitStatus(projectPath: string): Promise<GitStatus> {
+  return invoke<GitStatus>("git_status", { projectPath });
+}
+
+/**
+ * Multi-type: line counter (port of LineWalker). `countLines` is the
+ * manual "Run line count" button — always runs a full scan and
+ * caches the result on the project entry. `countLinesCached` is the
+ * git-popup auto-calc path — returns the cached result, or runs a
+ * fresh scan only when the project is below the size threshold.
+ */
+export interface LineCountScanResult {
+  totalLines: number;
+  codeFiles: { relPath: string; ext: string; lines: number }[];
+  ignoredFiles: { relPath: string; reason: string }[];
+  skippedDirs: string[];
+  readErrors: string[];
+}
+
+export interface CountLinesResult {
+  scan: LineCountScanResult;
+  report: string;
+  stats: LineCountStats;
+}
+
+export async function countLines(
+  projectId: string,
+  useGitignore?: boolean
+): Promise<CountLinesResult> {
+  return invoke<CountLinesResult>("count_lines", {
+    projectId,
+    useGitignore: useGitignore ?? true,
+  });
+}
+
+export async function countLinesCached(
+  projectId: string
+): Promise<LineCountStats | null> {
+  return invoke<LineCountStats | null>("count_lines_cached", { projectId });
+}
+
+/**
+ * Multi-type (Package): UPM manifest read/write + .meta operations +
+ * migrate. Ports the relevant pieces of UPM-Template-Creator.
+ */
+export interface PackageManifestAuthor {
+  name?: string;
+  email?: string;
+  url?: string;
+}
+
+export interface PackageManifestSample {
+  displayName?: string;
+  description?: string;
+  path?: string;
+}
+
+export interface PackageManifest {
+  name?: string;
+  version?: string;
+  displayName?: string;
+  description?: string;
+  unity?: string;
+  unityRelease?: string;
+  keywords?: string[];
+  author?: PackageManifestAuthor;
+  dependencies?: Record<string, string>;
+  samples?: PackageManifestSample[];
+  hideInEditor?: boolean;
+  type?: string;
+  documentationUrl?: string;
+  changelogUrl?: string;
+  licensesUrl?: string;
+}
+
+export type PackageManifestError =
+  | { type: "notFound"; path: string }
+  | { type: "parseFailed"; path: string; message: string }
+  | { type: "writeFailed"; path: string; message: string }
+  | { type: "projectNotFound"; projectId: string }
+  | { type: "persistFailed"; message: string };
+
+export async function readPackageManifest(
+  projectId: string
+): Promise<PackageManifest> {
+  return invoke<PackageManifest>("read_package_manifest", { projectId });
+}
+
+export async function writePackageManifest(
+  projectId: string,
+  manifest: PackageManifest,
+  previousVersion?: string,
+  bumpChangelog?: boolean,
+  changelogLabel?: string
+): Promise<PackageManifest> {
+  return invoke<PackageManifest>("write_package_manifest", {
+    projectId,
+    manifest,
+    previousVersion,
+    bumpChangelog,
+    changelogLabel,
+  });
+}
+
+export interface MetaOperationResult {
+  regenerated: number;
+  added: number;
+  notes: string[];
+}
+
+export async function regeneratePackageMetaGuids(
+  projectId: string
+): Promise<MetaOperationResult> {
+  return invoke<MetaOperationResult>("regenerate_package_meta_guids", { projectId });
+}
+
+export async function addMissingPackageMeta(
+  projectId: string
+): Promise<MetaOperationResult> {
+  return invoke<MetaOperationResult>("add_missing_package_meta", { projectId });
+}
+
+export interface MigrateEntry {
+  relPath: string;
+  action: string;
+}
+
+export interface MigrateResult {
+  entries: MigrateEntry[];
+  copied: number;
+  replaced: number;
+  savedSourceFolder: string;
+}
+
+export type MigrateError =
+  | { type: "projectNotFound"; projectId: string }
+  | { type: "sourceNotADirectory"; path: string }
+  | { type: "persistFailed"; message: string }
+  | { type: "ioFailed"; message: string };
+
+export async function migratePackageFiles(
+  projectId: string,
+  sourceFolder: string
+): Promise<MigrateResult> {
+  return invoke<MigrateResult>("migrate_package_files", { projectId, sourceFolder });
+}
+
+/**
+ * Multi-type (Open-MCP): long-running command runner. Spawns an npm
+ * process (build / test / custom) in the project root, streams
+ * stdout/stderr line-by-line via `cmd-log` events, and tracks the PID
+ * so it can be stopped (process-group kill). Ports vibe-launcher's
+ * process pattern.
+ */
+export type CommandRunnerError =
+  | { type: "spawnFailed"; message: string }
+  | { type: "alreadyRunning"; projectId: string; panel: string };
+
+export type CommandPanel = "build" | "test" | "custom";
+
+export async function runProjectBuild(projectId: string, cwd: string): Promise<void> {
+  return invoke<void>("run_project_build", { projectId, cwd });
+}
+
+export async function runProjectTest(projectId: string, cwd: string): Promise<void> {
+  return invoke<void>("run_project_test", { projectId, cwd });
+}
+
+export async function runProjectCustom(
+  projectId: string,
+  cwd: string,
+  args: string[]
+): Promise<void> {
+  return invoke<void>("run_project_custom", { projectId, cwd, args });
+}
+
+export async function stopProjectCommand(
+  projectId: string,
+  panel: CommandPanel
+): Promise<void> {
+  return invoke<void>("stop_project_command", { projectId, panel });
+}
+
+export async function projectCommandRunning(
+  projectId: string,
+  panel: CommandPanel
+): Promise<boolean> {
+  return invoke<boolean>("project_command_running", { projectId, panel });
+}
+
+/**
+ * Multi-type (New project flow): scaffolds a new UPM package on disk
+ * and registers it as a tracked `Package` project.
+ */
+export interface CreatePackageParams {
+  parent: string;
+  name: string;
+  version?: string;
+  displayName?: string;
+  description?: string;
+  unity?: string;
+  keywords?: string[];
+  authorName?: string;
+  authorUrl?: string;
+  includeExtras?: boolean;
+  overwrite?: boolean;
+}
+
+export interface CreatePackageResult {
+  project: ProjectEntry;
+  projects: ProjectsFile;
+}
+
+export type CreatePackageError =
+  | { type: "parentNotADirectory"; path: string }
+  | { type: "invalidName"; name: string; reason: string }
+  | { type: "targetExists"; path: string }
+  | { type: "scaffoldFailed"; message: string }
+  | { type: "duplicate"; path: string }
+  | { type: "persistFailed"; message: string };
+
+export async function createPackage(
+  params: CreatePackageParams
+): Promise<CreatePackageResult> {
+  return invoke<CreatePackageResult>("create_package", { params });
 }
 
 export async function isPidAlive(pid: number): Promise<boolean> {

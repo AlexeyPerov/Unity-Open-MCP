@@ -8,7 +8,7 @@ use tauri::State;
 
 use crate::config::commands::AppState;
 use crate::config::persistence;
-use crate::config::schemas::{ProjectEntry, ProjectsFile};
+use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile};
 
 #[derive(Debug, Deserialize)]
 struct HubProjectsV1 {
@@ -172,6 +172,10 @@ pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
             } else {
                 None
             },
+            kind: ProjectKind::Unity,
+            package_manifest_path: None,
+            migrate_source_folder: None,
+            line_count_stats: None,
         });
     }
 

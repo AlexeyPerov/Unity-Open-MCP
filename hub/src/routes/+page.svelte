@@ -1,5 +1,9 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
   import { S } from "$lib/state.svelte";
+  import { commandLogsStore } from "$lib/state/command_logs.svelte";
+  import type { CommandPanel } from "$lib/services/config";
   import TopBar from "$lib/components/shell/TopBar.svelte";
   import TabPanel from "$lib/components/shell/TabPanel.svelte";
   import ConfirmationModal from "$lib/components/shell/ConfirmationModal.svelte";
@@ -8,6 +12,25 @@
   import UnityVersionsTab from "$lib/tabs/UnityVersionsTab.svelte";
   import ToolsTab from "$lib/tabs/ToolsTab.svelte";
   import SettingsTab from "$lib/tabs/SettingsTab.svelte";
+
+  // Multi-type (Open-MCP): stream spawned-command output to the
+  // per-(project, panel) log store. The Rust command runner emits a
+  // `cmd-log` event per stdout/stderr line and a `cmd-exit` event on
+  // child exit. Both are unconditionally wired at app start so a
+  // command keeps streaming even if the settings popup is closed.
+  onMount(() => {
+    const unsubs: Array<() => void> = [];
+    listen<{ projectId: string; panel: string; line: string }>("cmd-log", (e) => {
+      commandLogsStore.appendLine(e.payload.projectId, e.payload.panel as CommandPanel, e.payload.line);
+    }).then((u) => unsubs.push(u));
+    listen<{ projectId: string; panel: string; code: number | null }>("cmd-exit", (e) => {
+      commandLogsStore.markExited(e.payload.projectId, e.payload.panel as CommandPanel, e.payload.code);
+      if (e.payload.code !== null && e.payload.code !== 0) {
+        S.appendErrorLog(`${e.payload.panel} exited with code ${e.payload.code}`);
+      }
+    }).then((u) => unsubs.push(u));
+    return () => unsubs.forEach((u) => u());
+  });
 </script>
 
 <div class="shell" role="application" aria-label="Unity Hub Pro">

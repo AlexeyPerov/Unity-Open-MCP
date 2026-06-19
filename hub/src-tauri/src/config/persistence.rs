@@ -105,7 +105,7 @@ fn save_projects_inner(projects: &ProjectsFile) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::schemas::ProjectEntry;
+    use crate::config::schemas::{ProjectEntry, ProjectKind};
 
     #[test]
     fn atomic_write_creates_file_with_content() {
@@ -182,6 +182,10 @@ mod tests {
                 env_vars: Default::default(),
                 render_pipeline: None,
                 default_build_target: None,
+                kind: ProjectKind::Unity,
+                package_manifest_path: None,
+                migrate_source_folder: None,
+                line_count_stats: None,
             }],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();

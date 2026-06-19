@@ -6,7 +6,7 @@ This document tracks primary technologies, scripts, and runtime requirements use
 
 | Area | Primary tools | Notes |
 |---|---|---|
-| Hub app (`hub/`) | Tauri 2, Svelte 5, SvelteKit, Vite, TypeScript | Desktop UI, local command bridge, and frontend runtime. |
+| Hub app (`hub/`) | Tauri 2, Svelte 5, SvelteKit, Vite, TypeScript | Desktop UI, local command bridge, and frontend runtime. The Rust backend (`hub/src-tauri/`) shells out to the system `git` for read-only status and uses `libc` for process-group kill in the Open-MCP command runner. |
 | Bridge (`packages/bridge/`) | Unity C# editor/runtime APIs, reflection-based registry | Typed dispatch and Unity-side bridge behavior. |
 | Verify package (`packages/verify/`) | Unity C# rule engine and batch entrypoints | Health/rule checks used by gate and batch workflows. |
 | MCP server (`mcp-server/`) | Node.js, TypeScript, `@modelcontextprotocol/sdk` | MCP stdio transport and server-side tool/resource exposure. |
