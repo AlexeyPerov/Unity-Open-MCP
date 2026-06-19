@@ -620,9 +620,10 @@ namespace UnityOpenMcpExtensions.InputSystem
         // InputSystemJson — duplicated here only because it is static-private
         // over there; the Create path calls this form before the asset is on
         // disk (SaveAsset would throw on GetAssetPath for a fresh instance).
+        // actionMaps is a ReadOnlyArray struct — check Count, not == null.
         static string SafeJson(InputActionAsset asset)
         {
-            if (asset.actionMaps == null || asset.actionMaps.Count == 0)
+            if (asset.actionMaps.Count == 0)
                 return "{\n    \"name\": \"" + asset.name + "\",\n    \"maps\": [],\n    \"controlSchemes\": []\n}";
             return asset.ToJson();
         }

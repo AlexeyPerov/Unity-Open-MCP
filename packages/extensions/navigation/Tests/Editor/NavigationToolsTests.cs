@@ -9,6 +9,10 @@
 //   4. Agent add + list round-trip — agents/surfaces/links/modifiers appear
 //      in navigation_list output.
 //
+// Tool methods return a hand-rolled JSON string; tests go through
+// BridgeToolRegistry.TryDispatch (which wraps the string in a
+// ToolDispatchResult) instead of calling the methods directly.
+//
 // Live agent.SetDestination (Play Mode only) is NOT covered here — it's in
 // the manual validation checklist. These tests run in EditMode and stay fast.
 using NUnit.Framework;
@@ -82,7 +86,10 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
         [Test]
         public void SurfaceAdd_MissingPathsHint_ReturnsError()
         {
-            var result = NavigationTools.SurfaceAdd(name: "NoHintTarget");
+            var result = BridgeToolRegistry.TryDispatch(
+                "unity_open_mcp_navigation_surface_add",
+                "{\"name\":\"NoHintTarget\"}");
+            Assert.IsNotNull(result);
             Assert.IsFalse(result.Success);
             Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
@@ -90,7 +97,10 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
         [Test]
         public void SurfaceBake_MissingPathsHint_ReturnsError()
         {
-            var result = NavigationTools.SurfaceBake(name: "NoHintTarget");
+            var result = BridgeToolRegistry.TryDispatch(
+                "unity_open_mcp_navigation_surface_bake",
+                "{\"name\":\"NoHintTarget\"}");
+            Assert.IsNotNull(result);
             Assert.IsFalse(result.Success);
             Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
@@ -98,7 +108,10 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
         [Test]
         public void ModifierAdd_MissingPathsHint_ReturnsError()
         {
-            var result = NavigationTools.ModifierAdd(name: "NoHintTarget");
+            var result = BridgeToolRegistry.TryDispatch(
+                "unity_open_mcp_navigation_modifier_add",
+                "{\"name\":\"NoHintTarget\"}");
+            Assert.IsNotNull(result);
             Assert.IsFalse(result.Success);
             Assert.AreEqual("paths_hint_required", result.ErrorCode);
         }
@@ -110,10 +123,11 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
             var go = new GameObject("AgentDestTarget");
             try
             {
-                var result = NavigationTools.AgentSetDestination(
-                    instance_id: go.GetInstanceID(),
-                    destination: null,
-                    paths_hint: new[] { "Assets/NoScene.unity" });
+                var result = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_agent_set_destination",
+                    "{\"instance_id\":" + go.GetInstanceID() +
+                    ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
+                Assert.IsNotNull(result);
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("missing_parameter", result.ErrorCode);
             }
@@ -133,13 +147,14 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
             var host = new GameObject("NavTestSurface");
             try
             {
-                var result = NavigationTools.SurfaceAdd(
-                    instance_id: host.GetInstanceID(),
-                    agent_type: "Humanoid",
-                    collect_objects: "All",
-                    paths_hint: new[] { "Assets/NavTest.unity" });
+                var result = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_surface_add",
+                    "{\"instance_id\":" + host.GetInstanceID() +
+                    ",\"agent_type\":\"Humanoid\",\"collect_objects\":\"All\"" +
+                    ",\"paths_hint\":[\"Assets/NavTest.unity\"]}");
 
-                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsNotNull(result);
+                Assert.IsTrue(result.Success, result.ErrorMessage ?? result.Output);
                 StringAssert.Contains("\"status\":\"ok\"", result.Output);
                 StringAssert.Contains("\"added\":true", result.Output);
                 Assert.IsNotNull(host.GetComponent<NavMeshSurface>(),
@@ -157,14 +172,18 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
             var host = new GameObject("NavTestSurfaceIdempotent");
             try
             {
-                var hint = new[] { "Assets/NavTest.unity" };
-                var first = NavigationTools.SurfaceAdd(
-                    instance_id: host.GetInstanceID(), paths_hint: hint);
-                Assert.IsTrue(first.Success, first.ErrorMessage);
+                var hint = ",\"paths_hint\":[\"Assets/NavTest.unity\"]}";
+                var idField = "{\"instance_id\":" + host.GetInstanceID();
 
-                var second = NavigationTools.SurfaceAdd(
-                    instance_id: host.GetInstanceID(), paths_hint: hint);
-                Assert.IsTrue(second.Success, second.ErrorMessage);
+                var first = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_surface_add", idField + hint);
+                Assert.IsNotNull(first);
+                Assert.IsTrue(first.Success, first.ErrorMessage ?? first.Output);
+
+                var second = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_surface_add", idField + hint);
+                Assert.IsNotNull(second);
+                Assert.IsTrue(second.Success, second.ErrorMessage ?? second.Output);
                 StringAssert.Contains("\"added\":false", second.Output);
             }
             finally
@@ -185,16 +204,20 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
             {
                 // Surface collects All geometry by default, so the plane is
                 // included without extra setup.
-                var add = NavigationTools.SurfaceAdd(
-                    instance_id: host.GetInstanceID(),
-                    collect_objects: "All",
-                    paths_hint: new[] { "Assets/NavBake.unity" });
-                Assert.IsTrue(add.Success, add.ErrorMessage);
+                var add = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_surface_add",
+                    "{\"instance_id\":" + host.GetInstanceID() +
+                    ",\"collect_objects\":\"All\"" +
+                    ",\"paths_hint\":[\"Assets/NavBake.unity\"]}");
+                Assert.IsNotNull(add);
+                Assert.IsTrue(add.Success, add.ErrorMessage ?? add.Output);
 
-                var bake = NavigationTools.SurfaceBake(
-                    instance_id: host.GetInstanceID(),
-                    paths_hint: new[] { "Assets/NavBake.unity" });
-                Assert.IsTrue(bake.Success, bake.ErrorMessage);
+                var bake = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_surface_bake",
+                    "{\"instance_id\":" + host.GetInstanceID() +
+                    ",\"paths_hint\":[\"Assets/NavBake.unity\"]}");
+                Assert.IsNotNull(bake);
+                Assert.IsTrue(bake.Success, bake.ErrorMessage ?? bake.Output);
                 StringAssert.Contains("\"baked\":true", bake.Output);
                 StringAssert.Contains("\"hasNavMeshData\":true", bake.Output);
 
@@ -224,8 +247,10 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
                 var navAgent = agent.AddComponent<NavMeshAgent>();
                 navAgent.speed = 7f;
 
-                var result = NavigationTools.List();
-                Assert.IsTrue(result.Success, result.ErrorMessage);
+                var result = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_list", "{}");
+                Assert.IsNotNull(result);
+                Assert.IsTrue(result.Success, result.ErrorMessage ?? result.Output);
                 StringAssert.Contains("\"surfaces\":", result.Output);
                 StringAssert.Contains("NavListSurface", result.Output);
                 StringAssert.Contains("\"agents\":", result.Output);
@@ -248,8 +273,11 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
                 host.AddComponent<NavMeshAgent>();
                 host.AddComponent<NavMeshModifier>();
 
-                var result = NavigationTools.Get(instance_id: host.GetInstanceID());
-                Assert.IsTrue(result.Success, result.ErrorMessage);
+                var result = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_get",
+                    "{\"instance_id\":" + host.GetInstanceID() + "}");
+                Assert.IsNotNull(result);
+                Assert.IsTrue(result.Success, result.ErrorMessage ?? result.Output);
                 StringAssert.Contains("\"type\":\"NavMeshSurface\"", result.Output);
                 StringAssert.Contains("\"type\":\"NavMeshAgent\"", result.Output);
                 StringAssert.Contains("\"type\":\"NavMeshModifier\"", result.Output);
@@ -263,7 +291,10 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
         [Test]
         public void Get_OnUnknownTarget_ReturnsTargetNotFound()
         {
-            var result = NavigationTools.Get(name: "__nonexistent_navigation_target__");
+            var result = BridgeToolRegistry.TryDispatch(
+                "unity_open_mcp_navigation_get",
+                "{\"name\":\"__nonexistent_navigation_target__\"}");
+            Assert.IsNotNull(result);
             Assert.IsFalse(result.Success);
             Assert.AreEqual("target_not_found", result.ErrorCode);
         }
@@ -271,9 +302,11 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
         [Test]
         public void SurfaceAdd_OnUnknownTarget_ReturnsTargetNotFound()
         {
-            var result = NavigationTools.SurfaceAdd(
-                name: "__nonexistent_navigation_target__",
-                paths_hint: new[] { "Assets/NavTest.unity" });
+            var result = BridgeToolRegistry.TryDispatch(
+                "unity_open_mcp_navigation_surface_add",
+                "{\"name\":\"__nonexistent_navigation_target__\"" +
+                ",\"paths_hint\":[\"Assets/NavTest.unity\"]}");
+            Assert.IsNotNull(result);
             Assert.IsFalse(result.Success);
             Assert.AreEqual("target_not_found", result.ErrorCode);
         }
@@ -291,14 +324,15 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
                 var agent = host.AddComponent<NavMeshAgent>();
                 agent.speed = 1f;
 
-                var fieldsJson = "[{\"field\":\"speed\",\"value\":5.5,\"type\":\"float\"}]";
-                var result = NavigationTools.Modify(
-                    instance_id: host.GetInstanceID(),
-                    component_type: "NavMeshAgent",
-                    fields_json: fieldsJson,
-                    paths_hint: new[] { "Assets/NavTest.unity" });
+                var result = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_modify",
+                    "{\"instance_id\":" + host.GetInstanceID() +
+                    ",\"component_type\":\"NavMeshAgent\"" +
+                    ",\"fields_json\":\"[{\\\"field\\\":\\\"speed\\\",\\\"value\\\":5.5,\\\"type\\\":\\\"float\\\"}]\"" +
+                    ",\"paths_hint\":[\"Assets/NavTest.unity\"]}");
 
-                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsNotNull(result);
+                Assert.IsTrue(result.Success, result.ErrorMessage ?? result.Output);
                 StringAssert.Contains("\"applied\":[", result.Output);
                 Assert.AreEqual(5.5f, agent.speed);
             }
@@ -314,11 +348,12 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
             var host = new GameObject("NavModifyNoType");
             try
             {
-                var result = NavigationTools.Modify(
-                    instance_id: host.GetInstanceID(),
-                    component_type: null,
-                    fields_json: "[]",
-                    paths_hint: new[] { "Assets/NavTest.unity" });
+                var result = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_modify",
+                    "{\"instance_id\":" + host.GetInstanceID() +
+                    ",\"fields_json\":\"[]\"" +
+                    ",\"paths_hint\":[\"Assets/NavTest.unity\"]}");
+                Assert.IsNotNull(result);
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("missing_parameter", result.ErrorCode);
             }
@@ -334,11 +369,13 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
             var host = new GameObject("NavModifyNoComp");
             try
             {
-                var result = NavigationTools.Modify(
-                    instance_id: host.GetInstanceID(),
-                    component_type: "NavMeshSurface",
-                    fields_json: "[{\"field\":\"agentTypeID\",\"value\":1}]",
-                    paths_hint: new[] { "Assets/NavTest.unity" });
+                var result = BridgeToolRegistry.TryDispatch(
+                    "unity_open_mcp_navigation_modify",
+                    "{\"instance_id\":" + host.GetInstanceID() +
+                    ",\"component_type\":\"NavMeshSurface\"" +
+                    ",\"fields_json\":\"[{\\\"field\\\":\\\"agentTypeID\\\",\\\"value\\\":1}]\"" +
+                    ",\"paths_hint\":[\"Assets/NavTest.unity\"]}");
+                Assert.IsNotNull(result);
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("component_not_found", result.ErrorCode);
             }

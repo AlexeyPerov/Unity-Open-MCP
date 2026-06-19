@@ -6,7 +6,7 @@ import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline } from "./offline.js";
 import { editorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES } from "./unity-log.js";
-import { extractStructuredCompilerErrors } from "./compiler-errors.js";
+import { summarizeProjectHealth } from "./project-health.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
 import { listRules } from "./capabilities/list-rules.js";
@@ -232,15 +232,32 @@ export class ToolRouter implements Router {
       };
     }
 
-    const errors = extractStructuredCompilerErrors(tail.content);
+    // Build the full health summary: CSxxxx compiler errors PLUS package /
+    // assembly-level red flags (unresolved-assembly Cecil failures, package
+    // deprecation, Package Manager errors) from the SAME log tail. The
+    // compilerErrors list is the same shape as before (kept as `errors` for
+    // backward compatibility) so existing callers do not break.
+    const health = summarizeProjectHealth(tail.content);
+    const errors = health.compilerErrors;
+    const status = health.unhealthy
+      ? errors.length > 0
+        ? "compile_failed"
+        : "project_unhealthy"
+      : "no_errors_found";
     return {
       content: [
         {
           type: "text",
           text: JSON.stringify({
-            status: errors.length > 0 ? "compile_failed" : "no_errors_found",
+            status,
+            unhealthy: health.unhealthy,
+            headline: health.headline,
             errorCount: errors.length,
             errors,
+            // Package / assembly issues from the same log tail. Empty when the
+            // only red flags are compiler errors (the common case).
+            issues: health.issues,
+            issueCount: health.issues.length,
             logPath,
             tailBytes: tail.bytes,
             _source: "offline",

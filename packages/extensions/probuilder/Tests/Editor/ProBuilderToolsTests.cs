@@ -14,6 +14,7 @@
 // These tests run in EditMode against the live demo project (ProBuilder
 // package must be installed). They clean up after themselves.
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.ProBuilder;
 using UnityOpenMcpBridge;

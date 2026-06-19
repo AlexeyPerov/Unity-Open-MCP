@@ -1,4 +1,5 @@
 using System.Text;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityOpenMcpBridge;
@@ -109,15 +110,19 @@ namespace UnityOpenMcpExtensions.Navigation
         }
     }
 
-    // Thin wrapper around the NavMesh area name table. `NavMesh.GetAreaByName`
-    // returns the int cost area id; we surface both name and id so agents can
-    // round-trip the value.
+    // Thin wrapper around the NavMesh area name table. The Unity 6
+    // UnityEngine.AI.NavMesh API exposes GetAreaFromName (not GetAreaByName);
+    // older Unity versions used GetAreaByName. We surface both name and id so
+    // agents can round-trip the value.
     static class NavigationAreas
     {
         public static int Resolve(string name, int fallback)
         {
             if (string.IsNullOrEmpty(name)) return fallback;
-            var id = NavMesh.GetAreaByName(name);
+            // Unity 6+ renamed GetAreaByName -> GetAreaFromName. Both return -1
+            // when the name is unknown. Prefer the current name, fall back to
+            // the legacy one for older editors.
+            var id = NavMesh.GetAreaFromName(name);
             return id != -1 ? id : fallback;
         }
     }

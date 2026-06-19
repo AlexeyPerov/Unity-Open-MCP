@@ -346,20 +346,20 @@ namespace UnityOpenMcpExtensions.Navigation
                 link = Undo.AddComponent<NavMeshLink>(host);
                 added = true;
             }
-            link.startPosition = ParseVector3(start_pos, link.startPosition);
-            link.endPosition = ParseVector3(end_pos, link.endPosition);
+            link.startPoint = ParseVector3(start_pos, link.startPoint);
+            link.endPoint = ParseVector3(end_pos, link.endPoint);
             link.width = width;
             link.costModifier = cost_modifier;
             link.bidirectional = bidirectional;
-            link.autoUpdate = autoUpdate;
+            link.autoUpdate = auto_update;
             EditorUtility.SetDirty(host);
 
             var sb = new StringBuilder(220);
             sb.Append("\"link\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
             sb.Append("\"instanceId\":").Append(link.GetInstanceID()).Append(',');
-            sb.Append("\"startPosition\":").Append(Vec3(link.startPosition)).Append(',');
-            sb.Append("\"endPosition\":").Append(Vec3(link.endPosition)).Append(',');
+            sb.Append("\"startPosition\":").Append(Vec3(link.startPoint)).Append(',');
+            sb.Append("\"endPosition\":").Append(Vec3(link.endPoint)).Append(',');
             sb.Append("\"width\":").Append(link.width).Append(',');
             sb.Append("\"bidirectional\":").Append(link.bidirectional ? "true" : "false").Append(',');
             sb.Append("\"autoUpdate\":").Append(link.autoUpdate ? "true" : "false");
@@ -604,8 +604,8 @@ namespace UnityOpenMcpExtensions.Navigation
                 first = AppendComma(sb, first);
                 sb.Append("{\"type\":\"NavMeshLink\",")
                   .Append("\"instanceId\":").Append(link.GetInstanceID()).Append(',')
-                  .Append("\"startPosition\":").Append(Vec3(link.startPosition)).Append(',')
-                  .Append("\"endPosition\":").Append(Vec3(link.endPosition)).Append(',')
+                  .Append("\"startPosition\":").Append(Vec3(link.startPoint)).Append(',')
+                  .Append("\"endPosition\":").Append(Vec3(link.endPoint)).Append(',')
                   .Append("\"width\":").Append(link.width).Append(',')
                   .Append("\"bidirectional\":").Append(link.bidirectional ? "true" : "false").Append(',')
                   .Append("\"autoUpdate\":").Append(link.autoUpdate ? "true" : "false").Append(',')
@@ -751,11 +751,26 @@ namespace UnityOpenMcpExtensions.Navigation
             // window when first opened. We leave the surface's agentTypeID
             // untouched when the name does not resolve so an early-call agent
             // does not corrupt the default (agentTypeID == 0 == Humanoid).
+            //
+            // Unity 6 UnityEngine.AI.NavMesh dropped GetSettingsByName; we walk
+            // the registered settings via GetSettingsCount / GetSettingsByIndex
+            // and match GetSettingsNameFromID(agentTypeID) against the requested
+            // name. Older Unity versions exposed GetSettingsByName directly.
             if (!string.IsNullOrEmpty(agentType))
             {
-                var settings = NavMesh.GetSettingsByName(agentType);
-                if (settings.agentTypeID != 0)
-                    surface.agentTypeID = settings.agentTypeID;
+                int resolved = -1;
+                int count = NavMesh.GetSettingsCount();
+                for (int i = 0; i < count; i++)
+                {
+                    var s = NavMesh.GetSettingsByIndex(i);
+                    if (NavMesh.GetSettingsNameFromID(s.agentTypeID) == agentType)
+                    {
+                        resolved = s.agentTypeID;
+                        break;
+                    }
+                }
+                if (resolved != -1 && resolved != 0)
+                    surface.agentTypeID = resolved;
             }
 
             if (!string.IsNullOrEmpty(collectObjects) &&

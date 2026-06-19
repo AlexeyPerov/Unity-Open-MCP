@@ -636,14 +636,22 @@ Supported operations:
 
 ### `read_compile_errors` (offline)
 
-`unity_open_mcp_read_compile_errors` — reads the tail of Unity's platform `Editor.log` (macOS `~/Library/Logs/Unity/Editor.log`, Windows `%LOCALAPPDATA%\Unity\Editor\Editor.log`, Linux `~/.config/unity3d/Editor.log`) and extracts structured C# compiler errors. Always offline (no bridge, no Unity spawn). This is the **only** error channel that works when the bridge assembly itself has failed to compile — every in-bridge channel (`read_console`, `editor_status`) is dead with it, and `compile_check` can't run.
+`unity_open_mcp_read_compile_errors` — reads the tail of Unity's platform `Editor.log` (macOS `~/Library/Logs/Unity/Editor.log`, Windows `%LOCALAPPDATA%\Unity\Editor\Editor.log`, Linux `~/.config/unity3d/Editor.log`) and extracts structured C# compiler errors **PLUS** package / assembly-level red flags from the same log tail. Always offline (no bridge, no Unity spawn). This is the **only** error channel that works when the bridge assembly itself has failed to compile — every in-bridge channel (`read_console`, `editor_status`) is dead with it, and `compile_check` can't run.
 
-Input: `tail_bytes` (default 262144, max 1048576) — bytes read from the end of the log, where Unity writes compiler diagnostics contiguously.
+Input: `tail_bytes` (default 262144, max 1048576) — bytes read from the end of the log, where Unity writes compiler diagnostics and assembly-resolution failures contiguously.
 
 Response:
-- `status`: `"compile_failed"` | `"no_errors_found"` | `"log_not_found"`
-- `errorCount`, `errors[]` (`raw`, `file`, `line`, `code`, `message`)
+- `status`: `"compile_failed"` (CSxxxx errors present) | `"project_unhealthy"` (only package/assembly issues, no CSxxxx) | `"no_errors_found"` | `"log_not_found"`
+- `unhealthy`: `true` when compiler errors OR package/assembly issues are present — check this first
+- `headline`: one-line triage summary (empty when healthy)
+- `errorCount`, `errors[]` (`raw`, `file`, `line`, `code`, `message`) — CSxxxx compiler diagnostics
+- `issueCount`, `issues[]` (`kind`, `summary`, `raw`, `hint`) — package / assembly red flags:
+  - `assembly_resolution` — `Mono.Cecil.AssemblyResolutionException: Failed to resolve assembly` failures. The classic package-version / Unity-version mismatch (e.g. ProBuilder 5.x compiled against `Unity.ProBuilder.AddOns.Editor`, which ProBuilder 6 removed — Burst's Cecil pass then can't resolve it and the editor stalls). The `hint` points the agent at `Packages/manifest.json`.
+  - `package_deprecated` — `[Package Manager] <id> is deprecated` notices.
+  - `package_manager_error` — other Package Manager conflict / resolution errors.
 - `logPath`, `tailBytes`, `_source: "offline"`
+
+Use this when: (a) the bridge is unreachable after a recompile — a `bridge_compile_failed` response points here, or `ping` returns `connected:false` unexpectedly; (b) Unity showed a "package update" / incompatibility popup; (c) you suspect a package is too old for the current Editor.
 
 The live-client returns a `bridge_compile_failed` error (pointing here) when it detects the dead-bridge signature: instance lock present with a live PID but a stale heartbeat (the bridge's `[InitializeOnLoad]` never re-ran after the failed recompile, so the heartbeat writer is gone).
 

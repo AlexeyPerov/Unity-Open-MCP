@@ -122,12 +122,16 @@ namespace UnityOpenMcpExtensions.InputSystem
         }
 
         // Serialize an InputActionAsset to JSON, guarding the InputSystem 1.x
-        // bug where ToJson() throws inside WriteFileJson.FromMaps when the
-        // asset has no ActionMaps (its internal map array is null). Emits
-        // minimal valid JSON in that case. Mirrors the upstream pack.
+        // bug where ToJson() throws inside WriteFileJson.FromMaps when the asset
+        // has no ActionMaps (its internal map array is null). Emits minimal
+        // valid JSON in that case. Mirrors the upstream pack.
+        //
+        // Note: actionMaps is a ReadOnlyArray<InputActionMap> (a struct), so it
+        // cannot be compared to null with == — check Count instead. The wrapper
+        // returns an empty ReadOnlyArray when the backing field is null.
         static string ToSafeJson(InputActionAsset asset)
         {
-            if (asset.actionMaps == null || asset.actionMaps.Count == 0)
+            if (asset.actionMaps.Count == 0)
                 return "{\n    \"name\": \"" + asset.name + "\",\n    \"maps\": [],\n    \"controlSchemes\": []\n}";
             return asset.ToJson();
         }
