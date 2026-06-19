@@ -106,6 +106,13 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_editor_get_layers",
             "unity_open_mcp_editor_add_tag",
             "unity_open_mcp_editor_add_layer",
+            // M16 Plan 6 — typed reflection / scripts / object data tools.
+            "unity_open_mcp_type_schema",
+            "unity_open_mcp_script_read",
+            "unity_open_mcp_script_write",
+            "unity_open_mcp_script_delete",
+            "unity_open_mcp_object_get_data",
+            "unity_open_mcp_object_modify",
             "unity_senses_run_tests",
             "unity_senses_screenshot",
             "unity_senses_read_console",
@@ -177,7 +184,14 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_editor_undo",
             "unity_open_mcp_editor_redo",
             "unity_open_mcp_editor_get_tags",
-            "unity_open_mcp_editor_get_layers"
+            "unity_open_mcp_editor_get_layers",
+            // M16 Plan 6 — read-only typed reflection / object tools (gate-
+            // free). type_schema reflects on a type's members; script_read
+            // reads a .cs file from disk; object_get_data reflects on a live
+            // UnityEngine.Object. None mutate project state.
+            "unity_open_mcp_type_schema",
+            "unity_open_mcp_script_read",
+            "unity_open_mcp_object_get_data"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -241,7 +255,17 @@ namespace UnityOpenMcpBridge
             // assets, so they are NOT mutating in gate terms — they route as
             // gate-free direct-response tools (see DirectResponseTools).
             "unity_open_mcp_editor_add_tag",
-            "unity_open_mcp_editor_add_layer"
+            "unity_open_mcp_editor_add_layer",
+            // M16 Plan 6 — typed reflection / scripts / object mutators.
+            // script_write creates/overwrites a .cs (Roslyn pre-validated);
+            // script_delete removes .cs (+.meta). Both refresh AssetDatabase
+            // (recompile / domain reload may follow). object_modify sets
+            // public fields/properties on any live Object via reflection.
+            // Each requires paths_hint scoped to the affected .cs path /
+            // asset / scene.
+            "unity_open_mcp_script_write",
+            "unity_open_mcp_script_delete",
+            "unity_open_mcp_object_modify"
         };
 
         static HttpListener _listener;
@@ -1274,6 +1298,18 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_editor_get_layers" => EditorConsoleSelectionTools.EditorGetLayers(body),
                 "unity_open_mcp_editor_add_tag" => EditorConsoleSelectionTools.EditorAddTag(body),
                 "unity_open_mcp_editor_add_layer" => EditorConsoleSelectionTools.EditorAddLayer(body),
+                // M16 Plan 6 — typed reflection / scripts / object data tools.
+                // type_schema / script_read / object_get_data are read-only
+                // (DirectResponseTools); script_write / script_delete /
+                // object_modify are mutators (MutatingTools). find_members /
+                // invoke_method stay in their original case entries above,
+                // enhanced in place.
+                "unity_open_mcp_type_schema" => ReflectionScriptsObjectsTools.TypeSchema(body),
+                "unity_open_mcp_script_read" => ReflectionScriptsObjectsTools.ScriptRead(body),
+                "unity_open_mcp_script_write" => ReflectionScriptsObjectsTools.ScriptWrite(body),
+                "unity_open_mcp_script_delete" => ReflectionScriptsObjectsTools.ScriptDelete(body),
+                "unity_open_mcp_object_get_data" => ReflectionScriptsObjectsTools.ObjectGetData(body),
+                "unity_open_mcp_object_modify" => ReflectionScriptsObjectsTools.ObjectModify(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

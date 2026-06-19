@@ -128,6 +128,15 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_editor_get_layers: "typed-editor",
   unity_open_mcp_editor_add_tag: "typed-editor",
   unity_open_mcp_editor_add_layer: "typed-editor",
+  // M16 Plan 6 — typed reflection / scripts / object data tools.
+  // type_schema / script_read / object_get_data are read-only; script_write /
+  // script_delete / object_modify are mutating (paths_hint scoped).
+  unity_open_mcp_type_schema: "typed-editor",
+  unity_open_mcp_script_read: "typed-editor",
+  unity_open_mcp_script_write: "typed-editor",
+  unity_open_mcp_script_delete: "typed-editor",
+  unity_open_mcp_object_get_data: "typed-editor",
+  unity_open_mcp_object_modify: "typed-editor",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
@@ -192,42 +201,8 @@ export const PLANNED_TOOLS: PlannedTool[] = [
   // The entries that used to live here have been removed.
 
   // --- Plan 6: Reflection, scripts, objects -------------------------------
-  {
-    name: "unity_open_mcp_type_schema",
-    category: "reflection",
-    description: "Generate a JSON schema for a loadable C# type's public fields/properties.",
-    guidance: "Planned reflection surface. Use find_members to inspect type members today.",
-  },
-  {
-    name: "unity_open_mcp_script_read",
-    category: "reflection",
-    description: "Read a .cs file (with optional line slicing).",
-    guidance: "Planned reflection surface. Use execute_csharp with File IO today.",
-  },
-  {
-    name: "unity_open_mcp_script_write",
-    category: "reflection",
-    description: "Create or overwrite a .cs file (Roslyn-validated).",
-    guidance: "Planned reflection surface. Use execute_csharp with File IO today.",
-  },
-  {
-    name: "unity_open_mcp_script_delete",
-    category: "reflection",
-    description: "Delete .cs file(s).",
-    guidance: "Planned reflection surface. Use execute_csharp with File IO today.",
-  },
-  {
-    name: "unity_open_mcp_object_get_data",
-    category: "reflection",
-    description: "Read serialized data of a UnityEngine.Object.",
-    guidance: "Planned reflection surface. Use read_asset / invoke_method today.",
-  },
-  {
-    name: "unity_open_mcp_object_modify",
-    category: "reflection",
-    description: "Modify a UnityEngine.Object's fields/properties.",
-    guidance: "Planned reflection surface. Use invoke_method or execute_csharp with SerializedObject today.",
-  },
+  // Plan 6 typed tools are now implemented (see mcp-server/src/tools/).
+  // The entries that used to live here have been removed.
 
   // --- Plan 7: Profiler session ------------------------------------------
   {

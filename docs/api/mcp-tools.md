@@ -84,7 +84,7 @@ The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabiliti
 - **Scene Management:** typed scene lifecycle/data (`scene_create/open/save/unload/set_active/list_opened`, `scene_get_data`, `scene_get_dirty_summary`, `scene_focus`) — **implemented in Plan 3**
 - **Package Manager:** `package_list`, `package_search`, `package_add`, `package_remove`, `package_get_info`, `package_get_dependencies`, `package_check` — **implemented in Plan 4**
 - **Console + Editor state/selection/tags/layers/undo:** `console_clear`, `console_log`, `editor_set_state`, `selection_get`, `selection_set`, `editor_undo`, `editor_redo`, `editor_get_tags`, `editor_get_layers`, `editor_add_tag`, `editor_add_layer` — **implemented in Plan 5**
-- **Reflection/scripts/object data:** `type_schema`, `script_read`, `script_write`, `script_delete`, `object_get_data`, `object_modify`
+- **Reflection/scripts/object data:** `type_schema`, `script_read`, `script_write`, `script_delete`, `object_get_data`, `object_modify` — **implemented in Plan 6**
 - **Profiler & Diagnostics session:** `profiler_start/stop/get_status`, `profiler_get/set_config`, `profiler_list_modules`, `profiler_enable_module`, `profiler_clear_data`, `profiler_save_data`, `profiler_load_data`, `profiler_get_script_stats` (non-duplicate with M10 capture/memory/rendering)
 - **Gate intelligence:** `impact_preview`, `gate_budget_estimate`, `mutation_explain`
 - **Project configuration & build:** build pipeline (`build_get_targets`, `build_get/set_target`, `build_get/set_scenes`, `build_start`, `build_get/set_defines`) and project settings (`settings_get/set_player/quality/physics/lighting`)
@@ -210,6 +210,32 @@ Tags / layers:
 
 Workflow: `editor_get_tags` / `editor_get_layers` to discover current state → `gameobject_modify` to apply a tag/layer to objects → `editor_add_tag` / `editor_add_layer` to add new ones when needed. For selection: `selection_get` to read the human's current click → mutate via the typed tools → `selection_set` to drive the editor focus (pairs with `scene_focus`).
 
+#### Reflection / scripts / object data (M16 Plan 6 — implemented)
+
+Read-only members (`type_schema`, `script_read`, `object_get_data`) are gate-free direct-response tools; mutating members (`script_write`, `script_delete`, `object_modify`) run the full gate path with `paths_hint` scoped to the affected `.cs` path / asset / scene. Plan 6 also enhances the core reflection tools in place — `find_members` now returns structured per-member metadata (every overload listed separately, `returnType` / `parameters[]` / `isStatic` / `isGeneric` / `genericParameters[]` for methods, `propertyType` / `canRead` / `canWrite` for properties) with an `include_signatures` toggle; `invoke_method` accepts `generic_arg_types` (to call generic methods like `GetComponent<Rigidbody>`) and `arg_type_names` (to disambiguate overloads). These enhancements do not duplicate `execute_csharp` / `invoke_method` / `find_members` — they extend them.
+
+Type schema:
+
+- `unity_open_mcp_type_schema` — Read-only: structured member schema for any loadable C# type. Returns `fields[]` / `properties[]` (on by default) plus optional `methods[]` / `constructors[]` (off by default) and `enumValues[]` for enums. Each member carries a flat `signature` AND structured fields (`memberType`, `declaringType`, `isStatic`, `canRead`/`canWrite` for properties, `returnType`/`parameters[]`/`isGeneric`/`genericParameters[]` for methods). Resolve by full name (preferred) or class-name fallback; `assembly_name` disambiguates. Use this to plan `invoke_method` / `object_modify` without trial-and-error. Token-bounded by `max_members`.
+
+Script files:
+
+- `unity_open_mcp_script_read` — Read-only: read a `.cs` file from disk with optional line slicing. Returns `totalLines`, `startLine`, `endLine`, `count`, `truncated`, and a numbered `lines[]` array. `start_line` / `end_line` (1-based, inclusive) slice; `max_lines` (default 2000) is a hard cap. Paths must be project-relative, end in `.cs`, and live under the project root (`..` and absolute-outside paths are refused). Prefer this over `execute_csharp` `File.ReadAllText`.
+- `unity_open_mcp_script_write` — Mutating: create or overwrite a `.cs` file. `paths_hint = ["<the .cs path>"]`. By default refuses to overwrite (`overwrite: true` to overwrite). `validate: true` (default) Roslyn-compiles the source first; a parse failure returns `validation_failed` and the file is NOT written (diagnostics are echoed as `validationDiagnostics`). Set `validate: false` for partial fragments. After write, `AssetDatabase.ImportAsset` is queued (a recompile / domain reload may follow — poll `editor_status` / `compile_check`).
+- `unity_open_mcp_script_delete` — Mutating: delete one or more `.cs` files (and their `.meta`). `paths_hint` lists every deleted path. Per-file errors (`file_not_found`) are accumulated and do not abort the batch. The gate surfaces any fallout (a removed MonoBehaviour breaks prefab/scene references).
+
+Object data:
+
+- `unity_open_mcp_object_get_data` — Read-only: token-bounded structured data for any live `UnityEngine.Object` (scene GameObject/Component, ScriptableObject, Material, or any asset). Uses the depth-limited reflective walker `invoke_method` uses for its return value, so the shape is consistent. Address by `instance_id` (live instance) or `asset_path` (asset on disk); `instance_id` wins. `max_depth` (default 4) and `max_items` (default 100) bound the walk. Prefer `component_get` for one Component's serialized Inspector fields (it uses SerializedObject); use this for ScriptableObjects, Materials, or any non-Component Object.
+- `unity_open_mcp_object_modify` — Mutating: set public fields/properties on a live `UnityEngine.Object` by name. `paths_hint` is the asset path (for assets) or scene path (for scene objects). `fields` is an array of `{name, value}` patches applied in order; per-entry errors are accumulated. Safe by default: refuses to write static / init-only/readonly members unless `allow_static: true`; never invokes methods. For Component Inspector fields prefer `component_modify` (SerializedObject round-trips the Inspector more accurately); use this for ScriptableObjects, Materials, or any non-Component Object.
+
+Enhanced core reflection (in place):
+
+- `unity_open_mcp_find_members` — now returns structured per-member metadata (every overload of a name is listed separately). Methods carry `returnType`, `parameters[]` (`name` / `type` / `hasDefault`), `isStatic`, `isGeneric`, `genericParameters[]` (with `constraints[]`); properties carry `propertyType`, `canRead`, `canWrite`, `isStatic`; types carry `fullName`, `namespace`, `assembly`, `isEnum`, `isClass`. The flat `signature` string stays for compatibility. Pass `include_signatures: false` for a lighter names-only payload.
+- `unity_open_mcp_invoke_method` — now accepts `generic_arg_types` (type-name strings substituted for the method's generic parameters, enabling `GetComponent<Rigidbody>()`-style calls) and `arg_type_names` (explicit parameter type names to disambiguate overloads when several share a name). Without either, the legacy single-overload resolution runs unchanged.
+
+Workflow: `find_members` to discover members → `type_schema` for the structured schema of the one type you'll call into → `invoke_method` (with `generic_arg_types` / `arg_type_names` for generic/overloaded calls) to execute. For script authoring: `script_read` the existing file → edit → `script_write` (Roslyn-validated) → `compile_check` / `read_compile_errors` to confirm. For object data: `object_get_data` to inspect → `object_modify` to patch; use `component_get` / `component_modify` for Component Inspector fields.
+
 ## Capability discovery
 
 `unity_open_mcp_capabilities` lets an agent self-discover the entire tool + rule + fix surface in a single call, including what is planned but not yet built.
@@ -232,11 +258,11 @@ Workflow: `editor_get_tags` / `editor_get_layers` to discover current state → 
       "inputSchema": { "type": "object", "properties": { "...": "..." } }
     },
     {
-      "name": "unity_open_mcp_type_schema",
+      "name": "unity_open_mcp_impact_preview",
       "implemented": false,
       "status": "planned",
-      "category": "reflection",
-      "guidance": "Planned reflection surface. Use find_members ..."
+      "category": "gate-intelligence",
+      "guidance": "Planned gate-intelligence surface. Run validate_edit before mutating today."
     }
   ],
   "rules": [

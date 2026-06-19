@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -15,6 +16,7 @@ namespace UnityOpenMcpBridge.MetaTools
             var assemblyFilter = JsonBody.GetString(body, "assembly_filter");
             var includeUnityEditor = JsonBody.GetBool(body, "include_unity_editor", true);
             var includeProject = JsonBody.GetBool(body, "include_project", true);
+            var includeSignatures = JsonBody.GetBool(body, "include_signatures", true);
             var maxResults = JsonBody.GetInt(body, "max_results", 50);
             if (maxResults < 1) maxResults = 1;
             if (maxResults > 200) maxResults = 200;
@@ -51,7 +53,7 @@ namespace UnityOpenMcpBridge.MetaTools
                                 totalMatches++;
                                 if (results.Count < maxResults)
                                 {
-                                    results.Add(SerializeMember("type", type.Name, type.FullName, "", GetSummary(type)));
+                                    results.Add(SerializeType(type, includeSignatures));
                                 }
                                 else
                                 {
@@ -62,6 +64,10 @@ namespace UnityOpenMcpBridge.MetaTools
 
                         if (kind is "method" or "all")
                         {
+                            // M16 Plan 6 — enumerate every overload separately
+                            // so an agent can pick the right one for invoke_method.
+                            // GetMethods with DeclaredOnly already groups them by
+                            // declaring type; we just don't deduplicate by name.
                             foreach (var method in GetMethodsSafe(type))
                             {
                                 if (MatchesQuery(method.Name, query))
@@ -69,8 +75,7 @@ namespace UnityOpenMcpBridge.MetaTools
                                     totalMatches++;
                                     if (results.Count < maxResults)
                                     {
-                                        results.Add(SerializeMember("method", method.Name, type.FullName,
-                                            GetMethodSignature(method), ""));
+                                        results.Add(SerializeMethod(type, method, includeSignatures));
                                     }
                                     else
                                     {
@@ -89,8 +94,7 @@ namespace UnityOpenMcpBridge.MetaTools
                                     totalMatches++;
                                     if (results.Count < maxResults)
                                     {
-                                        results.Add(SerializeMember("property", prop.Name, type.FullName,
-                                            GetPropertySignature(prop), ""));
+                                        results.Add(SerializeProperty(type, prop, includeSignatures));
                                     }
                                     else
                                     {
@@ -174,15 +178,21 @@ namespace UnityOpenMcpBridge.MetaTools
             try
             {
                 var sb = new StringBuilder(64);
-                sb.Append(method.ReturnType.Name);
+                sb.Append(TypeDisplayName(method.ReturnType));
                 sb.Append(' ');
                 sb.Append(method.Name);
+                if (method.IsGenericMethod)
+                {
+                    sb.Append('<');
+                    sb.Append(string.Join(", ", method.GetGenericArguments().Select(t => t.Name)));
+                    sb.Append('>');
+                }
                 sb.Append('(');
                 var parms = method.GetParameters();
                 for (int i = 0; i < parms.Length; i++)
                 {
                     if (i > 0) sb.Append(", ");
-                    sb.Append(parms[i].ParameterType.Name);
+                    sb.Append(TypeDisplayName(parms[i].ParameterType));
                     sb.Append(' ');
                     sb.Append(parms[i].Name);
                 }
@@ -197,7 +207,7 @@ namespace UnityOpenMcpBridge.MetaTools
             try
             {
                 var sb = new StringBuilder(32);
-                sb.Append(prop.PropertyType.Name);
+                sb.Append(TypeDisplayName(prop.PropertyType));
                 sb.Append(' ');
                 sb.Append(prop.Name);
                 sb.Append(" { ");
@@ -214,14 +224,105 @@ namespace UnityOpenMcpBridge.MetaTools
             return type.IsClass ? "class" : type.IsInterface ? "interface" : type.IsEnum ? "enum" : type.IsValueType ? "struct" : "";
         }
 
-        static string SerializeMember(string kind, string name, string declaringType, string signature, string summary)
+        // M16 Plan 6 — TypeDisplayName mirrors the find_members signature
+        // style (int, string, Vector3, List<T>) so method and type reads line
+        // up across tools.
+        static string TypeDisplayName(Type type)
         {
-            var sb = new StringBuilder(128);
-            sb.Append("{\"kind\":\"").Append(OutputSerializer.EscapeJsonString(kind));
-            sb.Append("\",\"name\":\"").Append(OutputSerializer.EscapeJsonString(name));
-            sb.Append("\",\"declaring_type\":\"").Append(OutputSerializer.EscapeJsonString(declaringType));
-            sb.Append("\",\"signature\":\"").Append(OutputSerializer.EscapeJsonString(signature));
-            sb.Append("\",\"summary\":\"").Append(OutputSerializer.EscapeJsonString(summary));
+            if (type == null) return "null";
+            var name = type.Name;
+            if (type.IsGenericType)
+            {
+                var tick = name.IndexOf('`');
+                if (tick > 0) name = name.Substring(0, tick);
+                var args = type.GetGenericArguments();
+                name += "<" + string.Join(", ", args.Select(TypeDisplayName)) + ">";
+            }
+            return name;
+        }
+
+        // ---------------- M16 Plan 6 structured serializers ----------------
+
+        static string SerializeType(Type type, bool includeSignatures)
+        {
+            var sb = new StringBuilder(160);
+            sb.Append("{\"kind\":\"type");
+            sb.Append("\",\"name\":\"").Append(OutputSerializer.EscapeJsonString(type.Name));
+            sb.Append("\",\"fullName\":\"").Append(OutputSerializer.EscapeJsonString(type.FullName ?? type.Name));
+            sb.Append("\",\"namespace\":\"").Append(OutputSerializer.EscapeJsonString(type.Namespace ?? ""));
+            sb.Append("\",\"assembly\":\"").Append(OutputSerializer.EscapeJsonString(type.Assembly.GetName().Name ?? ""));
+            sb.Append("\",\"isEnum\":").Append(type.IsEnum ? "true" : "false");
+            sb.Append(",\"isClass\":").Append(type.IsClass ? "true" : "false");
+            sb.Append(",\"summary\":\"").Append(OutputSerializer.EscapeJsonString(GetSummary(type)));
+            if (includeSignatures)
+            {
+                sb.Append("\",\"signature\":\"").Append(OutputSerializer.EscapeJsonString(type.FullName ?? type.Name));
+            }
+            sb.Append("\"}");
+            return sb.ToString();
+        }
+
+        static string SerializeMethod(Type declaringType, MethodInfo method, bool includeSignatures)
+        {
+            var sb = new StringBuilder(256);
+            sb.Append("{\"kind\":\"method");
+            sb.Append("\",\"name\":\"").Append(OutputSerializer.EscapeJsonString(method.Name));
+            sb.Append("\",\"declaringType\":\"").Append(OutputSerializer.EscapeJsonString(declaringType.FullName ?? declaringType.Name));
+            sb.Append("\",\"isStatic\":").Append(method.IsStatic ? "true" : "false");
+            sb.Append(",\"isGeneric\":").Append(method.IsGenericMethod ? "true" : "false");
+            sb.Append(",\"returnType\":\"").Append(OutputSerializer.EscapeJsonString(TypeDisplayName(method.ReturnType)));
+
+            var genericArgs = method.GetGenericArguments();
+            sb.Append("\",\"genericParameters\":[");
+            for (int i = 0; i < genericArgs.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"name\":\"").Append(OutputSerializer.EscapeJsonString(genericArgs[i].Name)).Append('"');
+                sb.Append(",\"constraints\":[");
+                var constraints = genericArgs[i].GetGenericParameterConstraints();
+                for (int c = 0; c < constraints.Length; c++)
+                {
+                    if (c > 0) sb.Append(',');
+                    sb.Append('"').Append(OutputSerializer.EscapeJsonString(TypeDisplayName(constraints[c]))).Append('"');
+                }
+                sb.Append("]}");
+            }
+            sb.Append(']');
+
+            var parms = method.GetParameters();
+            sb.Append(",\"parameters\":[");
+            for (int i = 0; i < parms.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"name\":\"").Append(OutputSerializer.EscapeJsonString(parms[i].Name ?? ""));
+                sb.Append("\",\"type\":\"").Append(OutputSerializer.EscapeJsonString(TypeDisplayName(parms[i].ParameterType)));
+                sb.Append("\",\"hasDefault\":").Append(parms[i].HasDefaultValue ? "true" : "false");
+                sb.Append('}');
+            }
+            sb.Append(']');
+            if (includeSignatures)
+            {
+                sb.Append(",\"signature\":\"").Append(OutputSerializer.EscapeJsonString(GetMethodSignature(method)));
+            }
+            sb.Append("\"}");
+            return sb.ToString();
+        }
+
+        static string SerializeProperty(Type declaringType, PropertyInfo prop, bool includeSignatures)
+        {
+            var sb = new StringBuilder(192);
+            sb.Append("{\"kind\":\"property");
+            sb.Append("\",\"name\":\"").Append(OutputSerializer.EscapeJsonString(prop.Name));
+            sb.Append("\",\"declaringType\":\"").Append(OutputSerializer.EscapeJsonString(declaringType.FullName ?? declaringType.Name));
+            sb.Append("\",\"propertyType\":\"").Append(OutputSerializer.EscapeJsonString(TypeDisplayName(prop.PropertyType)));
+            sb.Append("\",\"canRead\":").Append(prop.CanRead ? "true" : "false");
+            sb.Append(",\"canWrite\":").Append(prop.CanWrite ? "true" : "false");
+            var getter = prop.GetMethod;
+            sb.Append(",\"isStatic\":").Append(getter != null && getter.IsStatic ? "true" : "false");
+            if (includeSignatures)
+            {
+                sb.Append(",\"signature\":\"").Append(OutputSerializer.EscapeJsonString(GetPropertySignature(prop)));
+            }
             sb.Append("\"}");
             return sb.ToString();
         }

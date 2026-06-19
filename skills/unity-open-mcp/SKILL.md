@@ -258,6 +258,15 @@ Workflow: `package_check` (fast manifest hit) → `package_search` if not instal
 
 Workflow: `editor_get_tags` / `editor_get_layers` to discover valid names → `gameobject_modify` to apply → `editor_add_tag` / `editor_add_layer` to create new ones. For "see what the human clicked": `selection_get` → mutate via typed tools → `selection_set` (pairs with `scene_focus`).
 
+**Typed reflection / scripts / object data tools (M16 Plan 6).** These complement the core reflection tools — `find_members`, `invoke_method`, `execute_csharp` — without duplicating them. Read-only members are gate-free direct-response tools; mutating members run the full gate path with `paths_hint`.
+
+- Type schema: `unity_open_mcp_type_schema` (read-only) — structured member schema for one loadable C# type (fields/properties on by default; methods/constructors optional; enum values for enums). Use to plan `invoke_method` / `object_modify` without trial-and-error.
+- Script files: `unity_open_mcp_script_read` (read-only, line slicing) / `unity_open_mcp_script_write` (Roslyn pre-validated create/overwrite; `validate: true` default refuses to write code that doesn't compile, returning `validation_failed`) / `unity_open_mcp_script_delete` (mutating; removes `.cs` + `.meta`). Paths must be project-relative, end in `.cs`, and live under the project root. After write/delete a recompile may follow — poll `editor_status` / `compile_check`.
+- Object data: `unity_open_mcp_object_get_data` (read-only, reflective walk over any live `UnityEngine.Object`) / `unity_open_mcp_object_modify` (mutating, sets public fields/properties by name; safe by default — refuses static/init-only members unless `allow_static: true`, never invokes methods). Prefer `component_get` / `component_modify` for one Component's Inspector fields (they use SerializedObject); use these for ScriptableObjects, Materials, or any non-Component Object.
+- Core reflection enhanced in place: `find_members` now lists every overload separately with structured fields (`returnType`, `parameters[]`, `isStatic`, `isGeneric`, `genericParameters[]` for methods; `propertyType`, `canRead`, `canWrite` for properties); pass `include_signatures: false` for a names-only payload. `invoke_method` accepts `generic_arg_types` (call generic methods like `GetComponent<Rigidbody>`) and `arg_type_names` (disambiguate overloads).
+
+Workflow: `find_members` → `type_schema` for the one type → `invoke_method` (with `generic_arg_types` / `arg_type_names` for generic/overloaded calls). For authoring: `script_read` → edit → `script_write` → `compile_check` / `read_compile_errors`.
+
 ### Return serialization (execute_csharp / invoke_method)
 
 Results are walked by a depth-limited reflective serializer before becoming `mutation.output`:

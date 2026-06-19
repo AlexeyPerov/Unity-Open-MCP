@@ -97,6 +97,13 @@ import { editorGetTags } from "./editor-get-tags.js";
 import { editorGetLayers } from "./editor-get-layers.js";
 import { editorAddTag } from "./editor-add-tag.js";
 import { editorAddLayer } from "./editor-add-layer.js";
+// M16 Plan 6 — typed reflection / scripts / object data tools.
+import { typeSchema } from "./type-schema.js";
+import { scriptRead } from "./script-read.js";
+import { scriptWrite } from "./script-write.js";
+import { scriptDelete } from "./script-delete.js";
+import { objectGetData } from "./object-get-data.js";
+import { objectModify } from "./object-modify.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -237,6 +244,22 @@ export const M16_PLAN5_TOOLS: Tool[] = [
   editorAddLayer,
 ];
 
+// M16 Plan 6 — typed reflection / scripts / object data tools. Read-only
+// members (type_schema, script_read, object_get_data) are gate-free direct-
+// response tools; mutating members (script_write, script_delete,
+// object_modify) run the full gate path with paths_hint. script_write runs
+// Roslyn pre-write validation and exposes the diagnostics as a return field.
+// Enhancements to find_members / invoke_method (richer overload/signature
+// metadata, generic-arg resolution) ship in place — see those tool files.
+export const M16_PLAN6_TOOLS: Tool[] = [
+  typeSchema,
+  scriptRead,
+  scriptWrite,
+  scriptDelete,
+  objectGetData,
+  objectModify,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -253,4 +276,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN3_TOOLS,
   ...M16_PLAN4_TOOLS,
   ...M16_PLAN5_TOOLS,
+  ...M16_PLAN6_TOOLS,
 ];

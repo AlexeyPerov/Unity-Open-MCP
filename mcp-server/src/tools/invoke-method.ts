@@ -1,8 +1,23 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
+// M16 Plan 6 — invoke_method enhanced in place with better overload + generic-
+// arg resolution. Two new inputs:
+//   - generic_arg_types: type-name strings substituted for the method's
+//     generic parameters when calling a generic method (e.g. GetComponent<T>).
+//     Without this, generic methods could not be invoked.
+//   - arg_type_names: optional explicit parameter types, used to disambiguate
+//     overloads when multiple methods share a name (avoids the
+//     AmbiguousMatchException the previous single-GetMethod path raised).
+// When neither is supplied, the legacy single-GetMethod resolution runs as
+// before so existing callers are unaffected.
 export const invokeMethod: Tool = {
   name: "unity_open_mcp_invoke_method",
-  description: "Call a method via reflection.",
+  description:
+    "Call a method via reflection. Supports generic methods via `generic_arg_types` and " +
+    "overload disambiguation via `arg_type_names` (when multiple methods share a name, " +
+    "supply the parameter type names to pick one; without it the first overload is used). " +
+    "Otherwise identical to the previous behavior: pass type_name + method_name, optional " +
+    "args, is_static for static methods, object_id for instance methods on a live Object.",
   inputSchema: {
     type: "object",
     required: ["type_name", "method_name"],
@@ -18,6 +33,24 @@ export const invokeMethod: Tool = {
         type: "array",
         description: "JSON-serializable arguments",
         items: {},
+      },
+      arg_type_names: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional explicit parameter type names (full or simple, e.g. " +
+          "[\"UnityEngine.GameObject\", \"Int32\"]) used to disambiguate overloads when " +
+          "multiple methods share `method_name`. Length must match the overload's parameter " +
+          "count. When omitted, the first overload with the right name is used (legacy " +
+          "behavior).",
+      },
+      generic_arg_types: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Type-name strings substituted for the method's generic parameters when invoking a " +
+          "generic method (e.g. [\"UnityEngine.Rigidbody\"] for GetComponent<Rigidbody>). " +
+          "Length must match the method's generic parameter count. Omit for non-generic methods.",
       },
       is_static: {
         type: "boolean",
