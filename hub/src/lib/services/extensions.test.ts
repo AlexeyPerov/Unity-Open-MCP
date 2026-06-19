@@ -30,12 +30,18 @@ test("navigation pack is shipped and lists all 11 tools", () => {
 
 test("planned packs are not in shippedPacks()", () => {
   const shipped = shippedPacks();
-  // navigation + inputsystem + probuilder ship in this task.
-  assert.equal(shipped.length, 3, "navigation + inputsystem + probuilder ship");
+  // navigation + inputsystem + probuilder + particlesystem + animation ship.
+  assert.equal(
+    shipped.length,
+    5,
+    "navigation + inputsystem + probuilder + particlesystem + animation ship",
+  );
   const shippedDomains = shipped.map((p) => p.domain);
   assert.ok(shippedDomains.includes("navigation"));
   assert.ok(shippedDomains.includes("inputsystem"));
   assert.ok(shippedDomains.includes("probuilder"));
+  assert.ok(shippedDomains.includes("particle_system"));
+  assert.ok(shippedDomains.includes("animation"));
   for (const p of shipped) {
     assert.equal(p.shipped, true);
   }

@@ -135,9 +135,12 @@ export const EXTENSION_PACKS: readonly ExtensionPack[] = [
     description: "Particle module discovery and reflective mutation.",
     upmDependency: "",
     localPath: "packages/extensions/particlesystem",
-    toolIds: [],
+    toolIds: [
+      "unity_open_mcp_particle_system_get",
+      "unity_open_mcp_particle_system_modify",
+    ],
     skillPath: "skills/extensions/particlesystem/SKILL.md",
-    shipped: false,
+    shipped: true,
   },
   {
     id: "com.alexeyperov.unity-open-mcp-ext-animation",
@@ -146,9 +149,16 @@ export const EXTENSION_PACKS: readonly ExtensionPack[] = [
     description: "AnimationClip curves and AnimatorController state machines.",
     upmDependency: "",
     localPath: "packages/extensions/animation",
-    toolIds: [],
+    toolIds: [
+      "unity_open_mcp_animation_create",
+      "unity_open_mcp_animation_get_data",
+      "unity_open_mcp_animation_modify",
+      "unity_open_mcp_animator_create",
+      "unity_open_mcp_animator_get_data",
+      "unity_open_mcp_animator_modify",
+    ],
     skillPath: "skills/extensions/animation/SKILL.md",
-    shipped: false,
+    shipped: true,
   },
 ] as const;
 

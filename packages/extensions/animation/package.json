@@ -1,0 +1,22 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-ext-animation",
+  "displayName": "Unity Open MCP — Animation Extension",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "Animation typed helpers for Unity Open MCP. AnimationClip authoring (create / get / modify) and AnimatorController state-machine authoring (create / get / modify) behind schema-validated tools.",
+  "author": {
+    "name": "Alexey Perov",
+    "url": "https://github.com/AlexeyPerov/unity-open-mcp"
+  },
+  "keywords": [
+    "unity-open-mcp",
+    "mcp",
+    "extension",
+    "animation",
+    "animator",
+    "mecanim"
+  ],
+  "dependencies": {
+    "com.alexeyperov.unity-open-mcp-bridge": "0.1.0"
+  }
+}

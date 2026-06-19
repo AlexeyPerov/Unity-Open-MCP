@@ -1,0 +1,19 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-ext-particlesystem.Editor.Tests",
+  "rootNamespace": "UnityOpenMcpExtensions.ParticleSystem.Tests",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "com.alexeyperov.unity-open-mcp-ext-particlesystem.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

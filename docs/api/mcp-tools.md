@@ -373,6 +373,32 @@ Mutating tools target a scene GameObject and run the full gate path with `paths_
 
 Workflow: shaped block — `probuilder_create_shape` (Cube; capture `instanceId`) → `probuilder_get_mesh_info` (confirm counts + directions) → `probuilder_extrude` (`face_direction: "Up"`, `distance: 1.0`) → `probuilder_set_face_material` (`face_direction: "Up"`, `material_path: "Assets/Materials/Roof.mat"`). See `skills/extensions/probuilder/SKILL.md` for the full agent playbook.
 
+#### Particle System (M16 Plan 10 / T6.6.9 — implemented; extension pack)
+
+Particle System typed tools for inspecting and patching scene ParticleSystem components. **Opt-in** — the tool definitions ship in the core MCP server (so capabilities advertises the surface) but the bridge-side handler exists only when the `com.alexeyperov.unity-open-mcp-ext-particlesystem` extension pack is installed in the target project. A call to a particle-system tool when the pack is absent returns `tool_not_found`. Install via the Hub AI Setup wizard's "Optional extension packs" checkbox or by adding `"com.alexeyperov.unity-open-mcp-ext-particlesystem"` to `Packages/manifest.json`.
+
+ParticleSystem is a built-in Unity module (no extra Unity package is required). The lone mutator targets a scene GameObject and runs the full gate path with `paths_hint` scoped to the host's scene path; `particle_system_get` is read-only (gate-free). The mutator uses a per-module field-patch surface (a `module` discriminator + a `fields_json` JSON object of `{field: value}` entries) rather than the opaque reflector payload of the upstream pack — agents get up-front field-name validation and a structured `unknownFields` report instead of guessing.
+
+- `unity_open_mcp_particle_system_get` — Read-only (gate-free): runtime state (`isPlaying` / `isPaused` / `isEmitting` / `isStopped` / `particleCount` / `time`) plus opt-in data for the well-known modules (`include_main` defaults true; toggle the per-module flags or set `include_all`).
+- `unity_open_mcp_particle_system_modify` — Mutating (idempotent): apply a per-module field patch (`module`: main / emission / shape / color_over_lifetime / size_over_lifetime / rotation_over_lifetime / noise / collision / trails / renderer; `fields_json` of documented scalar fields). Unknown fields are skipped and reported; per-field type errors are reported. Scalar values only — for curve / gradient authoring, drop down to `execute_csharp`.
+
+Workflow: tune an effect — `particle_system_get` (`include_all: true`; see current state) → `particle_system_modify` (`module: "main"`, `fields_json: "{\"maxParticles\": 5000, \"loop\": false}"`) → `particle_system_modify` (`module: "emission"`, `fields_json: "{\"rateOverTime\": 42.0}"`) → `particle_system_get` (confirm). See `skills/extensions/particlesystem/SKILL.md` for the full agent playbook.
+
+#### Animation (M16 Plan 10 / T6.6.10 — implemented; extension pack)
+
+AnimationClip + AnimatorController typed tools. **Opt-in** — the tool definitions ship in the core MCP server (so capabilities advertises the surface) but the bridge-side handler exists only when the `com.alexeyperov.unity-open-mcp-ext-animation` extension pack is installed in the target project. A call to an animation tool when the pack is absent returns `tool_not_found`. Install via the Hub AI Setup wizard's "Optional extension packs" checkbox or by adding `"com.alexeyperov.unity-open-mcp-ext-animation"` to `Packages/manifest.json`.
+
+AnimationClip + AnimatorController are built-in Unity modules (no extra Unity package is required). Mutating tools run the full gate path with `paths_hint` scoped to the asset path (`.anim` or `.controller`); the two `*_modify` tools are DESTRUCTIVE — some modification types (ClearCurves / ClearEvents / RemoveCurve on clips; RemoveParameter / RemoveLayer / RemoveState / RemoveTransition on controllers) are irreversible without undo. The two `*_get_data` tools are read-only (gate-free). Both modify tools accept a JSON array of modification entries dispatched by `type`; per-entry errors are accumulated in the response's `errors` array and do not abort the batch.
+
+- `unity_open_mcp_animation_create` — Mutating: create empty AnimationClip assets at one or more `Assets/`-rooted `.anim` paths.
+- `unity_open_mcp_animation_get_data` — Read-only (gate-free): clip metadata (length / frameRate / wrapMode / flags) + float curve bindings + object-reference curve bindings + animation events.
+- `unity_open_mcp_animation_modify` — Mutating + **destructive**: batch modification dispatched by `type` (SetCurve / RemoveCurve / ClearCurves / SetFrameRate / SetWrapMode / SetLegacy / AddEvent / ClearEvents).
+- `unity_open_mcp_animator_create` — Mutating: create empty AnimatorController assets at one or more `Assets/`-rooted `.controller` paths.
+- `unity_open_mcp_animator_get_data` — Read-only (gate-free): controller name + parameters + layers + per-layer state machines (states, default state, transitions, any-state transitions, sub-state machines).
+- `unity_open_mcp_animator_modify` — Mutating + **destructive**: batch modification dispatched by `type` (AddParameter / RemoveParameter / AddLayer / RemoveLayer / AddState / RemoveState / SetDefaultState / AddTransition / RemoveTransition / AddAnyStateTransition / SetStateMotion / SetStateSpeed).
+
+Workflow: clip + controller — `animation_create` (`asset_paths: ["Assets/Anims/Idle.anim"]`) → `animation_modify` (SetCurve on `m_LocalPosition.x`) → `animator_create` (`asset_paths: ["Assets/Animators/Player.controller"]`) → `animator_modify` (AddParameter Speed; AddState Idle + Run; SetStateMotion Run = the clip; AddTransition Idle→Run conditioned on `Speed > 0.1`). See `skills/extensions/animation/SKILL.md` for the full agent playbook.
+
 ## Capability discovery
 
 `unity_open_mcp_capabilities` lets an agent self-discover the entire tool + rule + fix surface in a single call, including what is planned but not yet built.

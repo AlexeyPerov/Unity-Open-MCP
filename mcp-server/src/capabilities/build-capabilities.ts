@@ -211,6 +211,23 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_probuilder_extrude: "probuilder",
   unity_open_mcp_probuilder_delete_faces: "probuilder",
   unity_open_mcp_probuilder_set_face_material: "probuilder",
+  // M16 Plan 10 / T6.6.9 — Particle System extension tools. Extension pack
+  // tools ship tool definitions in the core MCP server (so capabilities
+  // advertises the surface) but require the matching extension UPM package
+  // installed in the target project for the bridge-side handler to exist.
+  unity_open_mcp_particle_system_get: "particle-system",
+  unity_open_mcp_particle_system_modify: "particle-system",
+  // M16 Plan 10 / T6.6.10 — Animation extension tools (AnimationClip +
+  // AnimatorController). Extension pack tools ship tool definitions in the
+  // core MCP server (so capabilities advertises the surface) but require the
+  // matching extension UPM package installed in the target project for the
+  // bridge-side handler to exist.
+  unity_open_mcp_animation_create: "animation",
+  unity_open_mcp_animation_get_data: "animation",
+  unity_open_mcp_animation_modify: "animation",
+  unity_open_mcp_animator_create: "animation",
+  unity_open_mcp_animator_get_data: "animation",
+  unity_open_mcp_animator_modify: "animation",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",

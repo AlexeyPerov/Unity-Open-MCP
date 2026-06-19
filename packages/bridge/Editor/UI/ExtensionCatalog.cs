@@ -162,9 +162,13 @@ namespace UnityOpenMcpBridge
                 description: "Particle module discovery and reflective mutation.",
                 upmDependency: "",
                 localPath: "packages/extensions/particlesystem",
-                toolIds: System.Array.Empty<string>(),
+                toolIds: new[]
+                {
+                    "unity_open_mcp_particle_system_get",
+                    "unity_open_mcp_particle_system_modify",
+                },
                 skillPath: "skills/extensions/particlesystem/SKILL.md",
-                shipped: false),
+                shipped: true),
             new ExtensionPack(
                 id: "com.alexeyperov.unity-open-mcp-ext-animation",
                 domain: "animation",
@@ -172,9 +176,17 @@ namespace UnityOpenMcpBridge
                 description: "AnimationClip curves and AnimatorController state machines.",
                 upmDependency: "",
                 localPath: "packages/extensions/animation",
-                toolIds: System.Array.Empty<string>(),
+                toolIds: new[]
+                {
+                    "unity_open_mcp_animation_create",
+                    "unity_open_mcp_animation_get_data",
+                    "unity_open_mcp_animation_modify",
+                    "unity_open_mcp_animator_create",
+                    "unity_open_mcp_animator_get_data",
+                    "unity_open_mcp_animator_modify",
+                },
                 skillPath: "skills/extensions/animation/SKILL.md",
-                shipped: false),
+                shipped: true),
         };
 
         /// <summary>

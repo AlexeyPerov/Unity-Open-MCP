@@ -171,6 +171,21 @@ import { probuilderGetMeshInfo } from "./probuilder-get-mesh-info.js";
 import { probuilderExtrude } from "./probuilder-extrude.js";
 import { probuilderDeleteFaces } from "./probuilder-delete-faces.js";
 import { probuilderSetFaceMaterial } from "./probuilder-set-face-material.js";
+// M16 Plan 10 / T6.6.9 — Particle System extension tools. Each tool is gated
+// on the `com.alexeyperov.unity-open-mcp-ext-particlesystem` extension pack
+// being installed in the target project.
+import { particleSystemGet } from "./particle-system-get.js";
+import { particleSystemModify } from "./particle-system-modify.js";
+// M16 Plan 10 / T6.6.10 — Animation extension tools (AnimationClip +
+// AnimatorController). Each tool is gated on the
+// `com.alexeyperov.unity-open-mcp-ext-animation` extension pack being installed
+// in the target project.
+import { animationCreate } from "./animation-create.js";
+import { animationGetData } from "./animation-get-data.js";
+import { animationModify } from "./animation-modify.js";
+import { animatorCreate } from "./animator-create.js";
+import { animatorGetData } from "./animator-get-data.js";
+import { animatorModify } from "./animator-modify.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -452,6 +467,37 @@ export const M16_PLAN10_PROBUILDER_TOOLS: Tool[] = [
   probuilderSetFaceMaterial,
 ];
 
+// M16 Plan 10 / T6.6.9 — Particle System extension tools. The lone mutator
+// (particle_system_modify) runs the full gate path with paths_hint scoped to
+// the host scene path; the read-only member (particle_system_get) is gate-free.
+// The two tools mirror the kebab `particle-system-*` ids in the upstream
+// Unity-MCP reference pack. modify uses a per-module field-patch surface
+// (module discriminator + fields_json) instead of the opaque ReflectorNet
+// SerializedMember payload — agents get up-front field-name validation and a
+// structured unknownFields report instead of guessing.
+export const M16_PLAN10_PARTICLESYSTEM_TOOLS: Tool[] = [
+  particleSystemGet,
+  particleSystemModify,
+];
+
+// M16 Plan 10 / T6.6.10 — Animation extension tools (AnimationClip + Animator
+// Controller). Mutating members (animation_create / animation_modify /
+// animator_create / animator_modify) run the full gate path with paths_hint
+// scoped to the asset path (.anim or .controller); the two modify tools are
+// DESTRUCTIVE — some modification types are irreversible without undo. Read-
+// only members (animation_get_data / animator_get_data) are gate-free. The six
+// tools mirror the kebab `animation-*` / `animator-*` ids in the upstream
+// Unity-MCP reference pack. modify accepts a JSON array of modification
+// entries dispatched by `type`; per-entry errors are accumulated, not thrown.
+export const M16_PLAN10_ANIMATION_TOOLS: Tool[] = [
+  animationCreate,
+  animationGetData,
+  animationModify,
+  animatorCreate,
+  animatorGetData,
+  animatorModify,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -475,4 +521,6 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN10_TOOLS,
   ...M16_PLAN10_INPUTSYSTEM_TOOLS,
   ...M16_PLAN10_PROBUILDER_TOOLS,
+  ...M16_PLAN10_PARTICLESYSTEM_TOOLS,
+  ...M16_PLAN10_ANIMATION_TOOLS,
 ];

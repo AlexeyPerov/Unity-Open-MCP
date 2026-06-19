@@ -1,0 +1,19 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-ext-animation.Editor.Tests",
+  "rootNamespace": "UnityOpenMcpExtensions.Animation.Tests",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "com.alexeyperov.unity-open-mcp-ext-animation.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
