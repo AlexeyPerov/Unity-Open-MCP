@@ -131,6 +131,26 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_impact_preview",
             "unity_open_mcp_gate_budget_estimate",
             "unity_open_mcp_mutation_explain",
+            // M16 Plan 9 — typed build pipeline + project-settings tools. The
+            // read members are gate-free; build_set_target / build_set_scenes /
+            // build_set_defines / settings_set_* / build_start run the full
+            // gate path (build_start additionally requires the deny bypass).
+            "unity_open_mcp_build_get_targets",
+            "unity_open_mcp_build_get_active_target",
+            "unity_open_mcp_build_set_target",
+            "unity_open_mcp_build_get_scenes",
+            "unity_open_mcp_build_set_scenes",
+            "unity_open_mcp_build_start",
+            "unity_open_mcp_build_get_defines",
+            "unity_open_mcp_build_set_defines",
+            "unity_open_mcp_settings_get_player",
+            "unity_open_mcp_settings_set_player",
+            "unity_open_mcp_settings_get_quality",
+            "unity_open_mcp_settings_set_quality",
+            "unity_open_mcp_settings_get_physics",
+            "unity_open_mcp_settings_set_physics",
+            "unity_open_mcp_settings_get_lighting",
+            "unity_open_mcp_settings_set_lighting",
             "unity_senses_run_tests",
             "unity_senses_screenshot",
             "unity_senses_read_console",
@@ -234,7 +254,19 @@ namespace UnityOpenMcpBridge
             // narrative. None mutate project state.
             "unity_open_mcp_impact_preview",
             "unity_open_mcp_gate_budget_estimate",
-            "unity_open_mcp_mutation_explain"
+            "unity_open_mcp_mutation_explain",
+            // M16 Plan 9 — read-only build + settings reads (gate-free). The
+            // mutating members (build_set_target / build_set_scenes /
+            // build_set_defines / build_start / settings_set_*) run the full
+            // gate path (MutatingTools).
+            "unity_open_mcp_build_get_targets",
+            "unity_open_mcp_build_get_active_target",
+            "unity_open_mcp_build_get_scenes",
+            "unity_open_mcp_build_get_defines",
+            "unity_open_mcp_settings_get_player",
+            "unity_open_mcp_settings_get_quality",
+            "unity_open_mcp_settings_get_physics",
+            "unity_open_mcp_settings_get_lighting"
         };
 
         static readonly HashSet<string> MutatingTools = new()
@@ -315,7 +347,22 @@ namespace UnityOpenMcpBridge
             // destination .json path. The other Plan 7 tools mutate editor
             // state but write no assets and route as gate-free direct-
             // response tools (DirectResponseTools).
-            "unity_open_mcp_profiler_save_data"
+            "unity_open_mcp_profiler_save_data",
+            // M16 Plan 9 — typed build + settings mutators. Each rewrites
+            // ProjectSettings/*.asset (or EditorBuildSettings) and runs the
+            // full gate path; the caller scopes paths_hint to the touched
+            // ProjectSettings asset (see each tool's description). build_start
+            // additionally requires the deny bypass (gate: "off" +
+            // confirm_bypass: true) because BuildPipeline.BuildPlayer is on the
+            // default deny list.
+            "unity_open_mcp_build_set_target",
+            "unity_open_mcp_build_set_scenes",
+            "unity_open_mcp_build_set_defines",
+            "unity_open_mcp_build_start",
+            "unity_open_mcp_settings_set_player",
+            "unity_open_mcp_settings_set_quality",
+            "unity_open_mcp_settings_set_physics",
+            "unity_open_mcp_settings_set_lighting"
         };
 
         static HttpListener _listener;
@@ -1385,6 +1432,31 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_impact_preview" => GateIntelligenceTools.ImpactPreview(body),
                 "unity_open_mcp_gate_budget_estimate" => GateIntelligenceTools.GateBudgetEstimate(body),
                 "unity_open_mcp_mutation_explain" => GateIntelligenceTools.MutationExplain(body),
+                // M16 Plan 9 — typed build pipeline + project-settings tools.
+                // The reads (build_get_targets / build_get_active_target /
+                // build_get_scenes / build_get_defines / settings_get_*) are
+                // gate-free direct-response tools; build_set_target /
+                // build_set_scenes / build_set_defines / settings_set_* run
+                // the full gate path with paths_hint on the touched
+                // ProjectSettings asset. build_start requires the deny bypass
+                // (gate: "off" + confirm_bypass: true) because
+                // BuildPipeline.BuildPlayer is on the default deny list.
+                "unity_open_mcp_build_get_targets" => BuildSettingsTools.GetTargets(body),
+                "unity_open_mcp_build_get_active_target" => BuildSettingsTools.GetActiveTarget(body),
+                "unity_open_mcp_build_set_target" => BuildSettingsTools.SetTarget(body),
+                "unity_open_mcp_build_get_scenes" => BuildSettingsTools.GetScenes(body),
+                "unity_open_mcp_build_set_scenes" => BuildSettingsTools.SetScenes(body),
+                "unity_open_mcp_build_start" => BuildSettingsTools.StartBuild(body),
+                "unity_open_mcp_build_get_defines" => BuildSettingsTools.GetDefines(body),
+                "unity_open_mcp_build_set_defines" => BuildSettingsTools.SetDefines(body),
+                "unity_open_mcp_settings_get_player" => BuildSettingsTools.SettingsGetPlayer(body),
+                "unity_open_mcp_settings_set_player" => BuildSettingsTools.SettingsSetPlayer(body),
+                "unity_open_mcp_settings_get_quality" => BuildSettingsTools.SettingsGetQuality(body),
+                "unity_open_mcp_settings_set_quality" => BuildSettingsTools.SettingsSetQuality(body),
+                "unity_open_mcp_settings_get_physics" => BuildSettingsTools.SettingsGetPhysics(body),
+                "unity_open_mcp_settings_set_physics" => BuildSettingsTools.SettingsSetPhysics(body),
+                "unity_open_mcp_settings_get_lighting" => BuildSettingsTools.SettingsGetLighting(body),
+                "unity_open_mcp_settings_set_lighting" => BuildSettingsTools.SettingsSetLighting(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

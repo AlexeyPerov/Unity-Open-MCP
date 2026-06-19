@@ -159,6 +159,26 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_impact_preview: "gate-intelligence",
   unity_open_mcp_gate_budget_estimate: "gate-intelligence",
   unity_open_mcp_mutation_explain: "gate-intelligence",
+  // M16 Plan 9 — typed build pipeline + project-settings tools. Reads are
+  // gate-free; build_set_target / build_set_scenes / build_set_defines /
+  // build_start / settings_set_* run the full gate path (build_start also
+  // requires the deny bypass — BuildPipeline.BuildPlayer is on the deny list).
+  unity_open_mcp_build_get_targets: "build-settings",
+  unity_open_mcp_build_get_active_target: "build-settings",
+  unity_open_mcp_build_set_target: "build-settings",
+  unity_open_mcp_build_get_scenes: "build-settings",
+  unity_open_mcp_build_set_scenes: "build-settings",
+  unity_open_mcp_build_start: "build-settings",
+  unity_open_mcp_build_get_defines: "build-settings",
+  unity_open_mcp_build_set_defines: "build-settings",
+  unity_open_mcp_settings_get_player: "build-settings",
+  unity_open_mcp_settings_set_player: "build-settings",
+  unity_open_mcp_settings_get_quality: "build-settings",
+  unity_open_mcp_settings_set_quality: "build-settings",
+  unity_open_mcp_settings_get_physics: "build-settings",
+  unity_open_mcp_settings_set_physics: "build-settings",
+  unity_open_mcp_settings_get_lighting: "build-settings",
+  unity_open_mcp_settings_set_lighting: "build-settings",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
@@ -234,103 +254,10 @@ export const PLANNED_TOOLS: PlannedTool[] = [
   // Plan 8 typed tools are now implemented (see mcp-server/src/tools/).
   // The entries that used to live here have been removed.
 
-  // --- Plan 10: Build & Settings -----------------------------------------
-  {
-    name: "unity_open_mcp_build_get_targets",
-    category: "typed-editor-build-settings",
-    description: "List available build targets.",
-    guidance: "Planned build surface. Use execute_csharp with BuildPipeline today.",
-  },
-  {
-    name: "unity_open_mcp_build_get_active_target",
-    category: "typed-editor-build-settings",
-    description: "Get the active build target.",
-    guidance: "Planned build surface. Use execute_csharp with EditorUserBuildSettings today.",
-  },
-  {
-    name: "unity_open_mcp_build_set_target",
-    category: "typed-editor-build-settings",
-    description: "Switch the active build target (may recompile).",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_build_get_scenes",
-    category: "typed-editor-build-settings",
-    description: "List scenes in build settings.",
-    guidance: "Planned build surface. Read EditorBuildSettings via execute_csharp today.",
-  },
-  {
-    name: "unity_open_mcp_build_set_scenes",
-    category: "typed-editor-build-settings",
-    description: "Set the build scene list.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_build_start",
-    category: "typed-editor-build-settings",
-    description: "Trigger a player build (destructive — gated).",
-    guidance: "Planned build surface. Use execute_csharp with BuildPipeline.BuildPlayer today.",
-  },
-  {
-    name: "unity_open_mcp_build_get_defines",
-    category: "typed-editor-build-settings",
-    description: "Read scripting define symbols.",
-    guidance: "Planned build surface. Use execute_csharp with PlayerSettings.GetScriptingDefineSymbols today.",
-  },
-  {
-    name: "unity_open_mcp_build_set_defines",
-    category: "typed-editor-build-settings",
-    description: "Set scripting define symbols.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_settings_get_player",
-    category: "typed-editor-build-settings",
-    description: "Read PlayerSettings.",
-    guidance: "Planned settings surface. Read ProjectSettings/ProjectSettings.asset today.",
-  },
-  {
-    name: "unity_open_mcp_settings_set_player",
-    category: "typed-editor-build-settings",
-    description: "Set a PlayerSettings value.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_settings_get_quality",
-    category: "typed-editor-build-settings",
-    description: "Read QualitySettings.",
-    guidance: "Planned settings surface. Read ProjectSettings/QualitySettings.asset today.",
-  },
-  {
-    name: "unity_open_mcp_settings_set_quality",
-    category: "typed-editor-build-settings",
-    description: "Set a QualitySettings value.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_settings_get_physics",
-    category: "typed-editor-build-settings",
-    description: "Read Physics / Physics2D settings.",
-    guidance: "Planned settings surface. Read ProjectSettings/DynamicsManager.asset today.",
-  },
-  {
-    name: "unity_open_mcp_settings_set_physics",
-    category: "typed-editor-build-settings",
-    description: "Set a Physics / Physics2D setting.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
-  {
-    name: "unity_open_mcp_settings_get_lighting",
-    category: "typed-editor-build-settings",
-    description: "Read render/lighting settings.",
-    guidance: "Planned settings surface. Read lighting/render settings assets today.",
-  },
-  {
-    name: "unity_open_mcp_settings_set_lighting",
-    category: "typed-editor-build-settings",
-    description: "Set a render/lighting setting.",
-    guidance: MUTATE_VIA_EXECUTE_CSHARP,
-  },
+  // --- Plan 9: Build & Settings ------------------------------------------
+  // Plan 9 typed tools are now implemented (see mcp-server/src/tools/).
+  // The entries that used to live here have been removed; the remaining
+  // Plan 9 references (none) live as real Tool definitions.
 ];
 
 // ---------------------------------------------------------------------------

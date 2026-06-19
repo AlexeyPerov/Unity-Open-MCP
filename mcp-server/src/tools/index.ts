@@ -120,6 +120,23 @@ import { profilerGetScriptStats } from "./profiler-get-script-stats.js";
 import { impactPreview } from "./impact-preview.js";
 import { gateBudgetEstimate } from "./gate-budget-estimate.js";
 import { mutationExplain } from "./mutation-explain.js";
+// M16 Plan 9 — typed build pipeline + project-settings tools.
+import { buildGetTargets } from "./build-get-targets.js";
+import { buildGetActiveTarget } from "./build-get-active-target.js";
+import { buildSetTarget } from "./build-set-target.js";
+import { buildGetScenes } from "./build-get-scenes.js";
+import { buildSetScenes } from "./build-set-scenes.js";
+import { buildStart } from "./build-start.js";
+import { buildGetDefines } from "./build-get-defines.js";
+import { buildSetDefines } from "./build-set-defines.js";
+import { settingsGetPlayer } from "./settings-get-player.js";
+import { settingsSetPlayer } from "./settings-set-player.js";
+import { settingsGetQuality } from "./settings-get-quality.js";
+import { settingsSetQuality } from "./settings-set-quality.js";
+import { settingsGetPhysics } from "./settings-get-physics.js";
+import { settingsSetPhysics } from "./settings-set-physics.js";
+import { settingsGetLighting } from "./settings-get-lighting.js";
+import { settingsSetLighting } from "./settings-set-lighting.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -313,6 +330,35 @@ export const M16_PLAN8_TOOLS: Tool[] = [
   mutationExplain,
 ];
 
+// M16 Plan 9 — build pipeline + project-settings typed tools. Read-only
+// members (build_get_targets / build_get_active_target / build_get_scenes /
+// build_get_defines / settings_get_*) are gate-free direct-response tools.
+// build_set_target / build_set_defines use restart_then_settle (they can
+// recompile); build_set_scenes / settings_set_quality / settings_set_physics /
+// settings_set_lighting use editor_settle; settings_set_player uses
+// restart_then_settle. Each runs the full gate path with paths_hint scoped to
+// the touched ProjectSettings asset. build_start additionally requires the
+// deny bypass (gate: "off" + confirm_bypass: true) because
+// BuildPipeline.BuildPlayer is on the default deny list.
+export const M16_PLAN9_TOOLS: Tool[] = [
+  buildGetTargets,
+  buildGetActiveTarget,
+  buildSetTarget,
+  buildGetScenes,
+  buildSetScenes,
+  buildStart,
+  buildGetDefines,
+  buildSetDefines,
+  settingsGetPlayer,
+  settingsSetPlayer,
+  settingsGetQuality,
+  settingsSetQuality,
+  settingsGetPhysics,
+  settingsSetPhysics,
+  settingsGetLighting,
+  settingsSetLighting,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -332,4 +378,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN6_TOOLS,
   ...M16_PLAN7_TOOLS,
   ...M16_PLAN8_TOOLS,
+  ...M16_PLAN9_TOOLS,
 ];

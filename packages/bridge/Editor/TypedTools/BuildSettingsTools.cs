@@ -1,0 +1,1224 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text;
+using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace UnityOpenMcpBridge.TypedTools
+{
+    // M16 Plan 9 — typed build pipeline + project-settings tools. Parity with
+    // UCP `build/*` and `settings/*` so agents drive CI build prep, define-
+    // symbol management, and settings audits without ad-hoc execute_csharp.
+    //
+    // Tool map:
+    //   - build_get_targets       (read-only)
+    //   - build_get_active_target (read-only)
+    //   - build_set_target        (mutating — may recompile)
+    //   - build_get_scenes        (read-only)
+    //   - build_set_scenes        (mutating — rewrites EditorBuildSettings)
+    //   - build_start             (mutating — destructive; deny heuristic +
+    //                                     gate + confirm_bypass for BuildPlayer)
+    //   - build_get_defines       (read-only)
+    //   - build_set_defines       (mutating — rewrites ProjectSettings)
+    //   - settings_get_player     (read-only)
+    //   - settings_set_player     (mutating — ProjectSettings/ProjectSettings.asset)
+    //   - settings_get_quality    (read-only)
+    //   - settings_set_quality    (mutating — ProjectSettings/QualitySettings.asset)
+    //   - settings_get_physics    (read-only)
+    //   - settings_set_physics    (mutating — ProjectSettings/DynamicsManager.asset)
+    //   - settings_get_lighting   (read-only)
+    //   - settings_set_lighting   (mutating — render/lighting settings asset)
+    //
+    // Gate routing (see BridgeHttpServer KnownTools / DirectResponseTools /
+    // MutatingTools):
+    //   - The eight *_get_* members are gate-free direct-response reads.
+    //   - build_set_target / build_set_scenes / build_set_defines + the four
+    //     settings_set_* members run the full gate path with paths_hint scoped
+    //     to the touched ProjectSettings asset (see each tool's docstring).
+    //   - build_start runs the deny heuristic FIRST (BuildPipeline.BuildPlayer
+    //     is on the default deny list — bypass only via gate: "off" +
+    //     confirm_bypass: true), then the full gate path.
+    //
+    // JSON is hand-rolled (no serializer dependency in the bridge — see
+    // packages/bridge/AGENTS.md §Transport). Read tools are token-bounded.
+    //
+    // NOT registry-discovered: wired into BridgeHttpServer.DispatchTool so the
+    // snake_case schemas parse the same way as the other M16 typed tools.
+    public static class BuildSettingsTools
+    {
+        // Cap for the build-target enumeration so a future Unity version with a
+        // very large BuildTarget enum does not blow the response budget.
+        const int MaxTargets = 64;
+
+        // ============================ Build reads =========================
+
+        // Read-only: enumerate BuildTarget values that resolve to a known group
+        // (Unknown is skipped). Folds UCP build/targets. Gate-free.
+        public static ToolDispatchResult GetTargets(string body)
+        {
+            try
+            {
+                var values = Enum.GetValues(typeof(BuildTarget));
+                var active = EditorUserBuildSettings.activeBuildTarget;
+                var sb = new StringBuilder(256 + values.Length * 64);
+                sb.Append("{\"status\":\"ok\",\"active\":\"")
+                  .Append(EscName(active.ToString()))
+                  .Append("\",\"activeGroup\":\"")
+                  .Append(EscName(EditorUserBuildSettings.selectedBuildTargetGroup.ToString()))
+                  .Append("\",\"targets\":[");
+                int emitted = 0;
+                // Enum.GetValues returns values in declared order, which mixes
+                // active + inactive targets. We sort by name for stable output.
+                var names = Enum.GetNames(typeof(BuildTarget));
+                Array.Sort(names, StringComparer.OrdinalIgnoreCase);
+                foreach (var name in names)
+                {
+                    if (emitted >= MaxTargets) break;
+                    if (!Enum.TryParse<BuildTarget>(name, out var bt)) continue;
+                    if ((int)bt < 0) continue;
+                    var group = BuildPipeline.GetBuildTargetGroup(bt);
+                    if (group == BuildTargetGroup.Unknown) continue;
+
+                    bool installed;
+                    try { installed = BuildPipeline.IsBuildTargetSupported(group, bt); }
+                    catch { installed = false; }
+
+                    if (emitted > 0) sb.Append(',');
+                    sb.Append("{\"name\":\"").Append(EscName(bt.ToString()));
+                    sb.Append("\",\"group\":\"").Append(EscName(group.ToString()));
+                    sb.Append("\",\"installed\":").Append(installed ? "true" : "false");
+                    sb.Append(",\"isActive\":").Append(bt == active ? "true" : "false");
+                    sb.Append('}');
+                    emitted++;
+                }
+                sb.Append("],\"count\":").Append(emitted);
+                sb.Append(",\"truncated\":").Append(Math.Max(0, names.Length - emitted));
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Read-only: active build target + group. Gate-free.
+        public static ToolDispatchResult GetActiveTarget(string body)
+        {
+            try
+            {
+                var sb = new StringBuilder(96);
+                sb.Append("{\"status\":\"ok\",\"target\":\"")
+                  .Append(EscName(EditorUserBuildSettings.activeBuildTarget.ToString()));
+                sb.Append("\",\"group\":\"")
+                  .Append(EscName(EditorUserBuildSettings.selectedBuildTargetGroup.ToString()));
+                sb.Append("\"}");
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Read-only: scenes currently in EditorBuildSettings. Gate-free.
+        public static ToolDispatchResult GetScenes(string body)
+        {
+            try
+            {
+                var scenes = EditorBuildSettings.scenes;
+                var sb = new StringBuilder(64 + scenes.Length * 96);
+                sb.Append("{\"status\":\"ok\",\"count\":").Append(scenes.Length);
+                sb.Append(",\"scenes\":[");
+                for (int i = 0; i < scenes.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    var s = scenes[i];
+                    sb.Append("{\"path\":\"").Append(EscName(s.path ?? ""));
+                    sb.Append("\",\"enabled\":").Append(s.enabled ? "true" : "false");
+                    sb.Append(",\"guid\":\"").Append(EscName(s.guid.ToString()));
+                    sb.Append("\"}");
+                }
+                sb.Append("]}");
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Read-only: scripting define symbols for the active build target
+        // group. Folds UCP build/defines. Gate-free.
+        public static ToolDispatchResult GetDefines(string body)
+        {
+            try
+            {
+                var namedTarget = ResolveNamedBuildTarget();
+                var group = EditorUserBuildSettings.selectedBuildTargetGroup;
+                var raw = PlayerSettings.GetScriptingDefineSymbols(namedTarget);
+                var list = SplitDefines(raw);
+                var sb = new StringBuilder(64 + list.Count * 32);
+                sb.Append("{\"status\":\"ok\",\"group\":\"")
+                  .Append(EscName(group.ToString()));
+                sb.Append("\",\"namedTarget\":\"")
+                  .Append(EscName(namedTarget.TargetName));
+                sb.Append("\",\"defines\":\"").Append(EscName(raw ?? ""));
+                sb.Append("\",\"list\":[");
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(EscName(list[i])).Append('"');
+                }
+                sb.Append("]}");
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // ============================ Build mutators ======================
+
+        // Mutating: switch the active build target. May trigger a recompile +
+        // domain reload. Folds UCP build/set-target. paths_hint scope is the
+        // ProjectSettings folder (target switch rewrites ProjectSettings/*.asset
+        // files — Library/BuildPlayerAsset is not an asset).
+        public static ToolDispatchResult SetTarget(string body)
+        {
+            var targetStr = JsonBody.GetString(body, "target");
+            if (string.IsNullOrWhiteSpace(targetStr))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'target' is required (a BuildTarget name, e.g. 'StandaloneWindows64').");
+
+            if (!Enum.TryParse<BuildTarget>(targetStr.Trim(), true, out var target))
+                return ToolDispatchResult.Fail("unknown_target",
+                    $"Unknown build target: '{targetStr}'. Use build_get_targets to enumerate valid BuildTarget names.");
+
+            try
+            {
+                var group = BuildPipeline.GetBuildTargetGroup(target);
+                if (group == BuildTargetGroup.Unknown)
+                    return ToolDispatchResult.Fail("unknown_target",
+                        $"Build target '{target}' has no known group.");
+                bool success = EditorUserBuildSettings.SwitchActiveBuildTarget(group, target);
+                var sb = new StringBuilder(128);
+                sb.Append("{\"status\":").Append(success ? "\"ok\"" : "\"failed\"");
+                sb.Append(",\"success\":").Append(success ? "true" : "false");
+                sb.Append(",\"target\":\"").Append(EscName(target.ToString()));
+                sb.Append("\",\"group\":\"").Append(EscName(group.ToString()));
+                sb.Append("\",\"note\":\"Switching the active build target can trigger a " +
+                          "recompile / domain reload; poll editor_status or compile_check " +
+                          "to confirm.\"}");
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Mutating: replace the EditorBuildSettings scene list. Folds UCP
+        // build/set-scenes. Accepts scene entries as `{path, enabled}` objects
+        // or bare path strings (treated as enabled). paths_hint scope is
+        // ProjectSettings (EditorBuildSettings.asset is under ProjectSettings/).
+        public static ToolDispatchResult SetScenes(string body)
+        {
+            // Parse the scenes[] array ourselves: entries may be objects or
+            // bare strings, and JsonBody.GetObjectArray drops bare-string
+            // entries. We walk the raw array and dispatch each entry by its
+            // leading character.
+            var rawArray = JsonBody.GetRawValue(body, "scenes");
+            if (string.IsNullOrWhiteSpace(rawArray) || rawArray.Trim() == "null")
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'scenes' is required and must be a non-empty array of " +
+                    "{path, enabled?} objects or bare path strings.");
+
+            var entries = ParseArrayEntries(rawArray);
+            if (entries.Count == 0)
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'scenes' is required and must be a non-empty array of " +
+                    "{path, enabled?} objects or bare path strings.");
+
+            try
+            {
+                var list = new List<EditorBuildSettingsScene>();
+                foreach (var entry in entries)
+                {
+                    if (string.IsNullOrEmpty(entry)) continue;
+                    var trimmedEntry = entry.Trim();
+                    string path;
+                    bool enabled = true;
+                    if (trimmedEntry.StartsWith("{"))
+                    {
+                        // Object entry — extract path + enabled. GetObjectArray
+                        // would have stripped the braces; here we keep them so
+                        // JsonBody.GetString / GetBool see a full object.
+                        path = JsonBody.GetString(trimmedEntry, "path");
+                        enabled = JsonBody.GetBool(trimmedEntry, "enabled", true);
+                    }
+                    else
+                    {
+                        // Bare string entry — strip surrounding quotes.
+                        path = trimmedEntry.Trim('"');
+                    }
+                    if (string.IsNullOrWhiteSpace(path)) continue;
+                    list.Add(new EditorBuildSettingsScene(path, enabled));
+                }
+
+                if (list.Count == 0)
+                    return ToolDispatchResult.Fail("invalid_scenes",
+                        "No valid scene entries parsed. Each entry must be " +
+                        "{path, enabled?} or a bare path string.");
+
+                EditorBuildSettings.scenes = list.ToArray();
+
+                var sb = new StringBuilder(64 + list.Count * 16);
+                sb.Append("{\"status\":\"ok\",\"action\":\"set_scenes\",\"count\":")
+                  .Append(list.Count);
+                sb.Append(",\"note\":\"EditorBuildSettings rewritten. A reimport of the " +
+                          "scene list may follow; poll assets_refresh if downstream " +
+                          "tools need it.\"}");
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Walk a JSON array and return each top-level element verbatim (the
+        // substring inside the surrounding brackets is split on top-level
+        // commas, with strings/objects/arrays skipped over so commas inside
+        // them do not split). Unlike JsonBody.GetObjectArray, this preserves
+        // bare-string entries alongside object entries.
+        static List<string> ParseArrayEntries(string rawArray)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrEmpty(rawArray)) return result;
+            var v = rawArray.Trim();
+            if (!v.StartsWith("[")) return result;
+            // Skip the leading '['.
+            int i = 1;
+            while (i < v.Length)
+            {
+                while (i < v.Length && char.IsWhiteSpace(v[i])) i++;
+                if (i >= v.Length || v[i] == ']') break;
+
+                int start = i;
+                // Advance to the next top-level comma.
+                if (v[i] == '"')
+                {
+                    i++;
+                    while (i < v.Length)
+                    {
+                        if (v[i] == '\\') { i += 2; continue; }
+                        if (v[i] == '"') { i++; break; }
+                        i++;
+                    }
+                }
+                else if (v[i] == '{' || v[i] == '[')
+                {
+                    var open = v[i];
+                    var close = open == '{' ? '}' : ']';
+                    int depth = 1;
+                    i++;
+                    while (i < v.Length && depth > 0)
+                    {
+                        if (v[i] == '"')
+                        {
+                            i++;
+                            while (i < v.Length)
+                            {
+                                if (v[i] == '\\') { i += 2; continue; }
+                                if (v[i] == '"') { i++; break; }
+                                i++;
+                            }
+                            continue;
+                        }
+                        if (v[i] == open) depth++;
+                        else if (v[i] == close) depth--;
+                        i++;
+                    }
+                }
+                else
+                {
+                    while (i < v.Length && v[i] != ',' && v[i] != ']') i++;
+                }
+                result.Add(v.Substring(start, i - start).Trim());
+                while (i < v.Length && (v[i] == ',' || char.IsWhiteSpace(v[i]))) i++;
+            }
+            return result;
+        }
+
+        // Mutating: set scripting define symbols for the active build target
+        // group. Folds UCP build/set-defines. Accepts an array (joined with ';')
+        // or a pre-joined ';' string. An empty array (or "") CLEARS the defines.
+        // paths_hint scope is ProjectSettings (ProjectSettings/ProjectSettings.asset
+        // holds the defines block).
+        public static ToolDispatchResult SetDefines(string body)
+        {
+            // Distinguish "field absent" (missing_parameter) from "field present
+            // but empty" (clear). JsonBody returns null/empty for both, so we
+            // probe the raw body for the key presence first.
+            if (!HasField(body, "defines"))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'defines' is required — either an array of symbols or a " +
+                    "';'-joined string. Pass an empty array (or \"\") to clear.");
+
+            var definesArray = JsonBody.GetStringArray(body, "defines");
+            string definesStr = JsonBody.GetString(body, "defines");
+
+            string defines;
+            if (definesArray != null && definesArray.Length > 0)
+            {
+                defines = string.Join(";", definesArray
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Select(s => s.Trim()));
+            }
+            else
+            {
+                // Empty array OR a (possibly empty) pre-joined string. An empty
+                // value clears the defines.
+                defines = definesStr ?? "";
+            }
+
+            try
+            {
+                var namedTarget = ResolveNamedBuildTarget();
+                var group = EditorUserBuildSettings.selectedBuildTargetGroup;
+                PlayerSettings.SetScriptingDefineSymbols(namedTarget, defines);
+
+                var sb = new StringBuilder(96);
+                sb.Append("{\"status\":\"ok\",\"action\":\"set_defines\"");
+                sb.Append(",\"group\":\"").Append(EscName(group.ToString()));
+                sb.Append("\",\"namedTarget\":\"").Append(EscName(namedTarget.TargetName));
+                sb.Append("\",\"defines\":\"").Append(EscName(defines));
+                sb.Append("\",\"note\":\"Changing scripting define symbols triggers a " +
+                          "recompile; poll compile_check / editor_status to confirm.\"}");
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Mutating + destructive: trigger a player build via
+        // BuildPipeline.BuildPlayer. BuildPlayer is on the default deny list
+        // (BridgeDenyList.DefaultCSharpPatterns), so this typed tool mirrors the
+        // destructive-menu pattern: it refuses UNLESS the request passes
+        // gate: "off" + confirm_bypass: true (BridgeDenyBypass.IsRequestedFromBody).
+        // When bypassed, the full gate path still runs so the response carries
+        // the post-build asset-reference fallout.
+        //
+        // paths_hint scope: the destination build output path (an asset-adjacent
+        // folder) plus any ProjectSettings assets touched by the build pipeline.
+        // Agents typically scope this to the build output folder.
+        public static ToolDispatchResult StartBuild(string body)
+        {
+            // Deny heuristic — same bypass contract as execute_csharp /
+            // execute_menu. The typed tool itself is the "scoped typed tool"
+            // alternative the deny message points at, but a player build is
+            // still destructive (multi-minute, writes a binary player) so we
+            // require the explicit bypass.
+            var bypass = BridgeDenyBypass.IsRequestedFromBody(body);
+            if (!bypass)
+                return ToolDispatchResult.Fail("build_confirmation_required",
+                    "build_start triggers BuildPipeline.BuildPlayer, which is destructive " +
+                    "(multi-minute, writes a binary player outside Assets/). The deny " +
+                    "heuristic blocks it by default. Retry with gate: \"off\" AND " +
+                    "confirm_bypass: true to proceed and accept the risk. " +
+                    "Matched pattern: BuildPipeline.BuildPlayer.");
+
+            var outputPath = JsonBody.GetString(body, "output_path");
+            bool development = JsonBody.GetBool(body, "development", false);
+            bool allowDebugging = JsonBody.GetBool(body, "allow_debugging", false);
+
+            try
+            {
+                var scenes = EditorBuildSettings.scenes
+                    .Where(s => s.enabled && !string.IsNullOrEmpty(s.path))
+                    .Select(s => s.path)
+                    .ToArray();
+
+                if (scenes.Length == 0)
+                    return ToolDispatchResult.Fail("no_scenes",
+                        "No enabled scenes in build settings. Use build_set_scenes " +
+                        "to populate the build scene list first.");
+
+                if (string.IsNullOrWhiteSpace(outputPath))
+                    outputPath = "Builds/" + EditorUserBuildSettings.activeBuildTarget + "/Build";
+
+                var options = BuildOptions.None;
+                if (development) options |= BuildOptions.Development;
+                if (allowDebugging) options |= BuildOptions.AllowDebugging;
+
+                var buildOptions = new BuildPlayerOptions
+                {
+                    scenes = scenes,
+                    locationPathName = outputPath,
+                    target = EditorUserBuildSettings.activeBuildTarget,
+                    targetGroup = EditorUserBuildSettings.selectedBuildTargetGroup,
+                    options = options,
+                };
+
+                var report = BuildPipeline.BuildPlayer(buildOptions);
+                return ToolDispatchResult.Ok(BuildReportJson(report, outputPath, options));
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("build_failed", e.Message);
+            }
+        }
+
+        // ============================ Settings reads ======================
+
+        // Read-only: PlayerSettings snapshot for the active build target.
+        // Gate-free. Folds UCP settings/player.
+        public static ToolDispatchResult SettingsGetPlayer(string body)
+        {
+            try
+            {
+                var namedTarget = ResolveNamedBuildTarget();
+                var activeTarget = EditorUserBuildSettings.activeBuildTarget;
+                var graphicsApis = PlayerSettings.GetGraphicsAPIs(activeTarget);
+                var firstApi = graphicsApis != null && graphicsApis.Length > 0
+                    ? graphicsApis[0].ToString()
+                    : "Unknown";
+
+                var sb = new StringBuilder(384);
+                sb.Append("{\"status\":\"ok\",\"namedTarget\":\"")
+                  .Append(EscName(namedTarget.TargetName)).Append("\"");
+                sb.Append(",\"companyName\":").Append(Q(PlayerSettings.companyName));
+                sb.Append(",\"productName\":").Append(Q(PlayerSettings.productName));
+                sb.Append(",\"bundleVersion\":").Append(Q(PlayerSettings.bundleVersion));
+                sb.Append(",\"defaultIsNativeResolution\":").Append(PlayerSettings.defaultIsNativeResolution ? "true" : "false");
+                sb.Append(",\"runInBackground\":").Append(PlayerSettings.runInBackground ? "true" : "false");
+                sb.Append(",\"colorSpace\":").Append(Q(PlayerSettings.colorSpace.ToString()));
+                sb.Append(",\"graphicsApi\":").Append(Q(firstApi));
+                sb.Append(",\"scriptingBackend\":").Append(Q(PlayerSettings.GetScriptingBackend(namedTarget).ToString()));
+                sb.Append(",\"apiCompatibilityLevel\":").Append(Q(PlayerSettings.GetApiCompatibilityLevel(namedTarget).ToString()));
+                int inputHandler = ReadSerializedPlayerInt("activeInputHandler");
+                sb.Append(",\"activeInputHandler\":").Append(inputHandler);
+                sb.Append(",\"activeInputHandlerName\":").Append(Q(DescribeActiveInputHandler(inputHandler)));
+                sb.Append(",\"targetFrameRate\":").Append(Application.targetFrameRate);
+                sb.Append(",\"defaultScreenWidth\":").Append(PlayerSettings.defaultScreenWidth);
+                sb.Append(",\"defaultScreenHeight\":").Append(PlayerSettings.defaultScreenHeight);
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Read-only: QualitySettings snapshot. Gate-free. Folds UCP
+        // settings/quality.
+        public static ToolDispatchResult SettingsGetQuality(string body)
+        {
+            try
+            {
+                var names = QualitySettings.names;
+                var current = QualitySettings.GetQualityLevel();
+                var sb = new StringBuilder(128 + names.Length * 48);
+                sb.Append("{\"status\":\"ok\",\"currentLevel\":").Append(current);
+                sb.Append(",\"currentName\":").Append(Q(names.Length > 0 && current >= 0 && current < names.Length ? names[current] : ""));
+                sb.Append(",\"levels\":[");
+                for (int i = 0; i < names.Length; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append("{\"index\":").Append(i);
+                    sb.Append(",\"name\":").Append(Q(names[i]));
+                    sb.Append(",\"isCurrent\":").Append(i == current ? "true" : "false");
+                    sb.Append('}');
+                }
+                sb.Append("],\"shadowDistance\":").Append(Num(QualitySettings.shadowDistance));
+                sb.Append(",\"shadowCascades\":").Append(QualitySettings.shadowCascades);
+                sb.Append(",\"antiAliasing\":").Append(QualitySettings.antiAliasing);
+                sb.Append(",\"vSyncCount\":").Append(QualitySettings.vSyncCount);
+                sb.Append(",\"pixelLightCount\":").Append(QualitySettings.pixelLightCount);
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Read-only: Physics + Physics2D settings. Gate-free. Folds UCP
+        // settings/physics.
+        public static ToolDispatchResult SettingsGetPhysics(string body)
+        {
+            try
+            {
+                var sb = new StringBuilder(256);
+                sb.Append("{\"status\":\"ok\",\"gravity\":[")
+                  .Append(Num(Physics.gravity.x)).Append(',')
+                  .Append(Num(Physics.gravity.y)).Append(',')
+                  .Append(Num(Physics.gravity.z)).Append(']');
+                sb.Append(",\"defaultSolverIterations\":").Append(Physics.defaultSolverIterations);
+                sb.Append(",\"defaultSolverVelocityIterations\":").Append(Physics.defaultSolverVelocityIterations);
+                sb.Append(",\"bounceThreshold\":").Append(Num(Physics.bounceThreshold));
+                sb.Append(",\"sleepThreshold\":").Append(Num(Physics.sleepThreshold));
+                sb.Append(",\"defaultContactOffset\":").Append(Num(Physics.defaultContactOffset));
+                sb.Append(",\"simulationMode\":").Append(Q(Physics.simulationMode.ToString()));
+                sb.Append(",\"physics2DGravity\":[")
+                  .Append(Num(Physics2D.gravity.x)).Append(',')
+                  .Append(Num(Physics2D.gravity.y)).Append(']');
+                sb.Append(",\"physics2DSimulationMode\":").Append(Q(Physics2D.simulationMode.ToString()));
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Read-only: Render/Lighting settings snapshot. Gate-free. Folds UCP
+        // settings/lighting. RenderSettings is scene-scoped in the live Editor
+        // — reads reflect the currently-active scene's lighting setup.
+        public static ToolDispatchResult SettingsGetLighting(string body)
+        {
+            try
+            {
+                var c = RenderSettings.ambientLight;
+                var fc = RenderSettings.fogColor;
+                var sb = new StringBuilder(320);
+                sb.Append("{\"status\":\"ok\",\"ambientMode\":").Append(Q(RenderSettings.ambientMode.ToString()));
+                sb.Append(",\"ambientIntensity\":").Append(Num(RenderSettings.ambientIntensity));
+                sb.Append(",\"ambientColor\":[").Append(Num(c.r)).Append(',').Append(Num(c.g)).Append(',').Append(Num(c.b)).Append(',').Append(Num(c.a)).Append(']');
+                sb.Append(",\"fog\":").Append(RenderSettings.fog ? "true" : "false");
+                sb.Append(",\"fogMode\":").Append(Q(RenderSettings.fogMode.ToString()));
+                sb.Append(",\"fogDensity\":").Append(Num(RenderSettings.fogDensity));
+                sb.Append(",\"fogColor\":[").Append(Num(fc.r)).Append(',').Append(Num(fc.g)).Append(',').Append(Num(fc.b)).Append(',').Append(Num(fc.a)).Append(']');
+                sb.Append(",\"fogStartDistance\":").Append(Num(RenderSettings.fogStartDistance));
+                sb.Append(",\"fogEndDistance\":").Append(Num(RenderSettings.fogEndDistance));
+                var skybox = RenderSettings.skybox;
+                sb.Append(",\"skybox\":").Append(skybox != null ? Q(skybox.name) : "null");
+                var sun = RenderSettings.sun;
+                sb.Append(",\"sunSource\":").Append(sun != null && sun.gameObject != null ? Q(sun.gameObject.name) : "null");
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // ============================ Settings mutators ===================
+
+        // Mutating: set PlayerSettings fields by key/value pairs. Folds UCP
+        // settings/player-set. paths_hint scope: ProjectSettings/ProjectSettings.asset.
+        // Writes are batched; per-key failures are accumulated and the batch
+        // still applies the valid keys.
+        public static ToolDispatchResult SettingsSetPlayer(string body)
+        {
+            var patches = JsonBody.GetObjectArray(body, "fields");
+            if (patches == null || patches.Length == 0)
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'fields' is required and must be a non-empty array of " +
+                    "{key, value} patches. See the tool description for supported keys.");
+
+            try
+            {
+                var applied = new List<string>();
+                var warnings = new List<string>();
+                foreach (var raw in patches)
+                {
+                    if (string.IsNullOrEmpty(raw)) continue;
+                    var key = JsonBody.GetString(raw, "key");
+                    if (string.IsNullOrWhiteSpace(key))
+                    {
+                        warnings.Add("Skipped a patch with no 'key'.");
+                        continue;
+                    }
+                    // value may be a string / number / boolean / null. We read
+                    // it raw so the per-key switch can parse it appropriately.
+                    var valueRaw = JsonBody.GetRawValue(raw, "value");
+                    var warn = ApplyPlayerSetting(key, valueRaw);
+                    if (warn != null) warnings.Add(warn);
+                    else applied.Add(key);
+                }
+
+                if (applied.Count == 0)
+                    return ToolDispatchResult.Fail("no_applicable_keys",
+                        "No PlayerSettings keys were applied. " +
+                        (warnings.Count > 0 ? string.Join(" ", warnings) : ""));
+
+                AssetDatabase.SaveAssets();
+                var sb = new StringBuilder(128 + applied.Count * 24 + warnings.Count * 64);
+                sb.Append("{\"status\":\"ok\",\"action\":\"set_player\"");
+                sb.Append(",\"applied\":[");
+                for (int i = 0; i < applied.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(EscName(applied[i])).Append('"');
+                }
+                sb.Append(']');
+                AppendWarnings(sb, warnings);
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Mutating: set QualitySettings fields by key/value pairs. Folds UCP
+        // settings/quality-set. paths_hint scope: ProjectSettings/QualitySettings.asset.
+        public static ToolDispatchResult SettingsSetQuality(string body)
+        {
+            return ApplyKeyedSettings(body, "set_quality", ApplyQualitySetting);
+        }
+
+        // Mutating: set Physics / Physics2D fields by key/value pairs. Folds UCP
+        // settings/physics-set. paths_hint scope: ProjectSettings/DynamicsManager.asset.
+        public static ToolDispatchResult SettingsSetPhysics(string body)
+        {
+            return ApplyKeyedSettings(body, "set_physics", ApplyPhysicsSetting);
+        }
+
+        // Mutating: set render/lighting fields by key/value pairs. Folds UCP
+        // settings/lighting-set. paths_hint scope: the render/lighting settings
+        // asset (RenderSettings is scene-scoped, so the active scene is marked
+        // dirty rather than a single ProjectSettings asset written — agents
+        // should also scope paths_hint to the active scene path).
+        public static ToolDispatchResult SettingsSetLighting(string body)
+        {
+            return ApplyKeyedSettings(body, "set_lighting", ApplyLightingSetting);
+        }
+
+        // ----------------------- keyed settings helper -------------------
+
+        // Shared body for the settings_set_* mutators: parse the fields[] array,
+        // dispatch each entry to the per-domain applier, accumulate applied keys
+        // and per-key warnings, and persist via AssetDatabase.SaveAssets (or
+        // mark the scene dirty for lighting). Returns a uniform ok envelope.
+        delegate string KeyedApplier(string key, string valueRaw);
+
+        static ToolDispatchResult ApplyKeyedSettings(string body, string action, KeyedApplier applier)
+        {
+            var patches = JsonBody.GetObjectArray(body, "fields");
+            if (patches == null || patches.Length == 0)
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'fields' is required and must be a non-empty array of " +
+                    "{key, value} patches. See the tool description for supported keys.");
+
+            try
+            {
+                var applied = new List<string>();
+                var warnings = new List<string>();
+                foreach (var raw in patches)
+                {
+                    if (string.IsNullOrEmpty(raw)) continue;
+                    var key = JsonBody.GetString(raw, "key");
+                    if (string.IsNullOrWhiteSpace(key))
+                    {
+                        warnings.Add("Skipped a patch with no 'key'.");
+                        continue;
+                    }
+                    var valueRaw = JsonBody.GetRawValue(raw, "value");
+                    var warn = applier(key, valueRaw);
+                    if (warn != null) warnings.Add(warn);
+                    else applied.Add(key);
+                }
+
+                if (applied.Count == 0)
+                    return ToolDispatchResult.Fail("no_applicable_keys",
+                        "No keys were applied. " +
+                        (warnings.Count > 0 ? string.Join(" ", warnings) : ""));
+
+                AssetDatabase.SaveAssets();
+                var sb = new StringBuilder(128 + applied.Count * 24 + warnings.Count * 64);
+                sb.Append("{\"status\":\"ok\",\"action\":\"").Append(action).Append("\"");
+                sb.Append(",\"applied\":[");
+                for (int i = 0; i < applied.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(EscName(applied[i])).Append('"');
+                }
+                sb.Append(']');
+                AppendWarnings(sb, warnings);
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Returns null on success, an error/warning string on failure.
+        static string ApplyPlayerSetting(string key, string valueRaw)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "companyName":
+                        PlayerSettings.companyName = AsString(valueRaw);
+                        return null;
+                    case "productName":
+                        PlayerSettings.productName = AsString(valueRaw);
+                        return null;
+                    case "bundleVersion":
+                        PlayerSettings.bundleVersion = AsString(valueRaw);
+                        return null;
+                    case "runInBackground":
+                        PlayerSettings.runInBackground = AsBool(valueRaw);
+                        return null;
+                    case "defaultIsNativeResolution":
+                        PlayerSettings.defaultIsNativeResolution = AsBool(valueRaw);
+                        return null;
+                    case "defaultScreenWidth":
+                        PlayerSettings.defaultScreenWidth = AsInt(valueRaw);
+                        return null;
+                    case "defaultScreenHeight":
+                        PlayerSettings.defaultScreenHeight = AsInt(valueRaw);
+                        return null;
+                    case "colorSpace":
+                        if (Enum.TryParse<ColorSpace>(AsString(valueRaw), true, out var cs))
+                        {
+                            PlayerSettings.colorSpace = cs;
+                            return null;
+                        }
+                        return $"colorSpace value '{valueRaw}' did not parse to a ColorSpace.";
+                    case "activeInputHandler":
+                    case "activeInputHandling":
+                    case "inputHandling":
+                        var parsed = ParseActiveInputHandler(valueRaw, out var inputErr);
+                        if (inputErr != null) return inputErr;
+                        WriteSerializedPlayerInt("activeInputHandler", parsed);
+                        return null;
+                    default:
+                        return $"Unknown player setting key: '{key}'.";
+                }
+            }
+            catch (Exception e)
+            {
+                return $"Could not apply player setting '{key}': {e.Message}";
+            }
+        }
+
+        static string ApplyQualitySetting(string key, string valueRaw)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "level":
+                        QualitySettings.SetQualityLevel(AsInt(valueRaw));
+                        return null;
+                    case "shadowDistance":
+                        QualitySettings.shadowDistance = AsFloat(valueRaw);
+                        return null;
+                    case "shadowCascades":
+                        QualitySettings.shadowCascades = AsInt(valueRaw);
+                        return null;
+                    case "antiAliasing":
+                        QualitySettings.antiAliasing = AsInt(valueRaw);
+                        return null;
+                    case "vSyncCount":
+                        QualitySettings.vSyncCount = AsInt(valueRaw);
+                        return null;
+                    case "pixelLightCount":
+                        QualitySettings.pixelLightCount = AsInt(valueRaw);
+                        return null;
+                    default:
+                        return $"Unknown quality setting key: '{key}'.";
+                }
+            }
+            catch (Exception e)
+            {
+                return $"Could not apply quality setting '{key}': {e.Message}";
+            }
+        }
+
+        static string ApplyPhysicsSetting(string key, string valueRaw)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "gravity":
+                        var g = AsVector3(valueRaw);
+                        if (g == null) return "gravity expects [x,y,z].";
+                        Physics.gravity = g.Value;
+                        return null;
+                    case "defaultSolverIterations":
+                        Physics.defaultSolverIterations = AsInt(valueRaw);
+                        return null;
+                    case "defaultSolverVelocityIterations":
+                        Physics.defaultSolverVelocityIterations = AsInt(valueRaw);
+                        return null;
+                    case "bounceThreshold":
+                        Physics.bounceThreshold = AsFloat(valueRaw);
+                        return null;
+                    case "sleepThreshold":
+                        Physics.sleepThreshold = AsFloat(valueRaw);
+                        return null;
+                    case "defaultContactOffset":
+                        Physics.defaultContactOffset = AsFloat(valueRaw);
+                        return null;
+                    case "physics2DGravity":
+                        var g2 = AsVector2(valueRaw);
+                        if (g2 == null) return "physics2DGravity expects [x,y].";
+                        Physics2D.gravity = g2.Value;
+                        return null;
+                    default:
+                        return $"Unknown physics setting key: '{key}'.";
+                }
+            }
+            catch (Exception e)
+            {
+                return $"Could not apply physics setting '{key}': {e.Message}";
+            }
+        }
+
+        static string ApplyLightingSetting(string key, string valueRaw)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "ambientMode":
+                        if (Enum.TryParse<AmbientMode>(AsString(valueRaw), true, out var am))
+                        {
+                            RenderSettings.ambientMode = am;
+                            MarkSceneDirty();
+                            return null;
+                        }
+                        return $"ambientMode value '{valueRaw}' did not parse to an AmbientMode.";
+                    case "ambientIntensity":
+                        RenderSettings.ambientIntensity = AsFloat(valueRaw);
+                        MarkSceneDirty();
+                        return null;
+                    case "ambientColor":
+                        var ac = AsColor(valueRaw);
+                        if (ac == null) return "ambientColor expects [r,g,b,(a)].";
+                        RenderSettings.ambientLight = ac.Value;
+                        MarkSceneDirty();
+                        return null;
+                    case "fog":
+                        RenderSettings.fog = AsBool(valueRaw);
+                        MarkSceneDirty();
+                        return null;
+                    case "fogMode":
+                        if (Enum.TryParse<FogMode>(AsString(valueRaw), true, out var fm))
+                        {
+                            RenderSettings.fogMode = fm;
+                            MarkSceneDirty();
+                            return null;
+                        }
+                        return $"fogMode value '{valueRaw}' did not parse to a FogMode.";
+                    case "fogDensity":
+                        RenderSettings.fogDensity = AsFloat(valueRaw);
+                        MarkSceneDirty();
+                        return null;
+                    case "fogColor":
+                        var fc = AsColor(valueRaw);
+                        if (fc == null) return "fogColor expects [r,g,b,(a)].";
+                        RenderSettings.fogColor = fc.Value;
+                        MarkSceneDirty();
+                        return null;
+                    case "fogStartDistance":
+                        RenderSettings.fogStartDistance = AsFloat(valueRaw);
+                        MarkSceneDirty();
+                        return null;
+                    case "fogEndDistance":
+                        RenderSettings.fogEndDistance = AsFloat(valueRaw);
+                        MarkSceneDirty();
+                        return null;
+                    default:
+                        return $"Unknown lighting setting key: '{key}'.";
+                }
+            }
+            catch (Exception e)
+            {
+                return $"Could not apply lighting setting '{key}': {e.Message}";
+            }
+        }
+
+        // RenderSettings is scene-scoped — writes only persist when the active
+        // scene is marked dirty. MarkSceneDirty covers that without forcing a
+        // save (the agent calls scene_save when ready).
+        static void MarkSceneDirty()
+        {
+            try { UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
+                UnityEngine.SceneManagement.SceneManager.GetActiveScene()); }
+            catch { /* best-effort — non-fatal */ }
+        }
+
+        // ----------------------------- helpers ----------------------------
+
+        // JsonBody.GetString returns null when the key is missing AND when it
+        // is present-but-empty, so we need a presence check to distinguish
+        // "field absent" from "field present but empty". Mirrors
+        // ProfilerSessionTools.HasField.
+        static bool HasField(string json, string key)
+        {
+            if (string.IsNullOrEmpty(json)) return false;
+            return json.IndexOf("\"" + key + "\"", StringComparison.Ordinal) >= 0;
+        }
+
+        static NamedBuildTarget ResolveNamedBuildTarget()
+            => NamedBuildTarget.FromBuildTargetGroup(
+                EditorUserBuildSettings.selectedBuildTargetGroup);
+
+        static List<string> SplitDefines(string raw)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrEmpty(raw)) return result;
+            foreach (var part in raw.Split(';'))
+            {
+                var trimmed = part.Trim();
+                if (!string.IsNullOrEmpty(trimmed)) result.Add(trimmed);
+            }
+            return result;
+        }
+
+        // Read an int field off the PlayerSettings serialized object. Some
+        // PlayerSettings knobs (e.g. activeInputHandler) are not exposed as
+        // public properties and have to go through SerializedObject. Mirrors
+        // UCP EditorSettingsController.ReadPlayerSettingInt.
+        static int ReadSerializedPlayerInt(string propertyName)
+        {
+            var so = new SerializedObject(GetPlayerSettingsAsset());
+            var prop = so.FindProperty(propertyName);
+            var value = prop != null ? prop.intValue : 0;
+            so.Dispose();
+            return value;
+        }
+
+        static void WriteSerializedPlayerInt(string propertyName, int value)
+        {
+            var so = new SerializedObject(GetPlayerSettingsAsset());
+            var prop = so.FindProperty(propertyName);
+            if (prop != null)
+            {
+                prop.intValue = value;
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
+            so.Dispose();
+        }
+
+        static UnityEngine.Object GetPlayerSettingsAsset()
+        {
+            var asset = Unsupported.GetSerializedAssetInterfaceSingleton("PlayerSettings");
+            if (asset == null)
+                throw new InvalidOperationException(
+                    "Unable to resolve PlayerSettings serialized asset.");
+            return asset;
+        }
+
+        static int ParseActiveInputHandler(string valueRaw, out string error)
+        {
+            error = null;
+            if (string.IsNullOrEmpty(valueRaw))
+            {
+                error = "activeInputHandler value cannot be null.";
+                return 0;
+            }
+            var trimmed = valueRaw.Trim().Trim('"');
+            if (int.TryParse(trimmed, out var numeric))
+            {
+                if (numeric < 0 || numeric > 2)
+                {
+                    error = "activeInputHandler must be 0 (Old), 1 (Input System), or 2 (Both).";
+                    return 0;
+                }
+                return numeric;
+            }
+            switch (trimmed.ToLowerInvariant())
+            {
+                case "old":
+                case "legacy":
+                case "inputmanager": return 0;
+                case "new":
+                case "inputsystem":
+                case "inputsystempackage": return 1;
+                case "both": return 2;
+                default:
+                    error = "activeInputHandler must be one of: old, inputsystem, both, 0, 1, 2.";
+                    return 0;
+            }
+        }
+
+        static string DescribeActiveInputHandler(int value)
+        {
+            switch (value)
+            {
+                case 0: return "Old";
+                case 1: return "InputSystemPackage";
+                case 2: return "Both";
+                default: return $"Unknown({value})";
+            }
+        }
+
+        // Value coercion helpers. valueRaw is the raw JSON value (already
+        // trimmed of surrounding whitespace by JsonBody.GetRawValue). Strings
+        // arrive with surrounding quotes; numbers / bools do not.
+        static string AsString(string valueRaw)
+        {
+            if (string.IsNullOrEmpty(valueRaw)) return "";
+            var v = valueRaw.Trim();
+            if (v == "null") return "";
+            if (v.StartsWith("\"") && v.EndsWith("\"") && v.Length >= 2)
+                return v.Substring(1, v.Length - 2);
+            return v;
+        }
+
+        static bool AsBool(string valueRaw)
+        {
+            if (string.IsNullOrEmpty(valueRaw)) return false;
+            var v = valueRaw.Trim();
+            if (v == "true") return true;
+            if (v == "false") return false;
+            // A non-empty quoted string is truthy.
+            return !string.IsNullOrEmpty(AsString(valueRaw));
+        }
+
+        static int AsInt(string valueRaw)
+        {
+            if (string.IsNullOrEmpty(valueRaw)) return 0;
+            if (int.TryParse(valueRaw.Trim(), NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out var v)) return v;
+            // Float-looking input → truncated.
+            if (float.TryParse(valueRaw.Trim(), NumberStyles.Float,
+                CultureInfo.InvariantCulture, out var f)) return (int)f;
+            return 0;
+        }
+
+        static float AsFloat(string valueRaw)
+        {
+            if (string.IsNullOrEmpty(valueRaw)) return 0f;
+            if (float.TryParse(valueRaw.Trim(), NumberStyles.Float,
+                CultureInfo.InvariantCulture, out var v)) return v;
+            return 0f;
+        }
+
+        // Parse a JSON array of numbers as a Vector3. Returns null on shape
+        // mismatch so the applier can surface a per-key warning.
+        static Vector3? AsVector3(string valueRaw)
+        {
+            var parts = ParseNumberArray(valueRaw);
+            if (parts == null || parts.Length < 3) return null;
+            return new Vector3(parts[0], parts[1], parts[2]);
+        }
+
+        static Vector2? AsVector2(string valueRaw)
+        {
+            var parts = ParseNumberArray(valueRaw);
+            if (parts == null || parts.Length < 2) return null;
+            return new Vector2(parts[0], parts[1]);
+        }
+
+        static Color? AsColor(string valueRaw)
+        {
+            var parts = ParseNumberArray(valueRaw);
+            if (parts == null || parts.Length < 3) return null;
+            return new Color(parts[0], parts[1], parts[2],
+                parts.Length >= 4 ? parts[3] : 1f);
+        }
+
+        static float[] ParseNumberArray(string valueRaw)
+        {
+            if (string.IsNullOrEmpty(valueRaw)) return null;
+            var v = valueRaw.Trim();
+            if (!v.StartsWith("[") || !v.EndsWith("]")) return null;
+            var inner = v.Substring(1, v.Length - 2);
+            var tokens = inner.Split(',');
+            var result = new float[tokens.Length];
+            for (int i = 0; i < tokens.Length; i++)
+            {
+                if (!float.TryParse(tokens[i].Trim(), NumberStyles.Float,
+                    CultureInfo.InvariantCulture, out result[i]))
+                    return null;
+            }
+            return result;
+        }
+
+        // ------------------------- JSON building --------------------------
+
+        static string BuildReportJson(BuildReport report, string outputPath, BuildOptions options)
+        {
+            var sb = new StringBuilder(256);
+            sb.Append("{\"status\":\"ok\",\"action\":\"build\"");
+            sb.Append(",\"result\":").Append(Q(report.summary.result.ToString()));
+            sb.Append(",\"totalTimeSeconds\":").Append(Num(report.summary.totalTime.TotalSeconds));
+            sb.Append(",\"totalSize\":").Append(report.summary.totalSize);
+            sb.Append(",\"totalErrors\":").Append(report.summary.totalErrors);
+            sb.Append(",\"totalWarnings\":").Append(report.summary.totalWarnings);
+            sb.Append(",\"outputPath\":").Append(Q(report.summary.outputPath ?? outputPath));
+            sb.Append(",\"options\":\"").Append(options.ToString()).Append("\"");
+            sb.Append(",\"steps\":[");
+            var steps = report.steps;
+            for (int i = 0; i < steps.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"name\":").Append(Q(steps[i].name));
+                sb.Append(",\"durationSeconds\":").Append(Num(steps[i].duration.TotalSeconds));
+                sb.Append('}');
+            }
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        static void AppendWarnings(StringBuilder sb, List<string> warnings)
+        {
+            if (warnings == null || warnings.Count == 0) return;
+            sb.Append(",\"warnings\":[");
+            for (int i = 0; i < warnings.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append('"').Append(EscName(warnings[i])).Append('"');
+            }
+            sb.Append(']');
+        }
+
+        static string Num(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
+        static string Num(float f) => f.ToString("0.###", CultureInfo.InvariantCulture);
+
+        // Quote a string for inline JSON (with surrounding quotes).
+        static string Q(string s)
+        {
+            if (s == null) return "\"\"";
+            return "\"" + EscName(s) + "\"";
+        }
+
+        // Escape a string body for inline JSON (no surrounding quotes).
+        static string EscName(string s)
+        {
+            if (s == null) return "";
+            var sb = new StringBuilder(s.Length + 4);
+            foreach (var c in s)
+            {
+                switch (c)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        if (c < 32) sb.Append($"\\u{(int)c:X4}");
+                        else sb.Append(c);
+                        break;
+                }
+            }
+            return sb.ToString();
+        }
+    }
+}

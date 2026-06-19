@@ -87,7 +87,7 @@ The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabiliti
 - **Reflection/scripts/object data:** `type_schema`, `script_read`, `script_write`, `script_delete`, `object_get_data`, `object_modify` — **implemented in Plan 6**
 - **Profiler & Diagnostics session:** `profiler_start/stop/get_status`, `profiler_get/set_config`, `profiler_list_modules`, `profiler_enable_module`, `profiler_clear_data`, `profiler_save_data`, `profiler_load_data`, `profiler_get_script_stats` — **implemented in Plan 7** (non-duplicate with M10 capture/memory/rendering)
 - **Gate intelligence:** `impact_preview`, `gate_budget_estimate`, `mutation_explain` — **implemented in Plan 8**
-- **Project configuration & build:** build pipeline (`build_get_targets`, `build_get/set_target`, `build_get/set_scenes`, `build_start`, `build_get/set_defines`) and project settings (`settings_get/set_player/quality/physics/lighting`)
+- **Project configuration & build:** build pipeline (`build_get_targets`, `build_get/set_target`, `build_get/set_scenes`, `build_start`, `build_get/set_defines`) and project settings (`settings_get/set_player/quality/physics/lighting`) — **implemented in Plan 9**
 
 #### Project & Asset Management (M16 Plan 1 — implemented)
 
@@ -281,6 +281,48 @@ Three read-only, gate-free direct-response tools that compose existing checkpoin
 
 Workflow: `impact_preview` (size the scope) → `gate_budget_estimate` `mode: "sample"` (ground the cost) → run the mutating tool → `mutation_explain` (narrate the result). For a deferred check, take a `checkpoint_create` before mutating and pass its id to `mutation_explain` later.
 
+#### Project configuration & build (M16 Plan 9 — implemented)
+
+Build pipeline + project-settings typed tools with parity to UCP `build/*` and `settings/*`. Read-only members (the `*_get_*` family) are gate-free direct-response tools. The mutators run the full gate path with `paths_hint` scoped to the touched ProjectSettings asset:
+
+- `build_set_target` — `lifecycle: "restart_then_settle"` (target switch can recompile); dirty guard preflights. `paths_hint = ["ProjectSettings"]`.
+- `build_set_scenes` — `lifecycle: "editor_settle"`. `paths_hint = ["ProjectSettings"]` (EditorBuildSettings.asset lives under ProjectSettings/).
+- `build_set_defines` — `lifecycle: "restart_then_settle"` (define change recompiles); dirty guard preflights. `paths_hint = ["ProjectSettings/ProjectSettings.asset"]`.
+- `build_start` — `lifecycle: "editor_settle"`; DESTRUCTIVE — requires the deny bypass (`gate: "off"` + `confirm_bypass: true`) because `BuildPipeline.BuildPlayer` is on the default deny list. `paths_hint` scopes to the build output folder and/or `"ProjectSettings"`.
+- `settings_set_player` — `lifecycle: "restart_then_settle"` (some keys flip scripting backend / input handler → recompile); dirty guard preflights. `paths_hint = ["ProjectSettings/ProjectSettings.asset"]`.
+- `settings_set_quality` / `settings_set_physics` — `lifecycle: "editor_settle"`. `paths_hint = ["ProjectSettings/QualitySettings.asset"]` / `["ProjectSettings/DynamicsManager.asset"]`.
+- `settings_set_lighting` — `lifecycle: "editor_settle"`. `RenderSettings` is scene-scoped (writes only persist when the active scene is dirtied — the tool does that automatically); `paths_hint` scopes to the active scene path and/or the render/lighting settings asset.
+
+Build pipeline reads (gate-free):
+
+- `unity_open_mcp_build_get_targets` — Read-only: enumerate available build targets. Each entry is `{name, group, installed, isActive}`; active target + group at top level. `BuildTarget` values whose group is `Unknown` are skipped. Token-bounded.
+- `unity_open_mcp_build_get_active_target` — Read-only: the active `BuildTarget` + `BuildTargetGroup`.
+- `unity_open_mcp_build_get_scenes` — Read-only: the `EditorBuildSettings.scenes` list (`{path, enabled, guid}` per entry).
+- `unity_open_mcp_build_get_defines` — Read-only: scripting define symbols for the active build target group — raw `;`-joined `defines` string + parsed `list[]`, plus the group + NamedBuildTarget.
+
+Build pipeline mutators:
+
+- `unity_open_mcp_build_set_target` — Mutating: `EditorUserBuildSettings.SwitchActiveBuildTarget`. `target` is a `BuildTarget` name (use `build_get_targets` to enumerate). Can recompile / domain-reload. `paths_hint = ["ProjectSettings"]`.
+- `unity_open_mcp_build_set_scenes` — Mutating: replace the build scene list. `scenes[]` entries are `{path, enabled?}` or bare path strings (treated as enabled). The full list REPLACES the current one. `paths_hint = ["ProjectSettings"]`.
+- `unity_open_mcp_build_start` — Mutating + DESTRUCTIVE: trigger `BuildPipeline.BuildPlayer`. Refuses with `build_confirmation_required` unless BOTH `gate: "off"` AND `confirm_bypass: true` are set (BuildPlayer is on the default deny list). When bypassed, the full gate path still runs. Uses the enabled build-settings scenes + active target; `output_path` defaults to `Builds/<target>/Build`; `development` / `allow_debugging` add the matching `BuildOptions`. Returns the `BuildReport` summary (result, total time, size, errors/warnings, per-step durations).
+- `unity_open_mcp_build_set_defines` — Mutating: `PlayerSettings.SetScriptingDefineSymbols` for the active group. Accepts an array (joined with `;`) or a pre-joined `;` string; pass empty to clear. Recompiles. `paths_hint = ["ProjectSettings/ProjectSettings.asset"]`.
+
+Project settings reads (gate-free):
+
+- `unity_open_mcp_settings_get_player` — Read-only: PlayerSettings snapshot for the active target (company/product name, bundleVersion, runInBackground, colorSpace, first graphics API, scripting backend, API compatibility level, active input handler numeric + name, target frame rate, default screen dimensions).
+- `unity_open_mcp_settings_get_quality` — Read-only: QualitySettings snapshot — every quality level `{index, name, isCurrent}` + the current level/name + global knobs (shadowDistance, shadowCascades, antiAliasing, vSyncCount, pixelLightCount).
+- `unity_open_mcp_settings_get_physics` — Read-only: Physics + Physics2D snapshot (gravity 3D + 2D, solver iterations, bounce/sleep thresholds, default contact offset, 3D/2D simulationMode).
+- `unity_open_mcp_settings_get_lighting` — Read-only: Render/Lighting (RenderSettings) snapshot for the active scene (ambientMode/intensity/color, fog + fogMode/density/color/distances, skybox + sun source names). Scene-scoped — reflects the active scene's setup.
+
+Project settings mutators (each takes a `fields: [{key, value}]` patch array; per-key failures are accumulated as warnings so a single bad patch does not abort the batch; returns the `applied[]` keys + any `warnings[]`):
+
+- `unity_open_mcp_settings_set_player` — Mutating: PlayerSettings by key. Supported keys: `companyName`, `productName`, `bundleVersion`, `colorSpace` (ColorSpace name); `runInBackground`, `defaultIsNativeResolution` (bool); `defaultScreenWidth`, `defaultScreenHeight` (int); `activeInputHandler` / `activeInputHandling` / `inputHandling` (0/1/2 or `old|inputsystem|both`). `paths_hint = ["ProjectSettings/ProjectSettings.asset"]`.
+- `unity_open_mcp_settings_set_quality` — Mutating: QualitySettings by key. Supported keys: `level` (int), `shadowDistance` (float), `shadowCascades` / `antiAliasing` / `vSyncCount` / `pixelLightCount` (int). `paths_hint = ["ProjectSettings/QualitySettings.asset"]`.
+- `unity_open_mcp_settings_set_physics` — Mutating: Physics + Physics2D by key. Supported keys: `gravity` ([x,y,z]), `defaultSolverIterations` / `defaultSolverVelocityIterations` (int), `bounceThreshold` / `sleepThreshold` / `defaultContactOffset` (float), `physics2DGravity` ([x,y]). `paths_hint = ["ProjectSettings/DynamicsManager.asset"]`.
+- `unity_open_mcp_settings_set_lighting` — Mutating: RenderSettings by key for the active scene. Supported keys: `ambientMode` (AmbientMode name), `ambientIntensity` (float), `ambientColor` ([r,g,b,(a)]), `fog` (bool), `fogMode` (FogMode name), `fogDensity` (float), `fogColor` ([r,g,b,(a)]), `fogStartDistance` / `fogEndDistance` (float). `paths_hint` scopes to the active scene path.
+
+Workflow: CI build prep — `build_get_scenes` (audit the scene list) → `build_set_scenes` (fix the list) → `build_get_defines` / `build_set_defines` (configure per-build defines) → `build_get_active_target` / `build_set_target` (pin the target) → `build_start` (gate `"off"` + `confirm_bypass: true`). Settings audit — read each `settings_get_*` surface, then batch-patch via the matching `settings_set_*` tool.
+
 ## Capability discovery
 
 `unity_open_mcp_capabilities` lets an agent self-discover the entire tool + rule + fix surface in a single call, including what is planned but not yet built.
@@ -304,10 +346,12 @@ Workflow: `impact_preview` (size the scope) → `gate_budget_estimate` `mode: "s
     },
     {
       "name": "unity_open_mcp_build_start",
-      "implemented": false,
-      "status": "planned",
-      "category": "typed-editor-build-settings",
-      "guidance": "Planned build surface. Use execute_csharp with BuildPipeline.BuildPlayer today."
+      "implemented": true,
+      "status": "implemented",
+      "category": "build-settings",
+      "routePolicy": "live",
+      "batchCapable": false,
+      "inputSchema": { "type": "object", "properties": { "...": "..." } }
     }
   ],
   "rules": [

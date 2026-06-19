@@ -288,6 +288,15 @@ Workflow: `find_members` → `type_schema` for the one type → `invoke_method` 
 
 Workflow: `profiler_start` → poll `profiler_get_status` to confirm recording → run the workload → `unity_senses_profiler_capture` for frame data → `profiler_save_data` to persist → `profiler_stop`. The M10 senses stay the per-frame reads; this surface is the runtime/session layer.
 
+**Typed build pipeline + project settings tools (M16 Plan 9).** Prefer these over `execute_csharp` for CI build prep, define-symbol management, and settings audits. The `*_get_*` reads are gate-free; the mutators run the full gate path with `paths_hint` scoped to the touched `ProjectSettings/*.asset`.
+
+- Build reads (gate-free): `build_get_targets` (enumerate BuildTarget + group + installed/active flags) / `build_get_active_target` / `build_get_scenes` (EditorBuildSettings list) / `build_get_defines` (scripting defines, raw `;` string + parsed list).
+- Build mutators: `build_set_target` (`target` BuildTarget name; can recompile — `paths_hint = ["ProjectSettings"]`, restart_then_settle lifecycle) / `build_set_scenes` (replace the scene list; entries are `{path, enabled?}` or bare path strings; `paths_hint = ["ProjectSettings"]`) / `build_set_defines` (accepts an array or `;`-joined string; empty clears; recompiles — `paths_hint = ["ProjectSettings/ProjectSettings.asset"]`) / `build_start` (DESTRUCTIVE — refuses with `build_confirmation_required` unless BOTH `gate: "off"` AND `confirm_bypass: true` are set, because `BuildPipeline.BuildPlayer` is on the default deny list; when bypassed, the full gate path still runs).
+- Settings reads (gate-free): `settings_get_player` / `settings_get_quality` / `settings_get_physics` / `settings_get_lighting` (RenderSettings — scene-scoped, reflects the active scene).
+- Settings mutators (each takes a `fields: [{key, value}]` patch array; per-key failures are accumulated as warnings; `restart_then_settle` for `settings_set_player`, `editor_settle` otherwise): `settings_set_player` (`paths_hint = ["ProjectSettings/ProjectSettings.asset"]`) / `settings_set_quality` (`["ProjectSettings/QualitySettings.asset"]`) / `settings_set_physics` (`["ProjectSettings/DynamicsManager.asset"]`) / `settings_set_lighting` (scene-scoped; tool marks the active scene dirty — `paths_hint` scopes to the active scene path).
+
+Workflow: CI build prep — `build_get_scenes` → `build_set_scenes` → `build_get_defines` / `build_set_defines` → `build_get_active_target` / `build_set_target` → `build_start` (`gate: "off"` + `confirm_bypass: true`).
+
 ### Return serialization (execute_csharp / invoke_method)
 
 Results are walked by a depth-limited reflective serializer before becoming `mutation.output`:

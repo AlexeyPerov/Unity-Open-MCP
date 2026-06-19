@@ -105,6 +105,25 @@ namespace UnityOpenMcpBridge
             // Plan 7 tools mutate editor state / bookkeeping but write no
             // assets (gate-free direct-response); they fall through to None.
             { "unity_open_mcp_profiler_save_data",  LifecyclePolicy.EditorSettle },
+            // M16 Plan 9 — typed build + settings mutators. build_set_target
+            // and build_set_defines can trigger a recompile / domain reload
+            // (RestartThenSettle — the dirty guard preflights them).
+            // build_set_scenes / settings_set_quality / settings_set_physics /
+            // settings_set_lighting write ProjectSettings assets without
+            // recompiling (EditorSettle). settings_set_player can flip
+            // scripting backend / input handler knobs that force a recompile,
+            // so it gets RestartThenSettle to be safe. build_start runs
+            // BuildPipeline.BuildPlayer in-process — long-running, but it does
+            // not force a domain reload of the editor itself; EditorSettle is
+            // enough (the deny heuristic gates the call itself).
+            { "unity_open_mcp_build_set_target",   LifecyclePolicy.RestartThenSettle },
+            { "unity_open_mcp_build_set_scenes",   LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_build_set_defines",  LifecyclePolicy.RestartThenSettle },
+            { "unity_open_mcp_build_start",        LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_settings_set_player",LifecyclePolicy.RestartThenSettle },
+            { "unity_open_mcp_settings_set_quality",  LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_settings_set_physics", LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_settings_set_lighting",LifecyclePolicy.EditorSettle },
 
             // ----- RestartThenSettle: may trigger a domain reload -----
             // execute_csharp / invoke_method can recompile; execute_menu can
