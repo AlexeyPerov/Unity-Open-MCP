@@ -343,6 +343,36 @@ Mutating tools run the full gate path with `paths_hint` scoped to the host's sce
 
 Workflow: walkable agent — `navigation_list` (discover) → `navigation_surface_add` (host + agent type) → `navigation_surface_bake` (wait for `hasNavMeshData:true`) → `navigation_agent_add` (player) → enter Play Mode (`editor_set_state`) → `navigation_agent_set_destination`. See `skills/extensions/navigation/SKILL.md` for the full agent playbook.
 
+#### Input System (M16 Plan 10 / T6.6.4 — implemented; extension pack)
+
+Input System typed tools for authoring `.inputactions` assets. **Opt-in** — the tool definitions ship in the core MCP server (so capabilities advertises the surface) but the bridge-side handler exists only when the `com.alexeyperov.unity-open-mcp-ext-inputsystem` extension pack is installed in the target project (which itself requires `com.unity.inputsystem`). A call to an inputsystem tool when the pack is absent returns `tool_not_found`. Install via the Hub AI Setup wizard's "Optional extension packs" checkbox or by adding `"com.alexeyperov.unity-open-mcp-ext-inputsystem"` to `Packages/manifest.json`.
+
+All mutating tools target a `.inputactions` asset path (not a scene GameObject) — every mutator runs the full gate path with `paths_hint` scoped to that asset; `inputsystem_get` is read-only (gate-free).
+
+- `unity_open_mcp_inputsystem_asset_create` — Mutating: create a new `.inputactions` asset at an `Assets/`-rooted path. Optional `initial_action_map`. Fails if an asset already exists at the path.
+- `unity_open_mcp_inputsystem_actionmap_add` — Mutating: add a new InputActionMap. Fails if a map of that name already exists.
+- `unity_open_mcp_inputsystem_action_add` — Mutating: add an InputAction to a map (`action_type`: Button / Value / PassThrough; optional `expected_control_type`; optional initial `binding` with `groups` / `interactions` / `processors`).
+- `unity_open_mcp_inputsystem_binding_add` — Mutating: add a simple (non-composite) InputBinding (`path`, optional `groups` / `interactions` / `processors`). Returns the new binding's index.
+- `unity_open_mcp_inputsystem_binding_composite_add` — Mutating: add a composite InputBinding (`composite`: 2DVector / 1DAxis / Axis / Dpad; `parts_json` = `[{ name, path, groups? }]`).
+- `unity_open_mcp_inputsystem_controlscheme_add` — Mutating: add an InputControlScheme with `required_devices` / `optional_devices` (device control paths like `<Gamepad>`).
+- `unity_open_mcp_inputsystem_get` — Read-only (gate-free): the full asset structure — ActionMaps, Actions (type / expectedControlType), Bindings (path / groups / interactions / processors / index / composite flags), Control Schemes.
+
+Workflow: keyboard + mouse player — `inputsystem_asset_create` (with `initial_action_map: "Player"`) → `inputsystem_controlscheme_add` (KeyboardMouse, `<Keyboard>` + `<Mouse>`) → `inputsystem_action_add` (Move, Value, Vector2) → `inputsystem_binding_composite_add` (2DVector WASD) → `inputsystem_action_add` (Fire, Button) → `inputsystem_binding_add` (`<Mouse>/leftButton`). See `skills/extensions/inputsystem/SKILL.md` for the full agent playbook.
+
+#### ProBuilder (M16 Plan 10 / T6.6.5 — implemented; extension pack)
+
+ProBuilder typed tools for in-editor mesh editing. **Opt-in** — the tool definitions ship in the core MCP server (so capabilities advertises the surface) but the bridge-side handler exists only when the `com.alexeyperov.unity-open-mcp-ext-probuilder` extension pack is installed in the target project (which itself requires `com.unity.probuilder`). A call to a probuilder tool when the pack is absent returns `tool_not_found`. Install via the Hub AI Setup wizard's "Optional extension packs" checkbox or by adding `"com.alexeyperov.unity-open-mcp-ext-probuilder"` to `Packages/manifest.json`.
+
+Mutating tools target a scene GameObject and run the full gate path with `paths_hint` scoped to the host's scene path; `probuilder_create_shape` adds a new GameObject to the active scene; `probuilder_delete_faces` is the lone DESTRUCTIVE tool (MCP clients can prompt for confirmation). `probuilder_get_mesh_info` is read-only (gate-free). Face selection is index-based (`face_indices`) or semantic (`face_direction`: Up / Down / Left / Right / Forward / Back) — never SceneView mouse picking.
+
+- `unity_open_mcp_probuilder_create_shape` — Mutating: create a new ProBuilderMesh GameObject from a `ShapeType` primitive (Cube / Cylinder / Sphere / Plane / Prism / Cone / Stair / Door / Pipe / Arch / Sprite / Torus). Optional name / position / rotation / scale / parent_path.
+- `unity_open_mcp_probuilder_get_mesh_info` — Read-only (gate-free): face / vertex / edge counts, bounds, and a face-direction summary (which indices face each axis).
+- `unity_open_mcp_probuilder_extrude` — Mutating: extrude faces along their normals (`face_indices` OR `face_direction`; positive `distance` = outward, negative = inward; `extrude_method`: IndividualFaces / FaceNormal / VertexNormal).
+- `unity_open_mcp_probuilder_delete_faces` — Mutating + **destructive**: delete faces (`face_indices` OR `face_direction`). Refuses to delete every face.
+- `unity_open_mcp_probuilder_set_face_material` — Mutating (idempotent): assign a Material to faces (`material_path` = `Assets/`-rooted .mat path or bare name; `face_indices` OR `face_direction`). The material is added to the renderer's material array if not present.
+
+Workflow: shaped block — `probuilder_create_shape` (Cube; capture `instanceId`) → `probuilder_get_mesh_info` (confirm counts + directions) → `probuilder_extrude` (`face_direction: "Up"`, `distance: 1.0`) → `probuilder_set_face_material` (`face_direction: "Up"`, `material_path: "Assets/Materials/Roof.mat"`). See `skills/extensions/probuilder/SKILL.md` for the full agent playbook.
+
 ## Capability discovery
 
 `unity_open_mcp_capabilities` lets an agent self-discover the entire tool + rule + fix surface in a single call, including what is planned but not yet built.

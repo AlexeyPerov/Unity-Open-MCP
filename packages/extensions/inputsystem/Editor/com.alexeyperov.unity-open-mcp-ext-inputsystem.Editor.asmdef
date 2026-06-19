@@ -1,0 +1,19 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-ext-inputsystem.Editor",
+  "rootNamespace": "UnityOpenMcpExtensions.InputSystem",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "Unity.InputSystem"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

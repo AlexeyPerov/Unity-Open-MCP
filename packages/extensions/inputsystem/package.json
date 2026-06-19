@@ -1,0 +1,23 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-ext-inputsystem",
+  "displayName": "Unity Open MCP — Input System Extension",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "Input System typed helpers for Unity Open MCP. Authors InputActionAsset graphs (maps, actions, bindings, composites, control schemes) behind schema-validated tools.",
+  "author": {
+    "name": "Alexey Perov",
+    "url": "https://github.com/AlexeyPerov/unity-open-mcp"
+  },
+  "keywords": [
+    "unity-open-mcp",
+    "mcp",
+    "extension",
+    "input",
+    "inputsystem",
+    "input-actions"
+  ],
+  "dependencies": {
+    "com.alexeyperov.unity-open-mcp-bridge": "0.1.0",
+    "com.unity.inputsystem": "1.7.0"
+  }
+}

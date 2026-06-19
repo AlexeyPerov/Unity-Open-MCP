@@ -194,6 +194,23 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_navigation_list: "navigation",
   unity_open_mcp_navigation_get: "navigation",
   unity_open_mcp_navigation_modify: "navigation",
+  // M16 Plan 10 / T6.6.4 — Input System extension tools. Extension pack tools
+  // ship tool definitions in the core MCP server (so capabilities advertises
+  // the surface) but require the matching extension UPM package installed in
+  // the target project for the bridge-side handler to exist.
+  unity_open_mcp_inputsystem_asset_create: "input-system",
+  unity_open_mcp_inputsystem_actionmap_add: "input-system",
+  unity_open_mcp_inputsystem_action_add: "input-system",
+  unity_open_mcp_inputsystem_binding_add: "input-system",
+  unity_open_mcp_inputsystem_binding_composite_add: "input-system",
+  unity_open_mcp_inputsystem_controlscheme_add: "input-system",
+  unity_open_mcp_inputsystem_get: "input-system",
+  // M16 Plan 10 / T6.6.5 — ProBuilder extension tools.
+  unity_open_mcp_probuilder_create_shape: "probuilder",
+  unity_open_mcp_probuilder_get_mesh_info: "probuilder",
+  unity_open_mcp_probuilder_extrude: "probuilder",
+  unity_open_mcp_probuilder_delete_faces: "probuilder",
+  unity_open_mcp_probuilder_set_face_material: "probuilder",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",

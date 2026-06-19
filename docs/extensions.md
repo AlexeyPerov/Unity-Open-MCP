@@ -29,8 +29,8 @@ Single source of truth, mirrored in two places — keep both in sync when a pack
 | Pack | Domain | Status | Unity dependency |
 |---|---|---|---|
 | Navigation (NavMesh) | `navigation` | shipped | `com.unity.ai.navigation` |
-| Input System | `inputsystem` | planned | `com.unity.inputsystem` |
-| ProBuilder | `probuilder` | planned | `com.unity.probuilder` |
+| Input System | `inputsystem` | shipped | `com.unity.inputsystem` |
+| ProBuilder | `probuilder` | shipped | `com.unity.probuilder` |
 | Splines | `splines` | planned | `com.unity.splines` |
 | Terrain | `terrain` | planned | (built-in) |
 | Tilemap | `tilemap` | planned | `com.unity.2d.tilemap` |
@@ -86,7 +86,7 @@ For every pack, update four core surfaces **in the same task** so the pack is di
 | Surface | File | What to add |
 |---|---|---|
 | MCP tool definitions | `mcp-server/src/tools/<domain>-<action>.ts` (one per tool) | Tool name, description, inputSchema |
-| Tool index | `mcp-server/src/tools/index.ts` | Import + add to `M16_PLAN10_TOOLS` (or a new plan array) + spread into `ALL_TOOLS` |
+| Tool index | `mcp-server/src/tools/index.ts` | Import + add to a plan array (`M16_PLAN10_TOOLS` for navigation, `M16_PLAN10_INPUTSYSTEM_TOOLS` for Input System, `M16_PLAN10_PROBUILDER_TOOLS` for ProBuilder, or a new one per pack) + spread into `ALL_TOOLS` |
 | Capability category | `mcp-server/src/capabilities/build-capabilities.ts` | `TOOL_CATEGORY` entry per tool (`unity_open_mcp_<domain>_<action>: "<domain>"`) |
 | Skill doc | `skills/extensions/<domain>/SKILL.md` | Agent playbook: preconditions, canonical workflow, tool reference |
 

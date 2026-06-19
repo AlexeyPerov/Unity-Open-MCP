@@ -1,0 +1,19 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-ext-probuilder.Editor",
+  "rootNamespace": "UnityOpenMcpExtensions.ProBuilder",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "Unity.ProBuilder"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

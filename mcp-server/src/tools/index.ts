@@ -152,6 +152,25 @@ import { navigationAgentSetDestination } from "./navigation-agent-set-destinatio
 import { navigationList } from "./navigation-list.js";
 import { navigationGet } from "./navigation-get.js";
 import { navigationModify } from "./navigation-modify.js";
+// M16 Plan 10 / T6.6.4 — Input System extension tools. Each tool is gated on
+// the `com.alexeyperov.unity-open-mcp-ext-inputsystem` extension pack being
+// installed in the target project; the tool definitions live in core so
+// capabilities discovery advertises the surface even before the pack is added.
+import { inputsystemAssetCreate } from "./inputsystem-asset-create.js";
+import { inputsystemActionmapAdd } from "./inputsystem-actionmap-add.js";
+import { inputsystemActionAdd } from "./inputsystem-action-add.js";
+import { inputsystemBindingAdd } from "./inputsystem-binding-add.js";
+import { inputsystemBindingCompositeAdd } from "./inputsystem-binding-composite-add.js";
+import { inputsystemControlschemeAdd } from "./inputsystem-controlscheme-add.js";
+import { inputsystemGet } from "./inputsystem-get.js";
+// M16 Plan 10 / T6.6.5 — ProBuilder extension tools. Each tool is gated on the
+// `com.alexeyperov.unity-open-mcp-ext-probuilder` extension pack being
+// installed in the target project.
+import { probuilderCreateShape } from "./probuilder-create-shape.js";
+import { probuilderGetMeshInfo } from "./probuilder-get-mesh-info.js";
+import { probuilderExtrude } from "./probuilder-extrude.js";
+import { probuilderDeleteFaces } from "./probuilder-delete-faces.js";
+import { probuilderSetFaceMaterial } from "./probuilder-set-face-material.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -398,6 +417,41 @@ export const M16_PLAN10_TOOLS: Tool[] = [
   navigationModify,
 ];
 
+// M16 Plan 10 / T6.6.4 — Input System extension tools. Extension pack tools
+// ship their tool definitions in the core MCP server (so capabilities
+// advertises the surface) but require the matching extension UPM package
+// installed in the target project for the bridge-side handler to exist. Six
+// mutating members (asset_create / actionmap_add / action_add / binding_add /
+// binding_composite_add / controlscheme_add) run the full gate path with
+// paths_hint scoped to the .inputactions asset; the read-only member (get) is
+// gate-free. The seven tools mirror the kebab `inputsystem-*` ids in the
+// upstream Unity-MCP reference pack.
+export const M16_PLAN10_INPUTSYSTEM_TOOLS: Tool[] = [
+  inputsystemAssetCreate,
+  inputsystemActionmapAdd,
+  inputsystemActionAdd,
+  inputsystemBindingAdd,
+  inputsystemBindingCompositeAdd,
+  inputsystemControlschemeAdd,
+  inputsystemGet,
+];
+
+// M16 Plan 10 / T6.6.5 — ProBuilder extension tools. Four mutating members
+// (create_shape / extrude / delete_faces / set_face_material) run the full
+// gate path with paths_hint scoped to the host scene path (create_shape adds a
+// new GameObject to the active scene); delete_faces is the lone DESTRUCTIVE
+// tool. The read-only member (get_mesh_info) is gate-free. Face selection is
+// index-based or semantic (Up / Down / Left / Right / Forward / Back) — never
+// SceneView mouse picking. The five tools mirror the kebab `probuilder-*` ids
+// in the upstream Unity-MCP reference pack.
+export const M16_PLAN10_PROBUILDER_TOOLS: Tool[] = [
+  probuilderCreateShape,
+  probuilderGetMeshInfo,
+  probuilderExtrude,
+  probuilderDeleteFaces,
+  probuilderSetFaceMaterial,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -419,4 +473,6 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN8_TOOLS,
   ...M16_PLAN9_TOOLS,
   ...M16_PLAN10_TOOLS,
+  ...M16_PLAN10_INPUTSYSTEM_TOOLS,
+  ...M16_PLAN10_PROBUILDER_TOOLS,
 ];

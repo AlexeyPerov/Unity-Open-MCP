@@ -96,9 +96,18 @@ namespace UnityOpenMcpBridge
                 description: "Input Action asset authoring (maps, actions, bindings, control schemes).",
                 upmDependency: "com.unity.inputsystem",
                 localPath: "packages/extensions/inputsystem",
-                toolIds: System.Array.Empty<string>(),
+                toolIds: new[]
+                {
+                    "unity_open_mcp_inputsystem_asset_create",
+                    "unity_open_mcp_inputsystem_actionmap_add",
+                    "unity_open_mcp_inputsystem_action_add",
+                    "unity_open_mcp_inputsystem_binding_add",
+                    "unity_open_mcp_inputsystem_binding_composite_add",
+                    "unity_open_mcp_inputsystem_controlscheme_add",
+                    "unity_open_mcp_inputsystem_get",
+                },
                 skillPath: "skills/extensions/inputsystem/SKILL.md",
-                shipped: false),
+                shipped: true),
             new ExtensionPack(
                 id: "com.alexeyperov.unity-open-mcp-ext-probuilder",
                 domain: "probuilder",
@@ -106,9 +115,16 @@ namespace UnityOpenMcpBridge
                 description: "In-editor mesh editing: shape creation, extrude, face materials.",
                 upmDependency: "com.unity.probuilder",
                 localPath: "packages/extensions/probuilder",
-                toolIds: System.Array.Empty<string>(),
+                toolIds: new[]
+                {
+                    "unity_open_mcp_probuilder_create_shape",
+                    "unity_open_mcp_probuilder_get_mesh_info",
+                    "unity_open_mcp_probuilder_extrude",
+                    "unity_open_mcp_probuilder_delete_faces",
+                    "unity_open_mcp_probuilder_set_face_material",
+                },
                 skillPath: "skills/extensions/probuilder/SKILL.md",
-                shipped: false),
+                shipped: true),
             new ExtensionPack(
                 id: "com.alexeyperov.unity-open-mcp-ext-splines",
                 domain: "splines",
