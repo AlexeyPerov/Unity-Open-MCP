@@ -71,7 +71,7 @@
 The hub tracks four kinds of folder, classified automatically on add by `hub/src-tauri/src/config/project_kind.rs` with precedence Unity → Open-MCP → Package → Custom. Each kind gets a tailored list row and settings popup:
 
 - **Unity** (`Assets/` + `ProjectSettings/`): launchable, AI Setup, render-pipeline/build-target chips, full settings popup (launch args, platform intent, env vars).
-- **Open-MCP** (`mcp-server/` + root `package.json`): read-only git status, line counter, and a command runner (`npm run build` / `npm test` / custom) with live streaming logs via `hub/src-tauri/src/config/command_runner.rs`.
+- **Open-MCP** (`mcp-server/` + root `package.json`): read-only git status, line counter, and a command runner with live streaming logs. npm commands (build / test / version / publish / custom) resolve cwd to `{project.path}/mcp-server` — the publishable package lives there, not at the repo root. A root `package.json` marker exists only so the Hub can register the checkout; npm scripts stay in `mcp-server/package.json`. The maintainer panel (`hub/src/lib/components/project-settings/OpenMcpProjectSettings.svelte`) surfaces version bump, dry-run, and publish; `hub/src-tauri/src/config/command_runner.rs::resolve_npm_cwd` centralizes the cwd rule.
 - **Package** (root `package.json`): UPM manifest editor (`hub/src-tauri/src/config/upm/`), `.meta` GUID regeneration, missing-meta fixup, and an append-and-replace file migrator.
 - **Custom** (any other folder): read-only git status + line counter only.
 

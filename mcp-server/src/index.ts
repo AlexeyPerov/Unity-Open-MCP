@@ -21,8 +21,12 @@ import { BridgeEventStream } from "./event-stream.js";
 import { KNOWN_COMMANDS } from "./cli/args.js";
 import { runCli } from "./cli/cli.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { readPackageVersion } from "./package-version.js";
 
-const PACKAGE_VERSION = "0.1.0";
+// Read the version from package.json at runtime so `npm version` (and the
+// maintainer-panel version-bump in the Hub) keep the reported server + CLI
+// version in sync without editing this source file.
+const PACKAGE_VERSION = readPackageVersion();
 
 /** Name → tool lookup, built once for default-injection in the CallTool handler. */
 const TOOL_BY_NAME = new Map<string, Tool>(

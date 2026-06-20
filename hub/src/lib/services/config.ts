@@ -93,13 +93,21 @@ export interface DiagnosticsSettings {
  * advanced escape hatch for a custom-built `mcp-server/dist/index.js`
  * only — packages and skills always use `rootPath`.
  *
- * Both fields default to `""` so legacy `settings.json` files
- * (pre-M4) deserialize cleanly and the wizard Step 2 hard-blocks
- * downstream steps until `rootPath` is set and validated.
+ * `useLocalCheckout` (added with the npm distribution milestone) is the
+ * Step 2 toggle that selects the local-checkout onboarding path over the
+ * default `npx` path. It auto-enables when `rootPath` is already set so
+ * existing M4 onboarding (clone-based) keeps resolving to the local
+ * launch command without a breaking change.
+ *
+ * All three fields default to empty/`false` so legacy `settings.json`
+ * files (pre-M4) deserialize cleanly and the wizard Step 2 hard-blocks
+ * downstream steps until `rootPath` is set and validated (local path).
  */
 export interface AiToolkitSettings {
   rootPath: string;
   mcpIndexOverride: string;
+  /** `true` to use the local toolkit checkout instead of `npx`. */
+  useLocalCheckout?: boolean;
 }
 
 /** M1.5-18: three-way theme switch. */
@@ -762,31 +770,142 @@ export async function migratePackageFiles(
 
 /**
  * Multi-type (Open-MCP): long-running command runner. Spawns an npm
- * process (build / test / custom) in the project root, streams
- * stdout/stderr line-by-line via `cmd-log` events, and tracks the PID
- * so it can be stopped (process-group kill). Ports vibe-launcher's
+ * process (build / test / version / publish / custom) in the npm-resolved
+ * cwd (`mcp-server/` for Open-MCP projects, the project root otherwise),
+ * streams stdout/stderr line-by-line via `cmd-log` events, and tracks the
+ * PID so it can be stopped (process-group kill). Ports vibe-launcher's
  * process pattern.
  */
 export type CommandRunnerError =
   | { type: "spawnFailed"; message: string }
   | { type: "alreadyRunning"; projectId: string; panel: string };
 
-export type CommandPanel = "build" | "test" | "custom";
+/**
+ * Panels the command runner tracks per project. The npm-maintainer panels
+ * (`version`, `publishDryRun`, `publish`) are surfaced in the Open-MCP
+ * settings popup; build/test/custom predate them.
+ */
+export type CommandPanel =
+  | "build"
+  | "test"
+  | "custom"
+  | "version"
+  | "publishDryRun"
+  | "publish";
 
-export async function runProjectBuild(projectId: string, cwd: string): Promise<void> {
-  return invoke<void>("run_project_build", { projectId, cwd });
+/**
+ * Read-only package identity for the maintainer panel. Mirrors the Rust
+ * `McpPackageInfo`. `name` + `version` come from the `package.json` at
+ * the npm-resolved cwd; `manifestPath` is the absolute path read.
+ */
+export interface McpPackageInfo {
+  name: string;
+  version: string;
+  manifestPath: string;
 }
 
-export async function runProjectTest(projectId: string, cwd: string): Promise<void> {
-  return invoke<void>("run_project_test", { projectId, cwd });
+export type McpPackageInfoError =
+  | { type: "notFound"; path: string }
+  | { type: "parseFailed"; path: string; message: string };
+
+/**
+ * Best-effort npm registry query result. Mirrors the Rust
+ * `NpmRegistryInfo`. Every field is optional — a missing value with a
+ * populated `*Error` is a normal outcome (offline host, unpublished
+ * name, or not-logged-in maintainer). The panel surfaces errors inline
+ * rather than blocking the publish flow.
+ */
+export interface NpmRegistryInfo {
+  publishedVersion?: string | null;
+  whoami?: string | null;
+  viewError?: string;
+  whoamiError?: string;
+}
+
+export async function runProjectBuild(
+  projectId: string,
+  projectPath: string,
+  kind: ProjectKind,
+): Promise<void> {
+  return invoke<void>("run_project_build", { projectId, projectPath, kind });
+}
+
+export async function runProjectTest(
+  projectId: string,
+  projectPath: string,
+  kind: ProjectKind,
+): Promise<void> {
+  return invoke<void>("run_project_test", { projectId, projectPath, kind });
 }
 
 export async function runProjectCustom(
   projectId: string,
-  cwd: string,
-  args: string[]
+  projectPath: string,
+  kind: ProjectKind,
+  args: string[],
 ): Promise<void> {
-  return invoke<void>("run_project_custom", { projectId, cwd, args });
+  return invoke<void>("run_project_custom", { projectId, projectPath, kind, args });
+}
+
+/**
+ * Bump the package version (`patch` | `minor` | `major`) in the
+ * npm-resolved cwd. `--no-git-tag-version` keeps the bump local — the
+ * Hub never creates git tags.
+ */
+export async function runProjectNpmVersion(
+  projectId: string,
+  projectPath: string,
+  kind: ProjectKind,
+  level: "patch" | "minor" | "major",
+): Promise<void> {
+  return invoke<void>("run_project_npm_version", {
+    projectId,
+    projectPath,
+    kind,
+    level,
+  });
+}
+
+/** `npm publish --dry-run --access public` — preflight, safe without confirm. */
+export async function runProjectNpmPublishDryRun(
+  projectId: string,
+  projectPath: string,
+  kind: ProjectKind,
+): Promise<void> {
+  return invoke<void>("run_project_npm_publish_dry_run", {
+    projectId,
+    projectPath,
+    kind,
+  });
+}
+
+/** Real publish — mutating; the caller must confirm first. */
+export async function runProjectNpmPublish(
+  projectId: string,
+  projectPath: string,
+  kind: ProjectKind,
+): Promise<void> {
+  return invoke<void>("run_project_npm_publish", {
+    projectId,
+    projectPath,
+    kind,
+  });
+}
+
+/** Read `name` + `version` from the package.json at the npm-resolved cwd. */
+export async function readMcpPackageInfo(
+  projectPath: string,
+  kind: ProjectKind,
+): Promise<McpPackageInfo> {
+  return invoke<McpPackageInfo>("read_mcp_package_info", { projectPath, kind });
+}
+
+/** Best-effort `npm view <name> version` + `npm whoami`. */
+export async function queryNpmRegistry(
+  projectPath: string,
+  kind: ProjectKind,
+): Promise<NpmRegistryInfo> {
+  return invoke<NpmRegistryInfo>("query_npm_registry", { projectPath, kind });
 }
 
 export async function stopProjectCommand(
@@ -1108,7 +1227,7 @@ export async function envVarCollisions(projectId: string): Promise<string[]> {
  * M1.5-19: Unity releases / updates viewer.
  */
 
-export type ReleaseStream = "lts" | "tech" | "beta" | "alpha";
+export type ReleaseStream = "lts" | "supported" | "tech" | "beta" | "alpha";
 
 export interface ReleaseEntry {
   version: string;
@@ -1137,28 +1256,17 @@ export async function refreshReleases(): Promise<ReleasesResult> {
 }
 
 /**
- * M1.5-20: Unity Editor install via Unity Hub CLI.
+ * Unity Editor install: opens Unity Hub's install dialog for the given
+ * release by firing its `unityhub://<version>/<changeset>` deep link.
+ * The Hub runs the download itself (single instance, native progress
+ * UI, module selection); this app does not track completion, so callers
+ * should nudge the user to refresh the Installed list afterward.
  */
-
-export type InstallError =
-  | { type: "hubNotFound" }
-  | { type: "installInProgress" }
-  | { type: "versionEmpty" }
-  | { type: "installFailed"; message: string };
-
-export interface InstallResult {
-  version: string;
-}
-
-export async function installUnityVersion(
+export async function openUnityHubInstall(
   version: string,
   changeset?: string
-): Promise<InstallResult> {
-  return invoke<InstallResult>("install_unity_version", { version, changeset });
-}
-
-export async function checkInstallInProgress(): Promise<boolean> {
-  return invoke<boolean>("check_install_in_progress");
+): Promise<void> {
+  await invoke<void>("open_unity_hub_install", { version, changeset });
 }
 
 /**
@@ -1369,6 +1477,16 @@ export type McpClientIdWire =
   | "zcodeProject"
   | "manual";
 
+/**
+ * How the MCP server is launched. Mirrors the Rust `McpLaunchMode`
+ * (camelCase serialisation). The default (`npx`) resolves the published
+ * npm package via `npx -y unity-open-mcp@latest`; `global` assumes a
+ * `npm i -g unity-open-mcp` install; the two `local*` modes point at an
+ * on-disk `mcp-server/dist/index.js` from a toolkit checkout. The Step 4
+ * advanced override field promotes `local` to `localOverride`.
+ */
+export type McpLaunchModeWire = "npx" | "global" | "local" | "localOverride";
+
 export interface McpConfigParamsWire {
   projectPath: string;
   toolkitRoot: string;
@@ -1379,6 +1497,8 @@ export interface McpConfigParamsWire {
   unityPath: string;
   client: McpClientIdWire;
   cursorProjectScope: boolean;
+  /** Defaults to `"npx"`. See `McpLaunchModeWire`. */
+  launchMode?: McpLaunchModeWire;
 }
 
 export interface McpConfigPlan {

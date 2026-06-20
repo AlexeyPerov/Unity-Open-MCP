@@ -4,17 +4,27 @@ Step-by-step guide to connect an AI client (Cursor, Claude Desktop, OpenCode, ZC
 
 For setup without Unity Hub Pro, see [manual-setup.md](manual-setup.md).
 
+> **Default path is now `npx`.** The wizard's Step 2 defaults to the
+> published npm package — you do **not** need to clone this repository or
+> build `mcp-server/dist/index.js` for a normal install. The instructions
+> below that build from a checkout apply to the **"Use local checkout"**
+> toggle (contributor flow); enable it in Step 2 to follow those steps.
+
 ## What you need
 
 | Requirement | Notes |
 |---|---|
 | Unity 2022.3 LTS+ (Unity 6 recommended) | Required by the bridge package. See [Unity version compatibility](unity-version-compat.md). |
-| Node.js 18+ | Runs the MCP server (`mcp-server/dist/index.js`). |
-| This repository | Clone or download the `unity-open-mcp` monorepo. |
+| Node.js 18+ | Runs the MCP server. Your AI client spawns it via `npx`; no manual build for the default path. |
 | Unity Hub Pro | Desktop app in [hub/](../hub/). |
 | An MCP client | Cursor, Claude Desktop, OpenCode, ZCode, or any client that supports MCP stdio servers. |
+| This repository *(local checkout path only)* | Clone only if you enable **Use local checkout** in Step 2. |
 
-## 1. Build the MCP server
+## 1. Build the MCP server *(local checkout path only)*
+
+> Skip this step for the default (`npx`) path — the AI client fetches the
+> published package. Only follow it when you enable **Use local checkout**
+> in Step 2 (contributor / clone flow).
 
 From the repository root:
 
@@ -66,8 +76,8 @@ Fix any hard blocks (missing version file, invalid path) before continuing.
 ### Step 2 — Environment
 
 1. **Node.js** — must report version 18 or higher.
-2. **AI toolkit root** — pick the root of this repository (the folder that contains `packages/`, `mcp-server/`, and `hub/`).
-3. Click **Validate** and resolve any failed fingerprint checks (missing `mcp-server/dist/index.js` usually means you skipped step 1).
+2. **MCP server source** — by default the wizard uses the published npm package (`npx -y unity-open-mcp@latest`); no toolkit root is required. Optionally enable **Use a global install** to launch the bare `unity-open-mcp` binary instead.
+3. **Use local checkout** *(optional)* — enable this toggle to onboard against a cloned toolkit root. Pick the root of this repository (the folder that contains `packages/`, `mcp-server/`, and `hub/`), then click **Validate** and resolve any failed fingerprint checks (missing `mcp-server/dist/index.js` usually means you skipped step 1). The toggle auto-enables when a toolkit root is already saved.
 4. Ensure the project’s `Packages/manifest.json` is writable.
 
 ### Step 3 — Install Unity packages

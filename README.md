@@ -1,13 +1,14 @@
 # Unity Open MCP (Beta)
 
 MCP/server infrastructure and tooling for Unity projects.
-Includes a Unity Hub Pro launcher with wizard setup for this MCP.
+
+The MCP server is published to npm as [`unity-open-mcp`](https://www.npmjs.com/package/unity-open-mcp) — most users point their AI client at `npx -y unity-open-mcp@latest` and never clone this repo. See [Manual setup](docs/manual-setup.md) for the config snippets.
 
 ## Current features
 
-- MCP server workspace under [mcp-server/](mcp-server/).
+- MCP server workspace under [mcp-server/](mcp-server/), published to npm as `unity-open-mcp` (`npx -y unity-open-mcp@latest`).
 - Bridge package and tests under [packages/](packages/).
-- Unity Hub Pro desktop app scaffold under [hub/](hub/). The hub manages Unity projects, UPM packages, Open-MCP repositories, and arbitrary folders — each classified automatically and given a type-specific settings popup, git status view, and line counter.
+- Unity Hub Pro desktop app scaffold under [hub/](hub/). The hub manages Unity projects, UPM packages, Open-MCP repositories, and arbitrary folders — each classified automatically and given a type-specific settings popup, git status view, and line counter. The Open-MCP settings popup doubles as a maintainer panel (build / test / version bump / publish dry-run / publish).
 - Demo and templates for local experimentation and automation under [demo/](demo/) and [templates/](templates/).
 
 ## Repository layout
@@ -38,9 +39,3 @@ Start from the component you are working on:
 - Hub app: see [hub/README.md](hub/README.md)
 - Demo setup: see [demo/README.md](demo/README.md)
 - Templates usage: see [templates/github-actions/README.md](templates/github-actions/README.md)
-
-<div align="center" width="100%">
-
-[![MCP](https://badge.mcpx.dev 'MCP Server')](https://modelcontextprotocol.io/introduction)
-
-</div>

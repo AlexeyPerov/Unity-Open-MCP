@@ -1,0 +1,74 @@
+# npm publish — publishes the `unity-open-mcp` MCP server to the public npm
+# registry when a `v*` tag is pushed. Mirrors the conventions of
+# typescript.yml (Node 22, working-directory: mcp-server).
+#
+# The workflow runs the `prepublishOnly` script (`npm run build`) before
+# publishing, so `dist/` is always fresh even when the tag was cut from a
+# checkout that had not rebuilt. Only the files whitelisted in
+# mcp-server/package.json `files` (`dist/`, `README.md`, `LICENSE`) ship.
+#
+# Authentication: `NPM_TOKEN` must be configured as a repository secret on the
+# publishing npm account (automation token with 2FA on the account). The
+# Hub's maintainer panel (docs/manual-setup.md §Maintainer publish flow) is the
+# other publish channel — it never touches this secret and never creates the
+# git tag. See the release runbook for when to use each path.
+
+name: npm-publish
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    name: publish unity-open-mcp to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: mcp-server
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+          # Publishes to the public npm registry. `NPM_TOKEN` is an automation
+          # token on the maintainer's npm account; `npm publish` reads it from
+          # this env var via the registry auth block below.
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: npm ci
+
+      - name: Verify package version matches tag
+        # Defensive guard: refuse to publish when the tag's version (e.g. v0.2.0)
+        # does not match the version in mcp-server/package.json. A maintainer
+        # who forgot `npm version` in the checkout gets a clear failure here
+        # instead of shipping a mismatched tarball.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "Tag version: $TAG"
+          echo "Package version: $PKG_VERSION"
+          if [ "$TAG" != "$PKG_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION. Run 'npm version <patch|minor|major>' in mcp-server/ before tagging."
+            exit 1
+          fi
+
+      - name: Build + publish
+        # `npm publish` runs `prepublishOnly` (npm run build) automatically, then
+        # ships the tarball to the registry. `--access public` keeps the
+        # unscoped package public (it is the default for unscoped names, but we
+        # set it explicitly so a future move to a scoped name keeps working).
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

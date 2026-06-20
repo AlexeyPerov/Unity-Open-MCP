@@ -389,6 +389,7 @@ class SettingsStore {
       this.current?.aiToolkit ?? {
         rootPath: "",
         mcpIndexOverride: "",
+        useLocalCheckout: false,
       }
     );
   }
@@ -423,6 +424,23 @@ class SettingsStore {
     const current = next.aiToolkit ?? { rootPath: "", mcpIndexOverride: "" };
     if (current.mcpIndexOverride === trimmed) return;
     next.aiToolkit = { ...current, mcpIndexOverride: trimmed };
+    await this.persist(next);
+  }
+
+  /**
+   * Persist the Step 2 "Use local checkout" toggle. When `true`, the
+   * wizard onboards against a local toolkit checkout (`node <root>/
+   * mcp-server/dist/index.js`); when `false`, the default `npx` path is
+   * used. The toggle is the single source of truth for which launch mode
+   * Step 4 emits; `rootPath` is never wiped on toggle change.
+   */
+  async setAiToolkitUseLocalCheckout(value: boolean): Promise<void> {
+    if (!this.current) return;
+    const current = this.current.aiToolkit?.useLocalCheckout ?? false;
+    if (current === value) return;
+    const next = this.clone();
+    const tool = next.aiToolkit ?? { rootPath: "", mcpIndexOverride: "" };
+    next.aiToolkit = { ...tool, useLocalCheckout: value };
     await this.persist(next);
   }
 }

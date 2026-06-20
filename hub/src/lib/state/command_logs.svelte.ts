@@ -8,6 +8,10 @@
  * Ports the routing shape of vibe-launcher's `AppState.routeLog` but
  * keyed by `projectId` so multiple Open-MCP repos can run commands
  * concurrently without their logs intermixing.
+ *
+ * Panels: build / test / custom predate the maintainer workflow; the
+ * npm-maintainer panels (version / publishDryRun / publish) cover the
+ * Plan 3 maintainer panel.
  */
 const MAX_LOG_LINES = 1000;
 
@@ -21,6 +25,9 @@ export interface ProjectPanels {
   build: PanelState;
   test: PanelState;
   custom: PanelState;
+  version: PanelState;
+  publishDryRun: PanelState;
+  publish: PanelState;
 }
 
 function emptyPanel(): PanelState {
@@ -37,6 +44,9 @@ class CommandLogsStore {
         build: emptyPanel(),
         test: emptyPanel(),
         custom: emptyPanel(),
+        version: emptyPanel(),
+        publishDryRun: emptyPanel(),
+        publish: emptyPanel(),
       };
     }
     return this.projects[projectId];

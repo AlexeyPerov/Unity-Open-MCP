@@ -5,6 +5,16 @@ use std::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize logging. `env_logger` is a dependency but was never
+    // initialized, so every `log::*` call elsewhere in the backend was
+    // silently dropped. Best-effort init: ignores the "already set"
+    // error so a double-init (e.g. CLI mode) is harmless. Default level
+    // is `warn` (silent in normal use); set `RUST_LOG=info` during a
+    // launch repro to see the per-operation timing spans in the dev
+    // terminal that complement the Status Drawer's end-to-end numbers.
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+        .try_init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_cli::init())
         .plugin(tauri_plugin_dialog::init())
@@ -14,7 +24,6 @@ pub fn run() {
             projects: Mutex::new(config::persistence::load_projects()),
             discovery_cache: Mutex::new(None),
             walk_up_registry: Mutex::new(config::walk_up_scan::WalkUpRegistry::default()),
-            install_in_progress: Mutex::new(false),
         })
         .manage(config::command_runner::CommandRunnerState::default())
         .invoke_handler(tauri::generate_handler![
@@ -59,8 +68,7 @@ pub fn run() {
             config::env_vars::env_var_collisions,
             config::releases::fetch_releases,
             config::releases::refresh_releases_command,
-            config::hub_install::install_unity_version,
-            config::hub_install::check_install_in_progress,
+            config::hub_install::open_unity_hub_install,
             config::ai_toolkit::validate_toolkit_root,
             config::ai_toolkit::check_node_version,
             config::wizard::detect_project_state,
@@ -85,6 +93,11 @@ pub fn run() {
             config::command_runner::run_project_build,
             config::command_runner::run_project_test,
             config::command_runner::run_project_custom,
+            config::command_runner::run_project_npm_version,
+            config::command_runner::run_project_npm_publish_dry_run,
+            config::command_runner::run_project_npm_publish,
+            config::command_runner::read_mcp_package_info,
+            config::command_runner::query_npm_registry,
             config::command_runner::stop_project_command,
             config::command_runner::project_command_running,
         ])

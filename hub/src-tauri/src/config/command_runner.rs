@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -20,6 +21,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
+
+use crate::config::schemas::ProjectKind;
 
 /// Per-(project, panel) tracked process. Holds the child PID (when
 /// running) so the stop command can kill the whole process tree.
@@ -53,6 +56,83 @@ fn npm_command() -> Command {
     } else {
         Command::new("npm")
     }
+}
+
+/// Resolve the npm working directory for a tracked project.
+///
+/// For Open-MCP repositories the publishable package lives in
+/// `mcp-server/` — the npm scripts (`build`, `test`, `publish`, `version`)
+/// are defined there, not at the repo root. Package projects keep using
+/// the project root. This centralizes the rule so every maintainer-panel
+/// command shares one resolution path (the frontend passes the repo root
+/// and the kind; Rust derives the right cwd).
+pub fn resolve_npm_cwd(project_path: &str, kind: ProjectKind) -> PathBuf {
+    let base = PathBuf::from(project_path);
+    match kind {
+        ProjectKind::OpenMcp => base.join("mcp-server"),
+        _ => base,
+    }
+}
+
+/// Read `name` + `version` from the `package.json` at the resolved npm
+/// cwd. Used by the maintainer panel's read-only info header so the user
+/// sees the package identity without a separate `npm` invocation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpPackageInfo {
+    pub name: String,
+    pub version: String,
+    /// Absolute path of the `package.json` the values came from.
+    pub manifest_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum McpPackageInfoError {
+    #[serde(rename_all = "camelCase")]
+    NotFound { path: String },
+    #[serde(rename_all = "camelCase")]
+    ParseFailed { path: String, message: String },
+}
+
+fn read_package_json_at(cwd: &PathBuf) -> Result<McpPackageInfo, McpPackageInfoError> {
+    let manifest_path = cwd.join("package.json");
+    let body = std::fs::read_to_string(&manifest_path).map_err(|_| McpPackageInfoError::NotFound {
+        path: manifest_path.to_string_lossy().into_owned(),
+    })?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| McpPackageInfoError::ParseFailed {
+            path: manifest_path.to_string_lossy().into_owned(),
+            message: e.to_string(),
+        })?;
+    let name = parsed
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let version = parsed
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    Ok(McpPackageInfo {
+        name,
+        version,
+        manifest_path: manifest_path.to_string_lossy().into_owned(),
+    })
+}
+
+/// Tauri command: read `name` + `version` from the package.json the
+/// maintainer panel would publish. For Open-MCP projects this resolves
+/// to `{project.path}/mcp-server/package.json`; for Package projects it
+/// is the root `package.json`.
+#[tauri::command]
+pub fn read_mcp_package_info(
+    project_path: String,
+    kind: ProjectKind,
+) -> Result<McpPackageInfo, McpPackageInfoError> {
+    let cwd = resolve_npm_cwd(&project_path, kind);
+    read_package_json_at(&cwd)
 }
 
 /// Strips ANSI CSI color sequences so the log pane renders cleanly.
@@ -256,50 +336,255 @@ fn spawn_tracked(
     Ok(())
 }
 
-/// Runs `npm run build` in the project root. The frontend listens for
-/// `cmd-log` lines tagged with `panel: "build"`.
+/// Runs `npm run build` in the npm-resolved cwd (`mcp-server/` for
+/// Open-MCP projects, the project root otherwise). The frontend listens
+/// for `cmd-log` lines tagged with `panel: "build"`.
 #[tauri::command]
 pub fn run_project_build(
     app: AppHandle,
     state: State<'_, CommandRunnerState>,
     project_id: String,
-    cwd: String,
+    project_path: String,
+    kind: ProjectKind,
 ) -> Result<(), CommandRunnerError> {
+    let cwd = resolve_npm_cwd(&project_path, kind);
+    let cwd_str = cwd.to_string_lossy().into_owned();
     let mut cmd = npm_command();
     cmd.args(["run", "build"]);
-    spawn_tracked(&app, &state, &project_id, "build", &cwd, cmd)
+    spawn_tracked(&app, &state, &project_id, "build", &cwd_str, cmd)
 }
 
-/// Runs `npm test` in the project root.
+/// Runs `npm test` in the npm-resolved cwd.
 #[tauri::command]
 pub fn run_project_test(
     app: AppHandle,
     state: State<'_, CommandRunnerState>,
     project_id: String,
-    cwd: String,
+    project_path: String,
+    kind: ProjectKind,
 ) -> Result<(), CommandRunnerError> {
+    let cwd = resolve_npm_cwd(&project_path, kind);
+    let cwd_str = cwd.to_string_lossy().into_owned();
     let mut cmd = npm_command();
     cmd.args(["run", "test"]);
-    spawn_tracked(&app, &state, &project_id, "test", &cwd, cmd)
+    spawn_tracked(&app, &state, &project_id, "test", &cwd_str, cmd)
 }
 
 /// Runs a custom npm script (e.g. `lint`) or, when `args` is empty, a
-/// bare `npm install`.
+/// bare `npm install`. Runs in the npm-resolved cwd.
 #[tauri::command]
 pub fn run_project_custom(
     app: AppHandle,
     state: State<'_, CommandRunnerState>,
     project_id: String,
-    cwd: String,
+    project_path: String,
+    kind: ProjectKind,
     args: Vec<String>,
 ) -> Result<(), CommandRunnerError> {
+    let cwd = resolve_npm_cwd(&project_path, kind);
+    let cwd_str = cwd.to_string_lossy().into_owned();
     let mut cmd = npm_command();
     if args.is_empty() {
         cmd.arg("install");
     } else {
         cmd.args(&args);
     }
-    spawn_tracked(&app, &state, &project_id, "custom", &cwd, cmd)
+    spawn_tracked(&app, &state, &project_id, "custom", &cwd_str, cmd)
+}
+
+/// `npm version {level}` bump in the npm-resolved cwd.
+/// `--no-git-tag-version` keeps the bump local to `package.json` —
+/// the Hub never creates git tags; tagging stays in the release runbook
+/// (CI publishes on a manually-pushed `v*` tag).
+#[tauri::command]
+pub fn run_project_npm_version(
+    app: AppHandle,
+    state: State<'_, CommandRunnerState>,
+    project_id: String,
+    project_path: String,
+    kind: ProjectKind,
+    level: String,
+) -> Result<(), CommandRunnerError> {
+    let cwd = resolve_npm_cwd(&project_path, kind);
+    let cwd_str = cwd.to_string_lossy().into_owned();
+    let level_trim = level.trim();
+    let valid = matches!(level_trim, "patch" | "minor" | "major");
+    if !valid {
+        return Err(CommandRunnerError::SpawnFailed {
+            message: format!(
+                "Invalid version bump level '{}': expected patch, minor, or major.",
+                level
+            ),
+        });
+    }
+    let mut cmd = npm_command();
+    cmd.args(["version", level_trim, "--no-git-tag-version"]);
+    spawn_tracked(&app, &state, &project_id, "version", &cwd_str, cmd)
+}
+
+/// `npm publish --dry-run --access public` in the npm-resolved cwd.
+/// Preflight only — lists the files that would ship without touching the
+/// registry. Safe to run without confirmation.
+#[tauri::command]
+pub fn run_project_npm_publish_dry_run(
+    app: AppHandle,
+    state: State<'_, CommandRunnerState>,
+    project_id: String,
+    project_path: String,
+    kind: ProjectKind,
+) -> Result<(), CommandRunnerError> {
+    let cwd = resolve_npm_cwd(&project_path, kind);
+    let cwd_str = cwd.to_string_lossy().into_owned();
+    let mut cmd = npm_command();
+    cmd.args(["publish", "--dry-run", "--access", "public"]);
+    spawn_tracked(&app, &state, &project_id, "publishDryRun", &cwd_str, cmd)
+}
+
+/// `npm publish --access public` in the npm-resolved cwd. Real publish —
+/// mutating. The frontend is expected to show a confirmation dialog
+/// before invoking this command; the Hub never persists npm credentials
+/// (the maintainer authenticates via `npm login` on the host machine).
+#[tauri::command]
+pub fn run_project_npm_publish(
+    app: AppHandle,
+    state: State<'_, CommandRunnerState>,
+    project_id: String,
+    project_path: String,
+    kind: ProjectKind,
+) -> Result<(), CommandRunnerError> {
+    let cwd = resolve_npm_cwd(&project_path, kind);
+    let cwd_str = cwd.to_string_lossy().into_owned();
+    let mut cmd = npm_command();
+    cmd.args(["publish", "--access", "public"]);
+    spawn_tracked(&app, &state, &project_id, "publish", &cwd_str, cmd)
+}
+
+/// Structured result of a best-effort registry query. Both fields are
+/// best-effort: a missing/empty value with an `error` message is a
+/// normal outcome when the host is offline, the package is unpublished,
+/// or the maintainer is not logged in. The panel surfaces the errors
+/// inline rather than blocking the publish flow.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpmRegistryInfo {
+    /// Package version advertised on the public registry, parsed from
+    /// `npm view <name> version` stdout. `null` when the query failed
+    /// or returned nothing (unpublished name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_version: Option<String>,
+    /// `npm whoami` result — the logged-in account name. `null` when
+    /// the maintainer is not authenticated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whoami: Option<String>,
+    /// Error text for the `npm view` call when it failed. Empty on
+    /// success.
+    #[serde(default)]
+    pub view_error: String,
+    /// Error text for the `npm whoami` call when it failed.
+    #[serde(default)]
+    pub whoami_error: String,
+}
+
+/// Tauri command: query the public npm registry for the package's
+/// published version and the current `npm whoami`. Both calls are
+/// best-effort and run synchronously (each shells out once); the panel
+/// treats any failure as a soft warning rather than a hard block.
+#[tauri::command]
+pub fn query_npm_registry(
+    project_path: String,
+    kind: ProjectKind,
+) -> Result<NpmRegistryInfo, CommandRunnerError> {
+    let cwd = resolve_npm_cwd(&project_path, kind);
+    let cwd_str = cwd.to_string_lossy().into_owned();
+    // Read the package name from the local manifest so the registry
+    // query targets whatever this checkout actually publishes (and so a
+    // fork with a different name still resolves correctly).
+    let info = match read_package_json_at(&cwd) {
+        Ok(i) => i,
+        Err(e) => {
+            return Err(CommandRunnerError::SpawnFailed {
+                message: format!(
+                    "cannot read package.json for registry query: {:?}",
+                    e
+                ),
+            });
+        }
+    };
+    if info.name.is_empty() {
+        return Err(CommandRunnerError::SpawnFailed {
+            message: "package.json has no `name` field; cannot query the registry.".to_string(),
+        });
+    }
+
+    let mut view_cmd = npm_command();
+    view_cmd.args(["view", &info.name, "version"]);
+    view_cmd.current_dir(&cwd_str);
+    view_cmd.stdin(Stdio::null());
+    let (published_version, view_error) = match capture_npm(&mut view_cmd) {
+        Ok(stdout) => {
+            let trimmed = stdout.trim();
+            if trimmed.is_empty() {
+                (None, String::new())
+            } else {
+                (Some(trimmed.to_string()), String::new())
+            }
+        }
+        Err(msg) => (None, msg),
+    };
+
+    let mut whoami_cmd = npm_command();
+    whoami_cmd.arg("whoami");
+    whoami_cmd.current_dir(&cwd_str);
+    whoami_cmd.stdin(Stdio::null());
+    let (whoami, whoami_error) = match capture_npm(&mut whoami_cmd) {
+        Ok(stdout) => {
+            let trimmed = stdout.trim();
+            if trimmed.is_empty() {
+                (None, String::new())
+            } else {
+                (Some(trimmed.to_string()), String::new())
+            }
+        }
+        Err(msg) => (None, msg),
+    };
+
+    Ok(NpmRegistryInfo {
+        published_version,
+        whoami,
+        view_error,
+        whoami_error,
+    })
+}
+
+/// Run an npm command to completion, capturing combined stdout/stderr.
+/// Returns the stdout text on exit 0, or an error string on non-zero /
+/// spawn failure. Used by the registry query (which is synchronous and
+/// short-lived — the streaming `spawn_tracked` path is for the
+/// long-running maintainer-panel commands).
+fn capture_npm(cmd: &mut Command) -> Result<String, String> {
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to spawn npm: {}", e))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut msg = String::new();
+        if !stderr.trim().is_empty() {
+            msg.push_str(stderr.trim());
+        }
+        if !stdout.trim().is_empty() {
+            if !msg.is_empty() {
+                msg.push(' ');
+            }
+            msg.push_str(stdout.trim());
+        }
+        if msg.is_empty() {
+            msg = format!("npm exited with status {}", output.status);
+        }
+        Err(msg)
+    }
 }
 
 /// Stops the tracked process for `(project_id, panel)`, killing its
@@ -368,5 +653,59 @@ mod tests {
         let p = TrackedProc::default();
         assert!(!p.running);
         assert!(p.pid.is_none());
+    }
+
+    #[test]
+    fn resolve_npm_cwd_appends_mcp_server_for_open_mcp() {
+        let cwd = resolve_npm_cwd("/repos/uai", ProjectKind::OpenMcp);
+        assert!(cwd.ends_with("mcp-server"));
+        assert!(cwd.starts_with("/repos/uai"));
+    }
+
+    #[test]
+    fn resolve_npm_cwd_keeps_project_root_for_package() {
+        // Package + Unity + Custom all stay at the project root — only
+        // Open-MCP reroutes into mcp-server/.
+        assert_eq!(
+            resolve_npm_cwd("/repos/pkg", ProjectKind::Package),
+            PathBuf::from("/repos/pkg")
+        );
+        assert_eq!(
+            resolve_npm_cwd("/game", ProjectKind::Unity),
+            PathBuf::from("/game")
+        );
+        assert_eq!(
+            resolve_npm_cwd("/any", ProjectKind::Custom),
+            PathBuf::from("/any")
+        );
+    }
+
+    #[test]
+    fn read_package_json_at_returns_name_and_version() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name": "unity-open-mcp", "version": "0.2.0"}"#,
+        )
+        .unwrap();
+        let info = read_package_json_at(&dir.path().to_path_buf()).unwrap();
+        assert_eq!(info.name, "unity-open-mcp");
+        assert_eq!(info.version, "0.2.0");
+        assert!(info.manifest_path.ends_with("package.json"));
+    }
+
+    #[test]
+    fn read_package_json_at_errors_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_package_json_at(&dir.path().to_path_buf()).unwrap_err();
+        assert!(matches!(err, McpPackageInfoError::NotFound { .. }));
+    }
+
+    #[test]
+    fn read_package_json_at_errors_when_malformed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), "{ not json").unwrap();
+        let err = read_package_json_at(&dir.path().to_path_buf()).unwrap_err();
+        assert!(matches!(err, McpPackageInfoError::ParseFailed { .. }));
     }
 }

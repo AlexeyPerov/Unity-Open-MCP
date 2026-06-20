@@ -69,6 +69,7 @@
     DEFAULT_BRIDGE_PORT,
     type McpClientId,
   } from "$lib/services/ai_toolkit";
+  import type { McpLaunchModeWire } from "$lib/services/config";
   // The pure-function `buildCursorMcpEntry` / `buildOpenCodeMcpEntry` /
   // `buildMcpEnv` helpers in `ai_toolkit.ts` still back the
   // `ai_toolkit.test.ts` Node:test suite. The wizard Step 4
@@ -150,6 +151,12 @@
   let nodeProbe = $state<NodeProbe | null>(null);
   let nodeProbing = $state(false);
   let pickToolkitInFlight = $state(false);
+  // Step 2 toggle: `true` to onboard against a local toolkit checkout
+  // (contributor / clone path); `false` (default) to use the bundled npm
+  // package via `npx -y unity-open-mcp@latest`. Auto-enables when a
+  // `rootPath` is already saved so existing M4 onboarding keeps resolving
+  // to the local launch command without a forced migration.
+  let useLocalCheckout = $state(false);
 
   // Step 3 — packages state.
   let installBridge = $state(true);
@@ -229,6 +236,11 @@
     const stored = settingsStore.aiToolkit;
     toolkitRoot = stored.rootPath ?? "";
     mcpIndexOverride = stored.mcpIndexOverride ?? "";
+    // Auto-enable the local-checkout toggle when a toolkit root is
+    // already persisted (M4 back-compat). The default onboarding path
+    // for a fresh install is `npx`; a returning user who cloned the
+    // repo keeps their local launch command without a forced migration.
+    useLocalCheckout = stored.useLocalCheckout ?? (toolkitRoot.trim().length > 0);
     toolkitRootDirty = false;
     void refreshDetection();
   });
@@ -271,7 +283,11 @@
 
   function isEnvironmentReady(): boolean {
     if (!nodeProbe?.ok) return false;
-    if (!toolkitValidation?.ok) return false;
+    // The local-checkout path requires a validated toolkit root; the
+    // default `npx` path does not (it resolves the published npm package,
+    // no clone needed). Step 3 packages/skills still use the root when
+    // the toggle is on — but the default path skips them entirely.
+    if (useLocalCheckout && !toolkitValidation?.ok) return false;
     // Below the supported minimum (2022.3) hard-blocks: the package
     // manifests declare `unity: "2022.3"`, so UPM would refuse to
     // resolve anyway. Below the *recommended* Unity 6 only warns.
@@ -279,6 +295,32 @@
     if (!detection?.meetsMinUnityVersion) return false;
     if (!detection?.manifestWritable) return false;
     return true;
+  }
+
+  // The launch mode the wizard passes to `plan_mcp_config` /
+  // `write_mcp_config`. Derived from the Step 2 toggle + the global
+  // install option + the Step 4 advanced override field: the override
+  // always wins (it is the explicit "custom mcp-server/dist/index.js"
+  // escape hatch), then the toggle picks local vs npx, then the global
+  // install option refines npx → global. Kept as a function so Step 4's
+  // two `$effect` blocks re-read it on every form-state change.
+  let useGlobalInstall = $state(false);
+
+  function effectiveLaunchMode(): McpLaunchModeWire {
+    if (mcpIndexOverride.trim().length > 0) return "localOverride";
+    if (useLocalCheckout) return "local";
+    return useGlobalInstall ? "global" : "npx";
+  }
+
+  function onUseLocalCheckoutChange(checked: boolean) {
+    useLocalCheckout = checked;
+    // Never wipe `toolkitRoot` on toggle change — keep reading it for
+    // back-compat so a user who flips back and forth does not lose the
+    // path. Clearing the validation error lets the UI re-run the
+    // fingerprint check when the toggle is re-enabled.
+    if (!checked) {
+      toolkitError = null;
+    }
   }
 
   function isManifestReady(): boolean {
@@ -363,11 +405,18 @@
   }
 
   async function persistToolkitRoot() {
-    if (!toolkitValidation?.ok) return;
     try {
-      await settingsStore.setAiToolkitRoot(toolkitRoot);
-      if (mcpIndexOverride.trim().length > 0) {
-        await settingsStore.setAiToolkitMcpIndexOverride(mcpIndexOverride);
+      // Always persist the local-checkout toggle so the next wizard run
+      // remembers the onboarding path the user picked — even on the npx
+      // path where no toolkit root is ever collected.
+      await settingsStore.setAiToolkitUseLocalCheckout(useLocalCheckout);
+      // Root + override only persist when the local-checkout path
+      // validated successfully. The npx path leaves them untouched.
+      if (useLocalCheckout && toolkitValidation?.ok) {
+        await settingsStore.setAiToolkitRoot(toolkitRoot);
+        if (mcpIndexOverride.trim().length > 0) {
+          await settingsStore.setAiToolkitMcpIndexOverride(mcpIndexOverride);
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -598,7 +647,19 @@
     const projectScope = cursorProjectScope;
     const port = bridgePort;
     const override = mcpIndexOverride;
-    if (!projectPath || !root) {
+    const localCheckout = useLocalCheckout;
+    const globalInstall = useGlobalInstall;
+    const mode: McpLaunchModeWire = override.trim().length > 0
+      ? "localOverride"
+      : localCheckout
+        ? "local"
+        : globalInstall
+          ? "global"
+          : "npx";
+    // The local + localOverride launch modes need a toolkit root to
+    // resolve the on-disk index; the npm modes (npx / global) resolve
+    // the published binary and never touch disk, so they run without one.
+    if (!projectPath || ((mode === "local" || mode === "localOverride") && !root)) {
       mcpPlan = null;
       return;
     }
@@ -616,6 +677,7 @@
           unityPath: "",
           client: clientToWire(client),
           cursorProjectScope: projectScope,
+          launchMode: mode,
         };
         const plan = await planMcpConfig(params);
         if (!cancelled) {
@@ -776,8 +838,14 @@
 
   function canWriteMcpConfig(): boolean {
     if (clientKind(mcpClient) !== "file") return false;
-    if (resolvedMcpPathValid !== true) return false;
-    if (!toolkitValidation?.ok) return false;
+    // The local + localOverride launch modes need a validated on-disk
+    // index path; the npm modes (npx / global) write the
+    // published-binary launch command and skip path validation.
+    const mode = effectiveLaunchMode();
+    if (mode === "local" || mode === "localOverride") {
+      if (resolvedMcpPathValid !== true) return false;
+      if (!toolkitValidation?.ok) return false;
+    }
     if (!mcpPlan?.targetPath) return false;
     return true;
   }
@@ -833,7 +901,12 @@
     if (!canWriteMcpConfig() || mcpWriting) return;
     const root = toolkitRoot;
     const projectPath = project.path;
-    if (!projectPath || !root) return;
+    const mode = effectiveLaunchMode();
+    // Local modes need a toolkit root to resolve the on-disk index; the
+    // npm modes (npx / global) write the published-binary launch command
+    // and never touch disk.
+    if (!projectPath) return;
+    if ((mode === "local" || mode === "localOverride") && !root) return;
     mcpWriting = true;
     mcpWriteError = null;
     try {
@@ -847,6 +920,7 @@
         unityPath: "",
         client: clientToWire(mcpClient),
         cursorProjectScope,
+        launchMode: mode,
       };
       const result = await writeMcpConfig(params);
       mcpWriteResult = result;
@@ -1615,11 +1689,52 @@
       {:else if currentStep === "step2"}
         <section class="wiz-section">
           <p class="wiz-desc">
-            Step 2 validates Unity version, Node.js, the cloned
-            unity-open-mcp toolkit root, and write access to
-            <code>Packages/manifest.json</code>. The first three
-            checks must pass before you can continue to Step 3.
+            Step 2 validates Unity version, Node.js, and write access to
+            <code>Packages/manifest.json</code>. By default the wizard uses the
+            published <code>unity-open-mcp</code> npm package (no repo clone
+            needed); enable <strong>Use local checkout</strong> to onboard
+            against a cloned toolkit root.
           </p>
+
+          <div class="wiz-field">
+            <span class="wiz-label">MCP server source</span>
+            <label class="wiz-toggle">
+              <input
+                type="checkbox"
+                checked={useLocalCheckout}
+                onchange={(e) =>
+                  onUseLocalCheckoutChange((e.currentTarget as HTMLInputElement).checked)}
+              />
+              <span>
+                <strong>Use local checkout</strong> —
+                <small>
+                  Point at a cloned <code>unity-open-mcp</code> monorepo instead of the
+                  published npm package. Step 4 then launches
+                  <code>node &lt;root&gt;/mcp-server/dist/index.js</code>, and Step 3
+                  package installs + skill copy use the toolkit root.
+                </small>
+              </span>
+            </label>
+            {#if !useLocalCheckout}
+              <label class="wiz-toggle">
+                <input type="checkbox" bind:checked={useGlobalInstall} />
+                <span>
+                  <strong>Use a global install</strong> —
+                  <small>
+                    Step 4 launches the bare <code>unity-open-mcp</code> binary
+                    (assumes <code>npm i -g unity-open-mcp</code>) instead of
+                    <code>npx -y unity-open-mcp@latest</code>.
+                  </small>
+                </span>
+              </label>
+              <p class="wiz-hint wiz-hint-ok">
+                Default: the wizard writes <code>npx -y unity-open-mcp@latest</code>
+                as the MCP launch command. Node {nodeProbe?.major ?? "≥"}18 fetches the
+                package from npm on first spawn.
+              </p>
+            {/if}
+          </div>
+
 
           {#if detection}
             <div class="wiz-field">
@@ -1673,63 +1788,66 @@
             </div>
           </div>
 
-          <div class="wiz-field">
-            <label class="wiz-label" for="wiz-toolkit-root">AI toolkit root</label>
-            <div class="wiz-input-row">
-              <input
-                id="wiz-toolkit-root"
-                type="text"
-                class="wiz-input"
-                placeholder="/Users/you/unity-open-mcp"
-                value={toolkitRoot}
-                oninput={(e) => onToolkitRootInput((e.currentTarget as HTMLInputElement).value)}
-              />
-              <Button variant="secondary" onclick={pickToolkitFolder} disabled={pickToolkitInFlight}>
-                {pickToolkitInFlight ? "Selecting…" : "Browse…"}
-              </Button>
-              <Button
-                variant="secondary"
-                onclick={runToolkitValidation}
-                disabled={toolkitValidating || !toolkitRoot.trim()}
-              >
-                {toolkitValidating ? "Validating…" : toolkitRootDirty ? "Validate" : "Re-check"}
-              </Button>
-            </div>
-            {#if toolkitError}
-              <p class="wiz-hint wiz-hint-warn">{toolkitError}</p>
-            {/if}
-            {#if toolkitValidation}
-              <ul class="wiz-fingerprints" aria-label="Toolkit root fingerprint checks">
-                {#each toolkitValidation.fingerprints as fp (fp.relativePath)}
-                  {@const tone =
-                    fp.exists && fp.kindOk === true
-                      ? "ok"
-                      : fp.exists && fp.kindOk === false
-                        ? "warn"
-                        : "missing"}
-                  <li class="wiz-fp wiz-fp-{tone}">
-                    <span class="wiz-fp-name"><code>{fp.relativePath}</code></span>
-                    <span class="wiz-fp-status">
-                      {#if tone === "ok"}
-                        ok
-                      {:else if tone === "warn"}
-                        wrong kind
-                      {:else}
-                        missing
-                      {/if}
-                    </span>
-                  </li>
-                {/each}
-              </ul>
-              {#if toolkitValidation.mcpDistMissing}
-                <p class="wiz-hint wiz-hint-warn">
-                  <code>mcp-server/dist/index.js</code> is not built.
-                  Run <code>npm run build</code> in
-                  <code>{toolkitRoot}/mcp-server/</code> and re-check.
-                </p>
+          {#if useLocalCheckout}
+            <div class="wiz-field">
+              <label class="wiz-label" for="wiz-toolkit-root">AI toolkit root</label>
+              <div class="wiz-input-row">
+                <input
+                  id="wiz-toolkit-root"
+                  type="text"
+                  class="wiz-input"
+                  placeholder="/Users/you/unity-open-mcp"
+                  value={toolkitRoot}
+                  oninput={(e) => onToolkitRootInput((e.currentTarget as HTMLInputElement).value)}
+                />
+                <Button variant="secondary" onclick={pickToolkitFolder} disabled={pickToolkitInFlight}>
+                  {pickToolkitInFlight ? "Selecting…" : "Browse…"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onclick={runToolkitValidation}
+                  disabled={toolkitValidating || !toolkitRoot.trim()}
+                >
+                  {toolkitValidating ? "Validating…" : toolkitRootDirty ? "Validate" : "Re-check"}
+                </Button>
+              </div>
+              {#if toolkitError}
+                <p class="wiz-hint wiz-hint-warn">{toolkitError}</p>
               {/if}
-            {/if}
-          </div>
+              {#if toolkitValidation}
+                <ul class="wiz-fingerprints" aria-label="Toolkit root fingerprint checks">
+                  {#each toolkitValidation.fingerprints as fp (fp.relativePath)}
+                    {@const tone =
+                      fp.exists && fp.kindOk === true
+                        ? "ok"
+                        : fp.exists && fp.kindOk === false
+                          ? "warn"
+                          : "missing"}
+                    <li class="wiz-fp wiz-fp-{tone}">
+                      <span class="wiz-fp-name"><code>{fp.relativePath}</code></span>
+                      <span class="wiz-fp-status">
+                        {#if tone === "ok"}
+                          ok
+                        {:else if tone === "warn"}
+                          wrong kind
+                        {:else}
+                          missing
+                        {/if}
+                      </span>
+                    </li>
+                  {/each}
+                </ul>
+                {#if toolkitValidation.mcpDistMissing}
+                  <p class="wiz-hint wiz-hint-warn">
+                    <code>mcp-server/dist/index.js</code> is not built.
+                    Run <code>npm run build</code> in
+                    <code>{toolkitRoot}/mcp-server/</code> and re-check.
+                  </p>
+                {/if}
+              {/if}
+            </div>
+          {/if}
+
 
           {#if detection && !detection.manifestWritable}
             <div class="wiz-field">
@@ -1820,7 +1938,7 @@
               <input type="checkbox" bind:checked={installScanner} disabled />
               <span>
                 <strong>Also install Unity Scanner</strong> —
-                <small>Full upstream product for human inspection in the Editor (advanced, off by default; not wired in v1).</small>
+                <small>Full upstream product for inspection in the Editor (advanced, off by default).</small>
               </span>
             </label>
           </div>
@@ -2039,14 +2157,17 @@
         <section class="wiz-section">
           <p class="wiz-desc">
             Step 4 writes a <code>unity-open-mcp</code> MCP server
-            entry to your client config. The wizard calls the
-            Rust planner on every form-state change so the live
-            preview matches exactly what the writer will emit:
-            <code>mcpServers.unity-open-mcp</code> for Cursor /
-            Claude Desktop, <code>mcp.unity-open-mcp</code> for
-            OpenCode, a <code>claude mcp add</code> command for
-            Claude Code, and a copyable snippet for Manual.
-            Unrelated MCP servers are merged through unchanged.
+            entry to your client config. The launch command comes from your
+            Step 2 choice — <code>npx -y unity-open-mcp@latest</code> by
+            default, or <code>node &lt;root&gt;/mcp-server/dist/index.js</code>
+            when <strong>Use local checkout</strong> is on. The wizard calls
+            the Rust planner on every form-state change so the live preview
+            matches exactly what the writer will emit:
+            <code>mcpServers.unity-open-mcp</code> for Cursor / Claude Desktop,
+            <code>mcp.unity-open-mcp</code> for OpenCode, a
+            <code>claude mcp add</code> command for Claude Code, and a copyable
+            snippet for Manual. Unrelated MCP servers are merged through
+            unchanged.
           </p>
 
           <div class="wiz-field">
@@ -2104,7 +2225,12 @@
               <p class="wiz-hint">Planning…</p>
             {:else if !mcpPlan}
               <p class="wiz-hint wiz-hint-warn">
-                Set the toolkit root in Step 2 to generate a config.
+                {#if useLocalCheckout}
+                  Set and validate the toolkit root in Step 2 to generate a config.
+                {:else}
+                  Waiting for the planner — the default <code>npx</code> launch
+                  command needs no toolkit root.
+                {/if}
               </p>
             {:else}
               <pre class="wiz-codeblock" aria-label={mcpPlan.command ? "Claude Code command" : "Generated MCP config"}>{mcpPreviewText || "—"}</pre>
@@ -2140,7 +2266,7 @@
                 </p>
               {/if}
             {/if}
-            {#if resolvedMcpPathValid === false}
+            {#if resolvedMcpPathValid === false && useLocalCheckout}
               <p class="wiz-hint wiz-hint-warn">
                 Resolved MCP path does not exist on disk:
                 <code>{resolvedMcpPath}</code>.

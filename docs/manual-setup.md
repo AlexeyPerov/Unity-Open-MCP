@@ -1,6 +1,6 @@
 # MCP Manual Setup
 
-Set up Unity Open MCP **without Unity Hub Pro**: build the MCP server, add Unity packages to your project, configure your AI client, and verify the bridge.
+Set up Unity Open MCP **without Unity Hub Pro**: install the MCP server from npm, add Unity packages to your project, configure your AI client, and verify the bridge.
 
 For the guided wizard in Unity Hub Pro, see [wizard-setup.md](wizard-setup.md).
 
@@ -9,21 +9,20 @@ For the guided wizard in Unity Hub Pro, see [wizard-setup.md](wizard-setup.md).
 | Requirement | Notes |
 |---|---|
 | Unity 2022.3 LTS+ (Unity 6 recommended) | Required by the bridge package. See [Unity version compatibility](unity-version-compat.md). |
-| Node.js 18+ | Runs the MCP server (`mcp-server/dist/index.js`). |
-| This repository | Clone or download the `unity-open-mcp` monorepo. |
+| Node.js 18+ | Runs the MCP server. Your AI client spawns it via `npx`, so no manual install is required. |
 | An MCP client | Cursor, Claude Desktop, OpenCode, ZCode, or any MCP stdio client. |
 
-## 1. Build the MCP server
+You do **not** need to clone this repository for a normal install — the MCP server is published to npm as [`unity-open-mcp`](https://www.npmjs.com/package/unity-open-mcp). Clone the repo only if you want to contribute or run from a local checkout (see [Contributor / local checkout](#contributor--local-checkout)).
 
-From the repository root:
+## 1. Install the MCP server
+
+The MCP server is a Node process your AI client spawns. The default install path uses `npx` and fetches the latest published version on first spawn — no manual install step. If you prefer a one-time install:
 
 ```bash
-cd mcp-server
-npm install
-npm run build
+npm install -g unity-open-mcp
 ```
 
-Confirm that `mcp-server/dist/index.js` exists.
+Then use `unity-open-mcp` as the command in your client config (see step 3) instead of `npx -y unity-open-mcp@latest`.
 
 ## 2. Add Unity packages
 
@@ -63,7 +62,7 @@ Open the project in Unity and let Package Manager resolve the entries. Fix any c
 
 ## 3. Configure your MCP client
 
-The MCP server is a Node process. Point your client at `mcp-server/dist/index.js` and set the required environment variables.
+The MCP server is a Node process. Point your client at it via `npx` (default) and set the required environment variables.
 
 | Variable | Required | Purpose |
 |---|---|---|
@@ -86,8 +85,8 @@ Edit `~/.cursor/mcp.json` (Cursor) or your Claude Desktop MCP config file. Merge
 {
   "mcpServers": {
     "unity-open-mcp": {
-      "command": "node",
-      "args": ["/absolute/path/to/unity-open-mcp/mcp-server/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "unity-open-mcp@latest"],
       "env": {
         "UNITY_PROJECT_PATH": "/absolute/path/to/your/unity/project",
         "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
@@ -96,6 +95,8 @@ Edit `~/.cursor/mcp.json` (Cursor) or your Claude Desktop MCP config file. Merge
   }
 }
 ```
+
+If you installed globally (`npm i -g unity-open-mcp`), use `"command": "unity-open-mcp", "args": []` instead.
 
 Keep any existing MCP servers in the file; only add or update the `unity-open-mcp` key.
 
@@ -108,7 +109,7 @@ Edit `~/.config/opencode/opencode.json`. Add under `mcp`:
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["node", "/absolute/path/to/unity-open-mcp/mcp-server/dist/index.js"],
+      "command": ["npx", "-y", "unity-open-mcp@latest"],
       "enabled": true,
       "environment": {
         "UNITY_PROJECT_PATH": "/absolute/path/to/your/unity/project",
@@ -131,8 +132,8 @@ Edit `~/.zcode/cli/config.json` (global) — ZCode nests MCP servers three level
     "servers": {
       "unity-open-mcp": {
         "type": "stdio",
-        "command": "node",
-        "args": ["/absolute/path/to/unity-open-mcp/mcp-server/dist/index.js"],
+        "command": "npx",
+        "args": ["-y", "unity-open-mcp@latest"],
         "env": {
           "UNITY_PROJECT_PATH": "/absolute/path/to/your/unity/project",
           "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
@@ -153,7 +154,7 @@ ZCode also discovers project skills under `.agents/skills/`. Run `unity_open_mcp
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/absolute/path/to/your/unity/project \
   --env UNITY_OPEN_MCP_BRIDGE_PORT=19120 \
-  -- node /absolute/path/to/unity-open-mcp/mcp-server/dist/index.js
+  -- npx -y unity-open-mcp@latest
 ```
 
 Adjust flags to match your installed Claude Code version if the CLI syntax differs.
@@ -200,7 +201,7 @@ See [api/bridge-http.md](api/bridge-http.md) for the full `/ping` response shape
 In your AI client, use a Unity-related MCP tool or resource. If tools fail:
 
 - Confirm `UNITY_PROJECT_PATH` matches the open project root exactly.
-- Confirm `mcp-server/dist/index.js` exists and Node 18+ is on your `PATH`.
+- Confirm Node 18+ is on your `PATH`. On the local-checkout path, also confirm `mcp-server/dist/index.js` exists (run `npm run build` in `mcp-server/`).
 - Confirm Unity is running with that project and compilation has finished.
 - Confirm no firewall is blocking localhost on the bridge port.
 
@@ -210,15 +211,11 @@ For MCP tool routing and offline fallbacks, see [api/mcp-tools.md](api/mcp-tools
 
 The MCP server ships a thin CLI for scripting and CI pipelines. It shares the
 same routing layer as the stdio server, so a CLI invocation returns the same
-JSON an MCP client would receive. From the repository:
+JSON an MCP client would receive. The published binary is invocable via `npx`:
 
 ```bash
-cd mcp-server
-node dist/index.js <command> [options]
+npx -y unity-open-mcp@latest <command> [options]
 ```
-
-Once the package is published to npm (see the distribution milestone), the
-same binary is invocable as `npx unity-open-mcp <command>`.
 
 Commands:
 
@@ -249,20 +246,20 @@ Examples:
 
 ```bash
 # Block until the bridge is ready (typical CI gate before running tools).
-node dist/index.js wait-for-ready --project /path/to/MyGame
+npx -y unity-open-mcp@latest wait-for-ready --project /path/to/MyGame
 
 # Probe and exit — useful as a health check.
-node dist/index.js ping --project /path/to/MyGame --json
+npx -y unity-open-mcp@latest ping --project /path/to/MyGame --json
 
 # Show the resolved bridge port + instance state without waiting.
-node dist/index.js status --project /path/to/MyGame --json
+npx -y unity-open-mcp@latest status --project /path/to/MyGame --json
 
 # Run a tool exactly like an MCP client would; parse the JSON downstream.
-node dist/index.js run-tool unity_open_mcp_capabilities \
+npx -y unity-open-mcp@latest run-tool unity_open_mcp_capabilities \
   --project /path/to/MyGame --json --arg include_planned=false
 
 # Offline-only tools (no bridge required) also work via the CLI.
-node dist/index.js run-tool unity_open_mcp_list_assets \
+npx -y unity-open-mcp@latest run-tool unity_open_mcp_list_assets \
   --project /path/to/MyGame --arg folder=Assets --arg max_per_folder=10
 ```
 
@@ -272,13 +269,95 @@ assembly failed to recompile) fails fast with a pointer at
 `run-tool unity_open_mcp_read_compile_errors` instead of spinning to the
 timeout. See [Bridge HTTP API](api/bridge-http.md) for the `/ping` body.
 
-> **npm / `npx` distribution.** The CLI is designed to be invoked as
-> `npx unity-open-mcp <command>` once the package is published to npm. The
-> `bin` field in `mcp-server/package.json` already points at the same
-> `dist/index.js` that handles both the stdio server and the CLI subcommands,
-> so the publish flow is the remaining piece — see the distribution milestone.
-> Until then, use `node mcp-server/dist/index.js <command>` against your
-> checkout.
+> **Pinning.** `npx -y unity-open-mcp@latest` always fetches the newest
+> published version on first spawn. To pin a release, swap `@latest` for a
+> specific version (`unity-open-mcp@0.2.0`) or install that version globally.
+
+## Contributor / local checkout
+
+Contributors who run from a cloned checkout can point the MCP client at the
+local `mcp-server/dist/index.js` instead of `npx`. Build once:
+
+```bash
+cd mcp-server
+npm install
+npm run build
+```
+
+Then use `node` with the absolute path in your client config:
+
+```json
+{
+  "mcpServers": {
+    "unity-open-mcp": {
+      "command": "node",
+      "args": ["/absolute/path/to/unity-open-mcp/mcp-server/dist/index.js"],
+      "env": {
+        "UNITY_PROJECT_PATH": "/absolute/path/to/your/unity/project",
+        "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
+      }
+    }
+  }
+}
+```
+
+From the CLI, use `node mcp-server/dist/index.js <command>` against your
+checkout. The Hub wizard's Step 2 **"Use local checkout"** toggle selects
+this path (it auto-enables when a toolkit root is already saved).
+
+## Maintainer publish flow
+
+The `unity-open-mcp` npm package is published from `mcp-server/`. There are
+two publish channels — use CI for releases, the Hub maintainer panel for
+local workflows:
+
+| Channel | When | Owner |
+|---|---|---|
+| **CI** (`.github/workflows/npm-publish.yml` on `v*` tags) | Production releases | push a `vX.Y.Z` tag whose version matches `mcp-server/package.json` |
+| **Hub maintainer panel** | First manual publish, emergency republish, local dry-runs | the maintainer's own `npm login` |
+
+### CI publish (tag-triggered)
+
+```bash
+cd mcp-server
+npm version patch   # or minor / major — bumps mcp-server/package.json
+git add mcp-server/package.json mcp-server/package-lock.json
+git commit -m "Bump unity-open-mcp to vX.Y.Z"
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+The `npm-publish.yml` workflow runs `npm ci && npm publish --access public`
+on the tag (the `prepublishOnly` script rebuilds `dist/` first). It refuses
+to publish when the tag version does not match `mcp-server/package.json`.
+The `NPM_TOKEN` repository secret (an automation token on the publishing
+account) authenticates the publish.
+
+### Hub maintainer panel
+
+When a folder is tracked as an Open-MCP repository (the Hub detects
+`mcp-server/` + a root `package.json`), the settings popup becomes a
+maintainer panel:
+
+- **Info header** — package name + local version from `mcp-server/package.json`,
+  the published version from `npm view`, and the `npm whoami` result.
+- **Build / Test** — `npm run build` / `npm test` with cwd `mcp-server/`.
+- **Version bump** — `npm version patch|minor|major --no-git-tag-version` (the
+  Hub never creates git tags).
+- **Publish dry-run** — `npm publish --dry-run --access public` preflight.
+- **Publish** — real publish behind a confirmation dialog.
+
+The Hub does **not** store npm credentials — authenticate with `npm login`
+on the machine (or the env vars npm already reads). Both channels ship only
+the `files` whitelist (`dist/`, `README.md`, `LICENSE`).
+
+### Publishing a fork
+
+To publish under your own name (a fork): change `name` in
+`mcp-server/package.json`, `npm login` with your account, and run the Hub
+publish flow or `npm publish --access public` from `mcp-server/`. The CI
+workflow is keyed off your fork's tags + `NPM_TOKEN` secret, so a fork with
+its own token publishes on its own tags with no further change.
 
 ## Optional: install the agent skill
 
@@ -362,10 +441,11 @@ Only the launch-errors / Safe Mode dialog is auto-dismissed. Destructive startup
 | Symptom | What to try |
 |---|---|
 | Package resolve fails in Unity | Check git URL, tag, or `file:` path; ensure Unity 2022.3 LTS or newer (Unity 6 recommended) — see [Unity version compatibility](unity-version-compat.md). |
-| MCP server fails to start | Run `node mcp-server/dist/index.js` manually and read stderr; fix missing `UNITY_PROJECT_PATH`. |
+| MCP server fails to start | Run `npx -y unity-open-mcp@latest` manually and read stderr; fix missing `UNITY_PROJECT_PATH`. On the local-checkout path, run `node mcp-server/dist/index.js` and confirm the file exists. |
 | `/ping` connection refused | Launch Unity for the same project; wait for compile; check the port the bridge picked via `~/.unity-open-mcp/instances/*.json` or the MCP server's startup log (`Bridge port resolved to <port>`). |
 | Tools work but live calls fail | Bridge may be disconnected — check `/ping` `connected` and that the Editor has the project focused/open. |
 | Wrong project picked up by the MCP server | Confirm `UNITY_PROJECT_PATH` matches the open project root exactly; the deterministic port is derived from this path. |
+| `npx` first run is slow | Expected — `npx -y` downloads and extracts the package on first spawn. Subsequent runs hit the npm cache. Use `npm i -g unity-open-mcp` for a one-time install if this matters. |
 | MCP server stalls on first call after a compile-error launch | Expected if the Safe Mode dialog is up. Auto-dismiss clicks **Ignore** by default; if you disabled it (`UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1`) or hit a permission error (macOS Accessibility), dismiss the dialog manually. Dismissals and errors are logged to the MCP server's stderr. |
 
 ## Related docs

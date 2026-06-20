@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "name": "unity-open-mcp-monorepo",
+  "version": "0.0.0",
+  "description": "Monorepo root marker for Unity Open MCP. The publishable npm package lives in mcp-server/package.json; this file exists so the Hub's Open-MCP project detection (mcp-server/ directory + root package.json) registers the checkout, not to declare npm scripts."
+}

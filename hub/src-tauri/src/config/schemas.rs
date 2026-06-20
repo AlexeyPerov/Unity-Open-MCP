@@ -56,7 +56,8 @@ fn default_theme() -> String {
 pub struct AiToolkitSettings {
     /// Absolute path to the cloned unity-open-mcp monorepo root.
     /// Empty when the wizard has not yet collected a valid root;
-    /// downstream steps (3/4) hard-block until this is set.
+    /// downstream steps (3/4) hard-block until this is set on the
+    /// local-checkout path.
     #[serde(default)]
     pub root_path: String,
     /// Optional Step 4 advanced override for `mcp-server/dist/index.js`.
@@ -64,6 +65,14 @@ pub struct AiToolkitSettings {
     /// and skill copy always use `rootPath` regardless of this value.
     #[serde(default)]
     pub mcp_index_override: String,
+    /// Step 2 toggle: when `true`, the wizard uses the local toolkit
+    /// checkout to derive the MCP launch command (`node <root>/mcp-server/
+    /// dist/index.js`); when `false` (default), onboarding resolves to the
+    /// bundled npm package via `npx -y unity-open-mcp@latest`. The wizard
+    /// auto-enables this when `root_path` is already set so existing M4
+    /// (clone-based) onboarding keeps working without a forced migration.
+    #[serde(default)]
+    pub use_local_checkout: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

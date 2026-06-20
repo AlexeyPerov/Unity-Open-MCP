@@ -50,6 +50,44 @@ fn resolve_mcp_index_path(toolkit_root: &str, mcp_index_override: &str) -> Optio
         .map(|p| p.to_string_lossy().into_owned())
 }
 
+/// Resolve the local `mcp-server/dist/index.js` path for local
+/// launch modes. Returns:
+/// - `Ok(Some(path))` when a local mode needs a real index path
+///   and one could be derived (toolkit root set, or override set).
+/// - `Ok(None)` for npm launch modes (`Npx` / `Global`) — no
+///   on-disk path is required, so the caller uses a sentinel.
+/// - `Err` when a local mode was requested but no path could be
+///   derived (no toolkit root, empty override). The caller turns
+///   this into a typed `mcpPathInvalid` error.
+fn resolve_index_for_mode(
+    params: &McpConfigParams,
+) -> Result<Option<String>, McpConfigError> {
+    if !params.launch_mode.requires_local_index() {
+        return Ok(None);
+    }
+    // `LocalOverride` only honors the override field; `Local` honors
+    // the override when set, otherwise derives from the toolkit root.
+    let override_set = !params.mcp_index_override.trim().is_empty();
+    if params.launch_mode == McpLaunchMode::LocalOverride && !override_set {
+        return Err(McpConfigError::new(
+            "mcpPathInvalid",
+            "Local-override launch mode requires a custom mcp-server/dist/index.js path.",
+        ));
+    }
+    resolve_mcp_index_path(&params.toolkit_root, &params.mcp_index_override).map(Some).ok_or_else(|| {
+        McpConfigError::new(
+            "mcpPathInvalid",
+            "Toolkit root is not set or the MCP override is empty.",
+        )
+    })
+}
+
+/// Sentinel surfaced in `McpConfigPlan.resolved_mcp_index` for the
+/// npm-based launch modes. Keeps the field non-empty (so the UI's
+/// "what did we resolve" line still reads cleanly) without
+/// inventing a fake filesystem path.
+const NPM_RESOLVED_LABEL: &str = "npm: unity-open-mcp@latest";
+
 /// MCP server key used in the parent config. Matches
 /// `MCP_SERVER_KEY` in `ai_toolkit.ts` and the spec
 /// "MCP server name in config: `unity-open-mcp` (recommended)"
@@ -95,6 +133,42 @@ enum McpScope {
     ZcodeProject,
 }
 
+/// How the MCP server should be launched. The wizard Step 2
+/// picks between the bundled npm package (default, zero-clone
+/// onboarding) and the local toolkit checkout (contributor
+/// flow). `LocalOverride` is the Step 4 advanced escape hatch
+/// for a custom `mcp-server/dist/index.js` path.
+///
+/// - `Npx` — `command: npx, args: ["-y", "unity-open-mcp@latest"]`.
+///   Resolves the published package from the npm cache; no
+///   toolkit root required.
+/// - `Global` — `command: unity-open-mcp, args: []`. Assumes the
+///   user ran `npm i -g unity-open-mcp`.
+/// - `Local` — `command: node, args: [<toolkitRoot>/mcp-server/dist/index.js]`.
+///   The M4 launch shape, used by the contributor checkout path.
+/// - `LocalOverride` — same as `Local` but the index path is
+///   taken from `mcp_index_override` verbatim (the Step 4
+///   "Custom mcp-server/dist/index.js" field).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum McpLaunchMode {
+    #[default]
+    Npx,
+    Global,
+    Local,
+    LocalOverride,
+}
+
+impl McpLaunchMode {
+    /// `true` when the launch command needs a resolved
+    /// `mcp-server/dist/index.js` path on disk. Only the two
+    /// local modes validate the path; the npm-based modes
+    /// point at the published binary and never touch disk.
+    pub fn requires_local_index(self) -> bool {
+        matches!(self, McpLaunchMode::Local | McpLaunchMode::LocalOverride)
+    }
+}
+
 /// Inputs to the MCP config merge. Mirrors the Step 4 form
 /// state: which client, where the MCP server lives, and the
 /// env-var inputs the writer embeds. `cursor_project_scope`
@@ -107,7 +181,8 @@ pub struct McpConfigParams {
     pub toolkit_root: String,
     /// Optional override for the MCP `index.js` path (Plan 1
     /// "Advanced override"). When empty, the planner derives
-    /// `{toolkitRoot}/mcp-server/dist/index.js`.
+    /// `{toolkitRoot}/mcp-server/dist/index.js`. Only consulted
+    /// when [`McpConfigParams::launch_mode`] is `LocalOverride`.
     #[serde(default)]
     pub mcp_index_override: String,
     /// Project path for the `UNITY_PROJECT_PATH` env var.
@@ -129,6 +204,12 @@ pub struct McpConfigParams {
     /// (`~/.cursor/mcp.json`). Ignored for non-Cursor clients.
     #[serde(default)]
     pub cursor_project_scope: bool,
+    /// How the MCP server is launched. Defaults to `Npx`
+    /// (bundled npm package). The wizard Step 2 toggle picks
+    /// `Local` for the local-checkout path; the Step 4 advanced
+    /// override field promotes it to `LocalOverride`.
+    #[serde(default)]
+    pub launch_mode: McpLaunchMode,
 }
 
 /// The merge plan the Step 4 UI previews. Includes the
@@ -260,13 +341,8 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
     let scope = match resolve_scope(params) {
         Ok(s) => s,
         Err(McpScopeSkip::CliOnly) => {
-            let resolved = resolve_mcp_index_path(&params.toolkit_root, &params.mcp_index_override)
-                .ok_or_else(|| {
-                    McpConfigError::new(
-                        "mcpPathInvalid",
-                        "Toolkit root is not set or the MCP override is empty.",
-                    )
-                })?;
+            let resolved = resolve_index_for_mode(params)?;
+            let resolved_str = resolved.as_deref().unwrap_or(NPM_RESOLVED_LABEL).to_string();
             return Ok(McpConfigPlan {
                 client: params.client,
                 target_path: None,
@@ -274,21 +350,16 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
                 would_write: false,
                 preserved_keys: Vec::new(),
                 proposed_json: None,
-                command: Some(command_for(params, &resolved, true)),
-                resolved_mcp_index: resolved,
+                command: Some(command_for(params, &resolved_str, true)),
+                resolved_mcp_index: resolved_str,
             });
         }
         Err(McpScopeSkip::Manual) => {
-            let resolved = resolve_mcp_index_path(&params.toolkit_root, &params.mcp_index_override)
-                .ok_or_else(|| {
-                    McpConfigError::new(
-                        "mcpPathInvalid",
-                        "Toolkit root is not set or the MCP override is empty.",
-                    )
-                })?;
+            let resolved = resolve_index_for_mode(params)?;
+            let resolved_str = resolved.as_deref().unwrap_or(NPM_RESOLVED_LABEL).to_string();
             let json = build_full_config_json(
                 params,
-                &resolved,
+                &resolved_str,
                 &manual_root_for(params),
                 Value::Null,
             );
@@ -302,7 +373,7 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
                 preserved_keys: Vec::new(),
                 proposed_json: Some(proposed_str),
                 command: None,
-                resolved_mcp_index: resolved,
+                resolved_mcp_index: resolved_str,
             });
         }
     };
@@ -312,20 +383,15 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
             "Cannot resolve the home directory for a global MCP config target.",
         )
     })?;
-    let resolved = resolve_mcp_index_path(&params.toolkit_root, &params.mcp_index_override)
-        .ok_or_else(|| {
-            McpConfigError::new(
-                "mcpPathInvalid",
-                "Toolkit root is not set or the MCP override is empty.",
-            )
-        })?;
+    let resolved = resolve_index_for_mode(params)?;
+    let resolved_str = resolved.as_deref().unwrap_or(NPM_RESOLVED_LABEL).to_string();
     let file_exists = target.exists();
     let (existing_value, existing_keys) = if file_exists {
         read_existing_config(&target)?
     } else {
         (Value::Null, Vec::new())
     };
-    let merged = build_full_config_json(params, &resolved, &target, existing_value.clone());
+    let merged = build_full_config_json(params, &resolved_str, &target, existing_value.clone());
     let proposed_str = serde_json::to_string_pretty(&merged).unwrap_or_else(|_| merged.to_string());
     let would_write = !file_exists || merged_differs(&existing_value, &merged, scope);
     Ok(McpConfigPlan {
@@ -336,7 +402,7 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
         preserved_keys: existing_keys,
         proposed_json: Some(proposed_str),
         command: None,
-        resolved_mcp_index: resolved,
+        resolved_mcp_index: resolved_str,
     })
 }
 
@@ -362,25 +428,27 @@ fn write_mcp_config_at(
             "Cannot resolve the home directory for a global MCP config target.",
         )
     })?;
-    let resolved = resolve_mcp_index_path(&params.toolkit_root, &params.mcp_index_override)
-        .ok_or_else(|| {
-            McpConfigError::new(
-                "mcpPathInvalid",
-                "Toolkit root is not set or the MCP override is empty.",
-            )
-        })?;
+    let resolved = resolve_index_for_mode(params)?;
+    let resolved_str = resolved.as_deref().unwrap_or(NPM_RESOLVED_LABEL).to_string();
     // Hard-block: refuse to write a config that points at a
-    // non-existent MCP index. The Step 4 "Write config" button
-    // is also disabled in this case, but the writer re-checks
-    // so a stale UI cannot sneak past the gate.
-    if !Path::new(&resolved).is_file() {
-        return Err(McpConfigError::new(
-            "mcpPathInvalid",
-            format!(
-                "MCP server entry point does not exist on disk: {}. Run `npm run build` in the toolkit's mcp-server/ folder.",
-                resolved
-            ),
-        ));
+    // non-existent MCP index. Only the local launch modes reference
+    // an on-disk path; the npm modes (`Npx` / `Global`) point at the
+    // published binary and skip this check. The Step 4 "Write config"
+    // button is also disabled in the local case, but the writer
+    // re-checks so a stale UI cannot sneak past the gate.
+    if params.launch_mode.requires_local_index() {
+        let path = resolved
+            .as_deref()
+            .ok_or_else(|| McpConfigError::new("mcpPathInvalid", "No local MCP index resolved."))?;
+        if !Path::new(path).is_file() {
+            return Err(McpConfigError::new(
+                "mcpPathInvalid",
+                format!(
+                    "MCP server entry point does not exist on disk: {}. Run `npm run build` in the toolkit's mcp-server/ folder.",
+                    path
+                ),
+            ));
+        }
     }
     let file_exists = target.exists();
     let (existing_value, _existing_keys) = if file_exists {
@@ -388,7 +456,7 @@ fn write_mcp_config_at(
     } else {
         (Value::Null, Vec::new())
     };
-    let merged = build_full_config_json(params, &resolved, &target, existing_value.clone());
+    let merged = build_full_config_json(params, &resolved_str, &target, existing_value.clone());
     let proposed_str = serde_json::to_string_pretty(&merged).unwrap_or_else(|_| merged.to_string());
     let would_write = !file_exists || merged_differs(&existing_value, &merged, scope);
     let mut backup_path = String::new();
@@ -569,6 +637,30 @@ fn build_full_config_json(
     Value::Object(root)
 }
 
+/// The `(command, args)` pair the launch entry embeds, keyed off
+/// the launch mode. `Local` / `LocalOverride` resolve to a real
+/// `mcp-server/dist/index.js` path; `Npx` / `Global` resolve to
+/// the published npm binary. The env block is the same across
+/// every mode and is layered on by [`build_entry_json`].
+///
+/// `resolved_index` is the on-disk index path (already validated
+/// by the caller for local modes). For npm modes it is passed
+/// through unchanged so it can surface in `McpConfigPlan.resolved_mcp_index`
+/// for debugging, but it is NOT used in the emitted command.
+fn launch_command_parts(mode: McpLaunchMode, resolved_index: &str) -> (String, Vec<String>) {
+    match mode {
+        McpLaunchMode::Npx => (
+            "npx".to_string(),
+            vec!["-y".to_string(), "unity-open-mcp@latest".to_string()],
+        ),
+        McpLaunchMode::Global => ("unity-open-mcp".to_string(), Vec::new()),
+        McpLaunchMode::Local | McpLaunchMode::LocalOverride => (
+            "node".to_string(),
+            vec![resolved_index.to_string()],
+        ),
+    }
+}
+
 fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
     let mut env = Map::new();
     env.insert(
@@ -587,29 +679,41 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
             Value::String(params.unity_path.trim().to_string()),
         );
     }
+    let (command, args) = launch_command_parts(params.launch_mode, resolved_index);
+    let args_value: Value = args.into_iter().map(Value::String).collect();
     match params.client {
         McpClientId::Cursor | McpClientId::ClaudeDesktop => json!({
-            "command": "node",
-            "args": [resolved_index],
+            "command": command,
+            "args": args_value,
             "env": Value::Object(env),
         }),
-        McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => json!({
-            "type": "local",
-            "command": ["node", resolved_index],
-            "enabled": true,
-            "environment": Value::Object(env),
-        }),
+        McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => {
+            // OpenCode's `command` is an array (argv form); prepend the
+            // resolved command so `npx -y unity-open-mcp@latest` becomes
+            // `["npx", "-y", "unity-open-mcp@latest"]` and
+            // `node /path/index.js` stays a two-element array.
+            let mut cmd_array = vec![Value::String(command)];
+            if let Value::Array(arr) = args_value {
+                cmd_array.extend(arr);
+            }
+            json!({
+                "type": "local",
+                "command": Value::Array(cmd_array),
+                "enabled": true,
+                "environment": Value::Object(env),
+            })
+        }
         McpClientId::ZcodeGlobal | McpClientId::ZcodeProject => json!({
             "type": "stdio",
-            "command": "node",
-            "args": [resolved_index],
+            "command": command,
+            "args": args_value,
             "env": Value::Object(env),
         }),
         // CLI / manual clients never reach the file writer;
         // they only consume the JSON via the snippet panel.
         _ => json!({
-            "command": "node",
-            "args": [resolved_index],
+            "command": command,
+            "args": args_value,
             "env": Value::Object(env),
         }),
     }
@@ -697,11 +801,14 @@ fn manual_root_for(params: &McpConfigParams) -> PathBuf {
 }
 
 /// Render the `claude mcp add` command for the Claude Code
-/// client. Two env keys are required; the rest is derived
-/// from the resolved MCP index path.
+/// client. Two env keys are required; the launch invocation is
+/// keyed off the launch mode — `npx -y unity-open-mcp@latest`
+/// for the bundled package, `unity-open-mcp` for a global
+/// install, and `node <path>` for a local checkout.
 pub fn claude_mcp_add_command(
     unity_project_path: &str,
     bridge_port: &str,
+    launch_mode: McpLaunchMode,
     resolved_index: &str,
 ) -> String {
     let port = if bridge_port.trim().is_empty() {
@@ -709,12 +816,19 @@ pub fn claude_mcp_add_command(
     } else {
         bridge_port.trim().to_string()
     };
+    let invocation = match launch_mode {
+        McpLaunchMode::Npx => "npx -y unity-open-mcp@latest".to_string(),
+        McpLaunchMode::Global => "unity-open-mcp".to_string(),
+        McpLaunchMode::Local | McpLaunchMode::LocalOverride => {
+            format!("node {}", resolved_index)
+        }
+    };
     format!(
-        "claude mcp add {name} --env UNITY_PROJECT_PATH={project} --env UNITY_OPEN_MCP_BRIDGE_PORT={port} -- node {index}",
+        "claude mcp add {name} --env UNITY_PROJECT_PATH={project} --env UNITY_OPEN_MCP_BRIDGE_PORT={port} -- {invocation}",
         name = MCP_SERVER_KEY,
         project = unity_project_path,
         port = port,
-        index = resolved_index,
+        invocation = invocation,
     )
 }
 
@@ -723,6 +837,7 @@ fn command_for(params: &McpConfigParams, resolved_index: &str, _is_cli_only: boo
         McpClientId::ClaudeCode => claude_mcp_add_command(
             &params.unity_project_path,
             &params.bridge_port,
+            params.launch_mode,
             resolved_index,
         ),
         _ => String::new(),
@@ -1129,6 +1244,7 @@ mod tests {
             unity_path: String::new(),
             client: McpClientId::Cursor,
             cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Local,
         }
     }
 
@@ -1143,6 +1259,7 @@ mod tests {
             unity_path: String::new(),
             client: McpClientId::OpencodeProject,
             cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Local,
         }
     }
 
@@ -1162,6 +1279,7 @@ mod tests {
             unity_path: String::new(),
             client,
             cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Local,
         }
     }
 
@@ -1199,6 +1317,95 @@ mod tests {
                 .unwrap(),
             "19120"
         );
+    }
+
+    #[test]
+    fn plan_npx_mode_emits_npx_command_without_toolkit_root() {
+        // Default onboarding path: no toolkit root required, launch via npx.
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = McpConfigParams {
+            project_path: project.to_string_lossy().into_owned(),
+            toolkit_root: String::new(),
+            mcp_index_override: String::new(),
+            unity_project_path: project.to_string_lossy().into_owned(),
+            bridge_port: "19120".to_string(),
+            include_unity_path: false,
+            unity_path: String::new(),
+            client: McpClientId::Cursor,
+            cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Npx,
+        };
+        // npx mode must NOT require a toolkit root: the planner resolves
+        // even when toolkit_root is empty.
+        let plan = plan_mcp_config_at(&params, home).expect("npx plan resolves without toolkit");
+        let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+        let entry = proposed
+            .get("mcpServers")
+            .and_then(|m| m.get("unity-open-mcp"))
+            .expect("entry present");
+        assert_eq!(entry.get("command").unwrap(), "npx");
+        let args = entry.get("args").unwrap().as_array().unwrap();
+        assert_eq!(args[0], "-y");
+        assert_eq!(args[1], "unity-open-mcp@latest");
+        // Sentinel label, not a filesystem path.
+        assert_eq!(plan.resolved_mcp_index, NPM_RESOLVED_LABEL);
+    }
+
+    #[test]
+    fn plan_global_mode_emits_bare_binary_command() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = McpConfigParams {
+            project_path: project.to_string_lossy().into_owned(),
+            toolkit_root: String::new(),
+            mcp_index_override: String::new(),
+            unity_project_path: project.to_string_lossy().into_owned(),
+            bridge_port: "19120".to_string(),
+            include_unity_path: false,
+            unity_path: String::new(),
+            client: McpClientId::OpencodeProject,
+            cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Global,
+        };
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+        let unity = proposed
+            .get("mcp")
+            .and_then(|m| m.get("unity-open-mcp"))
+            .unwrap();
+        let cmd = unity.get("command").unwrap().as_array().unwrap();
+        // OpenCode prepends the binary to the args array.
+        assert_eq!(cmd[0], "unity-open-mcp");
+        assert_eq!(cmd.len(), 1, "global mode has no args");
+    }
+
+    #[test]
+    fn write_npx_mode_skips_mcp_path_validation() {
+        // The writer must NOT hard-block on a missing on-disk index for the
+        // npx launch mode — there is no local path to validate.
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = McpConfigParams {
+            project_path: project.to_string_lossy().into_owned(),
+            toolkit_root: String::new(),
+            mcp_index_override: String::new(),
+            unity_project_path: project.to_string_lossy().into_owned(),
+            bridge_port: "19120".to_string(),
+            include_unity_path: false,
+            unity_path: String::new(),
+            client: McpClientId::Cursor,
+            cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Npx,
+        };
+        let result = write_mcp_config_at(&params, home).expect("npx write succeeds without toolkit");
+        assert!(result.would_write, "npx entry is a fresh write");
     }
 
     #[test]
@@ -1312,6 +1519,7 @@ mod tests {
             unity_path: String::new(),
             client: McpClientId::Cursor,
             cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Local,
         };
         let plan = plan_mcp_config_at(&seed, home).unwrap();
         write_text(&cursor_path, &plan.proposed_json.clone().unwrap());
@@ -1334,6 +1542,7 @@ mod tests {
             unity_path: String::new(),
             client: McpClientId::Cursor,
             cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Local,
         };
         let err = write_mcp_config_at(&params, project).unwrap_err();
         assert_eq!(err.kind, "mcpPathInvalid");
@@ -1353,6 +1562,7 @@ mod tests {
             unity_path: String::new(),
             client: McpClientId::ClaudeCode,
             cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Local,
         };
         let err = write_mcp_config_at(&params, project).unwrap_err();
         assert_eq!(err.kind, "noFileTarget");
@@ -1381,6 +1591,7 @@ mod tests {
             unity_path: String::new(),
             client: McpClientId::ClaudeCode,
             cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Local,
         };
         let plan = plan_mcp_config_at(&params, project).unwrap();
         assert!(plan.target_path.is_none());
@@ -1395,8 +1606,37 @@ mod tests {
 
     #[test]
     fn claude_mcp_add_command_uses_default_port_when_blank() {
-        let cmd = claude_mcp_add_command("/games/MyGame", "  ", "/u/mcp-server/dist/index.js");
+        let cmd = claude_mcp_add_command(
+            "/games/MyGame",
+            "  ",
+            McpLaunchMode::Local,
+            "/u/mcp-server/dist/index.js",
+        );
         assert!(cmd.contains("UNITY_OPEN_MCP_BRIDGE_PORT=19120"));
+    }
+
+    #[test]
+    fn claude_mcp_add_command_npx_mode_omits_node_prefix() {
+        let cmd = claude_mcp_add_command(
+            "/games/MyGame",
+            "19120",
+            McpLaunchMode::Npx,
+            "/unused/local/index.js",
+        );
+        assert!(cmd.contains("-- npx -y unity-open-mcp@latest"));
+        assert!(!cmd.contains("-- node "));
+    }
+
+    #[test]
+    fn claude_mcp_add_command_global_mode_uses_bare_binary() {
+        let cmd = claude_mcp_add_command(
+            "/games/MyGame",
+            "19120",
+            McpLaunchMode::Global,
+            "/unused/local/index.js",
+        );
+        assert!(cmd.contains("-- unity-open-mcp"));
+        assert!(!cmd.contains("npx"));
     }
 
     #[test]
