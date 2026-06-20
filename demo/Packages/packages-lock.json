@@ -8,6 +8,14 @@
         "com.alexeyperov.unity-open-mcp-verify": "0.1.0"
       }
     },
+    "com.alexeyperov.unity-open-mcp-ext-animation": {
+      "version": "file:../../packages/extensions/animation",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.alexeyperov.unity-open-mcp-bridge": "0.1.0"
+      }
+    },
     "com.alexeyperov.unity-open-mcp-ext-inputsystem": {
       "version": "file:../../packages/extensions/inputsystem",
       "depth": 0,
@@ -24,6 +32,14 @@
       "dependencies": {
         "com.alexeyperov.unity-open-mcp-bridge": "0.1.0",
         "com.unity.ai.navigation": "2.0.0"
+      }
+    },
+    "com.alexeyperov.unity-open-mcp-ext-particlesystem": {
+      "version": "file:../../packages/extensions/particlesystem",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.alexeyperov.unity-open-mcp-bridge": "0.1.0"
       }
     },
     "com.alexeyperov.unity-open-mcp-ext-probuilder": {

@@ -12,7 +12,16 @@
       "identifier": "opener:allow-open-path",
       "allow": [{ "path": "**" }]
     },
-    "opener:allow-open-url",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "http://*" },
+        { "url": "https://*" },
+        { "url": "mailto:*" },
+        { "url": "tel:*" },
+        { "url": "unityhub://*" }
+      ]
+    },
     {
       "identifier": "opener:allow-reveal-item-in-dir",
       "allow": [{ "path": "**" }]

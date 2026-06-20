@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { S } from "$lib/state.svelte";
   import { projectsStore } from "$lib/state/projects.svelte";
   import { runningUnityStore } from "$lib/state/running_unity.svelte";
@@ -272,23 +272,74 @@
     return BUILD_TARGET_LABELS[target] ?? target;
   }
 
-    onMount(() => {
-    let cancelled = false;
+  // Boot-path diagnostics. Each launch invoke logs a `start` line
+  // immediately and a `done` line on completion. The data points to
+  // whichever invoke is slow on a given machine — the most likely
+  // culprit for an intermittent ~30s post-launch "freeze" is a
+  // `get_project_sizes` or `check_paths_exists` against a spun-down
+  // external drive or stale network mount, where the OS filesystem
+  // timeout is 15-60s. Emitting a `start` line up front means a hung
+  // phase shows up as `start` with no matching `done` — unambiguous,
+  // since only-on-completion logging left the slow phase invisible.
+  // The drawer is collapsed by default, so this is invisible unless
+  // the user opens it.
+  function bootSpan(label: string): (result?: unknown) => void {
+    const start = performance.now();
+    S.appendDrawerLog(`[boot] ${label}: start`);
+    return (result) => {
+      const ms = Math.round(performance.now() - start);
+      // Surface the project count where relevant so the line is useful
+      // without cross-referencing the list.
+      const suffix =
+        result && typeof result === "object" && "length" in (result as object)
+          ? ` (${(result as { length: number }).length})`
+          : "";
+      S.appendDrawerLog(`[boot] ${label}: ${ms}ms${suffix}`);
+    };
+  }
+
+  // Lifecycle diagnostics. `mounted`/`unmounted` lines let us see if
+  // ProjectsTab is destroyed and recreated during a single app session
+  // (the drawer is an in-memory ring buffer, so it survives component
+  // remounts but NOT a page reload — seeing both lines proves a
+  // remount, not a reload). `cancelled` is hoisted so the onDestroy
+  // teardown can signal the boot IIFE to bail out instead of
+  // continuing to mutate store state after unmount.
+  let cancelled = false;
+  S.appendDrawerLog("[lifecycle] ProjectsTab mounted");
+  onMount(() => {
     (async () => {
+      const bootStart = performance.now();
+      const doneLoad = bootSpan("projectsStore.load");
       await projectsStore.load();
+      doneLoad(projectsStore.projects);
       if (cancelled) return;
       // Path existence, sizes, and git branches are independent of each
       // other — run them concurrently. The backing Tauri commands are
       // `async` + `spawn_blocking`, so they no longer serialize on the
       // webview thread and the window stays responsive while they run.
-      await Promise.all([refreshPathExistence(), loadSizes(), loadGitBranches()]);
+      const donePaths = bootSpan("refreshPathExistence");
+      const doneSizes = bootSpan("loadSizes");
+      const doneBranches = bootSpan("loadGitBranches");
+      await Promise.all([
+        refreshPathExistence().then((r) => donePaths(r)),
+        loadSizes().then((r) => doneSizes(r)),
+        loadGitBranches().then((r) => doneBranches(r)),
+      ]);
+      S.appendDrawerLog(
+        `[boot] total onMount: ${Math.round(performance.now() - bootStart)}ms`,
+      );
     })();
     // Start the running-Unity polling loop. The cadence is read from
     // `settings.discovery.scanIntervalSeconds` (default 30s, M1.5-10);
     // the store internally restarts the timer when the user edits the
     // setting. The polling stops on teardown so we don't leak the
     // interval while the user is on another tab.
-    void runningUnityStore.start();
+    // `bootSpan` logs a `start` line now and returns a `done` callback;
+    // the running-Unity store invokes it once the immediate scan
+    // completes, so the drawer shows the real scan duration (not ~0ms).
+    const doneScanRunning = bootSpan("scanRunningUnity");
+    void runningUnityStore.start(() => doneScanRunning());
     // M1.5-11: subscribe to walk-up scan progress / done events so the
     // modal can render the live counter. The store handles listener
     // re-registration safely; we only need to call `stop()` on
@@ -336,6 +387,7 @@
 
     return () => {
       cancelled = true;
+      S.appendDrawerLog("[lifecycle] ProjectsTab unmounted");
       window.removeEventListener("click", closeContextMenu, true);
       window.removeEventListener("keydown", handleGlobalKeydown, true);
       if (unlistenDrop) unlistenDrop();

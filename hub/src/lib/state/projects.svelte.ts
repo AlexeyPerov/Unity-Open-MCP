@@ -5,7 +5,33 @@ import {
   type ProjectsFile,
   type Settings,
 } from "$lib/services/config";
+import { S } from "$lib/state.svelte";
 import { settingsStore } from "$lib/state/settings.svelte";
+
+/**
+ * Boot diagnostic: run an `invoke`-backed async fn, logging a `start`
+ * line up front and a duration line on completion. A phase that hangs
+ * appears as `start` with no matching duration line — unambiguous,
+ * since only-on-completion logging left the slow phase invisible. Used
+ * to split `projectsStore.load` into its two underlying invokes so a
+ * freeze can be attributed to `loadProjects` or `loadSettings`.
+ */
+async function timedInvoke<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = performance.now();
+  S.appendDrawerLog(`[boot] ${label}: start`);
+  try {
+    const result = await fn();
+    S.appendDrawerLog(
+      `[boot] ${label}: ${Math.round(performance.now() - start)}ms`,
+    );
+    return result;
+  } catch (e) {
+    S.appendDrawerLog(
+      `[boot] ${label}: FAILED after ${Math.round(performance.now() - start)}ms`,
+    );
+    throw e;
+  }
+}
 
 class ProjectsStore {
   projects = $state<ProjectEntry[]>([]);
@@ -18,12 +44,27 @@ class ProjectsStore {
   }
 
   async load(): Promise<void> {
+    // Re-entrancy guard. ProjectsTab mounts behind an `{#if}` on
+    // `activeTab`, so it can be destroyed and recreated during a single
+    // session; without this guard each mount fires a fresh pair of
+    // `load_projects` + `load_settings` invokes while a prior pair may
+    // still be resolving. Mirrors the dedup `discoveryStore.load` uses.
+    // If this branch fires during a launch freeze, it confirms a
+    // double-mount was the trigger.
+    if (this.loading) {
+      S.appendDrawerLog("[boot] projectsStore.load: skipped (already loading)");
+      return;
+    }
     this.loading = true;
     this.error = null;
     try {
+      // Per-arm timing: on a freeze, this shows which of the two
+      // invokes never returns (a `start` with no matching duration line).
       const [projectsFile] = await Promise.all([
-        loadProjects(),
-        settingsStore.load(),
+        timedInvoke("loadProjects", loadProjects),
+        // `settingsStore.load` is `Promise<void>`; time it without
+        // surfacing its (absent) return value.
+        timedInvoke("loadSettings", () => settingsStore.load()),
       ]);
       this.projects = projectsFile.projects;
     } catch (e) {

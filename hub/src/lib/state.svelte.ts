@@ -107,7 +107,18 @@ class AppState {
   }
 
   appendDrawerLog(line: string) {
-    this.drawerLogs = [...this.drawerLogs, line].slice(-500);
+    // Prefix every line with a wall-clock timestamp. Critical for
+    // launch-path diagnostics: the gap between two boot phases (or two
+    // component mounts) shows whether a remount is automatic (sub-second)
+    // or user/HMR-driven (multi-second). `HH:MM:SS.mmm` keeps lines
+    // greppable and sortable in the ring buffer.
+    const now = new Date();
+    const ts =
+      `${String(now.getHours()).padStart(2, "0")}:` +
+      `${String(now.getMinutes()).padStart(2, "0")}:` +
+      `${String(now.getSeconds()).padStart(2, "0")}.` +
+      `${String(now.getMilliseconds()).padStart(3, "0")}`;
+    this.drawerLogs = [...this.drawerLogs, `${ts} ${line}`].slice(-500);
   }
 
   appendErrorLog(line: string) {

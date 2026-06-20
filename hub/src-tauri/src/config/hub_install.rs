@@ -1,189 +1,62 @@
-//! M1.5-20 / M1.5-21 — Unity Hub CLI integration.
+//! Unity Hub install integration via the `unityhub://` deep link.
 //!
-//! Provides:
-//! - Hub CLI executable path resolution (macOS, Windows, Linux)
-//! - `install_unity_version` Tauri command for headless editor installs
+//! Replaces the earlier headless `Unity Hub -- --headless install …`
+//! child-process approach. That spawned a fresh Hub process per click,
+//! showed a disconnected Hub window, and streamed raw `downloading N%`
+//! stdout into the drawer with no real progress UI — the multi-GB Unity
+//! 6 download looked stuck forever.
+//!
+//! The Hub registers a `unityhub://<version>/<changeset>` URL handler.
+//! Opening it (the same deep link Unity's own releases archive fires
+//! when you click "Install") brings the Hub to the foreground at its
+//! native install dialog: single instance, real progress bar, module
+//! selection. The install then happens inside the Hub, outside this app.
+//!
+//! There is no in-app completion detection (the Hub owns the process),
+//! so the frontend asks the user to click Refresh on the Installed
+//! panel once the Hub finishes.
 
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use tauri::AppHandle;
+use tauri_plugin_opener::OpenerExt;
 
-use serde::{Deserialize, Serialize};
-use tauri::{Emitter, State};
-
-use crate::config::commands::AppState;
-use crate::config::discovery;
-
-// ── Types ──────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InstallResult {
-    pub version: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum InstallError {
-    HubNotFound,
-    InstallInProgress,
-    VersionEmpty,
-    #[serde(rename_all = "camelCase")]
-    InstallFailed { message: String },
-}
-
-// ── Hub CLI path resolution ────────────────────────────────────────
-
-pub fn resolve_hub_cli_path() -> Option<PathBuf> {
-    if cfg!(target_os = "macos") {
-        let p = PathBuf::from("/Applications/Unity Hub.app/Contents/MacOS/Unity Hub");
-        if p.exists() {
-            return Some(p);
-        }
-    } else if cfg!(target_os = "windows") {
-        let p = PathBuf::from(r"C:\Program Files\Unity Hub\Unity Hub.exe");
-        if p.exists() {
-            return Some(p);
-        }
-        let p = PathBuf::from(r"C:\Program Files (x86)\Unity Hub\Unity Hub.exe");
-        if p.exists() {
-            return Some(p);
-        }
-    } else {
-        let candidates: Vec<PathBuf> = vec![
-            PathBuf::from("/opt/UnityHub/UnityHub"),
-            PathBuf::from("/usr/bin/unity-hub"),
-            dirs::home_dir()?.join("Applications/Unity Hub.AppImage"),
-            dirs::home_dir()?.join("Unity Hub.AppImage"),
-        ];
-        for c in candidates {
-            if c.exists() {
-                return Some(c);
-            }
-        }
+/// Build the `unityhub://` deep link for a release. When a changeset is
+/// available (the normal case — the feed exposes one for nearly every
+/// release) the link is `unityhub://<version>/<changeset>`, which the
+/// Hub resolves to the exact build. Without a changeset the link is
+/// `unityhub://<version>`; older Hub versions may ignore a
+/// changeset-less link, so the frontend falls back to pointing the user
+/// at the release-notes page in that case.
+fn build_deep_link(version: &str, changeset: Option<&str>) -> String {
+    match changeset {
+        Some(cs) if !cs.is_empty() => format!("unityhub://{}/{}", version, cs),
+        _ => format!("unityhub://{}", version),
     }
-    None
 }
 
-// ── Install command ────────────────────────────────────────────────
-
+/// Open Unity Hub at its install dialog for `<version>` by firing the
+/// `unityhub://` deep link via the opener plugin. The Hub must be
+/// installed and registered as the system handler for the scheme; if it
+/// isn't, the OS reports the failure and we surface it to the frontend.
 #[tauri::command]
-pub async fn install_unity_version(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
+pub fn open_unity_hub_install(
+    app: AppHandle,
     version: String,
     changeset: Option<String>,
-) -> Result<InstallResult, InstallError> {
+) -> Result<(), String> {
     if version.trim().is_empty() {
-        return Err(InstallError::VersionEmpty);
+        return Err("No version specified.".to_string());
     }
-    {
-        let in_progress = state.install_in_progress.lock().unwrap();
-        if *in_progress {
-            return Err(InstallError::InstallInProgress);
+    let link = build_deep_link(version.trim(), changeset.as_deref().and_then(|c| {
+        let trimmed = c.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
         }
-    }
-    {
-        let mut in_progress = state.install_in_progress.lock().unwrap();
-        *in_progress = true;
-    }
-    let hub_path = resolve_hub_cli_path().ok_or_else(|| {
-        reset_install_flag(&state);
-        InstallError::HubNotFound
-    })?;
-    let version_c = version.clone();
-    let changeset_c = changeset.clone();
-    let app_c = app.clone();
-    let install_result =
-        tauri::async_runtime::spawn_blocking(move || {
-            run_hub_install(&hub_path, &version_c, changeset_c.as_deref(), &app_c)
-        })
-        .await;
-    reset_install_flag(&state);
-    match install_result {
-        Ok(Ok(())) => {
-            let settings = state.settings.lock().unwrap().clone();
-            let disc = discovery::discover_unity_installations(&settings);
-            {
-                let mut cache = state.discovery_cache.lock().unwrap();
-                *cache = Some(disc);
-            }
-            let _ = app.emit("install-complete", &version);
-            Ok(InstallResult { version })
-        }
-        Ok(Err(e)) => Err(e),
-        Err(_) => Err(InstallError::InstallFailed {
-            message: "install task panicked".to_string(),
-        }),
-    }
-}
-
-fn reset_install_flag(state: &State<'_, AppState>) {
-    let mut flag = state.install_in_progress.lock().unwrap();
-    *flag = false;
-}
-
-fn run_hub_install(
-    hub_path: &Path,
-    version: &str,
-    changeset: Option<&str>,
-    app: &tauri::AppHandle,
-) -> Result<(), InstallError> {
-    let mut cmd = std::process::Command::new(hub_path);
-    cmd.arg("--")
-        .arg("--headless")
-        .arg("install")
-        .arg("-v")
-        .arg(version);
-    if let Some(cs) = changeset {
-        cmd.arg("--changeset").arg(cs);
-    }
-    cmd.stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| InstallError::InstallFailed {
-        message: format!("failed to spawn Unity Hub CLI: {}", e),
-    })?;
-    let stderr_lines = {
-        let stderr = child.stderr.take().unwrap();
-        std::thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            let mut lines = Vec::new();
-            for line in reader.lines().flatten() {
-                lines.push(line);
-            }
-            lines
-        })
-    };
-    if let Some(stdout) = child.stdout.take() {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines().flatten() {
-            let _ = app.emit("install-log", &line);
-        }
-    }
-    let stderr = stderr_lines.join().unwrap_or_default();
-    for line in &stderr {
-        let _ = app.emit("install-log", line);
-    }
-    let status = child.wait().map_err(|e| InstallError::InstallFailed {
-        message: format!("failed to wait for Unity Hub CLI: {}", e),
-    })?;
-    if status.success() {
-        Ok(())
-    } else {
-        let code = status.code().unwrap_or(-1);
-        let msg = stderr.join("\n");
-        Err(InstallError::InstallFailed {
-            message: if msg.trim().is_empty() {
-                format!("Unity Hub CLI exited with code {}", code)
-            } else {
-                msg
-            },
-        })
-    }
-}
-
-#[tauri::command]
-pub fn check_install_in_progress(state: State<AppState>) -> bool {
-    *state.install_in_progress.lock().unwrap()
+    }));
+    app.opener()
+        .open_url(link, None::<&str>)
+        .map_err(|e| format!("could not open Unity Hub install dialog: {e}"))
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -193,45 +66,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn install_error_hub_not_found_serializes() {
-        let err = InstallError::HubNotFound;
-        let json = serde_json::to_string(&err).unwrap();
-        assert!(json.contains("\"hubNotFound\""));
+    fn build_deep_link_includes_changeset_when_present() {
+        assert_eq!(
+            build_deep_link("6000.5.0f1", Some("88b47c5e7076")),
+            "unityhub://6000.5.0f1/88b47c5e7076"
+        );
     }
 
     #[test]
-    fn install_error_install_in_progress_serializes() {
-        let err = InstallError::InstallInProgress;
-        let json = serde_json::to_string(&err).unwrap();
-        assert!(json.contains("\"installInProgress\""));
+    fn build_deep_link_omits_changeset_when_none() {
+        assert_eq!(build_deep_link("6000.5.0f1", None), "unityhub://6000.5.0f1");
     }
 
     #[test]
-    fn install_error_install_failed_serializes() {
-        let err = InstallError::InstallFailed {
-            message: "network error".to_string(),
-        };
-        let json = serde_json::to_string(&err).unwrap();
-        assert!(json.contains("\"installFailed\""));
-        assert!(json.contains("network error"));
-    }
-
-    #[test]
-    fn install_result_serializes() {
-        let result = InstallResult {
-            version: "6000.0.32f1".to_string(),
-        };
-        let json = serde_json::to_string(&result).unwrap();
-        assert!(json.contains("\"version\""));
-        assert!(json.contains("6000.0.32f1"));
-    }
-
-    #[test]
-    fn resolve_hub_cli_path_returns_none_when_not_installed() {
-        let result = resolve_hub_cli_path();
-        if cfg!(target_os = "macos") {
-            let exists = std::path::Path::new("/Applications/Unity Hub.app/Contents/MacOS/Unity Hub").exists();
-            assert_eq!(result.is_some(), exists);
-        }
+    fn build_deep_link_omits_empty_changeset() {
+        assert_eq!(
+            build_deep_link("6000.5.0f1", Some("")),
+            "unityhub://6000.5.0f1"
+        );
     }
 }

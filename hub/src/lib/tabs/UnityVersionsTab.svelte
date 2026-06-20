@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { S } from "$lib/state.svelte";
   import { projectsStore } from "$lib/state/projects.svelte";
   import { discoveryStore, type VersionHealth } from "$lib/state/discovery.svelte";
@@ -8,12 +7,11 @@
     fetchReleases,
     refreshReleases,
     runUnityInstall,
-    installUnityVersion,
+    openUnityHubInstall,
     type ReleaseEntry,
     type ReleasesResult,
     type RunUnityError,
     type UnityInstallation,
-    type InstallError,
   } from "$lib/services/config";
   import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
   import Button from "$lib/components/shell/Button.svelte";
@@ -23,6 +21,25 @@
   const ROW_HEIGHT = 38;
 
   type ViewMode = "installed" | "all";
+  /// Filter scope inside the "All releases" sub-section. `lts` shows
+  /// only Long-Term-Support releases (the recommended install line);
+  /// `all` shows everything Unity publishes, including archived TECH,
+  /// BETA, and ALPHA builds.
+  type ReleasesScope = "lts" | "all";
+
+  /// Grid template for the All-releases table. Applied inline on both
+  /// the header row and every body row (the same pattern ProjectsTab
+  /// uses) so header and cells can never drift out of alignment and we
+  /// sidestep the stylesheet cascade that fought the shared 7-column
+  /// `.table-head` / `.row` rules. Single source of truth.
+  ///
+  /// Track minimums are sized to fit the widest content without
+  /// ellipsizing: Stream fits `SUPPORTED`, Released fits `2026-06-17`,
+  /// Version fits `6000.0.77f1`. On narrow widths the `minmax()` tracks
+  /// compress toward their minimums and `.cell`/`.th` ellipsize, the
+  /// same behavior the Installed and Projects tables exhibit.
+  const releasesGridTemplate =
+    "minmax(7.5rem, 1.2fr) minmax(6.5rem, 0.8fr) minmax(7rem, 0.9fr) minmax(8rem, 2.5fr) minmax(4.5rem, 0.7fr)";
 
   let search = $state("");
   let selectedVersion = $state<string | null>(null);
@@ -31,16 +48,12 @@
   let actionError = $state<string | null>(null);
 
   let viewMode = $state<ViewMode>("installed");
+  let releasesScope = $state<ReleasesScope>("lts");
   let releases = $state<ReleasesResult | null>(null);
   let releasesError = $state<string | null>(null);
   let releasesLoading = $state(false);
   let releasesSearch = $state("");
   let releasesContext = $state<{ x: number; y: number; entry: ReleaseEntry } | null>(null);
-  let installingVersion = $state<string | null>(null);
-  let installError = $state<string | null>(null);
-
-  let unlistenInstallLog: UnlistenFn | null = null;
-  let unlistenInstallComplete: UnlistenFn | null = null;
 
   onMount(() => {
     let cancelled = false;
@@ -53,24 +66,9 @@
     })();
     window.addEventListener("click", closeReleasesContext, true);
 
-    (async () => {
-      unlistenInstallLog = await listen<string>("install-log", (event) => {
-        S.appendDrawerLog(`[install] ${event.payload}`);
-      });
-      unlistenInstallComplete = await listen<string>("install-complete", async (event) => {
-        S.appendDrawerLog(`install complete: ${event.payload}`);
-        installingVersion = null;
-        installError = null;
-        await discoveryStore.refresh();
-        await loadReleases();
-      });
-    })();
-
     return () => {
       cancelled = true;
       window.removeEventListener("click", closeReleasesContext, true);
-      unlistenInstallLog?.();
-      unlistenInstallComplete?.();
     };
   });
 
@@ -116,22 +114,113 @@
     return installedVersionSet().has(version);
   }
 
+  /// Unity "major" line for grouping. Unity 6 versions (`6000.x`) use the
+  /// first two numeric segments as the line — `6000.0`, `6000.3`, … — so
+  /// each Unity 6 release train is its own line. Pre-Unity-6 versions
+  /// (`2022.3`, `2023.1`, …) use the year as the line. Returns `null`
+  /// for versions that do not match the expected shape so they are
+  /// excluded from grouping rather than crashing it.
+  function majorLine(version: string): string | null {
+    const m = /^(\d+)\.(\d+)\./.exec(version);
+    if (!m) return null;
+    const a = Number(m[1]);
+    if (!Number.isFinite(a)) return null;
+    return a >= 6000 ? `${m[1]}.${m[2]}` : m[1];
+  }
+
+  /// Compare two Unity version strings for "which is newer". Parses the
+  /// `major.minor.patch` numeric segments plus the suffix letter+number
+  /// (`f1`, `b2`, `a7`). Order: higher major wins; ties break on minor,
+  /// then patch, then the suffix letter (`f` final > `b` beta > `a`
+  /// alpha), then the suffix number. Returns >0 if `a` is newer, <0 if
+  /// `b` is newer, 0 on tie. Falls back to a plain string compare for
+  /// versions that do not parse, so they still order deterministically.
+  ///
+  /// Comparing the full major.minor (not just the patch, as the old
+  /// implementation did) is required so versions from different lines
+  /// order correctly — e.g. `6000.5.0f1` is newer than `6000.0.77f1`
+  /// even though the latter has a higher patch number.
+  function compareUnityVersions(a: string, b: string): number {
+    const pa = /^(\d+)\.(\d+)\.(\d+)([a-z])(\d+)$/.exec(a);
+    const pb = /^(\d+)\.(\d+)\.(\d+)([a-z])(\d+)$/.exec(b);
+    if (!pa || !pb) return a < b ? -1 : a > b ? 1 : 0;
+    // Major first, then minor, then patch.
+    for (let i = 1; i <= 3; i++) {
+      const delta = Number(pa[i]) - Number(pb[i]);
+      if (delta !== 0) return delta;
+    }
+    // Suffix letter: f > b > a. Compare ranks so any unknown letter
+    // sorts below the known set.
+    const rank = (c: string): number =>
+      c === "f" ? 3 : c === "b" ? 2 : c === "a" ? 1 : 0;
+    const letterDelta = rank(pa[4]) - rank(pb[4]);
+    if (letterDelta !== 0) return letterDelta;
+    return Number(pa[5]) - Number(pb[5]);
+  }
+
+  /// Collapse an LTS list to the newest patch of each major line. Unity
+  /// ships multiple LTS lines (`6000.0`, `6000.3`, `2022`, …); for the
+  /// "what should I install?" view we surface only the newest patch of
+  /// each line — one row per LTS train — sorted newest-first by date.
+  /// Older LTS majors that no longer appear in the archive feed (Unity
+  /// only lists Unity 6 in the public catalog now) are simply absent.
+  function newestPatchPerLtsLine(entries: ReleaseEntry[]): ReleaseEntry[] {
+    const newestByLine = new Map<string, ReleaseEntry>();
+    for (const e of entries) {
+      const line = majorLine(e.version);
+      if (!line) continue;
+      const cur = newestByLine.get(line);
+      if (!cur || compareUnityVersions(e.version, cur.version) > 0) {
+        newestByLine.set(line, e);
+      }
+    }
+    return [...newestByLine.values()];
+  }
+
+  /// Whether a release counts as "LTS" for the install view. Unity's
+  /// SUPPORTED stream is the active, fully-supported stable release line
+  /// (the newest engine release that is not yet LTS but is shipping for
+  /// production); for the user it is the same install recommendation as
+  /// LTS, so the LTS scope treats both as one population.
+  function isLtsLike(stream: ReleaseEntry["stream"]): boolean {
+    return stream === "lts" || stream === "supported";
+  }
+
   let filteredReleases = $derived.by(() => {
     if (!releases) return [];
+    // Scope narrows the stream first: `lts` keeps LTS **and** SUPPORTED
+    // releases (both are stable, production-ready install lines) and
+    // collapses them to the newest patch of each major line (so the user
+    // sees one row per line, e.g. `6000.0.77f1`, `6000.3.18f1`,
+    // `6000.4.12f1`, instead of every patch); `all` keeps every release
+    // Unity publishes (archived TECH/BETA/ALPHA included). The text query
+    // then runs on top of the scoped set.
+    const scoped =
+      releasesScope === "lts"
+        ? newestPatchPerLtsLine(releases.entries.filter((e) => isLtsLike(e.stream)))
+        : releases.entries;
     const q = releasesSearch.trim().toLowerCase();
-    if (!q) return releases.entries;
-    return releases.entries.filter((e) => {
-      if (e.version.toLowerCase().includes(q)) return true;
-      if (e.stream.toLowerCase().includes(q)) return true;
-      if (e.releaseDate && e.releaseDate.includes(q)) return true;
-      return false;
-    });
+    const filtered = !q
+      ? scoped
+      : scoped.filter((e) => {
+          if (e.version.toLowerCase().includes(q)) return true;
+          if (e.stream.toLowerCase().includes(q)) return true;
+          if (e.releaseDate && e.releaseDate.includes(q)) return true;
+          return false;
+        });
+    // Sort newest-version-first so the top of the list is the highest
+    // installable version, regardless of release date. Stable so entries
+    // that tie on version (shouldn't happen, but defensive) keep their
+    // feed order.
+    return [...filtered].sort((a, b) => compareUnityVersions(b.version, a.version));
   });
 
   function streamLabel(stream: ReleaseEntry["stream"]): string {
     switch (stream) {
       case "lts":
         return "LTS";
+      case "supported":
+        return "SUPPORTED";
       case "tech":
         return "TECH";
       case "beta":
@@ -144,6 +233,10 @@
   function streamTone(stream: ReleaseEntry["stream"]): "ok" | "warn" | "missing" {
     switch (stream) {
       case "lts":
+      case "supported":
+        // LTS and the active SUPPORTED line are both stable, shipped
+        // releases → green. SUPPORTED is the newest non-LTS engine
+        // release Unity is actively maintaining.
         return "ok";
       case "tech":
         return "warn";
@@ -289,36 +382,40 @@
     }
   }
 
-  function formatInstallError(err: InstallError): string {
-    switch (err.type) {
-      case "hubNotFound":
-        return "Unity Hub is not installed. Install Unity Hub or add the editor manually.";
-      case "installInProgress":
-        return "Another install is already in progress.";
-      case "versionEmpty":
-        return "No version specified.";
-      case "installFailed":
-        return err.message;
-      default:
-        return `unknown error: ${JSON.stringify(err)}`;
+  /// Open Unity Hub's install dialog for a release by firing its
+  /// `unityhub://` deep link. The Hub runs the download itself, so
+  /// there is no in-app progress; we tell the user to continue in the
+  /// Hub and to click Refresh on the Installed panel once it finishes.
+  async function handleInstall(entry: ReleaseEntry) {
+    S.drawerExpanded = true;
+    S.appendDrawerLog(
+      `opening Unity Hub to install Unity ${entry.version}${entry.changeset ? ` (changeset: ${entry.changeset})` : ""}…`,
+    );
+    try {
+      await openUnityHubInstall(entry.version, entry.changeset);
+      S.appendDrawerLog(
+        `continue the install in Unity Hub, then click Refresh to see Unity ${entry.version} here.`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`install failed: ${msg}`);
     }
   }
 
-  async function handleInstall(entry: ReleaseEntry) {
-    if (installingVersion) return;
-    installingVersion = entry.version;
-    installError = null;
-    S.drawerExpanded = true;
-    S.appendDrawerLog(`installing Unity ${entry.version}${entry.changeset ? ` (changeset: ${entry.changeset})` : ""}…`);
-    try {
-      await installUnityVersion(entry.version, entry.changeset);
-    } catch (e) {
-      const err = e as InstallError;
-      const msg = formatInstallError(err);
-      installError = msg;
-      installingVersion = null;
-      S.appendErrorLog(`install failed: ${msg}`);
-    }
+  /// Whether a release row offers an install action. Installed versions
+  /// are inert; everything else routes to Unity Hub on click. Drives
+  /// both the row's click affordance and its `title`/cursor.
+  function canInstallRow(entry: ReleaseEntry): boolean {
+    return !isInstalled(entry.version);
+  }
+
+  /// Row click / Enter / Space → install (the primary action). A no-op
+  /// for installed rows so the row stays non-interactive in that state.
+  /// Opening the release notes is the dedicated Notes button's job, not
+  /// the row's.
+  function handleRowActivate(entry: ReleaseEntry) {
+    if (!canInstallRow(entry)) return;
+    void handleInstall(entry);
   }
 
   async function handleOpenFolder() {
@@ -649,21 +746,31 @@
        the release-notes URL in the system browser; right-click
        exposes Copy version / Use as Upgrade target. -->
   <div class:hidden={viewMode !== "all"} style="display: flex; flex-direction: column; gap: 0.6rem; flex: 1; min-height: 0;">
-    {#if installError}
-      <div class="inline-error" role="alert">
-        <span class="inline-error-text">{installError}</span>
+    <div class="releases-meta">
+      <div class="scope-toggle" role="tablist" aria-label="Releases scope">
         <button
           type="button"
-          class="inline-error-dismiss"
-          onclick={() => (installError = null)}
-          aria-label="Dismiss error"
+          role="tab"
+          class="scope-toggle-btn"
+          class:scope-toggle-btn-active={releasesScope === "lts"}
+          aria-selected={releasesScope === "lts"}
+          onclick={() => (releasesScope = "lts")}
+          title="Show only Long-Term-Support releases (the recommended install line)"
         >
-          ×
+          LTS releases
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="scope-toggle-btn"
+          class:scope-toggle-btn-active={releasesScope === "all"}
+          aria-selected={releasesScope === "all"}
+          onclick={() => (releasesScope = "all")}
+          title="Show every release Unity publishes, including archived TECH/BETA/ALPHA builds"
+        >
+          All releases
         </button>
       </div>
-    {/if}
-
-    <div class="releases-meta">
       <span class="releases-meta-text">
         {filteredReleases.length} release{filteredReleases.length === 1 ? "" : "s"}
         {#if releases?.stale}
@@ -675,8 +782,8 @@
       {/if}
     </div>
 
-    <div class="table" role="grid" aria-rowcount={filteredReleases.length + 1} aria-colcount={5}>
-      <div class="table-head" role="row">
+    <div class="table releases-table" role="grid" aria-rowcount={filteredReleases.length + 1} aria-colcount={5}>
+      <div class="table-head" role="row" style="grid-template-columns: {releasesGridTemplate}">
         <div class="th" role="columnheader">Version</div>
         <div class="th" role="columnheader">Stream</div>
         <div class="th" role="columnheader">Released</div>
@@ -684,30 +791,42 @@
         <div class="th" role="columnheader">Status</div>
       </div>
 
-      <div class="table-body">
+      <div class="table-body releases-table-body">
         {#if !releases}
           <div class="empty-state">
             <p>Loading releases…</p>
           </div>
         {:else if filteredReleases.length === 0}
           <div class="empty-state">
-            <p>No releases match the current search.</p>
+            <p>
+              {#if releasesScope === "lts"}
+                No LTS releases match the current search. Switch to <strong>All releases</strong> to see archived TECH/BETA/ALPHA builds.
+              {:else}
+                No releases match the current search.
+              {/if}
+            </p>
           </div>
         {:else}
-          {#each filteredReleases as entry (entry.version)}
+          {#each filteredReleases as entry, index (entry.version)}
+            {@const installable = canInstallRow(entry)}
             <div
-              class="row"
+              class="row releases-row"
+              class:releases-row-inert={!installable}
               role="row"
-              onclick={() => openReleaseNotes(entry.releaseNotesUrl)}
+              aria-rowindex={index + 2}
+              style="grid-template-columns: {releasesGridTemplate};"
+              onclick={() => handleRowActivate(entry)}
               oncontextmenu={(e) => openReleasesContextMenu(e, entry)}
               onkeydown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  openReleaseNotes(entry.releaseNotesUrl);
+                  handleRowActivate(entry);
                 }
               }}
               tabindex={0}
-              title="Click to open release notes; right-click for more actions."
+              title={isInstalled(entry.version)
+                ? `Unity ${entry.version} is already installed`
+                : `Click to install Unity ${entry.version} in Unity Hub; click Notes to open release notes`}
             >
               <div class="cell cell-version" role="gridcell">
                 <div class="version-line">
@@ -720,21 +839,25 @@
               <div class="cell" role="gridcell">
                 <span class="muted">{entry.releaseDate ?? "—"}</span>
               </div>
-              <div class="cell" role="gridcell" title={entry.releaseNotesUrl}>
-                <span class="path-text">{entry.releaseNotesUrl.replace(/^https?:\/\//, "")}</span>
+              <div class="cell cell-notes" role="gridcell">
+                <button
+                  type="button"
+                  class="notes-btn"
+                  onclick={(e) => { e.stopPropagation(); void openReleaseNotes(entry.releaseNotesUrl); }}
+                  title={`Open release notes for Unity ${entry.version} in your browser`}
+                >
+                  Notes ↗
+                </button>
               </div>
               <div class="cell" role="gridcell">
                 {#if isInstalled(entry.version)}
                   <StatusChip tone="ok" label="installed" />
-                {:else if installingVersion === entry.version}
-                  <span class="install-status">Installing…</span>
                 {:else}
                   <button
                     type="button"
                     class="install-btn"
-                    disabled={!!installingVersion}
                     onclick={(e) => { e.stopPropagation(); handleInstall(entry); }}
-                    title={installingVersion ? "Another install is in progress" : `Install Unity ${entry.version} via Unity Hub`}
+                    title={`Install Unity ${entry.version} in Unity Hub`}
                   >
                     Install
                   </button>
@@ -785,8 +908,7 @@
             type="button"
             class="ctx-item ctx-item-install"
             role="menuitem"
-            disabled={!!installingVersion}
-            title={installingVersion ? "Another install is in progress" : `Install Unity ${ctxEntry.version}`}
+            title={`Install Unity ${ctxEntry.version} in Unity Hub`}
             onclick={() => {
               handleInstall(ctxEntry);
               closeReleasesContext();
@@ -965,12 +1087,19 @@
 
   .table-head {
     display: grid;
-    grid-template-columns: minmax(10rem, 1.2fr) minmax(4rem, 0.5fr) minmax(4rem, 0.6fr) minmax(4rem, 0.7fr) minmax(2.5fr) minmax(3.5rem, 0.5fr) minmax(5rem, 0.6fr);
+    grid-template-columns: minmax(10rem, 1.2fr) minmax(4rem, 0.5fr) minmax(4rem, 0.6fr) minmax(4rem, 0.7fr) minmax(12rem, 2.5fr) minmax(3.5rem, 0.5fr) minmax(5rem, 0.6fr);
     flex-shrink: 0;
     background: var(--hub-surface);
     border-bottom: 1px solid var(--hub-border);
     padding: 0 0.25rem;
   }
+
+  /* Dedicated 5-column grid for the All-releases table.
+     The grid template is applied inline (see `releasesGridTemplate` in
+     the script block) on both the header and every row, the same
+     pattern ProjectsTab uses, so header and body cells stay aligned at
+     any width and there is no stylesheet-cascade fight with the shared
+     7-column `.table-head` / `.row` rules. */
 
   .th {
     padding: 0.55rem 0.7rem;
@@ -980,6 +1109,14 @@
     color: var(--hub-text-muted);
     font-weight: 600;
     user-select: none;
+    /* Grid items default to min-width: auto, which lets an uppercase
+       header label overflow its track and push the next column's header
+       out of alignment with the body cells below it. Force the header
+       to respect its track the same way .cell does. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .th-num {
@@ -994,9 +1131,19 @@
     padding-top: 0.4rem;
   }
 
+  /* Releases table body: unlike the Installed table (which hosts a
+     VirtualList that owns its own scroll), the All-releases body renders
+     rows directly and is the scroll container itself. Mirrors the
+     Projects-tab pattern so the list scrolls cleanly within the bounded
+     table box — no extra empty space below the last row. The All scope
+     tops out around ~245 rows, trivially small for an in-flow render. */
+  .releases-table-body {
+    overflow-y: auto;
+  }
+
   .row {
     display: grid;
-    grid-template-columns: minmax(10rem, 1.2fr) minmax(4rem, 0.5fr) minmax(4rem, 0.6fr) minmax(4rem, 0.7fr) minmax(2.5fr) minmax(3.5rem, 0.5fr) minmax(5rem, 0.6fr);
+    grid-template-columns: minmax(10rem, 1.2fr) minmax(4rem, 0.5fr) minmax(4rem, 0.6fr) minmax(4rem, 0.7fr) minmax(12rem, 2.5fr) minmax(3.5rem, 0.5fr) minmax(5rem, 0.6fr);
     align-items: center;
     border-bottom: 1px solid var(--hub-card);
     padding: 0 0.25rem;
@@ -1232,6 +1379,42 @@
     color: var(--hub-text-muted);
   }
 
+  /* LTS vs All releases scope toggle (mirrors the Installed/All
+     view-toggle look so the two controls read as a family). */
+  .scope-toggle {
+    display: inline-flex;
+    flex-direction: row;
+    border: 1px solid var(--hub-border-light);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--hub-surface);
+    flex-shrink: 0;
+  }
+
+  .scope-toggle-btn {
+    background: transparent;
+    color: var(--hub-text-dim);
+    border: none;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.74rem;
+    cursor: pointer;
+    line-height: 1.3;
+  }
+
+  .scope-toggle-btn:hover {
+    color: var(--hub-text-bright);
+    background: var(--hub-bg);
+  }
+
+  .scope-toggle-btn-active {
+    background: var(--hub-selected);
+    color: var(--hub-text-bright);
+  }
+
+  .scope-toggle-btn-active:hover {
+    background: var(--hub-selected);
+  }
+
   .stale-badge {
     display: inline-block;
     margin-left: 0.4rem;
@@ -1321,17 +1504,48 @@
     cursor: not-allowed;
   }
 
-  .install-status {
-    font-size: 0.72rem;
-    color: var(--hub-text-muted);
-    font-style: italic;
-  }
-
   .ctx-item-install {
     color: var(--hub-accent);
   }
 
   .ctx-item-install:hover:not(:disabled) {
     color: var(--hub-text-bright);
+  }
+
+  /* Releases-table row affordances. Inert rows (installed, or another
+     install in progress) drop the pointer cursor and hover highlight so
+     they read as non-interactive; the Notes button inside them still
+     works. */
+  .releases-row {
+    cursor: pointer;
+  }
+
+  .releases-row-inert {
+    cursor: default;
+  }
+
+  .releases-row-inert:hover {
+    background: transparent;
+  }
+
+  /* Notes-column button: opens the release-notes URL in the browser.
+     Visually a quiet secondary affordance so it does not compete with
+     the primary Install action, but stays clearly clickable. */
+  .notes-btn {
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    border: 1px solid var(--hub-border-light);
+    background: transparent;
+    color: var(--hub-text-dim);
+    font-size: 0.72rem;
+    font-weight: 500;
+    cursor: pointer;
+    line-height: 1.3;
+  }
+
+  .notes-btn:hover {
+    border-color: var(--hub-accent);
+    color: var(--hub-accent);
+    background: var(--hub-bg);
   }
 </style>

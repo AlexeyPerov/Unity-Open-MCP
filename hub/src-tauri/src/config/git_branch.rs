@@ -102,9 +102,17 @@ fn read_git_branches(paths: Vec<String>) -> HashMap<String, Option<String>> {
 pub async fn get_git_branches(
     paths: Vec<String>,
 ) -> HashMap<String, Option<String>> {
-    tauri::async_runtime::spawn_blocking(move || read_git_branches(paths))
+    let count = paths.len();
+    let start = std::time::Instant::now();
+    let result = tauri::async_runtime::spawn_blocking(move || read_git_branches(paths))
         .await
-        .unwrap_or_default()
+        .unwrap_or_default();
+    log::info!(
+        "get_git_branches: {} paths in {}ms",
+        count,
+        start.elapsed().as_millis()
+    );
+    result
 }
 
 #[cfg(test)]

@@ -231,9 +231,22 @@ pub struct PackageInstallEntry {
     pub package_path: String,
 }
 
+/// A selected extension pack the wizard should install. Each entry
+/// is a (UPM id, repo-relative local path) pair resolved by the
+/// frontend from the TS catalog (`EXTENSION_PACKS`); Rust has no
+/// pack catalog of its own. Packs always install via `file:` URLs
+/// (no published-tag form exists yet).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionPackInstall {
+    pub id: String,
+    pub local_path: String,
+}
+
 /// The two package URLs the wizard always derives from a
 /// validated toolkit root (questions-4 Q2 = B; spec §Step 3
-/// "Package URL derivation").
+/// "Package URL derivation"), plus the derived entries for any
+/// selected extension packs (always `file:` form).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DerivedPackageUrls {
@@ -241,6 +254,10 @@ pub struct DerivedPackageUrls {
     pub git_remote: String,
     pub bridge: PackageInstallEntry,
     pub verify: PackageInstallEntry,
+    /// Derived `file:` entries for selected extension packs, in the
+    /// order the frontend supplied them.
+    #[serde(default)]
+    pub extension_packs: Vec<PackageInstallEntry>,
 }
 
 /// A single change the wizard intends to apply. Used by the
@@ -295,6 +312,14 @@ pub struct ManifestMergeParams {
     /// git remote URLs.
     #[serde(default)]
     pub use_local_packages: bool,
+    /// Selected extension packs to install. Each entry is a
+    /// (UPM id, repo-relative local path) pair resolved by the
+    /// frontend from its TS catalog; Rust trusts the ids and
+    /// paths. Packs always install via `file:` URLs (no
+    /// published-tag form exists yet), regardless of
+    /// `use_local_packages`.
+    #[serde(default)]
+    pub extension_packs: Vec<ExtensionPackInstall>,
 }
 
 /// The plan returned by [`plan_manifest_merge`]. Includes the
@@ -425,6 +450,7 @@ pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
         &params.version_pin,
         &params.custom_url,
         params.use_local_packages,
+        &params.extension_packs,
     );
     let mut changes = Vec::new();
     let mut proposed = BTreeMap::new();
@@ -450,6 +476,16 @@ pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
         });
         proposed.insert(entry.id.clone(), entry.url.clone());
     }
+    for entry in &derived.extension_packs {
+        let kind = classify(&read.dependencies, &entry.id, &entry.url, &entry.tag);
+        changes.push(PackageChange {
+            id: entry.id.clone(),
+            before: read.dependencies.get(&entry.id).cloned(),
+            after: entry.url.clone(),
+            kind,
+        });
+        proposed.insert(entry.id.clone(), entry.url.clone());
+    }
     // Carry over existing entries the wizard is not managing so
     // the preview reflects the full `dependencies` block.
     for (k, v) in &read.dependencies {
@@ -460,6 +496,7 @@ pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
         &read.dependencies,
         params.install_bridge,
         params.install_verify,
+        &params.extension_packs,
     );
     ManifestMergePlan {
         project_path: params.project_path,
@@ -508,6 +545,7 @@ pub fn write_manifest_merge(
         &params.version_pin,
         &params.custom_url,
         params.use_local_packages,
+        &params.extension_packs,
     );
     let mut changes = Vec::new();
     let mut proposed = BTreeMap::new();
@@ -533,6 +571,25 @@ pub fn write_manifest_merge(
     }
     if params.install_verify {
         let entry = &derived.verify;
+        let kind = classify(&read.dependencies, &entry.id, &entry.url, &entry.tag);
+        if kind == ChangeKind::Upgrade && !params.confirm_upgrades {
+            return Err(ManifestError::new(
+                "upgradeNotConfirmed",
+                format!(
+                    "Existing {} entry differs from the proposed value; set confirm_upgrades to apply.",
+                    entry.id
+                ),
+            ));
+        }
+        changes.push(PackageChange {
+            id: entry.id.clone(),
+            before: read.dependencies.get(&entry.id).cloned(),
+            after: entry.url.clone(),
+            kind,
+        });
+        proposed.insert(entry.id.clone(), entry.url.clone());
+    }
+    for entry in &derived.extension_packs {
         let kind = classify(&read.dependencies, &entry.id, &entry.url, &entry.tag);
         if kind == ChangeKind::Upgrade && !params.confirm_upgrades {
             return Err(ManifestError::new(
@@ -855,14 +912,27 @@ pub fn derive_package_urls(
     version_pin: &str,
     custom_url: &str,
     use_local_packages: bool,
+    extension_packs: &[ExtensionPackInstall],
 ) -> DerivedPackageUrls {
     let trimmed_root = toolkit_root.trim();
     let trimmed_pin = version_pin.trim();
     let trimmed_custom = custom_url.trim();
 
+    // Extension packs always install via `file:` URLs (no published-tag
+    // form exists yet), so their entries are identical across modes.
+    let project = Path::new(project_path.trim());
+    let packages_dir = project.join("Packages");
+    let extension_pack_entries: Vec<PackageInstallEntry> = extension_packs
+        .iter()
+        .map(|pack| {
+            let abs = Path::new(trimmed_root).join(&pack.local_path);
+            let rel = relative_path_for_upm(&packages_dir, &abs)
+                .unwrap_or_else(|| format!("../../{}", pack.local_path));
+            build_local_package_entry(&pack.id, &rel)
+        })
+        .collect();
+
     if use_local_packages {
-        let project = Path::new(project_path.trim());
-        let packages_dir = project.join("Packages");
         let bridge_abs = Path::new(trimmed_root).join(BRIDGE_PACKAGE_PATH);
         let verify_abs = Path::new(trimmed_root).join(VERIFY_PACKAGE_PATH);
         let bridge_rel = relative_path_for_upm(&packages_dir, &bridge_abs)
@@ -876,6 +946,7 @@ pub fn derive_package_urls(
             git_remote: String::new(),
             bridge,
             verify,
+            extension_packs: extension_pack_entries,
         };
     }
 
@@ -907,6 +978,7 @@ pub fn derive_package_urls(
         git_remote: remote,
         bridge,
         verify,
+        extension_packs: extension_pack_entries,
     }
 }
 
@@ -968,6 +1040,7 @@ fn manifest_uses_local_packages(
     dependencies: &BTreeMap<String, String>,
     install_bridge: bool,
     install_verify: bool,
+    extension_packs: &[ExtensionPackInstall],
 ) -> bool {
     if install_bridge {
         if let Some(value) = dependencies.get(BRIDGE_PACKAGE_ID) {
@@ -978,6 +1051,17 @@ fn manifest_uses_local_packages(
     }
     if install_verify {
         if let Some(value) = dependencies.get(VERIFY_PACKAGE_ID) {
+            if is_local_file_url(value) {
+                return true;
+            }
+        }
+    }
+    // Packs always install via `file:` URLs, so any selected pack
+    // that is already present in the manifest counts as a local
+    // install. `extension_packs` is empty when the wizard has no
+    // packs selected, so the loop is a no-op in that case.
+    for pack in extension_packs {
+        if let Some(value) = dependencies.get(&pack.id) {
             if is_local_file_url(value) {
                 return true;
             }
@@ -1432,7 +1516,7 @@ mod tests {
 
     #[test]
     fn derive_package_urls_uses_default_remote_when_no_git_config() {
-        let derived = derive_package_urls("/proj/demo", "/repos/uai", "", "", false);
+        let derived = derive_package_urls("/proj/demo", "/repos/uai", "", "", false, &[]);
         assert_eq!(derived.git_remote, DEFAULT_GIT_REMOTE);
         assert!(derived.bridge.url.contains("packages/bridge"));
         assert!(derived.bridge.url.contains(DEFAULT_BRIDGE_TAG));
@@ -1455,6 +1539,7 @@ mod tests {
             "",
             "",
             false,
+            &[],
         );
         assert_eq!(derived.git_remote, "git@github.com:AlexeyPerov/unity-open-mcp.git");
         assert!(derived.bridge.url.starts_with("git@github.com:AlexeyPerov/unity-open-mcp.git"));
@@ -1468,6 +1553,7 @@ mod tests {
             "bridge-v1.2.3",
             "https://github.com/fork/unity-open-mcp.git",
             false,
+            &[],
         );
         assert_eq!(derived.git_remote, "https://github.com/fork/unity-open-mcp.git");
         assert_eq!(derived.bridge.tag, "bridge-v1.2.3");
@@ -1532,7 +1618,7 @@ mod tests {
     fn plan_manifest_merge_marks_noop_when_already_installed() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
-        let derived = derive_package_urls("/proj/demo", "/repos/uai", "", "", false);
+        let derived = derive_package_urls("/proj/demo", "/repos/uai", "", "", false, &[]);
         write_manifest(
             dir.path(),
             &[
@@ -1549,6 +1635,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
+            extension_packs: Vec::new(),
         });
         assert!(!plan.has_upgrades);
         assert_eq!(plan.changes.len(), 2);
@@ -1575,6 +1662,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
+            extension_packs: Vec::new(),
         });
         assert!(plan.has_upgrades);
         let bridge = plan
@@ -1607,6 +1695,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
+            extension_packs: Vec::new(),
         })
         .unwrap();
         assert!(!result.backup_path.is_empty());
@@ -1638,12 +1727,175 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
+            extension_packs: Vec::new(),
         })
         .unwrap();
         assert!(result.backup_path.is_empty());
         assert_eq!(result.dependencies.len(), 1);
         let read_after = read_manifest_inner(dir.path());
         assert!(read_after.dependencies.contains_key(BRIDGE_PACKAGE_ID));
+    }
+
+    /// A navigation pack fixture used by the extension-pack tests below.
+    /// Mirrors the (id, repo-relative local path) shape the Hub wizard
+    /// derives from its TS catalog; the Rust side trusts both fields.
+    fn nav_pack() -> ExtensionPackInstall {
+        ExtensionPackInstall {
+            id: "com.alexeyperov.unity-open-mcp-ext-navigation".to_string(),
+            local_path: "packages/extensions/navigation".to_string(),
+        }
+    }
+
+    #[test]
+    fn derive_package_urls_emits_file_paths_for_extension_packs() {
+        // Packs always install via `file:` URLs regardless of mode —
+        // there is no published-tag form. Local mode produces a
+        // repo-relative path computed by `relative_path_for_upm`.
+        let root = tempdir().unwrap();
+        let toolkit = root.path().join("toolkit");
+        let project = root.path().join("demo");
+        fs::create_dir_all(toolkit.join("packages/extensions/navigation")).unwrap();
+        make_valid_project(&project);
+        let derived = derive_package_urls(
+            project.to_str().unwrap(),
+            toolkit.to_str().unwrap(),
+            "",
+            "",
+            true,
+            &[nav_pack()],
+        );
+        assert_eq!(derived.extension_packs.len(), 1);
+        let entry = &derived.extension_packs[0];
+        assert_eq!(entry.id, nav_pack().id);
+        assert!(entry.url.starts_with("file:"));
+        assert!(entry.url.contains("packages/extensions/navigation"));
+        assert!(entry.tag.is_empty());
+        // Git mode also yields `file:` for packs.
+        let derived_git = derive_package_urls(
+            project.to_str().unwrap(),
+            toolkit.to_str().unwrap(),
+            "",
+            "",
+            false,
+            &[nav_pack()],
+        );
+        assert_eq!(derived_git.extension_packs.len(), 1);
+        assert!(derived_git.extension_packs[0]
+            .url
+            .starts_with("file:"));
+    }
+
+    #[test]
+    fn plan_manifest_merge_includes_selected_extension_packs_in_changes() {
+        let dir = tempdir().unwrap();
+        make_valid_project(dir.path());
+        let plan = plan_manifest_merge(ManifestMergeParams {
+            project_path: dir.path().to_string_lossy().into_owned(),
+            toolkit_root: "/repos/uai".to_string(),
+            install_bridge: false,
+            install_verify: false,
+            version_pin: String::new(),
+            custom_url: String::new(),
+            confirm_upgrades: false,
+            use_local_packages: false,
+            extension_packs: vec![nav_pack()],
+        });
+        // Only the pack should surface — no bridge/verify selected.
+        assert_eq!(plan.changes.len(), 1);
+        let change = &plan.changes[0];
+        assert_eq!(change.id, nav_pack().id);
+        assert_eq!(change.kind, ChangeKind::Add);
+        assert!(change.after.starts_with("file:"));
+        assert!(plan
+            .proposed_dependencies
+            .contains_key(&nav_pack().id));
+        assert!(!plan.has_upgrades);
+    }
+
+    #[test]
+    fn plan_manifest_merge_marks_extension_pack_noop_when_already_installed() {
+        let dir = tempdir().unwrap();
+        make_valid_project(dir.path());
+        let derived = derive_package_urls(
+            dir.path().to_str().unwrap(),
+            "/repos/uai",
+            "",
+            "",
+            false,
+            &[nav_pack()],
+        );
+        write_manifest(dir.path(), &[(nav_pack().id.as_str(), &derived.extension_packs[0].url)]);
+        let plan = plan_manifest_merge(ManifestMergeParams {
+            project_path: dir.path().to_string_lossy().into_owned(),
+            toolkit_root: "/repos/uai".to_string(),
+            install_bridge: false,
+            install_verify: false,
+            version_pin: String::new(),
+            custom_url: String::new(),
+            confirm_upgrades: false,
+            use_local_packages: false,
+            extension_packs: vec![nav_pack()],
+        });
+        assert_eq!(plan.changes.len(), 1);
+        assert!(plan.changes.iter().all(|c| c.kind == ChangeKind::Unchanged));
+        assert!(!plan.has_upgrades);
+    }
+
+    #[test]
+    fn write_manifest_merge_adds_extension_packs_and_preserves_unrelated_keys() {
+        let dir = tempdir().unwrap();
+        make_valid_project(dir.path());
+        write_manifest(
+            dir.path(),
+            &[("com.unity.ide.rider", "3.0.36")],
+        );
+        let result = write_manifest_merge(ManifestMergeParams {
+            project_path: dir.path().to_string_lossy().into_owned(),
+            toolkit_root: "/repos/uai".to_string(),
+            install_bridge: false,
+            install_verify: false,
+            version_pin: String::new(),
+            custom_url: String::new(),
+            confirm_upgrades: false,
+            use_local_packages: false,
+            extension_packs: vec![nav_pack()],
+        })
+        .unwrap();
+        // Backup is created because an existing manifest was mutated.
+        assert!(!result.backup_path.is_empty());
+        assert!(std::path::Path::new(&result.backup_path).exists());
+        let read_after = read_manifest_inner(dir.path());
+        // Unrelated key survives.
+        assert!(read_after.dependencies.contains_key("com.unity.ide.rider"));
+        // Pack entry was added with a `file:` value.
+        let written = read_after.dependencies.get(&nav_pack().id).unwrap();
+        assert!(written.starts_with("file:"));
+        assert!(written.contains("packages/extensions/navigation"));
+    }
+
+    #[test]
+    fn write_manifest_merge_refuses_extension_pack_upgrade_without_confirmation() {
+        let dir = tempdir().unwrap();
+        make_valid_project(dir.path());
+        // Existing pack entry points at a different path — an upgrade.
+        write_manifest(
+            dir.path(),
+            &[(nav_pack().id.as_str(), "file:../../old/path/navigation")],
+        );
+        let err = write_manifest_merge(ManifestMergeParams {
+            project_path: dir.path().to_string_lossy().into_owned(),
+            toolkit_root: "/repos/uai".to_string(),
+            install_bridge: false,
+            install_verify: false,
+            version_pin: String::new(),
+            custom_url: String::new(),
+            confirm_upgrades: false,
+            use_local_packages: false,
+            extension_packs: vec![nav_pack()],
+        })
+        .unwrap_err();
+        assert_eq!(err.kind, "upgradeNotConfirmed");
+        assert!(err.message.contains(&nav_pack().id));
     }
 
     #[test]
@@ -1666,6 +1918,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
+            extension_packs: Vec::new(),
         })
         .unwrap_err();
         assert_eq!(err.kind, "upgradeNotConfirmed");
@@ -1695,6 +1948,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: true,
             use_local_packages: false,
+            extension_packs: Vec::new(),
         })
         .unwrap_err();
         assert_eq!(err.kind, "invalidJson");
@@ -1712,6 +1966,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
+            extension_packs: Vec::new(),
         });
         assert!(matches!(result, Err(ref e) if e.kind == "notAUnityProject"));
     }
@@ -1729,6 +1984,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
+            extension_packs: Vec::new(),
         })
         .unwrap();
         assert!(result
@@ -1747,7 +2003,7 @@ mod tests {
     fn write_manifest_merge_noop_when_already_installed() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
-        let derived = derive_package_urls("/proj/demo", "/repos/uai", "", "", false);
+        let derived = derive_package_urls("/proj/demo", "/repos/uai", "", "", false, &[]);
         write_manifest(
             dir.path(),
             &[
@@ -1764,6 +2020,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
+            extension_packs: Vec::new(),
         })
         .unwrap();
         // All changes are Unchanged, so the writer did not touch
@@ -1805,6 +2062,7 @@ mod tests {
             "",
             "",
             true,
+            &[],
         );
         assert!(derived.bridge.url.starts_with("file:"));
         assert!(derived.verify.url.starts_with("file:"));
@@ -1826,6 +2084,7 @@ mod tests {
             "",
             "",
             true,
+            &[],
         );
         write_manifest(
             &project,
@@ -1843,6 +2102,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: true,
+            extension_packs: Vec::new(),
         });
         assert!(plan.use_local_packages);
         assert!(plan.manifest_uses_local_packages);
@@ -1870,6 +2130,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
+            extension_packs: Vec::new(),
         });
         assert!(!plan.use_local_packages);
         assert!(plan.manifest_uses_local_packages);

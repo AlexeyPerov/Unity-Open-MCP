@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import { S } from "$lib/state.svelte";
+  import { S, type Tab } from "$lib/state.svelte";
   import { commandLogsStore } from "$lib/state/command_logs.svelte";
   import type { CommandPanel } from "$lib/services/config";
   import TopBar from "$lib/components/shell/TopBar.svelte";
@@ -30,6 +30,21 @@
       }
     }).then((u) => unsubs.push(u));
     return () => unsubs.forEach((u) => u());
+  });
+
+  // Boot diagnostics: trace every `activeTab` transition. ProjectsTab is
+  // rendered behind `{#if S.activeTab === "projects"}`, so any flip away
+  // from "projects" and back destroys and recreates it (firing its
+  // onMount again). Observing the transition here names whatever is
+  // driving the remount. `$effect` re-runs whenever `S.activeTab`
+  // changes; the previous value is captured for the `<old> → <new>` line.
+  let prevTab: Tab | null = null;
+  $effect(() => {
+    const tab = S.activeTab;
+    if (prevTab !== null && prevTab !== tab) {
+      S.appendDrawerLog(`[tab] activeTab: ${prevTab} → ${tab}`);
+    }
+    prevTab = tab;
   });
 </script>
 

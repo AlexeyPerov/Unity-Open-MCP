@@ -152,9 +152,16 @@ pub fn detect_running_unity() -> Vec<RunningUnity> {
 /// stops an extra freeze on top of the other launch-path commands.
 #[tauri::command]
 pub async fn scan_running_unity() -> Vec<RunningUnity> {
-    tauri::async_runtime::spawn_blocking(detect_running_unity)
+    let start = std::time::Instant::now();
+    let result = tauri::async_runtime::spawn_blocking(detect_running_unity)
         .await
-        .unwrap_or_default()
+        .unwrap_or_default();
+    log::info!(
+        "scan_running_unity: {} procs in {}ms",
+        result.len(),
+        start.elapsed().as_millis()
+    );
+    result
 }
 
 #[cfg(target_os = "macos")]

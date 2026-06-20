@@ -1398,11 +1398,23 @@ export interface PackageInstallEntry {
   packagePath: string;
 }
 
+/**
+ * A selected extension pack the wizard should install. The frontend
+ * resolves (id, localPath) from the TS catalog (`EXTENSION_PACKS`);
+ * packs always install via `file:` URLs (no published-tag form yet),
+ * regardless of `useLocalPackages`.
+ */
+export interface ExtensionPackInstall {
+  id: string;
+  localPath: string;
+}
+
 export interface DerivedPackageUrls {
   toolkitRoot: string;
   gitRemote: string;
   bridge: PackageInstallEntry;
   verify: PackageInstallEntry;
+  extensionPacks: PackageInstallEntry[];
 }
 
 export interface PackageChange {
@@ -1421,6 +1433,8 @@ export interface ManifestMergeParams {
   customUrl: string;
   confirmUpgrades: boolean;
   useLocalPackages: boolean;
+  /** Selected extension packs to install alongside bridge/verify. */
+  extensionPacks: ExtensionPackInstall[];
 }
 
 export interface ManifestMergePlan {

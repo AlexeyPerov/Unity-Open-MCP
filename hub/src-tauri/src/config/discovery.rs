@@ -422,11 +422,17 @@ pub async fn discover_installations(state: State<'_, AppState>) -> DiscoveryComm
     // keep the webview thread responsive (the Unity Versions tab fires
     // this on mount and on every manual refresh).
     let settings = state.settings.lock().unwrap().clone();
+    let start = std::time::Instant::now();
     let result = tauri::async_runtime::spawn_blocking(move || {
         discover_unity_installations(&settings)
     })
     .await
     .map_err(|e| format!("discovery task failed: {e}"))?;
+    log::info!(
+        "discover_installations: {} installs in {}ms",
+        result.installations.len(),
+        start.elapsed().as_millis()
+    );
 
     {
         let mut cache = state.discovery_cache.lock().unwrap();

@@ -13,18 +13,42 @@ pub struct AppState {
     pub projects: Mutex<ProjectsFile>,
     pub discovery_cache: Mutex<Option<DiscoveryResult>>,
     pub walk_up_registry: Mutex<WalkUpRegistry>,
-    /// M1.5-20: tracks whether a Unity Hub CLI install is
-    /// currently in progress so the frontend can disable the
-    /// Install button and surface an inline message.
-    pub install_in_progress: Mutex<bool>,
 }
 
 #[tauri::command]
-pub fn load_settings(state: State<AppState>) -> Settings {
-    let settings = persistence::load_settings();
+pub async fn load_settings(state: State<'_, AppState>) -> Result<Settings, String> {
+    // The `persistence::load_settings` disk read (which can create the
+    // default file on first run) is the only main-thread disk I/O on the
+    // critical launch path — `projectsStore.load()` awaits this before
+    // the path/size/branch scans even start. Offload the read to the
+    // blocking pool so the webview thread never stalls on it. The
+    // Mutex lock+clone stays on the async task (cheap).
+    //
+    // Tauri requires async commands that borrow `State` to return a
+    // `Result` (see `discover_installations`); `Ok(T)` is unwrapped to
+    // `T` on the JS side, so the frontend contract is unchanged.
+    //
+    // Entry/lock/return spans (visible under `RUST_LOG=info`) pinpoint a
+    // hang: no `entered` ⇒ stuck in the Tauri IPC layer; `entered` but
+    // no `lock acquired` ⇒ the Mutex is held elsewhere; both present but
+    // no `returning` ⇒ the disk read is wedged.
+    log::info!("load_settings: entered");
+    let start = std::time::Instant::now();
+    let settings = tauri::async_runtime::spawn_blocking(persistence::load_settings)
+        .await
+        .map_err(|e| format!("load_settings task failed: {e}"))?;
+    log::info!(
+        "load_settings: spawn_blocking done in {}ms, awaiting lock",
+        start.elapsed().as_millis()
+    );
     let mut guard = state.settings.lock().unwrap();
+    log::info!(
+        "load_settings: lock acquired after {}ms total",
+        start.elapsed().as_millis()
+    );
     *guard = settings.clone();
-    settings
+    log::info!("load_settings: returning after {}ms", start.elapsed().as_millis());
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -36,11 +60,26 @@ pub fn save_settings(state: State<AppState>, settings: Settings) -> Result<(), S
 }
 
 #[tauri::command]
-pub fn load_projects(state: State<AppState>) -> ProjectsFile {
-    let projects = persistence::load_projects();
+pub async fn load_projects(state: State<'_, AppState>) -> Result<ProjectsFile, String> {
+    // Entry/lock/return spans mirror `load_settings` — see the comment
+    // there for how to read them under a launch freeze.
+    log::info!("load_projects: entered");
+    let start = std::time::Instant::now();
+    let projects = tauri::async_runtime::spawn_blocking(persistence::load_projects)
+        .await
+        .map_err(|e| format!("load_projects task failed: {e}"))?;
+    log::info!(
+        "load_projects: spawn_blocking done in {}ms, awaiting lock",
+        start.elapsed().as_millis()
+    );
     let mut guard = state.projects.lock().unwrap();
+    log::info!(
+        "load_projects: lock acquired after {}ms total",
+        start.elapsed().as_millis()
+    );
     *guard = projects.clone();
-    projects
+    log::info!("load_projects: returning after {}ms", start.elapsed().as_millis());
+    Ok(projects)
 }
 
 #[tauri::command]
@@ -69,9 +108,17 @@ fn check_paths_exists_inner(paths: Vec<String>) -> HashMap<String, bool> {
 /// stale network mount) does not freeze the window on launch.
 #[tauri::command]
 pub async fn check_paths_exists(paths: Vec<String>) -> HashMap<String, bool> {
-    tauri::async_runtime::spawn_blocking(move || check_paths_exists_inner(paths))
+    let count = paths.len();
+    let start = std::time::Instant::now();
+    let result = tauri::async_runtime::spawn_blocking(move || check_paths_exists_inner(paths))
         .await
-        .unwrap_or_default()
+        .unwrap_or_default();
+    log::info!(
+        "check_paths_exists: {} paths in {}ms",
+        count,
+        start.elapsed().as_millis()
+    );
+    result
 }
 
 /// Returns the OS-default Unity Hub editor folders for the current

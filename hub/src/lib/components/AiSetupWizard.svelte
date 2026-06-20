@@ -62,7 +62,7 @@
   } from "$lib/services/manifest";
   import {
     EXTENSION_PACKS,
-    localPackageEntry,
+    findPack,
     shippedPacks,
   } from "$lib/services/extensions";
   import {
@@ -174,11 +174,22 @@
   let showDiff = $state(false);
   let upgradeAcknowledged = $state(false);
 
-  // Step 3 — optional extension packs (opt-in checkbox group). Selections
-  // surface the exact manifest line to add; the core merge planner focuses on
-  // bridge + verify, so extensions are surfaced as copy-paste lines (or via
-  // the bridge window's Extensions tab once the project is open).
+  // Step 3 — optional extension packs (opt-in checkbox group). Selected
+  // packs flow through the same merge planner as bridge + verify: each
+  // selected pack becomes a `file:` entry written to `Packages/manifest.json`
+  // on Install, with the same backup / upgrade-confirmation envelope. Packs
+  // always install via `file:` URLs (no published-tag form exists yet).
   let selectedExtensionPacks = $state<Set<string>>(new Set());
+
+  // Resolve the selected pack ids to (id, localPath) pairs the Rust merge
+  // planner expects. Sourced from the TS catalog; the merge writer computes
+  // the correct repo-relative `file:` path per project location.
+  function selectedPackInstalls(): { id: string; localPath: string }[] {
+    return [...selectedExtensionPacks]
+      .map((id) => findPack(id))
+      .filter((p): p is NonNullable<typeof p> => Boolean(p))
+      .map((p) => ({ id: p.id, localPath: p.localPath }));
+  }
 
   // Static catalog snapshot — extension packs advertised by the wizard. Only
   // shipped packs are selectable; planned packs render as disabled rows so the
@@ -324,7 +335,10 @@
   }
 
   function isManifestReady(): boolean {
-    if (!installBridge && !installVerify) return false;
+    // A pack-only selection (no bridge/verify) is a valid flow when the
+    // selected packs are already present in the manifest.
+    const packIds = [...selectedExtensionPacks];
+    if (!installBridge && !installVerify && packIds.length === 0) return false;
     if (!mergePlan) return false;
     if (mergePlan.manifestRead.parseError) return false;
     // Allow Next whenever the selected packages already exist in the
@@ -334,6 +348,7 @@
     const selectedIds: string[] = [];
     if (installBridge) selectedIds.push(BRIDGE_PACKAGE_ID);
     if (installVerify) selectedIds.push(VERIFY_PACKAGE_ID);
+    selectedIds.push(...packIds);
     return mergePlan.changes.some(
       (c) =>
         selectedIds.includes(c.id) &&
@@ -558,7 +573,11 @@
   $effect(() => {
     if (currentStep !== "step3") return;
     if (!toolkitRoot.trim()) return;
-    if (!installBridge && !installVerify) {
+    // Reading `selectedExtensionPacks` here makes the plan re-run
+    // whenever a pack checkbox is toggled. A pack-only selection
+    // (no bridge/verify) still produces a valid merge plan.
+    const packs = selectedPackInstalls();
+    if (!installBridge && !installVerify && packs.length === 0) {
       mergePlan = null;
       return;
     }
@@ -576,6 +595,7 @@
           customUrl: packageCustomUrl,
           confirmUpgrades: false,
           useLocalPackages: localMode,
+          extensionPacks: packs,
         });
         if (!cancelled) {
           mergePlan = plan;
@@ -998,6 +1018,7 @@
         customUrl: packageCustomUrl,
         confirmUpgrades: mergePlan.hasUpgrades,
         useLocalPackages,
+        extensionPacks: selectedPackInstalls(),
       });
       mergeResult = result;
       S.appendDrawerLog(
@@ -1387,6 +1408,7 @@
     upgradeAcknowledged = false;
     useLocalPackages = false;
     useLocalPackagesTouched = false;
+    selectedExtensionPacks = new Set();
     skillResult = null;
     skillError = null;
     skillOverwriteAck = false;
@@ -1987,9 +2009,10 @@
               Optional domain packs add typed NavMesh / Input System / ProBuilder
               / Splines / Terrain / Tilemap / Particle System / Animation tools.
               Each pack is a separate UPM package — opt in to the ones you need.
-              The wizard surfaces the exact manifest line to add (the core merge
-              planner focuses on bridge + verify); the bridge window's Extensions
-              tab is the second install path.
+              Selected packs are written to <code>Packages/manifest.json</code>
+              alongside the bridge / verify packages when you click Install (same
+              diff preview, backup, and upgrade confirmation). The bridge window's
+              Extensions tab is the second install path.
             </p>
 
             {#if shippedExtensionPacks.length === 0}
@@ -2021,11 +2044,6 @@
                         <small>{pack.description}</small>
                       </span>
                     </label>
-                    {#if checked}
-                      <code class="wiz-extension-pack-entry">
-                        "{pack.id}": "{localPackageEntry(pack)}"
-                      </code>
-                    {/if}
                   </li>
                 {/each}
               </ul>
@@ -2041,7 +2059,7 @@
 
           <div class="wiz-field">
             <span class="wiz-label">Manifest status</span>
-            {#if !installBridge && !installVerify}
+            {#if !installBridge && !installVerify && selectedExtensionPacks.size === 0}
               <p class="wiz-hint wiz-hint-warn">
                 Pick at least one package to install.
               </p>

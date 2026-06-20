@@ -39,12 +39,19 @@ class RunningUnityStore {
     return this.paths.has(path);
   }
 
-  async start(): Promise<void> {
+  /**
+   * Optionally surface the completion of the immediate scan back to the
+   * caller. Used by the Projects-tab boot diagnostics to time the first
+   * `scan_running_unity` invoke alongside the other launch-path calls.
+   * The callback fires once (after the initial tick) and is not invoked
+   * again for subsequent interval-driven ticks.
+   */
+  async start(onFirstScanDone?: () => void): Promise<void> {
     this.applyInterval();
     // Run an immediate scan so the first render after Projects tab mount
     // already reflects the current process list, even if the user has
     // a 30s interval configured.
-    void this.tick();
+    void this.tick().then(() => onFirstScanDone?.());
   }
 
   stop(): void {
