@@ -267,8 +267,16 @@ namespace UnityOpenMcpBridge
         }
 
         public static FindReferencesResult FindReferences(string assetPathOrGuid, int maxResults = 100)
+            => FindReferences(assetPathOrGuid, maxResults, null);
+
+        // options lets callers (tests, scoped scans) narrow the reverse-
+        // dependency walk via ReferenceGraphOptions.ScanRoots instead of
+        // always traversing AssetDatabase.GetAllAssetPaths(). The default
+        // overload above keeps full-project behaviour for production callers.
+        public static FindReferencesResult FindReferences(
+            string assetPathOrGuid, int maxResults, ReferenceGraphOptions options)
         {
-            var graph = ReferenceGraph.Find(assetPathOrGuid);
+            var graph = ReferenceGraph.Find(assetPathOrGuid, options);
 
             var allPaths = graph.ReferencedByPaths;
             var totalCount = allPaths.Count;

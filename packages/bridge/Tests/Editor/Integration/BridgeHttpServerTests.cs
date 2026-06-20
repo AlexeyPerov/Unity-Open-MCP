@@ -1,25 +1,38 @@
 using System;
+using System.Collections;
 using System.Net;
 using System.Net.Http;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using NUnit.Framework;
-using UnityEngine;
+using UnityOpenMcpBridge;
+using UnityEngine.TestTools;
 
 namespace UnityOpenMcpBridge.Tests
 {
-    // TEMPORARILY DISABLED — re-enable as part of T17.3 (EditMode test-suite
-    // speed-up, specs/execution/M17/execution-plan-3-editmode-test-perf.md).
-    // These tests hard-require a live bridge listening on :19120; when the
-    // bridge is down each fails after a 10s HttpClient timeout, burning the
-    // entire 30s suite budget. [Explicit] keeps them runnable by name but
-    // excludes them from suite runs until bridge lifecycle is fixed (M12 T1.5.4).
-    [Explicit]
     public class BridgeHttpServerTests
     {
-        static readonly string BaseUrl = $"http://127.0.0.1:19120";
+        // The bridge listens on a per-project port (InstancePortResolver), not
+        // a fixed 19120. The Editor's [InitializeOnLoad] static ctor starts
+        // the listener before any EditMode test runs, so by the time these
+        // tests execute the bridge is live on BridgeHttpServer.Port — read it
+        // dynamically instead of pinning a port that only matches when an env
+        // var happens to be set. If the listener isn't up (port collision,
+        // auth refusal, etc.) Assert.Ignore keeps the suite green instead of
+        // burning a 10s HttpClient timeout per test.
+        static string BaseUrl =>
+            $"http://127.0.0.1:{BridgeHttpServer.Port}";
         static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+
+        [SetUp]
+        public void EnsureBridgeRunning()
+        {
+            if (!BridgeHttpServer.IsRunning)
+                Assert.Ignore("Bridge HTTP listener is not running — skipping HTTP integration tests.");
+        }
+
+        // Ping / 404 / method-routing endpoints are served directly by the
+        // HTTP listener thread (no MainThreadDispatcher hop), so they work as
+        // plain synchronous [Test]s even while the editor is running NUnit.
 
         [Test]
         public static void Ping_ReturnsExpectedShape()
@@ -81,98 +94,102 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(body.Contains("\"method_not_allowed\""));
         }
 
-        [Test]
-        public static void MutatingTool_EmptyPathsHint_ReturnsPathsHintRequired()
-        {
-            var json = "{\"code\":\"return 1;\",\"paths_hint\":[]}";
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = HttpClient.PostAsync($"{BaseUrl}/tools/unity_open_mcp_execute_csharp", content).Result;
-            Assert.AreEqual(System.Net.HttpStatusCode.OK, response.StatusCode);
+        // Tool-dispatch endpoints route through MainThreadDispatcher, which
+        // only pumps on EditorApplication.update. A synchronous [Test] blocks
+        // the main thread, so the queued dispatch never runs and the HTTP
+        // call hangs until its 10s timeout. These run as [UnityTest]
+        // coroutines instead: SendAsync runs on a ThreadPool thread while the
+        // coroutine yields, letting update pump the dispatch queue.
 
+        static IEnumerator PostAndWait(string path, string json, Action<string> assertBody)
+        {
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var task = HttpClient.PostAsync($"{BaseUrl}{path}", content);
+            while (!task.IsCompleted) yield return null;
+
+            if (task.IsFaulted)
+                Assert.Fail($"HTTP request faulted: {task.Exception?.GetBaseException()?.Message}");
+            var response = task.Result;
             var body = response.Content.ReadAsStringAsync().Result;
-            Assert.IsTrue(body.Contains("\"paths_hint_required\""), $"Expected paths_hint_required error in: {body}");
-            Assert.IsTrue(body.Contains("\"success\":false"), $"Expected success:false in: {body}");
-            Assert.IsTrue(body.Contains("\"skipped\":true"), $"Expected gate skipped in: {body}");
+            assertBody(body);
         }
 
-        [Test]
-        public static void MutatingTool_MissingPathsHint_ReturnsPathsHintRequired()
+        [UnityTest]
+        public static IEnumerator MutatingTool_EmptyPathsHint_ReturnsPathsHintRequired()
         {
-            var json = "{\"code\":\"return 1;\"}";
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = HttpClient.PostAsync($"{BaseUrl}/tools/unity_open_mcp_execute_csharp", content).Result;
-
-            var body = response.Content.ReadAsStringAsync().Result;
-            Assert.IsTrue(body.Contains("\"paths_hint_required\""), $"Expected paths_hint_required in: {body}");
+            return PostAndWait("/tools/unity_open_mcp_execute_csharp",
+                "{\"code\":\"return 1;\",\"paths_hint\":[]}",
+                body =>
+                {
+                    Assert.IsTrue(body.Contains("\"paths_hint_required\""), $"Expected paths_hint_required error in: {body}");
+                    Assert.IsTrue(body.Contains("\"success\":false"), $"Expected success:false in: {body}");
+                    Assert.IsTrue(body.Contains("\"skipped\":true"), $"Expected gate skipped in: {body}");
+                });
         }
 
-        [Test]
-        public static void InvokeMethod_EmptyPathsHint_ReturnsPathsHintRequired()
+        [UnityTest]
+        public static IEnumerator MutatingTool_MissingPathsHint_ReturnsPathsHintRequired()
         {
-            var json = "{\"type_name\":\"System.Environment\",\"method_name\":\"get_TickCount\",\"is_static\":true,\"paths_hint\":[]}";
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = HttpClient.PostAsync($"{BaseUrl}/tools/unity_open_mcp_invoke_method", content).Result;
-
-            var body = response.Content.ReadAsStringAsync().Result;
-            Assert.IsTrue(body.Contains("\"paths_hint_required\""), $"Expected paths_hint_required in: {body}");
+            return PostAndWait("/tools/unity_open_mcp_execute_csharp",
+                "{\"code\":\"return 1;\"}",
+                body => Assert.IsTrue(body.Contains("\"paths_hint_required\""), $"Expected paths_hint_required in: {body}"));
         }
 
-        [Test]
-        public static void ExecuteMenu_EmptyPathsHint_NonAllowlisted_ReturnsPathsHintRequired()
+        [UnityTest]
+        public static IEnumerator InvokeMethod_EmptyPathsHint_ReturnsPathsHintRequired()
         {
-            var json = "{\"menu_path\":\"File/Save Project\",\"paths_hint\":[]}";
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = HttpClient.PostAsync($"{BaseUrl}/tools/unity_open_mcp_execute_menu", content).Result;
-
-            var body = response.Content.ReadAsStringAsync().Result;
-            Assert.IsTrue(body.Contains("\"paths_hint_required\""), $"Expected paths_hint_required for non-allowlisted menu in: {body}");
+            return PostAndWait("/tools/unity_open_mcp_invoke_method",
+                "{\"type_name\":\"System.Environment\",\"method_name\":\"get_TickCount\",\"is_static\":true,\"paths_hint\":[]}",
+                body => Assert.IsTrue(body.Contains("\"paths_hint_required\""), $"Expected paths_hint_required in: {body}"));
         }
 
-        [Test]
-        public static void ExecuteMenu_EmptyPathsHint_Allowlisted_Proceeds()
+        [UnityTest]
+        public static IEnumerator ExecuteMenu_EmptyPathsHint_NonAllowlisted_ReturnsPathsHintRequired()
         {
-            var json = "{\"menu_path\":\"Assets/Refresh\",\"paths_hint\":[]}";
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = HttpClient.PostAsync($"{BaseUrl}/tools/unity_open_mcp_execute_menu", content).Result;
-
-            var body = response.Content.ReadAsStringAsync().Result;
-            Assert.IsFalse(body.Contains("\"paths_hint_required\""), $"Allowlisted menu should not return paths_hint_required: {body}");
+            return PostAndWait("/tools/unity_open_mcp_execute_menu",
+                "{\"menu_path\":\"File/Save Project\",\"paths_hint\":[]}",
+                body => Assert.IsTrue(body.Contains("\"paths_hint_required\""), $"Expected paths_hint_required for non-allowlisted menu in: {body}"));
         }
 
-        [Test]
-        public static void FindMembers_DoesNotRequirePathsHint()
+        [UnityTest]
+        public static IEnumerator ExecuteMenu_EmptyPathsHint_Allowlisted_Proceeds()
         {
-            var json = "{\"query\":\"Transform\",\"kind\":\"type\",\"max_results\":5}";
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = HttpClient.PostAsync($"{BaseUrl}/tools/unity_open_mcp_find_members", content).Result;
-
-            var body = response.Content.ReadAsStringAsync().Result;
-            Assert.IsFalse(body.Contains("\"paths_hint_required\""), $"find_members should not require paths_hint: {body}");
+            return PostAndWait("/tools/unity_open_mcp_execute_menu",
+                "{\"menu_path\":\"Assets/Refresh\",\"paths_hint\":[]}",
+                body => Assert.IsFalse(body.Contains("\"paths_hint_required\""), $"Allowlisted menu should not return paths_hint_required: {body}"));
         }
 
-        [Test]
-        public static void PathsHintRequired_EnvelopeHasAgentNextSteps()
+        [UnityTest]
+        public static IEnumerator FindMembers_DoesNotRequirePathsHint()
         {
-            var json = "{\"code\":\"return 1;\",\"paths_hint\":[]}";
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = HttpClient.PostAsync($"{BaseUrl}/tools/unity_open_mcp_execute_csharp", content).Result;
-
-            var body = response.Content.ReadAsStringAsync().Result;
-            Assert.IsTrue(body.Contains("\"agentNextSteps\":["), $"Missing agentNextSteps in: {body}");
-            Assert.IsTrue(body.Contains("paths_hint"), $"agentNextSteps should mention paths_hint: {body}");
+            return PostAndWait("/tools/unity_open_mcp_find_members",
+                "{\"query\":\"Transform\",\"kind\":\"type\",\"max_results\":5}",
+                body => Assert.IsFalse(body.Contains("\"paths_hint_required\""), $"find_members should not require paths_hint: {body}"));
         }
 
-        [Test]
-        public static void PathsHintRequired_EnvelopeContainsGateSection()
+        [UnityTest]
+        public static IEnumerator PathsHintRequired_EnvelopeHasAgentNextSteps()
         {
-            var json = "{\"code\":\"return 1;\",\"paths_hint\":[]}";
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = HttpClient.PostAsync($"{BaseUrl}/tools/unity_open_mcp_execute_csharp", content).Result;
+            return PostAndWait("/tools/unity_open_mcp_execute_csharp",
+                "{\"code\":\"return 1;\",\"paths_hint\":[]}",
+                body =>
+                {
+                    Assert.IsTrue(body.Contains("\"agentNextSteps\":["), $"Missing agentNextSteps in: {body}");
+                    Assert.IsTrue(body.Contains("paths_hint"), $"agentNextSteps should mention paths_hint: {body}");
+                });
+        }
 
-            var body = response.Content.ReadAsStringAsync().Result;
-            Assert.IsTrue(body.Contains("\"gate\":{"), $"Missing gate section in: {body}");
-            Assert.IsTrue(body.Contains("\"mode\":\"enforce\""), $"Default gate mode should be enforce in: {body}");
-            Assert.IsTrue(body.Contains("\"skipped\":true"), $"Gate should be skipped on paths_hint error: {body}");
+        [UnityTest]
+        public static IEnumerator PathsHintRequired_EnvelopeContainsGateSection()
+        {
+            return PostAndWait("/tools/unity_open_mcp_execute_csharp",
+                "{\"code\":\"return 1;\",\"paths_hint\":[]}",
+                body =>
+                {
+                    Assert.IsTrue(body.Contains("\"gate\":{"), $"Missing gate section in: {body}");
+                    Assert.IsTrue(body.Contains("\"mode\":\"enforce\""), $"Default gate mode should be enforce in: {body}");
+                    Assert.IsTrue(body.Contains("\"skipped\":true"), $"Gate should be skipped on paths_hint error: {body}");
+                });
         }
     }
 }

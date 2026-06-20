@@ -14,11 +14,8 @@ namespace UnityOpenMcpVerify.Tests
     //
     // The pure CanFix/Describe/Safe cases are plain [Test]s (fast, no fixtures).
     // The end-to-end rewrite scenario is a [UnityTest] that builds a prefab with
-    // a broken GUID and verifies Apply() rewires it onto a chosen target.
-    //
-    // The [UnityTest] is marked [Explicit] to match the suite convention for
-    // heavy AssetDatabase-touching tests (see MissingReferencesRuleTests header
-    // comment). It still runs by name.
+    // a broken GUID and verifies Apply() rewires it onto a chosen target. The
+    // fixture folder is created/torn down once per fixture run.
     [TestFixture]
     public class RelinkBrokenGuidFixTests
     {
@@ -30,6 +27,22 @@ namespace UnityOpenMcpVerify.Tests
         public void SetUp()
         {
             fix = new RelinkBrokenGuidFix();
+        }
+
+        [OneTimeSetUp]
+        public void OneTimeSetUp()
+        {
+            EnsureDirectory(FixtureRoot);
+        }
+
+        [OneTimeTearDown]
+        public void OneTimeTearDown()
+        {
+            if (AssetDatabase.IsValidFolder(FixtureRoot))
+            {
+                AssetDatabase.DeleteAsset(FixtureRoot);
+                AssetDatabase.Refresh();
+            }
         }
 
         // -------------------------------------------------------------------
@@ -256,7 +269,6 @@ namespace UnityOpenMcpVerify.Tests
         // End-to-end fixture — build a prefab with a broken GUID, rewrite it
         // -------------------------------------------------------------------
 
-        [Explicit]
         [UnityTest]
         public System.Collections.IEnumerator Apply_WithValidTargetGuid_RewritesAndReimports()
         {
@@ -298,8 +310,6 @@ namespace UnityOpenMcpVerify.Tests
                 "rewritten prefab must carry the real mesh GUID");
             Assert.IsFalse(rewritten.Contains("guid: deadbeefdeadbeefdeadbeefdeadbeef"),
                 "fake GUID must be gone after rewrite");
-
-            yield return CleanupFixture(FixtureRoot);
         }
 
         // -------------------------------------------------------------------
@@ -342,16 +352,6 @@ namespace UnityOpenMcpVerify.Tests
                     lines[i] = lines[i].Replace($"guid: {realGuid}", $"guid: {fakeGuid}");
             }
             File.WriteAllLines(prefabPath, lines);
-        }
-
-        static System.Collections.IEnumerator CleanupFixture(string root)
-        {
-            if (AssetDatabase.IsValidFolder(root))
-            {
-                AssetDatabase.DeleteAsset(root);
-                AssetDatabase.Refresh();
-            }
-            yield return null;
         }
 
         static void EnsureDirectory(string path)

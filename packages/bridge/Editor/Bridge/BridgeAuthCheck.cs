@@ -1,7 +1,7 @@
 // M14 — Pure decision function for the HTTP auth check, isolated from
-// HttpListenerContext so it is unit-testable without the live-bridge harness
-// (BridgeHttpServerTests is [Explicit]). BridgeHttpServer.CheckAuth is the thin
-// wrapper that reads the header off the context and feeds it here.
+// HttpListenerContext so it is unit-testable without the live-bridge harness.
+// BridgeHttpServer.CheckAuth is the thin wrapper that reads the header off the
+// context and feeds it here.
 //
 // Semantics:
 //   - policy "none"     → always authorized (token may still be present)

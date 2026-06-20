@@ -5,7 +5,7 @@ namespace UnityOpenMcpBridge.Tests
 {
     // M14 — Pure auth-decision tests. BridgeHttpServer.CheckAuth delegates the
     // verdict to BridgeAuthCheck.IsAuthorized so this logic is covered without
-    // the live-HTTP harness (BridgeHttpServerTests is [Explicit]).
+    // the live-HTTP harness.
     public class BridgeAuthCheckTests
     {
         const string PolicyNone = BridgeAuthPolicy.None;

@@ -7,11 +7,6 @@ using UnityOpenMcpVerify.Rules;
 
 namespace UnityOpenMcpVerify.Tests
 {
-    // TEMPORARILY DISABLED (heavy) — re-enable as part of T17.3 (EditMode
-    // test-suite speed-up, specs/execution/M17/execution-plan-3-editmode-test-perf.md).
-    // [UnityTest] coroutines exercise real fixture assets with AssetDatabase I/O.
-    // [Explicit] excludes from suite runs until optimized; still runnable by name.
-    [Explicit]
     [TestFixture]
     public class FixtureDependenciesTests
     {

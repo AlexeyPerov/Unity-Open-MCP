@@ -8,18 +8,48 @@ using UnityOpenMcpVerify;
 
 namespace UnityOpenMcpVerify.Tests
 {
-    // TEMPORARILY DISABLED (heavy) — re-enable as part of T17.3 (EditMode
-    // test-suite speed-up, specs/execution/M17/execution-plan-3-editmode-test-perf.md).
-    // Each [UnityTest] does .bak file swaps + multiple
-    // AssetDatabase.Refresh() calls + full VerifyRunner.RunScoped scans.
-    // [Explicit] excludes from suite runs until optimized; runnable by name.
-    [Explicit]
     [TestFixture]
     public class GateDeltaIntegrationTests
     {
         const string FixtureRoot = "Assets/Tests/GateDeltaFixtures";
         const string HealthyPrefab = FixtureRoot + "/DeltaTest.prefab";
-        const string BrokenPrefab = FixtureRoot + "/DeltaTest.prefab";
+
+        // The fixture folder outlives all tests in this class; each test still
+        // (re)creates the prefab it scans because the .bak-swap tests mutate
+        // the same path. Hoisting the folder create/destroy avoids the per-test
+        // create+Refresh()/delete+Refresh() pair that dominated the runtime.
+        [OneTimeSetUp]
+        public void OneTimeSetUp()
+        {
+            EnsureRulesRegistered();
+            EnsureDirectory(FixtureRoot);
+        }
+
+        // VerifyRunner.RegisterDefaults runs via [InitializeOnLoadMethod] on
+        // domain reload, but in some test-host orderings the static ctor may
+        // not have run yet when the first [UnityTest] reaches the runner.
+        // Ensure the three default rules are present so CreateCheckpoint /
+        // RunScoped see them — otherwise CategoriesRun is empty and every
+        // delta assertion silently degrades to "0 fingerprints".
+        static void EnsureRulesRegistered()
+        {
+            if (VerifyRunner.Rules.Count == 0)
+            {
+                VerifyRunner.RegisterRule(new Rules.MissingReferencesRule());
+                VerifyRunner.RegisterRule(new Rules.ScenePrefabHealthRule());
+                VerifyRunner.RegisterRule(new Rules.DependenciesRule());
+            }
+        }
+
+        [OneTimeTearDown]
+        public void OneTimeTearDown()
+        {
+            if (AssetDatabase.IsValidFolder(FixtureRoot))
+            {
+                AssetDatabase.DeleteAsset(FixtureRoot);
+                AssetDatabase.Refresh();
+            }
+        }
 
         [UnityTest]
         public System.Collections.IEnumerator Delta_DetectsNewMissingReferences_AfterBadEdit()
@@ -60,7 +90,10 @@ namespace UnityOpenMcpVerify.Tests
                     $"Issue should reference the broken prefab path");
             }
 
-            yield return CleanupFixture(FixtureRoot);
+            // Restore inline (C# forbids `yield` inside `finally`). Cleanup is
+            // also idempotent: CreateHealthyPrefab's ClearFile reap any stale
+            // .bak a failed assertion would leave behind.
+            yield return RestorePrefab(HealthyPrefab);
         }
 
         [UnityTest]
@@ -80,6 +113,8 @@ namespace UnityOpenMcpVerify.Tests
             Assume.That(brokenDelta.newErrors, Is.GreaterThan(0),
                 "Prefab should be broken before fix attempt");
 
+            // Restore inline (C# forbids `yield` inside `finally`). The next
+            // test's CreateHealthyPrefab also reaps stale .bak via ClearFile.
             yield return RestorePrefab(HealthyPrefab);
 
             var fixedValidate = VerifyRunner.RunScoped(scope, ruleIds, VerifyRunMode.Validate);
@@ -87,8 +122,6 @@ namespace UnityOpenMcpVerify.Tests
 
             Assert.AreEqual(0, fixedDelta.newErrors,
                 "After restoring, there should be no new errors vs the original checkpoint");
-
-            yield return CleanupFixture(FixtureRoot);
         }
 
         [UnityTest]
@@ -108,9 +141,23 @@ namespace UnityOpenMcpVerify.Tests
                 "Both rules should produce fingerprints");
 
             var postValidate = VerifyRunner.RunScoped(scope, ruleIds, VerifyRunMode.Validate);
-            var delta = ComputeSimpleDelta(checkpoint, postValidate);
 
-            Assert.Greater(delta.newErrors + delta.newWarnings, 0,
+            // The fixture is static, so checkpoint and validate capture the
+            // same issue set — the delta vs its own checkpoint is correctly
+            // zero (no regression). What matters is that both rules actually
+            // ran and produced fingerprints: that proves the multi-rule
+            // checkpoint + validate path works end-to-end.
+            Assert.AreEqual(2, checkpoint.Fingerprints.Count,
+                "Checkpoint should fingerprint both rules");
+            CollectionAssert.AreEquivalent(
+                new[] { "missing_references", "scene_prefab_health" },
+                checkpoint.Fingerprints.Keys,
+                "Both requested rule ids should be fingerprinted");
+
+            // And the validate pass against a known-broken fixture should
+            // surface the previously-checkpointed issues (proving the rule
+            // actually ran, not just registered).
+            Assert.Greater(postValidate.Issues.Count, 0,
                 "BrokenRefFixture should produce issues in at least one rule");
 
             yield return null;
@@ -147,10 +194,21 @@ namespace UnityOpenMcpVerify.Tests
         static System.Collections.IEnumerator CreateHealthyPrefab(string path)
         {
             EnsureDirectory(System.IO.Path.GetDirectoryName(path));
+            // Re-create from scratch, clearing any stale state a previous
+            // (possibly failed) test left behind: the mesh asset, its .meta,
+            // and any .bak backups from BreakPrefab/RestorePrefab. The shared
+            // fixture folder outlives tests, so leftover files from a prior
+            // run are the most common source of IOException "already exists".
+            var meshPath = System.IO.Path.ChangeExtension(path, ".asset");
+            var metaPath = meshPath + ".meta";
+            ClearFile(meshPath); ClearFile(meshPath + ".bak");
+            ClearFile(metaPath); ClearFile(metaPath + ".bak");
+            AssetDatabase.Refresh();
+
             var go = new GameObject("DeltaTest");
             var mf = go.AddComponent<MeshFilter>();
             var mesh = new Mesh();
-            AssetDatabase.CreateAsset(mesh, System.IO.Path.ChangeExtension(path, ".asset"));
+            AssetDatabase.CreateAsset(mesh, meshPath);
             mf.sharedMesh = mesh;
             PrefabUtility.SaveAsPrefabAsset(go, path);
             Object.DestroyImmediate(go);
@@ -167,6 +225,14 @@ namespace UnityOpenMcpVerify.Tests
 
             var backupMeshPath = meshPath + ".bak";
             var backupMetaPath = metaPath + ".bak";
+            // If a prior run left a stale .bak (test crashed mid-break),
+            // restore it first so the File.Move below doesn't collide.
+            if (System.IO.File.Exists(backupMeshPath))
+            {
+                System.IO.File.Delete(backupMeshPath);
+                if (System.IO.File.Exists(backupMetaPath))
+                    System.IO.File.Delete(backupMetaPath);
+            }
             System.IO.File.Move(meshPath, backupMeshPath);
             if (System.IO.File.Exists(metaPath))
                 System.IO.File.Move(metaPath, backupMetaPath);
@@ -192,14 +258,10 @@ namespace UnityOpenMcpVerify.Tests
             yield return null;
         }
 
-        static System.Collections.IEnumerator CleanupFixture(string root)
+        static void ClearFile(string path)
         {
-            if (AssetDatabase.IsValidFolder(root))
-            {
-                AssetDatabase.DeleteAsset(root);
-                AssetDatabase.Refresh();
-            }
-            yield return null;
+            if (System.IO.File.Exists(path))
+                System.IO.File.Delete(path);
         }
 
         static void EnsureDirectory(string path)

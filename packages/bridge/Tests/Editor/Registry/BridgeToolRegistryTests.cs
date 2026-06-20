@@ -1,7 +1,3 @@
-using System;
-using System.Net;
-using System.Net.Http;
-using System.Text;
 using NUnit.Framework;
 using UnityOpenMcpBridge;
 
@@ -9,9 +5,6 @@ namespace UnityOpenMcpBridge.Tests
 {
     public class BridgeToolRegistryTests
     {
-        static readonly string BaseUrl = $"http://127.0.0.1:19120";
-        static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
-
         [Test]
         public static void Scan_DiscoveredEditorStatus()
         {

@@ -11,12 +11,6 @@ using UnityOpenMcpVerify.Rules;
 
 namespace UnityOpenMcpVerify.Tests
 {
-    // TEMPORARILY DISABLED (heavy) — re-enable as part of T17.3 (EditMode
-    // test-suite speed-up, specs/execution/M17/execution-plan-3-editmode-test-perf.md).
-    // The [UnityTest] coroutines build fixture prefabs/assets with multiple
-    // AssetDatabase.Refresh() calls per test. [Explicit] excludes from suite
-    // runs until optimized; still runnable by name.
-    [Explicit]
     [TestFixture]
     public class DependenciesRuleTests
     {
@@ -28,6 +22,26 @@ namespace UnityOpenMcpVerify.Tests
         public void SetUp()
         {
             rule = new DependenciesRule();
+        }
+
+        // Shared fixture folder lifetime: created once for the fixture,
+        // reaped once at teardown. Previously each [UnityTest] created +
+        // deleted the folder with a Refresh() on both sides, dominating
+        // the runtime for this file.
+        [OneTimeSetUp]
+        public void OneTimeSetUp()
+        {
+            EnsureDirectory(FixtureRoot);
+        }
+
+        [OneTimeTearDown]
+        public void OneTimeTearDown()
+        {
+            if (AssetDatabase.IsValidFolder(FixtureRoot))
+            {
+                AssetDatabase.DeleteAsset(FixtureRoot);
+                AssetDatabase.Refresh();
+            }
         }
 
         [Test]
@@ -97,8 +111,6 @@ namespace UnityOpenMcpVerify.Tests
                 Assert.AreEqual("dependencies", issue.RuleId);
                 Assert.AreEqual(prefabPath, issue.AssetPath);
             }
-
-            yield return CleanupFixture(FixtureRoot);
         }
 
         [UnityTest]
@@ -115,8 +127,6 @@ namespace UnityOpenMcpVerify.Tests
             var broken = sink.Where(i => i.IssueCode == "broken_dependency").ToList();
             Assert.AreEqual(0, broken.Count,
                 $"Healthy prefab must not produce broken_dependency. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
-
-            yield return CleanupFixture(FixtureRoot);
         }
 
         [UnityTest]
@@ -144,8 +154,6 @@ namespace UnityOpenMcpVerify.Tests
                 "broken_dependency must be Error severity");
             Assert.AreEqual("dependencies", broken.RuleId);
             Assert.AreEqual(prefabPath, broken.AssetPath);
-
-            yield return CleanupFixture(FixtureRoot);
         }
 
         [UnityTest]
@@ -165,8 +173,6 @@ namespace UnityOpenMcpVerify.Tests
                 CollectionAssert.Contains(knownCodes, issue.IssueCode,
                     $"Issue code '{issue.IssueCode}' must be a known Dependencies code");
             }
-
-            yield return CleanupFixture(FixtureRoot);
         }
 
         [UnityTest]
@@ -186,8 +192,6 @@ namespace UnityOpenMcpVerify.Tests
                     issue.Severity == VerifySeverity.Error || issue.Severity == VerifySeverity.Warning,
                     $"Severity must be Error or Warning, got {issue.Severity}");
             }
-
-            yield return CleanupFixture(FixtureRoot);
         }
 
         [UnityTest]
@@ -207,8 +211,6 @@ namespace UnityOpenMcpVerify.Tests
                 Assert.IsTrue(IssueKey.TryParse(key, out _, out _, out _, out _),
                     $"Issue key '{key}' must be valid");
             }
-
-            yield return CleanupFixture(FixtureRoot);
         }
 
         // -------------------------------------------------------------------
@@ -247,16 +249,6 @@ namespace UnityOpenMcpVerify.Tests
                 yaml = new Regex(Regex.Escape(marker)).Replace(yaml, edge, 1);
 
             File.WriteAllText(prefabPath, yaml);
-        }
-
-        static System.Collections.IEnumerator CleanupFixture(string root)
-        {
-            if (AssetDatabase.IsValidFolder(root))
-            {
-                AssetDatabase.DeleteAsset(root);
-                AssetDatabase.Refresh();
-            }
-            yield return null;
         }
 
         static void EnsureDirectory(string path)

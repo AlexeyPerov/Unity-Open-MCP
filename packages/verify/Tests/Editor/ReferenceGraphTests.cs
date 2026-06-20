@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using UnityOpenMcpVerify.References;
 using UnityEditor;
@@ -6,17 +7,35 @@ using UnityEngine;
 
 namespace UnityOpenMcpVerify.Tests
 {
-    // TEMPORARILY DISABLED (heavy) — re-enable as part of T17.3 (EditMode
-    // test-suite speed-up, specs/execution/M17/execution-plan-3-editmode-test-perf.md).
-    // ReferenceGraph.Find walks all assets referencing the Standard
-    // shader (full-project traversal). [Explicit] excludes from suite runs
-    // until optimized; still runnable by name.
-    [Explicit]
     public class ReferenceGraphTests
     {
         const string TestFolder = "Assets/__RefGraphTestTmp";
         const string MatAPath = TestFolder + "/MatA.mat";
         const string MatBPath = TestFolder + "/MatB.mat";
+
+        // Reuse one scoped-options instance across the tests that want to
+        // narrow the reverse-dependency walk to the fixture folder. Building
+        // the reverse map is the single expensive step in ReferenceGraph.Find
+        // — scoping it from AssetDatabase.GetAllAssetPaths() (every URP
+        // shader, package script, demo asset) down to two test materials
+        // collapses it from seconds to milliseconds.
+        static readonly ReferenceGraphOptions ScopedOptions = new ReferenceGraphOptions
+        {
+            ScanRoots = new List<string> { TestFolder }
+        };
+
+        // The shader used to build test materials MUST resolve to a real
+        // .shader asset file, because AssetDatabase.GetDependencies() only
+        // reports dependencies that live on disk. Built-in shaders (e.g.
+        // "Standard", which resolves to the virtual "Resources/unity_builtin_extra"
+        // blob) are NOT reported as dependencies, so the reverse-lookup tests
+        // cannot see the material→shader edge through them. URP projects ship
+        // "Universal Render Pipeline/Lit" as a real file under the package
+        // cache; non-URP projects fall back to the legacy "Standard" shader
+        // only if it happens to resolve to a real file. Resolve at setup so
+        // the whole fixture skips cleanly if neither is available.
+        static Shader _shader;
+        static string _shaderPath;
 
         [OneTimeSetUp]
         public void OneTimeSetUp()
@@ -24,17 +43,39 @@ namespace UnityOpenMcpVerify.Tests
             if (!AssetDatabase.IsValidFolder(TestFolder))
                 AssetDatabase.CreateFolder("Assets", "__RefGraphTestTmp");
 
-            var shader = Shader.Find("Standard");
-            Assert.IsNotNull(shader, "Standard shader not found — cannot create test materials.");
+            ResolveRealAssetShader();
+            Assume.That(_shader, Is.Not.Null,
+                "No real-asset shader available — skipping fixture (URP/Lit or Standard required).");
 
-            var matA = new Material(shader);
+            var matA = new Material(_shader);
             AssetDatabase.CreateAsset(matA, MatAPath);
 
-            var matB = new Material(shader);
+            var matB = new Material(_shader);
             AssetDatabase.CreateAsset(matB, MatBPath);
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
+        }
+
+        static void ResolveRealAssetShader()
+        {
+            // Prefer URP/Lit (always a real .shader file in URP projects — the
+            // demo is URP). Fall back to Standard only when it resolves to a
+            // real on-disk path (non-URP / built-in-shaders-extracted setup).
+            foreach (var name in new[] { "Universal Render Pipeline/Lit", "Standard" })
+            {
+                var sh = Shader.Find(name);
+                if (sh == null) continue;
+                var path = AssetDatabase.GetAssetPath(sh);
+                if (string.IsNullOrEmpty(path)) continue;
+                // Built-in shaders resolve to this virtual blob, not a file —
+                // GetDependencies cannot trace through them.
+                if (path == "Resources/unity_builtin_extra") continue;
+                if (!System.IO.File.Exists(path)) continue;
+                _shader = sh;
+                _shaderPath = path;
+                return;
+            }
         }
 
         [OneTimeTearDown]
@@ -47,7 +88,7 @@ namespace UnityOpenMcpVerify.Tests
         [Test]
         public void Find_ByPath_SetsQueriedFields()
         {
-            var graph = ReferenceGraph.Find(MatAPath);
+            var graph = ReferenceGraph.Find(MatAPath, ScopedOptions);
             Assert.AreEqual(MatAPath, graph.QueriedAssetPath);
             Assert.AreEqual(AssetDatabase.AssetPathToGUID(MatAPath), graph.QueriedAssetGuid);
         }
@@ -56,7 +97,7 @@ namespace UnityOpenMcpVerify.Tests
         public void Find_ByGuid_ReturnsSameAsset()
         {
             var guid = AssetDatabase.AssetPathToGUID(MatAPath);
-            var graph = ReferenceGraph.Find(guid);
+            var graph = ReferenceGraph.Find(guid, ScopedOptions);
             Assert.AreEqual(MatAPath, graph.QueriedAssetPath);
             Assert.AreEqual(guid, graph.QueriedAssetGuid);
         }
@@ -89,7 +130,13 @@ namespace UnityOpenMcpVerify.Tests
                 return;
             }
 
-            var graph = ReferenceGraph.Find(prefabPath);
+            // A prefab referenced by a scene requires scanning the scene's
+            // folder; the test fixtures themselves don't contain it.
+            var options = new ReferenceGraphOptions
+            {
+                ScanRoots = new List<string> { "Assets/Scenes" }
+            };
+            var graph = ReferenceGraph.Find(prefabPath, options);
             Assert.Contains(scenePath, graph.ReferencedByPaths,
                 $"Expected {scenePath} to reference {prefabPath}.");
         }
@@ -106,8 +153,12 @@ namespace UnityOpenMcpVerify.Tests
                 return;
             }
 
+            var options = new ReferenceGraphOptions
+            {
+                ScanRoots = new List<string> { "Assets/Scenes" }
+            };
             var guid = AssetDatabase.AssetPathToGUID(prefabPath);
-            var graph = ReferenceGraph.Find(guid);
+            var graph = ReferenceGraph.Find(guid, options);
             Assert.Contains(scenePath, graph.ReferencedByPaths,
                 $"Expected {scenePath} when querying prefab by GUID.");
         }
@@ -115,17 +166,18 @@ namespace UnityOpenMcpVerify.Tests
         [Test]
         public void Find_ShaderReferencedByTestMaterials()
         {
-            var shader = Shader.Find("Standard");
-            Assume.That(shader, Is.Not.Null, "Standard shader not available.");
+            Assume.That(_shaderPath, Is.Not.Null,
+                "No real-asset shader resolved at fixture setup — cannot test reverse shader lookup.");
 
-            var shaderPath = AssetDatabase.GetAssetPath(shader);
-            Assume.That(string.IsNullOrEmpty(shaderPath), Is.False, "Cannot resolve Standard shader path.");
-
-            var graph = ReferenceGraph.Find(shaderPath);
+            // Scoped scan: only the two test materials are walked, but the
+            // shader path still resolves because each material's GetDependencies
+            // lists it (it's a real .shader file) and Find records reverse
+            // entries for every dependency encountered.
+            var graph = ReferenceGraph.Find(_shaderPath, ScopedOptions);
             Assert.Contains(MatAPath, graph.ReferencedByPaths,
-                $"Expected {MatAPath} to depend on {shaderPath}.");
+                $"Expected {MatAPath} to depend on {_shaderPath}.");
             Assert.Contains(MatBPath, graph.ReferencedByPaths,
-                $"Expected {MatBPath} to depend on {shaderPath}.");
+                $"Expected {MatBPath} to depend on {_shaderPath}.");
         }
     }
 }

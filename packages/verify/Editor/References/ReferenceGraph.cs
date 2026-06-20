@@ -50,7 +50,41 @@ namespace UnityOpenMcpVerify.References
 
         private static Dictionary<string, List<string>> BuildReverseDependencyMap(ReferenceGraphOptions options)
         {
-            var assetPaths = AssetDatabase.GetAllAssetPaths().ToList();
+            // AssetDatabase.GetAllAssetPaths() returns every asset in the
+            // project AND every package asset (URP shaders, package scripts,
+            // etc.). Walking all of them with GetDependencies() is the single
+            // most expensive step in ReferenceGraph.Find — for a URP project
+            // it scans thousands of package assets that can never reference a
+            // user fixture.
+            //
+            // ScanRoots narrows the *source* set (which assets we compute
+            // forward-dependencies for) to one or more folders. A target can
+            // still live outside the roots: we record a reverse entry for every
+            // dependency we encounter, so e.g. querying the built-in Standard
+            // shader after scanning only a test fixture folder still finds the
+            // fixture's materials as referencers. This is the difference
+            // between scanning ~thousands of assets and ~handful.
+            List<string> assetPaths;
+            if (options.ScanRoots != null && options.ScanRoots.Count > 0)
+            {
+                assetPaths = new List<string>();
+                foreach (var root in options.ScanRoots)
+                {
+                    if (string.IsNullOrEmpty(root)) continue;
+                    var guids = AssetDatabase.FindAssets(string.Empty, new[] { root });
+                    foreach (var g in guids)
+                    {
+                        var p = AssetDatabase.GUIDToAssetPath(g);
+                        if (!string.IsNullOrEmpty(p))
+                            assetPaths.Add(p);
+                    }
+                }
+            }
+            else
+            {
+                assetPaths = AssetDatabase.GetAllAssetPaths().ToList();
+            }
+
             var reverseDeps = new Dictionary<string, List<string>>(assetPaths.Count);
             foreach (var p in assetPaths)
                 reverseDeps[p] = new List<string>();
@@ -63,7 +97,15 @@ namespace UnityOpenMcpVerify.References
 
                 foreach (var dep in deps)
                 {
-                    if (reverseDeps.TryGetValue(dep, out var list) && dep != assetPaths[i])
+                    // The dependency may live outside the scan roots (e.g. a
+                    // built-in shader). Create a reverse entry for it on demand
+                    // so lookups by the queried asset path still resolve.
+                    if (!reverseDeps.TryGetValue(dep, out var list))
+                    {
+                        list = new List<string>();
+                        reverseDeps[dep] = list;
+                    }
+                    if (dep != assetPaths[i])
                         list.Add(assetPaths[i]);
                 }
             }
@@ -211,5 +253,13 @@ namespace UnityOpenMcpVerify.References
         public bool ScanAssetReferences;
         public bool ScanTerrainData;
         public bool BinarySerialization;
+
+        // When non-empty, the reverse-dependency scan is restricted to assets
+        // under these folder roots instead of AssetDatabase.GetAllAssetPaths()
+        // (which would walk every package asset too). A queried asset that
+        // lives outside the roots is still resolvable: every dependency we
+        // encounter gets a reverse entry on demand. Used by tests to scope
+        // scans to a fixture folder and avoid a full-project walk.
+        public List<string> ScanRoots;
     }
 }
