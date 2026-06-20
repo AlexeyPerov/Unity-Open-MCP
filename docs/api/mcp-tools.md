@@ -1,771 +1,89 @@
-# MCP Tools
+# MCP Tools API
 
-MCP tools are registered in `mcp-server/src/tools/index.ts` and exposed by the stdio server in `mcp-server/src/index.ts`.
+This page summarizes the MCP tool surface exposed by `unity-open-mcp`.
 
-> **CLI surface.** The same tool set is reachable from a thin CLI
-> (`unity-open-mcp run-tool <name>`), which shares the routing layer with the
-> stdio server. A CLI invocation returns the same JSON an MCP client would
-> receive. See [Manual setup → CLI for CI / automation](../manual-setup.md#cli-for-ci--automation)
-> for command shapes and examples.
+For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open_mcp_capabilities`.
 
-## Quick lookup
+## Tool families
 
-| Question | Section |
-|---|---|
-| Which tool names are available? | Tool catalog |
-| How do I discover everything at once? | Capability discovery |
-| How route selection works? | Route policy |
-| Which tools can run in batch? | Batch support |
-| Which tools are offline-first? | Offline/compressible reads |
+- **Core runtime**: ping, C# execution, method invoke, menu calls, reflection, compile checks, editor status.
+- **Gate and validation**: validate edit, checkpoints, deltas, reference scan, path scan, regression baseline/check, fixes.
+- **Asset intelligence**: reserialize, read/search/list assets.
+- **Agent senses**: tests, screenshots, console read, profiler capture, memory/rendering snapshots, spatial queries, event pull.
+- **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers.
+- **Extension packs**: navigation, input system, probuilder, particle system, animation.
+- **Discovery utilities**: capabilities, rules list, skill generation.
 
-## Tool catalog
+## Discover tools programmatically
 
-### Core tools (M2 + M2.5)
+Call `unity_open_mcp_capabilities` first.
 
-- `unity_open_mcp_ping`
-- `unity_open_mcp_execute_csharp`
-- `unity_open_mcp_invoke_method`
-- `unity_open_mcp_execute_menu`
-- `unity_open_mcp_find_members`
-- `unity_open_mcp_compile_check`
-- `unity_open_mcp_read_compile_errors`
-- `unity_open_mcp_editor_status`
-
-### Gate and validation tools (M3 + M5)
-
-- `unity_open_mcp_validate_edit`
-- `unity_open_mcp_checkpoint_create`
-- `unity_open_mcp_delta`
-- `unity_open_mcp_find_references`
-- `unity_open_mcp_scan_paths`
-- `unity_open_mcp_apply_fix`
-- `unity_open_mcp_scan_all`
-- `unity_open_mcp_baseline_create`
-- `unity_open_mcp_regression_check`
-
-### Asset intelligence tools (M9)
-
-- `unity_open_mcp_reserialize`
-- `unity_open_mcp_read_asset`
-- `unity_open_mcp_search_assets`
-- `unity_open_mcp_list_assets`
-
-### Agent senses tools (M10)
-
-- `unity_senses_run_tests` — EditMode + PlayMode test runner with per-test pass/fail, filter by assembly/namespace/class/method, domain-reload-safe PlayMode via file handoff.
-- `unity_senses_screenshot` — Capture Scene view, Game view, or isolated 2×2 composite (Front/Right/Back/Top) of a single GameObject with layer culling. Returns saved PNG file path.
-- `unity_senses_read_console` — Read Unity console entries via reflection on internal `LogEntries`. Filter by type (error/warning/log/all), user-code stack filter, optional clear, token-bounded output.
-- `unity_senses_profiler_capture` — Read the Unity Profiler frame hierarchy via `ProfilerDriver.GetHierarchyFrameDataView`. Drill-down by parent ID / root name-substring / depth, multi-frame averaging, token-bounded top-N by self/total/calls.
-- `unity_senses_profiler_memory` — Live memory allocator stats (allocated/reserved/unused/temp/managed heap) with optional GC first.
-- `unity_senses_profiler_rendering` — Rendering environment batch: GPU/SystemInfo, active render pipeline, QualitySettings, screen resolution, target frame rate, Time stats.
-- `unity_senses_spatial_query` — Physics-based spatial reasoning (raycast / overlap / bounds / ground_check / nearest) against the live scene. Targets addressed by instance_id/path/name; returns hit object instanceId/name/path.
-
-### Capability discovery
-
-- `unity_open_mcp_capabilities` — Returns the full capability surface in one call: every tool with its input schema and route policy, every verify rule with applicable asset kinds and issue severities, and every available fix. Each capability carries an `implemented` boolean; planned-but-unbuilt items return with `status: "planned"` and guidance instead of failing. Call this first to learn what is available.
-- `unity_open_mcp_list_rules` — Purpose-built rule discovery. Lists every verify rule (implemented + planned) with applicable asset kinds/extensions, derived `defaultSeverity` (worst severity the rule can emit), flat `availableFixIds`, and issue codes. Filter by `asset_kind` / `extension` / `implemented_only`. Routes locally from the versioned rule catalog — never hits the live bridge or batch Unity. Use this before `scan_paths` / `validate_edit` to learn which rules apply to a given asset type without trial-and-error.
-- `unity_open_mcp_generate_skill` — Generates a project-specific SKILL.md reflecting the actual project state: Unity version, installed packages (including bridge/verify versions), available tools and verify rules, key MonoBehaviour/ScriptableObject types discovered from source, and the mutate→gate→fix workflow. Set `write: true` to persist the file into `.claude/skills/`, `.cursor/skills/`, `.opencode/skills/`, or `.agents/skills/`. Regenerate after package or script changes.
-
-### Streaming & event pull (M13)
-
-- `unity_senses_pull_events` — Drains incremental bridge events (console logs + editor-state transitions) since the previous call. The first call opens a server-side SSE subscription to the bridge's `GET /events` stream; later calls return only new events. Use this after `execute_csharp` / mutations to stream console output without polling `/ping` or re-reading the full console. Each event carries `seq`, `ts`, `type` (`log` | `editor_state`), and type-specific fields (`logType`/`message`/`stack` for logs, `state`/`isCompiling`/`isPlaying` for state). `dropped` reports events evicted from the queue before this pull; `connected` reports the SSE reader state. Live-only — returns `bridge_unavailable` when the bridge is down.
-
-### Typed editor tools (M16)
-
-M16 adds a curated typed surface on top of existing meta-tools. Duplicates are intentionally avoided:
-- keep `unity_open_mcp_execute_csharp`, `unity_open_mcp_invoke_method`, `unity_open_mcp_find_members` as core
-- keep M9 read/list/search/reserialize as the asset intelligence baseline
-- keep M10 sense tools for screenshots/test run/profiler capture/memory/rendering/spatial
-
-The full planned surface (~97 tools) is enumerated by `unity_open_mcp_capabilities` (each entry carries `status: "planned"` until implemented). The source of truth is `mcp-server/src/capabilities/build-capabilities.ts`, synchronized with the per-plan tables in `specs/execution/M16/execution-plan-*.md`. Planned categories:
-
-- **Project & Asset Management:** typed asset CRUD (`assets_create_folder`, `assets_copy`, `assets_move`, `assets_delete`, `assets_refresh`), material helpers (`material_create`, `material_get/set_property`, `material_get/set_keywords`, `material_set_shader`), shader reads (`shader_list_all`, `shader_get_data`), and prefab lifecycle (`prefab_instantiate/create/open/close/save` + `prefab_apply/revert/unpack/get_overrides/status`) — **implemented in Plan 1**
-- **GameObject & Components:** typed hierarchy/component lifecycle (`gameobject_create/destroy/duplicate/find/modify/set_parent`, `component_add/destroy/get/modify/list_all`) — **implemented in Plan 2**
-- **Scene Management:** typed scene lifecycle/data (`scene_create/open/save/unload/set_active/list_opened`, `scene_get_data`, `scene_get_dirty_summary`, `scene_focus`) — **implemented in Plan 3**
-- **Package Manager:** `package_list`, `package_search`, `package_add`, `package_remove`, `package_get_info`, `package_get_dependencies`, `package_check` — **implemented in Plan 4**
-- **Console + Editor state/selection/tags/layers/undo:** `console_clear`, `console_log`, `editor_set_state`, `selection_get`, `selection_set`, `editor_undo`, `editor_redo`, `editor_get_tags`, `editor_get_layers`, `editor_add_tag`, `editor_add_layer` — **implemented in Plan 5**
-- **Reflection/scripts/object data:** `type_schema`, `script_read`, `script_write`, `script_delete`, `object_get_data`, `object_modify` — **implemented in Plan 6**
-- **Profiler & Diagnostics session:** `profiler_start/stop/get_status`, `profiler_get/set_config`, `profiler_list_modules`, `profiler_enable_module`, `profiler_clear_data`, `profiler_save_data`, `profiler_load_data`, `profiler_get_script_stats` — **implemented in Plan 7** (non-duplicate with M10 capture/memory/rendering)
-- **Gate intelligence:** `impact_preview`, `gate_budget_estimate`, `mutation_explain` — **implemented in Plan 8**
-- **Project configuration & build:** build pipeline (`build_get_targets`, `build_get/set_target`, `build_get/set_scenes`, `build_start`, `build_get/set_defines`) and project settings (`settings_get/set_player/quality/physics/lighting`) — **implemented in Plan 9**
-
-#### Project & Asset Management (M16 Plan 1 — implemented)
-
-Mutating members run the full gate path with `paths_hint`; read-only members are gate-free (returned as direct JSON without the gate envelope). Asset/material/prefab mutators use `lifecycle: "editor_settle"` (wait for asset refresh); the read-only members use `lifecycle: "none"`.
-
-Folder / filesystem asset operations:
-
-- `unity_open_mcp_assets_create_folder` — Create folders under Assets/. `paths_hint` enumerates each new folder path.
-- `unity_open_mcp_assets_copy` — Copy asset(s) (`{source, destination}` pairs). `paths_hint` = destinations.
-- `unity_open_mcp_assets_move` — Move / rename asset(s). `paths_hint` should include BOTH source and destination paths so the gate can flag dangling references.
-- `unity_open_mcp_assets_delete` — Delete asset(s). `paths_hint` = deleted paths. Prefer `unity_open_mcp_find_references` first.
-- `unity_open_mcp_assets_refresh` — Refresh AssetDatabase. Light mutation; when `whole_project: true` (default), `paths_hint` may be omitted (refresh is whole-project by nature).
-
-Material helpers (resolved by `asset_path` (.mat) or `instance_id` of a scene GameObject whose Renderer.sharedMaterial is read, or the Material instance directly):
-
-- `unity_open_mcp_material_create` — Create a `.mat` at a path with a named shader (defaults to URP/Lit or Standard). `paths_hint` = new .mat path.
-- `unity_open_mcp_material_get_properties` — List all shader properties with values. Read-only, gate-free, token-bounded by `max_results`.
-- `unity_open_mcp_material_set_property` — Set one property; `type` infers value kind (color/float/int/vector/texture). Undo-recorded. `paths_hint` = .mat or scene path.
-- `unity_open_mcp_material_get_keywords` — List enabled shader keywords. Read-only, gate-free.
-- `unity_open_mcp_material_set_keyword` — Enable/disable a keyword. Undo-recorded. `paths_hint` = .mat or scene path.
-- `unity_open_mcp_material_set_shader` — Swap shader (gate delta surfaces missing-property references). Undo-recorded. `paths_hint` = .mat or scene path.
-
-Shader helpers (read-only, gate-free):
-
-- `unity_open_mcp_shader_list_all` — List shader assets with name + asset path. Token-bounded by `max_results`.
-- `unity_open_mcp_shader_get_data` — Read shader properties, attributes, subshader info, and compile errors (`errors[]` folds UCP `shader/errors`). Resolve by `asset_path` or `name`.
-
-Prefab lifecycle (scene instances resolved by `instance_id` > `path` > `name`, matching `spatial_query`):
-
-- `unity_open_mcp_prefab_instantiate` — Instantiate a prefab into the active scene. Returns the new instance's instanceId/name/path.
-- `unity_open_mcp_prefab_create` — Create prefab (or variant) asset from a scene GameObject.
-- `unity_open_mcp_prefab_open` / `prefab_close` / `prefab_save` — Prefab edit stage lifecycle. `close`/`save` are no-ops with a note when no stage is open.
-- `unity_open_mcp_prefab_apply` / `prefab_revert` / `prefab_unpack` — Apply instance overrides to the asset / revert to the asset / unpack into a plain GameObject.
-- `unity_open_mcp_prefab_get_overrides` — Read-only: list propertyModifications / addedComponents / removedComponents on an instance. Gate-free.
-- `unity_open_mcp_prefab_status` — Read-only: report isPrefab/isInstance/isRoot/hasOverrides + source asset. Gate-free.
-
-#### GameObject & Components (M16 Plan 2 — implemented)
-
-Mutating members run the full gate path with `paths_hint`; read-only members are gate-free. GameObjects are scene-backed, so `paths_hint` for every mutating tool here is the active scene path (the GameObject is a scene side-effect). All mutating members are undo-recorded and mark the active scene dirty. Scene instances resolved by `instance_id` > `path` > `name`, matching `spatial_query`.
-
-GameObject lifecycle:
-
-- `unity_open_mcp_gameobject_create` — Create a new GameObject in the active scene (optionally parented and pre-positioned). Pass `primitive_type` (Cube/Sphere/Capsule/Cylinder/Plane/Quad) to spawn a primitive. `paths_hint` = destination scene path.
-- `unity_open_mcp_gameobject_destroy` — Destroy a GameObject (and its children). `paths_hint` = scene path containing the target.
-- `unity_open_mcp_gameobject_duplicate` — Duplicate a GameObject preserving parent + transform. `paths_hint` = scene path containing the source.
-- `unity_open_mcp_gameobject_modify` — Update name / tag / layer / active / transform in one call. Only provided fields are touched. Note: target name is `name_target` so `name` stays free for the new value. `paths_hint` = scene path containing the target.
-- `unity_open_mcp_gameobject_set_parent` — Reparent a GameObject; cycle-safe (refuses cycles). `paths_hint` = scene path containing the child.
-- `unity_open_mcp_gameobject_find` — Read-only: targeted lookup (instance_id/path/name → single object) OR list mode (no target) with optional `name_contains` / `tag` / `component` / `root_only` filters. Each result includes instanceId/name/path/active/tag/layer/scene/transform/components. Gate-free, token-bounded by `max_results`.
-
-Component lifecycle (host resolved by `instance_id` > `path` > `name`; component resolved by `component_instance_id` or `type_name`):
-
-- `unity_open_mcp_component_add` — Add one or more components by type name (full name preferred, class-name fallback). Per-type errors are accumulated. `paths_hint` = scene path containing the host.
-- `unity_open_mcp_component_destroy` — Remove components by type name. `paths_hint` = scene path containing the host.
-- `unity_open_mcp_component_modify` — Apply per-path serialized patches via `SerializedObject` (`fields: [{path, value, type?}]`). Per-entry errors are accumulated. Use `component_get` first to discover paths. `paths_hint` = scene path containing the host.
-- `unity_open_mcp_component_get` — Read-only: serialized fields + (optional) public properties for one component. Token-bounded by `max_fields`. Gate-free.
-- `unity_open_mcp_component_list_all` — Read-only: catalog of attachable component types from loaded assemblies (built-in + project MonoBehaviours). Token-bounded by `max_results`. Use `query` to narrow by namespace/class-name. Gate-free.
-
-#### Scene Management (M16 Plan 3 — implemented)
-
-Mutating members run the full gate path with `paths_hint` scoped to the scene asset path (or scene hierarchy path for `scene_focus`); read-only members are gate-free (returned as direct JSON without the gate envelope). `scene_open` is `lifecycle: "restart_then_settle"` (Single-mode open can lose unsaved changes in currently-open scenes — the active-scene dirty guard preflights it; pass `ignore_scene_dirty: true` to opt out); the other mutators use `lifecycle: "editor_settle"`; the read-only members use `lifecycle: "none"`.
-
-Scene lifecycle:
-
-- `unity_open_mcp_scene_create` — Create a new scene asset and save it at a `.unity` path (opening it). `setup: empty|default`, `mode: single|additive`. `paths_hint` = new `.unity` path.
-- `unity_open_mcp_scene_open` — Open a scene asset in Single or Additive mode. `paths_hint` = target `.unity` path (include currently-open paths when `mode: 'single'` would close them). Pass `ignore_scene_dirty: true` to skip the active-scene dirty guard.
-- `unity_open_mcp_scene_save` — Save an opened scene back to its asset (or a new `path`). `name` optional (active scene when omitted). Idempotent: `saved: false` with a note when the scene was not dirty. `paths_hint` = destination `.unity` path.
-- `unity_open_mcp_scene_unload` — Unload an opened scene (without saving — call `scene_save` first if needed). Refuses the last opened scene (open another first). `paths_hint` = scene asset path (or name).
-- `unity_open_mcp_scene_set_active` — Mark an opened scene as active. The target must already be opened (`scene_open` first). Idempotent no-op when already active. `paths_hint` = scene asset path.
-- `unity_open_mcp_scene_list_opened` — Read-only: every opened scene as a shallow snapshot (name/path/isDirty/isLoaded/rootCount/buildIndex/isActive) + the active-scene pointer. Gate-free.
-
-Scene data:
-
-- `unity_open_mcp_scene_get_data` — Read-only: compact, drill-down hierarchy of an opened scene. `detail: summary|normal|verbose` (default `summary` = scene overview + root roster, no nested children; `normal` = + nested children to `depth` with active/tag/layer/components; `verbose` = + per-node instance_id + transform). `max_nodes` caps total nodes (`truncated` reports the overflow; `moreHidden` reports per-parent hidden counts). Supersedes the standalone M10 scene snapshot — reflects unsaved editor state, unlike `read_asset` on the `.unity` file. Gate-free.
-- `unity_open_mcp_scene_get_dirty_summary` — Read-only: per-scene dirty flag + rootCount across every opened scene, with a `dirtySceneCount` tally. Use before `scene_save` / `scene_unload` / `scene_open`. Gate-free.
-- `unity_open_mcp_scene_focus` — Frame a GameObject in the SceneView camera (computes combined renderer+collider bounds); optional `axis: top|bottom|front|back|left|right` and `size`. Returns the resulting pivot/camera position/rotation/size. Resolve target by `instance_id` > `path` > `name`. `paths_hint` = scene path containing the target.
-
-#### Package Manager (M16 Plan 4 — implemented)
-
-Mutating members (`package_add` / `package_remove`) run the full gate path with `paths_hint` = `["Packages/manifest.json"]` (packages-lock.json is touched implicitly — do not list it separately); they use `lifecycle: "restart_then_settle"` because UPM resolution can install/remove assemblies and force a domain reload, and the active-scene dirty guard preflights them (pass `ignore_scene_dirty: true` to opt out). Read-only members (`package_list` / `package_search` / `package_get_info` / `package_get_dependencies` / `package_check`) are gate-free (returned as direct JSON without the gate envelope) and use `lifecycle: "none"`.
-
-- `unity_open_mcp_package_list` — Read-only: list installed UPM packages (name/displayName/version/packageId/source/resolvedPath/description/category/versions/registry/dependencies). Filter by `source` (registry/embedded/local/git/builtin/localtarball), `name_filter` substring (with exact-match priority), `direct_dependencies_only` (manifest.json entries); `include_indirect: true` includes transitive deps; `offline: true` (default) uses cached resolution. Token-bounded by `max_results`. Gate-free.
-- `unity_open_mcp_package_search` — Read-only: search the UPM registry + installed local packages by query substring. Returns install status + installed version + top-5 compatible versions per result. Prioritized: exact name → exact displayName → name/displayName/description substring. `offline: true` (default) uses cached registry data; `offline: false` hits the live registry first for exact matches. Token-bounded by `max_results`. Gate-free.
-- `unity_open_mcp_package_add` — Install a package from the registry, a Git URL, a Git URL with branch/tag (`#v1.0.0`), a local path (`file:../MyPackage`), or a local tarball. Mutating; `paths_hint` = `["Packages/manifest.json"]`.
-- `unity_open_mcp_package_remove` — Uninstall a package by name (trailing `@version` is stripped). Refuses packages that are not installed; built-in and dependency-of-other packages cannot be removed. Mutating; `paths_hint` = `["Packages/manifest.json"]`.
-- `unity_open_mcp_package_get_info` — Read-only: inspect one package by name / packageId / displayName. Looks up installed first (`Client.List`); falls back to a live registry search when not installed and `offline: false`. Returns the full package descriptor + `installed` boolean. Gate-free.
-- `unity_open_mcp_package_get_dependencies` — Read-only: top-level dependency list from `Packages/manifest.json` parsed directly (no UPM request). Each entry is `{ name, reference }` where `reference` is the version pin / Git URL / file path / embedded marker as written. Use `package_list` with `include_indirect: true` for the resolved graph. Gate-free.
-- `unity_open_mcp_package_check` — Read-only: presence + pinned reference for one package id against `Packages/manifest.json` (read directly, no UPM request). Accepts a versioned input — the check runs against the name half. Returns `{ installed, reference }`. Gate-free.
-
-Workflow: `package_check` (fast manifest hit) → if not installed, `package_search` to discover the id → `package_add` with `paths_hint: ["Packages/manifest.json"]` → after the post-add compile settles, `package_get_info` to confirm the resolved version. Before `package_remove`, run `package_get_info` to confirm the package is present and not depended-on by others.
-
-#### Console + Editor state / selection / undo / tags / layers (M16 Plan 5 — implemented)
-
-Most of these mutate editor state but write NO assets, so the gate (which validates asset-reference fallout) has nothing to validate — they route as gate-free direct-response tools (returned as direct JSON without the gate envelope) and use `lifecycle: "none"`. The exceptions are `editor_add_tag` / `editor_add_layer`, which rewrite `ProjectSettings/TagManager.asset` and run the full gate path with `paths_hint = ["ProjectSettings/TagManager.asset"]` and `lifecycle: "editor_settle"`.
-
-Console:
-
-- `unity_open_mcp_console_clear` — Clear the Editor console (reflects `LogEntries.Clear`). Mutates console state only (no asset writes); gate-free. Complements `unity_senses_read_console` (the read side, which can also clear via `clear: true`).
-- `unity_open_mcp_console_log` — Write a `log` / `warning` / `error` entry from the agent (`level` controls `Debug.Log` / `LogWarning` / `LogError`). Optional `context_instance_id` (scene GameObject/Component) or `context_asset_path` attaches a `UnityEngine.Object` so the Console pings it on click. Mutates console state only; gate-free. The entry surfaces in the next `read_console` / `pull_events` call.
-
-Editor state:
-
-- `unity_open_mcp_editor_set_state` — Set play / pause / stop. Complements `unity_open_mcp_editor_status` (the read side). Writes no assets; gate-free and returns the post-transition state directly. Entering play mode is disruptive — when a loaded scene has unsaved changes Unity's native save modal can interrupt the flow, so the tool runs the active-scene dirty guard inline and refuses with code `scene_dirty`; pass `ignore_scene_dirty: true` to accept the risk. `play` refuses when already playing unless `force: true`; `pause` toggles pause (no-op when not playing); `stop` exits play mode (no-op when not playing). Poll `editor_status` to confirm the transition settled.
-
-Selection:
-
-- `unity_open_mcp_selection_get` — Read-only: report the current selection. Returns the active object (`instanceId` / `name` / `type` / `assetPath` when asset-backed, plus `path` for scene GameObjects) and the full `selection[]` array. Token-bounded by `max_results`. Gate-free.
-- `unity_open_mcp_selection_set` — Set the selection. Mutates selection state only (no asset writes); gate-free. Resolve a single target by `instance_id` (scene object) > `asset_path` (asset on disk) > `path` (hierarchy) > `name`, or pass a `targets[]` array for multi-selection (each entry resolves by the same fields; `asset_path` wins for assets). `clear: true` (or an empty target set) clears the selection. Returns `target_not_found` when none of the provided targets resolved.
-
-Undo / redo:
-
-- `unity_open_mcp_editor_undo` — Perform `Undo.PerformUndo` `steps` times (default 1). Mutates undo state only; gate-free. Surfaces the post-undo active selection so the agent knows what reverted. Works against every undo-recorded action the bridge takes plus human actions.
-- `unity_open_mcp_editor_redo` — Perform `Undo.PerformRedo` `steps` times (default 1). Mutates undo state only; gate-free. Surfaces the post-redo active selection.
-
-Tags / layers:
-
-- `unity_open_mcp_editor_get_tags` — Read-only: list every configured tag (built-in + user). Gate-free. Use before `gameobject_modify` (tag) or `editor_add_tag`.
-- `unity_open_mcp_editor_get_layers` — Read-only: list every non-empty layer slot (`index` 0–31 + `name`). Gate-free. Use before `gameobject_modify` (layer) or `editor_add_layer`.
-- `unity_open_mcp_editor_add_tag` — Add a user tag. Mutating; `paths_hint = ["ProjectSettings/TagManager.asset"]`. Idempotent (existing tag → `saved: false`); refuses reserved built-in names (`Untagged`, `Respawn`, `Finish`, `EditorOnly`, `MainCamera`, `Player`, `GameController`).
-- `unity_open_mcp_editor_add_layer` — Add a user layer. Mutating; `paths_hint = ["ProjectSettings/TagManager.asset"]`. By default picks the first empty slot in 8–31 (0–7 are reserved for built-ins); pass `slot` (8–31) to assign a specific index. Refuses reserved built-in names (`Default`, `TransparentFX`, `IgnoreRaycast`, `Water`, `UI`), occupied slots, and the no-free-slot case (`no_free_slot`).
-
-Workflow: `editor_get_tags` / `editor_get_layers` to discover current state → `gameobject_modify` to apply a tag/layer to objects → `editor_add_tag` / `editor_add_layer` to add new ones when needed. For selection: `selection_get` to read the human's current click → mutate via the typed tools → `selection_set` to drive the editor focus (pairs with `scene_focus`).
-
-#### Reflection / scripts / object data (M16 Plan 6 — implemented)
-
-Read-only members (`type_schema`, `script_read`, `object_get_data`) are gate-free direct-response tools; mutating members (`script_write`, `script_delete`, `object_modify`) run the full gate path with `paths_hint` scoped to the affected `.cs` path / asset / scene. Plan 6 also enhances the core reflection tools in place — `find_members` now returns structured per-member metadata (every overload listed separately, `returnType` / `parameters[]` / `isStatic` / `isGeneric` / `genericParameters[]` for methods, `propertyType` / `canRead` / `canWrite` for properties) with an `include_signatures` toggle; `invoke_method` accepts `generic_arg_types` (to call generic methods like `GetComponent<Rigidbody>`) and `arg_type_names` (to disambiguate overloads). These enhancements do not duplicate `execute_csharp` / `invoke_method` / `find_members` — they extend them.
-
-Type schema:
-
-- `unity_open_mcp_type_schema` — Read-only: structured member schema for any loadable C# type. Returns `fields[]` / `properties[]` (on by default) plus optional `methods[]` / `constructors[]` (off by default) and `enumValues[]` for enums. Each member carries a flat `signature` AND structured fields (`memberType`, `declaringType`, `isStatic`, `canRead`/`canWrite` for properties, `returnType`/`parameters[]`/`isGeneric`/`genericParameters[]` for methods). Resolve by full name (preferred) or class-name fallback; `assembly_name` disambiguates. Use this to plan `invoke_method` / `object_modify` without trial-and-error. Token-bounded by `max_members`.
-
-Script files:
-
-- `unity_open_mcp_script_read` — Read-only: read a `.cs` file from disk with optional line slicing. Returns `totalLines`, `startLine`, `endLine`, `count`, `truncated`, and a numbered `lines[]` array. `start_line` / `end_line` (1-based, inclusive) slice; `max_lines` (default 2000) is a hard cap. Paths must be project-relative, end in `.cs`, and live under the project root (`..` and absolute-outside paths are refused). Prefer this over `execute_csharp` `File.ReadAllText`.
-- `unity_open_mcp_script_write` — Mutating: create or overwrite a `.cs` file. `paths_hint = ["<the .cs path>"]`. By default refuses to overwrite (`overwrite: true` to overwrite). `validate: true` (default) Roslyn-compiles the source first; a parse failure returns `validation_failed` and the file is NOT written (diagnostics are echoed as `validationDiagnostics`). Set `validate: false` for partial fragments. After write, `AssetDatabase.ImportAsset` is queued (a recompile / domain reload may follow — poll `editor_status` / `compile_check`).
-- `unity_open_mcp_script_delete` — Mutating: delete one or more `.cs` files (and their `.meta`). `paths_hint` lists every deleted path. Per-file errors (`file_not_found`) are accumulated and do not abort the batch. The gate surfaces any fallout (a removed MonoBehaviour breaks prefab/scene references).
-
-Object data:
-
-- `unity_open_mcp_object_get_data` — Read-only: token-bounded structured data for any live `UnityEngine.Object` (scene GameObject/Component, ScriptableObject, Material, or any asset). Uses the depth-limited reflective walker `invoke_method` uses for its return value, so the shape is consistent. Address by `instance_id` (live instance) or `asset_path` (asset on disk); `instance_id` wins. `max_depth` (default 4) and `max_items` (default 100) bound the walk. Prefer `component_get` for one Component's serialized Inspector fields (it uses SerializedObject); use this for ScriptableObjects, Materials, or any non-Component Object.
-- `unity_open_mcp_object_modify` — Mutating: set public fields/properties on a live `UnityEngine.Object` by name. `paths_hint` is the asset path (for assets) or scene path (for scene objects). `fields` is an array of `{name, value}` patches applied in order; per-entry errors are accumulated. Safe by default: refuses to write static / init-only/readonly members unless `allow_static: true`; never invokes methods. For Component Inspector fields prefer `component_modify` (SerializedObject round-trips the Inspector more accurately); use this for ScriptableObjects, Materials, or any non-Component Object.
-
-Enhanced core reflection (in place):
-
-- `unity_open_mcp_find_members` — now returns structured per-member metadata (every overload of a name is listed separately). Methods carry `returnType`, `parameters[]` (`name` / `type` / `hasDefault`), `isStatic`, `isGeneric`, `genericParameters[]` (with `constraints[]`); properties carry `propertyType`, `canRead`, `canWrite`, `isStatic`; types carry `fullName`, `namespace`, `assembly`, `isEnum`, `isClass`. The flat `signature` string stays for compatibility. Pass `include_signatures: false` for a lighter names-only payload.
-- `unity_open_mcp_invoke_method` — now accepts `generic_arg_types` (type-name strings substituted for the method's generic parameters, enabling `GetComponent<Rigidbody>()`-style calls) and `arg_type_names` (explicit parameter type names to disambiguate overloads when several share a name). Without either, the legacy single-overload resolution runs unchanged.
-
-Workflow: `find_members` to discover members → `type_schema` for the structured schema of the one type you'll call into → `invoke_method` (with `generic_arg_types` / `arg_type_names` for generic/overloaded calls) to execute. For script authoring: `script_read` the existing file → edit → `script_write` (Roslyn-validated) → `compile_check` / `read_compile_errors` to confirm. For object data: `object_get_data` to inspect → `object_modify` to patch; use `component_get` / `component_modify` for Component Inspector fields.
-
-#### Profiler session / diagnostics (M16 Plan 7 — implemented)
-
-These complement the M10 senses (`unity_senses_profiler_capture` / `profiler_memory` / `profiler_rendering`) — they are the runtime/session layer (enabled flag, modules, config knobs, buffered-frames clear, snapshot save/load, script timing), NOT a second per-frame hierarchy read. Most mutate editor state but write NO assets (the gate validates asset-reference fallout, which does not apply): they route as gate-free direct-response tools (returned as direct JSON without the gate envelope) and use `lifecycle: "none"`. The exception is `profiler_save_data`, which writes a `.json` snapshot to disk and runs the full gate path with `paths_hint = ["<the .json path>"]` and `lifecycle: "editor_settle"`.
-
-Session control (gate-free; idempotent):
-
-- `unity_open_mcp_profiler_start` — Enable the runtime profiler (`Profiler.enabled = true`) and optionally open the Profiler window (`open_window: true` default). Recording starts at the next frame — poll `profiler_get_status` or `unity_senses_profiler_capture` to confirm. Enabling adds runtime overhead — disable via `profiler_stop` when done.
-- `unity_open_mcp_profiler_stop` — Disable the runtime profiler. Buffered frames stay in memory — call `profiler_clear_data` to discard them, or `profiler_save_data` to persist a snapshot first.
-
-Status / config reads (gate-free):
-
-- `unity_open_mcp_profiler_get_status` — `enabled`, `supported`, `maxUsedMemoryBytes` / `maxUsedMemoryMB`, and the local `activeModules[]` bookkeeping set. Lightweight runtime flag surface; use `unity_senses_profiler_memory` for live allocator bytes.
-- `unity_open_mcp_profiler_get_config` — Full ProfilerDriver / Profiler knob snapshot (`driverEnabled`, `profileEditor`, `deepProfile`, `allocationCallstacks`, `binaryLog`, `outputPath`, `maxUsedMemory`, `availableCategories[]`, `enabledCategories[]`) plus a `warnings[]` list flagging any version-gated knob that was unavailable. Some knobs return false / empty on Unity versions where the underlying API is missing.
-- `unity_open_mcp_profiler_get_script_stats` — Single-frame snapshot from `Time` + Mono/GC: `frameTimeMs`, `fixedDeltaTimeMs`, `timeScale`, `totalFrameCount`, `realtimeSinceStartup`, `monoMemoryUsageBytes/MB`, `gcMemoryUsageBytes/MB`. For historical frame data use `unity_senses_profiler_capture`.
-
-Config mutator (gate-free):
-
-- `unity_open_mcp_profiler_set_config` — Update one or more runtime knobs in a single call: `mode` (`"play"` / `"edit"` — edit targeting is version-gated), `deep_profile` (high overhead), `allocation_callstacks` (high overhead), `binary_log` (Editor usually ignores it; reported as a warning), `output` (`Profiler.logFile` path; parent dirs created), `max_used_memory` (bytes; clamped to a safe editor budget), `enable_categories[]` / `disable_categories[]` (`ProfilerCategory` name toggles). Returns the post-write config plus a `warnings[]` list of any knobs recorded but not applied on this Unity version. Use `profiler_start` / `profiler_stop` for the enabled flag itself.
-
-Module bookkeeping (gate-free):
-
-- `unity_open_mcp_profiler_list_modules` — Canonical Profiler window module names (CPU / GPU / Rendering / Memory / Audio / Video / Physics / Physics2D / NetworkMessages / NetworkOperations / UI / UIDetails / GlobalIllumination / VirtualTexturing) with the local enabled bookkeeping flag each. Unity's runtime API does not expose per-module toggling — the flag is bookkeeping only; use the Profiler window for actual visibility.
-- `unity_open_mcp_profiler_enable_module` — Toggle one module name in the local bookkeeping set (`module` required, `enabled` default true). Refuses unknown names with `unknown_module`.
-
-Buffered frames (gate-free; destructive):
-
-- `unity_open_mcp_profiler_clear_data` — `ProfilerDriver.ClearAllFrames()`. Cannot be undone — call `profiler_save_data` first if a snapshot is wanted. Returns `clear_unavailable` on Unity versions where the API is missing.
-
-Snapshots:
-
-- `unity_open_mcp_profiler_save_data` — Mutating: compose a structured JSON snapshot (status + rendering + script — re-emitted by the same read tools so the shape stays in sync) and write it. `paths_hint = ["<the .json path>"]`. Destination must live under the project root, end in `.json`, and contain no `..`. Parent directories are created.
-- `unity_open_mcp_profiler_load_data` — Read-only: read back a previously-saved snapshot (returns its raw JSON as `content`). Source must live under the project root, end in `.json`, and be under 10 MB. `add_to_profiler: true` (default false) also calls `Profiler.AddFramesFromFile` so the frames are browsable in the Profiler window — JSON snapshots saved by `profiler_save_data` are NOT raw binary captures, so `AddFramesFromFile` will refuse them (the request surfaces as a warning and the raw JSON is still returned).
-
-Workflow: `profiler_start` → poll `profiler_get_status` to confirm recording → run the workload → `unity_senses_profiler_capture` for per-frame data → `profiler_save_data` to persist → `profiler_stop`. The M10 senses stay the per-frame / allocator / GPU batch reads; this surface is the runtime/session layer. For deep-profile / allocation-callstacks / category toggles, use `profiler_set_config` (warns on version-gated knobs).
-
-#### Gate intelligence (M16 Plan 8 — implemented)
-
-Three read-only, gate-free direct-response tools that compose existing checkpoint / validate / delta / verify / run-history foundations to make edits safer and easier to reason about before and after mutation. They add NO new verify rules and re-implement NO existing tool — `impact_preview` and `gate_budget_estimate` are pre-mutation (scope-first, deterministic); `mutation_explain` is post-mutation. All three accept the same `paths_hint` vocabulary the gate uses. Every response carries a `heuristicNote` stating its confidence boundaries so an agent treats the outputs as guidance, not ground truth.
-
-- `unity_open_mcp_impact_preview` — Project the gate's view of a planned mutation scope WITHOUT mutating. Resolves the auto-selected verify rule set for `paths_hint` (same `categories` / `include_rules` / `exclude_rules` semantics as `validate_edit`), classifies each path (exists / folder / asset kind / rules-for-extension), and reports a coarse `risk.band` (`low` / `moderate` / `high`) with an explicit `confidence` (`low` / `medium`). Does NOT run a rule scan — that is what `validate_edit` is for. Confidence drops to `low` when paths are missing (a create op the gate cannot yet see).
-- `unity_open_mcp_gate_budget_estimate` — Forecast validation cost before a mutation. Returns `estimate.estimatedDurationMs` (a lower bound on the real gate path — checkpoint-mode is lighter than full validation), `estimate.estimatedIssueBudget` (an upper bound on issues the gate might surface), the resolved rule set, and `estimate.basis` + `estimate.confidence`. `mode: "cache"` (default) inspects the latest VerifyCacheService snapshot (cheap, coarse — the cache is global, not keyed by scope); `mode: "sample"` runs a cheap checkpoint-mode scan over the scope and times it (`basis: "sample_checkpoint"`, `confidence: "high"`). Falls back to a pure heuristic (`basis: "heuristic"`, `confidence: "low"`) when neither is available.
-- `unity_open_mcp_mutation_explain` — Turn a finished gate run (or an explicit checkpoint) into a human-readable `narrative` alongside a structured `summary` (outcome, new/resolved error & warning counts, gate durations, `agentNextSteps`) so an agent can branch without re-parsing prose. Default projects the most recent gate run; `checkpoint_id` compares that checkpoint against CURRENT project state (fresh delta, `tool: "checkpoint_compare"`); `tool_name` targets the latest recorded run of a specific mutating tool. Returns `no_mutation_context` when no run is recorded and no checkpoint is given, and `checkpoint_not_found` for an unknown id.
-
-Workflow: `impact_preview` (size the scope) → `gate_budget_estimate` `mode: "sample"` (ground the cost) → run the mutating tool → `mutation_explain` (narrate the result). For a deferred check, take a `checkpoint_create` before mutating and pass its id to `mutation_explain` later.
-
-#### Project configuration & build (M16 Plan 9 — implemented)
-
-Build pipeline + project-settings typed tools with parity to UCP `build/*` and `settings/*`. Read-only members (the `*_get_*` family) are gate-free direct-response tools. The mutators run the full gate path with `paths_hint` scoped to the touched ProjectSettings asset:
-
-- `build_set_target` — `lifecycle: "restart_then_settle"` (target switch can recompile); dirty guard preflights. `paths_hint = ["ProjectSettings"]`.
-- `build_set_scenes` — `lifecycle: "editor_settle"`. `paths_hint = ["ProjectSettings"]` (EditorBuildSettings.asset lives under ProjectSettings/).
-- `build_set_defines` — `lifecycle: "restart_then_settle"` (define change recompiles); dirty guard preflights. `paths_hint = ["ProjectSettings/ProjectSettings.asset"]`.
-- `build_start` — `lifecycle: "editor_settle"`; DESTRUCTIVE — requires the deny bypass (`gate: "off"` + `confirm_bypass: true`) because `BuildPipeline.BuildPlayer` is on the default deny list. `paths_hint` scopes to the build output folder and/or `"ProjectSettings"`.
-- `settings_set_player` — `lifecycle: "restart_then_settle"` (some keys flip scripting backend / input handler → recompile); dirty guard preflights. `paths_hint = ["ProjectSettings/ProjectSettings.asset"]`.
-- `settings_set_quality` / `settings_set_physics` — `lifecycle: "editor_settle"`. `paths_hint = ["ProjectSettings/QualitySettings.asset"]` / `["ProjectSettings/DynamicsManager.asset"]`.
-- `settings_set_lighting` — `lifecycle: "editor_settle"`. `RenderSettings` is scene-scoped (writes only persist when the active scene is dirtied — the tool does that automatically); `paths_hint` scopes to the active scene path and/or the render/lighting settings asset.
-
-Build pipeline reads (gate-free):
-
-- `unity_open_mcp_build_get_targets` — Read-only: enumerate available build targets. Each entry is `{name, group, installed, isActive}`; active target + group at top level. `BuildTarget` values whose group is `Unknown` are skipped. Token-bounded.
-- `unity_open_mcp_build_get_active_target` — Read-only: the active `BuildTarget` + `BuildTargetGroup`.
-- `unity_open_mcp_build_get_scenes` — Read-only: the `EditorBuildSettings.scenes` list (`{path, enabled, guid}` per entry).
-- `unity_open_mcp_build_get_defines` — Read-only: scripting define symbols for the active build target group — raw `;`-joined `defines` string + parsed `list[]`, plus the group + NamedBuildTarget.
-
-Build pipeline mutators:
-
-- `unity_open_mcp_build_set_target` — Mutating: `EditorUserBuildSettings.SwitchActiveBuildTarget`. `target` is a `BuildTarget` name (use `build_get_targets` to enumerate). Can recompile / domain-reload. `paths_hint = ["ProjectSettings"]`.
-- `unity_open_mcp_build_set_scenes` — Mutating: replace the build scene list. `scenes[]` entries are `{path, enabled?}` or bare path strings (treated as enabled). The full list REPLACES the current one. `paths_hint = ["ProjectSettings"]`.
-- `unity_open_mcp_build_start` — Mutating + DESTRUCTIVE: trigger `BuildPipeline.BuildPlayer`. Refuses with `build_confirmation_required` unless BOTH `gate: "off"` AND `confirm_bypass: true` are set (BuildPlayer is on the default deny list). When bypassed, the full gate path still runs. Uses the enabled build-settings scenes + active target; `output_path` defaults to `Builds/<target>/Build`; `development` / `allow_debugging` add the matching `BuildOptions`. Returns the `BuildReport` summary (result, total time, size, errors/warnings, per-step durations).
-- `unity_open_mcp_build_set_defines` — Mutating: `PlayerSettings.SetScriptingDefineSymbols` for the active group. Accepts an array (joined with `;`) or a pre-joined `;` string; pass empty to clear. Recompiles. `paths_hint = ["ProjectSettings/ProjectSettings.asset"]`.
-
-Project settings reads (gate-free):
-
-- `unity_open_mcp_settings_get_player` — Read-only: PlayerSettings snapshot for the active target (company/product name, bundleVersion, runInBackground, colorSpace, first graphics API, scripting backend, API compatibility level, active input handler numeric + name, target frame rate, default screen dimensions).
-- `unity_open_mcp_settings_get_quality` — Read-only: QualitySettings snapshot — every quality level `{index, name, isCurrent}` + the current level/name + global knobs (shadowDistance, shadowCascades, antiAliasing, vSyncCount, pixelLightCount).
-- `unity_open_mcp_settings_get_physics` — Read-only: Physics + Physics2D snapshot (gravity 3D + 2D, solver iterations, bounce/sleep thresholds, default contact offset, 3D/2D simulationMode).
-- `unity_open_mcp_settings_get_lighting` — Read-only: Render/Lighting (RenderSettings) snapshot for the active scene (ambientMode/intensity/color, fog + fogMode/density/color/distances, skybox + sun source names). Scene-scoped — reflects the active scene's setup.
-
-Project settings mutators (each takes a `fields: [{key, value}]` patch array; per-key failures are accumulated as warnings so a single bad patch does not abort the batch; returns the `applied[]` keys + any `warnings[]`):
-
-- `unity_open_mcp_settings_set_player` — Mutating: PlayerSettings by key. Supported keys: `companyName`, `productName`, `bundleVersion`, `colorSpace` (ColorSpace name); `runInBackground`, `defaultIsNativeResolution` (bool); `defaultScreenWidth`, `defaultScreenHeight` (int); `activeInputHandler` / `activeInputHandling` / `inputHandling` (0/1/2 or `old|inputsystem|both`). `paths_hint = ["ProjectSettings/ProjectSettings.asset"]`.
-- `unity_open_mcp_settings_set_quality` — Mutating: QualitySettings by key. Supported keys: `level` (int), `shadowDistance` (float), `shadowCascades` / `antiAliasing` / `vSyncCount` / `pixelLightCount` (int). `paths_hint = ["ProjectSettings/QualitySettings.asset"]`.
-- `unity_open_mcp_settings_set_physics` — Mutating: Physics + Physics2D by key. Supported keys: `gravity` ([x,y,z]), `defaultSolverIterations` / `defaultSolverVelocityIterations` (int), `bounceThreshold` / `sleepThreshold` / `defaultContactOffset` (float), `physics2DGravity` ([x,y]). `paths_hint = ["ProjectSettings/DynamicsManager.asset"]`.
-- `unity_open_mcp_settings_set_lighting` — Mutating: RenderSettings by key for the active scene. Supported keys: `ambientMode` (AmbientMode name), `ambientIntensity` (float), `ambientColor` ([r,g,b,(a)]), `fog` (bool), `fogMode` (FogMode name), `fogDensity` (float), `fogColor` ([r,g,b,(a)]), `fogStartDistance` / `fogEndDistance` (float). `paths_hint` scopes to the active scene path.
-
-Workflow: CI build prep — `build_get_scenes` (audit the scene list) → `build_set_scenes` (fix the list) → `build_get_defines` / `build_set_defines` (configure per-build defines) → `build_get_active_target` / `build_set_target` (pin the target) → `build_start` (gate `"off"` + `confirm_bypass: true`). Settings audit — read each `settings_get_*` surface, then batch-patch via the matching `settings_set_*` tool.
-
-#### Navigation / NavMesh (M16 Plan 10 / T6.6.2 — implemented; extension pack)
-
-NavMesh (AI Navigation) typed tools. **Opt-in** — the tool definitions ship in the core MCP server (so capabilities advertises the surface) but the bridge-side handler exists only when the `com.alexeyperov.unity-open-mcp-ext-navigation` extension pack is installed in the target project. A call to a navigation tool when the pack is absent returns `tool_not_found`. Install via the Hub AI Setup wizard's "Optional extension packs" checkbox or by adding `"com.alexeyperov.unity-open-mcp-ext-navigation"` to `Packages/manifest.json`.
-
-Mutating tools run the full gate path with `paths_hint` scoped to the host's scene path; `surface_bake` is the heavy op (`editor_settle` — the dispatcher waits for asset refresh so the baked NavMesh asset is on disk before the next call). Read-only tools (`navigation_list`, `navigation_get`) are gate-free. Address every target by `instance_id` > `path` > `name` (same model as `gameobject_*` / `component_*`).
-
-- `unity_open_mcp_navigation_surface_add` — Mutating: add a `NavMeshSurface` (idempotent — re-using reports `added:false`). `agent_type` (default "Humanoid"), `collect_objects` ("All" | "Volume"), optional `collection_extent` (x,y,z).
-- `unity_open_mcp_navigation_set_bake_settings` — Mutating: configure an existing surface's agent type / collect-objects / extent. Refuses if the host has no NavMeshSurface.
-- `unity_open_mcp_navigation_surface_bake` — Mutating (heavy): bake the NavMesh synchronously. Returns `durationMs` + `hasNavMeshData` + `navMeshDataInstanceId`.
-- `unity_open_mcp_navigation_modifier_add` — Mutating: add a `NavMeshModifier` (area override or `ignore: true` to skip baking).
-- `unity_open_mcp_navigation_modifier_volume_add` — Mutating: add a `NavMeshModifierVolume` and size it (re-tags NavMesh inside the volume).
-- `unity_open_mcp_navigation_link_add` — Mutating: add a `NavMeshLink` (off-mesh traversal — jumps, drops, gaps).
-- `unity_open_mcp_navigation_agent_add` — Mutating: add a `NavMeshAgent` and configure radius / height / speed / angular_speed / acceleration / stopping_distance.
-- `unity_open_mcp_navigation_agent_set_destination` — Mutating: set an agent's world-space destination. **Requires Play Mode** — the pathfinder only runs at runtime; returns `pathPending` + `pathStatus` (Valid / Partial / Invalid) + `isPlaying`.
-- `unity_open_mcp_navigation_list` — Read-only (gate-free): list every NavMesh component in the open scene(s) with host name / instance id / path.
-- `unity_open_mcp_navigation_get` — Read-only (gate-free): full detail for one target's NavMesh components (serialized fields).
-- `unity_open_mcp_navigation_modify` — Mutating: reflective field setter for niche fields not covered by the typed mutators. `component_type` selects `NavMeshSurface` / `NavMeshAgent` / `NavMeshLink` / `NavMeshModifier` / `NavMeshModifierVolume`; `fields_json` is a JSON array of `{field, value, type?}` patches.
-
-Workflow: walkable agent — `navigation_list` (discover) → `navigation_surface_add` (host + agent type) → `navigation_surface_bake` (wait for `hasNavMeshData:true`) → `navigation_agent_add` (player) → enter Play Mode (`editor_set_state`) → `navigation_agent_set_destination`. See `skills/extensions/navigation/SKILL.md` for the full agent playbook.
-
-#### Input System (M16 Plan 10 / T6.6.4 — implemented; extension pack)
-
-Input System typed tools for authoring `.inputactions` assets. **Opt-in** — the tool definitions ship in the core MCP server (so capabilities advertises the surface) but the bridge-side handler exists only when the `com.alexeyperov.unity-open-mcp-ext-inputsystem` extension pack is installed in the target project (which itself requires `com.unity.inputsystem`). A call to an inputsystem tool when the pack is absent returns `tool_not_found`. Install via the Hub AI Setup wizard's "Optional extension packs" checkbox or by adding `"com.alexeyperov.unity-open-mcp-ext-inputsystem"` to `Packages/manifest.json`.
-
-All mutating tools target a `.inputactions` asset path (not a scene GameObject) — every mutator runs the full gate path with `paths_hint` scoped to that asset; `inputsystem_get` is read-only (gate-free).
-
-- `unity_open_mcp_inputsystem_asset_create` — Mutating: create a new `.inputactions` asset at an `Assets/`-rooted path. Optional `initial_action_map`. Fails if an asset already exists at the path.
-- `unity_open_mcp_inputsystem_actionmap_add` — Mutating: add a new InputActionMap. Fails if a map of that name already exists.
-- `unity_open_mcp_inputsystem_action_add` — Mutating: add an InputAction to a map (`action_type`: Button / Value / PassThrough; optional `expected_control_type`; optional initial `binding` with `groups` / `interactions` / `processors`).
-- `unity_open_mcp_inputsystem_binding_add` — Mutating: add a simple (non-composite) InputBinding (`path`, optional `groups` / `interactions` / `processors`). Returns the new binding's index.
-- `unity_open_mcp_inputsystem_binding_composite_add` — Mutating: add a composite InputBinding (`composite`: 2DVector / 1DAxis / Axis / Dpad; `parts_json` = `[{ name, path, groups? }]`).
-- `unity_open_mcp_inputsystem_controlscheme_add` — Mutating: add an InputControlScheme with `required_devices` / `optional_devices` (device control paths like `<Gamepad>`).
-- `unity_open_mcp_inputsystem_get` — Read-only (gate-free): the full asset structure — ActionMaps, Actions (type / expectedControlType), Bindings (path / groups / interactions / processors / index / composite flags), Control Schemes.
-
-Workflow: keyboard + mouse player — `inputsystem_asset_create` (with `initial_action_map: "Player"`) → `inputsystem_controlscheme_add` (KeyboardMouse, `<Keyboard>` + `<Mouse>`) → `inputsystem_action_add` (Move, Value, Vector2) → `inputsystem_binding_composite_add` (2DVector WASD) → `inputsystem_action_add` (Fire, Button) → `inputsystem_binding_add` (`<Mouse>/leftButton`). See `skills/extensions/inputsystem/SKILL.md` for the full agent playbook.
-
-#### ProBuilder (M16 Plan 10 / T6.6.5 — implemented; extension pack)
-
-ProBuilder typed tools for in-editor mesh editing. **Opt-in** — the tool definitions ship in the core MCP server (so capabilities advertises the surface) but the bridge-side handler exists only when the `com.alexeyperov.unity-open-mcp-ext-probuilder` extension pack is installed in the target project (which itself requires `com.unity.probuilder`). A call to a probuilder tool when the pack is absent returns `tool_not_found`. Install via the Hub AI Setup wizard's "Optional extension packs" checkbox or by adding `"com.alexeyperov.unity-open-mcp-ext-probuilder"` to `Packages/manifest.json`.
-
-Mutating tools target a scene GameObject and run the full gate path with `paths_hint` scoped to the host's scene path; `probuilder_create_shape` adds a new GameObject to the active scene; `probuilder_delete_faces` is the lone DESTRUCTIVE tool (MCP clients can prompt for confirmation). `probuilder_get_mesh_info` is read-only (gate-free). Face selection is index-based (`face_indices`) or semantic (`face_direction`: Up / Down / Left / Right / Forward / Back) — never SceneView mouse picking.
-
-- `unity_open_mcp_probuilder_create_shape` — Mutating: create a new ProBuilderMesh GameObject from a `ShapeType` primitive (Cube / Cylinder / Sphere / Plane / Prism / Cone / Stair / Door / Pipe / Arch / Sprite / Torus). Optional name / position / rotation / scale / parent_path.
-- `unity_open_mcp_probuilder_get_mesh_info` — Read-only (gate-free): face / vertex / edge counts, bounds, and a face-direction summary (which indices face each axis).
-- `unity_open_mcp_probuilder_extrude` — Mutating: extrude faces along their normals (`face_indices` OR `face_direction`; positive `distance` = outward, negative = inward; `extrude_method`: IndividualFaces / FaceNormal / VertexNormal).
-- `unity_open_mcp_probuilder_delete_faces` — Mutating + **destructive**: delete faces (`face_indices` OR `face_direction`). Refuses to delete every face.
-- `unity_open_mcp_probuilder_set_face_material` — Mutating (idempotent): assign a Material to faces (`material_path` = `Assets/`-rooted .mat path or bare name; `face_indices` OR `face_direction`). The material is added to the renderer's material array if not present.
-
-Workflow: shaped block — `probuilder_create_shape` (Cube; capture `instanceId`) → `probuilder_get_mesh_info` (confirm counts + directions) → `probuilder_extrude` (`face_direction: "Up"`, `distance: 1.0`) → `probuilder_set_face_material` (`face_direction: "Up"`, `material_path: "Assets/Materials/Roof.mat"`). See `skills/extensions/probuilder/SKILL.md` for the full agent playbook.
-
-#### Particle System (M16 Plan 10 / T6.6.9 — implemented; extension pack)
-
-Particle System typed tools for inspecting and patching scene ParticleSystem components. **Opt-in** — the tool definitions ship in the core MCP server (so capabilities advertises the surface) but the bridge-side handler exists only when the `com.alexeyperov.unity-open-mcp-ext-particlesystem` extension pack is installed in the target project. A call to a particle-system tool when the pack is absent returns `tool_not_found`. Install via the Hub AI Setup wizard's "Optional extension packs" checkbox or by adding `"com.alexeyperov.unity-open-mcp-ext-particlesystem"` to `Packages/manifest.json`.
-
-ParticleSystem is a built-in Unity module (no extra Unity package is required). The lone mutator targets a scene GameObject and runs the full gate path with `paths_hint` scoped to the host's scene path; `particle_system_get` is read-only (gate-free). The mutator uses a per-module field-patch surface (a `module` discriminator + a `fields_json` JSON object of `{field: value}` entries) rather than the opaque reflector payload of the upstream pack — agents get up-front field-name validation and a structured `unknownFields` report instead of guessing.
-
-- `unity_open_mcp_particle_system_get` — Read-only (gate-free): runtime state (`isPlaying` / `isPaused` / `isEmitting` / `isStopped` / `particleCount` / `time`) plus opt-in data for the well-known modules (`include_main` defaults true; toggle the per-module flags or set `include_all`).
-- `unity_open_mcp_particle_system_modify` — Mutating (idempotent): apply a per-module field patch (`module`: main / emission / shape / color_over_lifetime / size_over_lifetime / rotation_over_lifetime / noise / collision / trails / renderer; `fields_json` of documented scalar fields). Unknown fields are skipped and reported; per-field type errors are reported. Scalar values only — for curve / gradient authoring, drop down to `execute_csharp`.
-
-Workflow: tune an effect — `particle_system_get` (`include_all: true`; see current state) → `particle_system_modify` (`module: "main"`, `fields_json: "{\"maxParticles\": 5000, \"loop\": false}"`) → `particle_system_modify` (`module: "emission"`, `fields_json: "{\"rateOverTime\": 42.0}"`) → `particle_system_get` (confirm). See `skills/extensions/particlesystem/SKILL.md` for the full agent playbook.
-
-#### Animation (M16 Plan 10 / T6.6.10 — implemented; extension pack)
-
-AnimationClip + AnimatorController typed tools. **Opt-in** — the tool definitions ship in the core MCP server (so capabilities advertises the surface) but the bridge-side handler exists only when the `com.alexeyperov.unity-open-mcp-ext-animation` extension pack is installed in the target project. A call to an animation tool when the pack is absent returns `tool_not_found`. Install via the Hub AI Setup wizard's "Optional extension packs" checkbox or by adding `"com.alexeyperov.unity-open-mcp-ext-animation"` to `Packages/manifest.json`.
-
-AnimationClip + AnimatorController are built-in Unity modules (no extra Unity package is required). Mutating tools run the full gate path with `paths_hint` scoped to the asset path (`.anim` or `.controller`); the two `*_modify` tools are DESTRUCTIVE — some modification types (ClearCurves / ClearEvents / RemoveCurve on clips; RemoveParameter / RemoveLayer / RemoveState / RemoveTransition on controllers) are irreversible without undo. The two `*_get_data` tools are read-only (gate-free). Both modify tools accept a JSON array of modification entries dispatched by `type`; per-entry errors are accumulated in the response's `errors` array and do not abort the batch.
-
-- `unity_open_mcp_animation_create` — Mutating: create empty AnimationClip assets at one or more `Assets/`-rooted `.anim` paths.
-- `unity_open_mcp_animation_get_data` — Read-only (gate-free): clip metadata (length / frameRate / wrapMode / flags) + float curve bindings + object-reference curve bindings + animation events.
-- `unity_open_mcp_animation_modify` — Mutating + **destructive**: batch modification dispatched by `type` (SetCurve / RemoveCurve / ClearCurves / SetFrameRate / SetWrapMode / SetLegacy / AddEvent / ClearEvents).
-- `unity_open_mcp_animator_create` — Mutating: create empty AnimatorController assets at one or more `Assets/`-rooted `.controller` paths.
-- `unity_open_mcp_animator_get_data` — Read-only (gate-free): controller name + parameters + layers + per-layer state machines (states, default state, transitions, any-state transitions, sub-state machines).
-- `unity_open_mcp_animator_modify` — Mutating + **destructive**: batch modification dispatched by `type` (AddParameter / RemoveParameter / AddLayer / RemoveLayer / AddState / RemoveState / SetDefaultState / AddTransition / RemoveTransition / AddAnyStateTransition / SetStateMotion / SetStateSpeed).
-
-Workflow: clip + controller — `animation_create` (`asset_paths: ["Assets/Anims/Idle.anim"]`) → `animation_modify` (SetCurve on `m_LocalPosition.x`) → `animator_create` (`asset_paths: ["Assets/Animators/Player.controller"]`) → `animator_modify` (AddParameter Speed; AddState Idle + Run; SetStateMotion Run = the clip; AddTransition Idle→Run conditioned on `Speed > 0.1`). See `skills/extensions/animation/SKILL.md` for the full agent playbook.
-
-## Capability discovery
-
-`unity_open_mcp_capabilities` lets an agent self-discover the entire tool + rule + fix surface in a single call, including what is planned but not yet built.
-
-- Implementation: `mcp-server/src/capabilities/build-capabilities.ts`, `mcp-server/src/capabilities/rule-catalog.ts`.
-- Routes locally (`_source: "local"`) — never hits the live bridge or batch Unity.
-
-### Response shape
+Example:
 
 ```json
 {
-  "tools": [
-    {
-      "name": "unity_open_mcp_scan_paths",
-      "implemented": true,
-      "status": "implemented",
-      "category": "gate-and-verify",
-      "routePolicy": "live",
-      "batchCapable": false,
-      "inputSchema": { "type": "object", "properties": { "...": "..." } }
-    },
-    {
-      "name": "unity_open_mcp_build_start",
-      "implemented": true,
-      "status": "implemented",
-      "category": "build-settings",
-      "routePolicy": "live",
-      "batchCapable": false,
-      "inputSchema": { "type": "object", "properties": { "...": "..." } }
-    }
-  ],
-  "rules": [
-    {
-      "id": "missing_references",
-      "implemented": true,
-      "status": "implemented",
-      "title": "Missing references",
-      "applicableAssetKinds": ["prefab", "scene", "scriptable_object"],
-      "issues": [
-        { "code": "missing_guid", "severity": "Error", "fixIds": ["relink_broken_guid"] },
-        { "code": "missing_script", "severity": "Error", "fixIds": ["remove_missing_script"] }
-      ]
-    },
-    {
-      "id": "dependencies",
-      "implemented": true,
-      "status": "implemented",
-      "title": "Forward dependency graph",
-      "applicableAssetKinds": ["prefab", "scene", "scriptable_object", "material", "animation"],
-      "issues": [
-        { "code": "broken_dependency", "severity": "Error", "fixIds": ["relink_broken_guid"] },
-        { "code": "dependency_cycle", "severity": "Warning", "fixIds": [] }
-      ]
-    },
-    {
-      "id": "materials",
-      "implemented": false,
-      "status": "planned",
-      "guidance": "Not yet ported. Use find_references ..."
-    }
-  ],
-  "fixes": [
-    { "id": "remove_missing_script", "implemented": true, "safe": true, "rules": ["missing_references"] },
-    { "id": "relink_broken_guid", "implemented": true, "safe": false, "rules": ["missing_references", "dependencies"] },
-    { "id": "fix_duplicate_guid", "implemented": false, "status": "planned", "safe": false, "guidance": "Not yet ported ..." }
-  ],
-  "counts": {
-    "toolsImplemented": 32,
-    "toolsPlanned": 97,
-    "rulesImplemented": 3,
-    "rulesPlanned": 7,
-    "fixesImplemented": 2,
-    "fixesPlanned": 4
-  },
-  "routing": {
-    "liveDefault": true,
-    "batchFallback": true,
-    "batchRequirements": ["UNITY_PATH", "UNITY_PROJECT_PATH"],
-    "batchBlocked": [
-      { "tool": "unity_open_mcp_execute_csharp", "reason": "Requires a live Editor compile context." },
-      { "tool": "unity_open_mcp_invoke_method", "reason": "Requires a live Editor reflection context." },
-      { "tool": "unity_open_mcp_execute_menu", "reason": "Menu execution needs the Editor UI; most menus fail in -batchmode." }
-    ],
-    "liveOnlyCategories": ["agent-senses"],
-    "perToolFlag": "batchCapable"
-  },
-  "_source": "local"
+  "kind": "tools",
+  "include_planned": true
 }
 ```
 
-### `routing` summary
+Use the response fields:
 
-The top-level `routing` object is a one-shot narrative for agents so a single `unity_open_mcp_capabilities` call gives the batch/route story without reading these docs. It is independent of the `kind` filter — asking for `kind: "rules"` still returns `routing`.
-
-| Field | Meaning |
-|---|---|
-| `liveDefault` | `true` — most tools prefer the live bridge when connected. |
-| `batchFallback` | `true` — when the live bridge is unavailable, only `batchCapable` tools fall back to a headless Unity spawn. |
-| `batchRequirements` | Env vars a headless batch spawn requires (`UNITY_PATH`, `UNITY_PROJECT_PATH`). |
-| `batchBlocked` | Mutating meta-tools intentionally rejected in batch, each with a short `reason`. |
-| `liveOnlyCategories` | Tool categories that have no batch form (e.g. `agent-senses`). |
-| `perToolFlag` | The per-tool flag name (`batchCapable`) agents should read for the authoritative per-tool answer. |
-
-Per-tool route details live on each tool entry (`routePolicy`, `batchCapable`, `category`); the `routing` object only summarizes them.
-
-### Parameters
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `kind` | `"tools"` \| `"rules"` \| `"fixes"` | (all) | Filter to a single surface. |
-| `include_planned` | boolean | `true` | Set false to see only implemented items. |
-
-### Planned-vs-implemented contract
-
-- Every registered tool ships `implemented: true`.
-- Planned typed tools and planned verify rules ship `implemented: false` with `status: "planned"` and a `guidance` string explaining the fallback — they never raise hard errors.
-- The rule catalog is versioned with the package, so the `implemented` flags reflect what ships in the matching bridge/verify release.
-
-## Rule selection: include / exclude
-
-`scan_paths` and `validate_edit` accept `include_rules` and `exclude_rules` to filter the resolved rule set without trial-and-error on `categories`. Composition rules:
-
-| Caller input | Behaviour |
-|---|---|
-| `categories` only | Run exactly the listed rules. |
-| `categories` + `include_rules` | Run the intersection (narrowing). |
-| `include_rules` only (no `categories`) | Additive: the auto-selected set ∪ the include list. |
-| `exclude_rules` (any combination) | Always wins. Excluded rules are dropped after every other step. |
-
-When the filters reduce the set to nothing, the tool returns an explicit empty result (no issues, `rulesApplied: []`) rather than running every rule. The response carries `rulesApplied` (post-filter effective set) alongside the legacy `categoriesRun`.
-
-### Issue payload fields
-
-Every issue in `scan_paths` / `validate_edit` responses carries:
-
-| Field | Description |
-|---|---|
-| `ruleId` / `categoryId` | The verify rule that emitted the issue (aliases — same value). |
-| `severity` | `"Error"` or `"Warning"`. |
-| `code` / `issueCode` | The stable issue code (e.g. `missing_script`). Aliases — same value. |
-| `assetPath` | The asset the issue is on. |
-| `description` | Human-readable description. |
-| `fixId` / `fixSafe` | Present when a fix is registered for this issue. `fixSafe: true` means the gate will auto-suggest it. |
-
-`scan_paths` additionally carries `failOnSeverity` (the resolved threshold) and `rulesApplied` (the post-filter rule set).
-
-## Severity thresholds
-
-Projects differ in what counts as a failure. `scan_paths` / `validate_edit` / `regression_check` accept an explicit threshold; when omitted, `scan_paths` falls back to the project default.
-
-### Project default (`scan_paths`)
-
-`.unity-open-mcp/settings.json` carries a project-level default under the `verify` key:
-
-```json
-{
-  "verify": { "severityThreshold": "warning" }
-}
-```
-
-Accepted values: `error` (default), `warning` (alias `warn`), `info`, `verbose`, `never` (alias `off`). With `warning`, a scan over an asset with only warnings still flips `passed: false`. `scan_paths` echoes the resolved `failOnSeverity` in its response so the caller can confirm whether the project default or a per-call value was applied. `validate_edit` is intentionally strict-error: it answers "is this asset currently healthy?", independent of the project threshold.
-
-### Per-call override
-
-`scan_paths` accepts `fail_on_severity` explicitly to override the project default for one call. Same enum as above.
-
-### Per-category regression thresholds (`regression_check`)
-
-`regression_check` compares the current error count against a baseline. The global `regression_threshold` (default `0`) is the max tolerated *total* error-count increase. `per_category_thresholds` adds per-rule overrides:
-
-```json
-{
-  "baseline_path": "CI/baseline.json",
-  "regression_threshold": 0,
-  "per_category_thresholds": { "missing_references": 2, "dependencies": 1 }
-}
-```
-
-- Rules named in the map use their per-rule threshold; rules not named fall back to `regression_threshold`.
-- The response carries a `regression.perRule` breakdown (ruleId, baselineError, currentError, errorDelta, errorThreshold, regressed) when any per-category threshold is set.
-- The overall `regressed` verdict is the OR of the global check and every per-rule check — a regression under any scope fails the gate.
-
-## Skill generation
-
-`unity_open_mcp_generate_skill` produces a project-specific SKILL.md that gives the LLM up-to-date context for the specific project — installed tool versions, available verify rules, key MonoBehaviour/ScriptableObject types, and the core workflow.
-
-- Implementation: `mcp-server/src/skill/generate-skill.ts`.
-- Routes locally (`_source: "local"`) — reads `ProjectSettings/ProjectVersion.txt`, `Packages/manifest.json`, and scans `.cs` files under `Assets/` for type declarations. Never hits the live bridge or batch Unity.
-
-### Parameters
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `write` | boolean | `false` | When `true`, write the generated skill to client skill directories. |
-| `clients` | string[] | `["claude"]` | Which client skill dirs to write to. Only used when `write: true`. Allowed values are derived from the single-source manifest at `skills/client-paths.json` (`cursor`, `claude`, `opencode`, `agents`). `agents` writes to `.agents/skills/` for ZCode and other `.agents`-aware clients. |
-
-### Response shape
-
-```json
-{
-  "skill": "# Unity Agent Skill — MyGame\n...",
-  "project": {
-    "projectName": "MyGame",
-    "unityVersion": "6000.0.1f1",
-    "packages": [{ "id": "com.unity.ugui", "version": "2.0.0" }],
-    "bridgeVersion": "0.3.0",
-    "verifyVersion": "0.3.0",
-    "monoBehaviours": [{ "name": "PlayerController", "namespace": "MyGame", "filePath": "Assets/Scripts/PlayerController.cs" }],
-    "scriptableObjects": []
-  },
-  "written": [
-    { "client": "claude", "relativePath": ".claude/skills/unity-open-mcp/SKILL.md", "absolutePath": "/path/.claude/skills/unity-open-mcp/SKILL.md", "written": true, "existed": false }
-  ],
-  "_source": "local"
-}
-```
-
-When `write: false` (default), `written` is an empty array and the skill content is returned as a preview string.
-
-## Object handle system
-
-Live `UnityEngine.Object` values returned by `invoke_method` and `execute_csharp` are serialized as object handles (instance ID + type + fallback locators) instead of reflected JSON. This lets agents pass live objects back in subsequent tool calls:
-
-- `invoke_method` — `object_id` parameter targets a live object for instance methods; args that are handle JSON are auto-resolved for `UnityEngine.Object` parameters.
-- `execute_csharp` — `object_ids` parameter injects resolved objects as `Snippet.Refs[i]` / `Snippet.Ref<T>(i)`.
-
-Handles include fallback locators (`path`, `assetPath`, `assetGuid`, `gameObjectPath`) so they degrade gracefully after domain reload. See [bridge-http.md](bridge-http.md#object-handles) for the wire format and resolution priority.
+- `tools[].name`
+- `tools[].category`
+- `tools[].routePolicy`
+- `tools[].batchCapable`
+- `tools[].inputSchema`
 
 ## Route policy
 
-Route selection is implemented in `mcp-server/src/tool-router.ts`.
+The router chooses one of:
 
-- `unity_open_mcp_list_assets`: always offline route.
-- `unity_open_mcp_read_compile_errors`: always offline route. Reads Unity's `Editor.log` directly — the one channel that works when the bridge assembly itself has failed to compile (every in-bridge channel is dead with it, and `compile_check` can't run because its batch entry point shares the broken assembly and Unity's per-project lock blocks a second instance). No bridge, no Unity spawn.
-- `unity_open_mcp_capabilities`: always local route (static catalog).
-- `unity_open_mcp_generate_skill`: always local route (reads project files from disk).
-- `unity_open_mcp_find_references`: live when available, otherwise offline reader.
-- `unity_open_mcp_read_asset` and `unity_open_mcp_search_assets`: compressible router with offline-first behavior and live fallback.
-- `unity_open_mcp_compile_check`: **always** routes to batch (a fresh Unity recompiling from scratch), even when the live bridge is connected — running it against an Editor that already compiled would never surface a broken build. Response `_route.fallbackReason` is `"compile_check_always_batch"`. Note: `compile_check` is **not** a recovery path for a broken bridge assembly (its entry point lives in that assembly); use `read_compile_errors` for that case.
-- `unity_senses_pull_events`: live-only. Drains a per-process SSE subscription against the bridge `GET /events` endpoint; returns `bridge_unavailable` when the live bridge is down. See [Streaming & event pull](#streaming--event-pull-m13).
-- Other tools:
-  - prefer live bridge when connected,
-  - use batch fallback only for tools in batch-eligible set,
-  - return batch-style ping result when live is unavailable and tool is `unity_open_mcp_ping`.
+- `live`: calls Unity bridge (`/tools/{name}`).
+- `batch`: headless Unity fallback for supported tools.
+- `offline`: local readers/parsers for selected tools.
+- `local`: no Unity dependency (capabilities, catalog-style tools).
 
-Tool responses include route metadata under `_route`:
-- live: `{ route: "live" }`
-- batch fallback: `{ route: "batch", fallbackReason: "live_unavailable" }`
-- compile check: `{ route: "batch", fallbackReason: "compile_check_always_batch" }`
+Common route behavior:
 
-## Batch support
+- Prefer `live` when available.
+- Use `batch` only for tools marked `batchCapable`.
+- Keep some tools route-pinned:
+  - `unity_open_mcp_compile_check` always uses batch.
+  - `unity_open_mcp_read_compile_errors` always uses offline.
+  - `unity_open_mcp_capabilities` and `unity_open_mcp_generate_skill` are local.
 
-Batch tool allow-list is defined by `BATCH_TOOL_NAMES` in `mcp-server/src/batch-spawn.ts`.
+## Batch support notes
 
-Supported operations:
-- `unity_open_mcp_scan_all`
-- `unity_open_mcp_baseline_create`
-- `unity_open_mcp_regression_check`
-- `unity_open_mcp_find_members`
-- `unity_open_mcp_compile_check` — headless compile check; **always** routes to batch (spawns a fresh Unity that recompiles from scratch), even when the live bridge is available. Returns structured compiler errors (`status`, `errorCount`, `errors[]` with `code`/`file`/`line`/`message`). Uses the auto-discovered Unity (OS-default Hub install paths + `UNITY_HUB` env override, matching the bridge's `unityVersion` when known) or `UNITY_PATH` when set; `UNITY_PROJECT_PATH` falls back to the instance lock's `projectPath`. When the bridge assembly itself fails to compile, the JSON markers never print — batch-spawn then extracts `error CSxxxx` lines from the Unity log and surfaces them in the rejection so every batch tool self-diagnoses a broken build. **Not** a recovery path for a broken bridge assembly: its entry point lives in that assembly, and Unity's per-project lock blocks a second instance. For that case use `read_compile_errors`.
+Batch is intended for non-interactive scenarios and fallback operation.
 
-### `read_compile_errors` (offline)
+- Typical batch-friendly tools: scan/regression surfaces, compile check, member lookup.
+- Tools that require live editor state (for example direct C# execution) are not batch-enabled.
+- Required environment for batch fallback:
+  - `UNITY_PROJECT_PATH`
+  - `UNITY_PATH` (when editor auto-discovery is unavailable)
 
-`unity_open_mcp_read_compile_errors` — reads the tail of Unity's platform `Editor.log` (macOS `~/Library/Logs/Unity/Editor.log`, Windows `%LOCALAPPDATA%\Unity\Editor\Editor.log`, Linux `~/.config/unity3d/Editor.log`) and extracts structured C# compiler errors **PLUS** package / assembly-level red flags from the same log tail. Always offline (no bridge, no Unity spawn). This is the **only** error channel that works when the bridge assembly itself has failed to compile — every in-bridge channel (`read_console`, `editor_status`) is dead with it, and `compile_check` can't run.
+## Output shaping
 
-Input: `tail_bytes` (default 262144, max 1048576) — bytes read from the end of the log, where Unity writes compiler diagnostics and assembly-resolution failures contiguously.
+Many tools support output controls to reduce token usage:
 
-Response:
-- `status`: `"compile_failed"` (CSxxxx errors present) | `"project_unhealthy"` (only package/assembly issues, no CSxxxx) | `"no_errors_found"` | `"log_not_found"`
-- `unhealthy`: `true` when compiler errors OR package/assembly issues are present — check this first
-- `headline`: one-line triage summary (empty when healthy)
-- `errorCount`, `errors[]` (`raw`, `file`, `line`, `code`, `message`) — CSxxxx compiler diagnostics
-- `issueCount`, `issues[]` (`kind`, `summary`, `raw`, `hint`) — package / assembly red flags:
-  - `assembly_resolution` — `Mono.Cecil.AssemblyResolutionException: Failed to resolve assembly` failures. The classic package-version / Unity-version mismatch (e.g. ProBuilder 5.x compiled against `Unity.ProBuilder.AddOns.Editor`, which ProBuilder 6 removed — Burst's Cecil pass then can't resolve it and the editor stalls). The `hint` points the agent at `Packages/manifest.json`.
-  - `package_deprecated` — `[Package Manager] <id> is deprecated` notices.
-  - `package_manager_error` — other Package Manager conflict / resolution errors.
-- `logPath`, `tailBytes`, `_source: "offline"`
+- `detail`: `summary | normal | verbose`
+- pagination and limits (`max_results`, `max_entries`, `max_items`, `max_nodes`, etc.)
+- explicit truncation indicators in the response
 
-Use this when: (a) the bridge is unreachable after a recompile — a `bridge_compile_failed` response points here, or `ping` returns `connected:false` unexpectedly; (b) Unity showed a "package update" / incompatibility popup; (c) you suspect a package is too old for the current Editor.
+## Error contract
 
-The live-client returns a `bridge_compile_failed` error (pointing here) when it detects the dead-bridge signature: instance lock present with a live PID but a stale heartbeat (the bridge's `[InitializeOnLoad]` never re-ran after the failed recompile, so the heartbeat writer is gone).
+Errors are returned as JSON with:
 
+- `error.code`
+- `error.message`
 
-Recognized but intentionally blocked in batch mode (`batch_not_supported`):
-- `unity_open_mcp_execute_csharp`
-- `unity_open_mcp_invoke_method`
-- `unity_open_mcp_execute_menu`
+Examples: `bridge_unavailable`, `batch_not_supported`, `validation_failed`, `scene_dirty`.
 
-Batch runtime requirements:
-- `UNITY_PATH` set to Unity executable.
-- `UNITY_PROJECT_PATH` set to project root.
+## Source references
 
-## Offline/compressible reads
-
-`mcp-server/src/compressible-router.ts` handles:
-- `unity_open_mcp_read_asset`
-- `unity_open_mcp_search_assets`
-
-Behavior:
-- Parse text-serialized assets offline first.
-- Fall back to live bridge for binary formats or offline parse failures.
-- Return source marker (`_source: "offline"` or `_source: "live"`).
-- `read_asset` uses LRU model cache and returns cache marker (`_cache: "hit" | "miss"`).
-
-## Tool naming and contract notes
-
-- Tool names use `unity_open_mcp_*`.
-- Input schema and descriptions live in each tool file under `mcp-server/src/tools/`.
-- Errors are returned as JSON text payloads with `error.code` and `error.message`.
-
-## Lifecycle policy
-
-Every bridge tool declares a **lifecycle policy** so callers know which ops are cheap, which settle, and which survive a domain reload. It is classified in the bridge (the source of truth — `[BridgeTool(Lifecycle = ...)]` for registry tools, `ToolLifecycle.Map` for legacy hardcoded tools) and surfaced in the gate response envelope as `lifecycle` + `settleMs`.
-
-| Policy | Meaning |
-|---|---|
-| `none` | Read-only, returns immediately. Most tools. |
-| `editor_settle` | Mutating; bridge waits for asset refresh/serialization (`apply_fix`, `reserialize`). |
-| `restart_then_settle` | Mutating; may trigger a domain reload. Bridge blocks until the editor finishes compiling (cap 60s) so the caller never observes a half-compiled state (`execute_csharp`, `invoke_method`, `execute_menu`, `compile_check`, `scene_open`). |
-| `custom_confirmation` | Async; returns immediately, result arrives via an external completion signal (`run_tests`). |
-
-**Active-scene dirty guard.** `restart_then_settle` tools are refused with `error.code = "scene_dirty"` when any loaded scene has unsaved changes, so Unity's native save modal never interrupts the flow. Recover by saving/discarding the scene, or pass `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu` / `scene_open`. See [bridge-http.md](bridge-http.md#active-scene-dirty-guard) for the envelope shape.
-
-## Token-bounded output (M13 T4.6)
-
-Every list-returning tool honors the same three controls so agents can bound token cost without reading per-tool docs:
-
-- `detail: summary | normal | verbose` — compression level. Defaults vary per tool (`summary` for `read_asset` and `scene_get_data`, `normal` for `read_console` / `find_references`). `summary` omits the largest sub-fields (component fields, stack traces, field locations); `verbose` lifts the per-item caps and includes Unity-internal frames.
-- `max_results` / `max_entries` / `max_items` / `max_nodes` — the cap on returned rows. Honored by `read_asset`, `search_assets`, `find_references`, `find_members`, `read_console`, `profiler_capture`, `list_assets`, `scene_get_data`, and `pull_events`.
-- **Truncation is always reported.** Every capped response carries a count field so elision is never silent:
-  - `read_asset` — `moreHidden` (folded tree rows past `limit`/`depth`).
-  - `search_assets` — `truncated` (result files past `max_results`) and `moreObjectsHidden` per file.
-  - `find_references` — `totalCount` vs returned entries; `pattern_threshold` collapses folders.
-  - `find_members` — `count` (returned) and `truncated` (additional matches dropped).
-  - `read_console` — `truncated` (entries dropped by `max_entries`) and `totalAfterFilter` (post-type-filter count).
-  - `profiler_capture` — `truncated` on nested enumerables.
-  - `scene_get_data` — `truncated` (nodes past `max_nodes`) and `moreHidden` (per-parent hidden child counts when `depth` caps the walk).
-  - `pull_events` — `dropped` (events evicted from the in-memory queue before this pull).
-
-When the cap is not hit, the count is `0` (or omitted for legacy fields); a missing count never means "unknown".
-
-## Streaming & event pull (M13)
-
-The bridge emits console-log and editor-state (compile / play-mode) notifications over an SSE stream at `GET /events`. See [bridge-http.md](bridge-http.md#events-sse--events-poll-m13) for the wire format.
-
-`unity_senses_pull_events` is the MCP surface for that stream:
-
-- The MCP server opens one SSE subscription per process on first call (lazy), keeps it connected across calls, and buffers events into a 500-entry queue.
-- Each call drains up to `max_events` events and advances the cursor; calling again immediately returns only events that arrived since.
-- The subscriber id is server-scoped — a restarted MCP server begins "now"; agents that need historical logs should still call `unity_senses_read_console`.
-- Returns `bridge_unavailable` when the live bridge is down (no batch fallback — there is no headless Unity console to stream).
-
-`pull_events` vs `read_console`: `read_console` is a snapshot of the *current* console contents (every call returns the whole buffered log). `pull_events` is *incremental* — it returns only logs emitted since the previous pull, plus editor-state transitions that never appear in the console (compile start/stop, play-mode changes). For a "what happened after my mutation" check, `pull_events` is cheaper; for a "what's the full current state" check, use `read_console`.
-
-
-
-## Source-of-truth files
-
-- `mcp-server/src/index.ts`
 - `mcp-server/src/tools/index.ts`
 - `mcp-server/src/tool-router.ts`
 - `mcp-server/src/batch-spawn.ts`
 - `mcp-server/src/compressible-router.ts`
-- `mcp-server/src/event-stream.ts`
 - `mcp-server/src/capabilities/build-capabilities.ts`
-- `mcp-server/src/capabilities/list-rules.ts`
-- `mcp-server/src/capabilities/rule-catalog.ts`
-- `mcp-server/src/skill/generate-skill.ts`
-- `mcp-server/src/skill/client-paths.ts`
-- `skills/client-paths.json` — single source of truth for project-relative skill install paths and the MCP-client → skill-target mapping (consumed by both the Hub wizard and `unity_open_mcp_generate_skill`).

@@ -1,32 +1,46 @@
-# MCP Setup with Unity Hub Pro
+# Wizard Setup (Unity Hub Pro)
 
-Step-by-step guide to connect an AI client (Cursor, Claude Desktop, OpenCode, ZCode, and others) to a Unity project using the **AI Setup wizard** in Unity Hub Pro.
+Use the AI Setup wizard in Unity Hub Pro to connect a Unity project to `unity-open-mcp`.
 
-For setup without Unity Hub Pro, see [manual-setup.md](manual-setup.md).
+For non-wizard setup, see [manual-setup.md](manual-setup.md).
 
-> **Default path is now `npx`.** The wizard's Step 2 defaults to the
-> published npm package — you do **not** need to clone this repository or
-> build `mcp-server/dist/index.js` for a normal install. The instructions
-> below that build from a checkout apply to the **"Use local checkout"**
-> toggle (contributor flow); enable it in Step 2 to follow those steps.
+## Requirements
 
-## What you need
+- Unity 2022.3 LTS or newer (Unity 6 recommended)
+- Node.js 18 or newer
+- Unity Hub Pro
+- MCP client (Cursor, Claude Desktop, OpenCode, ZCode, or similar)
 
-| Requirement | Notes |
-|---|---|
-| Unity 2022.3 LTS+ (Unity 6 recommended) | Required by the bridge package. See [Unity version compatibility](unity-version-compat.md). |
-| Node.js 18+ | Runs the MCP server. Your AI client spawns it via `npx`; no manual build for the default path. |
-| Unity Hub Pro | Desktop app in [hub/](../hub/). |
-| An MCP client | Cursor, Claude Desktop, OpenCode, ZCode, or any client that supports MCP stdio servers. |
-| This repository *(local checkout path only)* | Clone only if you enable **Use local checkout** in Step 2. |
+## Quick flow
 
-## 1. Build the MCP server *(local checkout path only)*
+1. Open Unity Hub Pro and add your Unity project.
+2. Click the **AI** action for that project.
+3. Complete wizard steps 1–6.
+4. Restart your MCP client.
+5. Run a Unity MCP call to confirm connectivity.
 
-> Skip this step for the default (`npx`) path — the AI client fetches the
-> published package. Only follow it when you enable **Use local checkout**
-> in Step 2 (contributor / clone flow).
+[[SCREENSHOT:WIZARD-OPEN]]
 
-From the repository root:
+## Wizard steps
+
+### Step 1 — Project check
+
+- Valid Unity project layout
+- Unity version detection
+- Existing bridge/verify package check
+- Existing MCP config check
+
+[[SCREENSHOT:WIZARD-STEP1-PROJECT-CHECK]]
+
+### Step 2 — Environment
+
+- Node.js check
+- MCP launch mode:
+  - default: `npx -y unity-open-mcp@latest`
+  - optional: global install
+  - optional: local checkout path
+
+If you use local checkout, build first:
 
 ```bash
 cd mcp-server
@@ -34,139 +48,48 @@ npm install
 npm run build
 ```
 
-Confirm that `mcp-server/dist/index.js` exists. The wizard checks for this file when validating the toolkit root.
+[[SCREENSHOT:WIZARD-STEP2-ENVIRONMENT]]
 
-## 2. Run Unity Hub Pro
+### Step 3 — Unity packages
 
-From the `hub/` directory:
+- Install or upgrade bridge and verify packages
+- Review manifest diff before apply
 
-```bash
-npm install
-npm run tauri dev
-```
-
-See [hub/README.md](../hub/README.md) for platform-specific notes.
-
-## 3. Add your Unity project
-
-1. Open the **Projects** tab.
-2. Click **Add Project** and choose your Unity project folder (must contain `Assets/` and `ProjectSettings/`).
-3. Optionally add the bundled [demo](../demo/) project to try the flow without a separate checkout.
-
-## 4. Open the AI Setup wizard
-
-1. In the project list, click **AI** on the row for your project (to the left of the gear **Settings** button).
-2. The wizard opens for that project only.
-
-You can also select a project and use the toolbar **AI Setup** button, or right-click a project row and choose **Configure Agent Bridge…**.
-
-## 5. Walk through the wizard
-
-### Step 1 — Project check
-
-The wizard confirms:
-
-- Valid Unity project layout
-- Unity version (6000+)
-- Whether bridge/verify packages are already in `Packages/manifest.json`
-- Whether an MCP client config already mentions `unity-open-mcp`
-
-Fix any hard blocks (missing version file, invalid path) before continuing.
-
-### Step 2 — Environment
-
-1. **Node.js** — must report version 18 or higher.
-2. **MCP server source** — by default the wizard uses the published npm package (`npx -y unity-open-mcp@latest`); no toolkit root is required. Optionally enable **Use a global install** to launch the bare `unity-open-mcp` binary instead.
-3. **Use local checkout** *(optional)* — enable this toggle to onboard against a cloned toolkit root. Pick the root of this repository (the folder that contains `packages/`, `mcp-server/`, and `hub/`), then click **Validate** and resolve any failed fingerprint checks (missing `mcp-server/dist/index.js` usually means you skipped step 1). The toggle auto-enables when a toolkit root is already saved.
-4. Ensure the project’s `Packages/manifest.json` is writable.
-
-### Step 3 — Install Unity packages
-
-1. Leave **Install Unity Open MCP Bridge** and **Install Unity Open MCP Verify** enabled unless you already manage those packages yourself.
-2. Review the manifest diff preview.
-3. If packages are already installed (for example in the demo project with local `file:` paths), click **Next** or **Skip to Step 4** — no rewrite is required.
-4. If an upgrade is proposed, check **I understand the manifest will be upgraded** before clicking **Install** or **Upgrade manifest**.
-
-When the demo project lives inside this monorepo, the wizard uses local `file:` package paths instead of git URLs.
+[[SCREENSHOT:WIZARD-STEP3-PACKAGES-DIFF]]
 
 ### Step 4 — MCP client config
 
-1. Choose your MCP client (Cursor, Claude Desktop, OpenCode, ZCode, Claude Code, or Manual).
-2. Review the live preview (JSON entry, CLI command, or copyable snippet).
-3. Click **Write config** (or follow the CLI instructions for Claude Code).
-4. Optional: enable advanced options such as a custom `mcp-server/dist/index.js` path if you built the server elsewhere.
+- Choose client preset
+- Review generated config preview
+- Write config to target location
 
-The wizard writes a `unity-open-mcp` server entry with at least:
-
-- `command`: `node`
-- `args`: path to `mcp-server/dist/index.js`
-- `env.UNITY_PROJECT_PATH`: your project’s absolute path
-
-See [tools.md](tools.md) for optional environment variables.
+[[SCREENSHOT:WIZARD-STEP4-MCP-CONFIG-PREVIEW]]
 
 ### Step 5 — Agent skill (optional)
 
-Install the agent skill so your AI client gets workflow guidance for the Unity MCP tools. This step is **optional** — skip it if you manage skills yourself.
+- Copy `SKILL.md` for your selected client
+- Optional overwrite with backup
 
-1. The wizard derives the target folder from the MCP client you picked in Step 4 and the single-source manifest at [`skills/client-paths.json`](../skills/client-paths.json):
-   - Cursor → `.cursor/skills/unity-open-mcp/SKILL.md`
-   - Claude Desktop / Claude Code → `.claude/skills/unity-open-mcp/SKILL.md`
-   - OpenCode → `.opencode/skills/unity-open-mcp/SKILL.md`
-   - ZCode → `.agents/skills/unity-open-mcp/SKILL.md`
-   - Manual → all four folders
-2. The preview lists each target with a "will create" / "exists — will be overwritten only with confirmation" status.
-3. Click **Copy skill** to copy the template, or **Skip** to continue without it.
-
-Existing files are only overwritten after you tick the **Overwrite existing skill files** box — the wizard backs them up to `*.bak` first. You can also copy the skill from the Done screen later.
+[[SCREENSHOT:WIZARD-STEP5-SKILL]]
 
 ### Step 6 — Launch and verify
 
-1. Click **Launch Unity and verify** (or use your usual launch flow with the bridge port shown).
-2. Wait for compile + bridge `/ping` checks (up to about two minutes).
-3. When `/ping` succeeds, finish the wizard.
+- Launch Unity
+- Wait for compile and bridge readiness
+- Finish when health checks pass
 
-If verification times out, you can **Skip to Done** and retry after Unity finishes compiling.
-
-### Done screen
-
-The summary lists manifest changes, MCP config path, copied skill files (when applicable), and bridge status. Use **Open in Cursor** or **Open in OpenCode** if your client is configured.
-
-## 6. Restart your MCP client
-
-Most clients load MCP servers only at startup:
-
-- **Cursor** — restart Cursor or reload MCP servers from settings after the config file is written.
-- **Claude Desktop** — quit and reopen the app.
-- **OpenCode** — restart the TUI or reload global/project MCP config as you normally would.
-- **ZCode** — restart the ZCode session or reload MCP config so the new `~/.zcode/cli/config.json` (global) or `<project>/.zcode/cli/config.json` (project) entry is picked up.
-
-Config file locations depend on the client and scope you chose in Step 4. The wizard shows the exact target path in the preview.
-
-## 7. Confirm the connection
-
-1. Open the Unity project in the Editor (bridge listens on the configured port, default `19120`).
-2. In your AI client, invoke an MCP tool or resource tied to Unity (for example a bridge `/ping`-backed check or a project resource).
-3. If tools fail with connection errors, check:
-   - Unity is running with the project open
-   - `UNITY_PROJECT_PATH` in the MCP config matches the project root
-   - `mcp-server/dist/index.js` exists and Node 18+ is on your `PATH`
-   - No firewall is blocking localhost on the bridge port
-
-For HTTP-level bridge behavior, see [api/bridge-http.md](api/bridge-http.md). For MCP tool routing, see [api/mcp-tools.md](api/mcp-tools.md).
+[[SCREENSHOT:WIZARD-STEP6-VERIFY]]
 
 ## Troubleshooting
 
-| Symptom | What to try |
-|---|---|
-| **AI** button missing on a project row | Path must exist, project must have a detected Unity version, and must not be marked stale. |
-| Toolkit validation fails | Run `npm run build` in `mcp-server/`. Point toolkit root at the monorepo root, not `hub/` or `mcp-server/` alone. |
-| Step 3 buttons disabled | Validate toolkit root in Step 2; ensure at least one package is selected; for upgrades, confirm the upgrade checkbox. |
-| MCP tools unavailable in the client | Restart the client after Step 4; confirm the config file path matches your OS and client. |
-| Bridge `/ping` fails | Launch Unity for the same project; wait for compilation; confirm port env vars match between MCP config and Unity. |
+- AI action missing: re-check project path and Unity version detection.
+- Package install disabled: resolve environment validation first.
+- Tools unavailable in client: restart client after writing config.
+- Bridge unavailable: verify project path, Unity runtime state, and Node path.
 
 ## Related docs
 
-- [Manual setup (no Hub)](manual-setup.md) — install packages and MCP config by hand.
-- [Architecture](architecture.md) — how hub, bridge, verify, and MCP server fit together.
-- [API index](api.md) — contracts and protocol surfaces.
-- [Tools and dependencies](tools.md) — scripts, env vars, and toolchain versions.
+- [Manual setup](manual-setup.md)
+- [Unity Hub Pro](unity-hub-pro.md)
+- [Bridge HTTP API](api/bridge-http.md)
+- [MCP tools API](api/mcp-tools.md)
