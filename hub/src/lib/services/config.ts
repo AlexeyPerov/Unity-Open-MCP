@@ -1681,42 +1681,51 @@ export interface BridgePingResult {
 }
 
 /**
- * Default bridge HTTP port (numeric form). Mirrors
- * `DEFAULT_BRIDGE_PORT` in `launch_verify.rs` and the default
- * documented in `packages/bridge.md` §HTTP API. The Step 4
- * env-var builder (`ai_toolkit.ts`) uses the string form
- * (`"19120"`) for the MCP config; the Step 5 verifier needs
- * the numeric form for `poll_bridge_ping` and
- * `launch_for_verify`.
+ * Parse the Step 4 bridge port input (a free-text string) into an
+ * optional override port. Returns `null` when the input is blank or
+ * unparsable — meaning "derive the port from the project path" (the
+ * per-project hash shared with the bridge + MCP server). The wizard
+ * resolves the actual port via {@link resolveBridgePort} before
+ * passing it to `launch_for_verify` / `poll_bridge_ping`.
  */
-export const DEFAULT_BRIDGE_PORT_NUM = 19120;
-
-/**
- * Parse the Step 4 bridge port input (a free-text string) into
- * the numeric value the Rust commands consume. Returns the
- * `DEFAULT_BRIDGE_PORT_NUM` when the input is blank or
- * unparsable so the wizard always has a usable port to poll
- * and pass to Unity.
- */
-export function bridgePortFromString(raw: string): number {
+export function bridgePortFromString(raw: string): number | null {
   const trimmed = raw.trim();
-  if (trimmed.length === 0) return DEFAULT_BRIDGE_PORT_NUM;
+  if (trimmed.length === 0) return null;
   const n = Number.parseInt(trimmed, 10);
   if (!Number.isFinite(n) || n <= 0 || n > 65535) {
-    return DEFAULT_BRIDGE_PORT_NUM;
+    return null;
   }
   return n;
+}
+
+/**
+ * Tauri command: resolve the bridge port for a project. When an
+ * explicit override port is given it wins; otherwise the port is the
+ * per-project hash (`20000 + sha256(projectPath) % 10000`), computed
+ * server-side in Rust so the formula lives in exactly one place. The
+ * wizard Step 4 calls this to display the effective port, and Step 5
+ * uses the result to launch Unity + poll `/ping`.
+ */
+export async function resolveBridgePort(
+  projectPath: string,
+  overridePort: number | null
+): Promise<number> {
+  return invoke<number>("resolve_bridge_port", {
+    projectPath,
+    overridePort: overridePort ?? null,
+  });
 }
 
 /**
  * Tauri command: launch Unity with the bridge port pinned via
  * `-UNITY_OPEN_MCP_BRIDGE_PORT` and the `UNITY_OPEN_MCP_BRIDGE_PORT`
  * env var, so the in-Editor bridge listens on the port the
- * wizard Step 5 is about to poll. Reuses the regular launch
- * pipeline (install resolution, version refresh, env-var
- * layering, `last_launch_pid` bookkeeping) and writes the
- * same `LaunchOutcome::Ok | LaunchOutcome::Error` record to
- * the per-launch log.
+ * wizard Step 5 is about to poll. When `bridgePort` is `0` the Rust
+ * side derives it from the project path (per-project hash). Reuses
+ * the regular launch pipeline (install resolution, version refresh,
+ * env-var layering, `last_launch_pid` bookkeeping) and writes the
+ * same `LaunchOutcome::Ok | LaunchOutcome::Error` record to the
+ * per-launch log.
  */
 export async function launchForVerify(
   params: LaunchForVerifyParamsWire

@@ -40,6 +40,7 @@ use serde_json::{json, Map, Value};
 
 use super::wizard::claude_desktop_config_path;
 use crate::config::ai_toolkit::derived_mcp_index_path;
+use crate::config::bridge_port::{parse_override, resolve_port};
 
 /// Local alias for [`derived_mcp_index_path`]. The wizard Step 4
 /// also needs to validate the path against the toolkit
@@ -667,11 +668,13 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
         "UNITY_PROJECT_PATH".to_string(),
         Value::String(params.unity_project_path.clone()),
     );
-    let port = if params.bridge_port.trim().is_empty() {
-        "19120".to_string()
-    } else {
-        params.bridge_port.trim().to_string()
-    };
+    // Resolve the bridge port from the project path (the per-project hash
+    // shared with the bridge + MCP server), honoring an explicit override
+    // when the wizard port field is non-blank. A blank field → the computed
+    // port, so the MCP client and the bridge listener always agree. See
+    // `bridge_port.rs`.
+    let port = resolve_port(&params.unity_project_path, parse_override(&params.bridge_port))
+        .to_string();
     env.insert("UNITY_OPEN_MCP_BRIDGE_PORT".to_string(), Value::String(port));
     if params.include_unity_path && !params.unity_path.trim().is_empty() {
         env.insert(
@@ -811,11 +814,7 @@ pub fn claude_mcp_add_command(
     launch_mode: McpLaunchMode,
     resolved_index: &str,
 ) -> String {
-    let port = if bridge_port.trim().is_empty() {
-        "19120".to_string()
-    } else {
-        bridge_port.trim().to_string()
-    };
+    let port = resolve_port(unity_project_path, parse_override(bridge_port)).to_string();
     let invocation = match launch_mode {
         McpLaunchMode::Npx => "npx -y unity-open-mcp@latest".to_string(),
         McpLaunchMode::Global => "unity-open-mcp".to_string(),
@@ -1167,6 +1166,7 @@ fn copy_skill_files_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::bridge_port::compute_port;
     use crate::config::wizard::contains_mcp_key;
     use std::fs;
     use tempfile::tempdir;
@@ -1239,7 +1239,7 @@ mod tests {
             toolkit_root: toolkit_root.to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
             unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: "19120".to_string(),
+            bridge_port: String::new(),
             include_unity_path: false,
             unity_path: String::new(),
             client: McpClientId::Cursor,
@@ -1254,7 +1254,7 @@ mod tests {
             toolkit_root: toolkit_root.to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
             unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: "19120".to_string(),
+            bridge_port: String::new(),
             include_unity_path: false,
             unity_path: String::new(),
             client: McpClientId::OpencodeProject,
@@ -1274,7 +1274,7 @@ mod tests {
             toolkit_root: toolkit_root.to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
             unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: "19120".to_string(),
+            bridge_port: String::new(),
             include_unity_path: false,
             unity_path: String::new(),
             client,
@@ -1315,7 +1315,9 @@ mod tests {
                 .get("env")
                 .and_then(|e| e.get("UNITY_OPEN_MCP_BRIDGE_PORT"))
                 .unwrap(),
-            "19120"
+            // Blank bridge_port → per-project hash, computed from the
+            // fixture project path (cross-side formula in bridge_port.rs).
+            &compute_port(&project.to_string_lossy()).to_string()
         );
     }
 
@@ -1331,7 +1333,7 @@ mod tests {
             toolkit_root: String::new(),
             mcp_index_override: String::new(),
             unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: "19120".to_string(),
+            bridge_port: String::new(),
             include_unity_path: false,
             unity_path: String::new(),
             client: McpClientId::Cursor,
@@ -1365,7 +1367,7 @@ mod tests {
             toolkit_root: String::new(),
             mcp_index_override: String::new(),
             unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: "19120".to_string(),
+            bridge_port: String::new(),
             include_unity_path: false,
             unity_path: String::new(),
             client: McpClientId::OpencodeProject,
@@ -1397,7 +1399,7 @@ mod tests {
             toolkit_root: String::new(),
             mcp_index_override: String::new(),
             unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: "19120".to_string(),
+            bridge_port: String::new(),
             include_unity_path: false,
             unity_path: String::new(),
             client: McpClientId::Cursor,
@@ -1514,7 +1516,7 @@ mod tests {
             toolkit_root: toolkit.path().to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
             unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: "19120".to_string(),
+            bridge_port: String::new(),
             include_unity_path: false,
             unity_path: String::new(),
             client: McpClientId::Cursor,
@@ -1537,7 +1539,7 @@ mod tests {
             toolkit_root: "/repos/this/does/not/exist".to_string(),
             mcp_index_override: "/nope/index.js".to_string(),
             unity_project_path: dir.path().to_string_lossy().into_owned(),
-            bridge_port: "19120".to_string(),
+            bridge_port: String::new(),
             include_unity_path: false,
             unity_path: String::new(),
             client: McpClientId::Cursor,
@@ -1557,7 +1559,7 @@ mod tests {
             toolkit_root: "/repos/uai".to_string(),
             mcp_index_override: String::new(),
             unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: "19120".to_string(),
+            bridge_port: String::new(),
             include_unity_path: false,
             unity_path: String::new(),
             client: McpClientId::ClaudeCode,
@@ -1586,7 +1588,7 @@ mod tests {
             toolkit_root: fake_root.path().to_string_lossy().into_owned(),
             mcp_index_override: String::new(),
             unity_project_path: project.to_string_lossy().into_owned(),
-            bridge_port: "19120".to_string(),
+            bridge_port: String::new(),
             include_unity_path: false,
             unity_path: String::new(),
             client: McpClientId::ClaudeCode,
@@ -1599,27 +1601,47 @@ mod tests {
         let cmd = plan.command.expect("claude-code renders a command");
         assert!(cmd.starts_with("claude mcp add unity-open-mcp"));
         assert!(cmd.contains("--env UNITY_PROJECT_PATH="));
-        assert!(cmd.contains("--env UNITY_OPEN_MCP_BRIDGE_PORT=19120"));
+        // Blank bridge_port → the per-project hash port for this fixture.
+        let expected_port = compute_port(&project.to_string_lossy());
+        assert!(cmd.contains(&format!(
+            "--env UNITY_OPEN_MCP_BRIDGE_PORT={expected_port}"
+        )));
         assert!(cmd.contains("-- node "));
         assert!(cmd.contains("index.js"));
     }
 
     #[test]
-    fn claude_mcp_add_command_uses_default_port_when_blank() {
+    fn claude_mcp_add_command_uses_computed_port_when_blank() {
         let cmd = claude_mcp_add_command(
             "/games/MyGame",
             "  ",
             McpLaunchMode::Local,
             "/u/mcp-server/dist/index.js",
         );
-        assert!(cmd.contains("UNITY_OPEN_MCP_BRIDGE_PORT=19120"));
+        // Blank → derived from the project path (cross-side formula).
+        assert!(cmd.contains(&format!(
+            "UNITY_OPEN_MCP_BRIDGE_PORT={}",
+            compute_port("/games/MyGame")
+        )));
+    }
+
+    #[test]
+    fn claude_mcp_add_command_honors_explicit_override() {
+        let cmd = claude_mcp_add_command(
+            "/games/MyGame",
+            "19199",
+            McpLaunchMode::Local,
+            "/u/mcp-server/dist/index.js",
+        );
+        // Explicit override wins over the per-project hash.
+        assert!(cmd.contains("UNITY_OPEN_MCP_BRIDGE_PORT=19199"));
     }
 
     #[test]
     fn claude_mcp_add_command_npx_mode_omits_node_prefix() {
         let cmd = claude_mcp_add_command(
             "/games/MyGame",
-            "19120",
+            "19199",
             McpLaunchMode::Npx,
             "/unused/local/index.js",
         );
@@ -1631,7 +1653,7 @@ mod tests {
     fn claude_mcp_add_command_global_mode_uses_bare_binary() {
         let cmd = claude_mcp_add_command(
             "/games/MyGame",
-            "19120",
+            "19199",
             McpLaunchMode::Global,
             "/unused/local/index.js",
         );

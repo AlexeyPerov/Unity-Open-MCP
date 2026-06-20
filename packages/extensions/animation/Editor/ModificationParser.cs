@@ -271,8 +271,8 @@ namespace UnityOpenMcpExtensions.Animation
                 var fields = ParseInlineObject(inner.Substring(start, i - start));
                 result.Add(new KeyframeSpec
                 {
-                    Time = Float(fields, "time"),
-                    Value = Float(fields, "value"),
+                    Time = Float(fields, "time") ?? 0f,
+                    Value = Float(fields, "value") ?? 0f,
                     InTangent = Float(fields, "inTangent") ?? 0f,
                     OutTangent = Float(fields, "outTangent") ?? 0f,
                 });

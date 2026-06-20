@@ -12,16 +12,20 @@ import {
   buildCursorMcpEntry,
   buildMcpEnv,
   buildOpenCodeMcpEntry,
-  DEFAULT_BRIDGE_PORT,
   MCP_SERVER_KEY,
   mcpClientConfigTarget,
   type McpClientId,
 } from "./ai_toolkit.ts";
 
+// The wizard resolves the bridge port via the `resolve_bridge_port` Tauri
+// command before building an entry; these tests pass an explicit port to
+// exercise the env-builder directly.
+const PORT = "27916";
+
 test("buildMcpEnv always includes required vars", () => {
-  const env = buildMcpEnv({ unityProjectPath: "/games/MyGame" });
+  const env = buildMcpEnv({ unityProjectPath: "/games/MyGame", bridgePort: PORT });
   assert.equal(env.UNITY_PROJECT_PATH, "/games/MyGame");
-  assert.equal(env.UNITY_OPEN_MCP_BRIDGE_PORT, DEFAULT_BRIDGE_PORT);
+  assert.equal(env.UNITY_OPEN_MCP_BRIDGE_PORT, PORT);
   assert.equal(env.UNITY_PATH, undefined);
 });
 
@@ -36,6 +40,7 @@ test("buildMcpEnv honors custom bridge port", () => {
 test("buildMcpEnv omits UNITY_PATH when blank", () => {
   const env = buildMcpEnv({
     unityProjectPath: "/games/MyGame",
+    bridgePort: PORT,
     unityPath: "   ",
   });
   assert.equal(env.UNITY_PATH, undefined);
@@ -44,6 +49,7 @@ test("buildMcpEnv omits UNITY_PATH when blank", () => {
 test("buildMcpEnv trims and includes UNITY_PATH when set", () => {
   const env = buildMcpEnv({
     unityProjectPath: "/games/MyGame",
+    bridgePort: PORT,
     unityPath: "  /Applications/Unity  ",
   });
   assert.equal(env.UNITY_PATH, "/Applications/Unity");
@@ -52,17 +58,18 @@ test("buildMcpEnv trims and includes UNITY_PATH when set", () => {
 test("buildCursorMcpEntry uses command+args+env envelope", () => {
   const entry = buildCursorMcpEntry("/repos/uai/mcp-server/dist/index.js", {
     unityProjectPath: "/games/MyGame",
+    bridgePort: PORT,
   });
   assert.equal(entry.command, "node");
   assert.deepEqual(entry.args, ["/repos/uai/mcp-server/dist/index.js"]);
   assert.equal(entry.env.UNITY_PROJECT_PATH, "/games/MyGame");
-  assert.equal(entry.env.UNITY_OPEN_MCP_BRIDGE_PORT, DEFAULT_BRIDGE_PORT);
+  assert.equal(entry.env.UNITY_OPEN_MCP_BRIDGE_PORT, PORT);
 });
 
 test("buildOpenCodeMcpEntry uses command-array+environment envelope", () => {
   const entry = buildOpenCodeMcpEntry(
     "/repos/uai/mcp-server/dist/index.js",
-    { unityProjectPath: "/games/MyGame" }
+    { unityProjectPath: "/games/MyGame", bridgePort: PORT }
   );
   assert.equal(entry.type, "local");
   assert.equal(entry.enabled, true);

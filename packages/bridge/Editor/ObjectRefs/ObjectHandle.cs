@@ -6,12 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-// GetInstanceID() / EditorUtility.InstanceIDToObject() are deprecated in Unity
-// 6000.4+ in favour of GetEntityId() / EntityIdToObject(), but those replacements
-// only exist on 6000.4+ (this package's declared minimum is 6000.0) and
-// GetEntityId() returns *different values* than the int instance ID. Our JSON
-// object-handle contract (objectId / gameObjectId / instanceId) is built on the
-// stable int instance ID, so we intentionally keep the deprecated int APIs here.
+// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 namespace UnityOpenMcpBridge.ObjectRefs
 {

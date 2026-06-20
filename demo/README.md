@@ -16,12 +16,23 @@ Open this `demo/` folder as a Unity project. Unity will resolve local `file:` pa
 - `com.alexeyperov.unity-open-mcp-bridge` → `../../packages/bridge`
 - `com.alexeyperov.unity-open-mcp-verify` → `../../packages/verify`
 
-The bridge HTTP listener starts automatically on `127.0.0.1:19120` when the Editor finishes loading.
+The bridge HTTP listener starts automatically on a **per-project port**
+derived from this project's path (`20000 + sha256(path) % 10000`, so two
+projects never collide) when the Editor finishes loading.
 
 ### 2. Verify bridge is running
 
+The port for this demo project is printed by the bridge window's status line;
+discover it (and confirm the bridge is up) with the MCP server CLI:
+
 ```bash
-curl http://127.0.0.1:19120/ping
+cd ../mcp-server && node dist/index.js status --project "$(pwd)/.." --json
+```
+
+Or ping it directly once you know the port (the bridge window shows it):
+
+```bash
+curl http://127.0.0.1:<port>/ping
 ```
 
 Expected response:
@@ -51,7 +62,7 @@ Set environment variables:
 | Variable | Value |
 |---|---|
 | `UNITY_PROJECT_PATH` | Absolute path to this `demo/` directory |
-| `UNITY_OPEN_MCP_BRIDGE_PORT` | `19120` (default) |
+| `UNITY_OPEN_MCP_BRIDGE_PORT` | Optional — the port is derived from the project path automatically. Set only to pin a specific port. |
 
 ### 4. Connect an AI client
 
@@ -101,4 +112,4 @@ Changes to bridge or verify source are reflected after Unity recompiles (domain 
 
 ## Port Override
 
-Set `UNITY_OPEN_MCP_BRIDGE_PORT` environment variable or pass `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>` as a Unity launch argument to override the default port `19120`.
+The bridge listens on a **per-project port** (`20000 + sha256(projectPath) % 10000`), so two Unity projects running simultaneously never collide. Override it by setting the `UNITY_OPEN_MCP_BRIDGE_PORT` environment variable or passing `-UNITY_OPEN_MCP_BRIDGE_PORT=<port>` as a Unity launch argument. The Unity Hub Pro wizard computes the port for you when generating client configs.

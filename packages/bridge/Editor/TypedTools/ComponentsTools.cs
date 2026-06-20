@@ -1,9 +1,4 @@
-// GetInstanceID() / EditorUtility.InstanceIDToObject() are deprecated in Unity
-// 6000.4+ in favour of GetEntityId() / EntityIdToObject(), but those
-// replacements return different values and do not exist in 2022.3 (this
-// package's declared minimum). Our JSON handle contract is built on the stable
-// int instance ID, so the deprecated int APIs are used deliberately here. See
-// ObjectRefs/ObjectHandle.cs for the canonical rationale.
+// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;

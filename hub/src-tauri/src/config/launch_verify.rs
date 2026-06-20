@@ -37,13 +37,6 @@ use crate::config::launch::{read_project_version, resolve_install_for_version};
 use crate::config::launch_log::{self, LaunchOutcome};
 use crate::config::persistence;
 
-/// Default bridge HTTP port. Mirrors the `DEFAULT_BRIDGE_PORT`
-/// exported from `ai_toolkit.ts` and the value documented in
-/// `packages/bridge.md` §HTTP API. The wizard Step 5 polls
-/// `127.0.0.1:{DEFAULT_PORT}/ping` whenever the user does not
-/// override the port in Step 4.
-pub const DEFAULT_BRIDGE_PORT: u16 = 19120;
-
 /// Default `/ping` request timeout. The spec gives the wizard
 /// a 120 s window for the bridge to come up; we keep the
 /// per-request timeout smaller (10 s) so a hung connection
@@ -130,18 +123,16 @@ pub struct LaunchForVerifyParams {
     pub project_id: String,
     /// Bridge port to pass to Unity via
     /// `-UNITY_OPEN_MCP_BRIDGE_PORT` / `UNITY_OPEN_MCP_BRIDGE_PORT`.
-    /// The wizard always uses the port the user picked in Step
-    /// 4 — `DEFAULT_BRIDGE_PORT` is just a default the caller
-    /// picks when the user did not override.
-    #[serde(default = "default_port")]
+    /// The wizard sends the resolved port (from
+    /// `resolve_bridge_port`). When `0` (or omitted) the server
+    /// derives it from the project path via the per-project hash
+    /// shared with the bridge + MCP server — see
+    /// [`crate::config::bridge_port::resolve_port`].
+    #[serde(default)]
     pub bridge_port: u16,
     /// M1.5-18: active Hub theme at the time of the launch.
     /// `None` ⇒ `"system"` (matches `launch_project`).
     pub theme: Option<String>,
-}
-
-fn default_port() -> u16 {
-    DEFAULT_BRIDGE_PORT
 }
 
 /// Tauri command: launch Unity for the Step 5 verify flow. The
@@ -162,7 +153,6 @@ pub fn launch_for_verify(
         .as_deref()
         .map(|t| if t == "dark" || t == "light" { t } else { "system" })
         .unwrap_or("system");
-    let port = params.bridge_port;
     let project_id = params.project_id.clone();
     match launch_for_verify_inner(&state, &params) {
         Ok(result) => {
@@ -188,7 +178,7 @@ pub fn launch_for_verify(
                 pid: result.pid,
                 unity_version: result.unity_version,
                 executable_path: result.executable_path,
-                bridge_port: port,
+                bridge_port: result.effective_port,
             })
         }
         Err(err) => {
@@ -272,6 +262,10 @@ struct InnerLaunchForVerify {
     executable_path: String,
     launch_args: Vec<String>,
     build_target: Option<String>,
+    /// The bridge port actually used for the launch (explicit override or
+    /// the per-project hash). Echoed back to the wizard so the result is
+    /// accurate even when `params.bridge_port` was 0 (auto).
+    effective_port: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -291,19 +285,6 @@ fn launch_for_verify_inner(
     state: &State<AppState>,
     params: &LaunchForVerifyParams,
 ) -> Result<InnerLaunchForVerify, InnerLaunchForVerifyError> {
-    if params.bridge_port == 0 {
-        return Err(InnerLaunchForVerifyError {
-            typed: LaunchForVerifyError::PortInvalid { port: 0 },
-            project_name: String::new(),
-            project_path: String::new(),
-            unity_version: None,
-            install_path: None,
-            launch_args: Vec::new(),
-            build_target: None,
-            code: "portInvalid".to_string(),
-            message: "bridge port 0 is not a valid TCP port".to_string(),
-        });
-    }
     let projects = {
         let guard = state.projects.lock().unwrap();
         guard.clone()
@@ -329,6 +310,16 @@ fn launch_for_verify_inner(
     let project_path_str = project.path.clone();
     let project_name = project.name.clone();
     let project_path = Path::new(&project_path_str);
+    // Resolve the bridge port: an explicit non-zero `bridge_port` from the
+    // wizard wins; otherwise derive it from the project path via the
+    // per-project hash shared with the bridge + MCP server. This keeps the
+    // Unity launch, the /ping poll, and the MCP client config all on the
+    // same port without a hardcoded default. See bridge_port.rs.
+    let effective_port: u16 = if params.bridge_port == 0 {
+        crate::config::bridge_port::compute_port(&project_path_str)
+    } else {
+        params.bridge_port
+    };
     if !project_path.exists() {
         return Err(InnerLaunchForVerifyError {
             typed: LaunchForVerifyError::PathInvalid {
@@ -410,12 +401,12 @@ fn launch_for_verify_inner(
     // `packages/bridge.md` §HTTP API) and as an env var (the
     // bridge package reads the env var first). The arg is
     // additive — we never strip user-provided args above.
-    let port_arg = format!("-UNITY_OPEN_MCP_BRIDGE_PORT={}", params.bridge_port);
+    let port_arg = format!("-UNITY_OPEN_MCP_BRIDGE_PORT={}", effective_port);
     args.push(port_arg.clone());
     let mut command = std::process::Command::new(&executable);
     command.args(&args);
     env_vars::apply_to_command(&mut command, &project.env_vars);
-    command.env("UNITY_OPEN_MCP_BRIDGE_PORT", params.bridge_port.to_string());
+    command.env("UNITY_OPEN_MCP_BRIDGE_PORT", effective_port.to_string());
     let child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -461,6 +452,7 @@ fn launch_for_verify_inner(
         executable_path: executable.to_string_lossy().to_string(),
         launch_args: args,
         build_target,
+        effective_port,
     })
 }
 
@@ -842,11 +834,6 @@ mod tests {
     #[test]
     fn split_http_response_returns_none_for_no_separator() {
         assert!(split_http_response("not http at all").is_none());
-    }
-
-    #[test]
-    fn default_port_is_19120() {
-        assert_eq!(DEFAULT_BRIDGE_PORT, 19120);
     }
 
     #[test]

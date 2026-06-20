@@ -27,6 +27,7 @@
     planMcpConfig,
     planSkillCopy,
     pollBridgePing,
+    resolveBridgePort,
     validateToolkitRoot,
     writeManifestMerge,
     writeMcpConfig,
@@ -66,7 +67,6 @@
     shippedPacks,
   } from "$lib/services/extensions";
   import {
-    DEFAULT_BRIDGE_PORT,
     type McpClientId,
   } from "$lib/services/ai_toolkit";
   import type { McpLaunchModeWire } from "$lib/services/config";
@@ -197,10 +197,15 @@
   const shippedExtensionPacks = shippedPacks();
   const plannedExtensionPacks = EXTENSION_PACKS.filter((p) => !p.shipped);
 
-  // Step 4 — MCP client state.
+  // Step 4 — MCP client state. `bridgePort` is an OPTIONAL override:
+  // blank means "derive from the project path" (the per-project hash shared
+  // with the bridge + MCP server). The effective port is resolved via
+  // `resolveBridgePort` and surfaced in `resolvedBridgePort` so the UI and
+  // Step 5 always work with the real number.
   let mcpClient = $state<McpClientId>("cursor");
   let cursorProjectScope = $state(false);
-  let bridgePort = $state(DEFAULT_BRIDGE_PORT);
+  let bridgePort = $state("");
+  let resolvedBridgePort = $state<number | null>(null);
   let copyToast = $state<string | null>(null);
   let mcpPlan = $state<McpConfigPlan | null>(null);
   let mcpPlanning = $state(false);
@@ -654,6 +659,31 @@
     };
   });
 
+  // Resolve the effective bridge port whenever the project path or the
+  // optional override changes. Blank override → the per-project hash
+  // (computed server-side in Rust); a valid override wins. Surfaced in
+  // `resolvedBridgePort` so the UI and Step 5 always use the real number.
+  $effect(() => {
+    const projectPath = project.path;
+    const override = bridgePortFromString(bridgePort);
+    if (!projectPath) {
+      resolvedBridgePort = null;
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const port = await resolveBridgePort(projectPath, override);
+        if (!cancelled) resolvedBridgePort = port;
+      } catch {
+        if (!cancelled) resolvedBridgePort = null;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  });
+
   // Live Step 4 plan: re-call `plan_mcp_config` whenever the
   // form state changes so the diff preview + write button
   // always reflect what the Rust writer would produce. The
@@ -1064,8 +1094,11 @@
     if (step5Running) return;
     resetStep5State();
     step5Running = true;
-    const port = bridgePortFromString(String(bridgePort));
-    step5BridgePort = port;
+    // `bridgePort` is an optional override; pass 0 when blank so the Rust
+    // launch path derives the per-project hash. The effective port is echoed
+    // back in the launch result (`result.bridgePort`).
+    const overridePort = bridgePortFromString(String(bridgePort));
+    step5BridgePort = resolvedBridgePort ?? overridePort;
     step5StartedAt = Date.now();
     step5DeadlineAt = step5StartedAt + STEP5_TOTAL_BUDGET_MS;
     step5Items = {
@@ -1078,9 +1111,12 @@
     try {
       const result = await launchForVerify({
         projectId: project.id,
-        bridgePort: port,
+        bridgePort: overridePort ?? 0,
         theme: (settingsStore.current?.theme as "dark" | "light" | "system" | undefined) ?? "system",
       });
+      // The launch result carries the effective port (override or computed
+      // hash), so surface that everywhere downstream.
+      step5BridgePort = result.bridgePort;
       step5LaunchPid = result.pid;
       launched = true;
       step5Items = {
@@ -1089,7 +1125,7 @@
         compile: "running",
       };
       S.appendDrawerLog(
-        `AI Setup: launched Unity (pid ${result.pid}) with bridge port ${port} for ${project.name}`,
+        `AI Setup: launched Unity (pid ${result.pid}) with bridge port ${result.bridgePort} for ${project.name}`,
       );
       // Phase 2 — poll the bridge `/ping` endpoint every
       // STEP5_POLL_INTERVAL_MS until the bridge responds 200
@@ -1099,7 +1135,7 @@
       // `compiling: false` (or once we've seen at least one
       // response, since the spec treats compile errors as
       // `ping: failed` rather than `compile: failed`).
-      await pollBridgeUntilReady(port);
+      await pollBridgeUntilReady(result.bridgePort);
     } catch (e) {
       const message = describeLaunchForVerifyError(e);
       step5Error = message;
@@ -2230,9 +2266,16 @@
               id="wiz-bridge-port"
               type="text"
               class="wiz-input wiz-input-small"
+              placeholder="(auto)"
               value={bridgePort}
               oninput={(e) => (bridgePort = (e.currentTarget as HTMLInputElement).value)}
             />
+            {#if !bridgePort.trim() && resolvedBridgePort != null}
+              <p class="wiz-hint">
+                Auto-derived from project path: <code>{resolvedBridgePort}</code>.
+                Override only if you pin a specific port.
+              </p>
+            {/if}
           </div>
 
           <div class="wiz-field">
@@ -2450,7 +2493,7 @@
         <section class="wiz-section">
           <p class="wiz-desc">
             Step 5 launches Unity with the bridge port pinned via
-            <code>-UNITY_OPEN_MCP_BRIDGE_PORT={step5BridgePort ?? bridgePortFromString(String(bridgePort))}</code>
+            <code>-UNITY_OPEN_MCP_BRIDGE_PORT={step5BridgePort ?? resolvedBridgePort ?? "auto"}</code>
             and polls the bridge HTTP <code>/ping</code> endpoint
             for up to 120 s. The wizard never spawns a separate
             <code>unity-open-mcp</code> subprocess — the wizard

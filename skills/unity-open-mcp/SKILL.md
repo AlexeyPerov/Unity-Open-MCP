@@ -14,6 +14,8 @@ Skill for AI agents driving a Unity project through the `unity-open-mcp` MCP ser
 
 The bridge port is **per-project** — `20000 + (sha256(projectPath) % 10000)` — NOT a fixed 19120. Two projects = two ports, zero config. The MCP server resolves it at startup, but if a tool returns `bridge_offline` do NOT assume Unity isn't running — verify first.
 
+> **Editing C#? Check the build first.** If you've been editing C# (`packages/` source, a `.cs` asset, anything that recompiles), an offline bridge is frequently a *symptom* of a compile failure, not just "Unity isn't running." Skip ahead to [Diagnose a broken build](#diagnose-a-broken-build-read_compile_errors--compile_check) and call `unity_open_mcp_read_compile_errors` — it reads `Editor.log` offline and survives a dead bridge. Then come back here if the log is clean.
+
 **Step 1 — read the instance lock.** The bridge writes `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` (lowercase hex sha256 of the absolute project path, forward slashes, no trailing slash). It carries: `pid`, `port`, `authToken`, `projectPath`, `state` (`idle` / `compiling` / `reloading`), `heartbeatAt` (ISO-8601 UTC, refreshed every 0.5s), `isCompiling`, `unityVersion`. To list every bridge the machine knows about:
 
 ```bash
@@ -195,10 +197,14 @@ Before deleting or moving an asset, call **`unity_open_mcp_find_references`** to
 
 There are two distinct failure shapes, with different recovery paths:
 
-**Bridge offline after a C# edit — `bridge_compile_failed`.** If a tool call returns an error with `code: "bridge_compile_failed"`, the bridge assembly itself failed to recompile (the edit was in `packages/bridge/` or a dependency), so the live Editor is stuck and every live tool refuses — including `unity_senses_read_console`. In this state `compile_check` does **not** work either (its batch entry point lives in the same broken assembly, and Unity's per-project lock blocks a second instance). The one channel that survives is the live Editor's `Editor.log`, which Unity writes regardless of bridge health.
+**Bridge offline after a C# edit — `bridge_offline` / `bridge_compile_failed`.** Whenever the bridge is unreachable and you have been editing C# (`packages/` source, a `.cs` asset, or anything that triggers a Unity recompile), your first move is to check the compile log — the bridge being down is often a *symptom* of a failed compile, not just "Unity isn't running." Two sub-cases:
 
-- Call **`unity_open_mcp_read_compile_errors`** — it reads the tail of Unity's `Editor.log` directly (offline, no bridge, no Unity spawn) and returns structured compiler errors (`status`, `errorCount`, `errors[]` with `code`/`file`/`line`/`message`).
-- Read `errors[].file`/`line`/`code` (e.g. `Assets/.../Foo.cs` line 75, `CS1061`) to locate the break, fix it, then trigger a recompile (a no-op edit + focus Unity, or `compile_check` once the source compiles). Once the bridge assembly recompiles, the listener reloads and live tools return.
+- **`bridge_compile_failed`** — the bridge assembly itself failed to recompile (the edit was in `packages/bridge/` or a dependency), so the live Editor is stuck and every live tool refuses — including `unity_senses_read_console`. In this state `compile_check` does **not** work either (its batch entry point lives in the same broken assembly, and Unity's per-project lock blocks a second instance). The one channel that survives is the live Editor's `Editor.log`, which Unity writes regardless of bridge health.
+- **Plain `bridge_offline`** (no `bridge_compile_failed` code) — Unity may simply not be running, or not yet recompiled. You still cannot run `compile_check` (it needs Unity). But if Unity **is** open, it has already written the latest CSxxxx diagnostics to `Editor.log`, and `read_compile_errors` retrieves them.
+
+Either way, call **`unity_open_mcp_read_compile_errors`** — it reads the tail of Unity's `Editor.log` directly (offline, no bridge, no Unity spawn) and returns structured compiler errors (`status`, `errorCount`, `errors[]` with `code`/`file`/`line`/`message`, plus a `headline` triage line). It works even when the bridge assembly is broken and even when Unity isn't running (it surfaces whatever the last Editor session wrote). Read `errors[].file`/`line`/`code` (e.g. `Assets/.../Foo.cs` line 75, `CS1061`) to locate the break, fix it, then trigger a recompile (a no-op edit + focus Unity, or `compile_check` once the source compiles). Once the bridge assembly recompiles, the listener reloads and live tools return.
+
+> **Note:** if no Unity Editor is open, `Editor.log` is stale from the previous session and will not reflect your latest edits — recompile verification needs Unity running. The stale log is still useful to see what the last session reported.
 
 **Project compiles but you want a clean-from-scratch check — `compile_check`.** When the live bridge is up but you want to verify the project compiles independently of the current Editor state, call **`unity_open_mcp_compile_check`**. It spawns a fresh headless Unity, recompiles from scratch, and returns structured compiler errors. It always routes to batch, so it works even when the live bridge reports compiling. Use it for a deliberate "does this build clean?" check, **not** as the recovery path for a broken bridge assembly.
 

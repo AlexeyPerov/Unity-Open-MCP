@@ -35,7 +35,6 @@ namespace UnityOpenMcpBridge
         // Port range: [20000, 29999]. Matches the spec and the MCP server.
         public const int PortRangeStart = 20000;
         public const int PortRangeSize = 10000;
-        public const int LegacyDefaultPort = 19120;
 
         // instances/ lives under the existing ~/.unity-open-mcp convention used
         // by TestRunnerService / ScreenshotService / CompileCheckState. One

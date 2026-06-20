@@ -13,17 +13,19 @@
  *  | OpenCode     | mcp          | `command: [node, path]`    | `environment`   |
  *
  * `UNITY_PROJECT_PATH` and `UNITY_OPEN_MCP_BRIDGE_PORT` are always
- * present (the wizard pre-fills `UNITY_PROJECT_PATH` from the Step 1
- * project path). `UNITY_PATH` is included for batch-capable flows
- * (M5+) — the wizard exposes a Step 4 advanced toggle to opt in,
- * defaulting to off in M4.
+ * present. The bridge port is the per-project hash
+ * (`20000 + sha256(projectPath) % 10000`, shared with the bridge and
+ * the MCP server) — the wizard resolves it via the `resolve_bridge_port`
+ * Tauri command before building the entry, so the on-disk writer (Rust)
+ * and the preview (TS) always agree. `UNITY_PATH` is included for
+ * batch-capable flows (M5+) — the wizard exposes a Step 4 advanced
+ * toggle to opt in, defaulting to off in M4.
  *
  * Pure functions only — no I/O. Callers serialize the result of
  * `buildXxxMcpEntry` directly into the client config file.
  */
 
 export const MCP_SERVER_KEY = "unity-open-mcp";
-export const DEFAULT_BRIDGE_PORT = "19120";
 
 /** The full set of env-var inputs the wizard may pass. `unityPath`
  *  is optional; it is added to the entry only when the user opts
@@ -31,8 +33,11 @@ export const DEFAULT_BRIDGE_PORT = "19120";
 export interface McpEnvInputs {
   /** Absolute path to the Unity project being onboarded. Required. */
   unityProjectPath: string;
-  /** Bridge HTTP port. Defaults to `DEFAULT_BRIDGE_PORT` (`"19120"`). */
-  bridgePort?: string;
+  /** Resolved bridge HTTP port. The wizard resolves this via the
+   *  `resolve_bridge_port` Tauri command (per-project hash, or an
+   *  explicit override from the Step 4 port field) before building
+   *  the entry, so the preview and the on-disk writer agree. */
+  bridgePort: string;
   /** Absolute path to the Unity Editor executable. Optional; only
    *  emitted when the user opts in to batch routing (M5+). */
   unityPath?: string;
@@ -46,11 +51,12 @@ export type McpEnv = Record<string, string>;
 /** Compute the canonical env-var map for a generated MCP entry.
  *  Use this for both Cursor/Claude (`env`) and OpenCode
  *  (`environment`); the key names are the spec contract and never
- *  change between clients. */
+ *  change between clients. The caller must pass the resolved
+ *  `bridgePort` (per-project hash or explicit override). */
 export function buildMcpEnv(inputs: McpEnvInputs): McpEnv {
   const env: McpEnv = {
     UNITY_PROJECT_PATH: inputs.unityProjectPath,
-    UNITY_OPEN_MCP_BRIDGE_PORT: inputs.bridgePort ?? DEFAULT_BRIDGE_PORT,
+    UNITY_OPEN_MCP_BRIDGE_PORT: inputs.bridgePort,
   };
   if (inputs.unityPath && inputs.unityPath.trim().length > 0) {
     env.UNITY_PATH = inputs.unityPath.trim();

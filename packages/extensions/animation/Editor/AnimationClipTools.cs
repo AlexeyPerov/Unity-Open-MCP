@@ -1,3 +1,5 @@
+// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
+#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;

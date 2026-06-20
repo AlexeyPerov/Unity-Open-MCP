@@ -5,11 +5,7 @@ using System.Text;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-// GetInstanceID() is deprecated in Unity 6000.4+ in favour of GetEntityId(), but
-// GetEntityId() only exists on 6000.4+ (package minimum is 6000.0) and returns
-// different values than the int instance ID. The instanceId fields emitted here
-// are part of the agent-facing JSON contract and must stay as the stable int
-// instance ID, so we deliberately keep GetInstanceID() — hence the suppression.
+// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 namespace UnityOpenMcpBridge.Spatial
 {

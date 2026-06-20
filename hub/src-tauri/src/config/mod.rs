@@ -27,6 +27,7 @@ pub mod ai_toolkit;
 pub mod wizard;
 pub mod mcp_config;
 pub mod launch_verify;
+pub mod bridge_port;
 pub mod render_pipeline;
 pub mod line_count;
 pub mod upm;

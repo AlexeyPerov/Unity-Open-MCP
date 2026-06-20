@@ -1,8 +1,5 @@
-// These tests exercise ObjectHandle's int-instance-ID contract, which is itself
-// built on the deprecated GetInstanceID() (see ObjectHandle.cs for the full
-// rationale: GetEntityId() only exists on Unity 6000.4+ and returns different
-// values). To feed Resolve() a real canonical instance ID we must read it via
-// GetInstanceID(), so the suppression mirrors the production code.
+// These tests exercise ObjectHandle's int-instance-ID contract, which is built
+// on the deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using NUnit.Framework;
 using UnityOpenMcpBridge.ObjectRefs;

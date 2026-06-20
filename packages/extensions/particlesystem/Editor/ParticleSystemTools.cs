@@ -1,7 +1,4 @@
-// GetInstanceID() / EditorUtility.InstanceIDToObject() are deprecated in Unity
-// 6000.4+; the bridge's JSON handle contract is built on the stable int
-// instance ID, so the deprecated APIs are used deliberately here. See
-// packages/bridge/Editor/ObjectRefs/ObjectHandle.cs.
+// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
@@ -10,7 +7,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpExtensions.ParticleSystem
+namespace UnityOpenMcpExtensions.ParticleSystemExt
 {
     // M16 Plan 10 / T6.6.9 — Particle System extension pack.
     //
@@ -178,9 +175,12 @@ namespace UnityOpenMcpExtensions.ParticleSystem
             var unknown = new List<string>();
             var errors = new List<string>();
 
-            // Each module is a struct property on the ParticleSystem. Read it
-            // into a local, mutate the local, then assign back. Fields are
-            // dispatched by name; unknown fields are collected (not fatal).
+            // Each module is a read-only struct property on the ParticleSystem
+            // (e.g. ps.main), but the struct carries an internal ref to the
+            // system — so mutating a field on the local writes through to the
+            // live component directly. Do NOT try to assign the module back to
+            // ps (the property has no setter; CS0200). Fields are dispatched by
+            // name; unknown fields are collected (not fatal).
             var normalized = module.Trim().ToLowerInvariant();
             switch (normalized)
             {
@@ -188,63 +188,54 @@ namespace UnityOpenMcpExtensions.ParticleSystem
                 {
                     var m = ps.main;
                     ApplyMainFields(m, fields, applied, unknown, errors);
-                    ps.main = m; // copy back
                     break;
                 }
                 case "emission":
                 {
                     var m = ps.emission;
                     ApplyEmissionFields(m, fields, applied, unknown, errors);
-                    ps.emission = m;
                     break;
                 }
                 case "shape":
                 {
                     var m = ps.shape;
                     ApplyShapeFields(m, fields, applied, unknown, errors);
-                    ps.shape = m;
                     break;
                 }
                 case "color_over_lifetime":
                 {
                     var m = ps.colorOverLifetime;
                     ApplyColorOverLifetimeFields(m, fields, applied, unknown, errors);
-                    ps.colorOverLifetime = m;
                     break;
                 }
                 case "size_over_lifetime":
                 {
                     var m = ps.sizeOverLifetime;
                     ApplySizeOverLifetimeFields(m, fields, applied, unknown, errors);
-                    ps.sizeOverLifetime = m;
                     break;
                 }
                 case "rotation_over_lifetime":
                 {
                     var m = ps.rotationOverLifetime;
                     ApplyRotationOverLifetimeFields(m, fields, applied, unknown, errors);
-                    ps.rotationOverLifetime = m;
                     break;
                 }
                 case "noise":
                 {
                     var m = ps.noise;
                     ApplyNoiseFields(m, fields, applied, unknown, errors);
-                    ps.noise = m;
                     break;
                 }
                 case "collision":
                 {
                     var m = ps.collision;
                     ApplyCollisionFields(m, fields, applied, unknown, errors);
-                    ps.collision = m;
                     break;
                 }
                 case "trails":
                 {
                     var m = ps.trails;
                     ApplyTrailsFields(m, fields, applied, unknown, errors);
-                    ps.trails = m;
                     break;
                 }
                 case "renderer":
@@ -472,8 +463,9 @@ namespace UnityOpenMcpExtensions.ParticleSystem
             sb.Append("\"enabled\":").Append(m.enabled ? "true" : "false").Append(',');
             sb.Append("\"ratio\":").Append(EscMinMaxCurve(m.ratio)).Append(',');
             sb.Append("\"lifetime\":").Append(EscMinMaxCurve(m.lifetime)).Append(',');
-            sb.Append("\"width\":").Append(EscMinMaxCurve(m.width)).Append(',');
-            sb.Append("\"color\":").Append(EscMinMaxGradient(m.color));
+            sb.Append("\"widthOverTrail\":").Append(EscMinMaxCurve(m.widthOverTrail)).Append(',');
+            sb.Append("\"colorOverLifetime\":").Append(EscMinMaxGradient(m.colorOverLifetime)).Append(',');
+            sb.Append("\"colorOverTrail\":").Append(EscMinMaxGradient(m.colorOverTrail));
             sb.Append('}');
         }
 
@@ -848,8 +840,8 @@ namespace UnityOpenMcpExtensions.ParticleSystem
                         else errors.Add($"renderer.renderMode invalid: '{kv.Value}'. Valid: Billboard, Mesh, HorizontalBillboard, VerticalBillboard, Stretch3D.");
                         break;
                     case "alignment":
-                        if (TryEnum(kv.Value, out ParticleSystemRenderSpaceAlignment al)) { r.alignment = al; applied.Add(kv.Key); }
-                        else errors.Add($"renderer.alignment invalid: '{kv.Value}'. Valid: View, World, Facing, Velocity.");
+                        if (TryEnum(kv.Value, out ParticleSystemRenderSpace al)) { r.alignment = al; applied.Add(kv.Key); }
+                        else errors.Add($"renderer.alignment invalid: '{kv.Value}'. Valid: View, World, Local, Facing.");
                         break;
                     case "sortMode":
                         if (TryEnum(kv.Value, out ParticleSystemSortMode sm)) { r.sortMode = sm; applied.Add(kv.Key); }

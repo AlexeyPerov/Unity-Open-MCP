@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-ext-particlesystem.Editor",
-  "rootNamespace": "UnityOpenMcpExtensions.ParticleSystem",
+  "rootNamespace": "UnityOpenMcpExtensions.ParticleSystemExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor"
   ],

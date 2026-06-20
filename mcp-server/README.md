@@ -32,8 +32,7 @@ Edit `~/.cursor/mcp.json` (Cursor) or your Claude Desktop MCP config file:
       "command": "npx",
       "args": ["-y", "unity-open-mcp@latest"],
       "env": {
-        "UNITY_PROJECT_PATH": "/path/to/your/unity/project",
-        "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
+        "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
       }
     }
   }
@@ -52,8 +51,7 @@ Edit `~/.config/opencode/opencode.json`:
       "command": ["npx", "-y", "unity-open-mcp@latest"],
       "enabled": true,
       "environment": {
-        "UNITY_PROJECT_PATH": "/path/to/your/unity/project",
-        "UNITY_OPEN_MCP_BRIDGE_PORT": "19120"
+        "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
       }
     }
   }
@@ -68,9 +66,14 @@ For a project-scoped config, put the same `mcp.unity-open-mcp` block in
 ```bash
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/path/to/your/unity/project \
-  --env UNITY_OPEN_MCP_BRIDGE_PORT=19120 \
   -- npx -y unity-open-mcp@latest
 ```
+
+> **Bridge port.** The bridge HTTP port is **derived from the project path**
+> (`20000 + sha256(path) % 10000`, so two projects never collide), and the
+> server discovers it via the bridge's lock file — so you usually do **not**
+> need to set a port at all. The Unity Hub Pro wizard computes it for you.
+> Set `UNITY_OPEN_MCP_BRIDGE_PORT` only when you want to pin a specific port.
 
 ### Optional: global install
 
@@ -89,7 +92,7 @@ Then use `"command": "unity-open-mcp", "args": []` (Cursor / Claude Desktop) or
 | Variable | Required | Purpose |
 |---|---|---|
 | `UNITY_PROJECT_PATH` | yes | Absolute path to your Unity project root. |
-| `UNITY_OPEN_MCP_BRIDGE_PORT` | no | Bridge HTTP port override. When unset, the port is derived deterministically from the project path and discovered via the bridge's lock file. |
+| `UNITY_OPEN_MCP_BRIDGE_PORT` | no | Bridge HTTP port override. When unset, the port is derived deterministically from the project path (`20000 + sha256(path) % 10000`) and discovered via the bridge's lock file. Set only to pin a specific port. |
 | `UNITY_PATH` | no | Unity Editor executable for batch-only (headless) tools. |
 
 ## How it works

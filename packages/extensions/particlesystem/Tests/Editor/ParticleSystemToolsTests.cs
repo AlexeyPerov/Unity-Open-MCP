@@ -1,7 +1,4 @@
-// GetInstanceID() / EditorUtility.InstanceIDToObject() are deprecated in Unity
-// 6000.4+; the bridge's JSON handle contract is built on the stable int
-// instance ID, so the deprecated APIs are used deliberately here. See
-// packages/bridge/Editor/ObjectRefs/ObjectHandle.cs.
+// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 // EditMode tests for the Particle System extension pack.
 //
@@ -24,7 +21,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpExtensions.ParticleSystem.Tests
+namespace UnityOpenMcpExtensions.ParticleSystemExt.Tests
 {
     public class ParticleSystemToolsTests
     {

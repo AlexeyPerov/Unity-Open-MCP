@@ -1,6 +1,4 @@
-// GetInstanceID() is deprecated in Unity 6000.4+; the bridge's JSON handle
-// contract is built on the stable int instance ID, so the deprecated API is
-// used deliberately here. See packages/bridge/Editor/ObjectRefs/ObjectHandle.cs.
+// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 // EditMode tests for the M16 Plan 1 typed prefab tools (PrefabTools).
 // Covers parameter parsing and resolver branches that do NOT drive Unity

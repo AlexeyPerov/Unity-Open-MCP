@@ -81,6 +81,7 @@ pub fn run() {
             config::mcp_config::copy_skill_files,
             config::launch_verify::launch_for_verify,
             config::launch_verify::poll_bridge_ping,
+            config::bridge_port::resolve_bridge_port,
             config::line_count::count_lines,
             config::line_count::count_lines_cached,
             config::git_status::git_status,

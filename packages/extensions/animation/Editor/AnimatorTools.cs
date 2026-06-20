@@ -1,3 +1,5 @@
+// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
+#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -449,7 +451,7 @@ namespace UnityOpenMcpExtensions.Animation
         static AnimatorState GetState(AnimatorStateMachine stateMachine, string stateName)
         {
             var child = stateMachine.states.FirstOrDefault(s => s.state.name == stateName);
-            if (child?.state == null)
+            if (child.state == null)
                 throw new System.Exception($"State '{stateName}' not found in this layer.");
             return child.state;
         }

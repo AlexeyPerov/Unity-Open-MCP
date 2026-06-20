@@ -17,6 +17,7 @@ Use this index to find setup guides, product docs, and API contracts.
 - [Bridge HTTP API](api/bridge-http.md) — bridge endpoints and envelopes.
 - [MCP tools API](api/mcp-tools.md) — tool catalog and route policy.
 - [MCP resources API](api/resources.md) — resource URIs and payloads.
+- [Code conventions](code-conventions.md) — non-obvious C# decisions (instance IDs, namespace aliasing).
 
 ## Fast lookup
 
