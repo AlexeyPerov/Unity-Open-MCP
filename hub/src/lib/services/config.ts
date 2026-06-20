@@ -1361,6 +1361,10 @@ export interface ProjectState {
   bridgeInstalled: boolean;
   verifyInstalled: boolean;
   mcpConfigured: McpConfigHeuristic;
+  /** `true` when at least one agent-skill `SKILL.md` exists under any
+   * of the four client-relative skill dirs in the project. Drives the
+   * Step 4b passing highlight + the project-row AI status. */
+  anySkillInstalled: boolean;
   /** `true` when `Packages/manifest.json` (or its parent) is writable. */
   manifestWritable: boolean;
   /** `true` when any path segment contains a space — Step 2 warning. */
@@ -1636,6 +1640,46 @@ export async function copySkillFiles(
     params,
     overwriteExisting,
   });
+}
+
+/**
+ * "Clear AI Setup" — the destructive inverse of the wizard. Strips the
+ * bridge + verify package ids from `Packages/manifest.json`, removes the
+ * `unity-open-mcp` entry from every known MCP client config (global files
+ * only when the entry's `UNITY_PROJECT_PATH` matches this project), and
+ * deletes the four agent-skill `SKILL.md` files. All mutations are
+ * best-effort with `.bak` backups; per-target failures are collected into
+ * `errors` rather than aborting the whole pass. Mirrors the Rust
+ * `clear::{clear_ai_setup, ClearAiSetupResult, …}` types.
+ */
+export interface ClearedClientConfig {
+  /** Display label, e.g. "Cursor (global)". */
+  label: string;
+  /** Absolute path of the config file that was (or would have been) modified. */
+  path: string;
+  /** `true` when the `unity-open-mcp` entry was present and removed. */
+  removed: boolean;
+  /** `true` when a `.bak` backup was created next to the file. */
+  backedUp: boolean;
+}
+
+export interface ClearAiSetupResult {
+  /** `true` when bridge + verify were stripped from the manifest. */
+  manifestCleared: boolean;
+  /** `.bak` path for the manifest, when a backup was created. */
+  manifestBackupPath: string | null;
+  /** Per-client-config outcome. */
+  clientConfigsCleared: ClearedClientConfig[];
+  /** Project-relative skill paths that were deleted. */
+  skillsRemoved: string[];
+  /** Non-fatal errors encountered (missing files are NOT errors). */
+  errors: string[];
+}
+
+export async function clearAiSetup(
+  projectPath: string
+): Promise<ClearAiSetupResult> {
+  return invoke<ClearAiSetupResult>("clear_ai_setup", { projectPath });
 }
 
 /**

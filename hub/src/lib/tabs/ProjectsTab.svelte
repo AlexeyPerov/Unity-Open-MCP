@@ -11,6 +11,7 @@
     addProject,
     checkPathsExists,
     createNewProject,
+    detectProjectState,
     discoverHubProjects,
     envVarCollisions,
     getCrashLogPath,
@@ -51,6 +52,7 @@
     type NewProjectError,
     type ProjectEntry,
     type ProjectKind,
+    type ProjectState,
     type RelinkProjectError,
     type RemoveProjectError,
     type RenderPipeline,
@@ -136,6 +138,12 @@
   let filterPreset = $state<FilterPreset>("all");
   let pathExistsMap = $state<Record<string, boolean>>({});
   let checkingPaths = $state(false);
+  // AI-setup detection cache keyed by project path. Populated lazily
+  // (after the first paint, one project at a time) so the per-row AI
+  // button can reflect "installed + configured" without blocking the
+  // list load. Not persisted — mirrors `pathExistsMap`.
+  let aiDetectMap = $state<Record<string, ProjectState>>({});
+  let aiDetectLoading = $state(false);
   let launching = $state<string | null>(null);
   let contextMenu = $state<{ x: number; y: number; projectId: string } | null>(null);
   let moreMenuOpenFor = $state<string | null>(null);
@@ -332,6 +340,10 @@
       S.appendDrawerLog(
         `[boot] total onMount: ${Math.round(performance.now() - bootStart)}ms`,
       );
+      // AI-setup detection is best-effort and per-project; kick it off
+      // after the blocking boot so rows paint first, then each AI
+      // button flips to green as its snapshot arrives.
+      void refreshAiDetection();
     })();
     // Start the running-Unity polling loop. The cadence is read from
     // `settings.discovery.scanIntervalSeconds` (default 30s, M1.5-10);
@@ -509,6 +521,61 @@
       S.appendErrorLog(`path check failed: ${msg}`);
     } finally {
       checkingPaths = false;
+    }
+  }
+
+  // `true` when the cached detection snapshot says the agent is fully
+  // installed + configured for this project: valid Unity ≥ 2022.3, a
+  // writable manifest, bridge + verify present, and at least one MCP
+  // client configured. Step 5 bridge-verify and the optional skill are
+  // runtime/optional and intentionally not required for the green state.
+  function aiReadyFor(path: string): boolean {
+    const d = aiDetectMap[path];
+    if (!d) return false;
+    if (!d.isValidUnityProject || !d.meetsMinUnityVersion || !d.manifestWritable) return false;
+    if (!d.bridgeInstalled || !d.verifyInstalled) return false;
+    const h = d.mcpConfigured;
+    return (
+      h.cursor ||
+      h.claudeDesktop ||
+      h.opencodeGlobal ||
+      h.opencodeProject ||
+      h.zcodeGlobal ||
+      h.zcodeProject
+    );
+  }
+
+  // Refresh AI detection for every tracked Unity project. Runs lazily
+  // (yielding between calls) so the list renders first and each row's
+  // button flips to green as its snapshot lands.
+  async function refreshAiDetection() {
+    if (aiDetectLoading) return;
+    const list = projectsStore.projects.filter((p) => p.kind === "unity");
+    if (list.length === 0) {
+      aiDetectMap = {};
+      return;
+    }
+    aiDetectLoading = true;
+    try {
+      for (const p of list) {
+        try {
+          const d = await detectProjectState(p.path);
+          aiDetectMap = { ...aiDetectMap, [p.path]: d };
+        } catch {
+          // Per-project failures are non-fatal; leave whatever was cached.
+        }
+      }
+    } finally {
+      aiDetectLoading = false;
+    }
+  }
+
+  async function refreshAiDetectionFor(path: string) {
+    try {
+      const d = await detectProjectState(path);
+      aiDetectMap = { ...aiDetectMap, [path]: d };
+    } catch {
+      // ignore — keep prior cache entry.
     }
   }
 
@@ -2209,7 +2276,13 @@
   }
 
   function closeAiSetup() {
+    // Capture the project before clearing the id so we can refresh its
+    // AI status — the wizard may have written configs or run "Clear".
+    const proj = aiSetupWizardProjectId
+      ? projectsStore.find(aiSetupWizardProjectId)
+      : null;
     aiSetupWizardProjectId = null;
+    if (proj?.path) void refreshAiDetectionFor(proj.path);
   }
 
   function formatRemoveError(err: RemoveProjectError): string {
@@ -3016,12 +3089,17 @@
               </div>
               <div class="cell cell-settings" role="gridcell">
                 {#if AI_SETUP_ENABLED && kind === "unity" && s.pathExists === true && s.hasVersion && !s.stale}
+                  {@const aiReady = aiReadyFor(project.path)}
                   <button
                     type="button"
-                    class="row-action-btn ai-row-btn ai-setup-btn ai-setup-{s.launchable ? 'ready' : 'incomplete'}"
+                    class="row-action-btn ai-row-btn ai-setup-btn ai-setup-{aiReady ? 'complete' : s.launchable ? 'ready' : 'incomplete'}"
                     onclick={(e: MouseEvent) => { e.stopPropagation(); openAiSetupFor(project); }}
                     aria-label="AI setup"
-                    title="AI — install / configure the Unity AI agent for this project"
+                    title={aiReady
+                      ? "AI setup complete — click to re-open the AI setup wizard"
+                      : aiDetectMap[project.path]
+                        ? "AI setup incomplete — click to install / configure the Unity AI agent"
+                        : "AI — install / configure the Unity AI agent for this project"}
                   >
                     AI
                   </button>
@@ -6384,6 +6462,17 @@
   }
   :global(.ai-setup-btn.ai-setup-incomplete:hover:not(:disabled)) {
     background: rgba(251, 191, 36, 0.18);
+  }
+  /* Green "setup complete" state — driven by the cached detection
+     snapshot (bridge + verify installed + an MCP client configured).
+     Uses --hub-success to match StatusChip's "ok" tone. */
+  :global(.ai-setup-btn.ai-setup-complete) {
+    border-color: var(--hub-success);
+    color: #9fe0b6;
+    background: rgba(47, 111, 74, 0.28);
+  }
+  :global(.ai-setup-btn.ai-setup-complete:hover:not(:disabled)) {
+    background: rgba(47, 111, 74, 0.42);
   }
 
   .ctx-item-ai-setup,

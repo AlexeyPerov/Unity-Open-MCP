@@ -20,6 +20,7 @@
   import {
     bridgePortFromString,
     checkNodeVersion,
+    clearAiSetup,
     copySkillFiles,
     detectProjectState,
     launchForVerify,
@@ -33,6 +34,7 @@
     writeMcpConfig,
     type BridgePingResult,
     type BridgeStatusKind,
+    type ClearAiSetupResult,
     type LaunchForVerifyError,
     type ManifestError,
     type ManifestMergePlan,
@@ -99,7 +101,7 @@
 
   const STEP_TITLES: Record<StepId, string> = {
     step1: "Project detection",
-    step2: "Environment",
+    step2: "MCP server source",
     step3: "Install Unity packages",
     step4: "Configure AI client",
     step4b: "Agent skill (optional)",
@@ -107,15 +109,71 @@
     done: "Setup complete",
   };
 
-  const MCP_CLIENT_OPTIONS: { id: McpClientId; label: string; kind: "file" | "cli" | "clipboard" }[] = [
-    { id: "cursor", label: "Cursor", kind: "file" },
-    { id: "claude-desktop", label: "Claude Desktop", kind: "file" },
-    { id: "claude-code", label: "Claude Code (CLI only)", kind: "cli" },
-    { id: "opencode-global", label: "OpenCode (global)", kind: "file" },
-    { id: "opencode-project", label: "OpenCode (project)", kind: "file" },
-    { id: "zcode-global", label: "ZCode (global)", kind: "file" },
-    { id: "zcode-project", label: "ZCode (project)", kind: "file" },
-    { id: "manual", label: "Manual / copy JSON", kind: "clipboard" },
+  const MCP_CLIENT_OPTIONS: {
+    id: McpClientId;
+    label: string;
+    kind: "file" | "cli" | "clipboard";
+    /** Tooltip describing the config format family + popular agents
+     *  that share it, so users picking one client understand the
+     *  format they are committing to. */
+    sharedWith?: string;
+  }[] = [
+    {
+      id: "cursor",
+      label: "Cursor",
+      kind: "file",
+      sharedWith:
+        "Format: mcpServers JSON at ~/.cursor/mcp.json. Shared by: Cursor, Roo Code, Kilo Code, Cline (Cursor-family clients).",
+    },
+    {
+      id: "claude-desktop",
+      label: "Claude Desktop",
+      kind: "file",
+      sharedWith:
+        "Format: mcpServers JSON (Claude Desktop config). Same envelope as Cursor; shared by Claude Desktop and Cursor.",
+    },
+    {
+      id: "claude-code",
+      label: "Claude Code (CLI only)",
+      kind: "cli",
+      sharedWith:
+        "CLI-only: renders a `claude mcp add` command (no config file is written). Skill installs to .claude/skills/.",
+    },
+    {
+      id: "opencode-global",
+      label: "OpenCode (global)",
+      kind: "file",
+      sharedWith:
+        "Format: mcp + $schema JSON (~/.config/opencode/opencode.json). Shared by: OpenCode and Opencode.",
+    },
+    {
+      id: "opencode-project",
+      label: "OpenCode (project)",
+      kind: "file",
+      sharedWith:
+        "Format: mcp + $schema JSON (project-local opencode.json). Shared by: OpenCode and Opencode.",
+    },
+    {
+      id: "zcode-global",
+      label: "ZCode (global)",
+      kind: "file",
+      sharedWith:
+        "Format: mcp.servers + type:stdio JSON (~/.zcode/cli/config.json). Skill installs to .agents/skills/. Shared by: ZCode.",
+    },
+    {
+      id: "zcode-project",
+      label: "ZCode (project)",
+      kind: "file",
+      sharedWith:
+        "Format: mcp.servers + type:stdio JSON (project-local .zcode/cli/config.json). Skill installs to .agents/skills/. Shared by: ZCode.",
+    },
+    {
+      id: "manual",
+      label: "Manual / copy JSON",
+      kind: "clipboard",
+      sharedWith:
+        "Copy a JSON snippet to paste into any MCP client manually. No file is written by the wizard.",
+    },
   ];
 
   interface Props {
@@ -137,6 +195,10 @@
   let detection = $state<ProjectState | null>(null);
   let detectionLoading = $state(false);
   let detectionError = $state<string | null>(null);
+  // Transient "project state refreshed" confirmation shown next to the
+  // Re-detect button after a successful refresh. Auto-clears on a timer.
+  let detectToast = $state<string | null>(null);
+  let detectToastTimer = $state<ReturnType<typeof setTimeout> | null>(null);
 
   // Step 2 — environment state. Prefilled from `settings.aiToolkit`
   // when the user has run the wizard before, but kept in local
@@ -221,6 +283,14 @@
   let skillError = $state<SkillCopyError | null>(null);
   let skillOverwriteAck = $state(false);
 
+  // "Clear AI Setup" — destructive inverse of the wizard. The yellow
+  // footer button runs it after a confirmation modal; the result is
+  // surfaced inline + via the Re-detect toast slot so the user sees
+  // exactly what was removed.
+  let clearInProgress = $state(false);
+  let clearResult = $state<ClearAiSetupResult | null>(null);
+  let clearError = $state<string | null>(null);
+
   // Step 5 — launch/verify state. The wizard drives the
   // launch + `/ping` polling itself; the Done screen reads
   // these values (plus the live detection snapshot) to render
@@ -278,7 +348,7 @@
       case "step1":
         return isProjectReady();
       case "step2":
-        return isEnvironmentReady();
+        return isMcpSourceReady();
       case "step3":
         return isManifestReady();
       case "step4":
@@ -293,23 +363,25 @@
   }
 
   function isProjectReady(): boolean {
+    // Step 1 is the environment gate: a valid Unity project that meets
+    // the minimum version, has a writable manifest, and Node.js ≥18
+    // available (the wizard launches `npx unity-open-mcp` / a local
+    // `node` build, so Node is a hard requirement surfaced here rather
+    // than on a separate Environment step).
     if (!detection) return false;
-    return detection.isValidUnityProject;
+    if (!detection.isValidUnityProject) return false;
+    if (!detection.meetsMinUnityVersion) return false;
+    if (!detection.manifestWritable) return false;
+    if (!nodeProbe?.ok) return false;
+    return true;
   }
 
-  function isEnvironmentReady(): boolean {
-    if (!nodeProbe?.ok) return false;
-    // The local-checkout path requires a validated toolkit root; the
-    // default `npx` path does not (it resolves the published npm package,
-    // no clone needed). Step 3 packages/skills still use the root when
-    // the toggle is on — but the default path skips them entirely.
+  function isMcpSourceReady(): boolean {
+    // Step 2 only configures the MCP-server launch source. The default
+    // `npx` path needs nothing; the local-checkout path needs a
+    // validated toolkit root. Unity version / Node / manifest-writable
+    // checks live on Step 1 now.
     if (useLocalCheckout && !toolkitValidation?.ok) return false;
-    // Below the supported minimum (2022.3) hard-blocks: the package
-    // manifests declare `unity: "2022.3"`, so UPM would refuse to
-    // resolve anyway. Below the *recommended* Unity 6 only warns.
-    if (!detection?.isValidUnityProject) return false;
-    if (!detection?.meetsMinUnityVersion) return false;
-    if (!detection?.manifestWritable) return false;
     return true;
   }
 
@@ -372,6 +444,15 @@
     if (i < STEP_ORDER.length - 1) {
       currentStep = STEP_ORDER[i + 1];
     }
+  }
+
+  // Free navigation: jump straight to any step from the progress list.
+  // The destination step's own UI continues to show its blocks/gating;
+  // the footer Back/Next still respects sequential `canGoNext`. No
+  // prerequisite enforcement on jump — least surprising for "let me
+  // peek at a later step."
+  function jumpToStep(id: StepId) {
+    currentStep = id;
   }
 
   function backStep() {
@@ -450,6 +531,14 @@
     try {
       const next = await detectProjectState(project.path);
       detection = next;
+      // Surface a small confirmation so the user sees the refresh did
+      // something (Re-detect is otherwise silent when nothing changed).
+      detectToast = "Project state refreshed";
+      if (detectToastTimer) clearTimeout(detectToastTimer);
+      detectToastTimer = setTimeout(() => {
+        detectToast = null;
+        detectToastTimer = null;
+      }, 2200);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       detectionError = `detection failed: ${msg}`;
@@ -531,9 +620,12 @@
     }
   }
 
-  // Re-run environment checks whenever the user enters Step 2.
+  // Re-run environment checks whenever the user enters Step 1 (the
+  // wizard's environment gate). Node is probed here so the popup
+  // launch immediately surfaces a missing/too-old Node, and the
+  // toolkit re-validates when a saved root is present.
   $effect(() => {
-    if (currentStep === "step2") {
+    if (currentStep === "step1") {
       if (nodeProbe === null) void runNodeProbe();
       if (toolkitRoot.trim() && toolkitValidation === null && !toolkitValidating) {
         void runToolkitValidation();
@@ -1453,6 +1545,55 @@
     void refreshDetection();
   }
 
+  // Clear AI Setup — removes the manifest entries, MCP client configs
+  // (project-scoped unconditionally; global only the entries whose
+  // `UNITY_PROJECT_PATH` matches this project), and the agent-skill
+  // files the wizard wrote. All mutations are best-effort with `.bak`
+  // backups; per-target failures land in `result.errors` and are shown
+  // inline rather than aborting the whole pass.
+  async function onClearAiSetup() {
+    if (clearInProgress) return;
+    const ok = await S.confirm(
+      "Clear AI Setup?",
+      "This removes the Unity AI agent for this project: the bridge + verify entries from Packages/manifest.json, the unity-open-mcp entry from every known MCP client config (global files only the entries pointing at this project), and the copied agent-skill SKILL.md files. A .bak backup is left next to each changed file. This cannot be undone.",
+    );
+    if (!ok) return;
+    clearInProgress = true;
+    clearError = null;
+    clearResult = null;
+    try {
+      const result = await clearAiSetup(project.path);
+      clearResult = result;
+      // Refresh the live snapshot so Step 1 / Done reflect the cleared
+      // state, and reset the transient Step 4/4b/5 state so stale
+      // "config written" / bridge-verified chips do not linger.
+      mcpWriteResult = null;
+      mcpWriteError = null;
+      mcpPlan = null;
+      skillResult = null;
+      skillError = null;
+      resetStep5State();
+      void refreshDetection();
+      const clearedConfigs = result.clientConfigsCleared.filter((c) => c.removed).length;
+      const summary =
+        result.errors.length > 0
+          ? `Cleared ${clearedConfigs} config(s), ${result.skillsRemoved.length} skill(s); ${result.errors.length} error(s).`
+          : `Cleared ${clearedConfigs} config(s), ${result.skillsRemoved.length} skill(s).`;
+      detectToast = summary;
+      if (detectToastTimer) clearTimeout(detectToastTimer);
+      detectToastTimer = setTimeout(() => {
+        detectToast = null;
+        detectToastTimer = null;
+      }, 3500);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      clearError = `Clear AI Setup failed: ${msg}`;
+      S.appendErrorLog(clearError);
+    } finally {
+      clearInProgress = false;
+    }
+  }
+
   function openInCursor() {
     if (!project.path) return;
     // The Hub doesn't track a Cursor install path; the
@@ -1484,13 +1625,49 @@
 
   // Re-render the wizard's progress segments. We highlight the
   // current step and dim completed/pending steps so the user has a
-  // single glance at "where am I" + "what's left".
+  // single glance at "where am I" + "what's left". A segment also gets
+  // a green `passing` accent when its readiness check holds against the
+  // live detection / probe state — so on popup launch, segments whose
+  // prerequisites are already satisfied light up immediately.
+  function stepPassing(id: StepId): boolean {
+    switch (id) {
+      case "step1":
+        return isProjectReady();
+      case "step2":
+        return isMcpSourceReady();
+      case "step3":
+        return (
+          !!detection &&
+          detection.bridgeInstalled &&
+          detection.verifyInstalled
+        );
+      case "step4": {
+        const h = detection?.mcpConfigured;
+        return (
+          !!h &&
+          (h.cursor ||
+            h.claudeDesktop ||
+            h.opencodeGlobal ||
+            h.opencodeProject ||
+            h.zcodeGlobal ||
+            h.zcodeProject)
+        );
+      }
+      case "step4b":
+        return !!detection?.anySkillInstalled;
+      case "step5":
+        return step5BridgeStatus.kind === "ok";
+      case "done":
+        return false;
+    }
+  }
+
   let progress = $derived.by(() => {
     return STEP_ORDER.map((id, idx) => {
       const currentIdx = currentStepIndex();
       const state: "done" | "current" | "pending" =
         idx < currentIdx ? "done" : idx === currentIdx ? "current" : "pending";
-      return { id, idx, label: stepLabel(id), state };
+      return { id, idx, label: stepLabel(id), state, passing: stepPassing(id) };
     });
   });
 
@@ -1517,41 +1694,6 @@
     if (h.zcodeProject) clients.push("ZCode (project)");
     return `yes (${clients.join(", ")})`;
   }
-
-  // --- Step 2 derived display helpers -------------------------------
-  // Hard block: ProjectVersion.txt missing/empty, or version below
-  // the supported minimum (2022.3). UPM refuses the packages below
-  // this floor, so the wizard mirrors that here.
-  let unityBlockReason = $derived.by(() => {
-    if (!detection) return null;
-    if (detection.isValidUnityProject && !detection.unityVersion) {
-      return "ProjectSettings/ProjectVersion.txt is missing or empty.";
-    }
-    if (!detection.meetsMinUnityVersion) {
-      return `Detected Unity ${detection.unityVersion ?? "unknown"} — Unity Open MCP Bridge requires Unity 2022.3 LTS or newer.`;
-    }
-    return null;
-  });
-
-  // Soft warning (never blocks): meets the minimum but below the
-  // recommended Unity 6. The toolbar toggle falls back to a legacy
-  // button injection path on these versions; everything else works.
-  let unityVersionWarning = $derived.by(() => {
-    if (!detection) return null;
-    if (unityBlockReason) return null;
-    if (!detection.meetsRecommendedUnityVersion) {
-      return `Unity 6 is recommended. Unity ${detection.unityVersion} is supported, but uses the legacy toolbar button fallback instead of the native Unity 6 toolbar element.`;
-    }
-    return null;
-  });
-
-  let manifestWriteBlockReason = $derived.by(() => {
-    if (!detection) return null;
-    if (!detection.manifestWritable) {
-      return "Packages/manifest.json (or its parent) is not user-writable.";
-    }
-    return null;
-  });
 
   // --- Step 3 derived display helpers -------------------------------
   let diffPreviewText = $derived.by(() => {
@@ -1634,7 +1776,22 @@
 
     <ol class="wiz-progress" aria-label="Wizard progress">
       {#each progress as seg (seg.id)}
-        <li class="wiz-seg wiz-seg-{seg.state}" aria-current={seg.state === "current" ? "step" : undefined}>
+        <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_interactive_supports_focus, a11y_no_noninteractive_element_to_interactive_role -->
+        <li
+          class="wiz-seg wiz-seg-{seg.state}{seg.passing ? ' wiz-seg-passing' : ''}"
+          aria-current={seg.state === "current" ? "step" : undefined}
+          role="button"
+          tabindex="0"
+          aria-label={`Jump to Step ${seg.idx + 1}: ${seg.label}`}
+          title={`Jump to Step ${seg.idx + 1}: ${seg.label}`}
+          onclick={() => jumpToStep(seg.id)}
+          onkeydown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              jumpToStep(seg.id);
+            }
+          }}
+        >
           <span class="wiz-seg-num">{seg.idx + 1}</span>
           <span class="wiz-seg-label">{seg.label}</span>
         </li>
@@ -1642,6 +1799,26 @@
     </ol>
 
     <div class="wiz-body">
+      {#if clearResult}
+        <div class="wiz-block wiz-block-ok" role="status">
+          <strong>AI setup cleared.</strong>
+          Removed {clearResult.clientConfigsCleared.filter((c) => c.removed).length}
+          MCP config entr{clearResult.clientConfigsCleared.filter((c) => c.removed).length === 1 ? "y" : "ies"}
+          and {clearResult.skillsRemoved.length} skill file(s)
+          {#if clearResult.manifestCleared}
+            · bridge + verify removed from <code>Packages/manifest.json</code>
+            {#if clearResult.manifestBackupPath}
+              (backup: <code>{clearResult.manifestBackupPath}</code>)
+            {/if}
+          {/if}.
+          {#if clearResult.errors.length > 0}
+            <br /><small>{clearResult.errors.length} non-fatal error(s) — see the error log.</small>
+          {/if}
+        </div>
+      {/if}
+      {#if clearError}
+        <div class="wiz-block wiz-block-error" role="alert">{clearError}</div>
+      {/if}
       {#if currentStep === "step1"}
         <section class="wiz-section">
           <p class="wiz-desc">
@@ -1694,11 +1871,11 @@
                     {#if detection.unityVersion}
                       <code>{detection.unityVersion}</code>
                       {#if !detection.meetsMinUnityVersion}
-                        <span class="wiz-tag wiz-tag-warn">below minimum</span>
+                        <span class="wiz-tag wiz-tag-warn" title="Unity 2022.3 LTS is the minimum supported version.">below minimum</span>
                       {:else if detection.meetsRecommendedUnityVersion}
-                        <span class="wiz-tag wiz-tag-ok">Unity 6+</span>
+                        <span class="wiz-tag wiz-tag-ok" title="Meets the recommended Unity 6+; minimum supported is 2022.3 LTS.">Unity 6+</span>
                       {:else}
-                        <span class="wiz-tag wiz-tag-warn">supported (legacy toolbar)</span>
+                        <span class="wiz-tag wiz-tag-warn" title="Meets the minimum (2022.3 LTS); uses the legacy toolbar button fallback instead of the native Unity 6 toolbar element.">supported (legacy toolbar)</span>
                       {/if}
                     {:else}
                       <em>unknown</em>
@@ -1731,15 +1908,67 @@
                     {mcpConfiguredSummary(detection.mcpConfigured)}
                   </dd>
                 </div>
-                <div>
-                  <dt>Bridge status</dt>
-                  <dd><em>not checked</em></dd>
-                </div>
               </dl>
+
+              {#if !detection.meetsMinUnityVersion}
+                <div class="wiz-block wiz-block-error" role="alert">
+                  <strong>Unity {detection.unityVersion ?? "unknown"} does not meet the minimum.</strong>
+                  Unity 2022.3 LTS or newer is required — the bridge + verify
+                  package manifests declare <code>unity: "2022.3"</code>.
+                </div>
+              {/if}
+              {#if !detection.manifestWritable}
+                <div class="wiz-block wiz-block-error" role="alert">
+                  <strong>Cannot write to <code>Packages/manifest.json</code>.</strong>
+                  The file (or its parent directory) is not user-writable. The
+                  wizard cannot install packages without write access.
+                </div>
+              {/if}
+              {#if detection.hasSpacesInPath}
+                <div class="wiz-block wiz-block-warn" role="status">
+                  <strong>Spaces in project path.</strong>
+                  Some MCP clients are known to mis-handle paths with spaces.
+                  This is a warning, not a block.
+                </div>
+              {/if}
+
+              <div class="wiz-field">
+                <span class="wiz-label">Node.js</span>
+                {#if nodeProbing || nodeProbe === null}
+                  <p class="wiz-hint">Probing…</p>
+                {:else if nodeProbe.ok}
+                  <p class="wiz-hint wiz-hint-ok">
+                    Detected <strong>Node {nodeProbe.version}</strong>
+                    (major {nodeProbe.major} ≥ {nodeProbe.requiredMajor}).
+                  </p>
+                {:else}
+                  <div class="wiz-block wiz-block-error" role="alert">
+                    <strong>Node.js {nodeProbe.requiredMajor}+ is required</strong>
+                    to run <code>unity-open-mcp</code>.
+                    {#if nodeProbe.version}
+                      Detected <strong>{nodeProbe.version}</strong>.
+                    {:else}
+                      Not detected on PATH.
+                    {/if}
+                    {#if nodeProbe.error}
+                      <br /><small>{nodeProbe.error}</small>
+                    {/if}
+                  </div>
+                {/if}
+                <div>
+                  <Button variant="secondary" onclick={runNodeProbe} disabled={nodeProbing}>
+                    {nodeProbing ? "Checking…" : "Re-check Node"}
+                  </Button>
+                </div>
+              </div>
+
               <div class="wiz-actions-row">
                 <Button variant="secondary" onclick={refreshDetection} disabled={detectionLoading}>
                   {detectionLoading ? "Re-detecting…" : "Re-detect"}
                 </Button>
+                {#if detectToast}
+                  <span class="wiz-toast" role="status">{detectToast}</span>
+                {/if}
               </div>
             {/if}
           {/if}
@@ -1747,11 +1976,12 @@
       {:else if currentStep === "step2"}
         <section class="wiz-section">
           <p class="wiz-desc">
-            Step 2 validates Unity version, Node.js, and write access to
-            <code>Packages/manifest.json</code>. By default the wizard uses the
-            published <code>unity-open-mcp</code> npm package (no repo clone
-            needed); enable <strong>Use local checkout</strong> to onboard
-            against a cloned toolkit root.
+            Choose how the <code>unity-open-mcp</code> MCP server is launched.
+            By default the wizard uses the published npm package via
+            <code>npx</code> (no repo clone needed); enable
+            <strong>Use local checkout</strong> to point at a cloned
+            <code>unity-open-mcp</code> monorepo. Project, Unity version, and
+            Node.js checks live on the previous step.
           </p>
 
           <div class="wiz-field">
@@ -1791,59 +2021,6 @@
                 package from npm on first spawn.
               </p>
             {/if}
-          </div>
-
-
-          {#if detection}
-            <div class="wiz-field">
-              <span class="wiz-label">Unity version</span>
-              {#if unityBlockReason}
-                <div class="wiz-block wiz-block-error" role="alert">
-                  <strong>Unity {detection.unityVersion ?? "unknown"} does not meet the minimum.</strong>
-                  {unityBlockReason}
-                </div>
-              {:else if unityVersionWarning}
-                <div class="wiz-block wiz-block-warn" role="status">
-                  <strong>Unity {detection.unityVersion}</strong>
-                  {unityVersionWarning}
-                </div>
-              {:else}
-                <p class="wiz-hint wiz-hint-ok">
-                  Detected <strong>Unity {detection.unityVersion}</strong> — meets the
-                  recommended <strong>Unity 6 (6000.0+)</strong>.
-                </p>
-              {/if}
-            </div>
-          {/if}
-
-          <div class="wiz-field">
-            <span class="wiz-label">Node.js</span>
-            {#if nodeProbing || nodeProbe === null}
-              <p class="wiz-hint">Probing…</p>
-            {:else if nodeProbe.ok}
-              <p class="wiz-hint wiz-hint-ok">
-                Detected <strong>Node {nodeProbe.version}</strong>
-                (major {nodeProbe.major} ≥ {nodeProbe.requiredMajor}).
-              </p>
-            {:else}
-              <div class="wiz-block wiz-block-error" role="alert">
-                <strong>Node.js {nodeProbe.requiredMajor}+ is required</strong>
-                to run <code>unity-open-mcp</code>.
-                {#if nodeProbe.version}
-                  Detected <strong>{nodeProbe.version}</strong>.
-                {:else}
-                  Not detected on PATH.
-                {/if}
-                {#if nodeProbe.error}
-                  <br /><small>{nodeProbe.error}</small>
-                {/if}
-              </div>
-            {/if}
-            <div>
-              <Button variant="secondary" onclick={runNodeProbe} disabled={nodeProbing}>
-                {nodeProbing ? "Checking…" : "Re-check"}
-              </Button>
-            </div>
           </div>
 
           {#if useLocalCheckout}
@@ -1903,29 +2080,6 @@
                   </p>
                 {/if}
               {/if}
-            </div>
-          {/if}
-
-
-          {#if detection && !detection.manifestWritable}
-            <div class="wiz-field">
-              <span class="wiz-label">Manifest write access</span>
-              <div class="wiz-block wiz-block-error" role="alert">
-                <strong>Cannot write to <code>Packages/manifest.json</code>.</strong>
-                {manifestWriteBlockReason} The wizard cannot install packages
-                without write access.
-              </div>
-            </div>
-          {/if}
-
-          {#if detection?.hasSpacesInPath}
-            <div class="wiz-field">
-              <span class="wiz-label">Warning</span>
-              <p class="wiz-hint wiz-hint-warn">
-                The project path contains a space. Some MCP clients are known
-                to mis-handle paths with spaces. This is a warning, not a
-                block.
-              </p>
             </div>
           {/if}
 
@@ -2228,7 +2382,7 @@
             <span class="wiz-label">MCP client</span>
             <div class="wiz-radio-grid" role="radiogroup" aria-label="MCP client">
               {#each MCP_CLIENT_OPTIONS as opt (opt.id)}
-                <label class="wiz-radio">
+                <label class="wiz-radio" title={opt.sharedWith}>
                   <input
                     type="radio"
                     name="wiz-mcp-client"
@@ -2858,6 +3012,17 @@
           {nextLabel()}
         </Button>
       </div>
+      <div class="wiz-footer-clear">
+        <Button
+          class="wiz-clear-btn"
+          variant="secondary"
+          onclick={onClearAiSetup}
+          disabled={clearInProgress}
+          title="Remove every AI-agent artifact the wizard wrote for this project (manifest entries, MCP client configs, skill files). Backups are created first."
+        >
+          {clearInProgress ? "Clearing…" : "Clear AI Setup"}
+        </Button>
+      </div>
     </footer>
   </div>
 </div>
@@ -2964,6 +3129,17 @@
     background: var(--hub-card);
     min-width: 0;
     min-height: 3.2rem;
+    cursor: pointer;
+    transition: border-color 0.12s ease, background 0.12s ease;
+  }
+
+  .wiz-seg:hover {
+    border-color: var(--hub-border-hover);
+  }
+
+  .wiz-seg:focus-visible {
+    outline: 2px solid var(--hub-accent);
+    outline-offset: 1px;
   }
 
   .wiz-seg-done {
@@ -2979,6 +3155,22 @@
 
   .wiz-seg-pending {
     opacity: 0.75;
+  }
+
+  /* Green accent for a segment whose readiness check already holds.
+     Uses --hub-success to match StatusChip's "ok" tone. */
+  .wiz-seg-passing {
+    border-color: var(--hub-success);
+  }
+
+  .wiz-seg-passing .wiz-seg-num {
+    background: rgba(47, 111, 74, 0.28);
+    border-color: var(--hub-success);
+    color: var(--hub-text-bright);
+  }
+
+  .wiz-seg-current.wiz-seg-passing {
+    border-color: var(--hub-success);
   }
 
   .wiz-seg-num {
@@ -3486,8 +3678,28 @@
     align-items: center;
   }
 
+  /* Destructive "Clear AI Setup" lives at the far right of the footer.
+     Yellow (--hub-warning) so it reads as a cautionary action distinct
+     from the nav Back/Next group. */
+  .wiz-footer-clear {
+    display: flex;
+    align-items: center;
+  }
+
+  :global(.btn.wiz-clear-btn) {
+    border-color: var(--hub-warning) !important;
+    color: var(--hub-warning) !important;
+    background: rgba(201, 162, 39, 0.10) !important;
+  }
+
+  :global(.btn.wiz-clear-btn:hover:not(:disabled)) {
+    background: rgba(201, 162, 39, 0.22) !important;
+  }
+
   @media (max-width: 720px) {
     .wiz-progress { grid-template-columns: repeat(3, 1fr); }
     .wiz-radio-grid { grid-template-columns: 1fr; }
+    .wiz-footer { flex-wrap: wrap; }
+    .wiz-footer-clear { order: 3; width: 100%; justify-content: flex-end; }
   }
 </style>

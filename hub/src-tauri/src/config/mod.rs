@@ -26,6 +26,7 @@ pub mod hub_install;
 pub mod ai_toolkit;
 pub mod wizard;
 pub mod mcp_config;
+pub mod clear;
 pub mod launch_verify;
 pub mod bridge_port;
 pub mod render_pipeline;

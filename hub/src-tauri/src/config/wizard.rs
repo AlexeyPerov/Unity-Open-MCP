@@ -177,6 +177,14 @@ pub struct ProjectState {
     /// Per-client heuristic for whether a `unity-open-mcp` MCP
     /// server entry is already configured.
     pub mcp_configured: McpConfigHeuristic,
+    /// `true` when at least one known agent-skill `SKILL.md`
+    /// exists in the project under any of the four client-relative
+    /// skill dirs (`.cursor/`, `.claude/`, `.opencode/`, `.agents/`).
+    /// Drives the Step 4b "passing" highlight and the project-row
+    /// AI status. Mirrors the relative paths declared in
+    /// `skills/client-paths.json` (kept in sync as a small static
+    /// list so detect does not need a toolkit root).
+    pub any_skill_installed: bool,
     /// `true` when the wizard believes `Packages/manifest.json`
     /// can be written to. `false` when the file is read-only or
     /// the parent directory is not user-writable — Step 2 hard
@@ -758,6 +766,7 @@ pub fn detect_project_state_at(project: &Path) -> ProjectState {
     );
 
     let mcp_configured = read_mcp_heuristic(project);
+    let any_skill_installed = any_skill_installed(project);
     let manifest_writable = check_manifest_writable_at(&manifest_path);
     let has_spaces_in_path = project.to_string_lossy().contains(' ');
 
@@ -772,6 +781,7 @@ pub fn detect_project_state_at(project: &Path) -> ProjectState {
         bridge_installed,
         verify_installed,
         mcp_configured,
+        any_skill_installed,
         manifest_writable,
         has_spaces_in_path,
         bridge_status: BridgeStatusKind::NotChecked,
@@ -1212,6 +1222,22 @@ fn extract_path_query(url: &str) -> Option<String> {
                 .find_map(|kv| kv.strip_prefix("path=").map(|s| s.to_string()))
         });
     path
+}
+
+/// `true` when any of the four known agent-skill `SKILL.md` files
+/// exists in the project. The relative paths mirror
+/// `skills/client-paths.json` so detect can run without a toolkit
+/// root; if that manifest ever grows a new skill dir, add it here.
+fn any_skill_installed(project: &Path) -> bool {
+    const SKILL_REL_PATHS: &[&str] = &[
+        ".cursor/skills/unity-open-mcp/SKILL.md",
+        ".claude/skills/unity-open-mcp/SKILL.md",
+        ".opencode/skills/unity-open-mcp/SKILL.md",
+        ".agents/skills/unity-open-mcp/SKILL.md",
+    ];
+    SKILL_REL_PATHS
+        .iter()
+        .any(|rel| project.join(rel).is_file())
 }
 
 fn read_mcp_heuristic(project: &Path) -> McpConfigHeuristic {

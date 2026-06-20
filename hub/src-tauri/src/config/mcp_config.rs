@@ -124,7 +124,7 @@ pub enum McpClientId {
 /// Rust side collapses the pair into this single discriminant
 /// so the planner and writer share one switch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum McpScope {
+pub(crate) enum McpScope {
     CursorGlobal,
     CursorProject,
     ClaudeDesktopGlobal,
@@ -729,7 +729,7 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
 /// `mcp.servers.<name>` (three levels), versus Cursor/Claude
 /// (`mcpServers.<name>`, two levels) and OpenCode
 /// (`mcp.<name>`, two levels). Empty for CLI/Manual clients.
-fn merge_key_path(client: McpClientId) -> Vec<&'static str> {
+pub(crate) fn merge_key_path(client: McpClientId) -> Vec<&'static str> {
     match client {
         McpClientId::Cursor | McpClientId::ClaudeDesktop => vec!["mcpServers", MCP_SERVER_KEY],
         McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => vec!["mcp", MCP_SERVER_KEY],
