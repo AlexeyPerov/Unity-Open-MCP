@@ -1,3 +1,10 @@
+// EditorUtility.InstanceIDToObject() is deprecated in Unity 6000.4+ in favour
+// of EntityIdToObject(), but that replacement does not exist in 2022.3 (this
+// package's declared minimum) and returns different values. The bridge's JSON
+// handle contract is built on the stable int instance ID, so the deprecated
+// int API is used deliberately here. See
+// packages/bridge/Editor/ObjectRefs/ObjectHandle.cs for the canonical rationale.
+#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEditor;

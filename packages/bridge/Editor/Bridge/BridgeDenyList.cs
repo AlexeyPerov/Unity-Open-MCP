@@ -146,7 +146,7 @@ namespace UnityOpenMcpBridge
         {
             if (bypass) return DenyResult.Allow();
             if (string.IsNullOrEmpty(code)) return DenyResult.Allow();
-            return Match(code, GetOrCompile(ref _csharpCache, ResolveCSharpPatterns(settingsPatterns)),
+            return Match(code, GetOrCompileCSharp(ResolveCSharpPatterns(settingsPatterns)),
                 "execute_csharp",
                 "Use a scoped typed tool (apply_fix, reserialize, invoke_method) instead of a raw snippet, " +
                 "or retry with gate: \"off\" and confirm_bypass: true to proceed and accept the risk.");
@@ -157,7 +157,7 @@ namespace UnityOpenMcpBridge
         {
             if (bypass) return DenyResult.Allow();
             if (string.IsNullOrEmpty(menuPath)) return DenyResult.Allow();
-            return Match(menuPath, GetOrCompile(ref _menuCache, ResolveMenuPatterns(settingsPatterns)),
+            return Match(menuPath, GetOrCompileMenu(ResolveMenuPatterns(settingsPatterns)),
                 "execute_menu",
                 "Use a scoped typed tool instead, or retry with gate: \"off\" and confirm_bypass: true " +
                 "to proceed and accept the risk.");
@@ -195,16 +195,41 @@ namespace UnityOpenMcpBridge
         // Cache lookup keyed on reference-equality of the settings array. The
         // settings store reuses the same array instance across reads until a
         // write replaces it, so this is a cheap and correct cache invalidation.
-        static PatternCache GetOrCompile(ref PatternCache slot, string[] source)
+        //
+        // CS0420 note: the cache slots are `volatile`, and passing a volatile
+        // field by `ref` (as the old shared helper did) silently drops the
+        // acquire/release fence the annotation promises — exactly what the
+        // warning flags. We avoid `ref` entirely and let each field have its
+        // own double-checked-lock body. Reads outside the lock rely on the
+        // `volatile` annotation; the write under the lock publishes a fully
+        // constructed PatternCache (reference assignment is atomic), so the
+        // worst case under a race is one redundant lock acquisition, never a
+        // torn read.
+        static PatternCache GetOrCompileCSharp(string[] source)
         {
-            var existing = slot;
+            var existing = _csharpCache;
             if (existing != null && ReferenceEquals(existing.Source, source)) return existing;
             lock (_cacheLock)
             {
-                existing = slot;
+                existing = _csharpCache;
                 if (existing != null && ReferenceEquals(existing.Source, source)) return existing;
-                slot = Compile(source);
-                return slot;
+                var compiled = Compile(source);
+                _csharpCache = compiled;
+                return compiled;
+            }
+        }
+
+        static PatternCache GetOrCompileMenu(string[] source)
+        {
+            var existing = _menuCache;
+            if (existing != null && ReferenceEquals(existing.Source, source)) return existing;
+            lock (_cacheLock)
+            {
+                existing = _menuCache;
+                if (existing != null && ReferenceEquals(existing.Source, source)) return existing;
+                var compiled = Compile(source);
+                _menuCache = compiled;
+                return compiled;
             }
         }
 

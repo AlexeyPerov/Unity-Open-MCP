@@ -1,3 +1,7 @@
+// GetInstanceID() is deprecated in Unity 6000.4+; the bridge's JSON handle
+// contract is built on the stable int instance ID, so the deprecated API is
+// used deliberately here. See packages/bridge/Editor/ObjectRefs/ObjectHandle.cs.
+#pragma warning disable CS0618
 // EditMode tests for the M16 Plan 2 typed GameObject tools (GameObjectsTools).
 // Covers parameter parsing and resolver branches. Mutating tests use a fresh
 // GameObject in the active scene and tear it down; EditMode has an empty scene

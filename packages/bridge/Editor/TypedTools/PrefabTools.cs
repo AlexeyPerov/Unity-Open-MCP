@@ -1,3 +1,9 @@
+// GetInstanceID() is deprecated in Unity 6000.4+ in favour of GetEntityId(),
+// but GetEntityId() returns different values and does not exist in 2022.3 (this
+// package's declared minimum). Our JSON handle contract is built on the stable
+// int instance ID, so the deprecated int API is used deliberately here. See
+// ObjectRefs/ObjectHandle.cs for the canonical rationale.
+#pragma warning disable CS0618
 using System.Text;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -157,7 +163,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Ok("{\"status\":\"noop\",\"note\":\"No prefab stage is currently open.\"}");
 
             var prefabContentsRoot = stage.prefabContentsRoot;
-            var assetPath = stage.prefabAssetPath;
+            var assetPath = stage.assetPath;
 
             try
             {
@@ -189,7 +195,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Ok("{\"status\":\"noop\",\"note\":\"No prefab stage is currently open.\"}");
 
             var prefabContentsRoot = stage.prefabContentsRoot;
-            var assetPath = stage.prefabAssetPath;
+            var assetPath = stage.assetPath;
             if (prefabContentsRoot == null || string.IsNullOrEmpty(assetPath))
                 return ToolDispatchResult.Fail("save_failed",
                     "Open prefab stage is missing prefabContentsRoot or assetPath.");
