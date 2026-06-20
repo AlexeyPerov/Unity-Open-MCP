@@ -176,10 +176,13 @@
   // M1.5-15: Hide / Mark stale actions.
   let hidingId = $state<string | null>(null);
   let markingStaleId = $state<string | null>(null);
-  // M1.5-15: when true, hidden rows are also shown in the default
-  // list. The toggle is a chip in the toolbar, not a setting, so
-  // session-only state is sufficient.
-  let showHidden = $state(false);
+  // M1.5-15: when true, hidden rows are also shown in the list.
+  // Defaults to true so the list shows ALL projects by default;
+  // the toggle chip only appears in the toolbar once at least one
+  // hidden project exists, letting the user collapse them out of
+  // view. The toggle is a chip, not a setting, so session-only
+  // state is sufficient.
+  let showHidden = $state(true);
   // M1.5-15: row-level cache of the user's confirmed
   // "I manually upgraded" state. When the user clicks "Upgrade
   // Unity…" and the modal reports the project has already been
@@ -2193,30 +2196,10 @@
   }
 
   /**
-   * M4 Plan 2 (M4-4): AI Setup toolbar button entry point. The
-   * button is bound to the currently selected project; when no row
-   * is selected the button is disabled (state = "disabled"), when
-   * the selected row is launchable it lights up (state = "ready"),
-   * and a project whose last detected state was incomplete (e.g.
-   * a previous run that skipped Step 5) shows the "incomplete"
-   * state. The wizard itself is a modal opened by
-   * `AiSetupWizard.svelte`; this handler just kicks the open.
-   */
-  function openAiSetup() {
-    if (!AI_SETUP_ENABLED) return;
-    const id = projectsStore.selectedProjectId;
-    if (!id) return;
-    const project = projectsStore.find(id);
-    if (!project) return;
-    aiSetupWizardProjectId = project.id;
-  }
-
-  /**
    * Open the AI Setup wizard for a specific project (called from
-   * the row context menu — "Configure Agent Bridge"). The button
-   * in the toolbar uses the currently selected row; the context
-   * menu entry always operates on the right-clicked row, so the
-   * two paths are explicit.
+   * the per-row AI button and the row context menu — "Configure
+   * Agent Bridge"). The context-menu entry always operates on the
+   * right-clicked row, so the two paths are explicit.
    */
   function openAiSetupFor(project: ProjectEntry) {
     if (!AI_SETUP_ENABLED) return;
@@ -2227,51 +2210,6 @@
 
   function closeAiSetup() {
     aiSetupWizardProjectId = null;
-  }
-
-  /**
-   * The AI Setup button has three visual states per hub-ui.md
-   * §Projects toolbar:
-   *   - disabled: no row selected, OR the selected row is not a
-   *     valid Unity project (missing path / unknown version).
-   *   - ready: selected row is launchable.
-   *   - incomplete: selected row previously went through a partial
-   *     run (we currently treat any selected row whose path exists
-   *     but whose AI Setup is unknown as "incomplete" — Step 1's
-   *     live detection in Plan 3 will tighten this once we have
-   *     a stored detect snapshot).
-   * Selection is mirrored in real time so right-click → context
-   * menu / keyboard nav all share the same underlying button
-   * state without duplicate state.
-   */
-  type AiSetupButtonState = "disabled" | "ready" | "incomplete";
-  function aiSetupButtonState(): AiSetupButtonState {
-    if (!AI_SETUP_ENABLED) return "disabled";
-    const id = projectsStore.selectedProjectId;
-    if (!id) return "disabled";
-    const project = projectsStore.find(id);
-    if (!project) return "disabled";
-    // Multi-type: AI Setup only applies to Unity projects. Selecting a
-    // package / open-mcp / custom row disables the toolbar button so
-    // the user cannot start the wizard against a non-Unity folder.
-    if (projectKindOf(project) !== "unity") return "disabled";
-    const s = statusFor(project);
-    if (s.pathExists !== true) return "disabled";
-    if (!s.hasVersion) return "disabled";
-    if (s.stale) return "disabled";
-    if (s.launchable) return "ready";
-    return "incomplete";
-  }
-
-  function aiSetupButtonTitle(state: AiSetupButtonState): string {
-    switch (state) {
-      case "disabled":
-        return "AI Setup — select a project first";
-      case "ready":
-        return "AI Setup — install / configure the Unity AI agent for this project";
-      case "incomplete":
-        return "AI Setup — previous run was incomplete; resume from Step 1";
-    }
   }
 
   function formatRemoveError(err: RemoveProjectError): string {
@@ -2833,34 +2771,22 @@
         title="Filter projects"
       />
 
-      <button
-        type="button"
-        class="filter-btn show-hidden-btn"
-        class:filter-active={showHidden}
-        onclick={() => (showHidden = !showHidden)}
-        aria-pressed={showHidden}
-        title={showHidden
-          ? "Hide soft-deleted projects from the list"
-          : "Show soft-deleted projects (entries kept in projects.json; use Hide from the row menu to soft-delete)"}
-      >
-        {showHidden ? "✓ " : ""}Show hidden
-      </button>
+      {#if projectsStore.projects.some((p) => p.hidden)}
+        <button
+          type="button"
+          class="filter-btn show-hidden-btn"
+          class:filter-active={showHidden}
+          onclick={() => (showHidden = !showHidden)}
+          aria-pressed={showHidden}
+          title={showHidden
+            ? "Hide soft-deleted projects from the list"
+            : "Show soft-deleted projects (entries kept in projects.json; use Hide from the row menu to soft-delete)"}
+        >
+          {showHidden ? "✓ " : ""}Show hidden
+        </button>
+      {/if}
 
       <div class="toolbar-spacer"></div>
-
-      {#if AI_SETUP_ENABLED}
-        {@const aiState = aiSetupButtonState()}
-        <Button
-          variant="secondary"
-          class="ai-setup-btn ai-setup-{aiState}"
-          onclick={openAiSetup}
-          disabled={aiState === "disabled"}
-          title={aiSetupButtonTitle(aiState)}
-          data-state={aiState}
-        >
-          AI Setup
-        </Button>
-      {/if}
     </div>
     <div class="toolbar-row">
       <div class="toolbar-spacer"></div>

@@ -851,7 +851,7 @@
               </div>
               <div class="cell" role="gridcell">
                 {#if isInstalled(entry.version)}
-                  <StatusChip tone="ok" label="installed" />
+                  <StatusChip tone="ok" label="Installed" />
                 {:else}
                   <button
                     type="button"
