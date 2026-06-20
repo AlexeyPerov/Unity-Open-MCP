@@ -38,6 +38,81 @@ cat ~/.unity-open-mcp/instances/*.json
 
 If Unity can't be found at all (not installed, or installed somewhere discovery doesn't look), batch tools return `unity_not_discovered` listing the scanned paths; the only tools that still work are the offline reads (`list_assets`, `find_references`, `read_asset`, `search_assets`) and `read_compile_errors`.
 
+## Check Unity state before tests/edits (decision procedure)
+
+The single most common agent mistake is misclassifying Unity's state — assuming "tool returned `bridge_offline`" means "Unity isn't running," or assuming tests that fail identically to before a fix mean "the fix didn't work" (when the source was never recompiled). Follow this procedure in order **before** running tests, before launching Unity, and whenever a tool returns `bridge_offline` or `bridge_compile_failed`.
+
+> **Why a procedure and not a guess:** Unity can be (a) not running, (b) running and healthy, (c) running but compiling, (d) running but stuck in **Safe Mode** with a broken bridge assembly, or (e) running and healthy but on a port the MCP server isn't hitting. Each has a different recovery. The instance lock file distinguishes all five.
+
+### Step 1 — Is Unity running at all?
+
+```bash
+cat ~/.unity-open-mcp/instances/*.json 2>/dev/null
+ps aux | grep -i "Unity.app/Contents/MacOS/Unity" | grep -v grep     # macOS
+# Windows (PowerShell): Get-Process Unity -ErrorAction SilentlyContinue
+```
+
+- **No instance files AND no Unity process** → Unity isn't running. Proceed to "Open the project" below.
+- **No instance files BUT a Unity process exists** → Unity is booting or in **Safe Mode** (the bridge assembly never started, so no lock was written). Go to step 4.
+- **Instance files exist** → go to step 2.
+- **A Unity process already exists for this project** → **do NOT launch a second instance.** Unity holds a per-project lock (`<project>/Temp/UnityLockfile`); a second launch either fails silently or steals focus from the wedged instance. If the existing instance is stuck, the fix is to diagnose it (step 2-4), not spawn another.
+
+### Step 2 — Read the instance lock and classify the state
+
+The lock at `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` carries `pid`, `port`, `state`, `heartbeatAt`, `isCompiling`. Check `pid` liveness and heartbeat freshness:
+
+- **`pid` dead** (`kill -0 <pid>` non-zero) → Unity was killed; the lock is stale. Reopen Unity or use the batch fallback.
+- **`pid` alive, heartbeat fresh (<10s), `state: "idle"`** → Unity is healthy and idle. **Proceed** with your task.
+- **`pid` alive, heartbeat fresh, `state: "compiling"` (or `isCompiling: true`)** → Unity IS compiling. **Wait** — poll `curl http://127.0.0.1:<port>/ping` and look at the `compiling` field, or re-read the lock's `isCompiling`. Do not run tests, do not edit.
+- **`pid` alive, `state: "reloading"`, heartbeat STALE (>10s old)** → **SAFE MODE — the bridge assembly failed to recompile.** This is the signature: the PID is alive but the heartbeat froze because `[InitializeOnLoad]` never re-ran after the failed compile. Go to step 4.
+- **`pid` alive, heartbeat fresh, but every tool returns `bridge_offline`** → **port mismatch.** The MCP server is hitting a different port than the bridge is on. Go to step 5.
+
+### Step 3 — Never conclude "Unity not running" while a process is alive
+
+A Unity process in Safe Mode still owns the per-project lock and may still show a window, but the bridge is dead. This looks identical to "Unity not running" from the MCP server's perspective (every tool returns `bridge_offline` / `bridge_compile_failed`). Before assuming Unity is down, confirm with `kill -0 <pid>` — if the PID is alive, you are in step 4, not step 1.
+
+### Step 4 — Safe Mode / `bridge_compile_failed` recovery
+
+This is the state where a C# edit broke the bridge assembly (or any assembly the bridge depends on), Unity is showing the "Enter Safe Mode?" / compiler-errors dialog, and the bridge listener is dead.
+
+1. Call **`unity_open_mcp_read_compile_errors`** — it reads the tail of Unity's `Editor.log` directly (offline, no bridge, no Unity spawn) and returns structured CSxxxx errors with `file` / `line` / `code`. It is the **only** diagnostic channel that survives a dead bridge.
+2. Read `errors[].file` / `line` / `code` (e.g. `CS1625`, `Assets/.../Foo.cs:75`) and **fix the CS error in source first.** Do not retry tests. Do not relaunch Unity. Do not call `compile_check` — its batch entry point lives in the same broken assembly and Unity's per-project lock blocks a second instance, so it cannot help here.
+3. After fixing the source, trigger a recompile so Unity picks up the fix (see step 6). The bridge reloads itself automatically once the assembly compiles. The MCP server also auto-dismisses the "Enter Safe Mode?" dialog unless `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` is set.
+4. Only after `read_compile_errors` reports no errors AND the instance lock shows a fresh heartbeat with `state: "idle"` is the bridge back. Re-run tools.
+
+### Step 5 — Port mismatch (`UNITY_OPEN_MCP_BRIDGE_PORT` trap)
+
+If the instance lock's `port` (e.g. `27916`) differs from what the MCP server is hitting, an MCP-client config pinned `UNITY_OPEN_MCP_BRIDGE_PORT` to a stale value (e.g. `19120`). The env var **always wins** on both the MCP server and the bridge, so if it's set wrong, neither side consults the per-project hash or the lock.
+
+The instance lock's `port` is authoritative. The agent cannot edit the MCP client config at runtime, so:
+- **Tell the user** which port the bridge is actually on (`<lock.port>`) and that the `UNITY_OPEN_MCP_BRIDGE_PORT` value in their MCP client config (e.g. `.zcode/cli/config.json`, `.cursor/mcp.json`, `.claude.json`) is wrong. Removing the env var entirely lets both sides derive the per-project hash and agree.
+- If you're launching the MCP server directly, set `UNITY_OPEN_MCP_BRIDGE_PORT=<lock.port>` (or unset it) in that process's environment.
+
+### Step 6 — Forcing a recompile of local `file:` package source
+
+Edits under `packages/` (the bridge/verify/extensions packages, referenced as `file:../../packages/...` from the project's `Packages/manifest.json`) live **outside** Unity's `Assets/` watch root. Unity's editor does **not** auto-detect these edits, and neither `unity_open_mcp_assets_refresh` nor `CompilationPipeline.RequestScriptCompilation()` reliably picks them up. If you skip this step, you will run tests against the stale DLL and conclude your fix didn't work when it was simply never compiled in.
+
+After editing `packages/` source and before running tests:
+
+1. **Confirm the new source has no CS errors** (only meaningful once Unity has seen it once — see step 4 if the bridge is already dead).
+2. **Trigger the recompile** via one of:
+   - **(a, most reliable)** `unity_open_mcp_package_add` / `package_remove` a no-op entry to force a UPM resolution + domain reload (heavy, but Unity re-reads all `file:` package source on resolve), then revert it.
+   - **(b)** Ask the user to focus the Unity window after you touch a tracked `Assets/` file (Unity's standard focus-triggers-compile behavior).
+   - **(c, if the bridge is up)** `execute_csharp` that calls `AssetDatabase.ImportAsset("Packages/<package-name>/...", ImportAssetOptions.ForceUpdate)` on the changed package-relative path, then `CompilationPipeline.RequestScriptCompilation()`.
+3. **Verify the DLL actually rebuilt** before running tests:
+   ```bash
+   stat -f "%Sm %N" Library/ScriptAssemblies/<assembly>.dll   # macOS
+   # Compare mtime to your last source edit. If the DLL is older, the recompile didn't fire — retry.
+   ```
+   Do not run tests until the DLL mtime is newer than your edit. If the bridge is up, `compile_check` can also confirm, but the mtime check is instant.
+
+### Step 7 — Running tests (only after steps 1-6 pass)
+
+Once Unity is healthy (step 2: idle) AND your latest source is compiled in (step 6: DLL mtime > edit):
+- Call **`unity_senses_run_tests`** ONCE, with `include_passes: false` on large suites to avoid truncation. The MCP server internally polls `~/.unity-open-mcp/test-results-<runId>.json` and returns final results.
+- **Never fire a second `run_tests` before the first resolves.** There is no concurrency guard — a second call mints a new `runId` and shares Unity's single in-process `TestRunnerApi`; the two runs interleave and cross-contaminate results.
+- If results look identical to a pre-fix run, **re-check step 6** before concluding the fix failed.
+
 ## Discover first
 
 Call **`unity_open_mcp_capabilities`** (no args) before guessing which tools, verify rules, or fixes exist. It returns, in one local call:
@@ -196,6 +271,8 @@ Before deleting or moving an asset, call **`unity_open_mcp_find_references`** to
 ### Diagnose a broken build (read_compile_errors / compile_check)
 
 There are two distinct failure shapes, with different recovery paths:
+
+> **Stale-DLL trap (tests fail identically after a fix).** If you edited `packages/` source and tests fail the same way they did before your change, the assembly DLL almost certainly never recompiled — Unity does not auto-detect out-of-tree local `file:` package edits. Verify `Library/ScriptAssemblies/<asm>.dll` mtime is newer than your source edit; if it isn't, force a recompile per the "Check Unity state before tests/edits" procedure (step 6) above before re-running tests. Do not conclude your fix is wrong until the DLL is fresh.
 
 **Bridge offline after a C# edit — `bridge_offline` / `bridge_compile_failed`.** Whenever the bridge is unreachable and you have been editing C# (`packages/` source, a `.cs` asset, or anything that triggers a Unity recompile), your first move is to check the compile log — the bridge being down is often a *symptom* of a failed compile, not just "Unity isn't running." Two sub-cases:
 
