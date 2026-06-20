@@ -20,17 +20,17 @@ namespace UnityOpenMcpBridge
     [InitializeOnLoad]
     public static class BridgeToolbarToggle
     {
-        const string Label = "MCP";
+        private const string Label = "MCP";
 
 #if UNITY_6000_0_OR_NEWER
         const string ToolbarId = "UnityOpenMCP/Bridge Toggle";
 #else
-        const string ButtonName = "UnityOpenMCP_Toggle_Button";
-        static bool _installed;
-        static Button _legacyButton;
+        private const string ButtonName = "UnityOpenMCP_Toggle_Button";
+        private static bool _installed;
+        private static Button _legacyButton;
 #endif
 
-        static bool _lastKnownRunning;
+        private static bool _lastKnownRunning;
 
         static BridgeToolbarToggle()
         {
@@ -45,7 +45,7 @@ namespace UnityOpenMcpBridge
 #endif
         }
 
-        static void PollState()
+        private static void PollState()
         {
             var running = BridgeHttpServer.IsRunning;
             if (running != _lastKnownRunning)
@@ -63,7 +63,7 @@ namespace UnityOpenMcpBridge
                 BridgeHttpServer.Start();
         }
 
-        static void RefreshVisual()
+        private static void RefreshVisual()
         {
 #if UNITY_6000_0_OR_NEWER
             MainToolbar.Refresh(ToolbarId);
@@ -72,7 +72,7 @@ namespace UnityOpenMcpBridge
 #endif
         }
 
-        static string GetColoredLabel()
+        private static string GetColoredLabel()
         {
             if (BridgeHttpServer.IsRunning)
                 return $"<color=#33AA33><b>{Label}</b></color>";
@@ -90,7 +90,7 @@ namespace UnityOpenMcpBridge
 
 #else
 
-        static void TryInstallLegacyOnUpdate()
+        private static void TryInstallLegacyOnUpdate()
         {
             if (_installed)
             {
@@ -105,7 +105,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static bool TryInstallLegacy()
+        private static bool TryInstallLegacy()
         {
             var toolbar = GetToolbarWindow();
             if (toolbar == null) return false;
@@ -142,7 +142,7 @@ namespace UnityOpenMcpBridge
             return true;
         }
 
-        static VisualElement FindFirstZone(VisualElement root)
+        private static VisualElement FindFirstZone(VisualElement root)
         {
             var names = new[]
             {
@@ -162,7 +162,7 @@ namespace UnityOpenMcpBridge
             return null;
         }
 
-        static void ApplyLegacyVisual()
+        private static void ApplyLegacyVisual()
         {
             if (_legacyButton == null) return;
 
@@ -178,7 +178,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static EditorWindow GetToolbarWindow()
+        private static EditorWindow GetToolbarWindow()
         {
             var toolbarType = typeof(Editor).Assembly.GetType("UnityEditor.Toolbar");
             if (toolbarType == null) return null;

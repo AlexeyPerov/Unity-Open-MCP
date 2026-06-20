@@ -24,13 +24,13 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static string GetCurrentScenePath()
+        private static string GetCurrentScenePath()
         {
             var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
             return scene.path ?? "";
         }
 
-        static string EscapeJsonString(string s)
+        private static string EscapeJsonString(string s)
         {
             if (s == null) return "null";
             var sb = new StringBuilder(s.Length + 8);

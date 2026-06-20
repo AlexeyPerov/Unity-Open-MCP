@@ -48,7 +48,7 @@ namespace UnityOpenMcpVerify
                 throw new FormatException($"Malformed issue key: '{key}'. Expected format: {{ruleId}}|{{severity}}|{{assetPath}}|{{issueCode}}");
         }
 
-        static void ValidateComponents(string ruleId, VerifySeverity severity, string assetPath, string issueCode)
+        private static void ValidateComponents(string ruleId, VerifySeverity severity, string assetPath, string issueCode)
         {
             if (string.IsNullOrEmpty(ruleId))
                 throw new ArgumentException("Issue key ruleId must not be empty.", nameof(ruleId));

@@ -1,7 +1,3 @@
-// UI helper baseline adapted from Unity-Scanner
-//   /Users/alexeyperov/Projects/Unity-Scanner/Editor/UI/Controls/USGUIUtilities.cs
-// Only UI-only concerns are imported; no scanner orchestration / categories / cache / MCP glue
-// is pulled into the bridge UI namespace. Adapted under M4.5-3 (Unity-Scanner reuse map).
 using UnityEditor;
 using UnityEngine;
 

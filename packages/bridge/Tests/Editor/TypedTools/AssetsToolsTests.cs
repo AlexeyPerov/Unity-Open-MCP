@@ -1,8 +1,3 @@
-// EditMode tests for the M16 Plan 1 typed asset tools (AssetsTools).
-// Mirrors the ReserializeAssetsToolTests pattern: covers the parameter
-// parsing and validation branches that do NOT invoke AssetDatabase
-// mutating APIs (those run in EditMode against the live demo project and
-// would mutate fixtures).
 using NUnit.Framework;
 using UnityOpenMcpBridge.TypedTools;
 

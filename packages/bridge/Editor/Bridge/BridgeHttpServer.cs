@@ -15,16 +15,16 @@ namespace UnityOpenMcpBridge
     [InitializeOnLoad]
     public static class BridgeHttpServer
     {
-        const string PortEnvVar = "UNITY_OPEN_MCP_BRIDGE_PORT";
-        const string PortArgPrefix = "-UNITY_OPEN_MCP_BRIDGE_PORT=";
-        const int DefaultTimeoutMs = 30000;
-        const int MinTimeoutMs = 1000;
+        private const string PortEnvVar = "UNITY_OPEN_MCP_BRIDGE_PORT";
+        private const string PortArgPrefix = "-UNITY_OPEN_MCP_BRIDGE_PORT=";
+        private const int DefaultTimeoutMs = 30000;
+        private const int MinTimeoutMs = 1000;
         // Matches the documented maximum in the run-tests tool schema
         // (mcp-server/src/tools/run-tests.ts). Previously 300000, which silently
         // clamped a caller's explicit value below the advertised ceiling.
-        const int MaxTimeoutMs = 600000;
+        private const int MaxTimeoutMs = 600000;
 
-        static readonly HashSet<string> KnownTools = new()
+        private static readonly HashSet<string> KnownTools = new()
         {
             "unity_open_mcp_execute_csharp",
             "unity_open_mcp_invoke_method",
@@ -160,7 +160,7 @@ namespace UnityOpenMcpBridge
             "unity_senses_spatial_query"
         };
 
-        static readonly HashSet<string> DirectResponseTools = new()
+        private static readonly HashSet<string> DirectResponseTools = new()
         {
             "unity_open_mcp_validate_edit",
             "unity_open_mcp_checkpoint_create",
@@ -269,7 +269,7 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_settings_get_lighting"
         };
 
-        static readonly HashSet<string> MutatingTools = new()
+        private static readonly HashSet<string> MutatingTools = new()
         {
             "unity_open_mcp_execute_csharp",
             "unity_open_mcp_invoke_method",
@@ -365,17 +365,17 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_settings_set_lighting"
         };
 
-        static HttpListener _listener;
-        static Thread _listenerThread;
-        static volatile bool _running;
-        static int _port;
+        private static HttpListener _listener;
+        private static Thread _listenerThread;
+        private static volatile bool _running;
+        private static int _port;
 
         // Per-request activity record. Set on the listener worker thread at the start
         // of HandleRequest and read by nested handlers (e.g. HandleToolDispatch) before
         // FinishActivity records it to the ring buffer. Thread-static because each
         // request runs on a ThreadPool worker.
-        [ThreadStatic] static BridgeActivityEvent _currentActivity;
-        static BridgeActivityEvent CurrentActivity => _currentActivity;
+        [ThreadStatic] private static BridgeActivityEvent _currentActivity;
+        private static BridgeActivityEvent CurrentActivity => _currentActivity;
 
         public static int Port => _port;
         public static bool IsRunning => _running;
@@ -402,11 +402,11 @@ namespace UnityOpenMcpBridge
         // to detect a dead bridge and fail fast instead of hanging on /ping.
         // On a normal reload, Start() runs again after the reload and Acquire()
         // overwrites this lock with fresh state.
-        static void OnBeforeAssemblyReload() => Stop(releaseLock: false);
+        private static void OnBeforeAssemblyReload() => Stop(releaseLock: false);
 
         // Graceful editor quit: full release — delete the lock so a stale entry
         // doesn't linger for a closed editor.
-        static void OnQuitting() => Stop(releaseLock: true);
+        private static void OnQuitting() => Stop(releaseLock: true);
 
         // M13 T4.3 — Per-project port with override precedence:
         //   1. UNITY_OPEN_MCP_BRIDGE_PORT env var
@@ -417,7 +417,7 @@ namespace UnityOpenMcpBridge
         // concurrently on different ports with zero configuration. The MCP
         // server computes the same hash and reads the lock file, so it finds
         // the right bridge per project without sharing config.
-        static int ResolvePort()
+        private static int ResolvePort()
         {
             int? envPort = null;
             var envValue = Environment.GetEnvironmentVariable(PortEnvVar);
@@ -449,7 +449,7 @@ namespace UnityOpenMcpBridge
         // placeholder if the editor hasn't initialized Application.dataPath
         // yet — in practice this runs inside [InitializeOnLoad] after the
         // project is loaded, but we never want to throw during static init.
-        static string GetProjectPathForPort()
+        private static string GetProjectPathForPort()
         {
             try
             {
@@ -530,7 +530,7 @@ namespace UnityOpenMcpBridge
         // instance lock on disk so the MCP server can detect a dead bridge
         // assembly via the stale-heartbeat + live-PID signature; releaseLock=true
         // (graceful quit) deletes it.
-        static void Stop(bool releaseLock)
+        private static void Stop(bool releaseLock)
         {
             if (!_running) return;
             _running = false;
@@ -566,7 +566,7 @@ namespace UnityOpenMcpBridge
             UnityEngine.Debug.Log("[Unity Open MCP Bridge] Stopped.");
         }
 
-        static void ListenLoop()
+        private static void ListenLoop()
         {
             while (_running)
             {
@@ -585,7 +585,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static void HandleRequest(HttpListenerContext context)
+        private static void HandleRequest(HttpListenerContext context)
         {
             var activity = BeginActivity(context);
             _currentActivity = activity;
@@ -730,7 +730,7 @@ namespace UnityOpenMcpBridge
         // false when CheckAuth has already written a 401. Pure decision lives
         // in BridgeAuthCheck so it can be unit-tested without HttpListener.
         // The activity is annotated for the activity log regardless of outcome.
-        static bool CheckAuth(HttpListenerContext context, BridgeActivityEvent activity)
+        private static bool CheckAuth(HttpListenerContext context, BridgeActivityEvent activity)
         {
             string headerValue = null;
             try { headerValue = context.Request.Headers["Authorization"]; }
@@ -751,7 +751,7 @@ namespace UnityOpenMcpBridge
             return false;
         }
 
-        static BridgeActivityEvent BeginActivity(HttpListenerContext context)
+        private static BridgeActivityEvent BeginActivity(HttpListenerContext context)
         {
             var evt = new BridgeActivityEvent
             {
@@ -769,7 +769,7 @@ namespace UnityOpenMcpBridge
             return evt;
         }
 
-        static int SafeContentLength(HttpListenerRequest request)
+        private static int SafeContentLength(HttpListenerRequest request)
         {
             if (request == null) return 0;
             try
@@ -781,7 +781,7 @@ namespace UnityOpenMcpBridge
             catch { return 0; }
         }
 
-        static void FinishActivity(HttpListenerContext context, BridgeActivityEvent activity)
+        private static void FinishActivity(HttpListenerContext context, BridgeActivityEvent activity)
         {
             if (activity == null) return;
             try
@@ -798,7 +798,7 @@ namespace UnityOpenMcpBridge
             try { BridgeActivityLog.Record(activity); } catch { }
         }
 
-        static void HandlePing(HttpListenerContext context)
+        private static void HandlePing(HttpListenerContext context)
         {
             if (!BridgeSession.IsInitialized)
             {
@@ -814,7 +814,7 @@ namespace UnityOpenMcpBridge
         // server can verify the on-disk lock matches the live bridge (and
         // read the heartbeat state without an HTTP round-trip via the file).
         // Falls back to 503 when the bridge hasn't acquired a lock yet.
-        static void HandleInstance(HttpListenerContext context)
+        private static void HandleInstance(HttpListenerContext context)
         {
             var json = BridgeInstanceLock.ReadCurrentJson();
             if (json == null)
@@ -837,7 +837,7 @@ namespace UnityOpenMcpBridge
         //                      A new id is minted when omitted.
         //   max_per_poll=<n> — cap events per drain tick (default 100). Bounds
         //                      burst replay after a reconnect.
-        static void HandleEventsSse(HttpListenerContext context)
+        private static void HandleEventsSse(HttpListenerContext context)
         {
             const int sseTimeoutMs = 10 * 60 * 1000;
             const int pollIntervalMs = 100;
@@ -903,7 +903,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static void WriteSseEvent(HttpListenerContext context, string eventName, string data)
+        private static void WriteSseEvent(HttpListenerContext context, string eventName, string data)
         {
             var sb = new StringBuilder(64 + data.Length);
             sb.Append("event: ").Append(eventName).Append('\n');
@@ -923,7 +923,7 @@ namespace UnityOpenMcpBridge
         // caller's last poll as a single JSON envelope. The MCP server uses
         // this surface (instead of SSE) because it lives behind a stdio
         // transport and would otherwise need to forward SSE→MCP notifications.
-        static void HandleEventsPoll(HttpListenerContext context)
+        private static void HandleEventsPoll(HttpListenerContext context)
         {
             var query = context.Request.QueryString;
             var subscriber = query["subscriber"];
@@ -938,7 +938,7 @@ namespace UnityOpenMcpBridge
             SendJson(context, 200, BridgeEventSource.RenderDrain(drain));
         }
 
-        static void HandleToolDispatch(HttpListenerContext context, string toolName)
+        private static void HandleToolDispatch(HttpListenerContext context, string toolName)
         {
             var body = ReadRequestBody(context.Request);
             var timeoutMs = ExtractTimeoutMs(body);
@@ -1097,7 +1097,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static void ApplyToolResultToActivity(BridgeActivityEvent activity, GateDispatchResult result, long durationMs)
+        private static void ApplyToolResultToActivity(BridgeActivityEvent activity, GateDispatchResult result, long durationMs)
         {
             if (activity == null) return;
             activity.DurationMs = durationMs;
@@ -1118,7 +1118,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static void ApplyToolFailureToActivity(BridgeActivityEvent activity, string code, string message, long durationMs)
+        private static void ApplyToolFailureToActivity(BridgeActivityEvent activity, string code, string message, long durationMs)
         {
             if (activity == null) return;
             activity.DurationMs = durationMs;
@@ -1127,14 +1127,14 @@ namespace UnityOpenMcpBridge
             activity.ErrorMessage = TruncateMessage(message);
         }
 
-        static string TruncateMessage(string message)
+        private static string TruncateMessage(string message)
         {
             if (string.IsNullOrEmpty(message)) return null;
             const int max = 200;
             return message.Length <= max ? message : message.Substring(0, max) + "…";
         }
 
-        static void RecordGateRun(string toolName, string effectiveMode, GateDispatchResult result, string[] pathsHint)
+        private static void RecordGateRun(string toolName, string effectiveMode, GateDispatchResult result, string[] pathsHint)
         {
             try
             {
@@ -1182,7 +1182,7 @@ namespace UnityOpenMcpBridge
         // M14 T5.5 — build + persist the audit record. Outcome vocabulary is
         // the GateOutcome enum lowercased, plus "denied" when the deny
         // heuristic refused the mutation (carried as the mutation error code).
-        static void RecordAudit(string toolName, string effectiveMode, GateDispatchResult result, string[] pathsHint)
+        private static void RecordAudit(string toolName, string effectiveMode, GateDispatchResult result, string[] pathsHint)
         {
             if (!BridgeAuditLog.Enabled) return;
 
@@ -1214,7 +1214,7 @@ namespace UnityOpenMcpBridge
             BridgeAuditLog.Record(record);
         }
 
-        static string ResolveAuditProjectHash()
+        private static string ResolveAuditProjectHash()
         {
             var projectPath = BridgeSession.ProjectPath ?? GetProjectPathForPort();
             try { return InstancePortResolver.ProjectHash(projectPath); }
@@ -1225,7 +1225,7 @@ namespace UnityOpenMcpBridge
         // message. Extract it so the audit record has a structured field for
         // grep / SIEM correlation. Returns null when the message isn't a deny
         // refusal.
-        static string ExtractDeniedPattern(string errorMessage)
+        private static string ExtractDeniedPattern(string errorMessage)
         {
             if (string.IsNullOrEmpty(errorMessage)) return null;
             const string marker = "Matched pattern: ";
@@ -1237,7 +1237,7 @@ namespace UnityOpenMcpBridge
             return errorMessage.Substring(start, end - start);
         }
 
-        static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint)
+        private static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint)
         {
             bool isMutating = MutatingTools.Contains(toolName)
                 || (BridgeToolRegistry.TryGet(toolName, out var regEntry) && regEntry.IsMutating);
@@ -1282,7 +1282,7 @@ namespace UnityOpenMcpBridge
             return GatePolicy.Execute(mode, pathsHint, () => DispatchTool(toolName, body));
         }
 
-        static string[] BuildSceneDirtyNextSteps(string[] dirtyPaths)
+        private static string[] BuildSceneDirtyNextSteps(string[] dirtyPaths)
         {
             var list = new List<string>(3);
             if (dirtyPaths == null || dirtyPaths.Length == 0)
@@ -1302,7 +1302,7 @@ namespace UnityOpenMcpBridge
             return list.ToArray();
         }
 
-        static ToolDispatchResult DispatchTool(string toolName, string body)
+        private static ToolDispatchResult DispatchTool(string toolName, string body)
         {
             return toolName switch
             {
@@ -1466,7 +1466,7 @@ namespace UnityOpenMcpBridge
         // list / unknown-fix listing) without invoking the gate. The gate only
         // has something to validate when the project actually changes, and a
         // dry-run never changes the project.
-        static void HandleDryRunApplyFix(
+        private static void HandleDryRunApplyFix(
             HttpListenerContext context, string body, string gateMode,
             int timeoutMs, BridgeActivityEvent activity, Stopwatch sw)
         {
@@ -1513,7 +1513,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static void HandleDirectResponseTool(HttpListenerContext context, string toolName, string body, int timeoutMs)
+        private static void HandleDirectResponseTool(HttpListenerContext context, string toolName, string body, int timeoutMs)
         {
             try
             {
@@ -1543,12 +1543,12 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static string BuildDirectToolErrorJson(ToolDispatchResult result)
+        private static string BuildDirectToolErrorJson(ToolDispatchResult result)
         {
             return $"{{\"error\":{{\"code\":\"{EscapeStringContent(result.ErrorCode)}\",\"message\":\"{EscapeStringContent(result.ErrorMessage)}\"}}}}";
         }
 
-        static string ReadRequestBody(HttpListenerRequest request)
+        private static string ReadRequestBody(HttpListenerRequest request)
         {
             using var stream = request.InputStream;
             using var reader = new StreamReader(stream, Encoding.UTF8);
@@ -1578,7 +1578,7 @@ namespace UnityOpenMcpBridge
             return Math.Clamp(ms, MinTimeoutMs, MaxTimeoutMs);
         }
 
-        static string ExtractGateMode(string body)
+        private static string ExtractGateMode(string body)
         {
             // Precedence per architecture/gate-policy.md:
             //   1. Request body `gate` value
@@ -1608,7 +1608,7 @@ namespace UnityOpenMcpBridge
             return BridgeGateDefaultPolicy.IsValid(value) ? value : BridgeGateDefaultPolicy.GetDefault();
         }
 
-        static string[] PathsFromIssueId(string issueId)
+        private static string[] PathsFromIssueId(string issueId)
         {
             if (string.IsNullOrEmpty(issueId)) return null;
             var parts = issueId.Split('|');
@@ -1618,7 +1618,7 @@ namespace UnityOpenMcpBridge
             return new[] { assetPath };
         }
 
-        static string BuildGateEnvelope(GateDispatchResult result, string gateMode, LifecyclePolicy lifecycle)
+        private static string BuildGateEnvelope(GateDispatchResult result, string gateMode, LifecyclePolicy lifecycle)
         {
             var sb = new StringBuilder(1024);
 
@@ -1730,7 +1730,7 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static string BuildTimeoutEnvelope(string toolName, string gateMode, int timeoutMs)
+        private static string BuildTimeoutEnvelope(string toolName, string gateMode, int timeoutMs)
         {
             var sb = new StringBuilder(512);
             sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"timeout\",\"message\":\"Tool '");
@@ -1743,7 +1743,7 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static string BuildFaultEnvelope(System.Exception e, string gateMode)
+        private static string BuildFaultEnvelope(System.Exception e, string gateMode)
         {
             var sb = new StringBuilder(512);
             sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"execution_error\",\"message\":\"");
@@ -1754,7 +1754,7 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static string BuildPathsHintErrorEnvelope(string toolName, string gateMode)
+        private static string BuildPathsHintErrorEnvelope(string toolName, string gateMode)
         {
             var sb = new StringBuilder(512);
             sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"paths_hint_required\",\"message\":\"");
@@ -1769,7 +1769,7 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static string BuildPingJson()
+        private static string BuildPingJson()
         {
             var sb = new StringBuilder(256);
             sb.Append('{');
@@ -1784,7 +1784,7 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static void HandleResourceList(HttpListenerContext context)
+        private static void HandleResourceList(HttpListenerContext context)
         {
             var resources = BridgeResourceRegistry.All();
             var sb = new StringBuilder(512);
@@ -1804,7 +1804,7 @@ namespace UnityOpenMcpBridge
             SendJson(context, 200, sb.ToString());
         }
 
-        static void HandleResourceDispatch(HttpListenerContext context, string route)
+        private static void HandleResourceDispatch(HttpListenerContext context, string route)
         {
             var entry = BridgeResourceRegistry.FindByRoute(route);
             if (entry == null)
@@ -1837,25 +1837,25 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static void SendToolNotFound(HttpListenerContext context, string toolName)
+        private static void SendToolNotFound(HttpListenerContext context, string toolName)
         {
             var json = $"{{\"error\":{{\"code\":\"tool_not_found\",\"message\":\"Unknown tool: {EscapeStringContent(toolName)}\"}}}}";
             SendJson(context, 404, json);
         }
 
-        static void SendNotFound(HttpListenerContext context, string path)
+        private static void SendNotFound(HttpListenerContext context, string path)
         {
             var json = $"{{\"error\":{{\"code\":\"not_found\",\"message\":\"Unknown endpoint: {EscapeStringContent(path)}\"}}}}";
             SendJson(context, 404, json);
         }
 
-        static void SendJsonError(HttpListenerContext context, int statusCode, string code, string message)
+        private static void SendJsonError(HttpListenerContext context, int statusCode, string code, string message)
         {
             var json = $"{{\"error\":{{\"code\":\"{EscapeStringContent(code)}\",\"message\":\"{EscapeStringContent(message)}\"}}}}";
             SendJson(context, statusCode, json);
         }
 
-        static void SendJson(HttpListenerContext context, int statusCode, string json)
+        private static void SendJson(HttpListenerContext context, int statusCode, string json)
         {
             var bytes = Encoding.UTF8.GetBytes(json);
             context.Response.StatusCode = statusCode;
@@ -1864,7 +1864,7 @@ namespace UnityOpenMcpBridge
             context.Response.OutputStream.Write(bytes, 0, bytes.Length);
         }
 
-        static string EscapeString(string s)
+        private static string EscapeString(string s)
         {
             if (s == null) return "null";
             var sb = new StringBuilder(s.Length + 8);
@@ -1874,7 +1874,7 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static string EscapeStringContent(string s)
+        private static string EscapeStringContent(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);
@@ -1882,7 +1882,7 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static void EscapeStringContentTo(StringBuilder sb, string s)
+        private static void EscapeStringContentTo(StringBuilder sb, string s)
         {
             foreach (var c in s)
             {

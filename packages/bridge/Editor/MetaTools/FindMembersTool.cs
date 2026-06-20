@@ -118,7 +118,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return ToolDispatchResult.Ok(json);
         }
 
-        static bool ShouldIncludeAssembly(Assembly asm, string assemblyFilter, bool includeUnityEditor, bool includeProject)
+        private static bool ShouldIncludeAssembly(Assembly asm, string assemblyFilter, bool includeUnityEditor, bool includeProject)
         {
             var name = asm.GetName().Name;
 
@@ -148,14 +148,14 @@ namespace UnityOpenMcpBridge.MetaTools
             return true;
         }
 
-        static bool MatchesQuery(string name, string query)
+        private static bool MatchesQuery(string name, string query)
         {
             if (string.IsNullOrEmpty(query)) return true;
             if (string.IsNullOrEmpty(name)) return false;
             return name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        static IEnumerable<MethodInfo> GetMethodsSafe(Type type)
+        private static IEnumerable<MethodInfo> GetMethodsSafe(Type type)
         {
             try
             {
@@ -164,7 +164,7 @@ namespace UnityOpenMcpBridge.MetaTools
             catch { return Array.Empty<MethodInfo>(); }
         }
 
-        static IEnumerable<PropertyInfo> GetPropertiesSafe(Type type)
+        private static IEnumerable<PropertyInfo> GetPropertiesSafe(Type type)
         {
             try
             {
@@ -173,7 +173,7 @@ namespace UnityOpenMcpBridge.MetaTools
             catch { return Array.Empty<PropertyInfo>(); }
         }
 
-        static string GetMethodSignature(MethodInfo method)
+        private static string GetMethodSignature(MethodInfo method)
         {
             try
             {
@@ -202,7 +202,7 @@ namespace UnityOpenMcpBridge.MetaTools
             catch { return ""; }
         }
 
-        static string GetPropertySignature(PropertyInfo prop)
+        private static string GetPropertySignature(PropertyInfo prop)
         {
             try
             {
@@ -219,7 +219,7 @@ namespace UnityOpenMcpBridge.MetaTools
             catch { return ""; }
         }
 
-        static string GetSummary(Type type)
+        private static string GetSummary(Type type)
         {
             return type.IsClass ? "class" : type.IsInterface ? "interface" : type.IsEnum ? "enum" : type.IsValueType ? "struct" : "";
         }
@@ -227,7 +227,7 @@ namespace UnityOpenMcpBridge.MetaTools
         // M16 Plan 6 — TypeDisplayName mirrors the find_members signature
         // style (int, string, Vector3, List<T>) so method and type reads line
         // up across tools.
-        static string TypeDisplayName(Type type)
+        private static string TypeDisplayName(Type type)
         {
             if (type == null) return "null";
             var name = type.Name;
@@ -243,7 +243,7 @@ namespace UnityOpenMcpBridge.MetaTools
 
         // ---------------- M16 Plan 6 structured serializers ----------------
 
-        static string SerializeType(Type type, bool includeSignatures)
+        private static string SerializeType(Type type, bool includeSignatures)
         {
             var sb = new StringBuilder(160);
             sb.Append("{\"kind\":\"type");
@@ -262,7 +262,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string SerializeMethod(Type declaringType, MethodInfo method, bool includeSignatures)
+        private static string SerializeMethod(Type declaringType, MethodInfo method, bool includeSignatures)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"kind\":\"method");
@@ -308,7 +308,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string SerializeProperty(Type declaringType, PropertyInfo prop, bool includeSignatures)
+        private static string SerializeProperty(Type declaringType, PropertyInfo prop, bool includeSignatures)
         {
             var sb = new StringBuilder(192);
             sb.Append("{\"kind\":\"property");

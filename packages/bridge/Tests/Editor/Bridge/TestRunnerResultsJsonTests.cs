@@ -9,7 +9,7 @@ namespace UnityOpenMcpBridge.Tests
     // per-field length caps on message/stackTrace.
     public class TestRunnerResultsJsonTests
     {
-        static TestResultInfo R(string name, string status, string message = "", string stack = "") =>
+        private static TestResultInfo R(string name, string status, string message = "", string stack = "") =>
             new TestResultInfo
             {
                 Name = name,

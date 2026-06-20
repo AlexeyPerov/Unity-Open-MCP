@@ -68,7 +68,7 @@ namespace UnityOpenMcpBridge.Screenshot
             }
         }
 
-        static GameObject FindByPath(string path)
+        private static GameObject FindByPath(string path)
         {
             // Try as hierarchy path first (slash-separated from root).
             var parts = path.Split('/');
@@ -102,7 +102,7 @@ namespace UnityOpenMcpBridge.Screenshot
             return null;
         }
 
-        static string BuildSuccessJson(string view, int width, int height, string filePath)
+        private static string BuildSuccessJson(string view, int width, int height, string filePath)
         {
             var sb = new StringBuilder(256);
             sb.Append('{');
@@ -119,7 +119,7 @@ namespace UnityOpenMcpBridge.Screenshot
             return sb.ToString();
         }
 
-        static string ErrorJson(string code, string message)
+        private static string ErrorJson(string code, string message)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"error\":{\"code\":").Append(Esc(code));
@@ -128,7 +128,7 @@ namespace UnityOpenMcpBridge.Screenshot
             return sb.ToString();
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "\"\"";
             var sb = new StringBuilder(s.Length + 8);

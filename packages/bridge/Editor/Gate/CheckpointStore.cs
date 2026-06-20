@@ -16,9 +16,9 @@ namespace UnityOpenMcpBridge
 
     public static class CheckpointStore
     {
-        const int DefaultCapacity = 20;
-        static readonly List<CheckpointStoreEntry> _entries = new();
-        static readonly Dictionary<string, CheckpointStoreEntry> _index = new();
+        private const int DefaultCapacity = 20;
+        private static readonly List<CheckpointStoreEntry> _entries = new();
+        private static readonly Dictionary<string, CheckpointStoreEntry> _index = new();
 
         public static int Count => _entries.Count;
 

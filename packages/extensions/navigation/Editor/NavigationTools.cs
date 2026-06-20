@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
@@ -742,7 +741,7 @@ namespace UnityOpenMcpExtensions.Navigation
         // Helpers
         // =====================================================================
 
-        static void ApplySurfaceSettings(NavMeshSurface surface, string agentType, string collectObjects, string collectionExtent)
+        private static void ApplySurfaceSettings(NavMeshSurface surface, string agentType, string collectObjects, string collectionExtent)
         {
             // Map the friendly agent name (e.g. "Humanoid") to the registered
             // NavMeshBuildSettings.agentTypeID. The bridge stays in
@@ -792,7 +791,7 @@ namespace UnityOpenMcpExtensions.Navigation
             }
         }
 
-        static Component ResolveComponent(GameObject host, string typeName)
+        private static Component ResolveComponent(GameObject host, string typeName)
         {
             switch (typeName)
             {
@@ -812,7 +811,7 @@ namespace UnityOpenMcpExtensions.Navigation
             public string TypeHint;
         }
 
-        static System.Collections.Generic.List<FieldEntry> ParseFieldArray(string json)
+        private static System.Collections.Generic.List<FieldEntry> ParseFieldArray(string json)
         {
             if (string.IsNullOrEmpty(json)) return null;
             var trimmed = json.Trim();
@@ -846,7 +845,7 @@ namespace UnityOpenMcpExtensions.Navigation
             return entries;
         }
 
-        static FieldEntry ParseFieldEntry(string objBody)
+        private static FieldEntry ParseFieldEntry(string objBody)
         {
             var entry = new FieldEntry();
             entry.Field = ExtractStringValue(objBody, "field");
@@ -855,7 +854,7 @@ namespace UnityOpenMcpExtensions.Navigation
             return entry;
         }
 
-        static string ExtractStringValue(string objBody, string key)
+        private static string ExtractStringValue(string objBody, string key)
         {
             var raw = ExtractRawValue(objBody, key);
             if (string.IsNullOrEmpty(raw)) return null;
@@ -864,7 +863,7 @@ namespace UnityOpenMcpExtensions.Navigation
             return raw;
         }
 
-        static string ExtractRawValue(string objBody, string key)
+        private static string ExtractRawValue(string objBody, string key)
         {
             var pattern = "\"" + key + "\"";
             var idx = objBody.IndexOf(pattern, System.StringComparison.Ordinal);
@@ -924,7 +923,7 @@ namespace UnityOpenMcpExtensions.Navigation
             public string Message;
         }
 
-        static FieldResult SetField(Component comp, FieldEntry entry)
+        private static FieldResult SetField(Component comp, FieldEntry entry)
         {
             if (string.IsNullOrEmpty(entry.Field))
                 return new FieldResult { Ok = false, Message = "field is required" };
@@ -952,7 +951,7 @@ namespace UnityOpenMcpExtensions.Navigation
             }
         }
 
-        static object ConvertValue(System.Type targetType, string raw, string typeHint)
+        private static object ConvertValue(System.Type targetType, string raw, string typeHint)
         {
             if (targetType == typeof(string))
             {
@@ -977,7 +976,7 @@ namespace UnityOpenMcpExtensions.Navigation
             throw new System.NotSupportedException($"Unsupported field type {targetType.Name}.");
         }
 
-        static Vector3 ParseVector3(string s, Vector3 fallback)
+        private static Vector3 ParseVector3(string s, Vector3 fallback)
         {
             if (string.IsNullOrEmpty(s)) return fallback;
             var parts = s.Split(',');
@@ -991,10 +990,10 @@ namespace UnityOpenMcpExtensions.Navigation
             return new Vector3(x, y, z);
         }
 
-        static string Vec3(Vector3 v)
+        private static string Vec3(Vector3 v)
             => $"[{v.x},{v.y},{v.z}]";
 
-        static string BuildPath(GameObject go)
+        private static string BuildPath(GameObject go)
         {
             var sb = new StringBuilder();
             var t = go.transform;
@@ -1007,7 +1006,7 @@ namespace UnityOpenMcpExtensions.Navigation
             return sb.ToString();
         }
 
-        static void AppendComponentList<T>(StringBuilder sb, string key, bool first,
+        private static void AppendComponentList<T>(StringBuilder sb, string key, bool first,
             System.Func<T, string> extra) where T : Component
         {
             if (!first) sb.Append(',');
@@ -1031,14 +1030,14 @@ namespace UnityOpenMcpExtensions.Navigation
             sb.Append(']');
         }
 
-        static bool AppendComma(StringBuilder sb, bool first)
+        private static bool AppendComma(StringBuilder sb, bool first)
         {
             if (!first) sb.Append(',');
             return false;
         }
 
         // Target-not-found helper — kept short so call sites read cleanly.
-        static string TargetNotFound()
+        private static string TargetNotFound()
             => NavigationJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
     }

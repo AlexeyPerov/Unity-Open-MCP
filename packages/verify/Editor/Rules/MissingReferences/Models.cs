@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Categories/MissingReferences/MissingReferencesResultModels.cs
-
 using System;
 using System.Collections.Generic;
 using System.Linq;

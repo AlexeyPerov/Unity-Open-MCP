@@ -1,24 +1,3 @@
-// EditMode tests for the Animation extension pack.
-//
-// Covers the deterministic contracts that protect the agent surface:
-//
-//   1. All 6 catalog tools are discovered by BridgeToolRegistry (no core
-//      bridge edits — proves the [BridgeToolType] assembly scan works for
-//      packs).
-//   2. Mutating tools refuse to run without paths_hint (the gate contract).
-//   3. Mutating tools validate required parameters (asset_paths /
-//      modifications_json).
-//   4. clip create → get_data → modify (SetCurve) → get_data round-trip
-//      on a real .anim asset.
-//   5. controller create → get_data → modify (AddParameter / AddState /
-//      SetDefaultState / AddTransition) → get_data round-trip on a real
-//      .controller asset.
-//   6. Per-entry errors are accumulated, not thrown (set curve with a bad
-//      component type does not abort the batch).
-//
-// These tests run in EditMode against the live demo project. They write
-// transient assets under Assets/TmpAnimTests/ and delete the folder on
-// teardown.
 using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
@@ -30,8 +9,8 @@ namespace UnityOpenMcpExtensions.Animation.Tests
 {
     public class AnimationToolsTests
     {
-        const string TmpRoot = "Assets/TmpAnimTests";
-        static readonly string[] ExpectedTools =
+        private const string TmpRoot = "Assets/TmpAnimTests";
+        private static readonly string[] ExpectedTools =
         {
             "unity_open_mcp_animation_create",
             "unity_open_mcp_animation_get_data",
@@ -112,7 +91,7 @@ namespace UnityOpenMcpExtensions.Animation.Tests
         // the agent-side test runner exercises.
         // -----------------------------------------------------------------
 
-        static void AssertErrorEnvelope(ToolDispatchResult result, string expectedCode)
+        private static void AssertErrorEnvelope(ToolDispatchResult result, string expectedCode)
         {
             Assert.IsNotNull(result);
             bool sawEnvelope = (result.Output ?? "").Contains("\"code\":\"" + expectedCode + "\"");
@@ -413,7 +392,7 @@ namespace UnityOpenMcpExtensions.Animation.Tests
         // Test helpers.
         // -----------------------------------------------------------------
 
-        static void CreateClip(string name)
+        private static void CreateClip(string name)
         {
             var path = TmpRoot + "/" + name;
             BridgeToolRegistry.TryDispatch(
@@ -425,7 +404,7 @@ namespace UnityOpenMcpExtensions.Animation.Tests
         // outer tool body. Backslashes + quotes only — the bridge body parser
         // unescapes once, leaving the modifications_json value as the raw
         // JSON string the modification parser expects.
-        static string JsonEscape(string s)
+        private static string JsonEscape(string s)
         {
             var sb = new System.Text.StringBuilder(s.Length + 8);
             foreach (var c in s)

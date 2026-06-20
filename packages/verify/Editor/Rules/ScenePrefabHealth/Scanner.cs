@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Categories/ScenePrefabHealth/ScenePrefabHealthScanner.cs
-
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -36,7 +34,7 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             }
         }
 
-        static SceneData AnalyzeScene(string scenePath, ScanSettings settings)
+        private static SceneData AnalyzeScene(string scenePath, ScanSettings settings)
         {
             long fileBytes = 0;
             try { if (File.Exists(scenePath)) fileBytes = new FileInfo(scenePath).Length; } catch { }
@@ -140,7 +138,7 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             return data;
         }
 
-        static PrefabData AnalyzePrefab(string prefabPath, ScanSettings settings)
+        private static PrefabData AnalyzePrefab(string prefabPath, ScanSettings settings)
         {
             long fileBytes = 0;
             try { if (File.Exists(prefabPath)) fileBytes = new FileInfo(prefabPath).Length; } catch { }
@@ -182,7 +180,7 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             return data;
         }
 
-        static int CalculateNestingDepth(GameObject prefab)
+        private static int CalculateNestingDepth(GameObject prefab)
         {
             var depth = 0;
             var current = PrefabUtility.GetCorrespondingObjectFromSource(prefab);
@@ -194,13 +192,13 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             return depth;
         }
 
-        static int CountPrefabOverrides(GameObject prefab)
+        private static int CountPrefabOverrides(GameObject prefab)
         {
             var modifications = PrefabUtility.GetPropertyModifications(prefab);
             return modifications != null ? modifications.Length : 0;
         }
 
-        static HashSet<string> GetBuildScenePaths()
+        private static HashSet<string> GetBuildScenePaths()
         {
             var result = new HashSet<string>();
             for (var i = 0; i < EditorBuildSettings.scenes.Length; i++)
@@ -211,7 +209,7 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             return result;
         }
 
-        static string GetHierarchyPath(Transform t)
+        private static string GetHierarchyPath(Transform t)
         {
             var parts = new List<string>();
             var current = t;

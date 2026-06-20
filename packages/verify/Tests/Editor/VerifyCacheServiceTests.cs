@@ -138,7 +138,7 @@ namespace UnityOpenMcpVerify.Tests
             Assert.AreEqual(VerifyCacheService.DefaultTtl, VerifyCacheService.Ttl);
         }
 
-        static VerifyResult MakeResult(params VerifyIssue[] issues)
+        private static VerifyResult MakeResult(params VerifyIssue[] issues)
         {
             return new VerifyResult(
                 new List<VerifyIssue>(issues),
@@ -146,7 +146,7 @@ namespace UnityOpenMcpVerify.Tests
                 10L);
         }
 
-        static VerifyResult MakeResult(int errors, int warnings)
+        private static VerifyResult MakeResult(int errors, int warnings)
         {
             var issues = new List<VerifyIssue>();
             for (int i = 0; i < errors; i++)

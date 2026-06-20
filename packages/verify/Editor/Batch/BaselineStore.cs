@@ -143,7 +143,7 @@ namespace UnityOpenMcpVerify.Batch
             return detail;
         }
 
-        static int ErrorCountFor(BaselineFile file, string ruleId)
+        private static int ErrorCountFor(BaselineFile file, string ruleId)
         {
             if (file == null || file.rules == null) return 0;
             foreach (var r in file.rules)
@@ -153,7 +153,7 @@ namespace UnityOpenMcpVerify.Batch
             return 0;
         }
 
-        static SeveritySummary BuildSummary(List<VerifyIssue> issues)
+        private static SeveritySummary BuildSummary(List<VerifyIssue> issues)
         {
             var s = new SeveritySummary();
             if (issues == null) return s;
@@ -166,7 +166,7 @@ namespace UnityOpenMcpVerify.Batch
             return s;
         }
 
-        static List<RuleBaselineEntry> BuildRuleEntries(VerifyResult result)
+        private static List<RuleBaselineEntry> BuildRuleEntries(VerifyResult result)
         {
             var entries = new List<RuleBaselineEntry>();
             if (result == null) return entries;

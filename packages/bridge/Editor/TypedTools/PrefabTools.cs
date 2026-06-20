@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Text;
 using UnityEditor;
@@ -372,7 +371,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return new InstanceResolve { Ok = true, GameObject = go };
         }
 
-        static string BuildInstanceStatus(GameObject go)
+        private static string BuildInstanceStatus(GameObject go)
         {
             var sb = new StringBuilder(192);
             bool isInstance = PrefabUtility.IsPartOfPrefabInstance(go);
@@ -402,7 +401,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
-        static string BuildAssetStatus(GameObject prefab, string assetPath)
+        private static string BuildAssetStatus(GameObject prefab, string assetPath)
         {
             var kind = PrefabUtility.GetPrefabAssetType(prefab);
             var sb = new StringBuilder(128);
@@ -414,7 +413,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
-        static void MarkSceneDirty(GameObject go)
+        private static void MarkSceneDirty(GameObject go)
         {
             var scene = go.scene;
             if (scene.IsValid()) EditorSceneManager.MarkSceneDirty(scene);

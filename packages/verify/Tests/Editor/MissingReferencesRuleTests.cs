@@ -12,9 +12,9 @@ namespace UnityOpenMcpVerify.Tests
     [TestFixture]
     public class MissingReferencesRuleTests
     {
-        const string FixtureRoot = "Assets/Tests/VerifyFixtures/MissingReferences";
+        private const string FixtureRoot = "Assets/Tests/VerifyFixtures/MissingReferences";
 
-        MissingReferencesRule rule;
+        private MissingReferencesRule rule;
 
         [SetUp]
         public void SetUp()
@@ -251,7 +251,7 @@ namespace UnityOpenMcpVerify.Tests
         // forces the import pipeline to settle before the test body reads the
         // asset back. One Refresh() per create (down from helper + body +
         // cleanup = ~4 per test) is enough.
-        static System.Collections.IEnumerator CreatePrefabWithMeshReference(string prefabPath, string meshPath)
+        private static System.Collections.IEnumerator CreatePrefabWithMeshReference(string prefabPath, string meshPath)
         {
             EnsureDirectory(System.IO.Path.GetDirectoryName(prefabPath));
 
@@ -269,7 +269,7 @@ namespace UnityOpenMcpVerify.Tests
             yield return null;
         }
 
-        static System.Collections.IEnumerator CreateMinimalPrefab(string path)
+        private static System.Collections.IEnumerator CreateMinimalPrefab(string path)
         {
             EnsureDirectory(System.IO.Path.GetDirectoryName(path));
             var go = new GameObject("VerifyTestFixture");
@@ -281,7 +281,7 @@ namespace UnityOpenMcpVerify.Tests
             yield return null;
         }
 
-        static void EnsureDirectory(string path)
+        private static void EnsureDirectory(string path)
         {
             if (!AssetDatabase.IsValidFolder(path))
             {

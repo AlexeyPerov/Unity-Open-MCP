@@ -287,7 +287,7 @@ namespace UnityOpenMcpBridge.Profiler
 
         // ============================ hierarchy helpers ============================
 
-        string AveragedHierarchy(int fromFrame, int toFrame, int threadIndex, string rootName,
+        private string AveragedHierarchy(int fromFrame, int toFrame, int threadIndex, string rootName,
             float minTime, string sortBy, int maxItems, int effDepth, int rawDepth)
         {
             int firstAvail = ProfilerDriver.firstFrameIndex;
@@ -380,7 +380,7 @@ namespace UnityOpenMcpBridge.Profiler
             return sb.ToString();
         }
 
-        void CollectFlat(HierarchyFrameDataView fd, int parentId, int remainingDepth,
+        private void CollectFlat(HierarchyFrameDataView fd, int parentId, int remainingDepth,
             Dictionary<string, (double total, double self, long calls, int count)> acc)
         {
             var childIds = new List<int>();
@@ -403,7 +403,7 @@ namespace UnityOpenMcpBridge.Profiler
             }
         }
 
-        int FindItemByName(HierarchyFrameDataView fd, int parentId, string name)
+        private int FindItemByName(HierarchyFrameDataView fd, int parentId, string name)
         {
             var childIds = new List<int>();
             fd.GetItemChildren(parentId, childIds);
@@ -420,7 +420,7 @@ namespace UnityOpenMcpBridge.Profiler
             return -1;
         }
 
-        static int GetSortColumn(string sortBy)
+        private static int GetSortColumn(string sortBy)
         {
             switch (sortBy)
             {
@@ -432,7 +432,7 @@ namespace UnityOpenMcpBridge.Profiler
 
         struct ChildrenResult { public StringBuilder Json; public int Count; }
 
-        ChildrenResult BuildChildren(HierarchyFrameDataView fd, int parentId, float minTime, int maxItems, int remainingDepth)
+        private ChildrenResult BuildChildren(HierarchyFrameDataView fd, int parentId, float minTime, int maxItems, int remainingDepth)
         {
             var childIds = new List<int>();
             fd.GetItemChildren(parentId, childIds);
@@ -473,7 +473,7 @@ namespace UnityOpenMcpBridge.Profiler
 
         // ============================ formatting helpers ============================
 
-        static string DetectRenderPipeline()
+        private static string DetectRenderPipeline()
         {
             try
             {
@@ -492,7 +492,7 @@ namespace UnityOpenMcpBridge.Profiler
             return "Built-in Render Pipeline";
         }
 
-        static string HumanBytes(long bytes)
+        private static string HumanBytes(long bytes)
         {
             if (bytes < 1024) return bytes + " B";
             double kb = bytes / 1024.0;
@@ -503,11 +503,11 @@ namespace UnityOpenMcpBridge.Profiler
             return gb.ToString("0.##", CultureInfo.InvariantCulture) + " GB";
         }
 
-        static string Num(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
+        private static string Num(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
 
-        static string Num(float f) => f.ToString("0.###", CultureInfo.InvariantCulture);
+        private static string Num(float f) => f.ToString("0.###", CultureInfo.InvariantCulture);
 
-        static string ErrorJson(string code, string message)
+        private static string ErrorJson(string code, string message)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"error\":{\"code\":").Append(Esc(code));
@@ -516,7 +516,7 @@ namespace UnityOpenMcpBridge.Profiler
             return sb.ToString();
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "\"\"";
             var sb = new StringBuilder(s.Length + 8);

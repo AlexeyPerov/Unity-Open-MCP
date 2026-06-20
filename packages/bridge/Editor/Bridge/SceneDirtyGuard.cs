@@ -92,7 +92,7 @@ namespace UnityOpenMcpBridge
             return GuardResult.Refuse(dirty.ToArray(), BuildMessage(dirty));
         }
 
-        static List<string> CollectDirtyPaths(SceneSetup[] setup)
+        private static List<string> CollectDirtyPaths(SceneSetup[] setup)
         {
             var dirty = new List<string>();
             foreach (var entry in setup)
@@ -113,7 +113,7 @@ namespace UnityOpenMcpBridge
             return dirty;
         }
 
-        static string BuildMessage(List<string> dirty)
+        private static string BuildMessage(List<string> dirty)
         {
             var sb = new StringBuilder(256);
             sb.Append("Active scene has unsaved changes (dirty): ");

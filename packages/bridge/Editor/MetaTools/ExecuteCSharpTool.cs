@@ -11,7 +11,7 @@ namespace UnityOpenMcpBridge.MetaTools
 {
     public static class ExecuteCSharpTool
     {
-        static readonly string[] DefaultUsings =
+        private static readonly string[] DefaultUsings =
         {
             "System",
             "System.IO",
@@ -115,7 +115,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        static SerializeOptions BuildSerializeOptions(string body)
+        private static SerializeOptions BuildSerializeOptions(string body)
         {
             var maxDepth = JsonBody.GetInt(body, "max_depth", 4);
             var maxItems = JsonBody.GetInt(body, "max_items", 100);
@@ -126,7 +126,7 @@ namespace UnityOpenMcpBridge.MetaTools
             };
         }
 
-        static string BuildSource(string code, string[] usings)
+        private static string BuildSource(string code, string[] usings)
         {
             var sb = new StringBuilder(code.Length + usings.Length * 30 + 280);
             foreach (var u in usings)

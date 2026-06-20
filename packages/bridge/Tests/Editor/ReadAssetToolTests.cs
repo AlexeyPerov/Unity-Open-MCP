@@ -1,7 +1,3 @@
-// EditMode tests for the M9 Plan 2 compact-read data producer.
-// Covers parameter validation and the unsupported-extension / asset-not-found
-// branches. The hierarchy walk + SerializedObject field emission run against
-// the live demo project — covered by the manual checklist walkthrough.
 using NUnit.Framework;
 using UnityOpenMcpBridge.MetaTools;
 

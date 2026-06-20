@@ -1,10 +1,3 @@
-// EditMode tests for the M16 Plan 8 typed gate intelligence tools
-// (GateIntelligenceTools). Covers parameter validation, deterministic JSON
-// shape, and the contract branches that do NOT require a live gate run or a
-// fixture asset — impact_preview / gate_budget_estimate are pure functions of
-// scope + rule catalog; mutation_explain's no-context branch is exercised
-// against an empty history. The checkpoint-compare branch is exercised via a
-// real checkpoint_create round-trip (cheap; runs against the live project).
 using NUnit.Framework;
 using UnityOpenMcpBridge.MetaTools;
 using UnityOpenMcpBridge.TypedTools;

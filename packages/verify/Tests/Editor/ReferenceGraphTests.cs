@@ -9,9 +9,9 @@ namespace UnityOpenMcpVerify.Tests
 {
     public class ReferenceGraphTests
     {
-        const string TestFolder = "Assets/__RefGraphTestTmp";
-        const string MatAPath = TestFolder + "/MatA.mat";
-        const string MatBPath = TestFolder + "/MatB.mat";
+        private const string TestFolder = "Assets/__RefGraphTestTmp";
+        private const string MatAPath = TestFolder + "/MatA.mat";
+        private const string MatBPath = TestFolder + "/MatB.mat";
 
         // Reuse one scoped-options instance across the tests that want to
         // narrow the reverse-dependency walk to the fixture folder. Building
@@ -19,7 +19,7 @@ namespace UnityOpenMcpVerify.Tests
         // — scoping it from AssetDatabase.GetAllAssetPaths() (every URP
         // shader, package script, demo asset) down to two test materials
         // collapses it from seconds to milliseconds.
-        static readonly ReferenceGraphOptions ScopedOptions = new ReferenceGraphOptions
+        private static readonly ReferenceGraphOptions ScopedOptions = new ReferenceGraphOptions
         {
             ScanRoots = new List<string> { TestFolder }
         };
@@ -34,8 +34,8 @@ namespace UnityOpenMcpVerify.Tests
         // cache; non-URP projects fall back to the legacy "Standard" shader
         // only if it happens to resolve to a real file. Resolve at setup so
         // the whole fixture skips cleanly if neither is available.
-        static Shader _shader;
-        static string _shaderPath;
+        private static Shader _shader;
+        private static string _shaderPath;
 
         [OneTimeSetUp]
         public void OneTimeSetUp()
@@ -57,7 +57,7 @@ namespace UnityOpenMcpVerify.Tests
             AssetDatabase.Refresh();
         }
 
-        static void ResolveRealAssetShader()
+        private static void ResolveRealAssetShader()
         {
             // Prefer URP/Lit (always a real .shader file in URP projects — the
             // demo is URP). Fall back to Standard only when it resolves to a

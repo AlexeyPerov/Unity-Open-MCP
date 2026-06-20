@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Categories/MissingReferences/MissingReferencesScanner.cs
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -76,7 +74,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             return results;
         }
 
-        static void ParseReferences(
+        private static void ParseReferences(
             string[] lines, bool isScene,
             Regex regexFileAndGuid, Regex regexFileID, Regex regexTypeStart,
             AssetReferencesData refsData, Dictionary<string, bool> guidResolveCache)
@@ -143,7 +141,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             }
         }
 
-        static void CountLocalUsages(string[] lines, AssetReferencesData refsData)
+        private static void CountLocalUsages(string[] lines, AssetReferencesData refsData)
         {
             foreach (var registry in refsData.LocalReferences)
             {
@@ -157,7 +155,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             }
         }
 
-        static void ResolveReferences(List<AssetData> assets, HashSet<long> scopedFileIDs,
+        private static void ResolveReferences(List<AssetData> assets, HashSet<long> scopedFileIDs,
             Dictionary<string, bool> guidResolveCache, Dictionary<string, HashSet<long>> fileIdCache)
         {
             foreach (var asset in assets)
@@ -194,7 +192,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             }
         }
 
-        static bool VerifyGuidResolves(string guidPath, Dictionary<string, bool> cache)
+        private static bool VerifyGuidResolves(string guidPath, Dictionary<string, bool> cache)
         {
             if (string.IsNullOrEmpty(guidPath))
                 return false;
@@ -208,7 +206,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             return resolved;
         }
 
-        static HashSet<long> GetFileIdsForPath(string assetPath, Dictionary<string, HashSet<long>> cache)
+        private static HashSet<long> GetFileIdsForPath(string assetPath, Dictionary<string, HashSet<long>> cache)
         {
             if (string.IsNullOrEmpty(assetPath))
                 return null;
@@ -233,7 +231,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             return fileIds;
         }
 
-        static void FindFieldType(Regex regexTypeStart, int index, string[] lines, ExternalReferenceRegistry referenceData)
+        private static void FindFieldType(Regex regexTypeStart, int index, string[] lines, ExternalReferenceRegistry referenceData)
         {
             for (var j = index - 1; j >= 0; j--)
             {
@@ -248,7 +246,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             }
         }
 
-        static void RecordGuidPlaceData(int index, string[] lines, ExternalReferenceRegistry referenceData)
+        private static void RecordGuidPlaceData(int index, string[] lines, ExternalReferenceRegistry referenceData)
         {
             for (var j = index - 1; j >= 0; j--)
             {
@@ -267,7 +265,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                 referenceData.Sample.Add(lines[j]);
         }
 
-        static void ScanMissingScripts(string[] lines, AssetReferencesData refsData)
+        private static void ScanMissingScripts(string[] lines, AssetReferencesData refsData)
         {
             for (var i = 0; i < lines.Length; i++)
             {
@@ -284,7 +282,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             }
         }
 
-        static void ScanUnityEventReferences(string[] lines, AssetReferencesData refsData)
+        private static void ScanUnityEventReferences(string[] lines, AssetReferencesData refsData)
         {
             for (var i = 0; i < lines.Length; i++)
             {
@@ -334,7 +332,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             }
         }
 
-        static Type ResolveType(string typeName)
+        private static Type ResolveType(string typeName)
         {
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -348,7 +346,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             return null;
         }
 
-        static void ScanDuplicateComponents(string assetPath, Type assetType, AssetReferencesData refsData)
+        private static void ScanDuplicateComponents(string assetPath, Type assetType, AssetReferencesData refsData)
         {
             if (assetType != typeof(GameObject)) return;
 
@@ -378,7 +376,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             }
         }
 
-        static void ScanInvalidLayers(string[] lines, AssetReferencesData refsData)
+        private static void ScanInvalidLayers(string[] lines, AssetReferencesData refsData)
         {
             var validLayers = new HashSet<int>();
             for (var i = 0; i < 32; i++)

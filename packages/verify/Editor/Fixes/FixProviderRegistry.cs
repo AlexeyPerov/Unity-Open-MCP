@@ -29,10 +29,10 @@ namespace UnityOpenMcpVerify.Fixes
 
     public static class FixProviderRegistry
     {
-        static readonly List<IFixProvider> _providers = new();
+        private static readonly List<IFixProvider> _providers = new();
 
         [UnityEditor.InitializeOnLoadMethod]
-        static void RegisterDefaults()
+        private static void RegisterDefaults()
         {
             if (_providers.Count == 0)
             {

@@ -9,16 +9,16 @@ namespace UnityOpenMcpBridge.Tests
 {
     public class VerifyGateAdapterFindReferencesTests
     {
-        const string TestFolder = "Assets/__BridgeRefTestTmp";
-        const string MatPath = TestFolder + "/TestMat.mat";
-        const string MatPath2 = TestFolder + "/TestMat2.mat";
+        private const string TestFolder = "Assets/__BridgeRefTestTmp";
+        private const string MatPath = TestFolder + "/TestMat.mat";
+        private const string MatPath2 = TestFolder + "/TestMat2.mat";
 
         // Scope the reverse-lookup walk to the fixture folder. Without this
         // VerifyGateAdapter.FindReferences -> ReferenceGraph.Find would call
         // AssetDatabase.GetAllAssetPaths() and compute forward dependencies
         // for every package asset in the project (URP shaders, package
         // scripts, demo assets) on every test invocation.
-        static readonly ReferenceGraphOptions ScopedOptions = new ReferenceGraphOptions
+        private static readonly ReferenceGraphOptions ScopedOptions = new ReferenceGraphOptions
         {
             ScanRoots = new List<string> { TestFolder }
         };
@@ -29,8 +29,8 @@ namespace UnityOpenMcpBridge.Tests
         // GetDependencies does not report as a dependency — so the
         // reverse-lookup tests cannot trace material→shader edges through
         // them. Falls back to "Standard" only when it resolves to a real file.
-        static Shader _shader;
-        static string _shaderPath;
+        private static Shader _shader;
+        private static string _shaderPath;
 
         [OneTimeSetUp]
         public void OneTimeSetUp()
@@ -52,7 +52,7 @@ namespace UnityOpenMcpBridge.Tests
             AssetDatabase.Refresh();
         }
 
-        static void ResolveRealAssetShader()
+        private static void ResolveRealAssetShader()
         {
             foreach (var name in new[] { "Universal Render Pipeline/Lit", "Standard" })
             {

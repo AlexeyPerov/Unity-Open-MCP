@@ -12,12 +12,12 @@ namespace UnityOpenMcpVerify.Tests
     [TestFixture]
     public class FixtureMissingReferencesTests
     {
-        const string MissingScriptFixture = "Assets/Fixtures/MissingScriptFixture.prefab";
-        const string BrokenRefFixture = "Assets/Fixtures/BrokenRefFixture.prefab";
-        const string HealthyFixture = "Assets/Fixtures/HealthyFixture.prefab";
-        const string RestorableRefFixture = "Assets/Fixtures/RestorableRefFixture.prefab";
+        private const string MissingScriptFixture = "Assets/Fixtures/MissingScriptFixture.prefab";
+        private const string BrokenRefFixture = "Assets/Fixtures/BrokenRefFixture.prefab";
+        private const string HealthyFixture = "Assets/Fixtures/HealthyFixture.prefab";
+        private const string RestorableRefFixture = "Assets/Fixtures/RestorableRefFixture.prefab";
 
-        MissingReferencesRule rule;
+        private MissingReferencesRule rule;
 
         [SetUp]
         public void SetUp()

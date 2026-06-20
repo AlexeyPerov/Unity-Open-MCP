@@ -98,7 +98,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return CopyMove(body, "move");
         }
 
-        static ToolDispatchResult CopyMove(string body, string op)
+        private static ToolDispatchResult CopyMove(string body, string op)
         {
             var entries = JsonBody.GetObjectArray(body, "entries");
             if (entries == null || entries.Length == 0)
@@ -220,7 +220,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // AssetDatabase treats files and folders uniformly through IsValidFolder
         // + System.IO.File.Exists; folders are not File.Exists-true.
-        static bool FileOrFolderExists(string path)
+        private static bool FileOrFolderExists(string path)
         {
             if (string.IsNullOrEmpty(path)) return false;
             if (AssetDatabase.IsValidFolder(path)) return true;

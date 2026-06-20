@@ -489,11 +489,11 @@ namespace UnityOpenMcpExtensions.InputSystem
         // Helpers
         // =====================================================================
 
-        static string PathRequired(string tool)
+        private static string PathRequired(string tool)
             => InputSystemJson.Error("paths_hint_required",
                 $"{tool} is mutating; pass a non-empty paths_hint scoped to the .inputactions asset path.");
 
-        static bool TryParseActionType(string s, out InputActionType type, out string error)
+        private static bool TryParseActionType(string s, out InputActionType type, out string error)
         {
             error = null;
             if (string.IsNullOrWhiteSpace(s))
@@ -509,7 +509,7 @@ namespace UnityOpenMcpExtensions.InputSystem
 
         // Resolve an action within an asset's map. Returns false + sets outError
         // (a structured JSON error envelope) when the map or action is missing.
-        static bool ResolveAction(InputActionAsset asset, string mapName, string actionName,
+        private static bool ResolveAction(InputActionAsset asset, string mapName, string actionName,
             out InputAction action, out string errorEnvelope)
         {
             action = null;
@@ -541,7 +541,7 @@ namespace UnityOpenMcpExtensions.InputSystem
         // Parse a JSON array of { name, path, groups? } entries. Hand-rolled —
         // the bridge's JsonBody helpers are not visible outside the bridge
         // assembly. Returns null on a malformed array.
-        static List<CompositePart> ParseCompositeParts(string json)
+        private static List<CompositePart> ParseCompositeParts(string json)
         {
             if (string.IsNullOrEmpty(json)) return null;
             var trimmed = json.Trim();
@@ -577,7 +577,7 @@ namespace UnityOpenMcpExtensions.InputSystem
             return parts;
         }
 
-        static string ExtractStringValue(string objBody, string key)
+        private static string ExtractStringValue(string objBody, string key)
         {
             var raw = ExtractRawValue(objBody, key);
             if (string.IsNullOrEmpty(raw)) return null;
@@ -586,7 +586,7 @@ namespace UnityOpenMcpExtensions.InputSystem
             return raw;
         }
 
-        static string ExtractRawValue(string objBody, string key)
+        private static string ExtractRawValue(string objBody, string key)
         {
             var pattern = "\"" + key + "\"";
             var idx = objBody.IndexOf(pattern, System.StringComparison.Ordinal);
@@ -621,7 +621,7 @@ namespace UnityOpenMcpExtensions.InputSystem
         // over there; the Create path calls this form before the asset is on
         // disk (SaveAsset would throw on GetAssetPath for a fresh instance).
         // actionMaps is a ReadOnlyArray struct — check Count, not == null.
-        static string SafeJson(InputActionAsset asset)
+        private static string SafeJson(InputActionAsset asset)
         {
             if (asset.actionMaps.Count == 0)
                 return "{\n    \"name\": \"" + asset.name + "\",\n    \"maps\": [],\n    \"controlSchemes\": []\n}";

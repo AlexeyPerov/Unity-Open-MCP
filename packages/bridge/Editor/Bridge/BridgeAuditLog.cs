@@ -1,24 +1,3 @@
-// M14 T5.5 — Optional on-disk audit log for gate mutations.
-//
-// BridgeActivityLog is an in-memory ring buffer (capacity 100, session-scoped,
-// cleared on domain reload). For security-sensitive contexts the operator may
-// want every gate mutation (pass / fail / warn, plus bypass) auditable after
-// the fact — surviving domain reloads and editor restarts.
-//
-// This module appends one JSON-lines record per gate run to a rolling file:
-//   ~/.unity-open-mcp/audit/audit-<projectHash>-<seq>.jsonl
-// Rolling: when the active file exceeds MaxFileBytes (default 5 MiB) it is
-// renamed to a .1 / .2 / ... suffix (MaxRetainedFiles kept) and a fresh file
-// started. This bounds disk usage without losing recent history.
-//
-// Opt-in via auditLogEnabled in .unity-open-mcp/settings.json. When disabled,
-// every call is a no-op — there is zero I/O cost on the dispatch path.
-//
-// Thread-safety: Record() is called from the listener worker thread (the same
-// thread that built the gate envelope). Writes are serialized through a lock;
-// a single process only writes its own audit file so there is no cross-process
-// contention. The audit dir is shared across projects (one file per project
-// hash), mirroring the ~/.unity-open-mcp/instances/ layout.
 using System;
 using System.Globalization;
 using System.IO;
@@ -38,8 +17,8 @@ namespace UnityOpenMcpBridge
         // it null and the log lands under ~/.unity-open-mcp/audit/.
         public static string AuditDirOverride;
 
-        static readonly object _writeLock = new object();
-        static bool _availabilityLogged;
+        private static readonly object _writeLock = new object();
+        private static bool _availabilityLogged;
 
         public static string AuditDir
         {
@@ -73,7 +52,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static void WriteRecord(BridgeAuditRecord record)
+        private static void WriteRecord(BridgeAuditRecord record)
         {
             var dir = AuditDir;
             var path = ActiveFilePath(dir, record.ProjectHash);
@@ -87,13 +66,13 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static string ActiveFilePath(string dir, string projectHash) =>
+        private static string ActiveFilePath(string dir, string projectHash) =>
             Path.Combine(dir, $"audit-{projectHash}.jsonl");
 
-        static string RotatedFilePath(string dir, string projectHash, int seq) =>
+        private static string RotatedFilePath(string dir, string projectHash, int seq) =>
             Path.Combine(dir, $"audit-{projectHash}.{seq}.jsonl");
 
-        static void EnsureDir(string dir)
+        private static void EnsureDir(string dir)
         {
             if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
         }
@@ -102,7 +81,7 @@ namespace UnityOpenMcpBridge
         // Renames active → .1, .1 → .2, …, and deletes anything past the
         // retention count. Rotation is best-effort: a rename failure leaves
         // the active file oversized rather than dropping the audit record.
-        static void MaybeRotate(string dir, string projectHash, int incomingBytes)
+        private static void MaybeRotate(string dir, string projectHash, int incomingBytes)
         {
             var active = ActiveFilePath(dir, projectHash);
             long currentSize = 0;
@@ -142,7 +121,7 @@ namespace UnityOpenMcpBridge
             catch { }
         }
 
-        static void LogOnce(string message)
+        private static void LogOnce(string message)
         {
             if (_availabilityLogged) return;
             _availabilityLogged = true;
@@ -205,9 +184,9 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static string JsonString(string s) => s == null ? "null" : "\"" + Escape(s) + "\"";
+        private static string JsonString(string s) => s == null ? "null" : "\"" + Escape(s) + "\"";
 
-        static string JsonStringArray(string[] arr)
+        private static string JsonStringArray(string[] arr)
         {
             if (arr == null) return "null";
             var sb = new StringBuilder();
@@ -221,7 +200,7 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static string Escape(string s)
+        private static string Escape(string s)
         {
             if (string.IsNullOrEmpty(s)) return s;
             var sb = new StringBuilder(s.Length);

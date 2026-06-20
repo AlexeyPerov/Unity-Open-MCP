@@ -1,21 +1,3 @@
-// EditMode tests for the M16 Plan 7 typed profiler session / diagnostics
-// tools (ProfilerSessionTools).
-//
-// Strategy: live ProfilerDriver frame data is non-deterministic in CI (no
-// guarantees the Editor has captured frames), so these tests cover the
-// parameter-parsing, resolver, and gate-wiring contracts that are stable:
-//
-// - missing/empty parameter validation for every tool that takes arguments
-// - the module-bookkeeping surface (list_modules / enable_module round trip)
-// - the runtime-status + script-stats reads (single-frame snapshots that
-//   always work in EditMode)
-// - the snapshot path resolver (save_data / load_data) refusal cases
-// - the dispatch wiring contracts (KnownTools / DirectResponseTools /
-//   MutatingTools membership + the lifecycle policy for the lone mutator)
-//
-// Live round-trips (save → load → assert content equality, set_config deep
-// profile, etc.) need a real running Editor and are covered by the manual
-// validation checklist, not here.
 using NUnit.Framework;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.TypedTools;

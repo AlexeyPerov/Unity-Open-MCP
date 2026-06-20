@@ -33,21 +33,21 @@ namespace UnityOpenMcpBridge
     {
         // Cap the in-memory ring. Each event is a few hundred bytes; 1024 keeps
         // ~5 minutes of typical console chatter without unbounded growth.
-        const int BufferCapacity = 1024;
+        private const int BufferCapacity = 1024;
 
-        static readonly ConcurrentQueue<BridgeEvent> _buffer = new();
-        static int _bufferCount;
-        static long _totalEmitted;
+        private static readonly ConcurrentQueue<BridgeEvent> _buffer = new();
+        private static int _bufferCount;
+        private static long _totalEmitted;
 
         // Per-subscriber cursor: how many events from the head this subscriber
         // has already drained. Keyed by the opaque subscriber id assigned on
         // Subscribe().
-        static readonly ConcurrentDictionary<string, SubscriberState> _subscribers = new();
+        private static readonly ConcurrentDictionary<string, SubscriberState> _subscribers = new();
 
-        static bool _registered;
+        private static bool _registered;
 
         // Hooked from BridgeEventSource.Initialize; unsubscribed on Stop.
-        static void LogCallback(string condition, string stackTrace, LogType type)
+        private static void LogCallback(string condition, string stackTrace, LogType type)
         {
             Emit(new BridgeEvent
             {
@@ -59,7 +59,7 @@ namespace UnityOpenMcpBridge
         }
 
         [InitializeOnLoadMethod]
-        static void Initialize()
+        private static void Initialize()
         {
             if (_registered) return;
             _registered = true;
@@ -107,9 +107,9 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        static bool _compileStartEmitted;
+        private static bool _compileStartEmitted;
 
-        static void EmitState(string state, bool isCompiling, bool isPlaying)
+        private static void EmitState(string state, bool isCompiling, bool isPlaying)
         {
             Emit(new BridgeEvent
             {
@@ -120,7 +120,7 @@ namespace UnityOpenMcpBridge
             });
         }
 
-        static void Emit(BridgeEvent evt)
+        private static void Emit(BridgeEvent evt)
         {
             evt.Sequence = Interlocked.Increment(ref _totalEmitted);
             evt.Timestamp = DateTime.UtcNow;
@@ -318,10 +318,10 @@ namespace UnityOpenMcpBridge
         public static int BufferCount => _bufferCount;
         public static long TotalEmitted => _totalEmitted;
 
-        static string IsoUtc(DateTime dt) =>
+        private static string IsoUtc(DateTime dt) =>
             dt.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fffZ");
 
-        static string Escape(string s)
+        private static string Escape(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

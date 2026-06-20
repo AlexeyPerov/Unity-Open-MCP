@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
@@ -265,7 +264,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 "Provide 'asset_path' (.mat) or 'instance_id' (Material or GameObject with Renderer) to identify the material.");
         }
 
-        static ResolveResult Fail(string code, string message)
+        private static ResolveResult Fail(string code, string message)
             => new ResolveResult { Ok = false, Result = ToolDispatchResult.Fail(code, message) };
 
         public static Shader ResolveCreateShader(string shaderName)
@@ -406,7 +405,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return result;
         }
 
-        static string StripQuotes(string s)
+        private static string StripQuotes(string s)
         {
             if (string.IsNullOrEmpty(s)) return s;
             s = s.Trim();

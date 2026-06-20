@@ -1,15 +1,3 @@
-// EditMode tests for the template extension pack.
-//
-// Proves the two scaffolding contracts every pack depends on:
-//
-//   1. BridgeToolRegistry discovers tools declared in an extension assembly
-//      (via [BridgeToolType] + [BridgeTool]) WITHOUT any core bridge edits.
-//   2. The mutating paths_hint contract is enforced — a mutating tool that
-//      receives an empty scope fails with `paths_hint_required`.
-//
-// These run when the template pack is added to a project's testables list
-// (e.g. the demo project's Packages/manifest.json). They do NOT need a live
-// HTTP listener — they call the registry + tool methods directly.
 using NUnit.Framework;
 using UnityOpenMcpBridge;
 using UnityOpenMcpExtensions.Template;

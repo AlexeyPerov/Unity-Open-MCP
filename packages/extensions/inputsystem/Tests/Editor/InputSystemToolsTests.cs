@@ -1,17 +1,3 @@
-// EditMode tests for the Input System extension pack.
-//
-// Covers the deterministic contracts that protect the agent surface:
-//
-//   1. All 7 catalog tools are discovered by BridgeToolRegistry (no core
-//      bridge edits — proves the [BridgeToolType] assembly scan works for
-//      packs).
-//   2. Mutating tools refuse to run without paths_hint (the gate contract).
-//   3. Asset create + map add + action add + binding add round-trip —
-//      inputsystem_get reflects the resulting structure.
-//
-// These tests write real .inputactions assets under a temp folder inside the
-// demo project so the AssetDatabase importer runs. They clean up after
-// themselves. They run in EditMode and stay fast.
 using NUnit.Framework;
 using UnityEditor;
 using UnityOpenMcpBridge;
@@ -22,7 +8,7 @@ namespace UnityOpenMcpExtensions.InputSystem.Tests
     public class InputSystemToolsTests
     {
         // The 7 catalog tool ids this pack must register.
-        static readonly string[] ExpectedTools =
+        private static readonly string[] ExpectedTools =
         {
             "unity_open_mcp_inputsystem_asset_create",
             "unity_open_mcp_inputsystem_actionmap_add",
@@ -35,7 +21,7 @@ namespace UnityOpenMcpExtensions.InputSystem.Tests
 
         // Temp folder for test assets. Under the project root so AssetDatabase
         // can import the .inputactions file.
-        const string TempFolder = "Assets/__InputSystemTests";
+        private const string TempFolder = "Assets/__InputSystemTests";
 
         [SetUp]
         public void SetUp()

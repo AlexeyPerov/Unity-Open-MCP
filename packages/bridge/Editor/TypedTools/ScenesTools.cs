@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
@@ -447,7 +446,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         enum DetailLevel { Summary, Normal, Verbose }
 
-        static string DetailToWire(DetailLevel d) => d switch
+        private static string DetailToWire(DetailLevel d) => d switch
         {
             DetailLevel.Summary => "summary",
             DetailLevel.Normal => "normal",
@@ -455,7 +454,7 @@ namespace UnityOpenMcpBridge.TypedTools
             _ => "summary",
         };
 
-        static DetailLevel ParseDetail(string raw, DetailLevel fallback)
+        private static DetailLevel ParseDetail(string raw, DetailLevel fallback)
         {
             if (string.IsNullOrEmpty(raw)) return fallback;
             return raw.ToLowerInvariant() switch
@@ -497,7 +496,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Serialize one node + (when detail allows) its descendants up to depth.
         // Nodes past max_nodes are counted in counter.Truncated and not emitted.
-        static void SerializeNode(StringBuilder sb, GameObject go, DetailLevel detail,
+        private static void SerializeNode(StringBuilder sb, GameObject go, DetailLevel detail,
             int maxDepth, int depth, NodeCounter counter)
         {
             if (!counter.CanEmit)
@@ -573,7 +572,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append('}');
         }
 
-        static void AppendTransform(StringBuilder sb, Transform t)
+        private static void AppendTransform(StringBuilder sb, Transform t)
         {
             sb.Append("{\"position\":");
             AppendVector(sb, t.position);
@@ -584,7 +583,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append('}');
         }
 
-        static void AppendVector(StringBuilder sb, Vector3 v)
+        private static void AppendVector(StringBuilder sb, Vector3 v)
         {
             sb.Append('[');
             sb.Append(v.x.ToString("R", CultureInfo.InvariantCulture));
@@ -593,7 +592,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(']');
         }
 
-        static Bounds CalculateFocusBounds(GameObject target)
+        private static Bounds CalculateFocusBounds(GameObject target)
         {
             var hasBounds = false;
             var bounds = new Bounds(target.transform.position, Vector3.one);
@@ -614,7 +613,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return bounds;
         }
 
-        static Vector3? ParseAxis(string raw)
+        private static Vector3? ParseAxis(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return null;
             return raw.ToLowerInvariant() switch
@@ -629,7 +628,7 @@ namespace UnityOpenMcpBridge.TypedTools
             };
         }
 
-        static Vector3 SelectUpVector(Vector3 forward)
+        private static Vector3 SelectUpVector(Vector3 forward)
         {
             if (Mathf.Abs(Vector3.Dot(forward, Vector3.up)) > 0.98f)
                 return Vector3.forward;
@@ -638,7 +637,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Normalize a caller-provided scene path to an Assets/-rooted .unity
         // path. Returns null when the path does not end with '.unity'.
-        static string NormalizeScenePath(string raw)
+        private static string NormalizeScenePath(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return null;
             var normalized = raw.Replace('\\', '/').Trim();
@@ -649,7 +648,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return normalized;
         }
 
-        static NewSceneSetup ParseSetup(string raw, NewSceneSetup fallback)
+        private static NewSceneSetup ParseSetup(string raw, NewSceneSetup fallback)
         {
             if (string.IsNullOrEmpty(raw)) return fallback;
             return raw.ToLowerInvariant() switch
@@ -660,7 +659,7 @@ namespace UnityOpenMcpBridge.TypedTools
             };
         }
 
-        static NewSceneMode ParseNewSceneMode(string raw, NewSceneMode fallback)
+        private static NewSceneMode ParseNewSceneMode(string raw, NewSceneMode fallback)
         {
             if (string.IsNullOrEmpty(raw)) return fallback;
             return raw.ToLowerInvariant() switch
@@ -671,7 +670,7 @@ namespace UnityOpenMcpBridge.TypedTools
             };
         }
 
-        static OpenSceneMode ParseOpenSceneMode(string raw, OpenSceneMode fallback)
+        private static OpenSceneMode ParseOpenSceneMode(string raw, OpenSceneMode fallback)
         {
             if (string.IsNullOrEmpty(raw)) return fallback;
             return raw.ToLowerInvariant() switch
@@ -682,7 +681,7 @@ namespace UnityOpenMcpBridge.TypedTools
             };
         }
 
-        static Scene ResolveOpenedByName(string name)
+        private static Scene ResolveOpenedByName(string name)
         {
             for (int i = 0; i < SceneManager.sceneCount; i++)
             {
@@ -692,7 +691,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return new Scene();
         }
 
-        static int CountOpenedScenes()
+        private static int CountOpenedScenes()
         {
             int n = 0;
             for (int i = 0; i < SceneManager.sceneCount; i++)
@@ -700,7 +699,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return n;
         }
 
-        static List<Scene> OpenedScenes()
+        private static List<Scene> OpenedScenes()
         {
             var list = new List<Scene>(SceneManager.sceneCount);
             for (int i = 0; i < SceneManager.sceneCount; i++)
@@ -712,7 +711,7 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Shallow per-scene snapshot shared by every lifecycle op response.
-        static string BuildSceneShallow(Scene scene)
+        private static string BuildSceneShallow(Scene scene)
         {
             var sb = new StringBuilder(128);
             sb.Append("{\"name\":\"").Append(TypedTargets.Esc(scene.name));
@@ -728,7 +727,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Envelope listing all opened scenes — returned by open/unload/set_active
         // and list_opened so the agent can confirm post-op state in one call.
-        static string BuildOpenedScenesEnvelope(string action, string subject)
+        private static string BuildOpenedScenesEnvelope(string action, string subject)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"status\":\"ok\",\"action\":\"").Append(TypedTargets.Esc(action)).Append("\"");

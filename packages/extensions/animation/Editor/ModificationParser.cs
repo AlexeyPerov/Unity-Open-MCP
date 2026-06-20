@@ -122,7 +122,7 @@ namespace UnityOpenMcpExtensions.Animation
 
         // Parse a single { ... } modification object. Each field is read by
         // name; the parser tolerates unknown fields and reorders.
-        static Modification ParseObject(string obj)
+        private static Modification ParseObject(string obj)
         {
             if (string.IsNullOrEmpty(obj)) return null;
             obj = obj.Trim();
@@ -243,7 +243,7 @@ namespace UnityOpenMcpExtensions.Animation
             return mod;
         }
 
-        static List<KeyframeSpec> ParseKeyframes(string arrayJson)
+        private static List<KeyframeSpec> ParseKeyframes(string arrayJson)
         {
             var result = new List<KeyframeSpec>();
             if (string.IsNullOrEmpty(arrayJson)) return result;
@@ -280,7 +280,7 @@ namespace UnityOpenMcpExtensions.Animation
             return result;
         }
 
-        static List<ConditionSpec> ParseConditions(string arrayJson)
+        private static List<ConditionSpec> ParseConditions(string arrayJson)
         {
             var result = new List<ConditionSpec>();
             if (string.IsNullOrEmpty(arrayJson)) return result;
@@ -318,7 +318,7 @@ namespace UnityOpenMcpExtensions.Animation
 
         // Parse a flat {field: scalar} object into a Dictionary. Used for
         // keyframes / conditions (no further nesting expected).
-        static Dictionary<string, string> ParseInlineObject(string obj)
+        private static Dictionary<string, string> ParseInlineObject(string obj)
         {
             var fields = new Dictionary<string, string>();
             if (string.IsNullOrEmpty(obj)) return fields;
@@ -373,7 +373,7 @@ namespace UnityOpenMcpExtensions.Animation
         // Tokens keep their JSON form (quoted for strings, bare for scalars).
         // -----------------------------------------------------------------
 
-        static string Str(Dictionary<string, string> d, string key)
+        private static string Str(Dictionary<string, string> d, string key)
         {
             if (!d.TryGetValue(key, out var v)) return null;
             if (v == null) return null;
@@ -382,7 +382,7 @@ namespace UnityOpenMcpExtensions.Animation
             return v;
         }
 
-        static bool? Bool(Dictionary<string, string> d, string key)
+        private static bool? Bool(Dictionary<string, string> d, string key)
         {
             if (!d.TryGetValue(key, out var v)) return null;
             if (v == "true") return true;
@@ -390,26 +390,26 @@ namespace UnityOpenMcpExtensions.Animation
             return null;
         }
 
-        static int? Int(Dictionary<string, string> d, string key)
+        private static int? Int(Dictionary<string, string> d, string key)
         {
             if (!d.TryGetValue(key, out var v)) return null;
             return int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : (int?)null;
         }
 
-        static float? Float(Dictionary<string, string> d, string key)
+        private static float? Float(Dictionary<string, string> d, string key)
         {
             if (!d.TryGetValue(key, out var v)) return null;
             return float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var n) ? n : (float?)null;
         }
 
-        static T? Enum<T>(Dictionary<string, string> d, string key) where T : struct
+        private static T? Enum<T>(Dictionary<string, string> d, string key) where T : struct
         {
             var s = Str(d, key);
             if (s == null) return null;
             return System.Enum.TryParse(s, true, out T v) ? v : (T?)null;
         }
 
-        static string Unescape(string s)
+        private static string Unescape(string s)
             => string.IsNullOrEmpty(s) ? s : s.Replace("\\\"", "\"").Replace("\\\\", "\\");
     }
 }

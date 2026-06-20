@@ -39,7 +39,7 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
-        static string Escape(string s)
+        private static string Escape(string s)
         {
             if (s == null) return "null";
             var sb = new StringBuilder(s.Length + 8);

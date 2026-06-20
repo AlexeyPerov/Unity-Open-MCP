@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Categories/ScenePrefabHealth/ScenePrefabHealthResultModels.cs
-
 using System.Collections.Generic;
 
 namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth

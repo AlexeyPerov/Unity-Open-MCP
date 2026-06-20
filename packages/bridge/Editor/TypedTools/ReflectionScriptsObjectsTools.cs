@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System;
 using System.Collections.Generic;
@@ -95,7 +94,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
-        static void AppendTypeInfo(StringBuilder sb, Type type)
+        private static void AppendTypeInfo(StringBuilder sb, Type type)
         {
             sb.Append("\"fullName\":\"").Append(OutputSerializer.EscapeJsonString(type.FullName ?? type.Name));
             sb.Append("\",\"name\":\"").Append(OutputSerializer.EscapeJsonString(type.Name));
@@ -126,7 +125,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static void AppendMemberSection<T>(StringBuilder sb, IEnumerable<T> members,
+        private static void AppendMemberSection<T>(StringBuilder sb, IEnumerable<T> members,
             int maxMembers, ref int emitted, ref int truncated, string kind) where T : MemberInfo
         {
             sb.Append('[');
@@ -142,7 +141,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(']');
         }
 
-        static void AppendFieldOrProperty(StringBuilder sb, MemberInfo m, string kind)
+        private static void AppendFieldOrProperty(StringBuilder sb, MemberInfo m, string kind)
         {
             // m is FieldInfo or PropertyInfo under the public instance+static
             // binding flags. Emit shared metadata plus kind-specific fields.
@@ -187,7 +186,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append('}');
         }
 
-        static void AppendMethodSection(StringBuilder sb, IEnumerable<MethodInfo> methods,
+        private static void AppendMethodSection(StringBuilder sb, IEnumerable<MethodInfo> methods,
             int maxMembers, ref int emitted, ref int truncated)
         {
             sb.Append('[');
@@ -206,7 +205,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(']');
         }
 
-        static void AppendMethod(StringBuilder sb, MethodInfo method)
+        private static void AppendMethod(StringBuilder sb, MethodInfo method)
         {
             sb.Append("{\"name\":\"").Append(OutputSerializer.EscapeJsonString(method.Name));
             sb.Append("\",\"kind\":\"method");
@@ -251,7 +250,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append('}');
         }
 
-        static void AppendCtorSection(StringBuilder sb, IEnumerable<ConstructorInfo> ctors,
+        private static void AppendCtorSection(StringBuilder sb, IEnumerable<ConstructorInfo> ctors,
             int maxMembers, ref int emitted, ref int truncated)
         {
             sb.Append('[');
@@ -608,7 +607,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Resolve a UnityEngine.Object by instance_id (preferred) or
         // asset_path. Returns null when neither resolves. Used by
         // object_get_data and object_modify.
-        static UnityEngine.Object ResolveObject(string body)
+        private static UnityEngine.Object ResolveObject(string body)
         {
             var instanceId = JsonBody.GetInt(body, "instance_id", 0);
             if (instanceId != 0)
@@ -626,7 +625,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // project root. Refuses paths that escape the project or aren't .cs.
         // The returned path is normalized to the OS separator; `inputPath` is
         // the original (forward-slash) form for AssetDatabase calls.
-        static string ResolveScriptPath(string inputPath, out ToolDispatchResult error)
+        private static string ResolveScriptPath(string inputPath, out ToolDispatchResult error)
         {
             error = null;
             if (string.IsNullOrWhiteSpace(inputPath))
@@ -671,7 +670,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Roslyn-validate a script source. Returns (true, null) on success,
         // (false, diagnostics) on parse/compile failure. Mirrors the compile
         // path ExecuteCSharpTool uses so error messages line up.
-        static (bool ok, string diagnostics) ValidateScript(string content)
+        private static (bool ok, string diagnostics) ValidateScript(string content)
         {
             if (!RoslynHost.Initialize())
                 // When Roslyn is unavailable we cannot validate — refuse to
@@ -687,7 +686,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Resolve a type by full name (preferred) or class name fallback.
         // Mirrors InvokeMethodTool.FindType so the behavior is consistent.
-        static Type ResolveType(string typeName, string assemblyName)
+        private static Type ResolveType(string typeName, string assemblyName)
         {
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
             if (!string.IsNullOrEmpty(assemblyName))
@@ -712,7 +711,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return null;
         }
 
-        static IEnumerable<Type> SafeGetTypes(Assembly asm)
+        private static IEnumerable<Type> SafeGetTypes(Assembly asm)
         {
             try { return asm.GetTypes(); }
             catch (ReflectionTypeLoadException e)
@@ -721,36 +720,36 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static IEnumerable<Type> FilterNull(Type[] types)
+        private static IEnumerable<Type> FilterNull(Type[] types)
         {
             foreach (var t in types) if (t != null) yield return t;
         }
 
-        static IEnumerable<FieldInfo> GetFieldsSafe(Type type, BindingFlags flags)
+        private static IEnumerable<FieldInfo> GetFieldsSafe(Type type, BindingFlags flags)
         {
             try { return type.GetFields(flags); }
             catch { return Array.Empty<FieldInfo>(); }
         }
 
-        static IEnumerable<PropertyInfo> GetPropertiesSafe(Type type, BindingFlags flags)
+        private static IEnumerable<PropertyInfo> GetPropertiesSafe(Type type, BindingFlags flags)
         {
             try { return type.GetProperties(flags); }
             catch { return Array.Empty<PropertyInfo>(); }
         }
 
-        static IEnumerable<MethodInfo> GetMethodsSafe(Type type, BindingFlags flags)
+        private static IEnumerable<MethodInfo> GetMethodsSafe(Type type, BindingFlags flags)
         {
             try { return type.GetMethods(flags); }
             catch { return Array.Empty<MethodInfo>(); }
         }
 
-        static IEnumerable<ConstructorInfo> GetConstructorsSafe(Type type, BindingFlags flags)
+        private static IEnumerable<ConstructorInfo> GetConstructorsSafe(Type type, BindingFlags flags)
         {
             try { return type.GetConstructors(flags); }
             catch { return Array.Empty<ConstructorInfo>(); }
         }
 
-        static string TypeDisplayName(Type type)
+        private static string TypeDisplayName(Type type)
         {
             // Match the C#-style name find_members already uses
             // (int, string, Vector3, List<T>) so the two tools read the same.
@@ -766,7 +765,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return name;
         }
 
-        static string BuildMethodSignature(MethodInfo method)
+        private static string BuildMethodSignature(MethodInfo method)
         {
             var sb = new StringBuilder(64);
             sb.Append(TypeDisplayName(method.ReturnType)).Append(' ').Append(method.Name);
@@ -790,7 +789,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Convert a raw JSON value string into the target CLR type. Handles
         // the scalar/vector/object-reference shapes component_modify already
         // supports so the same value payloads work across both tools.
-        static object ConvertValue(string raw, Type targetType)
+        private static object ConvertValue(string raw, Type targetType)
         {
             if (raw == null) raw = "null";
             raw = raw.Trim();
@@ -869,21 +868,21 @@ namespace UnityOpenMcpBridge.TypedTools
                 $"Cannot convert value to {targetType.FullName}. Use a typed tool (component_modify) for complex fields.");
         }
 
-        static int ParseInt(string raw)
+        private static int ParseInt(string raw)
         {
             if (!int.TryParse(StripQuotes(raw), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
                 throw new FormatException($"Could not parse int from '{raw}'.");
             return n;
         }
 
-        static float ParseFloat(string raw)
+        private static float ParseFloat(string raw)
         {
             if (!float.TryParse(StripQuotes(raw), NumberStyles.Float, CultureInfo.InvariantCulture, out var f))
                 throw new FormatException($"Could not parse float from '{raw}'.");
             return f;
         }
 
-        static string StripQuotes(string s)
+        private static string StripQuotes(string s)
         {
             if (string.IsNullOrEmpty(s)) return s;
             s = s.Trim();
@@ -892,11 +891,11 @@ namespace UnityOpenMcpBridge.TypedTools
             return s;
         }
 
-        static int ClampPositive(int n) => n < 1 ? 1 : n;
+        private static int ClampPositive(int n) => n < 1 ? 1 : n;
 
         // Op-result builder matching the AssetsTools/ComponentsTools shape so
         // the response keys are consistent across mutating typed tools.
-        static string BuildOpResult(List<string> done, List<string> errors, string doneLabel,
+        private static string BuildOpResult(List<string> done, List<string> errors, string doneLabel,
             Action<StringBuilder> extra)
         {
             var sb = new StringBuilder(128 + done.Count * 32 + errors.Count * 48);

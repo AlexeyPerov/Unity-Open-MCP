@@ -15,7 +15,7 @@ namespace UnityOpenMcpVerify.Batch
         public const int ExitPass = 0;
         public const int ExitFail = 1;
 
-        static readonly string[] ValidOperations =
+        private static readonly string[] ValidOperations =
             { "scan_all", "baseline_create", "regression_check" };
 
         public static void Run()
@@ -82,7 +82,7 @@ namespace UnityOpenMcpVerify.Batch
             }
         }
 
-        static (int exitCode, string json) RunScanAll(string[] args)
+        private static (int exitCode, string json) RunScanAll(string[] args)
         {
             var parsed = ParseFlags(args, "scan_all");
             if (parsed.error != null)
@@ -114,7 +114,7 @@ namespace UnityOpenMcpVerify.Batch
             return (batchResult.exitCode, json);
         }
 
-        static (int exitCode, string json) RunBaselineCreate(string[] args)
+        private static (int exitCode, string json) RunBaselineCreate(string[] args)
         {
             var parsed = ParseFlags(args, "baseline_create");
             if (parsed.error != null)
@@ -155,7 +155,7 @@ namespace UnityOpenMcpVerify.Batch
             return (batchResult.exitCode, json);
         }
 
-        static (int exitCode, string json) RunRegressionCheck(string[] args)
+        private static (int exitCode, string json) RunRegressionCheck(string[] args)
         {
             var parsed = ParseFlags(args, "regression_check");
             if (parsed.error != null)
@@ -203,7 +203,7 @@ namespace UnityOpenMcpVerify.Batch
             return (batchResult.exitCode, json);
         }
 
-        static BatchResult BuildBatchResult(
+        private static BatchResult BuildBatchResult(
             string operation,
             string platformProfile,
             VerifyResult verifyResult,
@@ -279,7 +279,7 @@ namespace UnityOpenMcpVerify.Batch
             public string error;
         }
 
-        static ParsedFlags ParseFlags(string[] args, string operation)
+        private static ParsedFlags ParseFlags(string[] args, string operation)
         {
             var p = new ParsedFlags();
 
@@ -408,7 +408,7 @@ namespace UnityOpenMcpVerify.Batch
             return p;
         }
 
-        static bool IsValidProfile(string profile)
+        private static bool IsValidProfile(string profile)
         {
             return profile == "mobile" || profile == "console" || profile == "desktop";
         }
@@ -417,7 +417,7 @@ namespace UnityOpenMcpVerify.Batch
 
         #region CLI extraction helpers
 
-        static string[] ExtractToolArgs(string[] allArgs)
+        private static string[] ExtractToolArgs(string[] allArgs)
         {
             for (int i = 0; i < allArgs.Length; i++)
             {
@@ -434,7 +434,7 @@ namespace UnityOpenMcpVerify.Batch
             return Array.Empty<string>();
         }
 
-        static string[] SliceAfter(string[] source, int index)
+        private static string[] SliceAfter(string[] source, int index)
         {
             if (index + 1 >= source.Length)
                 return Array.Empty<string>();
@@ -448,7 +448,7 @@ namespace UnityOpenMcpVerify.Batch
 
         #region Output helpers
 
-        static string ResolveProjectPath(string relativeOrAbsolute)
+        private static string ResolveProjectPath(string relativeOrAbsolute)
         {
             if (Path.IsPathRooted(relativeOrAbsolute))
                 return relativeOrAbsolute;
@@ -457,7 +457,7 @@ namespace UnityOpenMcpVerify.Batch
             return Path.Combine(projectRoot, relativeOrAbsolute);
         }
 
-        static void WriteOutputFile(string outputPath, string json)
+        private static void WriteOutputFile(string outputPath, string json)
         {
             try
             {
@@ -473,7 +473,7 @@ namespace UnityOpenMcpVerify.Batch
             }
         }
 
-        static (int exitCode, string json) Fail(string operation, string message)
+        private static (int exitCode, string json) Fail(string operation, string message)
         {
             var result = new BatchResult
             {
@@ -484,7 +484,7 @@ namespace UnityOpenMcpVerify.Batch
             return (ExitFail, JsonUtility.ToJson(result, true));
         }
 
-        static string ErrorJson(string operation, string message)
+        private static string ErrorJson(string operation, string message)
         {
             var result = new BatchResult
             {

@@ -240,7 +240,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             return trimmed.StartsWith("{") && trimmed.Contains(ObjectIdKey);
         }
 
-        static string BuildStaleHandleError(int instanceId, string typeName)
+        private static string BuildStaleHandleError(int instanceId, string typeName)
         {
             var sb = new StringBuilder(256);
             sb.Append("Object handle is stale or invalid");
@@ -255,7 +255,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             return sb.ToString();
         }
 
-        static Type TryResolveType(string typeName)
+        private static Type TryResolveType(string typeName)
         {
             if (string.IsNullOrEmpty(typeName)) return null;
 
@@ -273,7 +273,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
 
         // ============================ hierarchy helpers ============================
 
-        static string GetHierarchyPath(GameObject go)
+        private static string GetHierarchyPath(GameObject go)
         {
             if (go == null) return "";
             var t = go.transform;
@@ -290,7 +290,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             return sb.ToString();
         }
 
-        static GameObject FindByPath(string path)
+        private static GameObject FindByPath(string path)
         {
             if (string.IsNullOrEmpty(path)) return null;
             var trimmed = path.Trim('/');
@@ -311,7 +311,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             return null;
         }
 
-        static GameObject WalkPath(Transform current, string[] segments, int index)
+        private static GameObject WalkPath(Transform current, string[] segments, int index)
         {
             if (index >= segments.Length) return current.gameObject;
             foreach (Transform child in current)
@@ -325,7 +325,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             return null;
         }
 
-        static GameObject FindByName(string name)
+        private static GameObject FindByName(string name)
         {
             if (string.IsNullOrEmpty(name)) return null;
             for (var i = 0; i < SceneManager.sceneCount; i++)
@@ -341,7 +341,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             return null;
         }
 
-        static GameObject FindInHierarchyByName(GameObject go, string name)
+        private static GameObject FindInHierarchyByName(GameObject go, string name)
         {
             if (go.name == name) return go;
             foreach (Transform child in go.transform)
@@ -352,7 +352,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             return null;
         }
 
-        static string Escape(string s)
+        private static string Escape(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

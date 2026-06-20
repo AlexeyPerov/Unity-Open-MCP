@@ -9,16 +9,16 @@ namespace UnityOpenMcpBridge
 {
     public static class MainThreadDispatcher
     {
-        static readonly ConcurrentQueue<Action> _queue = new();
+        private static readonly ConcurrentQueue<Action> _queue = new();
 
         [InitializeOnLoadMethod]
-        static void Initialize()
+        private static void Initialize()
         {
             EditorApplication.update -= ProcessQueue;
             EditorApplication.update += ProcessQueue;
         }
 
-        static void ProcessQueue()
+        private static void ProcessQueue()
         {
             while (_queue.TryDequeue(out var action))
             {

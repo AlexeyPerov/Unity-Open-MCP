@@ -118,7 +118,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 pathsHint, rulesApplied, perPath, kindCounts, missingCount, risk));
         }
 
-        static string NormalizeScopePath(string raw)
+        private static string NormalizeScopePath(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return null;
             // AssetDatabase paths are forward-slashed and Assets/-rooted. The
@@ -128,7 +128,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return p;
         }
 
-        static bool AssetExists(string path, out string assetKind, out bool isFolder)
+        private static bool AssetExists(string path, out string assetKind, out bool isFolder)
         {
             assetKind = null;
             isFolder = false;
@@ -159,7 +159,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return !string.IsNullOrEmpty(ext) && AssetDatabase.LoadMainAssetAtPath(path) != null;
         }
 
-        static string FolderRootOf(string path)
+        private static string FolderRootOf(string path)
         {
             // Only treat paths under Assets/ as potential folders — Package /
             // ProjectSettings folder scopes are file scopes, not asset folders.
@@ -171,7 +171,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return null;
         }
 
-        static bool IsProjectFile(string path)
+        private static bool IsProjectFile(string path)
         {
             if (string.IsNullOrEmpty(path)) return false;
             var norm = path.Replace('\\', '/');
@@ -179,7 +179,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 || norm.StartsWith("Packages/", StringComparison.OrdinalIgnoreCase);
         }
 
-        static string ResolveDiskPath(string projectRelativePath)
+        private static string ResolveDiskPath(string projectRelativePath)
         {
             try
             {
@@ -198,7 +198,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // advertises (mcp-server/src/capabilities/rule-catalog.ts) and that the
         // bridge gate adapter uses to auto-select rules. Kept here so the impact
         // preview classifies scopes without going through the rule catalog.
-        static string AssetKindForExtension(string ext)
+        private static string AssetKindForExtension(string ext)
         {
             switch (ext)
             {
@@ -225,7 +225,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static string[] RulesForPath(string path, string[] allRules)
+        private static string[] RulesForPath(string path, string[] allRules)
         {
             if (allRules == null || allRules.Length == 0) return Array.Empty<string>();
             var auto = VerifyGateAdapter.SelectRuleIds(new[] { path });
@@ -238,7 +238,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return arr;
         }
 
-        static RiskBand ClassifyRisk(int pathCount, int ruleCount, int missingCount,
+        private static RiskBand ClassifyRisk(int pathCount, int ruleCount, int missingCount,
             Dictionary<string, int> kindCounts)
         {
             // Coarse heuristic — surfaced with an explicit confidence band so
@@ -294,7 +294,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return new RiskBand { Band = band, Confidence = confidence, Score = score };
         }
 
-        static string BuildImpactJson(
+        private static string BuildImpactJson(
             string[] pathsHint,
             string[] rulesApplied,
             List<PathImpact> perPath,
@@ -482,7 +482,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 estimatedMs, estimatedBudget, snapshot));
         }
 
-        static int CountScopeAssets(string[] pathsHint)
+        private static int CountScopeAssets(string[] pathsHint)
         {
             // Best-effort count of concrete assets the gate would scan. Folder
             // scopes expand to their asset count; explicit asset paths count 1.
@@ -506,7 +506,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return Math.Max(total, 1);
         }
 
-        static long EstimateDurationMs(int assetCount, int ruleCount)
+        private static long EstimateDurationMs(int assetCount, int ruleCount)
         {
             // Rough per-asset / per-rule cost. Tuned to over-estimate on
             // purpose — `confidence: low` already signals this is a heuristic.
@@ -517,7 +517,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return Math.Max(estimate, 5);
         }
 
-        static int EstimateIssueBudget(int assetCount, int ruleCount)
+        private static int EstimateIssueBudget(int assetCount, int ruleCount)
         {
             // Conservative upper bound on issues the gate might surface — used
             // to size token budgets for follow-up validate_edit calls. One
@@ -525,7 +525,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return assetCount * Math.Max(ruleCount, 1);
         }
 
-        static string BuildBudgetJson(
+        private static string BuildBudgetJson(
             string[] pathsHint, string[] rulesApplied, int pathCount,
             BudgetMode mode, string basis, string confidence,
             long estimatedMs, int estimatedBudget,
@@ -716,7 +716,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 explicitCheckpoint, record));
         }
 
-        static string OutcomeLabel(GateOutcome outcome)
+        private static string OutcomeLabel(GateOutcome outcome)
         {
             switch (outcome)
             {
@@ -728,7 +728,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static string BuildNarrative(
+        private static string BuildNarrative(
             string toolName, string outcome, DeltaData delta,
             long totalMs, string[] scopePaths)
         {
@@ -798,7 +798,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
-        static string BuildExplainJson(
+        private static string BuildExplainJson(
             string toolName, string outcome, DeltaData delta,
             string[] categoriesRun, long checkpointMs, long validationMs, long totalMs,
             string[] agentNextSteps, string[] scopePaths, string narrative,

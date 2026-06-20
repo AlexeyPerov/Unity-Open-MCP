@@ -228,8 +228,8 @@ namespace UnityOpenMcpBridge.TestRunner
 
     internal class TestCallbacks : ICallbacks
     {
-        readonly Action<ITestResultAdaptor> _onResult;
-        readonly Action<ITestResultAdaptor> _onFinished;
+        private readonly Action<ITestResultAdaptor> _onResult;
+        private readonly Action<ITestResultAdaptor> _onFinished;
 
         public TestCallbacks(Action<ITestResultAdaptor> onResult, Action<ITestResultAdaptor> onFinished)
         {

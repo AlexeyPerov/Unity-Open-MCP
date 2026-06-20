@@ -10,7 +10,7 @@ namespace UnityOpenMcpBridge
 {
     public static class VerifyGateAdapter
     {
-        static readonly string[] FallbackRuleIds = { "missing_references", "dependencies" };
+        private static readonly string[] FallbackRuleIds = { "missing_references", "dependencies" };
 
         public static string[] SelectRuleIds(string[] paths)
         {

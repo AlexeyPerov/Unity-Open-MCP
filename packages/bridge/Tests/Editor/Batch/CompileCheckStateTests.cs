@@ -178,7 +178,7 @@ namespace UnityOpenMcpBridge.Tests
             return CompileCheckState.ExtractCode(message);
         }
 
-        static CompilerMessage MakeMessage(string message, CompilerMessageType type)
+        private static CompilerMessage MakeMessage(string message, CompilerMessageType type)
         {
             return new CompilerMessage
             {

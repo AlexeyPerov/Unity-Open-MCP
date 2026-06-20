@@ -14,15 +14,15 @@ namespace UnityOpenMcpBridge
         public static string Mode => "live";
         public static bool Connected => _connected;
 
-        static string _projectPath;
-        static string _unityVersion;
-        static volatile bool _isCompiling;
-        static volatile bool _isPlaying;
-        static volatile bool _connected;
-        static volatile bool _initialized;
+        private static string _projectPath;
+        private static string _unityVersion;
+        private static volatile bool _isCompiling;
+        private static volatile bool _isPlaying;
+        private static volatile bool _connected;
+        private static volatile bool _initialized;
 
         [InitializeOnLoadMethod]
-        static void Initialize()
+        private static void Initialize()
         {
             CacheStaticState();
             _initialized = true;
@@ -34,25 +34,25 @@ namespace UnityOpenMcpBridge
             AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
         }
 
-        static void CacheStaticState()
+        private static void CacheStaticState()
         {
             _projectPath = System.IO.Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
             _unityVersion = Application.unityVersion;
         }
 
-        static void RefreshVolatileState()
+        private static void RefreshVolatileState()
         {
             _isCompiling = EditorApplication.isCompiling;
             _isPlaying = EditorApplication.isPlaying;
         }
 
-        static void OnBeforeAssemblyReload()
+        private static void OnBeforeAssemblyReload()
         {
             _isCompiling = true;
             _connected = false;
         }
 
-        static void OnAfterAssemblyReload()
+        private static void OnAfterAssemblyReload()
         {
             CacheStaticState();
             _initialized = true;

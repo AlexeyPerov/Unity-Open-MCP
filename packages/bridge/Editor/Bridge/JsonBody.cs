@@ -25,7 +25,7 @@ namespace UnityOpenMcpBridge
             return ReadQuotedString(json, ref start);
         }
 
-        static string ReadQuotedString(string json, ref int i)
+        private static string ReadQuotedString(string json, ref int i)
         {
             var sb = new StringBuilder(64);
             while (i < json.Length)
@@ -256,7 +256,7 @@ namespace UnityOpenMcpBridge
             return ParseJsonValues(raw.Trim());
         }
 
-        static List<object> ParseJsonValues(string jsonArray)
+        private static List<object> ParseJsonValues(string jsonArray)
         {
             var result = new List<object>();
             if (!jsonArray.StartsWith("[")) return result;
@@ -273,7 +273,7 @@ namespace UnityOpenMcpBridge
             return result;
         }
 
-        static (object, int) ReadJsonValue(string json, int start)
+        private static (object, int) ReadJsonValue(string json, int start)
         {
             var i = start;
             while (i < json.Length && char.IsWhiteSpace(json[i])) i++;

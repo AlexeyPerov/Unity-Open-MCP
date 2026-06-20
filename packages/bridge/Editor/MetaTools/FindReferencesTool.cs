@@ -30,7 +30,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return ToolDispatchResult.Ok(BuildResult(result));
         }
 
-        static string BuildResult(FindReferencesResult result)
+        private static string BuildResult(FindReferencesResult result)
         {
             var sb = new StringBuilder(1024);
 
@@ -60,7 +60,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string EscapeString(string s)
+        private static string EscapeString(string s)
         {
             if (s == null) return "null";
             var sb = new StringBuilder(s.Length + 8);

@@ -37,13 +37,13 @@ namespace UnityOpenMcpBridge.TypedTools
         // UPM operations can take a while (registry round-trip, domain
         // reload on add/remove). Generous cap; the dispatcher still enforces
         // the request-level timeout_ms.
-        const int RequestTimeoutMs = 90_000;
-        const int PollIntervalMs = 25;
+        private const int RequestTimeoutMs = 90_000;
+        private const int PollIntervalMs = 25;
 
         // The canonical manifest path. Relative to the project root (the
         // folder containing Assets/). Used by get_dependencies and check so
         // they can answer without spinning up a UPM request.
-        static string ManifestPath => Path.Combine(
+        private static string ManifestPath => Path.Combine(
             Directory.GetParent(UnityEngine.Application.dataPath).FullName,
             "Packages", "manifest.json");
 
@@ -495,7 +495,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // ----------------------------- helpers ----------------------------
 
-        static PackageSource? ParseSourceFilter(string raw)
+        private static PackageSource? ParseSourceFilter(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return null;
             return raw.ToLowerInvariant() switch
@@ -513,7 +513,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Polling wait for a UPM request. Returns true when the request
         // completed within the timeout, false on timeout. Package-manager
         // worker progress advances independently of the polling thread.
-        static bool WaitForRequest<T>(T request) where T : Request
+        private static bool WaitForRequest<T>(T request) where T : Request
         {
             var deadline = System.DateTime.UtcNow.AddMilliseconds(RequestTimeoutMs);
             while (!request.IsCompleted)
@@ -524,16 +524,16 @@ namespace UnityOpenMcpBridge.TypedTools
             return true;
         }
 
-        static ToolDispatchResult Timeout(string op) =>
+        private static ToolDispatchResult Timeout(string op) =>
             ToolDispatchResult.Fail("timeout",
                 $"Package Manager {op} request timed out after {RequestTimeoutMs} ms.");
 
-        static ToolDispatchResult Fail(string code, string message) =>
+        private static ToolDispatchResult Fail(string code, string message) =>
             ToolDispatchResult.Fail(code, message);
 
         // Name filter: case-insensitive substring over name/displayName/
         // description. Empty filter accepts everything.
-        static bool MatchName(PackageInfo pkg, string filter)
+        private static bool MatchName(PackageInfo pkg, string filter)
         {
             if (string.IsNullOrEmpty(filter)) return true;
             return MatchPriority(pkg, filter) > 0;
@@ -542,7 +542,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Match priority: 5 exact name, 4 exact displayName, 3 name substring,
         // 2 displayName substring, 1 description substring, 0 no match.
         // Higher = better. Mirrors UMCP GetSearchPriority.
-        static int MatchPriority(PackageInfo pkg, string filter)
+        private static int MatchPriority(PackageInfo pkg, string filter)
         {
             if (string.IsNullOrEmpty(filter)) return 0;
             var name = pkg.name ?? "";
@@ -558,7 +558,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // A package "matches" a query if the query equals or is a substring
         // of the package's name, packageId, or displayName.
-        static bool MatchesPackage(PackageInfo pkg, string query)
+        private static bool MatchesPackage(PackageInfo pkg, string query)
         {
             if (string.Equals(pkg.name, query, System.StringComparison.OrdinalIgnoreCase)) return true;
             if (!string.IsNullOrEmpty(pkg.packageId)
@@ -568,7 +568,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return false;
         }
 
-        static Dictionary<string, PackageInfo> CollectInstalled()
+        private static Dictionary<string, PackageInfo> CollectInstalled()
         {
             var req = Client.List(true);
             if (!WaitForRequest(req) || req.Status != StatusCode.Success) return null;
@@ -577,7 +577,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return dict;
         }
 
-        static string Truncate(string s, int max)
+        private static string Truncate(string s, int max)
         {
             if (string.IsNullOrEmpty(s) || s.Length <= max) return s ?? "";
             return s.Substring(0, max - 3) + "...";
@@ -644,7 +644,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // block is a flat "dependencies": { "name": "ref", ... } object —
         // parse it directly by scanning for the brace-delimited block.
 
-        static Dictionary<string, string> ReadManifestDependencies()
+        private static Dictionary<string, string> ReadManifestDependencies()
         {
             try
             {
@@ -695,7 +695,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Extract the inner body of an object-valued field from a JSON string
         // (the substring inside the field's {...}). Returns null when the
         // field is missing or not an object.
-        static string ExtractObjectField(string json, string fieldName)
+        private static string ExtractObjectField(string json, string fieldName)
         {
             var pattern = "\"" + fieldName + "\"";
             var idx = json.IndexOf(pattern, System.StringComparison.Ordinal);
@@ -729,7 +729,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return json.Substring(start, i - start - 1);
         }
 
-        static string ReadJsonString(string json, ref int i)
+        private static string ReadJsonString(string json, ref int i)
         {
             if (i >= json.Length || json[i] != '"') { i++; return ""; }
             i++;

@@ -12,11 +12,11 @@ namespace UnityOpenMcpVerify.Tests
     [TestFixture]
     public class FixtureScenePrefabHealthTests
     {
-        const string HealthyFixture = "Assets/Fixtures/HealthyFixture.prefab";
-        const string BrokenRefFixture = "Assets/Fixtures/BrokenRefFixture.prefab";
-        const string MissingScriptFixture = "Assets/Fixtures/MissingScriptFixture.prefab";
+        private const string HealthyFixture = "Assets/Fixtures/HealthyFixture.prefab";
+        private const string BrokenRefFixture = "Assets/Fixtures/BrokenRefFixture.prefab";
+        private const string MissingScriptFixture = "Assets/Fixtures/MissingScriptFixture.prefab";
 
-        ScenePrefabHealthRule rule;
+        private ScenePrefabHealthRule rule;
 
         [SetUp]
         public void SetUp()

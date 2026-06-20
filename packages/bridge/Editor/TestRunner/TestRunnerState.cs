@@ -52,7 +52,7 @@ namespace UnityOpenMcpBridge.TestRunner
             catch { }
         }
 
-        static void OnAfterAssemblyReload()
+        private static void OnAfterAssemblyReload()
         {
             try
             {
@@ -83,7 +83,7 @@ namespace UnityOpenMcpBridge.TestRunner
             }
         }
 
-        static void ReattachCallbacks(
+        private static void ReattachCallbacks(
             string runId,
             string assemblyName,
             string testNamespace,
@@ -109,7 +109,7 @@ namespace UnityOpenMcpBridge.TestRunner
             api.Execute(new ExecutionSettings(filter));
         }
 
-        static string PendingFilePath(string runId) =>
+        private static string PendingFilePath(string runId) =>
             TestRunnerService.PendingFilePath(runId);
     }
 }

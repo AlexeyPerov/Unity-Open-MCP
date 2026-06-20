@@ -129,7 +129,7 @@ namespace UnityOpenMcpExtensions.InputSystem
         // Note: actionMaps is a ReadOnlyArray<InputActionMap> (a struct), so it
         // cannot be compared to null with == — check Count instead. The wrapper
         // returns an empty ReadOnlyArray when the backing field is null.
-        static string ToSafeJson(InputActionAsset asset)
+        private static string ToSafeJson(InputActionAsset asset)
         {
             if (asset.actionMaps.Count == 0)
                 return "{\n    \"name\": \"" + asset.name + "\",\n    \"maps\": [],\n    \"controlSchemes\": []\n}";

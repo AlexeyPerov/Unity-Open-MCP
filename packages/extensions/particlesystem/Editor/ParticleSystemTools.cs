@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
@@ -272,7 +271,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
         // Resolve helpers
         // =====================================================================
 
-        static ParticleSystem ResolvePs(int instanceId, string path, string name, out string errorEnvelope)
+        private static ParticleSystem ResolvePs(int instanceId, string path, string name, out string errorEnvelope)
         {
             errorEnvelope = null;
             GameObject host = null;
@@ -304,12 +303,12 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             return ps;
         }
 
-        static string PathRequired()
+        private static string PathRequired()
             => ParticleSystemJson.Error("paths_hint_required",
                 "particle_system_modify is mutating; pass a non-empty paths_hint " +
                 "scoped to the host scene path.");
 
-        static GameObject FindByPath(string path)
+        private static GameObject FindByPath(string path)
         {
             var parts = path.Split('/');
             var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude);
@@ -331,7 +330,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             return null;
         }
 
-        static GameObject FindByName(string name)
+        private static GameObject FindByName(string name)
         {
             var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude);
             foreach (var root in roots)
@@ -343,7 +342,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
         // Module serializers (read side)
         // =====================================================================
 
-        static void AppendRuntimeState(StringBuilder sb, ParticleSystem ps)
+        private static void AppendRuntimeState(StringBuilder sb, ParticleSystem ps)
         {
             // No trailing comma — module emitters add a leading comma before
             // their own key, so the runtime block can be the last entry when
@@ -358,7 +357,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             sb.Append('}');
         }
 
-        static void AppendMain(StringBuilder sb, ParticleSystem.MainModule m)
+        private static void AppendMain(StringBuilder sb, ParticleSystem.MainModule m)
         {
             sb.Append('{');
             sb.Append("\"duration\":").Append(m.duration.ToString("R", CultureInfo.InvariantCulture)).Append(',');
@@ -380,7 +379,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             sb.Append('}');
         }
 
-        static void AppendEmission(StringBuilder sb, ParticleSystem.EmissionModule m)
+        private static void AppendEmission(StringBuilder sb, ParticleSystem.EmissionModule m)
         {
             sb.Append('{');
             sb.Append("\"enabled\":").Append(m.enabled ? "true" : "false").Append(',');
@@ -390,7 +389,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             sb.Append('}');
         }
 
-        static void AppendShape(StringBuilder sb, ParticleSystem.ShapeModule m)
+        private static void AppendShape(StringBuilder sb, ParticleSystem.ShapeModule m)
         {
             sb.Append('{');
             sb.Append("\"enabled\":").Append(m.enabled ? "true" : "false").Append(',');
@@ -405,7 +404,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             sb.Append('}');
         }
 
-        static void AppendColorOverLifetime(StringBuilder sb, ParticleSystem.ColorOverLifetimeModule m)
+        private static void AppendColorOverLifetime(StringBuilder sb, ParticleSystem.ColorOverLifetimeModule m)
         {
             sb.Append('{');
             sb.Append("\"enabled\":").Append(m.enabled ? "true" : "false").Append(',');
@@ -413,7 +412,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             sb.Append('}');
         }
 
-        static void AppendSizeOverLifetime(StringBuilder sb, ParticleSystem.SizeOverLifetimeModule m)
+        private static void AppendSizeOverLifetime(StringBuilder sb, ParticleSystem.SizeOverLifetimeModule m)
         {
             sb.Append('{');
             sb.Append("\"enabled\":").Append(m.enabled ? "true" : "false").Append(',');
@@ -422,7 +421,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             sb.Append('}');
         }
 
-        static void AppendRotationOverLifetime(StringBuilder sb, ParticleSystem.RotationOverLifetimeModule m)
+        private static void AppendRotationOverLifetime(StringBuilder sb, ParticleSystem.RotationOverLifetimeModule m)
         {
             sb.Append('{');
             sb.Append("\"enabled\":").Append(m.enabled ? "true" : "false").Append(',');
@@ -433,7 +432,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             sb.Append('}');
         }
 
-        static void AppendNoise(StringBuilder sb, ParticleSystem.NoiseModule m)
+        private static void AppendNoise(StringBuilder sb, ParticleSystem.NoiseModule m)
         {
             sb.Append('{');
             sb.Append("\"enabled\":").Append(m.enabled ? "true" : "false").Append(',');
@@ -446,7 +445,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             sb.Append('}');
         }
 
-        static void AppendCollision(StringBuilder sb, ParticleSystem.CollisionModule m)
+        private static void AppendCollision(StringBuilder sb, ParticleSystem.CollisionModule m)
         {
             sb.Append('{');
             sb.Append("\"enabled\":").Append(m.enabled ? "true" : "false").Append(',');
@@ -457,7 +456,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             sb.Append('}');
         }
 
-        static void AppendTrails(StringBuilder sb, ParticleSystem.TrailModule m)
+        private static void AppendTrails(StringBuilder sb, ParticleSystem.TrailModule m)
         {
             sb.Append('{');
             sb.Append("\"enabled\":").Append(m.enabled ? "true" : "false").Append(',');
@@ -469,7 +468,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             sb.Append('}');
         }
 
-        static void AppendRenderer(StringBuilder sb, ParticleSystemRenderer r)
+        private static void AppendRenderer(StringBuilder sb, ParticleSystemRenderer r)
         {
             sb.Append('{');
             sb.Append("\"renderMode\":").Append(ParticleSystemJson.Esc(r.renderMode.ToString())).Append(',');
@@ -490,7 +489,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
         // field names. Scalar parsing via Parse*() returns false on a bad
         // value, which lands in the `errors` list with the field name.
 
-        static void ApplyMainFields(ParticleSystem.MainModule m,
+        private static void ApplyMainFields(ParticleSystem.MainModule m,
             Dictionary<string, string> fields,
             List<string> applied, List<string> unknown, List<string> errors)
         {
@@ -564,7 +563,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             }
         }
 
-        static void ApplyEmissionFields(ParticleSystem.EmissionModule m,
+        private static void ApplyEmissionFields(ParticleSystem.EmissionModule m,
             Dictionary<string, string> fields,
             List<string> applied, List<string> unknown, List<string> errors)
         {
@@ -591,7 +590,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             }
         }
 
-        static void ApplyShapeFields(ParticleSystem.ShapeModule m,
+        private static void ApplyShapeFields(ParticleSystem.ShapeModule m,
             Dictionary<string, string> fields,
             List<string> applied, List<string> unknown, List<string> errors)
         {
@@ -642,7 +641,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             }
         }
 
-        static void ApplyColorOverLifetimeFields(ParticleSystem.ColorOverLifetimeModule m,
+        private static void ApplyColorOverLifetimeFields(ParticleSystem.ColorOverLifetimeModule m,
             Dictionary<string, string> fields,
             List<string> applied, List<string> unknown, List<string> errors)
         {
@@ -664,7 +663,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             }
         }
 
-        static void ApplySizeOverLifetimeFields(ParticleSystem.SizeOverLifetimeModule m,
+        private static void ApplySizeOverLifetimeFields(ParticleSystem.SizeOverLifetimeModule m,
             Dictionary<string, string> fields,
             List<string> applied, List<string> unknown, List<string> errors)
         {
@@ -687,7 +686,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             }
         }
 
-        static void ApplyRotationOverLifetimeFields(ParticleSystem.RotationOverLifetimeModule m,
+        private static void ApplyRotationOverLifetimeFields(ParticleSystem.RotationOverLifetimeModule m,
             Dictionary<string, string> fields,
             List<string> applied, List<string> unknown, List<string> errors)
         {
@@ -722,7 +721,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             }
         }
 
-        static void ApplyNoiseFields(ParticleSystem.NoiseModule m,
+        private static void ApplyNoiseFields(ParticleSystem.NoiseModule m,
             Dictionary<string, string> fields,
             List<string> applied, List<string> unknown, List<string> errors)
         {
@@ -765,7 +764,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             }
         }
 
-        static void ApplyCollisionFields(ParticleSystem.CollisionModule m,
+        private static void ApplyCollisionFields(ParticleSystem.CollisionModule m,
             Dictionary<string, string> fields,
             List<string> applied, List<string> unknown, List<string> errors)
         {
@@ -800,7 +799,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             }
         }
 
-        static void ApplyTrailsFields(ParticleSystem.TrailModule m,
+        private static void ApplyTrailsFields(ParticleSystem.TrailModule m,
             Dictionary<string, string> fields,
             List<string> applied, List<string> unknown, List<string> errors)
         {
@@ -827,7 +826,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             }
         }
 
-        static void ApplyRendererFields(ParticleSystemRenderer r,
+        private static void ApplyRendererFields(ParticleSystemRenderer r,
             Dictionary<string, string> fields,
             List<string> applied, List<string> unknown, List<string> errors)
         {
@@ -866,7 +865,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
         // are kept as their raw JSON tokens (string scalars quoted, numbers /
         // bools bare). The apply routines interpret each token via the typed
         // Try* helpers.
-        static Dictionary<string, string> ParseFieldsObject(string json)
+        private static Dictionary<string, string> ParseFieldsObject(string json)
         {
             if (string.IsNullOrEmpty(json)) return null;
             var trimmed = json.Trim();
@@ -936,13 +935,13 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             return result;
         }
 
-        static string UnescapeString(string s)
+        private static string UnescapeString(string s)
         {
             if (string.IsNullOrEmpty(s)) return s;
             return s.Replace("\\\"", "\"").Replace("\\\\", "\\");
         }
 
-        static bool TryBool(string token, out bool value)
+        private static bool TryBool(string token, out bool value)
         {
             value = false;
             if (token == "true") { value = true; return true; }
@@ -950,7 +949,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             return false;
         }
 
-        static bool TryFloat(string token, out float value)
+        private static bool TryFloat(string token, out float value)
         {
             value = 0f;
             // Allow JSON-quoted scalars too.
@@ -958,14 +957,14 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             return float.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
         }
 
-        static bool TryInt(string token, out int value)
+        private static bool TryInt(string token, out int value)
         {
             value = 0;
             var raw = Unquote(token);
             return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
         }
 
-        static bool TryVec3(string token, out Vector3 value)
+        private static bool TryVec3(string token, out Vector3 value)
         {
             value = Vector3.zero;
             var raw = Unquote(token);
@@ -978,14 +977,14 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             return true;
         }
 
-        static bool TryEnum<T>(string token, out T value) where T : struct
+        private static bool TryEnum<T>(string token, out T value) where T : struct
         {
             value = default;
             var raw = Unquote(token);
             return System.Enum.TryParse(raw, true, out value);
         }
 
-        static string Unquote(string token)
+        private static string Unquote(string token)
         {
             if (token != null && token.Length >= 2 &&
                 token[0] == '"' && token[token.Length - 1] == '"')
@@ -993,7 +992,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             return token;
         }
 
-        static string JsonArray(List<string> items)
+        private static string JsonArray(List<string> items)
         {
             var sb = new StringBuilder();
             sb.Append('[');
@@ -1016,7 +1015,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
         // current state. Curve / random-between-two values are reported as
         // their constantMin / constantMax (which is meaningful for
         // TwoConstants; for curves we fall back to the curve constant).
-        static string EscMinMaxCurve(ParticleSystem.MinMaxCurve c)
+        private static string EscMinMaxCurve(ParticleSystem.MinMaxCurve c)
         {
             var sb = new StringBuilder(64);
             sb.Append("{\"mode\":").Append(ParticleSystemJson.Esc(c.mode.ToString())).Append(',');
@@ -1029,7 +1028,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             return sb.ToString();
         }
 
-        static string EscMinMaxGradient(ParticleSystem.MinMaxGradient g)
+        private static string EscMinMaxGradient(ParticleSystem.MinMaxGradient g)
         {
             var sb = new StringBuilder(64);
             sb.Append("{\"mode\":").Append(ParticleSystemJson.Esc(g.mode.ToString())).Append(',');
@@ -1040,7 +1039,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             return sb.ToString();
         }
 
-        static string ColorJson(Color c)
+        private static string ColorJson(Color c)
             => $"[{c.r},{c.g},{c.b},{c.a}]";
     }
 }

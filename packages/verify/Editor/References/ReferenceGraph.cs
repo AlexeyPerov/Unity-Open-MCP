@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/UI/Window/FindReferencesWindow.cs (RefsMapBuilder) + Editor/Categories/Dependencies/DependenciesScanner.cs
-
 using System;
 using System.Collections.Generic;
 using System.IO;

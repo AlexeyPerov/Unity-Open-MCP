@@ -1,20 +1,4 @@
-// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
-// EditMode tests for the ProBuilder extension pack.
-//
-// Covers the deterministic contracts that protect the agent surface:
-//
-//   1. All 5 catalog tools are discovered by BridgeToolRegistry (no core
-//      bridge edits — proves the [BridgeToolType] assembly scan works for
-//      packs).
-//   2. Mutating tools refuse to run without paths_hint (the gate contract).
-//   3. delete_faces is flagged DestructiveHint (MCP clients can prompt).
-//   4. Shape create → get_mesh_info → extrude by direction round-trip on a
-//      Cube primitive.
-//   5. Face-index errors return structured JSON errors (no thrown exceptions).
-//
-// These tests run in EditMode against the live demo project (ProBuilder
-// package must be installed). They clean up after themselves.
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -27,7 +11,7 @@ namespace UnityOpenMcpExtensions.ProBuilder.Tests
     public class ProBuilderToolsTests
     {
         // The 5 catalog tool ids this pack must register.
-        static readonly string[] ExpectedTools =
+        private static readonly string[] ExpectedTools =
         {
             "unity_open_mcp_probuilder_create_shape",
             "unity_open_mcp_probuilder_get_mesh_info",
@@ -334,7 +318,7 @@ namespace UnityOpenMcpExtensions.ProBuilder.Tests
         // Minimal JSON int extractor — pulls "instanceId":<int> out of the
         // hand-rolled JSON envelopes the tools return.
         // -----------------------------------------------------------------
-        static int ExtractInt(string json, string key)
+        private static int ExtractInt(string json, string key)
         {
             var pattern = "\"" + key + "\":";
             var idx = json.IndexOf(pattern, System.StringComparison.Ordinal);

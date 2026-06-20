@@ -70,7 +70,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return ToolDispatchResult.Ok(BuildApplyResult(result));
         }
 
-        static string BuildFixListResult(string issueId, string[] availableFixIds)
+        private static string BuildFixListResult(string issueId, string[] availableFixIds)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"dryRun\":true");
@@ -88,7 +88,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string BuildDryRunResult(FixDescription desc)
+        private static string BuildDryRunResult(FixDescription desc)
         {
             var sb = new StringBuilder(512);
             sb.Append("{\"dryRun\":true");
@@ -101,7 +101,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string BuildApplyResult(FixResult result)
+        private static string BuildApplyResult(FixResult result)
         {
             var sb = new StringBuilder(512);
             sb.Append("{\"dryRun\":false");
@@ -120,7 +120,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string BuildUnknownFixError(string fixId, string issueId)
+        private static string BuildUnknownFixError(string fixId, string issueId)
         {
             var available = FixProviderRegistry.AvailableFixIds();
             var applicable = FixProviderRegistry.FixesForIssue(issueId);
@@ -147,7 +147,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

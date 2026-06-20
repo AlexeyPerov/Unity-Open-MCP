@@ -41,16 +41,16 @@ namespace UnityOpenMcpVerify.Batch
 
     public static class VerifyProjectSettings
     {
-        const string SettingsDirName = ".unity-open-mcp";
-        const string SettingsFileName = "settings.json";
+        private const string SettingsDirName = ".unity-open-mcp";
+        private const string SettingsFileName = "settings.json";
 
         // The verify default mirrors the historical gate behaviour: a single
         // Error fails the gate. Projects that want to count warnings as failures
         // opt in via `warning`; `info` is a "fail on anything non-clean" mode.
         public const string DefaultSeverityThreshold = "error";
 
-        static VerifyProjectSettingsData _data;
-        static bool _loaded;
+        private static VerifyProjectSettingsData _data;
+        private static bool _loaded;
 
         public static string SettingsPath
         {
@@ -135,7 +135,7 @@ namespace UnityOpenMcpVerify.Batch
             _loaded = true;
         }
 
-        static string Normalize(string raw)
+        private static string Normalize(string raw)
         {
             if (string.IsNullOrEmpty(raw))
                 return DefaultSeverityThreshold;
@@ -163,7 +163,7 @@ namespace UnityOpenMcpVerify.Batch
             }
         }
 
-        static string GetProjectRoot()
+        private static string GetProjectRoot()
         {
             var dataPath = Application.dataPath;
             if (string.IsNullOrEmpty(dataPath)) return null;

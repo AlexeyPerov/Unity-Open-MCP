@@ -11,8 +11,8 @@ namespace UnityOpenMcpVerify.Tests
     [TestFixture]
     public class GateDeltaIntegrationTests
     {
-        const string FixtureRoot = "Assets/Tests/GateDeltaFixtures";
-        const string HealthyPrefab = FixtureRoot + "/DeltaTest.prefab";
+        private const string FixtureRoot = "Assets/Tests/GateDeltaFixtures";
+        private const string HealthyPrefab = FixtureRoot + "/DeltaTest.prefab";
 
         // The fixture folder outlives all tests in this class; each test still
         // (re)creates the prefab it scans because the .bak-swap tests mutate
@@ -31,7 +31,7 @@ namespace UnityOpenMcpVerify.Tests
         // Ensure the three default rules are present so CreateCheckpoint /
         // RunScoped see them — otherwise CategoriesRun is empty and every
         // delta assertion silently degrades to "0 fingerprints".
-        static void EnsureRulesRegistered()
+        private static void EnsureRulesRegistered()
         {
             if (VerifyRunner.Rules.Count == 0)
             {
@@ -163,7 +163,7 @@ namespace UnityOpenMcpVerify.Tests
             yield return null;
         }
 
-        static (int newErrors, int newWarnings, HashSet<string> newKeys) ComputeSimpleDelta(
+        private static (int newErrors, int newWarnings, HashSet<string> newKeys) ComputeSimpleDelta(
             CheckpointFingerprint before, VerifyResult after)
         {
             var beforeKeys = new HashSet<string>();
@@ -191,7 +191,7 @@ namespace UnityOpenMcpVerify.Tests
             return (newErrors, newWarnings, newKeys);
         }
 
-        static System.Collections.IEnumerator CreateHealthyPrefab(string path)
+        private static System.Collections.IEnumerator CreateHealthyPrefab(string path)
         {
             EnsureDirectory(System.IO.Path.GetDirectoryName(path));
             // Re-create from scratch, clearing any stale state a previous
@@ -216,7 +216,7 @@ namespace UnityOpenMcpVerify.Tests
             yield return null;
         }
 
-        static System.Collections.IEnumerator BreakPrefab(string prefabPath)
+        private static System.Collections.IEnumerator BreakPrefab(string prefabPath)
         {
             var meshPath = System.IO.Path.ChangeExtension(prefabPath, ".asset");
             var metaPath = meshPath + ".meta";
@@ -240,7 +240,7 @@ namespace UnityOpenMcpVerify.Tests
             yield return null;
         }
 
-        static System.Collections.IEnumerator RestorePrefab(string prefabPath)
+        private static System.Collections.IEnumerator RestorePrefab(string prefabPath)
         {
             var meshPath = System.IO.Path.ChangeExtension(prefabPath, ".asset");
             var metaPath = meshPath + ".meta";
@@ -258,13 +258,13 @@ namespace UnityOpenMcpVerify.Tests
             yield return null;
         }
 
-        static void ClearFile(string path)
+        private static void ClearFile(string path)
         {
             if (System.IO.File.Exists(path))
                 System.IO.File.Delete(path);
         }
 
-        static void EnsureDirectory(string path)
+        private static void EnsureDirectory(string path)
         {
             if (!AssetDatabase.IsValidFolder(path))
             {

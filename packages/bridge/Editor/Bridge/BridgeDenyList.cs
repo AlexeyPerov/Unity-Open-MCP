@@ -1,27 +1,3 @@
-// M14 T5.2 / T5.3 — Static deny heuristic for the power tools.
-//
-// execute_csharp and execute_menu can do anything — quit the editor, delete
-// assets, build the player, etc. The gate catches *new project errors* after a
-// mutation, but several destructive ops produce no verify signal (the editor
-// just closes) or are themselves the threat (bulk asset delete). This module
-// implements a configurable regex deny heuristic that runs BEFORE the mutation
-// and refuses with a clear reason + alternative.
-//
-// Policy shape (`.unity-open-mcp/settings.json`):
-//   - csharpDenyPatterns : string[] — regex patterns matched against the
-//     submitted snippet source. Empty array / unset ⇒ use the built-in
-//     defaults (DefaultCSharpPatterns). Explicitly set to [""] to disable.
-//   - menuDenyPatterns   : string[] — regex patterns matched against the
-//     menu_path. Same null-vs-empty semantics.
-//
-// Bypass contract (matches the spec for T5.2): an explicit `gate: "off"` AND
-// `confirm_bypass: true` on the request skips the deny heuristic. The bypass
-// is audited via the activity log (the request still flows through the normal
-// dispatch path, so it lands in BridgeActivityLog with gate.mode = off). There
-// is no silent bypass: omitting either flag, or passing only one, still denies.
-//
-// The decision is split out from ExecuteCSharpTool / ExecuteMenuTool so it is
-// unit-testable without Roslyn / a live editor, mirroring BridgeAuthCheck.
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
@@ -37,7 +13,7 @@ namespace UnityOpenMcpBridge
         public readonly string Reason;
         public readonly string Suggestion;
 
-        DenyResult(bool allowed, string matchedPattern, string reason, string suggestion)
+        private DenyResult(bool allowed, string matchedPattern, string reason, string suggestion)
         {
             Allowed = allowed;
             MatchedPattern = matchedPattern;
@@ -63,7 +39,7 @@ namespace UnityOpenMcpBridge
         // before the method call". Case-sensitive by default — Unity APIs are
         // PascalCase and a case-insensitive match would over-trigger on
         // comments / local variables.
-        static readonly string[] DefaultCSharpPatterns =
+        private static readonly string[] DefaultCSharpPatterns =
         {
             // Editor / playmode exit — no verify signal possible after these.
             @"EditorApplication\.Exit",
@@ -81,7 +57,7 @@ namespace UnityOpenMcpBridge
             @"Directory\.Delete\s*\([^)]*Assets"
         };
 
-        static readonly string[] DefaultMenuPatterns =
+        private static readonly string[] DefaultMenuPatterns =
         {
             // Editor quit / exit. Existing hardcoded File/Quit block is kept as
             // a fallback; this list is the configurable surface.
@@ -95,9 +71,9 @@ namespace UnityOpenMcpBridge
         // Compiled + cached patterns. Re-resolved when the underlying settings
         // signature changes so a hot dispatch path does not pay a Regex.Compile
         // per request. Volatile read on the cache slot; writes under a lock.
-        static readonly object _cacheLock = new object();
-        static volatile PatternCache _csharpCache;
-        static volatile PatternCache _menuCache;
+        private static readonly object _cacheLock = new object();
+        private static volatile PatternCache _csharpCache;
+        private static volatile PatternCache _menuCache;
 
         sealed class PatternCache
         {
@@ -127,7 +103,7 @@ namespace UnityOpenMcpBridge
         public static string[] ResolveMenuPatterns(string[] settingsPatterns)
             => HasPatterns(settingsPatterns) ? settingsPatterns : DefaultMenuPatterns;
 
-        static bool HasPatterns(string[] arr)
+        private static bool HasPatterns(string[] arr)
         {
             if (arr == null || arr.Length == 0) return false;
             // An array of only empties/whitespace counts as "no patterns".
@@ -163,7 +139,7 @@ namespace UnityOpenMcpBridge
                 "to proceed and accept the risk.");
         }
 
-        static DenyResult Match(string input, PatternCache cache, string toolName, string suggestion)
+        private static DenyResult Match(string input, PatternCache cache, string toolName, string suggestion)
         {
             var compiled = cache.Compiled;
             for (int i = 0; i < compiled.Length; i++)
@@ -205,7 +181,7 @@ namespace UnityOpenMcpBridge
         // constructed PatternCache (reference assignment is atomic), so the
         // worst case under a race is one redundant lock acquisition, never a
         // torn read.
-        static PatternCache GetOrCompileCSharp(string[] source)
+        private static PatternCache GetOrCompileCSharp(string[] source)
         {
             var existing = _csharpCache;
             if (existing != null && ReferenceEquals(existing.Source, source)) return existing;
@@ -219,7 +195,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static PatternCache GetOrCompileMenu(string[] source)
+        private static PatternCache GetOrCompileMenu(string[] source)
         {
             var existing = _menuCache;
             if (existing != null && ReferenceEquals(existing.Source, source)) return existing;
@@ -233,7 +209,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static PatternCache Compile(string[] source)
+        private static PatternCache Compile(string[] source)
         {
             if (source == null || source.Length == 0)
                 return new PatternCache(source ?? Array.Empty<string>(), Array.Empty<Regex>());

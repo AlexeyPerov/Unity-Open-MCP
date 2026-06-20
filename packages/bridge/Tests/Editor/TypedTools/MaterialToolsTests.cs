@@ -1,6 +1,3 @@
-// EditMode tests for the M16 Plan 1 typed material tools (MaterialTools).
-// Covers parameter parsing and resolver branches that do NOT drive Unity
-// material mutating APIs from EditMode.
 using NUnit.Framework;
 using UnityOpenMcpBridge.TypedTools;
 

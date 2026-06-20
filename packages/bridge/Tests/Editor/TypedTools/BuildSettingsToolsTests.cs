@@ -1,21 +1,3 @@
-// EditMode tests for the M16 Plan 9 typed build + settings tools
-// (BuildSettingsTools).
-//
-// Strategy (mirrors PackagesToolsTests): the parameter-parsing, validation,
-// and deny-bypass branches are deterministic and protect the contract — they
-// are covered here. Live mutators that drive BuildPipeline.BuildPlayer /
-// PlayerSettings writes are NOT exercised here (they need a real project +
-// target backend and are slow + side-effecting); they are covered by the
-// integration suite + the manual validation checklist.
-//
-// Covered branches:
-//
-// - missing-parameter validation for every mutator
-// - build_start refuses without the deny bypass (the default-deny contract)
-// - read tools return an ok envelope with the expected shape
-// - the dispatch wiring contracts (KnownTools / DirectResponseTools /
-//   MutatingTools membership) so a future edit that forgets to wire a new
-//   Plan 9 tool fails loudly here
 using NUnit.Framework;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.TypedTools;

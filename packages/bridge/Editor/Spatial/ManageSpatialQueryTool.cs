@@ -40,7 +40,7 @@ namespace UnityOpenMcpBridge.Spatial
     [BridgeToolType]
     public class Tool_Spatial
     {
-        const int DefaultNearestMax = 5;
+        private const int DefaultNearestMax = 5;
 
         // ============================ dispatch ============================
 
@@ -109,7 +109,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ raycast ============================
 
-        string DoRaycast(string originStr, string directionStr, float maxDistance,
+        private string DoRaycast(string originStr, string directionStr, float maxDistance,
             string layerName, bool queryTriggers)
         {
             Physics.SyncTransforms();
@@ -151,7 +151,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ overlap ============================
 
-        string DoOverlap(string shapeStr, string centerStr, float radiusVal,
+        private string DoOverlap(string shapeStr, string centerStr, float radiusVal,
             string halfExtentsStr, string endStr, string layerName, bool queryTriggers)
         {
             Physics.SyncTransforms();
@@ -192,7 +192,7 @@ namespace UnityOpenMcpBridge.Spatial
             return BuildOverlapResult(shape, center, hits);
         }
 
-        string BuildOverlapResult(string shape, Vector3 center, Collider[] hits)
+        private string BuildOverlapResult(string shape, Vector3 center, Collider[] hits)
         {
             var sb = new StringBuilder(1024);
             sb.Append('{');
@@ -222,7 +222,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ bounds ============================
 
-        string DoBounds(int instanceId, string pathStr, string nameStr, bool includeChildren)
+        private string DoBounds(int instanceId, string pathStr, string nameStr, bool includeChildren)
         {
             Physics.SyncTransforms();
 
@@ -254,7 +254,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ ground_check ============================
 
-        string DoGround(int instanceId, string pathStr, string nameStr, string pointStr,
+        private string DoGround(int instanceId, string pathStr, string nameStr, string pointStr,
             string directionStr, float maxDistance, string layerName)
         {
             Physics.SyncTransforms();
@@ -312,7 +312,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ nearest ============================
 
-        string DoNearest(int instanceId, string pathStr, string nameStr, string pointStr,
+        private string DoNearest(int instanceId, string pathStr, string nameStr, string pointStr,
             int maxCount, string componentFilter, string tagFilter)
         {
             Vector3 from;
@@ -370,7 +370,7 @@ namespace UnityOpenMcpBridge.Spatial
             return sb.ToString();
         }
 
-        static void CollectNearest(GameObject go, Vector3 from, GameObject self,
+        private static void CollectNearest(GameObject go, Vector3 from, GameObject self,
             string componentFilter, string tagFilter, List<(GameObject, float)> outList)
         {
             var include = go != self;
@@ -387,7 +387,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ target resolution ============================
 
-        static GameObject ResolveTarget(int instanceId, string pathStr, string nameStr)
+        private static GameObject ResolveTarget(int instanceId, string pathStr, string nameStr)
         {
             if (instanceId != 0)
             {
@@ -410,7 +410,7 @@ namespace UnityOpenMcpBridge.Spatial
             return null;
         }
 
-        static GameObject FindByInstanceId(int instanceId)
+        private static GameObject FindByInstanceId(int instanceId)
         {
             for (var i = 0; i < SceneManager.sceneCount; i++)
             {
@@ -425,7 +425,7 @@ namespace UnityOpenMcpBridge.Spatial
             return null;
         }
 
-        static GameObject FindInHierarchyById(GameObject go, int instanceId)
+        private static GameObject FindInHierarchyById(GameObject go, int instanceId)
         {
             if (go.GetInstanceID() == instanceId) return go;
             foreach (Transform child in go.transform)
@@ -436,7 +436,7 @@ namespace UnityOpenMcpBridge.Spatial
             return null;
         }
 
-        static GameObject FindByPath(string path)
+        private static GameObject FindByPath(string path)
         {
             if (string.IsNullOrEmpty(path)) return null;
             var trimmed = path.Trim('/');
@@ -457,7 +457,7 @@ namespace UnityOpenMcpBridge.Spatial
             return null;
         }
 
-        static GameObject WalkPath(Transform current, string[] segments, int index)
+        private static GameObject WalkPath(Transform current, string[] segments, int index)
         {
             if (index >= segments.Length) return current.gameObject;
             foreach (Transform child in current)
@@ -471,7 +471,7 @@ namespace UnityOpenMcpBridge.Spatial
             return null;
         }
 
-        static GameObject FindByName(string name)
+        private static GameObject FindByName(string name)
         {
             if (string.IsNullOrEmpty(name)) return null;
             for (var i = 0; i < SceneManager.sceneCount; i++)
@@ -487,7 +487,7 @@ namespace UnityOpenMcpBridge.Spatial
             return null;
         }
 
-        static GameObject FindInHierarchyByName(GameObject go, string name)
+        private static GameObject FindInHierarchyByName(GameObject go, string name)
         {
             if (go.name == name) return go;
             foreach (Transform child in go.transform)
@@ -500,7 +500,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ bounds helper ============================
 
-        static Bounds ComputeWorldBounds(GameObject target, bool includeChildren, out bool hasBounds)
+        private static Bounds ComputeWorldBounds(GameObject target, bool includeChildren, out bool hasBounds)
         {
             hasBounds = false;
             var bounds = new Bounds(target.transform.position, Vector3.zero);
@@ -528,7 +528,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ path + vector helpers ============================
 
-        static string GetPath(GameObject go)
+        private static string GetPath(GameObject go)
         {
             if (go == null) return "";
             var t = go.transform;
@@ -545,7 +545,7 @@ namespace UnityOpenMcpBridge.Spatial
             return sb.ToString();
         }
 
-        static Vector3 ParseVec3(string s, string fieldName)
+        private static Vector3 ParseVec3(string s, string fieldName)
         {
             if (string.IsNullOrEmpty(s))
                 throw new ArgumentException($"'{fieldName}' (\"x,y,z\") is required.");
@@ -559,7 +559,7 @@ namespace UnityOpenMcpBridge.Spatial
             return new Vector3(x, y, z);
         }
 
-        static int ResolveLayerMask(string layerName)
+        private static int ResolveLayerMask(string layerName)
         {
             // A single layer name, else everything.
             if (!string.IsNullOrEmpty(layerName))
@@ -574,7 +574,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ formatting helpers ============================
 
-        static string Vec3Json(Vector3 v)
+        private static string Vec3Json(Vector3 v)
         {
             var sb = new StringBuilder(48);
             sb.Append('[');
@@ -585,11 +585,11 @@ namespace UnityOpenMcpBridge.Spatial
             return sb.ToString();
         }
 
-        static string Num(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
+        private static string Num(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
 
-        static string Num(float f) => f.ToString("0.###", CultureInfo.InvariantCulture);
+        private static string Num(float f) => f.ToString("0.###", CultureInfo.InvariantCulture);
 
-        static string ErrorJson(string code, string message)
+        private static string ErrorJson(string code, string message)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"error\":{\"code\":").Append(Esc(code));
@@ -598,7 +598,7 @@ namespace UnityOpenMcpBridge.Spatial
             return sb.ToString();
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "\"\"";
             var sb = new StringBuilder(s.Length + 8);

@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Linq;
@@ -442,15 +441,15 @@ namespace UnityOpenMcpExtensions.ProBuilder
         // Helpers
         // =====================================================================
 
-        static string PathRequired(string tool)
+        private static string PathRequired(string tool)
             => ProBuilderJson.Error("paths_hint_required",
                 $"{tool} is mutating; pass a non-empty paths_hint scoped to the host scene path.");
 
-        static string TargetNotFound()
+        private static string TargetNotFound()
             => ProBuilderJson.Error("target_not_found",
                 "No GameObject resolved. Address by instance_id > path > name.");
 
-        static bool TryParseShapeType(string s, out ShapeType shape, out string error)
+        private static bool TryParseShapeType(string s, out ShapeType shape, out string error)
         {
             error = null;
             if (string.IsNullOrWhiteSpace(s))
@@ -464,7 +463,7 @@ namespace UnityOpenMcpExtensions.ProBuilder
             return false;
         }
 
-        static bool TryParseExtrudeMethod(string s, out ExtrudeMethod method, out string error)
+        private static bool TryParseExtrudeMethod(string s, out ExtrudeMethod method, out string error)
         {
             error = null;
             if (string.IsNullOrWhiteSpace(s))
@@ -481,7 +480,7 @@ namespace UnityOpenMcpExtensions.ProBuilder
         // Resolve faces by index OR direction. Exactly one of face_indices /
         // face_direction is required. Returns false + sets outErrorEnvelope
         // (a structured JSON error) on any failure.
-        static bool ResolveFaces(ProBuilderMesh mesh,
+        private static bool ResolveFaces(ProBuilderMesh mesh,
             int[] faceIndices, string faceDirection,
             out int[] resolved, out string selectionMethod, out string errorEnvelope)
         {
@@ -547,7 +546,7 @@ namespace UnityOpenMcpExtensions.ProBuilder
             return true;
         }
 
-        static UnityEngine.Material LoadMaterial(string materialPath)
+        private static UnityEngine.Material LoadMaterial(string materialPath)
         {
             // Try as asset path first.
             if (materialPath.StartsWith("Assets/"))
@@ -565,7 +564,7 @@ namespace UnityOpenMcpExtensions.ProBuilder
             return null;
         }
 
-        static Vector3 ParseVector3(string s, Vector3 fallback)
+        private static Vector3 ParseVector3(string s, Vector3 fallback)
         {
             if (string.IsNullOrEmpty(s)) return fallback;
             var parts = s.Split(',');
@@ -583,7 +582,7 @@ namespace UnityOpenMcpExtensions.ProBuilder
         // to the indices facing it (dot >= DirectionThreshold). Faces that do
         // not match any axis land in "other". A face can only be claimed by
         // one direction (first match wins) so the buckets are disjoint.
-        static void AppendFaceDirectionSummary(StringBuilder sb, ProBuilderMesh mesh)
+        private static void AppendFaceDirectionSummary(StringBuilder sb, ProBuilderMesh mesh)
         {
             var faces = mesh.faces;
             var positions = mesh.positions;

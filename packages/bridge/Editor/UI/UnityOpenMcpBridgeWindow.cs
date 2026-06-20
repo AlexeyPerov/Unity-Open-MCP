@@ -1,9 +1,3 @@
-// Bridge runtime dashboard window (M4.5-1 shell, M4.5-2 status panel, M4.5-3 helper baseline,
-// M4.5-4 tools catalog, M4.5-5/6 runtime toggles + filter UX, M4.5-7/8/9 gate tab,
-// M4.5-10/11/12 activity log + settings tab + passive batch hint).
-// Tab navigation pattern adapted from
-//   /Users/alexeyperov/Projects/Unity-Scanner/Editor/UI/Window/UnityScannerWindow.cs
-// (copy/adapt only; no scanner orchestrator / categories / MCP glue imported).
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
@@ -28,11 +22,11 @@ namespace UnityOpenMcpBridge
 
     public class UnityOpenMcpBridgeWindow : EditorWindow
     {
-        const string MenuPath = "Tools/Unity Open MCP Bridge";
-        const string SelectedTabPref = "UOMCB_SelectedTab";
-        const string BindAddress = "127.0.0.1";
+        private const string MenuPath = "Tools/Unity Open MCP Bridge";
+        private const string SelectedTabPref = "UOMCB_SelectedTab";
+        private const string BindAddress = "127.0.0.1";
 
-        static readonly HttpClient SharedHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+        private static readonly HttpClient SharedHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
 
         [MenuItem(MenuPath)]
         public static void Launch()
@@ -41,50 +35,50 @@ namespace UnityOpenMcpBridge
             window.minSize = new Vector2(520, 360);
         }
 
-        BridgeWindowTab _currentTab;
-        Vector2 _contentScroll;
+        private BridgeWindowTab _currentTab;
+        private Vector2 _contentScroll;
 
-        string _lastPingResult = "";
-        MessageType _lastPingMessageType = MessageType.None;
-        bool _pingInFlight;
+        private string _lastPingResult = "";
+        private MessageType _lastPingMessageType = MessageType.None;
+        private bool _pingInFlight;
 
-        [NonSerialized] bool _stopConfirmPending;
-        [NonSerialized] double _stopConfirmDeadline;
+        [NonSerialized] private bool _stopConfirmPending;
+        [NonSerialized] private double _stopConfirmDeadline;
 
         // Tools tab state (M4.5-4/5/6)
         enum ToolFilterMode { All, Enabled, Disabled }
-        [NonSerialized] ToolFilterMode _toolFilter = ToolFilterMode.All;
-        [NonSerialized] string _toolSearch = "";
-        [NonSerialized] Vector2 _toolListScroll;
-        [NonSerialized] readonly HashSet<string> _toolFoldoutExpanded = new HashSet<string>();
+        [NonSerialized] private ToolFilterMode _toolFilter = ToolFilterMode.All;
+        [NonSerialized] private string _toolSearch = "";
+        [NonSerialized] private Vector2 _toolListScroll;
+        [NonSerialized] private readonly HashSet<string> _toolFoldoutExpanded = new HashSet<string>();
 
         // Gate tab state (M4.5-7/8/9)
-        [NonSerialized] string _manualValidateInput = "";
-        [NonSerialized] Vector2 _gateTabScroll;
-        [NonSerialized] Vector2 _gateLatestScroll;
-        [NonSerialized] Vector2 _gateCheckpointScroll;
-        [NonSerialized] Vector2 _gateManualResultScroll;
-        [NonSerialized] bool _validateInFlight;
-        [NonSerialized] BridgeManualValidateResult _lastManualResult;
-        [NonSerialized] readonly HashSet<string> _manualAssetFoldoutExpanded = new HashSet<string>();
-        [NonSerialized] bool _gateLatestFoldout = true;
-        [NonSerialized] bool _gateCheckpointFoldout = true;
-        [NonSerialized] bool _gateManualFoldout = true;
+        [NonSerialized] private string _manualValidateInput = "";
+        [NonSerialized] private Vector2 _gateTabScroll;
+        [NonSerialized] private Vector2 _gateLatestScroll;
+        [NonSerialized] private Vector2 _gateCheckpointScroll;
+        [NonSerialized] private Vector2 _gateManualResultScroll;
+        [NonSerialized] private bool _validateInFlight;
+        [NonSerialized] private BridgeManualValidateResult _lastManualResult;
+        [NonSerialized] private readonly HashSet<string> _manualAssetFoldoutExpanded = new HashSet<string>();
+        [NonSerialized] private bool _gateLatestFoldout = true;
+        [NonSerialized] private bool _gateCheckpointFoldout = true;
+        [NonSerialized] private bool _gateManualFoldout = true;
 
         // Activity tab state (M4.5-10)
-        [NonSerialized] Vector2 _activityTabScroll;
-        [NonSerialized] bool _activityVerboseFoldout = false;
-        [NonSerialized] bool _activityFilterToolRequests = true;
-        [NonSerialized] bool _activityFilterDisabled = true;
-        [NonSerialized] bool _activityFilterErrors = true;
-        [NonSerialized] bool _activityFilterPing = false;
-        [NonSerialized] bool _activityFilterResources = false;
-        [NonSerialized] string _activitySearch = "";
+        [NonSerialized] private Vector2 _activityTabScroll;
+        [NonSerialized] private bool _activityVerboseFoldout = false;
+        [NonSerialized] private bool _activityFilterToolRequests = true;
+        [NonSerialized] private bool _activityFilterDisabled = true;
+        [NonSerialized] private bool _activityFilterErrors = true;
+        [NonSerialized] private bool _activityFilterPing = false;
+        [NonSerialized] private bool _activityFilterResources = false;
+        [NonSerialized] private string _activitySearch = "";
 
         // Settings tab state (M4.5-11)
-        [NonSerialized] Vector2 _settingsTabScroll;
+        [NonSerialized] private Vector2 _settingsTabScroll;
 
-        void OnEnable()
+        private void OnEnable()
         {
             _currentTab = (BridgeWindowTab)EditorPrefs.GetInt(SelectedTabPref, (int)BridgeWindowTab.Status);
             EditorApplication.update -= RepaintTick;
@@ -101,7 +95,7 @@ namespace UnityOpenMcpBridge
             BridgeProjectSettings.Changed += RepaintTick;
         }
 
-        void OnDisable()
+        private void OnDisable()
         {
             EditorApplication.update -= RepaintTick;
             BridgeToolTogglePolicy.Changed -= RepaintTick;
@@ -112,7 +106,7 @@ namespace UnityOpenMcpBridge
             EditorPrefs.SetInt(SelectedTabPref, (int)_currentTab);
         }
 
-        void RepaintTick()
+        private void RepaintTick()
         {
             if (_stopConfirmPending && EditorApplication.timeSinceStartup >= _stopConfirmDeadline)
             {
@@ -122,14 +116,14 @@ namespace UnityOpenMcpBridge
             Repaint();
         }
 
-        void OnGUI()
+        private void OnGUI()
         {
             DrawToolbar();
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawContent();
         }
 
-        void DrawToolbar()
+        private void DrawToolbar()
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
 
@@ -157,7 +151,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndHorizontal();
         }
 
-        static string TabLabel(BridgeWindowTab tab)
+        private static string TabLabel(BridgeWindowTab tab)
         {
             return tab switch
             {
@@ -171,7 +165,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        void DrawContent()
+        private void DrawContent()
         {
             _contentScroll = EditorGUILayout.BeginScrollView(_contentScroll);
             switch (_currentTab)
@@ -198,13 +192,13 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndScrollView();
         }
 
-        static void DrawPlaceholderTab(string message)
+        private static void DrawPlaceholderTab(string message)
         {
             EditorGUILayout.Space(20);
             BridgeGUIUtilities.DrawLabelAtCenterHorizontally(message, new Color(0.7f, 0.7f, 0.7f));
         }
 
-        void DrawStatusTab()
+        private void DrawStatusTab()
         {
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("Bridge runtime", EditorStyles.boldLabel);
@@ -284,7 +278,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        void DrawRuntimeControls()
+        private void DrawRuntimeControls()
         {
             var running = BridgeHttpServer.IsRunning;
             EditorGUILayout.BeginHorizontal();
@@ -349,7 +343,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndHorizontal();
         }
 
-        void DrawLocalPing()
+        private void DrawLocalPing()
         {
             EditorGUILayout.Space(2);
             EditorGUILayout.BeginHorizontal();
@@ -363,7 +357,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndHorizontal();
         }
 
-        async Task RunLocalPingAsync()
+        private async Task RunLocalPingAsync()
         {
             _pingInFlight = true;
             try
@@ -391,9 +385,9 @@ namespace UnityOpenMcpBridge
 
         // ---------- Tools tab (M4.5-4/5/6) ----------
 
-        const string TokenEstimateNote = "Token estimate deferred in v1 (no fake heuristic surfaced).";
+        private const string TokenEstimateNote = "Token estimate deferred in v1 (no fake heuristic surfaced).";
 
-        void DrawToolsTab()
+        private void DrawToolsTab()
         {
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("Tools catalog", EditorStyles.boldLabel);
@@ -410,7 +404,7 @@ namespace UnityOpenMcpBridge
             DrawToolList(items);
         }
 
-        void DrawToolFilters(List<BridgeToolCatalogItem> items)
+        private void DrawToolFilters(List<BridgeToolCatalogItem> items)
         {
             int total = items?.Count ?? 0;
             int enabled = BridgeToolCatalog.CountEnabled(items);
@@ -453,7 +447,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndHorizontal();
         }
 
-        ToolFilterMode DrawFilterButton(ToolFilterMode mode, string label, ToolFilterMode current)
+        private ToolFilterMode DrawFilterButton(ToolFilterMode mode, string label, ToolFilterMode current)
         {
             var isCurrent = mode == current;
             var prev = GUI.color;
@@ -467,7 +461,7 @@ namespace UnityOpenMcpBridge
             return current;
         }
 
-        void DrawToolList(List<BridgeToolCatalogItem> items)
+        private void DrawToolList(List<BridgeToolCatalogItem> items)
         {
             if (items == null || items.Count == 0)
             {
@@ -499,7 +493,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        bool PassesFilter(BridgeToolCatalogItem item)
+        private bool PassesFilter(BridgeToolCatalogItem item)
         {
             bool disabled = BridgeToolTogglePolicy.IsDisabled(item.Name);
             return _toolFilter switch
@@ -510,7 +504,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        bool MatchesSearch(BridgeToolCatalogItem item, string search)
+        private bool MatchesSearch(BridgeToolCatalogItem item, string search)
         {
             if (string.IsNullOrEmpty(search)) return true;
             if (Contains(item.Name, search)) return true;
@@ -529,13 +523,13 @@ namespace UnityOpenMcpBridge
             return false;
         }
 
-        static bool Contains(string haystack, string needle)
+        private static bool Contains(string haystack, string needle)
         {
             if (string.IsNullOrEmpty(haystack) || string.IsNullOrEmpty(needle)) return false;
             return haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        void DrawToolRow(BridgeToolCatalogItem item)
+        private void DrawToolRow(BridgeToolCatalogItem item)
         {
             bool enabled = !BridgeToolTogglePolicy.IsDisabled(item.Name);
             bool expanded = _toolFoldoutExpanded.Contains(item.Name);
@@ -621,7 +615,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndVertical();
         }
 
-        static string BuildHintSummary(BridgeToolCatalogItem item)
+        private static string BuildHintSummary(BridgeToolCatalogItem item)
         {
             var parts = new List<string>(4);
             if (item.ReadOnlyHint) parts.Add("read-only");
@@ -637,7 +631,7 @@ namespace UnityOpenMcpBridge
 
         // ---------- Gate tab (M4.5-7/8/9) ----------
 
-        void DrawGateTab()
+        private void DrawGateTab()
         {
             _gateTabScroll = EditorGUILayout.BeginScrollView(_gateTabScroll);
             DrawGateDefaultPolicySection();
@@ -650,7 +644,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndScrollView();
         }
 
-        void DrawGateDefaultPolicySection()
+        private void DrawGateDefaultPolicySection()
         {
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("Project default gate mode", EditorStyles.boldLabel);
@@ -675,7 +669,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.LabelField("Storage", BridgeProjectSettings.SettingsPath ?? "(no project root)", EditorStyles.miniLabel);
         }
 
-        static GUIContent[] ModeLabels()
+        private static GUIContent[] ModeLabels()
         {
             var labels = new GUIContent[BridgeGateDefaultPolicy.ValidModes.Length];
             for (int i = 0; i < labels.Length; i++)
@@ -685,7 +679,7 @@ namespace UnityOpenMcpBridge
             return labels;
         }
 
-        static int IndexOfMode(string mode)
+        private static int IndexOfMode(string mode)
         {
             for (int i = 0; i < BridgeGateDefaultPolicy.ValidModes.Length; i++)
             {
@@ -694,7 +688,7 @@ namespace UnityOpenMcpBridge
             return 0;
         }
 
-        static string ModeDescriptor(string mode)
+        private static string ModeDescriptor(string mode)
         {
             return mode switch
             {
@@ -705,7 +699,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        void DrawGateLatestResultSection()
+        private void DrawGateLatestResultSection()
         {
             EditorGUILayout.Space(6);
             _gateLatestFoldout = EditorGUILayout.Foldout(_gateLatestFoldout, "Latest gate result (session, in-memory)", true);
@@ -786,7 +780,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndHorizontal();
         }
 
-        static string OutcomeLabel(GateOutcome outcome)
+        private static string OutcomeLabel(GateOutcome outcome)
         {
             return outcome switch
             {
@@ -798,7 +792,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        static Color OutcomeColor(GateOutcome outcome)
+        private static Color OutcomeColor(GateOutcome outcome)
         {
             return outcome switch
             {
@@ -809,7 +803,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        void DrawGateCheckpointHistorySection()
+        private void DrawGateCheckpointHistorySection()
         {
             EditorGUILayout.Space(6);
             _gateCheckpointFoldout = EditorGUILayout.Foldout(_gateCheckpointFoldout, "Checkpoint history (in-memory ring buffer)", true);
@@ -864,7 +858,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndScrollView();
         }
 
-        void DrawGateManualValidateSection()
+        private void DrawGateManualValidateSection()
         {
             EditorGUILayout.Space(6);
             _gateManualFoldout = EditorGUILayout.Foldout(_gateManualFoldout, "Manual validate (scoped, non-mutating)", true);
@@ -917,7 +911,7 @@ namespace UnityOpenMcpBridge
             DrawGateManualResult();
         }
 
-        void DrawGateManualResult()
+        private void DrawGateManualResult()
         {
             var result = _lastManualResult;
             if (result == null)
@@ -972,7 +966,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndScrollView();
         }
 
-        void DrawManualAssetGroup(BridgeManualAssetGroup group)
+        private void DrawManualAssetGroup(BridgeManualAssetGroup group)
         {
             var expanded = _manualAssetFoldoutExpanded.Contains(group.AssetPath);
             var header = $"{group.AssetPath}    errors: {group.ErrorCount}    warnings: {group.WarningCount}";
@@ -1018,11 +1012,11 @@ namespace UnityOpenMcpBridge
 
         // ---------- Activity tab (M4.5-10) ----------
 
-        const string ActivityPrivacyNote =
+        private const string ActivityPrivacyNote =
             "Default capture is metadata only (no request/response bodies). " +
             "Verbose mode adds a truncated request snippet for debugging.";
 
-        void DrawActivityTab()
+        private void DrawActivityTab()
         {
             _activityTabScroll = EditorGUILayout.BeginScrollView(_activityTabScroll);
 
@@ -1045,7 +1039,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndScrollView();
         }
 
-        void DrawActivityControls()
+        private void DrawActivityControls()
         {
             EditorGUILayout.Space(2);
             EditorGUILayout.BeginHorizontal();
@@ -1079,7 +1073,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        void DrawActivityFilters()
+        private void DrawActivityFilters()
         {
             EditorGUILayout.Space(2);
             EditorGUILayout.LabelField("Filters", EditorStyles.miniBoldLabel);
@@ -1100,7 +1094,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndHorizontal();
         }
 
-        void DrawActivityList()
+        private void DrawActivityList()
         {
             var all = BridgeActivityLog.Events;
             if (all == null || all.Count == 0)
@@ -1133,7 +1127,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        bool PassesActivityFilter(BridgeActivityEvent evt)
+        private bool PassesActivityFilter(BridgeActivityEvent evt)
         {
             return evt.Kind switch
             {
@@ -1148,7 +1142,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        bool MatchesActivitySearch(BridgeActivityEvent evt, string search)
+        private bool MatchesActivitySearch(BridgeActivityEvent evt, string search)
         {
             if (evt == null || string.IsNullOrEmpty(search)) return true;
             if (Contains(evt.ToolName, search)) return true;
@@ -1158,7 +1152,7 @@ namespace UnityOpenMcpBridge
             return false;
         }
 
-        void DrawActivityRow(BridgeActivityEvent evt)
+        private void DrawActivityRow(BridgeActivityEvent evt)
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
@@ -1207,7 +1201,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndVertical();
         }
 
-        static string ActivityKindLabel(BridgeActivityKind kind)
+        private static string ActivityKindLabel(BridgeActivityKind kind)
         {
             return kind switch
             {
@@ -1222,7 +1216,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        static Color ActivityKindColor(BridgeActivityKind kind)
+        private static Color ActivityKindColor(BridgeActivityKind kind)
         {
             return kind switch
             {
@@ -1237,7 +1231,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        static string ActivityOutcomeLabel(BridgeActivityOutcome outcome)
+        private static string ActivityOutcomeLabel(BridgeActivityOutcome outcome)
         {
             return outcome switch
             {
@@ -1249,7 +1243,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        static Color ActivityOutcomeColor(BridgeActivityOutcome outcome)
+        private static Color ActivityOutcomeColor(BridgeActivityOutcome outcome)
         {
             return outcome switch
             {
@@ -1263,7 +1257,7 @@ namespace UnityOpenMcpBridge
 
         // ---------- Passive batch hint (M4.5-12) ----------
 
-        void DrawActivityPassiveBatchHint()
+        private void DrawActivityPassiveBatchHint()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Batch workflows", EditorStyles.miniBoldLabel);
@@ -1277,11 +1271,11 @@ namespace UnityOpenMcpBridge
 
         // ---------- Settings tab (M4.5-11) ----------
 
-        const string SettingsPersistenceNote =
+        private const string SettingsPersistenceNote =
             "Project-level runtime settings persist in `.unity-open-mcp/settings.json` at the project root. " +
             "Changes are saved immediately. v1 surface only — no Project Settings provider.";
 
-        void DrawSettingsTab()
+        private void DrawSettingsTab()
         {
             _settingsTabScroll = EditorGUILayout.BeginScrollView(_settingsTabScroll);
 
@@ -1310,7 +1304,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndScrollView();
         }
 
-        void DrawAutoStartSection()
+        private void DrawAutoStartSection()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Auto-start bridge listener", EditorStyles.miniBoldLabel);
@@ -1329,7 +1323,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        void DrawDefaultGateModeSection()
+        private void DrawDefaultGateModeSection()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Project default gate mode", EditorStyles.miniBoldLabel);
@@ -1349,7 +1343,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        void DrawAuthSection()
+        private void DrawAuthSection()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Bridge auth", EditorStyles.miniBoldLabel);
@@ -1372,7 +1366,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        void DrawBindAddressSection()
+        private void DrawBindAddressSection()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Listener bind", EditorStyles.miniBoldLabel);
@@ -1405,7 +1399,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static GUIContent[] BindAddressLabels()
+        private static GUIContent[] BindAddressLabels()
         {
             var labels = new GUIContent[BridgeBindAddress.ValidAddresses.Length];
             for (int i = 0; i < labels.Length; i++)
@@ -1415,7 +1409,7 @@ namespace UnityOpenMcpBridge
             return labels;
         }
 
-        static int IndexOfBindAddress(string address)
+        private static int IndexOfBindAddress(string address)
         {
             for (int i = 0; i < BridgeBindAddress.ValidAddresses.Length; i++)
             {
@@ -1424,7 +1418,7 @@ namespace UnityOpenMcpBridge
             return 0;
         }
 
-        static string BindAddressDescriptor(string address)
+        private static string BindAddressDescriptor(string address)
         {
             return address switch
             {
@@ -1434,7 +1428,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        void DrawDenyListsSection()
+        private void DrawDenyListsSection()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Power-tool deny lists", EditorStyles.miniBoldLabel);
@@ -1455,7 +1449,7 @@ namespace UnityOpenMcpBridge
             DrawDenyListSummary("execute_menu", menuActive, menuDefaults);
         }
 
-        static void DrawDenyListSummary(string tool, string[] active, string[] defaults)
+        private static void DrawDenyListSummary(string tool, string[] active, string[] defaults)
         {
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(tool, GUILayout.Width(120));
@@ -1471,7 +1465,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndHorizontal();
         }
 
-        void DrawAuditLogSection()
+        private void DrawAuditLogSection()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("On-disk audit log", EditorStyles.miniBoldLabel);
@@ -1495,7 +1489,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static GUIContent[] AuthModeLabels()
+        private static GUIContent[] AuthModeLabels()
         {
             var labels = new GUIContent[BridgeAuthPolicy.ValidModes.Length];
             for (int i = 0; i < labels.Length; i++)
@@ -1505,7 +1499,7 @@ namespace UnityOpenMcpBridge
             return labels;
         }
 
-        static int IndexOfAuthMode(string mode)
+        private static int IndexOfAuthMode(string mode)
         {
             for (int i = 0; i < BridgeAuthPolicy.ValidModes.Length; i++)
             {
@@ -1514,7 +1508,7 @@ namespace UnityOpenMcpBridge
             return 0;
         }
 
-        static string AuthModeDescriptor(string mode)
+        private static string AuthModeDescriptor(string mode)
         {
             return mode switch
             {
@@ -1524,7 +1518,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        void DrawActivityLogSection()
+        private void DrawActivityLogSection()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Activity log", EditorStyles.miniBoldLabel);
@@ -1543,7 +1537,7 @@ namespace UnityOpenMcpBridge
                 MessageType.None);
         }
 
-        void DrawSettingsStorageSection()
+        private void DrawSettingsStorageSection()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Storage", EditorStyles.miniBoldLabel);
@@ -1573,7 +1567,7 @@ namespace UnityOpenMcpBridge
                 MessageType.None);
         }
 
-        void RevealSettingsFile()
+        private void RevealSettingsFile()
         {
             var path = BridgeProjectSettings.SettingsPath;
             if (string.IsNullOrEmpty(path)) return;
@@ -1587,7 +1581,7 @@ namespace UnityOpenMcpBridge
         }
 
         // Passive batch hint shared between the Activity and Settings tabs (M4.5-12).
-        void DrawSettingsPassiveBatchHint()
+        private void DrawSettingsPassiveBatchHint()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Batch workflows", EditorStyles.miniBoldLabel);
@@ -1600,13 +1594,13 @@ namespace UnityOpenMcpBridge
 
         // ---------- Extensions tab (M16 Plan 10) ----------
 
-        [NonSerialized] Vector2 _extensionsTabScroll;
+        [NonSerialized] private Vector2 _extensionsTabScroll;
 
         // The extension pack catalog ships with the bridge assembly, so this
         // tab needs no live network round-trip — every pack entry is static
         // metadata. Installed detection uses the same registry scan result
         // the Tools tab already depends on.
-        void DrawExtensionsTab()
+        private void DrawExtensionsTab()
         {
             _extensionsTabScroll = EditorGUILayout.BeginScrollView(_extensionsTabScroll);
 
@@ -1642,7 +1636,7 @@ namespace UnityOpenMcpBridge
         }
 
         // Returns true when the pack is installed in this project.
-        bool DrawExtensionPackRow(ExtensionPack pack)
+        private bool DrawExtensionPackRow(ExtensionPack pack)
         {
             var installed = IsExtensionPackInstalled(pack);
 
@@ -1710,7 +1704,7 @@ namespace UnityOpenMcpBridge
         // A pack is installed when at least one of its tool ids is registered
         // (the extension assembly is loaded → BridgeToolRegistry picked it up).
         // Planned packs (shipped:false) report as not-installed by definition.
-        static bool IsExtensionPackInstalled(ExtensionPack pack)
+        private static bool IsExtensionPackInstalled(ExtensionPack pack)
         {
             if (!pack.Shipped || pack.ToolIds == null || pack.ToolIds.Length == 0)
                 return false;

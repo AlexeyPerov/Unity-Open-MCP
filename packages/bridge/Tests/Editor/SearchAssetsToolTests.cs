@@ -1,7 +1,3 @@
-// EditMode tests for the M9 Plan 2 compact-search data producer.
-// Covers the missing-parameter branch and the empty-result envelope shape.
-// Structured GameObject/component matching runs against the live demo project
-// — covered by the manual checklist walkthrough.
 using NUnit.Framework;
 using UnityOpenMcpBridge.MetaTools;
 

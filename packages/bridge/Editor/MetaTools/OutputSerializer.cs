@@ -26,7 +26,7 @@ namespace UnityOpenMcpBridge.MetaTools
 
     static class OutputSerializer
     {
-        const int EnumerableSafetyCap = 100_000;
+        private const int EnumerableSafetyCap = 100_000;
 
         public static string Serialize(object value)
         {
@@ -39,7 +39,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return SerializeInternal(value, 0, options, new HashSet<object>(ReferenceComparer.Instance));
         }
 
-        static string SerializeInternal(object value, int depth, SerializeOptions opts, HashSet<object> visited)
+        private static string SerializeInternal(object value, int depth, SerializeOptions opts, HashSet<object> visited)
         {
             if (value == null) return null;
 
@@ -122,7 +122,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return SerializeComposite(value, type, depth, opts, visited);
         }
 
-        static string SerializeComposite(object value, Type type, int depth, SerializeOptions opts, HashSet<object> visited)
+        private static string SerializeComposite(object value, Type type, int depth, SerializeOptions opts, HashSet<object> visited)
         {
             if (value is IDictionary dict)
                 return SerializeDictionary(dict, depth, opts, visited);
@@ -133,12 +133,12 @@ namespace UnityOpenMcpBridge.MetaTools
             return ReflectObject(value, type, depth, opts, visited);
         }
 
-        static string SerializeUnityObject(UnityEngine.Object obj)
+        private static string SerializeUnityObject(UnityEngine.Object obj)
         {
             return ObjectHandle.Serialize(obj);
         }
 
-        static string SerializeDictionary(IDictionary dict, int depth, SerializeOptions opts, HashSet<object> visited)
+        private static string SerializeDictionary(IDictionary dict, int depth, SerializeOptions opts, HashSet<object> visited)
         {
             var items = new List<string>();
             foreach (DictionaryEntry entry in dict)
@@ -151,7 +151,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return "{" + string.Join(",", items) + "}";
         }
 
-        static string SerializeEnumerable(IEnumerable enumerable, int depth, SerializeOptions opts, HashSet<object> visited)
+        private static string SerializeEnumerable(IEnumerable enumerable, int depth, SerializeOptions opts, HashSet<object> visited)
         {
             var items = new List<string>();
             var taken = 0;
@@ -185,7 +185,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return "{\"items\":[" + string.Join(",", items) + "],\"truncated\":" + truncated + "}";
         }
 
-        static string ReflectObject(object value, Type type, int depth, SerializeOptions opts, HashSet<object> visited)
+        private static string ReflectObject(object value, Type type, int depth, SerializeOptions opts, HashSet<object> visited)
         {
             var members = new List<string>();
             members.Add("\"$type\":\"" + EscapeJsonString(type.Name) + "\"");
@@ -220,12 +220,12 @@ namespace UnityOpenMcpBridge.MetaTools
             return "{" + string.Join(",", members) + "}";
         }
 
-        static string ErrorMarker(Exception ex)
+        private static string ErrorMarker(Exception ex)
         {
             return "\"" + EscapeJsonString("<error: " + ex.GetType().Name + ">") + "\"";
         }
 
-        static string SafeToString(object value)
+        private static string SafeToString(object value)
         {
             try { return value.ToString(); }
             catch { return value.GetType().Name; }

@@ -49,7 +49,7 @@ namespace UnityOpenMcpBridge.TestRunner
             return TestRunnerService.BuildStartedJson(run_id, mode);
         }
 
-        static void StartRun(Filter filter, string runId, string mode, bool playMode, bool includePasses)
+        private static void StartRun(Filter filter, string runId, string mode, bool playMode, bool includePasses)
         {
             var results = new List<TestResultInfo>();
             TestRunnerApi api = null;

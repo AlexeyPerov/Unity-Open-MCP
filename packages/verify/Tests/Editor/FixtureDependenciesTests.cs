@@ -10,10 +10,10 @@ namespace UnityOpenMcpVerify.Tests
     [TestFixture]
     public class FixtureDependenciesTests
     {
-        const string BrokenRefFixture = "Assets/Fixtures/BrokenRefFixture.prefab";
-        const string HealthyFixture = "Assets/Fixtures/HealthyFixture.prefab";
+        private const string BrokenRefFixture = "Assets/Fixtures/BrokenRefFixture.prefab";
+        private const string HealthyFixture = "Assets/Fixtures/HealthyFixture.prefab";
 
-        DependenciesRule rule;
+        private DependenciesRule rule;
 
         [SetUp]
         public void SetUp()

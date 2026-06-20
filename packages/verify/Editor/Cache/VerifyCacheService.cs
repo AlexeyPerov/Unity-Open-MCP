@@ -12,10 +12,10 @@ namespace UnityOpenMcpVerify.Cache
 
         public static readonly TimeSpan DefaultTtl = TimeSpan.FromSeconds(60);
 
-        static HealthSummarySnapshot _lastSnapshot;
-        static DateTime _lastWriteUtc;
-        static TimeSpan _ttl = DefaultTtl;
-        static bool _hasData;
+        private static HealthSummarySnapshot _lastSnapshot;
+        private static DateTime _lastWriteUtc;
+        private static TimeSpan _ttl = DefaultTtl;
+        private static bool _hasData;
 
         public static TimeSpan Ttl
         {
@@ -75,7 +75,7 @@ namespace UnityOpenMcpVerify.Cache
             return age > _ttl;
         }
 
-        static HealthSummarySnapshot EmptySnapshot()
+        private static HealthSummarySnapshot EmptySnapshot()
         {
             return new HealthSummarySnapshot
             {

@@ -14,9 +14,9 @@ namespace UnityOpenMcpVerify.Tests
     [TestFixture]
     public class DependenciesRuleTests
     {
-        const string FixtureRoot = "Assets/Tests/VerifyFixtures/Dependencies";
+        private const string FixtureRoot = "Assets/Tests/VerifyFixtures/Dependencies";
 
-        DependenciesRule rule;
+        private DependenciesRule rule;
 
         [SetUp]
         public void SetUp()
@@ -217,7 +217,7 @@ namespace UnityOpenMcpVerify.Tests
         // Fixture helpers
         // -------------------------------------------------------------------
 
-        static System.Collections.IEnumerator CreateMinimalPrefab(string path)
+        private static System.Collections.IEnumerator CreateMinimalPrefab(string path)
         {
             EnsureDirectory(Path.GetDirectoryName(path));
             var go = new GameObject("VerifyDepsFixture");
@@ -232,7 +232,7 @@ namespace UnityOpenMcpVerify.Tests
         // Injects an external-guid PPtr edge into a freshly saved prefab YAML
         // pointing at a GUID that does not resolve, so the dependencies rule sees
         // a declared edge whose target asset does not load.
-        static void InjectBrokenGuidReference(string prefabPath, string fakeGuid)
+        private static void InjectBrokenGuidReference(string prefabPath, string fakeGuid)
         {
             var yaml = File.ReadAllText(prefabPath);
 
@@ -251,7 +251,7 @@ namespace UnityOpenMcpVerify.Tests
             File.WriteAllText(prefabPath, yaml);
         }
 
-        static void EnsureDirectory(string path)
+        private static void EnsureDirectory(string path)
         {
             if (!AssetDatabase.IsValidFolder(path))
             {

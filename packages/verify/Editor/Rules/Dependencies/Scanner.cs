@@ -1,8 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Categories/Dependencies/DependenciesScanner.cs +
-// Editor/UI/Window/FindReferencesWindow.cs (RefsMapBuilder). Forward-graph view of what
-// each scoped asset depends on. Cycle detection walks the scoped subset of the forward
-// graph (a cycle through assets outside the scope is not reported).
-
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -47,7 +42,7 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
             DetectCycles(byPath, scoped);
         }
 
-        static void CollectDeclaredEdges(string assetPath, AssetDependencyData data)
+        private static void CollectDeclaredEdges(string assetPath, AssetDependencyData data)
         {
             var lines = TryReadLines(assetPath);
             if (lines.Count == 0) return;
@@ -92,7 +87,7 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
         // forward walk stays one hop and cycle detection runs over declared edges).
         // We additionally fold in any m_AssetGUID edges that GetDependencies misses
         // (AssetReference<> fields are not standard PPtrs).
-        static IEnumerable<string> GetUnityDependencies(string assetPath, AssetDependencyData data)
+        private static IEnumerable<string> GetUnityDependencies(string assetPath, AssetDependencyData data)
         {
             var deps = new HashSet<string>(StringComparer.Ordinal);
             string[] unityDeps;
@@ -119,7 +114,7 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
         // DFS over the scoped forward graph; a back-edge into the current recursion
         // stack marks a cycle. We only follow edges whose target is itself in scope
         // (cycles through unscoped assets are not actionable from a paths_hint view).
-        static void DetectCycles(Dictionary<string, AssetDependencyData> byPath, HashSet<string> scoped)
+        private static void DetectCycles(Dictionary<string, AssetDependencyData> byPath, HashSet<string> scoped)
         {
             var visited = new HashSet<string>(StringComparer.Ordinal);
             var stack = new HashSet<string>(StringComparer.Ordinal);
@@ -155,7 +150,7 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
             }
         }
 
-        static List<string> ExtractCycle(List<string> pathStack, string entryNode)
+        private static List<string> ExtractCycle(List<string> pathStack, string entryNode)
         {
             var cycle = new List<string>();
             var idx = pathStack.IndexOf(entryNode);
@@ -165,7 +160,7 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
             return cycle;
         }
 
-        static List<string> TryReadLines(string assetPath)
+        private static List<string> TryReadLines(string assetPath)
         {
             var result = new List<string>();
             try
@@ -181,7 +176,7 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
             return result;
         }
 
-        static bool IsRealGuid(string guid)
+        private static bool IsRealGuid(string guid)
         {
             if (string.IsNullOrEmpty(guid)) return false;
             if (guid.Length != 32) return false;

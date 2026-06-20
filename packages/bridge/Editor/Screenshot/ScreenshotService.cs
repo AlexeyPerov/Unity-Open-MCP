@@ -20,8 +20,8 @@ namespace UnityOpenMcpBridge.Screenshot
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".unity-open-mcp", "screenshots");
 
-        const TextureFormat CaptureFormat = TextureFormat.RGBA32;
-        const bool CaptureMipChain = false;
+        private const TextureFormat CaptureFormat = TextureFormat.RGBA32;
+        private const bool CaptureMipChain = false;
 
         // ---- public API ----
 
@@ -111,7 +111,7 @@ namespace UnityOpenMcpBridge.Screenshot
 
         // ---- helpers ----
 
-        static string CaptureCamera(Camera cam, int width, int height, string outPath)
+        private static string CaptureCamera(Camera cam, int width, int height, string outPath)
         {
             var rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
             var prevTarget = cam.targetTexture;
@@ -146,7 +146,7 @@ namespace UnityOpenMcpBridge.Screenshot
             }
         }
 
-        static Texture2D RenderQuad(Camera cam, int width, int height)
+        private static Texture2D RenderQuad(Camera cam, int width, int height)
         {
             var rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
             var prevTarget = cam.targetTexture;
@@ -175,7 +175,7 @@ namespace UnityOpenMcpBridge.Screenshot
             }
         }
 
-        static string CompositeToPng(Texture2D[] quads, int qw, int qh, string outPath)
+        private static string CompositeToPng(Texture2D[] quads, int qw, int qh, string outPath)
         {
             int totalW = qw * 2;
             int totalH = qh * 2;
@@ -222,7 +222,7 @@ namespace UnityOpenMcpBridge.Screenshot
             return outPath;
         }
 
-        static Bounds? ComputeBounds(GameObject go)
+        private static Bounds? ComputeBounds(GameObject go)
         {
             var renderers = go.GetComponentsInChildren<Renderer>();
             if (renderers == null || renderers.Length == 0) return null;
@@ -233,7 +233,7 @@ namespace UnityOpenMcpBridge.Screenshot
             return b;
         }
 
-        static CameraClearFlags ParseClearFlags(string background)
+        private static CameraClearFlags ParseClearFlags(string background)
         {
             return background switch
             {
@@ -243,7 +243,7 @@ namespace UnityOpenMcpBridge.Screenshot
             };
         }
 
-        static string PathStamp(string label)
+        private static string PathStamp(string label)
         {
             var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff");
             var name = $"screenshot-{label}-{stamp}.png";

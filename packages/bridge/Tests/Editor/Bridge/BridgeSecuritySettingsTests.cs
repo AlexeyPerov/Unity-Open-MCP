@@ -21,7 +21,7 @@ namespace UnityOpenMcpBridge.Tests
             ResetSecuritySettings();
         }
 
-        static void ResetSecuritySettings()
+        private static void ResetSecuritySettings()
         {
             var data = BridgeProjectSettings.Data;
             data.csharpDenyPatterns = null;

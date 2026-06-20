@@ -53,7 +53,7 @@ namespace UnityOpenMcpBridge.TypedTools
     {
         // Cap for the build-target enumeration so a future Unity version with a
         // very large BuildTarget enum does not blow the response budget.
-        const int MaxTargets = 64;
+        private const int MaxTargets = 64;
 
         // ============================ Build reads =========================
 
@@ -298,7 +298,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // commas, with strings/objects/arrays skipped over so commas inside
         // them do not split). Unlike JsonBody.GetObjectArray, this preserves
         // bare-string entries alongside object entries.
-        static List<string> ParseArrayEntries(string rawArray)
+        private static List<string> ParseArrayEntries(string rawArray)
         {
             var result = new List<string>();
             if (string.IsNullOrEmpty(rawArray)) return result;
@@ -706,9 +706,9 @@ namespace UnityOpenMcpBridge.TypedTools
         // dispatch each entry to the per-domain applier, accumulate applied keys
         // and per-key warnings, and persist via AssetDatabase.SaveAssets (or
         // mark the scene dirty for lighting). Returns a uniform ok envelope.
-        delegate string KeyedApplier(string key, string valueRaw);
+        private delegate string KeyedApplier(string key, string valueRaw);
 
-        static ToolDispatchResult ApplyKeyedSettings(string body, string action, KeyedApplier applier)
+        private static ToolDispatchResult ApplyKeyedSettings(string body, string action, KeyedApplier applier)
         {
             var patches = JsonBody.GetObjectArray(body, "fields");
             if (patches == null || patches.Length == 0)
@@ -761,7 +761,7 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Returns null on success, an error/warning string on failure.
-        static string ApplyPlayerSetting(string key, string valueRaw)
+        private static string ApplyPlayerSetting(string key, string valueRaw)
         {
             try
             {
@@ -812,7 +812,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static string ApplyQualitySetting(string key, string valueRaw)
+        private static string ApplyQualitySetting(string key, string valueRaw)
         {
             try
             {
@@ -846,7 +846,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static string ApplyPhysicsSetting(string key, string valueRaw)
+        private static string ApplyPhysicsSetting(string key, string valueRaw)
         {
             try
             {
@@ -887,7 +887,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static string ApplyLightingSetting(string key, string valueRaw)
+        private static string ApplyLightingSetting(string key, string valueRaw)
         {
             try
             {
@@ -954,7 +954,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // RenderSettings is scene-scoped — writes only persist when the active
         // scene is marked dirty. MarkSceneDirty covers that without forcing a
         // save (the agent calls scene_save when ready).
-        static void MarkSceneDirty()
+        private static void MarkSceneDirty()
         {
             try { UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
                 UnityEngine.SceneManagement.SceneManager.GetActiveScene()); }
@@ -967,17 +967,17 @@ namespace UnityOpenMcpBridge.TypedTools
         // is present-but-empty, so we need a presence check to distinguish
         // "field absent" from "field present but empty". Mirrors
         // ProfilerSessionTools.HasField.
-        static bool HasField(string json, string key)
+        private static bool HasField(string json, string key)
         {
             if (string.IsNullOrEmpty(json)) return false;
             return json.IndexOf("\"" + key + "\"", StringComparison.Ordinal) >= 0;
         }
 
-        static NamedBuildTarget ResolveNamedBuildTarget()
+        private static NamedBuildTarget ResolveNamedBuildTarget()
             => NamedBuildTarget.FromBuildTargetGroup(
                 EditorUserBuildSettings.selectedBuildTargetGroup);
 
-        static List<string> SplitDefines(string raw)
+        private static List<string> SplitDefines(string raw)
         {
             var result = new List<string>();
             if (string.IsNullOrEmpty(raw)) return result;
@@ -993,7 +993,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // PlayerSettings knobs (e.g. activeInputHandler) are not exposed as
         // public properties and have to go through SerializedObject. Mirrors
         // UCP EditorSettingsController.ReadPlayerSettingInt.
-        static int ReadSerializedPlayerInt(string propertyName)
+        private static int ReadSerializedPlayerInt(string propertyName)
         {
             var so = new SerializedObject(GetPlayerSettingsAsset());
             var prop = so.FindProperty(propertyName);
@@ -1002,7 +1002,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return value;
         }
 
-        static void WriteSerializedPlayerInt(string propertyName, int value)
+        private static void WriteSerializedPlayerInt(string propertyName, int value)
         {
             var so = new SerializedObject(GetPlayerSettingsAsset());
             var prop = so.FindProperty(propertyName);
@@ -1014,7 +1014,7 @@ namespace UnityOpenMcpBridge.TypedTools
             so.Dispose();
         }
 
-        static UnityEngine.Object GetPlayerSettingsAsset()
+        private static UnityEngine.Object GetPlayerSettingsAsset()
         {
             var asset = Unsupported.GetSerializedAssetInterfaceSingleton("PlayerSettings");
             if (asset == null)
@@ -1023,7 +1023,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return asset;
         }
 
-        static int ParseActiveInputHandler(string valueRaw, out string error)
+        private static int ParseActiveInputHandler(string valueRaw, out string error)
         {
             error = null;
             if (string.IsNullOrEmpty(valueRaw))
@@ -1056,7 +1056,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static string DescribeActiveInputHandler(int value)
+        private static string DescribeActiveInputHandler(int value)
         {
             switch (value)
             {
@@ -1070,7 +1070,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Value coercion helpers. valueRaw is the raw JSON value (already
         // trimmed of surrounding whitespace by JsonBody.GetRawValue). Strings
         // arrive with surrounding quotes; numbers / bools do not.
-        static string AsString(string valueRaw)
+        private static string AsString(string valueRaw)
         {
             if (string.IsNullOrEmpty(valueRaw)) return "";
             var v = valueRaw.Trim();
@@ -1080,7 +1080,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return v;
         }
 
-        static bool AsBool(string valueRaw)
+        private static bool AsBool(string valueRaw)
         {
             if (string.IsNullOrEmpty(valueRaw)) return false;
             var v = valueRaw.Trim();
@@ -1090,7 +1090,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return !string.IsNullOrEmpty(AsString(valueRaw));
         }
 
-        static int AsInt(string valueRaw)
+        private static int AsInt(string valueRaw)
         {
             if (string.IsNullOrEmpty(valueRaw)) return 0;
             if (int.TryParse(valueRaw.Trim(), NumberStyles.Integer,
@@ -1101,7 +1101,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return 0;
         }
 
-        static float AsFloat(string valueRaw)
+        private static float AsFloat(string valueRaw)
         {
             if (string.IsNullOrEmpty(valueRaw)) return 0f;
             if (float.TryParse(valueRaw.Trim(), NumberStyles.Float,
@@ -1111,21 +1111,21 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Parse a JSON array of numbers as a Vector3. Returns null on shape
         // mismatch so the applier can surface a per-key warning.
-        static Vector3? AsVector3(string valueRaw)
+        private static Vector3? AsVector3(string valueRaw)
         {
             var parts = ParseNumberArray(valueRaw);
             if (parts == null || parts.Length < 3) return null;
             return new Vector3(parts[0], parts[1], parts[2]);
         }
 
-        static Vector2? AsVector2(string valueRaw)
+        private static Vector2? AsVector2(string valueRaw)
         {
             var parts = ParseNumberArray(valueRaw);
             if (parts == null || parts.Length < 2) return null;
             return new Vector2(parts[0], parts[1]);
         }
 
-        static Color? AsColor(string valueRaw)
+        private static Color? AsColor(string valueRaw)
         {
             var parts = ParseNumberArray(valueRaw);
             if (parts == null || parts.Length < 3) return null;
@@ -1133,7 +1133,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 parts.Length >= 4 ? parts[3] : 1f);
         }
 
-        static float[] ParseNumberArray(string valueRaw)
+        private static float[] ParseNumberArray(string valueRaw)
         {
             if (string.IsNullOrEmpty(valueRaw)) return null;
             var v = valueRaw.Trim();
@@ -1152,7 +1152,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // ------------------------- JSON building --------------------------
 
-        static string BuildReportJson(BuildReport report, string outputPath, BuildOptions options)
+        private static string BuildReportJson(BuildReport report, string outputPath, BuildOptions options)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"status\":\"ok\",\"action\":\"build\"");
@@ -1176,7 +1176,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
-        static void AppendWarnings(StringBuilder sb, List<string> warnings)
+        private static void AppendWarnings(StringBuilder sb, List<string> warnings)
         {
             if (warnings == null || warnings.Count == 0) return;
             sb.Append(",\"warnings\":[");
@@ -1188,18 +1188,18 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(']');
         }
 
-        static string Num(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
-        static string Num(float f) => f.ToString("0.###", CultureInfo.InvariantCulture);
+        private static string Num(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
+        private static string Num(float f) => f.ToString("0.###", CultureInfo.InvariantCulture);
 
         // Quote a string for inline JSON (with surrounding quotes).
-        static string Q(string s)
+        private static string Q(string s)
         {
             if (s == null) return "\"\"";
             return "\"" + EscName(s) + "\"";
         }
 
         // Escape a string body for inline JSON (no surrounding quotes).
-        static string EscName(string s)
+        private static string EscName(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

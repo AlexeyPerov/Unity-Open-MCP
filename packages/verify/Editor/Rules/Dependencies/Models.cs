@@ -1,8 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Categories/Dependencies/DependenciesScanner.cs +
-// Editor/UI/Window/FindReferencesWindow.cs (RefsMapBuilder). Forward-graph view of what
-// each scoped asset depends on — complements the reverse ReferenceGraph (find_references)
-// and the per-PPtr-field MissingReferencesRule.
-
 using System.Collections.Generic;
 
 namespace UnityOpenMcpVerify.Rules.Dependencies

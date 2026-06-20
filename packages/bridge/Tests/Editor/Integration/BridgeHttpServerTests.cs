@@ -19,9 +19,9 @@ namespace UnityOpenMcpBridge.Tests
         // var happens to be set. If the listener isn't up (port collision,
         // auth refusal, etc.) Assert.Ignore keeps the suite green instead of
         // burning a 10s HttpClient timeout per test.
-        static string BaseUrl =>
+        private static string BaseUrl =>
             $"http://127.0.0.1:{BridgeHttpServer.Port}";
-        static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+        private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
 
         [SetUp]
         public void EnsureBridgeRunning()
@@ -101,7 +101,7 @@ namespace UnityOpenMcpBridge.Tests
         // coroutines instead: SendAsync runs on a ThreadPool thread while the
         // coroutine yields, letting update pump the dispatch queue.
 
-        static IEnumerator PostAndWait(string path, string json, Action<string> assertBody)
+        private static IEnumerator PostAndWait(string path, string json, Action<string> assertBody)
         {
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             var task = HttpClient.PostAsync($"{BaseUrl}{path}", content);

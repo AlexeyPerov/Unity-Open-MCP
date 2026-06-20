@@ -129,7 +129,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        static SerializeOptions BuildSerializeOptions(string body)
+        private static SerializeOptions BuildSerializeOptions(string body)
         {
             var maxDepth = JsonBody.GetInt(body, "max_depth", 4);
             var maxItems = JsonBody.GetInt(body, "max_items", 100);
@@ -140,7 +140,7 @@ namespace UnityOpenMcpBridge.MetaTools
             };
         }
 
-        static Type FindType(string typeName, string assemblyName)
+        private static Type FindType(string typeName, string assemblyName)
         {
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
 
@@ -176,7 +176,7 @@ namespace UnityOpenMcpBridge.MetaTools
         // arg_type_names (full name or simple name), then optionally bind
         // generic type arguments when the method is generic. Returns null when
         // no overload matches.
-        static MethodInfo ResolveOverload(Type type, string methodName, BindingFlags bindingFlags,
+        private static MethodInfo ResolveOverload(Type type, string methodName, BindingFlags bindingFlags,
             string[] argTypeNames, string[] genericArgTypeNames)
         {
             MethodInfo[] candidates;
@@ -219,7 +219,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return fallback;
         }
 
-        static bool TypeNameMatches(Type paramType, string requestedName)
+        private static bool TypeNameMatches(Type paramType, string requestedName)
         {
             if (string.IsNullOrEmpty(requestedName)) return false;
             // Full-name match first; fall back to simple name (matching FindType).
@@ -232,7 +232,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return false;
         }
 
-        static MethodInfo BindGenericMethod(MethodInfo method, string[] genericArgTypeNames)
+        private static MethodInfo BindGenericMethod(MethodInfo method, string[] genericArgTypeNames)
         {
             var typeArgs = new Type[genericArgTypeNames.Length];
             for (int i = 0; i < genericArgTypeNames.Length; i++)
@@ -250,7 +250,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        static readonly Dictionary<string, string> ClrAliases = new()
+        private static readonly Dictionary<string, string> ClrAliases = new()
         {
             { "int", "Int32" },
             { "uint", "UInt32" },
@@ -269,7 +269,7 @@ namespace UnityOpenMcpBridge.MetaTools
             { "object", "Object" },
         };
 
-        static object[] ConvertArgs(List<object> args, ParameterInfo[] parameters)
+        private static object[] ConvertArgs(List<object> args, ParameterInfo[] parameters)
         {
             if (args == null || args.Count == 0) return Array.Empty<object>();
             if (parameters == null || parameters.Length == 0) return Array.Empty<object>();
@@ -281,7 +281,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return result;
         }
 
-        static object ConvertArg(object value, Type targetType)
+        private static object ConvertArg(object value, Type targetType)
         {
             if (value == null)
             {

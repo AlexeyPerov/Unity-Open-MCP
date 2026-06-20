@@ -1,21 +1,4 @@
-// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
-// EditMode tests for the Particle System extension pack.
-//
-// Covers the deterministic contracts that protect the agent surface:
-//
-//   1. Both catalog tools are discovered by BridgeToolRegistry (no core
-//      bridge edits — proves the [BridgeToolType] assembly scan works for
-//      packs).
-//   2. modify refuses to run without paths_hint (the gate contract).
-//   3. modify validates its required parameters (module, fields_json).
-//   4. get on a scene ParticleSystem reports runtime state + main module.
-//   5. modify → get round-trip: set main.maxParticles then read it back.
-//   6. Unknown module / unknown field surface as structured errors (no thrown
-//      exceptions to MCP).
-//
-// These tests run in EditMode against the live demo project. They create a
-// transient ParticleSystem GameObject per test and clean up after themselves.
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -26,7 +9,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt.Tests
     public class ParticleSystemToolsTests
     {
         // The 2 catalog tool ids this pack must register.
-        static readonly string[] ExpectedTools =
+        private static readonly string[] ExpectedTools =
         {
             "unity_open_mcp_particle_system_get",
             "unity_open_mcp_particle_system_modify",
@@ -73,7 +56,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt.Tests
         // which layer the agent-side test runner exercises.
         // -----------------------------------------------------------------
 
-        static void AssertErrorEnvelope(ToolDispatchResult result, string expectedCode)
+        private static void AssertErrorEnvelope(ToolDispatchResult result, string expectedCode)
         {
             Assert.IsNotNull(result);
             bool sawEnvelope = (result.Output ?? "").Contains("\"code\":\"" + expectedCode + "\"");

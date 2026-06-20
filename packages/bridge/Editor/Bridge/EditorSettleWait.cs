@@ -27,9 +27,9 @@ namespace UnityOpenMcpBridge
     // update (and thus refreshing the flag) while this loop sleeps.
     public static class EditorSettleWait
     {
-        const int TickMs = 100;
-        const int EditorSettleCapMs = 5000;
-        const int RestartSettleCapMs = 60000;
+        private const int TickMs = 100;
+        private const int EditorSettleCapMs = 5000;
+        private const int RestartSettleCapMs = 60000;
 
         // Blocks the calling (worker) thread until isCompiling flips false or
         // the policy cap elapses. Returns the elapsed wait in milliseconds.

@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Utilities/RegexPatterns/USSharedRegex.cs
-
 using System.Text.RegularExpressions;
 
 namespace UnityOpenMcpVerify.Internals.RegexPatterns

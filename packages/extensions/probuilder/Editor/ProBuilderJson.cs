@@ -1,4 +1,3 @@
-// Deliberate use of deprecated EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Text;
 using UnityEngine;

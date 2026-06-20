@@ -1,4 +1,3 @@
-// EditMode tests for the M16 Plan 1 typed shader tools (ShaderTools).
 using NUnit.Framework;
 using UnityOpenMcpBridge.TypedTools;
 

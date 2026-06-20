@@ -7,14 +7,14 @@ namespace UnityOpenMcpVerify
 {
     public static class VerifyRunner
     {
-        const long CheckpointBudgetMs = 2000;
+        private const long CheckpointBudgetMs = 2000;
 
-        static readonly List<IVerifyRule> RegisteredRules = new();
+        private static readonly List<IVerifyRule> RegisteredRules = new();
 
         public static IReadOnlyList<IVerifyRule> Rules => RegisteredRules;
 
         [UnityEditor.InitializeOnLoadMethod]
-        static void RegisterDefaults()
+        private static void RegisterDefaults()
         {
             if (RegisteredRules.Count == 0)
             {

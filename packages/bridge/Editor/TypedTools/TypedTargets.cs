@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
@@ -47,7 +46,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return null;
         }
 
-        static GameObject FindInHierarchyById(GameObject go, int instanceId)
+        private static GameObject FindInHierarchyById(GameObject go, int instanceId)
         {
             if (go.GetInstanceID() == instanceId) return go;
             foreach (Transform child in go.transform)
@@ -79,7 +78,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return null;
         }
 
-        static GameObject WalkPath(Transform current, string[] segments, int index)
+        private static GameObject WalkPath(Transform current, string[] segments, int index)
         {
             if (index >= segments.Length) return current.gameObject;
             foreach (Transform child in current)
@@ -109,7 +108,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return null;
         }
 
-        static GameObject FindInHierarchyByName(GameObject go, string name)
+        private static GameObject FindInHierarchyByName(GameObject go, string name)
         {
             if (go.name == name) return go;
             foreach (Transform child in go.transform)

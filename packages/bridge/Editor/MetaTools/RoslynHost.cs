@@ -10,9 +10,9 @@ namespace UnityOpenMcpBridge.MetaTools
 {
     static class RoslynHost
     {
-        static Assembly _ca;
-        static Assembly _cacs;
-        static bool _initAttempted;
+        private static Assembly _ca;
+        private static Assembly _cacs;
+        private static bool _initAttempted;
 
         public static bool IsAvailable { get; private set; }
         public static string LastInitError { get; private set; }
@@ -41,14 +41,14 @@ namespace UnityOpenMcpBridge.MetaTools
             return false;
         }
 
-        static IEnumerable<string> GetRoslynDirectoryCandidates(string contentsPath)
+        private static IEnumerable<string> GetRoslynDirectoryCandidates(string contentsPath)
         {
             yield return Path.Combine(contentsPath, "Resources", "Scripting", "MonoBleedingEdge", "lib", "mono", "msbuild", "Current", "bin", "Roslyn");
             yield return Path.Combine(contentsPath, "DotNetSdkRoslyn");
             yield return Path.Combine(contentsPath, "Tools", "roslyn");
         }
 
-        static bool TryLoadRoslyn(string roslynDir)
+        private static bool TryLoadRoslyn(string roslynDir)
         {
             if (!Directory.Exists(roslynDir))
                 return false;
@@ -99,7 +99,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        static (byte[] pe, string errors) CompileInternal(string source)
+        private static (byte[] pe, string errors) CompileInternal(string source)
         {
             var syntaxTreeType = _ca.GetType("Microsoft.CodeAnalysis.SyntaxTree");
             var metadataRefType = _ca.GetType("Microsoft.CodeAnalysis.MetadataReference");
@@ -189,7 +189,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return (peStream.ToArray(), null);
         }
 
-        static (object syntaxTree, string error) ParseSyntaxTree(string source, Type syntaxTreeType)
+        private static (object syntaxTree, string error) ParseSyntaxTree(string source, Type syntaxTreeType)
         {
             var cstType = _cacs.GetType("Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree");
             var parseText = FindStaticMethod(cstType, "ParseText", typeof(string));
@@ -213,7 +213,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return (tree, null);
         }
 
-        static List<object> BuildMetadataReferences(Type metadataRefType)
+        private static List<object> BuildMetadataReferences(Type metadataRefType)
         {
             var createFromAssembly = FindStaticMethodMinimal(metadataRefType, "CreateFromAssembly", typeof(Assembly));
             var createFromFile = FindStaticMethod(metadataRefType, "CreateFromFile", typeof(string));
@@ -245,7 +245,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return references;
         }
 
-        static MethodInfo FindStaticMethod(Type type, string name, Type firstParamType)
+        private static MethodInfo FindStaticMethod(Type type, string name, Type firstParamType)
         {
             return type.GetMethods(BindingFlags.Public | BindingFlags.Static)
                 .Where(m => m.Name == name &&
@@ -256,7 +256,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 .FirstOrDefault();
         }
 
-        static MethodInfo FindStaticMethodMinimal(Type type, string name, Type firstParamType)
+        private static MethodInfo FindStaticMethodMinimal(Type type, string name, Type firstParamType)
         {
             return type.GetMethods(BindingFlags.Public | BindingFlags.Static)
                 .Where(m => m.Name == name &&
@@ -266,7 +266,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 .FirstOrDefault();
         }
 
-        static MethodInfo FindInstanceMethod(Type type, string name, Func<ParameterInfo, bool> firstParamMatches)
+        private static MethodInfo FindInstanceMethod(Type type, string name, Func<ParameterInfo, bool> firstParamMatches)
         {
             return type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
                 .Where(m => m.Name == name &&
@@ -277,13 +277,13 @@ namespace UnityOpenMcpBridge.MetaTools
                 .FirstOrDefault();
         }
 
-        static bool ParameterTypeMatches(Type parameterType, Type expectedType)
+        private static bool ParameterTypeMatches(Type parameterType, Type expectedType)
         {
             return parameterType == expectedType ||
                    string.Equals(parameterType.FullName, expectedType.FullName, StringComparison.Ordinal);
         }
 
-        static object InvokeWithOptionalDefaults(MethodBase method, object target, params object[] providedArgs)
+        private static object InvokeWithOptionalDefaults(MethodBase method, object target, params object[] providedArgs)
         {
             var parameters = method.GetParameters();
             var args = new object[parameters.Length];

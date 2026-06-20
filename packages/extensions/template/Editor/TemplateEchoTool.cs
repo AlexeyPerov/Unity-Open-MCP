@@ -82,7 +82,7 @@ namespace UnityOpenMcpExtensions.Template
             return sb.ToString();
         }
 
-        static string ErrorJson(string code, string message)
+        private static string ErrorJson(string code, string message)
         {
             var sb = new StringBuilder(128);
             sb.Append("{\"error\":{\"code\":").Append(Esc(code));
@@ -91,7 +91,7 @@ namespace UnityOpenMcpExtensions.Template
             return sb.ToString();
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "\"\"";
             var sb = new StringBuilder(s.Length + 8);

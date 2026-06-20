@@ -1,8 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Categories/Dependencies/DependenciesIssueMapper.cs.
-// Forward-graph issues. Distinct from missing_references (per-PPtr field view) and
-// find_references (reverse-only): broken_dependency catches forward asset-graph edges
-// that do not resolve, dependency_cycle catches self-referential forward cycles.
-
 using System.Collections.Generic;
 using System.Linq;
 
@@ -40,7 +35,7 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
             }
         }
 
-        static VerifyIssue MakeIssue(
+        private static VerifyIssue MakeIssue(
             AssetDependencyData asset, string code, string description,
             VerifySeverity severity)
         {

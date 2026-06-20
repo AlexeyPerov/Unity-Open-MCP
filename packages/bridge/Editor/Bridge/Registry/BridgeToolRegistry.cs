@@ -8,7 +8,7 @@ namespace UnityOpenMcpBridge
 {
     public static class BridgeToolRegistry
     {
-        static readonly Dictionary<string, BridgeToolEntry> _tools = new();
+        private static readonly Dictionary<string, BridgeToolEntry> _tools = new();
 
         public static int Count => _tools.Count;
 
@@ -31,7 +31,7 @@ namespace UnityOpenMcpBridge
             Debug.Log($"[BridgeToolRegistry] Registered {_tools.Count} typed tool(s)");
         }
 
-        static void ScanAssembly(Assembly assembly)
+        private static void ScanAssembly(Assembly assembly)
         {
             foreach (var type in assembly.GetTypes())
             {
@@ -109,7 +109,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static object[] ExtractArguments(BridgeToolEntry entry, string body)
+        private static object[] ExtractArguments(BridgeToolEntry entry, string body)
         {
             if (entry.Parameters.Length == 0)
                 return Array.Empty<object>();

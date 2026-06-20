@@ -1,7 +1,3 @@
-// EditMode tests for the M9 Plan 1 reserialize round-trip meta-tool.
-// Covers parameter parsing and pre-flight validation branches that do NOT
-// invoke AssetDatabase.ForceReserializeAssets (those run in EditMode against
-// the live demo project and would mutate fixtures).
 using NUnit.Framework;
 using UnityOpenMcpBridge.MetaTools;
 using UnityEditor;

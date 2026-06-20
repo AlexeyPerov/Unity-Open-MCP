@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
@@ -267,11 +266,11 @@ namespace UnityOpenMcpExtensions.Animation
         // Helpers
         // =====================================================================
 
-        static string PathRequired()
+        private static string PathRequired()
             => AnimationJson.Error("paths_hint_required",
                 "animation tool is mutating; pass a non-empty paths_hint scoped to the .anim asset path.");
 
-        static AnimationClip LoadClip(string assetPath, out string errorEnvelope)
+        private static AnimationClip LoadClip(string assetPath, out string errorEnvelope)
         {
             errorEnvelope = null;
             if (!AnimationJson.ValidateAssetPath(assetPath, AnimationJson.ClipExtension,
@@ -291,7 +290,7 @@ namespace UnityOpenMcpExtensions.Animation
             return clip;
         }
 
-        static void ApplyModification(AnimationClip clip, Modification mod,
+        private static void ApplyModification(AnimationClip clip, Modification mod,
             List<AnimationEvent> events, List<string> applied)
         {
             switch (mod.Type)
@@ -339,7 +338,7 @@ namespace UnityOpenMcpExtensions.Animation
             }
         }
 
-        static void ApplySetCurve(AnimationClip clip, Modification mod)
+        private static void ApplySetCurve(AnimationClip clip, Modification mod)
         {
             if (string.IsNullOrEmpty(mod.ComponentType))
                 throw new System.Exception("componentType is required for SetCurve.");
@@ -362,7 +361,7 @@ namespace UnityOpenMcpExtensions.Animation
             clip.SetCurve(mod.RelativePath ?? string.Empty, type, mod.PropertyName, curve);
         }
 
-        static void ApplyRemoveCurve(AnimationClip clip, Modification mod)
+        private static void ApplyRemoveCurve(AnimationClip clip, Modification mod)
         {
             if (string.IsNullOrEmpty(mod.ComponentType))
                 throw new System.Exception("componentType is required for RemoveCurve.");
@@ -403,7 +402,7 @@ namespace UnityOpenMcpExtensions.Animation
                 AnimationUtility.SetObjectReferenceCurve(clip, pair.Key, pair.Value);
         }
 
-        static void ApplyAddEvent(List<AnimationEvent> events, Modification mod)
+        private static void ApplyAddEvent(List<AnimationEvent> events, Modification mod)
         {
             if (!mod.Time.HasValue)
                 throw new System.Exception("time is required for AddEvent.");
@@ -423,7 +422,7 @@ namespace UnityOpenMcpExtensions.Animation
         // Resolve a System.Type by name. Accepts the full name (preferred) or
         // a bare name; falls back to a couple of common namespace prefixes so
         // agents can pass 'Transform' or 'UnityEngine.Transform' interchangeably.
-        static System.Type ResolveComponentType(string name)
+        private static System.Type ResolveComponentType(string name)
         {
             var t = System.Type.GetType(name);
             if (t != null) return t;
@@ -450,7 +449,7 @@ namespace UnityOpenMcpExtensions.Animation
             throw new System.Exception($"Could not resolve component type '{name}'. Pass the full name (e.g. 'UnityEngine.Transform').");
         }
 
-        static void AppendBinding(StringBuilder sb, EditorCurveBinding binding, int keyframeCount)
+        private static void AppendBinding(StringBuilder sb, EditorCurveBinding binding, int keyframeCount)
         {
             sb.Append('{');
             sb.Append("\"path\":").Append(AnimationJson.Esc(binding.path)).Append(',');
@@ -462,7 +461,7 @@ namespace UnityOpenMcpExtensions.Animation
             sb.Append('}');
         }
 
-        static void AppendEvent(StringBuilder sb, AnimationEvent evt)
+        private static void AppendEvent(StringBuilder sb, AnimationEvent evt)
         {
             sb.Append('{');
             sb.Append("\"time\":").Append(evt.time.ToString("R", CultureInfo.InvariantCulture)).Append(',');
@@ -476,7 +475,7 @@ namespace UnityOpenMcpExtensions.Animation
         // Collect the asset paths that actually got a clip created — we don't
         // track this inline above so we re-derive it from the input minus the
         // error entries. (errors entries are prefixed with the original path.)
-        static List<string> CreatedPaths(string[] assetPaths, List<string> errors)
+        private static List<string> CreatedPaths(string[] assetPaths, List<string> errors)
         {
             var errorPaths = new HashSet<string>();
             foreach (var e in errors)
@@ -496,7 +495,7 @@ namespace UnityOpenMcpExtensions.Animation
             return result;
         }
 
-        static string JsonStringArray(List<string> items)
+        private static string JsonStringArray(List<string> items)
         {
             var sb = new StringBuilder();
             sb.Append('[');

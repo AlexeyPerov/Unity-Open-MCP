@@ -1,18 +1,3 @@
-// Unified tools catalog model for the bridge window Tools tab.
-//
-// Combines hardcoded meta-tools (the KnownTools set in BridgeHttpServer) with
-// registry-discovered typed tools (BridgeToolRegistry) into a single read-only
-// list that the UI can render. The catalog intentionally surfaces only the
-// metadata an agent (or operator) needs to decide what to call:
-//
-//   - name, title, source (hardcoded vs registry)
-//   - mutating / read-only
-//   - gate hints (enforce / warn / off / n/a)
-//   - read-only / idempotent / destructive hints
-//   - parameter summaries (name : type) derived from attribute or
-//     hand-authored metadata
-//
-// Token estimate is deliberately omitted in v1 per questions-9 Q11.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -51,7 +36,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static string FormatDefault(object value)
+        private static string FormatDefault(object value)
         {
             if (value == null) return "null";
             if (value is string s) return $"\"{s}\"";
@@ -79,7 +64,7 @@ namespace UnityOpenMcpBridge
         // Hardcoded meta-tools that BridgeHttpServer dispatches directly.
         // Mirrors the KnownTools set in BridgeHttpServer.cs so the catalog stays
         // honest about what is actually dispatchable in the current session.
-        static readonly (string Name, string Title, bool IsMutating, string Gate)[] HardcodedTools =
+        private static readonly (string Name, string Title, bool IsMutating, string Gate)[] HardcodedTools =
         {
             ("unity_open_mcp_execute_csharp", "Execute C#", true,  "enforce"),
             ("unity_open_mcp_invoke_method",  "Invoke Method", true,  "enforce"),
@@ -179,7 +164,7 @@ namespace UnityOpenMcpBridge
             return string.Join(", ", item.Parameters.ConvertAll(p => p.Display));
         }
 
-        static string GateModeToString(GateMode mode)
+        private static string GateModeToString(GateMode mode)
         {
             return mode switch
             {
@@ -190,7 +175,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        static List<BridgeToolParameterSummary> RegistryParameterSummary(BridgeToolEntry entry)
+        private static List<BridgeToolParameterSummary> RegistryParameterSummary(BridgeToolEntry entry)
         {
             var list = new List<BridgeToolParameterSummary>();
             if (entry?.Parameters == null) return list;
@@ -210,7 +195,7 @@ namespace UnityOpenMcpBridge
             return list;
         }
 
-        static List<BridgeToolParameterSummary> HardcodedParameterSummary(string toolName)
+        private static List<BridgeToolParameterSummary> HardcodedParameterSummary(string toolName)
         {
             // Mirror the input schemas in specs/architecture/mcp-tools.md so the
             // Tools tab metadata matches what agents actually send. Keep this list
@@ -242,7 +227,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static List<BridgeToolParameterSummary> P(params string[] specs)
+        private static List<BridgeToolParameterSummary> P(params string[] specs)
         {
             var list = new List<BridgeToolParameterSummary>(specs.Length);
             foreach (var s in specs)
@@ -272,7 +257,7 @@ namespace UnityOpenMcpBridge
             return list;
         }
 
-        static string FriendlyTypeName(Type t)
+        private static string FriendlyTypeName(Type t)
         {
             if (t == null) return "object";
             if (t == typeof(string)) return "string";

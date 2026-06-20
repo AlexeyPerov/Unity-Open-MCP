@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
@@ -385,7 +384,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return new InstanceResolve { Ok = true, GameObject = go, Name = go.name };
         }
 
-        static PrimitiveType? ParsePrimitive(string raw)
+        private static PrimitiveType? ParsePrimitive(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return null;
             return raw.ToLowerInvariant() switch
@@ -400,7 +399,7 @@ namespace UnityOpenMcpBridge.TypedTools
             };
         }
 
-        static void ApplyTransform(Transform t, Vector3 position, Vector3 rotationEuler, Vector3 scale, bool localSpace)
+        private static void ApplyTransform(Transform t, Vector3 position, Vector3 rotationEuler, Vector3 scale, bool localSpace)
         {
             if (localSpace)
             {
@@ -414,7 +413,7 @@ namespace UnityOpenMcpBridge.TypedTools
             t.localScale = scale;
         }
 
-        static bool Matches(GameObject go, string nameContains, string tag, string component)
+        private static bool Matches(GameObject go, string nameContains, string tag, string component)
         {
             if (!string.IsNullOrEmpty(nameContains) && go.name.IndexOf(nameContains, System.StringComparison.Ordinal) < 0)
                 return false;
@@ -425,21 +424,21 @@ namespace UnityOpenMcpBridge.TypedTools
             return true;
         }
 
-        static void CollectMatches(GameObject go, List<GameObject> sink, string nameContains, string tag, string component)
+        private static void CollectMatches(GameObject go, List<GameObject> sink, string nameContains, string tag, string component)
         {
             if (Matches(go, nameContains, tag, component)) sink.Add(go);
             foreach (Transform child in go.transform)
                 CollectMatches(child.gameObject, sink, nameContains, tag, component);
         }
 
-        static bool IsTagValid(string tag)
+        private static bool IsTagValid(string tag)
         {
             if (string.IsNullOrEmpty(tag)) return false;
             try { return UnityInternalEditorUtilityTagsContains(tag); }
             catch { return false; }
         }
 
-        static bool UnityInternalEditorUtilityTagsContains(string tag)
+        private static bool UnityInternalEditorUtilityTagsContains(string tag)
         {
             // UnityEditorInternal.InternalEditorUtility.tags — kept behind a
             // reflection shim so this file compiles against Unity versions
@@ -449,7 +448,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return false;
         }
 
-        static string StripQuotes(string s)
+        private static string StripQuotes(string s)
         {
             if (string.IsNullOrEmpty(s)) return s;
             s = s.Trim();
@@ -489,7 +488,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
-        static void AppendTransform(StringBuilder sb, Transform t)
+        private static void AppendTransform(StringBuilder sb, Transform t)
         {
             sb.Append("{\"position\":");
             AppendVector(sb, t.position);
@@ -510,7 +509,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append('}');
         }
 
-        static void AppendVector(StringBuilder sb, Vector3 v)
+        private static void AppendVector(StringBuilder sb, Vector3 v)
         {
             sb.Append('[');
             sb.Append(v.x.ToString("R", CultureInfo.InvariantCulture));
@@ -519,7 +518,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(']');
         }
 
-        static string BuildGameObjectResult(GameObject go, string action)
+        private static string BuildGameObjectResult(GameObject go, string action)
         {
             var summary = BuildGameObjectSummary(go);
             var sb = new StringBuilder(16 + summary.Length + action.Length);
@@ -530,7 +529,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
-        static void MarkActiveSceneDirty()
+        private static void MarkActiveSceneDirty()
         {
             var scene = EditorSceneManager.GetActiveScene();
             if (scene.IsValid()) EditorSceneManager.MarkSceneDirty(scene);

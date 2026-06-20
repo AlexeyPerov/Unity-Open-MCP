@@ -1,8 +1,4 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
-// EditMode tests for the M16 Plan 1 typed prefab tools (PrefabTools).
-// Covers parameter parsing and resolver branches that do NOT drive Unity
-// prefab mutating APIs (no scene is loaded in EditMode by default).
 using NUnit.Framework;
 using UnityEngine;
 using UnityOpenMcpBridge.TypedTools;

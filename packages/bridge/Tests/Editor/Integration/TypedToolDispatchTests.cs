@@ -16,9 +16,9 @@ namespace UnityOpenMcpBridge.Tests
         // the tests work whether or not UNITY_OPEN_MCP_BRIDGE_PORT is set.
         // [SetUp] skips cleanly when the listener isn't up instead of
         // exhausting the suite budget on 10s-per-test HttpClient timeouts.
-        static string BaseUrl =>
+        private static string BaseUrl =>
             $"http://127.0.0.1:{BridgeHttpServer.Port}";
-        static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+        private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
 
         [SetUp]
         public void EnsureBridgeRunning()
@@ -33,7 +33,7 @@ namespace UnityOpenMcpBridge.Tests
         // yields, letting update pump the dispatch queue. A synchronous
         // [Test] would block the main thread and time out.
 
-        static IEnumerator PostAndWait(string path, string json, Action<string> assertBody)
+        private static IEnumerator PostAndWait(string path, string json, Action<string> assertBody)
         {
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             var task = HttpClient.PostAsync($"{BaseUrl}{path}", content);
@@ -85,9 +85,9 @@ namespace UnityOpenMcpBridge.Tests
 
     public class ResourceEndpointTests
     {
-        static string BaseUrl =>
+        private static string BaseUrl =>
             $"http://127.0.0.1:{BridgeHttpServer.Port}";
-        static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+        private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
 
         [SetUp]
         public void EnsureBridgeRunning()
@@ -117,7 +117,7 @@ namespace UnityOpenMcpBridge.Tests
 
         // Resource dispatch routes through MainThreadDispatcher — must be a
         // [UnityTest] coroutine so update can pump while the HTTP call runs.
-        static IEnumerator GetAndWait(string path, Action<string> assertBody)
+        private static IEnumerator GetAndWait(string path, Action<string> assertBody)
         {
             var task = HttpClient.GetAsync($"{BaseUrl}{path}");
             while (!task.IsCompleted) yield return null;
@@ -149,9 +149,9 @@ namespace UnityOpenMcpBridge.Tests
 
     public class GateIntegrationTypedToolTests
     {
-        static string BaseUrl =>
+        private static string BaseUrl =>
             $"http://127.0.0.1:{BridgeHttpServer.Port}";
-        static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+        private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
 
         [SetUp]
         public void EnsureBridgeRunning()
@@ -162,7 +162,7 @@ namespace UnityOpenMcpBridge.Tests
 
         // All of these dispatch tools through MainThreadDispatcher, so they
         // run as [UnityTest] coroutines (see TypedToolDispatchTests for why).
-        static IEnumerator PostAndWait(string path, string json, Action<string> assertBody)
+        private static IEnumerator PostAndWait(string path, string json, Action<string> assertBody)
         {
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             var task = HttpClient.PostAsync($"{BaseUrl}{path}", content);

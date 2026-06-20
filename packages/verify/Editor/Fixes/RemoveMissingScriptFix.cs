@@ -67,7 +67,7 @@ namespace UnityOpenMcpVerify.Fixes
             };
         }
 
-        static FixResult FixPrefab(string assetPath)
+        private static FixResult FixPrefab(string assetPath)
         {
             var go = PrefabUtility.LoadPrefabContents(assetPath);
             if (go == null)
@@ -105,7 +105,7 @@ namespace UnityOpenMcpVerify.Fixes
             }
         }
 
-        static FixResult FixScene(string assetPath)
+        private static FixResult FixScene(string assetPath)
         {
             var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(assetPath);
             if (!scene.isLoaded)
@@ -133,7 +133,7 @@ namespace UnityOpenMcpVerify.Fixes
             };
         }
 
-        static int RemoveMissingScriptsRecursive(GameObject go)
+        private static int RemoveMissingScriptsRecursive(GameObject go)
         {
             var total = GameObjectUtility.RemoveMonoBehavioursWithMissingScript(go);
             foreach (Transform child in go.transform)

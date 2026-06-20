@@ -34,7 +34,7 @@ namespace UnityOpenMcpBridge
     // practice. The .tmp file path is per-PID to avoid collisions.
     public static class BridgeInstanceLock
     {
-        const string TempSuffix = ".tmp";
+        private const string TempSuffix = ".tmp";
 
         // State values written into the lock. Mirror the TS-side parser in
         // mcp-server/src/instance-discovery.ts (InstanceState type).
@@ -48,18 +48,18 @@ namespace UnityOpenMcpBridge
         // Last-written snapshot, kept in memory so UpdateState can rewrite
         // only the fields that changed without re-reading the file. Volatile
         // read/written from main + worker threads.
-        static volatile bool _acquired;
-        static string _acquiredProjectPath;
-        static int _acquiredPort;
-        static string _acquiredProjectHash;
-        static int _pid;
-        static DateTime _startedAt;
+        private static volatile bool _acquired;
+        private static string _acquiredProjectPath;
+        private static int _acquiredPort;
+        private static string _acquiredProjectHash;
+        private static int _pid;
+        private static DateTime _startedAt;
 
         // M14 — per-session bearer token. Always minted on Acquire so the MCP
         // server can send it regardless of the project's authMode; enforcement
         // is decided by BridgeAuthPolicy at request time. Read by the HTTP
         // auth check (BridgeHttpServer) and mirrored into the lock JSON below.
-        static string _authToken;
+        private static string _authToken;
 
         public static bool IsAcquired => _acquired;
         public static string CurrentProjectPath => _acquiredProjectPath;
@@ -169,7 +169,7 @@ namespace UnityOpenMcpBridge
 
         // ----- internals -----
 
-        static void WriteLock(string state, bool isPlaying, bool isCompiling, DateTime now)
+        private static void WriteLock(string state, bool isPlaying, bool isCompiling, DateTime now)
         {
             var path = InstancePortResolver.LockPath(_acquiredProjectPath);
             var dir = Path.GetDirectoryName(path);
@@ -185,7 +185,7 @@ namespace UnityOpenMcpBridge
                 File.Move(tmp, path);
         }
 
-        static string BuildJson(string state, bool isPlaying, bool isCompiling, DateTime now)
+        private static string BuildJson(string state, bool isPlaying, bool isCompiling, DateTime now)
         {
             var sb = new StringBuilder(512);
             sb.Append('{');
@@ -209,7 +209,7 @@ namespace UnityOpenMcpBridge
         }
 
         // JSON-encode a string value with surrounding quotes. null → "null".
-        static string Escape(string raw)
+        private static string Escape(string raw)
         {
             if (raw == null) return "null";
             var sb = new StringBuilder(raw.Length + 8);
@@ -221,9 +221,9 @@ namespace UnityOpenMcpBridge
 
         // BridgeSession.UnityVersion etc. are strings but may be null before
         // init; coerce to empty string so Escape produces "" not null.
-        static string NullToEmpty(string s) => s ?? "";
+        private static string NullToEmpty(string s) => s ?? "";
 
-        static void AppendEscaped(StringBuilder sb, string s)
+        private static void AppendEscaped(StringBuilder sb, string s)
         {
             for (int i = 0; i < s.Length; i++)
             {
@@ -243,14 +243,14 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static string IsoUtc(DateTime dt)
+        private static string IsoUtc(DateTime dt)
         {
             // Round-trip ISO-8601 in UTC. Universal sortable pattern + Z is
             // the simplest form every JSON parser accepts.
             return dt.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fffZ", CultureInfo.InvariantCulture);
         }
 
-        static void EnsureInstancesDir()
+        private static void EnsureInstancesDir()
         {
             var dir = InstancePortResolver.InstancesDir;
             if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
@@ -261,7 +261,7 @@ namespace UnityOpenMcpBridge
         // alone" — a malformed lock for someone else's instance is not ours
         // to touch. We DO touch our own project's lock below in WriteLock
         // (overwrite), so a stale own-project lock gets replaced regardless.
-        static void SweepStaleLocks()
+        private static void SweepStaleLocks()
         {
             var dir = InstancePortResolver.InstancesDir;
             if (!Directory.Exists(dir)) return;
@@ -297,7 +297,7 @@ namespace UnityOpenMcpBridge
 
         // Minimal pid extractor: pull the integer value of "pid":N out of the
         // lock JSON without a JSON parser (bridge has no Newtonsoft).
-        static int ExtractPid(string json)
+        private static int ExtractPid(string json)
         {
             const string key = "\"pid\"";
             var idx = json.IndexOf(key, StringComparison.Ordinal);
@@ -315,7 +315,7 @@ namespace UnityOpenMcpBridge
         // kill -0 equivalent. Process.GetProcessById throws on a dead pid on
         // all platforms; the returned Process is then immediately discarded.
         // The exception path is the common case for stale locks.
-        static bool IsPidAlive(int pid)
+        private static bool IsPidAlive(int pid)
         {
             try
             {

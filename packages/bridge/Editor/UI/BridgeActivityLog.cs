@@ -1,19 +1,3 @@
-// In-memory ring buffer of bridge HTTP activity for the M4.5 Activity tab.
-//
-// Captures the metadata of every bridge HTTP event by default: timestamp, tool name,
-// gate mode, durations, and outcome. Request and response bodies are **excluded** by
-// default per questions-9 Q12 — only counts, sizes, and short header-like hints are
-// captured. When verbose mode is enabled (also via Q12) the buffer additionally stores
-// a **truncated** JSON snippet of the request body and the mutation success/error code
-// to help with debugging, but never the full body and never response bodies.
-//
-// Retention is in-memory only per Q13 — the buffer survives the Editor session but is
-// cleared on domain reload / Editor restart. No on-disk persistence in v1.
-//
-// Capacity is intentionally larger than the gate run history (100 vs 20) because every
-// tool call — including fast read-only ones — lands here, and a long MCP session can
-// produce hundreds of calls. Allocation is amortized via a single `LinkedList` push
-// pattern; trimming to capacity on every insert keeps memory bounded.
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -69,9 +53,9 @@ namespace UnityOpenMcpBridge
         public const int Capacity = 100;
         public const int SnippetMaxChars = 240; // truncated payload length cap (Q12)
 
-        static readonly LinkedList<BridgeActivityEvent> _events = new LinkedList<BridgeActivityEvent>();
-        static int _totalRecorded;
-        static int _totalDroppedTrim;
+        private static readonly LinkedList<BridgeActivityEvent> _events = new LinkedList<BridgeActivityEvent>();
+        private static int _totalRecorded;
+        private static int _totalDroppedTrim;
 
         public static event Action Changed;
 
@@ -101,7 +85,7 @@ namespace UnityOpenMcpBridge
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStaticsOnLoad()
+        private static void ResetStaticsOnLoad()
         {
             // Domain reload resets the buffer (Q13 — in-memory only). Verbose preference
             // is read on every property access from BridgeProjectSettings, so the user
@@ -154,7 +138,7 @@ namespace UnityOpenMcpBridge
             return cleaned.Substring(0, SnippetMaxChars) + "…";
         }
 
-        static string StripControlChars(string s)
+        private static string StripControlChars(string s)
         {
             var sb = new StringBuilder(s.Length);
             foreach (var c in s)

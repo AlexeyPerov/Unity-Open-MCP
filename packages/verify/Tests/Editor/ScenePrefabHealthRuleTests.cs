@@ -12,9 +12,9 @@ namespace UnityOpenMcpVerify.Tests
     [TestFixture]
     public class ScenePrefabHealthRuleTests
     {
-        const string FixtureRoot = "Assets/Tests/VerifyFixtures/ScenePrefabHealth";
+        private const string FixtureRoot = "Assets/Tests/VerifyFixtures/ScenePrefabHealth";
 
-        ScenePrefabHealthRule rule;
+        private ScenePrefabHealthRule rule;
 
         [SetUp]
         public void SetUp()
@@ -185,7 +185,7 @@ namespace UnityOpenMcpVerify.Tests
             yield return null;
         }
 
-        static System.Collections.IEnumerator CreateMinimalPrefab(string path)
+        private static System.Collections.IEnumerator CreateMinimalPrefab(string path)
         {
             EnsureDirectory(System.IO.Path.GetDirectoryName(path));
             var go = new GameObject("VerifyTestPrefab");
@@ -197,7 +197,7 @@ namespace UnityOpenMcpVerify.Tests
             yield return null;
         }
 
-        static System.Collections.IEnumerator CreateMinimalScene(string path)
+        private static System.Collections.IEnumerator CreateMinimalScene(string path)
         {
             EnsureDirectory(System.IO.Path.GetDirectoryName(path));
             // EditorSceneManager.NewScene(Additive) throws when the test
@@ -213,7 +213,7 @@ namespace UnityOpenMcpVerify.Tests
 
         // Minimal valid empty Unity scene YAML. Enough for the verify rules to
         // load and scan the scene asset without touching EditorSceneManager.
-        static void WriteEmptySceneFile(string path)
+        private static void WriteEmptySceneFile(string path)
         {
             const string yaml =
                 "%YAML 1.1\n" +
@@ -338,7 +338,7 @@ namespace UnityOpenMcpVerify.Tests
             System.IO.File.WriteAllText(path, yaml);
         }
 
-        static void EnsureDirectory(string path)
+        private static void EnsureDirectory(string path)
         {
             if (!AssetDatabase.IsValidFolder(path))
             {

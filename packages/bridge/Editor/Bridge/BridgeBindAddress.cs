@@ -1,21 +1,3 @@
-// M14 T5.4 — Listener bind address policy.
-//
-// The bridge binds loopback by default. Remote access (shared dev machine,
-// CI runner reached over the network) is opt-in via bindAddress in
-// .unity-open-mcp/settings.json, and is REFUSED at listener start unless
-// authMode is "required". This module is the pure validator / decision
-// function, split out from BridgeHttpServer so it is unit-testable without a
-// live HttpListener.
-//
-// Threat model (documented in docs/api/bridge-http.md §Remote bind):
-//   - Loopback (default) trusts the local security boundary. Any local process
-//     can reach the bridge; authMode "none" is acceptable.
-//   - Remote (0.0.0.0) exposes the bridge to every host that can route to this
-//     machine. Token auth is mandatory because the network is untrusted, and
-//     even with auth the operator should assume the token could be intercepted
-//     on the wire — TLS termination (reverse proxy, ssh tunnel) is the
-//     operator's responsibility and is documented as such. The bridge itself
-//     does not terminate TLS.
 namespace UnityOpenMcpBridge
 {
     public static class BridgeBindAddress
@@ -35,7 +17,7 @@ namespace UnityOpenMcpBridge
             public readonly string ResolvedAddress;
             public readonly string RefusalReason;
 
-            BindDecision(bool allowed, string resolvedAddress, string refusalReason)
+            private BindDecision(bool allowed, string resolvedAddress, string refusalReason)
             {
                 Allowed = allowed;
                 ResolvedAddress = resolvedAddress;

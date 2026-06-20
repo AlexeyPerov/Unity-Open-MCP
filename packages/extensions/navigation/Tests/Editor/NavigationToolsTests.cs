@@ -1,22 +1,4 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
-// EditMode tests for the Navigation (NavMesh) extension pack.
-//
-// Covers the deterministic contracts that protect the agent surface:
-//
-//   1. All 11 tools are discovered by BridgeToolRegistry (no core bridge
-//      edits — proves the [BridgeToolType] assembly scan works for packs).
-//   2. Mutating tools refuse to run without paths_hint (the gate contract).
-//   3. Surface add + bake round-trip on a minimal NavMesh scene slice.
-//   4. Agent add + list round-trip — agents/surfaces/links/modifiers appear
-//      in navigation_list output.
-//
-// Tool methods return a hand-rolled JSON string; tests go through
-// BridgeToolRegistry.TryDispatch (which wraps the string in a
-// ToolDispatchResult) instead of calling the methods directly.
-//
-// Live agent.SetDestination (Play Mode only) is NOT covered here — it's in
-// the manual validation checklist. These tests run in EditMode and stay fast.
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.AI;
@@ -33,7 +15,7 @@ namespace UnityOpenMcpExtensions.Navigation.Tests
     public class NavigationToolsTests
     {
         // The 11 catalog tool ids this pack must register.
-        static readonly string[] ExpectedTools =
+        private static readonly string[] ExpectedTools =
         {
             "unity_open_mcp_navigation_surface_add",
             "unity_open_mcp_navigation_set_bake_settings",

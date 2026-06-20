@@ -19,7 +19,7 @@ namespace UnityOpenMcpBridge
         public ParameterInfo[] Parameters { get; }
         public Type DeclaringType { get; }
 
-        object _instance;
+        private object _instance;
 
         public BridgeToolEntry(
             string name,

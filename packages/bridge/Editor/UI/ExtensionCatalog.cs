@@ -1,25 +1,3 @@
-// M16 Plan 10 — extension pack catalog.
-//
-// Single source of truth for the optional extension packs the toolkit
-// advertises. Read by the bridge window's "Extensions" section and (mirrored)
-// by the Hub wizard Step 3 opt-in checkbox group. The catalog is intentionally
-// hardcoded — packs are few, and a runtime registry would need an out-of-band
-// discovery channel that does not exist yet. When a new pack ships, add an
-// entry here AND mirror it in hub/src/lib/services/extensions.ts.
-//
-// Catalog entry shape (stable across consumers):
-//
-//   id            UPM package id ("com.alexeyperov.unity-open-mcp-ext-<domain>")
-//   domain        snake_case domain prefix used in tool ids (e.g. "navigation")
-//   displayName   user-facing label
-//   description   one-line summary
-//   upmDependency the Unity-side dependency this pack wraps (may be empty)
-//   localPath     repo-relative path used for `file:` install in dev
-//                 ("packages/extensions/<domain>")
-//   toolIds       tool ids the pack contributes (snake_case; for discovery)
-//   skillPath     path to the pack's SKILL.md under skills/extensions/
-//   shipped       true when the pack is implemented (not just planned)
-
 using System.Collections.Generic;
 
 namespace UnityOpenMcpBridge

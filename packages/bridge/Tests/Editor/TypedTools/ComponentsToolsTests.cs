@@ -1,8 +1,4 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
-// EditMode tests for the M16 Plan 2 typed component tools (ComponentsTools).
-// Covers parameter parsing, resolver branches, and core add/get/modify flows
-// on a fresh GameObject in the active scene.
 using NUnit.Framework;
 using UnityEngine;
 using UnityOpenMcpBridge.TypedTools;

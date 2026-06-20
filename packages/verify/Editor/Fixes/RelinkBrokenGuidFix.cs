@@ -1,17 +1,3 @@
-// T2.4 fix provider — relink broken PPtr / forward-dependency edges.
-//
-// Targets the `missing_guid` issue code emitted by the `missing_references`
-// rule and the `broken_dependency` code emitted by the `dependencies` rule
-// (both surface "an external GUID that does not resolve to a loadable asset").
-//
-// A broken GUID is rarely fixed deterministically: the agent usually has to
-// pick the intended target out of several candidates. The provider therefore
-// exposes a candidate-finding Describe path (the dry_run preview surfaces
-// them) and an Apply path that takes a chosen replacement GUID. Replacement
-// is text-level YAML editing of `guid: <old>` -> `guid: <new>` followed by a
-// re-import — `Safe: false` because it mutates references and a wrong choice
-// silently rewires an asset graph.
-
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -146,7 +132,7 @@ namespace UnityOpenMcpVerify.Fixes
         // was when the issue was emitted) and lets the provider be invoked with a
         // bare issue id.
 
-        static string ExtractBrokenGuidFromIssue(string issueId)
+        private static string ExtractBrokenGuidFromIssue(string issueId)
         {
             if (!IssueKey.TryParse(issueId, out _, out _, out var assetPath, out _))
                 return null;
@@ -172,7 +158,7 @@ namespace UnityOpenMcpVerify.Fixes
         // Candidate discovery — name + type heuristics
         // -------------------------------------------------------------------
 
-        static List<GuidCandidate> FindCandidateAssets(string brokenGuid, string referencingAssetPath)
+        private static List<GuidCandidate> FindCandidateAssets(string brokenGuid, string referencingAssetPath)
         {
             // Heuristic 1: the broken GUID may have been re-imported under a new
             // GUID but the same asset name. We cannot read the name from a GUID
@@ -206,7 +192,7 @@ namespace UnityOpenMcpVerify.Fixes
             return candidates;
         }
 
-        static string FormatCandidates(List<GuidCandidate> candidates)
+        private static string FormatCandidates(List<GuidCandidate> candidates)
         {
             var parts = candidates
                 .Take(8)
@@ -218,7 +204,7 @@ namespace UnityOpenMcpVerify.Fixes
         // Apply — rewrite the broken GUID in the asset YAML and re-import
         // -------------------------------------------------------------------
 
-        static FixResult RewriteGuid(string assetPath, string brokenGuid, string targetGuid)
+        private static FixResult RewriteGuid(string assetPath, string brokenGuid, string targetGuid)
         {
             if (!File.Exists(assetPath))
                 return new FixResult

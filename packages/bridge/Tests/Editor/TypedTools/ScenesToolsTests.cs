@@ -1,11 +1,3 @@
-// EditMode tests for the M16 Plan 3 typed scene tools (ScenesTools).
-//
-// Covers parameter parsing, resolver branches, and the read-only behavioral
-// reads that work in a fresh EditMode session (where the active scene is
-// valid but typically empty/untitled). Tests that would need to create,
-// save, or open scene assets on disk are intentionally avoided — those need
-// a real writable project and would be flaky in CI; the integration test
-// suite (Tests/Editor/Integration/) covers the live dispatch path.
 using NUnit.Framework;
 using UnityEditor.SceneManagement;
 using UnityEngine;

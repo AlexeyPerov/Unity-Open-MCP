@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Utilities/Serialization/USYamlUtilities.cs
-
 using System;
 using System.Collections.Generic;
 using System.IO;

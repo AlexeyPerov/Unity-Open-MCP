@@ -104,7 +104,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
-        static List<Transform> CollectRoots(Transform start)
+        private static List<Transform> CollectRoots(Transform start)
         {
             var roots = new List<Transform>();
             // If the loaded object is already a root (no parent), start there.
@@ -115,7 +115,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return roots;
         }
 
-        static void AppendNode(StringBuilder sb, Transform transform, string parentPath, int depth, int depthLimit, int fieldLimit,
+        private static void AppendNode(StringBuilder sb, Transform transform, string parentPath, int depth, int depthLimit, int fieldLimit,
             ref int objectCount, ref int componentCount)
         {
             objectCount++; // the GameObject itself
@@ -167,7 +167,7 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append('}');
         }
 
-        static void AppendComponent(StringBuilder sb, Component component, int fieldLimit, ref int objectCount)
+        private static void AppendComponent(StringBuilder sb, Component component, int fieldLimit, ref int objectCount)
         {
             objectCount++; // each component is its own YAML object
             var typeName = component.GetType().Name;
@@ -194,7 +194,7 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append('}');
         }
 
-        static void AppendFlatObject(StringBuilder sb, Object asset, int fieldLimit, ref int objectCount)
+        private static void AppendFlatObject(StringBuilder sb, Object asset, int fieldLimit, ref int objectCount)
         {
             objectCount++;
             var type = asset.GetType();
@@ -229,7 +229,7 @@ namespace UnityOpenMcpBridge.MetaTools
         // + [SerializeField] privates), skipping properties — which is exactly the
         // contract the compression module expects. Values are stringified with a
         // depth/count cap to keep the payload bounded.
-        static List<KeyValuePair<string, string>> SerializeFields(Object asset, int fieldLimit)
+        private static List<KeyValuePair<string, string>> SerializeFields(Object asset, int fieldLimit)
         {
             var result = new List<KeyValuePair<string, string>>();
             try
@@ -261,7 +261,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return result;
         }
 
-        static string ReadPropertyValue(SerializedProperty prop)
+        private static string ReadPropertyValue(SerializedProperty prop)
         {
             switch (prop.propertyType)
             {
@@ -292,7 +292,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        static string NormalizePath(string raw)
+        private static string NormalizePath(string raw)
         {
             var p = raw.Replace('\\', '/').Trim('/');
             if (p.Equals("Assets", System.StringComparison.OrdinalIgnoreCase))
@@ -302,14 +302,14 @@ namespace UnityOpenMcpBridge.MetaTools
             return p;
         }
 
-        static bool IsSupportedExtension(string path)
+        private static bool IsSupportedExtension(string path)
         {
             var ext = Path.GetExtension(path).ToLowerInvariant();
             return ext == ".prefab" || ext == ".unity" || ext == ".asset"
                 || ext == ".mat" || ext == ".controller" || ext == ".anim";
         }
 
-        static string KindForPath(string path)
+        private static string KindForPath(string path)
         {
             var ext = Path.GetExtension(path).ToLowerInvariant();
             switch (ext)
@@ -324,7 +324,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

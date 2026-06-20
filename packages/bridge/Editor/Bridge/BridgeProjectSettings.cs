@@ -1,22 +1,3 @@
-// Minimal project-level runtime settings store for the bridge UI.
-//
-// Backed by `.unity-open-mcp/settings.json` at the project root. The v1 schema carries:
-//   - disabledTools (Plan 2)
-//   - defaultGateMode (Plan 3)
-//   - autoStart (Plan 4)
-//   - verboseActivityLog (Plan 4)
-//   - authMode (M14): "none" (default) | "required"
-//   - csharpDenyPatterns (M14 T5.2): regex[] overriding the built-in execute_csharp deny list
-//   - menuDenyPatterns   (M14 T5.3): regex[] overriding the built-in execute_menu deny list
-//   - bindAddress (M14 T5.4): "127.0.0.1" (default) | "0.0.0.0" (remote, requires authMode=required)
-//   - auditLogEnabled (M14 T5.5): opt-in on-disk rolling audit log for gate mutations
-//
-// Unknown fields in the file are preserved on save so future Hub / MCP tooling can extend
-// the same file without a v1 migration step. Missing / unreadable files produce an empty
-// default — the bridge must keep running even when no settings file is present.
-//
-// The store is read once at static init and rewritten on every mutation. Writes are
-// atomic via a `.tmp` rename.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -56,12 +37,12 @@ namespace UnityOpenMcpBridge
 
     public static class BridgeProjectSettings
     {
-        const string SettingsDirName = ".unity-open-mcp";
-        const string SettingsFileName = "settings.json";
-        const string TempSuffix = ".tmp";
+        private const string SettingsDirName = ".unity-open-mcp";
+        private const string SettingsFileName = "settings.json";
+        private const string TempSuffix = ".tmp";
 
-        static BridgeProjectSettingsData _data = new BridgeProjectSettingsData();
-        static bool _loaded;
+        private static BridgeProjectSettingsData _data = new BridgeProjectSettingsData();
+        private static bool _loaded;
 
         public static string SettingsPath
         {
@@ -363,7 +344,7 @@ namespace UnityOpenMcpBridge
         // deny-list evaluator (BridgeDenyList.Resolve*) treats both as "use
         // defaults"; callers wanting the list fully off pass a custom pattern
         // that matches nothing or use the per-request bypass.
-        static string[] NormalizePatternArray(IEnumerable<string> patterns)
+        private static string[] NormalizePatternArray(IEnumerable<string> patterns)
         {
             if (patterns == null) return null;
             var set = new List<string>();
@@ -388,7 +369,7 @@ namespace UnityOpenMcpBridge
             return set.ToArray();
         }
 
-        static string[] StripNullEntries(string[] arr)
+        private static string[] StripNullEntries(string[] arr)
         {
             if (arr == null) return null;
             if (arr.Length == 0) return arr;
@@ -400,7 +381,7 @@ namespace UnityOpenMcpBridge
             return cleaned.Count == arr.Length ? arr : cleaned.ToArray();
         }
 
-        static string GetProjectRoot()
+        private static string GetProjectRoot()
         {
             var dataPath = Application.dataPath;
             if (string.IsNullOrEmpty(dataPath)) return null;

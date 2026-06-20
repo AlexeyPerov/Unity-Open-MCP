@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Text;
@@ -474,7 +473,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         enum LogLevel { Log, Warning, Error }
 
-        static LogLevel ParseLogLevel(string raw, LogLevel fallback)
+        private static LogLevel ParseLogLevel(string raw, LogLevel fallback)
         {
             if (string.IsNullOrEmpty(raw)) return fallback;
             return raw.ToLowerInvariant() switch
@@ -486,7 +485,7 @@ namespace UnityOpenMcpBridge.TypedTools
             };
         }
 
-        static string LogLevelToWire(LogLevel l) => l switch
+        private static string LogLevelToWire(LogLevel l) => l switch
         {
             LogLevel.Log => "log",
             LogLevel.Warning => "warning",
@@ -496,7 +495,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         enum EditorStateTarget { Unknown, Play, Pause, Stop }
 
-        static EditorStateTarget ParseEditorState(string raw)
+        private static EditorStateTarget ParseEditorState(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return EditorStateTarget.Unknown;
             return raw.ToLowerInvariant() switch
@@ -508,7 +507,7 @@ namespace UnityOpenMcpBridge.TypedTools
             };
         }
 
-        static string BuildStateEnvelope(string action, string note)
+        private static string BuildStateEnvelope(string action, string note)
         {
             var sb = new StringBuilder(128);
             sb.Append("{\"status\":\"ok\",\"action\":\"").Append(Esc(action)).Append("\"");
@@ -524,7 +523,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // filtered). Returns null when NOTHING resolved (so the caller can
         // surface target_not_found distinctly from "clear the selection").
         // Empty input + no clear flag returns an empty array (valid — clears).
-        static Object[] ResolveTargets(string body)
+        private static Object[] ResolveTargets(string body)
         {
             var targets = JsonBody.GetObjectArray(body, "targets");
             if (targets != null)
@@ -560,7 +559,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return new[] { single };
         }
 
-        static Object ResolveOneTarget(string body)
+        private static Object ResolveOneTarget(string body)
         {
             var assetPath = JsonBody.GetString(body, "asset_path");
             if (!string.IsNullOrEmpty(assetPath))
@@ -586,7 +585,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return null;
         }
 
-        static string BuildSelectionResult(int count, int total, string action)
+        private static string BuildSelectionResult(int count, int total, string action)
         {
             var sb = new StringBuilder(96);
             sb.Append("{\"status\":\"ok\",\"action\":\"").Append(Esc(action)).Append("\"");
@@ -596,7 +595,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
-        static string SerializeSelectionEntry(Object obj)
+        private static string SerializeSelectionEntry(Object obj)
         {
             if (obj == null) return "null";
             var sb = new StringBuilder(96);
@@ -616,7 +615,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
-        static string BuildUndoResult(string action, int steps)
+        private static string BuildUndoResult(string action, int steps)
         {
             var sb = new StringBuilder(96);
             sb.Append("{\"status\":\"ok\",\"action\":\"").Append(Esc(action)).Append("\"");
@@ -632,7 +631,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Reflect UnityEditor.LogEntries.Clear() — the type is internal, so we
         // can't bind to it directly. Mirrors the reflection used by
         // ReadConsoleTool (LogEntriesReader) for cross-version safety.
-        static bool LogEntriesClearViaReflection()
+        private static bool LogEntriesClearViaReflection()
         {
             var t = typeof(EditorWindow).Assembly.GetType("UnityEditor.LogEntries");
             if (t == null) return false;
@@ -650,35 +649,35 @@ namespace UnityOpenMcpBridge.TypedTools
         // Load the TagManager as a SerializedObject. UCP / unity-cli both use
         // AssetDatabase.LoadMainAssetAtPath on the well-known ProjectSettings
         // path; this returns the live TagManager asset Unity keeps loaded.
-        static SerializedObject LoadTagManagerSerialized()
+        private static SerializedObject LoadTagManagerSerialized()
         {
             var asset = AssetDatabase.LoadMainAssetAtPath("ProjectSettings/TagManager.asset");
             if (asset == null) return null;
             return new SerializedObject(asset);
         }
 
-        static void SaveTagManagerAsset()
+        private static void SaveTagManagerAsset()
         {
             AssetDatabase.SaveAssetIfDirty(
                 AssetDatabase.LoadMainAssetAtPath("ProjectSettings/TagManager.asset"));
             AssetDatabase.Refresh();
         }
 
-        static readonly HashSet<string> ReservedTags = new HashSet<string>
+        private static readonly HashSet<string> ReservedTags = new HashSet<string>
         {
             "Untagged", "Respawn", "Finish", "EditorOnly", "MainCamera", "Player", "GameController"
         };
 
-        static bool IsReservedTag(string tag) => ReservedTags.Contains(tag);
+        private static bool IsReservedTag(string tag) => ReservedTags.Contains(tag);
 
-        static readonly HashSet<string> ReservedLayers = new HashSet<string>
+        private static readonly HashSet<string> ReservedLayers = new HashSet<string>
         {
             "Default", "TransparentFX", "IgnoreRaycast", "Water", "UI"
         };
 
-        static bool IsReservedLayer(string layer) => ReservedLayers.Contains(layer);
+        private static bool IsReservedLayer(string layer) => ReservedLayers.Contains(layer);
 
-        static int? TryGetSlot(string body)
+        private static int? TryGetSlot(string body)
         {
             var raw = JsonBody.GetRawValue(body, "slot");
             if (string.IsNullOrEmpty(raw)) return null;
@@ -688,7 +687,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Escape a string for inline JSON (mirrors PackagesTools.Esc /
         // TypedTargets.Esc so responses are byte-identical in style).
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

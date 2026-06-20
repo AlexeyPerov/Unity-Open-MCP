@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
@@ -226,11 +225,11 @@ namespace UnityOpenMcpExtensions.Animation
         // Helpers — load + per-type application
         // =====================================================================
 
-        static string PathRequired()
+        private static string PathRequired()
             => AnimationJson.Error("paths_hint_required",
                 "animator tool is mutating; pass a non-empty paths_hint scoped to the .controller asset path.");
 
-        static AnimatorController LoadController(string assetPath, out string errorEnvelope)
+        private static AnimatorController LoadController(string assetPath, out string errorEnvelope)
         {
             errorEnvelope = null;
             if (!AnimationJson.ValidateAssetPath(assetPath, AnimationJson.ControllerExtension,
@@ -250,7 +249,7 @@ namespace UnityOpenMcpExtensions.Animation
             return controller;
         }
 
-        static void ApplyModification(AnimatorController controller, Modification mod,
+        private static void ApplyModification(AnimatorController controller, Modification mod,
             List<string> applied)
         {
             switch (mod.Type)
@@ -359,7 +358,7 @@ namespace UnityOpenMcpExtensions.Animation
             }
         }
 
-        static void AddParameter(AnimatorController controller, Modification mod)
+        private static void AddParameter(AnimatorController controller, Modification mod)
         {
             if (string.IsNullOrEmpty(mod.ParameterName))
                 throw new System.Exception("parameterName is required for AddParameter.");
@@ -392,7 +391,7 @@ namespace UnityOpenMcpExtensions.Animation
             controller.parameters = parameters;
         }
 
-        static void RemoveParameter(AnimatorController controller, Modification mod)
+        private static void RemoveParameter(AnimatorController controller, Modification mod)
         {
             if (string.IsNullOrEmpty(mod.ParameterName))
                 throw new System.Exception("parameterName is required for RemoveParameter.");
@@ -402,7 +401,7 @@ namespace UnityOpenMcpExtensions.Animation
             controller.RemoveParameter(param);
         }
 
-        static AnimatorState AddState(AnimatorController controller, Modification mod)
+        private static AnimatorState AddState(AnimatorController controller, Modification mod)
         {
             if (string.IsNullOrEmpty(mod.LayerName))
                 throw new System.Exception("layerName is required for AddState.");
@@ -412,7 +411,7 @@ namespace UnityOpenMcpExtensions.Animation
             return layer.stateMachine.AddState(mod.StateName);
         }
 
-        static void ConfigureTransition(AnimatorStateTransition transition, Modification mod)
+        private static void ConfigureTransition(AnimatorStateTransition transition, Modification mod)
         {
             if (mod.HasExitTime.HasValue) transition.hasExitTime = mod.HasExitTime.Value;
             if (mod.ExitTime.HasValue) transition.exitTime = mod.ExitTime.Value;
@@ -433,14 +432,14 @@ namespace UnityOpenMcpExtensions.Animation
             }
         }
 
-        static int GetLayerIndex(AnimatorController controller, string layerName)
+        private static int GetLayerIndex(AnimatorController controller, string layerName)
         {
             for (int i = 0; i < controller.layers.Length; i++)
                 if (controller.layers[i].name == layerName) return i;
             throw new System.Exception($"Layer '{layerName}' not found.");
         }
 
-        static AnimatorControllerLayer GetLayer(AnimatorController controller, string layerName)
+        private static AnimatorControllerLayer GetLayer(AnimatorController controller, string layerName)
         {
             var layer = controller.layers.FirstOrDefault(l => l.name == layerName);
             if (layer == null || layer.stateMachine == null)
@@ -448,7 +447,7 @@ namespace UnityOpenMcpExtensions.Animation
             return layer;
         }
 
-        static AnimatorState GetState(AnimatorStateMachine stateMachine, string stateName)
+        private static AnimatorState GetState(AnimatorStateMachine stateMachine, string stateName)
         {
             var child = stateMachine.states.FirstOrDefault(s => s.state.name == stateName);
             if (child.state == null)
@@ -460,7 +459,7 @@ namespace UnityOpenMcpExtensions.Animation
         // Serializers
         // =====================================================================
 
-        static void AppendParameter(StringBuilder sb, AnimatorControllerParameter p)
+        private static void AppendParameter(StringBuilder sb, AnimatorControllerParameter p)
         {
             sb.Append('{');
             sb.Append("\"name\":").Append(AnimationJson.Esc(p.name)).Append(',');
@@ -471,7 +470,7 @@ namespace UnityOpenMcpExtensions.Animation
             sb.Append('}');
         }
 
-        static void AppendLayer(StringBuilder sb, AnimatorControllerLayer layer)
+        private static void AppendLayer(StringBuilder sb, AnimatorControllerLayer layer)
         {
             sb.Append('{');
             sb.Append("\"name\":").Append(AnimationJson.Esc(layer.name)).Append(',');
@@ -520,7 +519,7 @@ namespace UnityOpenMcpExtensions.Animation
             sb.Append("]}");
         }
 
-        static void AppendState(StringBuilder sb, AnimatorState state)
+        private static void AppendState(StringBuilder sb, AnimatorState state)
         {
             sb.Append('{');
             sb.Append("\"name\":").Append(AnimationJson.Esc(state.name)).Append(',');
@@ -540,7 +539,7 @@ namespace UnityOpenMcpExtensions.Animation
             sb.Append("]}");
         }
 
-        static void AppendTransition(StringBuilder sb, AnimatorStateTransition tr)
+        private static void AppendTransition(StringBuilder sb, AnimatorStateTransition tr)
         {
             sb.Append('{');
             sb.Append("\"destinationStateName\":").Append(
@@ -564,7 +563,7 @@ namespace UnityOpenMcpExtensions.Animation
             sb.Append("]}");
         }
 
-        static string JsonStringArray(List<string> items)
+        private static string JsonStringArray(List<string> items)
         {
             var sb = new StringBuilder();
             sb.Append('[');

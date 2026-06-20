@@ -1,6 +1,3 @@
-// Unit tests for M4.5-7 (project default gate mode), M4.5-9 (gate run history),
-// M4.5-10 (activity ring buffer + verbose mode), and M4.5-11 (project settings schema
-// extension: autoStart + verboseActivityLog).
 using NUnit.Framework;
 using UnityOpenMcpBridge;
 

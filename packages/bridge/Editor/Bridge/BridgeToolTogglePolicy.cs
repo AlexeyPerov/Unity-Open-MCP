@@ -1,10 +1,3 @@
-// Runtime per-tool enable/disable policy for the bridge dispatcher.
-//
-// Disable state is persisted in `.unity-open-mcp/settings.json` via `BridgeProjectSettings` and
-// survives domain reload. Both hardcoded meta-tools and registry-discovered typed tools
-// share the same gate: `IsDisabled(toolName)` is checked in `BridgeHttpServer` before any
-// dispatch path. A disabled call returns a structured `tool_disabled` error so agents see
-// an explicit failure rather than a silent no-op.
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -55,7 +48,7 @@ namespace UnityOpenMcpBridge
             return $"{{\"error\":{{\"code\":\"{DisabledErrorCode}\",\"message\":\"{EscapeStringContent(msg)}\",\"tool\":\"{EscapeStringContent(toolName)}\",\"hint\":\"Enable the tool in the Unity Open MCP Bridge window Tools tab.\"}}}}";
         }
 
-        static string EscapeStringContent(string s)
+        private static string EscapeStringContent(string s)
         {
             if (s == null) return "";
             var sb = new System.Text.StringBuilder(s.Length + 4);

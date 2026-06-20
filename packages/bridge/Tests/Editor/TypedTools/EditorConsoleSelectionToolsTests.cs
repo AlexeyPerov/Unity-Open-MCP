@@ -1,12 +1,3 @@
-// EditMode tests for the M16 Plan 5 typed console / editor state / selection /
-// undo / tags / layers tools (EditorConsoleSelectionTools).
-//
-// Covers parameter validation, the read-only behavioral reads that work in a
-// fresh EditMode session (selection, tags, layers), the gate-free vs mutating
-// routing contracts, and the TagManager idempotency / reservation logic
-// (cleaning up any tag/layer it adds so the project state is unchanged). State
-// transitions (play/pause/stop) are validated at the parsing/idempotency layer
-// only — actually entering play mode from EditMode is flaky in CI.
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -17,8 +8,8 @@ namespace UnityOpenMcpBridge.Tests
 {
     public class EditorConsoleSelectionToolsTests
     {
-        const string CleanupTag = "__MCPTest_Plan5_Tag";
-        const string CleanupLayer = "__MCPTest_Plan5_Layer";
+        private const string CleanupTag = "__MCPTest_Plan5_Tag";
+        private const string CleanupLayer = "__MCPTest_Plan5_Layer";
 
         [TearDown]
         public void TearDown()
@@ -529,7 +520,7 @@ namespace UnityOpenMcpBridge.Tests
 
         // ----------------------- helpers ---------------------------------
 
-        static void RemoveTagIfPresent(string tag)
+        private static void RemoveTagIfPresent(string tag)
         {
             var so = new SerializedObject(
                 AssetDatabase.LoadMainAssetAtPath("ProjectSettings/TagManager.asset"));
@@ -545,7 +536,7 @@ namespace UnityOpenMcpBridge.Tests
                 AssetDatabase.LoadMainAssetAtPath("ProjectSettings/TagManager.asset"));
         }
 
-        static void RemoveLayerIfPresent(string layer)
+        private static void RemoveLayerIfPresent(string layer)
         {
             var so = new SerializedObject(
                 AssetDatabase.LoadMainAssetAtPath("ProjectSettings/TagManager.asset"));

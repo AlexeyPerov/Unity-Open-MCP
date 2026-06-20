@@ -129,7 +129,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         struct Entry { public string Name; public string Path; }
 
-        static readonly System.Reflection.MethodInfo GetShaderMessagesMethod =
+        private static readonly System.Reflection.MethodInfo GetShaderMessagesMethod =
             typeof(UnityEditor.ShaderUtil).GetMethod("GetShaderMessages",
                 System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
 
@@ -137,7 +137,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // returned array elements are internal UnityEditor.ShaderMessage
         // structs exposing `message` (string) and `platform` (string) fields.
         // Returns "[]" when the API is unavailable or the shader is clean.
-        static string RenderShaderErrors(Shader shader)
+        private static string RenderShaderErrors(Shader shader)
         {
             if (shader == null || GetShaderMessagesMethod == null) return "[]";
 
@@ -162,7 +162,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
-        static string ReadStringField(object obj, string fieldName)
+        private static string ReadStringField(object obj, string fieldName)
         {
             if (obj == null) return null;
             var t = obj.GetType();

@@ -46,7 +46,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return ToolDispatchResult.Ok(BuildResult(result, filtered.RulesApplied, failOnSeverity));
         }
 
-        static bool ShouldFail(VerifySeverity severity, string failOnSeverity)
+        private static bool ShouldFail(VerifySeverity severity, string failOnSeverity)
         {
             return failOnSeverity switch
             {
@@ -58,7 +58,7 @@ namespace UnityOpenMcpBridge.MetaTools
             };
         }
 
-        static string BuildResult(VerifyResult result, string[] rulesApplied, string failOnSeverity)
+        private static string BuildResult(VerifyResult result, string[] rulesApplied, string failOnSeverity)
         {
             var sb = new StringBuilder(1024);
             var hasFailures = result.Issues.Exists(i => ShouldFail(i.Severity, failOnSeverity));
@@ -123,7 +123,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string BuildUnknownRulesError(string[] unknownIds, string[] availableIds)
+        private static string BuildUnknownRulesError(string[] unknownIds, string[] availableIds)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"error\":{\"code\":\"unknown_rule\"");
@@ -145,14 +145,14 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string SeverityStr(VerifySeverity s) => s switch
+        private static string SeverityStr(VerifySeverity s) => s switch
         {
             VerifySeverity.Error => "Error",
             VerifySeverity.Warning => "Warning",
             _ => "Info"
         };
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

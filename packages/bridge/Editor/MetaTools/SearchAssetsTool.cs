@@ -73,14 +73,14 @@ namespace UnityOpenMcpBridge.MetaTools
             public List<string> Components = new List<string>();
         }
 
-        static string[] FindAssets(string folder, string typeFilter)
+        private static string[] FindAssets(string folder, string typeFilter)
         {
             var filter = BuildFilter(typeFilter);
             var guids = AssetDatabase.FindAssets(filter, new[] { folder });
             return guids;
         }
 
-        static string BuildFilter(string typeFilter)
+        private static string BuildFilter(string typeFilter)
         {
             // AssetDatabase.FindAssets takes a single filter string. When a type
             // filter is supplied, prefix with "t:Kind" terms. Otherwise search
@@ -103,7 +103,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return "t:Prefab t:Scene t:Material t:ScriptableObject t:AnimatorController t:AnimationClip";
         }
 
-        static MatchRecord BuildMatch(string assetPath, string guid, string name, string component, string guidQuery, int objectLimit)
+        private static MatchRecord BuildMatch(string assetPath, string guid, string name, string component, string guidQuery, int objectLimit)
         {
             var record = new MatchRecord
             {
@@ -177,7 +177,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return record;
         }
 
-        static void WalkForStructured(Transform transform, string parentPath, string name, string component,
+        private static void WalkForStructured(Transform transform, string parentPath, string name, string component,
             int objectLimit, List<ObjectMatch> objects, ref bool matched)
         {
             if (objects.Count >= objectLimit) return;
@@ -209,7 +209,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 WalkForStructured(transform.GetChild(c), path, name, component, objectLimit, objects, ref matched);
         }
 
-        static bool FileContainsGuid(string assetPath, string guid)
+        private static bool FileContainsGuid(string assetPath, string guid)
         {
             try
             {
@@ -224,20 +224,20 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        static bool IsTextAsset(string path)
+        private static bool IsTextAsset(string path)
         {
             var ext = Path.GetExtension(path).ToLowerInvariant();
             return ext == ".prefab" || ext == ".unity" || ext == ".asset"
                 || ext == ".mat" || ext == ".controller" || ext == ".anim";
         }
 
-        static bool ContainsFold(string haystack, string needle)
+        private static bool ContainsFold(string haystack, string needle)
         {
             if (string.IsNullOrEmpty(needle)) return true;
             return haystack != null && haystack.ToLowerInvariant().Contains(needle.ToLowerInvariant());
         }
 
-        static string KindForPath(string path)
+        private static string KindForPath(string path)
         {
             var ext = Path.GetExtension(path).ToLowerInvariant();
             switch (ext)
@@ -252,7 +252,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        static string BuildResult(List<MatchRecord> matches, int truncated, string name, string component, string guid, string typeFilter)
+        private static string BuildResult(List<MatchRecord> matches, int truncated, string name, string component, string guid, string typeFilter)
         {
             var sb = new StringBuilder(2048);
             sb.Append('{');
@@ -307,7 +307,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

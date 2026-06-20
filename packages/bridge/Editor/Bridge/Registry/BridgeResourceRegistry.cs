@@ -8,7 +8,7 @@ namespace UnityOpenMcpBridge
 {
     public static class BridgeResourceRegistry
     {
-        static readonly Dictionary<string, BridgeResourceEntry> _resources = new();
+        private static readonly Dictionary<string, BridgeResourceEntry> _resources = new();
 
         public static int Count => _resources.Count;
 
@@ -31,7 +31,7 @@ namespace UnityOpenMcpBridge
             Debug.Log($"[BridgeResourceRegistry] Registered {_resources.Count} resource(s)");
         }
 
-        static void ScanAssembly(Assembly assembly)
+        private static void ScanAssembly(Assembly assembly)
         {
             foreach (var type in assembly.GetTypes())
             {

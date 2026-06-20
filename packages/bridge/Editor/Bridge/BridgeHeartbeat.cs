@@ -27,14 +27,14 @@ namespace UnityOpenMcpBridge
     // warnings.
     public static class BridgeHeartbeat
     {
-        const double HeartbeatIntervalSec = 0.5;
+        private const double HeartbeatIntervalSec = 0.5;
 
-        static double _lastWriteTime;
-        static bool _registered;
+        private static double _lastWriteTime;
+        private static bool _registered;
         // Forced state set by callbacks; cleared after the next throttled
         // write so we don't keep emitting it forever.
-        static string _forcedState;
-        static volatile bool _forcedPending;
+        private static string _forcedState;
+        private static volatile bool _forcedPending;
 
         public static bool IsRunning => _registered;
 
@@ -61,7 +61,7 @@ namespace UnityOpenMcpBridge
             EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
         }
 
-        static void OnBeforeAssemblyReload()
+        private static void OnBeforeAssemblyReload()
         {
             // Forced transition: a domain reload is about to freeze the
             // editor. Emit it immediately so readers see "reloading" before
@@ -69,7 +69,7 @@ namespace UnityOpenMcpBridge
             Force(BridgeInstanceLock.StateReloading);
         }
 
-        static void OnPlayModeStateChanged(PlayModeStateChange change)
+        private static void OnPlayModeStateChanged(PlayModeStateChange change)
         {
             switch (change)
             {
@@ -90,14 +90,14 @@ namespace UnityOpenMcpBridge
 
         // Queue a forced state and write immediately. The throttled Tick will
         // clear it once the editor state catches up.
-        static void Force(string state)
+        private static void Force(string state)
         {
             _forcedState = state;
             _forcedPending = true;
             WriteNow();
         }
 
-        static void Tick()
+        private static void Tick()
         {
             if (!_registered) return;
 
@@ -111,7 +111,7 @@ namespace UnityOpenMcpBridge
         // Compute the effective state and write the lock. Forced state wins
         // until the underlying flag disagrees with it; then we clear the
         // force and fall back to the derived state.
-        static void WriteNow()
+        private static void WriteNow()
         {
             if (!BridgeInstanceLock.IsAcquired) return;
 

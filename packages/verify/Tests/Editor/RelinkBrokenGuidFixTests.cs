@@ -19,9 +19,9 @@ namespace UnityOpenMcpVerify.Tests
     [TestFixture]
     public class RelinkBrokenGuidFixTests
     {
-        const string FixtureRoot = "Assets/Tests/VerifyFixtures/RelinkBrokenGuid";
+        private const string FixtureRoot = "Assets/Tests/VerifyFixtures/RelinkBrokenGuid";
 
-        RelinkBrokenGuidFix fix;
+        private RelinkBrokenGuidFix fix;
 
         [SetUp]
         public void SetUp()
@@ -316,7 +316,7 @@ namespace UnityOpenMcpVerify.Tests
         // Fixture helpers (mirrors MissingReferencesRuleTests patterns)
         // -------------------------------------------------------------------
 
-        static System.Collections.IEnumerator CreatePrefabWithMeshReference(
+        private static System.Collections.IEnumerator CreatePrefabWithMeshReference(
             string prefabPath, string meshPath)
         {
             EnsureDirectory(Path.GetDirectoryName(prefabPath));
@@ -343,7 +343,7 @@ namespace UnityOpenMcpVerify.Tests
         // the fake GUID — except the prefab's own m_Script references (Unity
         // built-ins), which we leave alone. We only touch lines that look like
         // external asset references on MeshFilter/Renderer.
-        static void InjectBrokenGuid(string prefabPath, string realGuid, string fakeGuid)
+        private static void InjectBrokenGuid(string prefabPath, string realGuid, string fakeGuid)
         {
             var lines = File.ReadAllLines(prefabPath);
             for (int i = 0; i < lines.Length; i++)
@@ -354,7 +354,7 @@ namespace UnityOpenMcpVerify.Tests
             File.WriteAllLines(prefabPath, lines);
         }
 
-        static void EnsureDirectory(string path)
+        private static void EnsureDirectory(string path)
         {
             if (!AssetDatabase.IsValidFolder(path))
             {

@@ -1,18 +1,3 @@
-// M14 T5.2 — Bypass resolver for the deny heuristic.
-//
-// The deny heuristic is bypassed only when BOTH conditions hold:
-//   1. The request asks for gate mode "off" (the agent is explicitly opting
-//      out of post-mutation verification).
-//   2. The request sets confirm_bypass: true (an explicit acknowledgement).
-//
-// Requiring both keeps a confused agent from skirting the deny list by setting
-// a single flag. The bypass is still audited — the request flows through the
-// normal dispatch path and lands in BridgeActivityLog with gate.mode = off, so
-// the operator can grep for bypasses in the activity tab.
-//
-// Split out from BridgeDenyList so it can read the gate value through the same
-// precedence the dispatcher uses, without the deny module needing to know
-// about request-body parsing.
 namespace UnityOpenMcpBridge
 {
     public static class BridgeDenyBypass
@@ -38,7 +23,7 @@ namespace UnityOpenMcpBridge
             return ExtractExplicitGateOff(body);
         }
 
-        static bool ExtractExplicitGateOff(string body)
+        private static bool ExtractExplicitGateOff(string body)
         {
             const string key = "\"gate\"";
             var idx = body.IndexOf(key, System.StringComparison.Ordinal);

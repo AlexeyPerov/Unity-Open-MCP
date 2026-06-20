@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Utilities/AssetDatabase/USAssetTypeUtilities.cs
-
 using System;
 using UnityEditor;
 using UnityEngine;

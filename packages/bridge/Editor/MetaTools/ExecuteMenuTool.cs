@@ -6,12 +6,12 @@ namespace UnityOpenMcpBridge.MetaTools
 {
     public static class ExecuteMenuTool
     {
-        static readonly HashSet<string> BlockedMenus = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly HashSet<string> BlockedMenus = new(StringComparer.OrdinalIgnoreCase)
         {
             "File/Quit"
         };
 
-        static readonly HashSet<string> ReadOnlyMenuAllowlist = new(StringComparer.OrdinalIgnoreCase)
+        private static readonly HashSet<string> ReadOnlyMenuAllowlist = new(StringComparer.OrdinalIgnoreCase)
         {
             "Assets/Refresh",
             "Assets/Reimport All",
@@ -90,7 +90,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        static bool IsHardBlocked(string menuPath)
+        private static bool IsHardBlocked(string menuPath)
         {
             return BlockedMenus.Contains(menuPath);
         }

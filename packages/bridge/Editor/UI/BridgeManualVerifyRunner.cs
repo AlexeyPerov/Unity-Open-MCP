@@ -1,14 +1,3 @@
-// Bridge-side facade for ad-hoc manual verify runs driven from the Editor UI (M4.5-8).
-//
-// Wraps VerifyGateAdapter.ValidatePaths with a small result-shape so the bridge window
-// can render the manual validate outcome without leaking verify-package types into the
-// UI layer. Manual verify is **non-mutating**: it does not create a gate transaction,
-// does not create a checkpoint, and does not touch the gate precedence rules — it is a
-// pure read-only scan over the supplied paths.
-//
-// Paths come from either the Project window selection (default) or a user-typed list
-// (one per line). The runner normalizes/validates paths and surfaces an empty result
-// for empty/invalid input so the UI can render a clean no-data state.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -180,7 +169,7 @@ namespace UnityOpenMcpBridge
             }
         }
 
-        static int SeverityRank(string severity)
+        private static int SeverityRank(string severity)
         {
             return severity == "error" ? 0 : 1;
         }

@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Categories/ScenePrefabHealth/ScenePrefabHealthIssueMapper.cs
-
 using System.Collections.Generic;
 
 namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
@@ -28,7 +26,7 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
                 MapPrefabIssues(prefab, settings, sink);
         }
 
-        static void MapSceneIssues(SceneData scene, ScanSettings settings, List<VerifyIssue> sink)
+        private static void MapSceneIssues(SceneData scene, ScanSettings settings, List<VerifyIssue> sink)
         {
             if (settings.DetectBrokenReferences)
             {
@@ -79,7 +77,7 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             }
         }
 
-        static void MapPrefabIssues(PrefabData prefab, ScanSettings settings, List<VerifyIssue> sink)
+        private static void MapPrefabIssues(PrefabData prefab, ScanSettings settings, List<VerifyIssue> sink)
         {
             if (settings.DetectDeepNesting && prefab.NestingDepth > settings.MaxPrefabNestingDepth)
             {
@@ -96,7 +94,7 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             }
         }
 
-        static VerifyIssue MakeIssue(
+        private static VerifyIssue MakeIssue(
             string assetPath, string code, string description,
             VerifySeverity severity)
         {

@@ -13,7 +13,7 @@ namespace UnityOpenMcpBridge.Batch
         public const int ExitPass = 0;
         public const int ExitFail = 1;
 
-        static readonly string[] SupportedOperations = { "find_members", "compile_check" };
+        private static readonly string[] SupportedOperations = { "find_members", "compile_check" };
 
         public static void Run()
         {
@@ -71,7 +71,7 @@ namespace UnityOpenMcpBridge.Batch
         // CompileCheckState.Start applies its own default and clamps. Kept here
         // (not in CompileCheckState) so the decision to branch is local to the
         // entry point, matching how Execute() dispatches the synchronous ops.
-        static (bool isCompileCheck, long timeoutMs) DetectCompileCheck(string[] allArgs)
+        private static (bool isCompileCheck, long timeoutMs) DetectCompileCheck(string[] allArgs)
         {
             var toolArgs = ExtractToolArgs(allArgs);
             if (toolArgs.Length == 0 || toolArgs[0] != "compile_check")
@@ -124,7 +124,7 @@ namespace UnityOpenMcpBridge.Batch
             }
         }
 
-        static (int exitCode, string json) RunFindMembers(string[] args)
+        private static (int exitCode, string json) RunFindMembers(string[] args)
         {
             var parsed = ParseFindMembersFlags(args);
             if (parsed.error != null)
@@ -154,7 +154,7 @@ namespace UnityOpenMcpBridge.Batch
             public string error;
         }
 
-        static FindMembersFlags ParseFindMembersFlags(string[] args)
+        private static FindMembersFlags ParseFindMembersFlags(string[] args)
         {
             var p = new FindMembersFlags();
 
@@ -247,7 +247,7 @@ namespace UnityOpenMcpBridge.Batch
             return p;
         }
 
-        static bool TryParseBool(string s, out bool result)
+        private static bool TryParseBool(string s, out bool result)
         {
             if (s == "true") { result = true; return true; }
             if (s == "false") { result = false; return true; }
@@ -259,7 +259,7 @@ namespace UnityOpenMcpBridge.Batch
 
         #region JSON body construction
 
-        static string BuildFindMembersBody(FindMembersFlags flags)
+        private static string BuildFindMembersBody(FindMembersFlags flags)
         {
             var sb = new StringBuilder(256);
             sb.Append('{');
@@ -276,7 +276,7 @@ namespace UnityOpenMcpBridge.Batch
             return sb.ToString();
         }
 
-        static string JsonString(string s)
+        private static string JsonString(string s)
         {
             if (s == null) return "null";
             return "\"" + OutputSerializer.EscapeJsonString(s) + "\"";
@@ -286,7 +286,7 @@ namespace UnityOpenMcpBridge.Batch
 
         #region Envelope builders
 
-        static string BuildSuccessEnvelope(string outputJson)
+        private static string BuildSuccessEnvelope(string outputJson)
         {
             var sb = new StringBuilder(512);
             sb.Append("{\"mutation\":{\"success\":true,\"output\":");
@@ -297,7 +297,7 @@ namespace UnityOpenMcpBridge.Batch
             return sb.ToString();
         }
 
-        static string BuildFailureEnvelope(string errorCode, string errorMessage)
+        private static string BuildFailureEnvelope(string errorCode, string errorMessage)
         {
             var sb = new StringBuilder(512);
             sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"");
@@ -314,7 +314,7 @@ namespace UnityOpenMcpBridge.Batch
 
         #region CLI extraction helpers
 
-        static string[] ExtractToolArgs(string[] allArgs)
+        private static string[] ExtractToolArgs(string[] allArgs)
         {
             for (int i = 0; i < allArgs.Length; i++)
             {
@@ -331,7 +331,7 @@ namespace UnityOpenMcpBridge.Batch
             return Array.Empty<string>();
         }
 
-        static string[] SliceAfter(string[] source, int index)
+        private static string[] SliceAfter(string[] source, int index)
         {
             if (index + 1 >= source.Length)
                 return Array.Empty<string>();
@@ -345,12 +345,12 @@ namespace UnityOpenMcpBridge.Batch
 
         #region Output helpers
 
-        static (int exitCode, string json) Fail(string message)
+        private static (int exitCode, string json) Fail(string message)
         {
             return (ExitFail, ErrorEnvelope("batch_error", message));
         }
 
-        static string ErrorEnvelope(string code, string message)
+        private static string ErrorEnvelope(string code, string message)
         {
             return BuildFailureEnvelope(code, message);
         }

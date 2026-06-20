@@ -95,7 +95,7 @@ namespace UnityOpenMcpBridge.Console
 
         enum DetailLevel { Summary, Normal, Verbose }
 
-        static DetailLevel ParseDetail(string detail)
+        private static DetailLevel ParseDetail(string detail)
         {
             if (string.IsNullOrEmpty(detail)) return DetailLevel.Normal;
             switch (detail.ToLowerInvariant())
@@ -109,7 +109,7 @@ namespace UnityOpenMcpBridge.Console
 
         // ---- entry filtering ----
 
-        static List<LogEntryInfo> FilterByType(List<LogEntryInfo> entries, string type)
+        private static List<LogEntryInfo> FilterByType(List<LogEntryInfo> entries, string type)
         {
             if (type == "all") return entries;
 
@@ -127,7 +127,7 @@ namespace UnityOpenMcpBridge.Console
             return result;
         }
 
-        static string Classify(int mode)
+        private static string Classify(int mode)
         {
             // Exception/Fatal/Error/Assert bits
             if ((mode & 1) != 0) return "error";       // Error
@@ -144,7 +144,7 @@ namespace UnityOpenMcpBridge.Console
         // tail matters most) and report how many were dropped so the caller can
         // widen the cap. Returns the trimmed list and sets `truncated` to the
         // number of dropped entries (never silent elision).
-        static List<LogEntryInfo> CapEntries(List<LogEntryInfo> entries, int maxEntries, out int truncated)
+        private static List<LogEntryInfo> CapEntries(List<LogEntryInfo> entries, int maxEntries, out int truncated)
         {
             if (maxEntries <= 0) maxEntries = 1;
             if (entries.Count > maxEntries)
@@ -156,7 +156,7 @@ namespace UnityOpenMcpBridge.Console
             return entries;
         }
 
-        static string FormatStack(string stack, int maxFrames, bool includeUnity)
+        private static string FormatStack(string stack, int maxFrames, bool includeUnity)
         {
             if (string.IsNullOrEmpty(stack)) return "";
 
@@ -183,7 +183,7 @@ namespace UnityOpenMcpBridge.Console
             return string.Join("\n", result);
         }
 
-        static bool IsUnityInternalFrame(string frame)
+        private static bool IsUnityInternalFrame(string frame)
         {
             if (string.IsNullOrEmpty(frame)) return true;
             var lower = frame.ToLowerInvariant();
@@ -196,7 +196,7 @@ namespace UnityOpenMcpBridge.Console
 
         // ---- JSON building ----
 
-        static string BuildJson(List<LogEntryInfo> entries, int totalBeforeFilter, int totalAfterFilter,
+        private static string BuildJson(List<LogEntryInfo> entries, int totalBeforeFilter, int totalAfterFilter,
             int truncated, bool cleared, string type, int maxEntries, int maxFrames, bool includeUnity,
             DetailLevel detailLevel)
         {
@@ -252,7 +252,7 @@ namespace UnityOpenMcpBridge.Console
             return sb.ToString();
         }
 
-        static string ErrorJson(string code, string message)
+        private static string ErrorJson(string code, string message)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"error\":{\"code\":").Append(Esc(code));
@@ -261,7 +261,7 @@ namespace UnityOpenMcpBridge.Console
             return sb.ToString();
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "\"\"";
             var sb = new StringBuilder(s.Length + 8);
@@ -298,16 +298,16 @@ namespace UnityOpenMcpBridge.Console
 
     static class LogEntriesReader
     {
-        static Type _logEntriesType;
-        static Type _logEntryType;
-        static MethodInfo _getEntriesMethod;
-        static MethodInfo _clearMethod;
-        static FieldInfo _messageField;
-        static FieldInfo _stackField;
-        static FieldInfo _modeField;
-        static bool _initialized;
+        private static Type _logEntriesType;
+        private static Type _logEntryType;
+        private static MethodInfo _getEntriesMethod;
+        private static MethodInfo _clearMethod;
+        private static FieldInfo _messageField;
+        private static FieldInfo _stackField;
+        private static FieldInfo _modeField;
+        private static bool _initialized;
 
-        static void Init()
+        private static void Init()
         {
             if (_initialized) return;
             _initialized = true;

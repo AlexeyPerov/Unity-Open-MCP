@@ -37,7 +37,7 @@ namespace UnityOpenMcpBridge.Batch
         // and re-check.
         internal const int MaxErrors = 200;
 
-        const long DefaultTimeoutMs = 300_000;
+        private const long DefaultTimeoutMs = 300_000;
 
         static CompileCheckState()
         {
@@ -93,7 +93,7 @@ namespace UnityOpenMcpBridge.Batch
             }
         }
 
-        static void OnAssemblyCompiled(string assembly, CompilerMessage[] messages)
+        private static void OnAssemblyCompiled(string assembly, CompilerMessage[] messages)
         {
             if (!File.Exists(PendingFilePath)) return;
 
@@ -133,7 +133,7 @@ namespace UnityOpenMcpBridge.Batch
             }
         }
 
-        static void Update()
+        private static void Update()
         {
             if (!File.Exists(PendingFilePath)) return;
 
@@ -149,7 +149,7 @@ namespace UnityOpenMcpBridge.Batch
             Finalize(pending, timedOut);
         }
 
-        static void Finalize(PendingState pending, bool timedOut)
+        private static void Finalize(PendingState pending, bool timedOut)
         {
             EditorApplication.update -= Update;
             CompilationPipeline.assemblyCompilationFinished -= OnAssemblyCompiled;
@@ -218,9 +218,9 @@ namespace UnityOpenMcpBridge.Batch
             return message.Substring(idx, end - idx);
         }
 
-        static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        static string JsonString(string s)
+        private static string JsonString(string s)
         {
             if (s == null) return "null";
             return "\"" + OutputSerializer.EscapeJsonString(s) + "\"";
@@ -228,7 +228,7 @@ namespace UnityOpenMcpBridge.Batch
 
         #region Pending-file persistence (survives domain reload)
 
-        static void WritePending(PendingState pending)
+        private static void WritePending(PendingState pending)
         {
             try
             {
@@ -241,7 +241,7 @@ namespace UnityOpenMcpBridge.Batch
             }
         }
 
-        static PendingState ReadPending()
+        private static PendingState ReadPending()
         {
             try
             {
@@ -258,7 +258,7 @@ namespace UnityOpenMcpBridge.Batch
         // Hand-rolled JSON for the pending file — the bridge has no JSON serializer
         // dependency (see packages/bridge/AGENTS.md §Transport) and these structs
         // are simple enough that pulling one in is not warranted.
-        static string SerializePending(PendingState pending)
+        private static string SerializePending(PendingState pending)
         {
             var sb = new StringBuilder(256);
             sb.Append('{');
@@ -293,7 +293,7 @@ namespace UnityOpenMcpBridge.Batch
             return sb.ToString();
         }
 
-        static PendingState ParsePending(string json)
+        private static PendingState ParsePending(string json)
         {
             if (string.IsNullOrEmpty(json)) return null;
             var p = new PendingState();

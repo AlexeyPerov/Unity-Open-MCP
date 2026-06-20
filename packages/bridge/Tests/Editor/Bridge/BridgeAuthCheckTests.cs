@@ -8,8 +8,8 @@ namespace UnityOpenMcpBridge.Tests
     // the live-HTTP harness.
     public class BridgeAuthCheckTests
     {
-        const string PolicyNone = BridgeAuthPolicy.None;
-        const string PolicyRequired = BridgeAuthPolicy.Required;
+        private const string PolicyNone = BridgeAuthPolicy.None;
+        private const string PolicyRequired = BridgeAuthPolicy.Required;
 
         [Test]
         public void NonePolicy_AllowsAnyRequest()

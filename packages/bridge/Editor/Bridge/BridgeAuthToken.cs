@@ -1,17 +1,3 @@
-// M14 — Per-session bearer token minted when the bridge acquires its instance
-// lock, plus a constant-time comparison helper for the HTTP auth check.
-//
-// The token is written into ~/.unity-open-mcp/instances/<projectHash>.json so the
-// MCP server (and any other client that discovered the bridge via the lock
-// file) can present it back. Enforcement is opt-in via `authMode` in
-// .unity-open-mcp/settings.json (BridgeAuthPolicy): the token is always minted
-// so flipping to "required" needs no restart, but the HTTP layer only checks
-// it when the policy says so.
-//
-// No new dependencies: RandomNumberGenerator is BCL (already used in
-// InstancePortResolver for the project hash). 32 random bytes hex-encoded give
-// 256 bits of entropy and a stable 64-char ASCII payload that survives every
-// transport the bridge already speaks.
 using System;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -29,7 +15,7 @@ namespace UnityOpenMcpBridge
         // without hardcoding a magic number.
         public const int HexLength = ByteLength * 2;
 
-        const string BearerPrefix = "Bearer ";
+        private const string BearerPrefix = "Bearer ";
 
         // Mint a fresh token. Never returns null/empty.
         public static string Generate()

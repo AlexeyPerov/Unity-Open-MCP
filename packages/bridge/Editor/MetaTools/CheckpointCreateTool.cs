@@ -40,7 +40,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return ToolDispatchResult.Ok(BuildResult(entry));
         }
 
-        static string BuildResult(CheckpointStoreEntry entry)
+        private static string BuildResult(CheckpointStoreEntry entry)
         {
             var sb = new StringBuilder(512);
             sb.Append("{\"checkpointId\":\"").Append(Esc(entry.CheckpointId)).Append("\"");
@@ -77,7 +77,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

@@ -15,10 +15,10 @@ namespace UnityOpenMcpBridge.Tests
     // PID before calling Acquire, then verifies it disappeared.
     public class BridgeInstanceLockTests
     {
-        const string TestProjectPath = "/test/MyGame";
-        const string OtherProjectPath = "/test/OtherGame";
+        private const string TestProjectPath = "/test/MyGame";
+        private const string OtherProjectPath = "/test/OtherGame";
 
-        string _tempDir;
+        private string _tempDir;
 
         [SetUp]
         public void SetUp()
@@ -38,7 +38,7 @@ namespace UnityOpenMcpBridge.Tests
             try { Directory.Delete(_tempDir, recursive: true); } catch { }
         }
 
-        static Guid Guid()
+        private static Guid Guid()
         {
             // Local helper so the test name doesn't shadow System.Guid.
             return System.Guid.NewGuid();
@@ -48,7 +48,7 @@ namespace UnityOpenMcpBridge.Tests
         // _acquired flag so Acquire can run again. The on-disk lock (if any)
         // from a prior test was written to the previous temp dir, which is
         // already gone.
-        static void ForceReleaseForTest()
+        private static void ForceReleaseForTest()
         {
             try { BridgeInstanceLock.Release(); } catch { }
         }

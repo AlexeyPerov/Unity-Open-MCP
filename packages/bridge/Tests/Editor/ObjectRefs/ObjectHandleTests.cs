@@ -1,5 +1,3 @@
-// These tests exercise ObjectHandle's int-instance-ID contract, which is built
-// on the deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using NUnit.Framework;
 using UnityOpenMcpBridge.ObjectRefs;

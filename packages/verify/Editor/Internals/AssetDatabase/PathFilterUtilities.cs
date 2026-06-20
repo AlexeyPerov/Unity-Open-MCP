@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Utilities/AssetDatabase/USPathFilterUtilities.cs
-
 using System;
 using System.Collections.Generic;
 using System.Linq;

@@ -1,21 +1,3 @@
-// EditMode tests for the M16 Plan 4 typed Package Manager tools
-// (PackagesTools).
-//
-// Strategy: most branches that touch live UPM state (Client.List /
-// Client.Add / Client.Remove) need a real network + project — they are
-// flaky in CI. These tests cover the parameter-parsing and manifest-parsing
-// branches that are deterministic and that protect the contract:
-//
-// - missing/empty parameter validation for every tool
-// - the manifest.json reader (get_dependencies + check), which is the only
-//   piece that runs entirely off disk and is therefore stable
-// - the dispatch wiring contracts (KnownTools / DirectResponseTools /
-//   MutatingTools membership) so a future edit that forgets to wire a new
-//   package tool fails loudly here
-//
-// Live UPM round-trips (list / search / add / remove / get_info) are
-// covered by the integration suite (Tests/Editor/Integration/) and the
-// manual validation checklist, not here.
 using NUnit.Framework;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.TypedTools;

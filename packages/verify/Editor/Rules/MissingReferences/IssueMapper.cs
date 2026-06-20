@@ -1,5 +1,3 @@
-// Extracted from Unity-Scanner: Editor/Categories/MissingReferences/MissingReferencesIssueMapper.cs
-
 using System.Collections.Generic;
 
 namespace UnityOpenMcpVerify.Rules.MissingReferences
@@ -96,7 +94,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             }
         }
 
-        static VerifyIssue MakeIssue(
+        private static VerifyIssue MakeIssue(
             AssetData asset, string code, string description,
             VerifySeverity severity)
         {

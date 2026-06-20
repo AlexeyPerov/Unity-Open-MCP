@@ -56,7 +56,7 @@ namespace UnityOpenMcpBridge
 
     public static class GatePolicy
     {
-        const long GateBudgetMs = 2000;
+        private const long GateBudgetMs = 2000;
 
         public static GateDispatchResult Execute(
             GateMode mode,
@@ -266,7 +266,7 @@ namespace UnityOpenMcpBridge
             return steps.ToArray();
         }
 
-        static void AddIssueHints(List<string> steps, string[] issueKeys, int newErrors, int newWarnings, bool isFailed)
+        private static void AddIssueHints(List<string> steps, string[] issueKeys, int newErrors, int newWarnings, bool isFailed)
         {
             var firstKey = issueKeys != null && issueKeys.Length > 0 ? issueKeys[0] : null;
             var parsed = ParseIssueKey(firstKey);
@@ -290,14 +290,14 @@ namespace UnityOpenMcpBridge
                 steps.Add("Fix the issue and retry; use unity_open_mcp_validate_edit to verify without mutation.");
         }
 
-        static string FormatIssue(IssueKeyParts? parsed, string rawKey)
+        private static string FormatIssue(IssueKeyParts? parsed, string rawKey)
         {
             if (parsed == null) return rawKey ?? "unknown";
             var p = parsed.Value;
             return $"{p.IssueCode} on {p.AssetPath}";
         }
 
-        static bool TryFixIdForIssue(string categoryId, string issueCode, out string fixId)
+        private static bool TryFixIdForIssue(string categoryId, string issueCode, out string fixId)
         {
             // Issue codes are emitted in lowercase by the rule issue mappers, but
             // legacy delta keys (and older test fixtures) used UPPERCASE codes —
@@ -337,7 +337,7 @@ namespace UnityOpenMcpBridge
             return new IssueKeyParts(parts[0], parts[1], parts[2], parts[3]);
         }
 
-        static string[] BuildNextSteps()
+        private static string[] BuildNextSteps()
         {
             return new[] { "Mutation failed before gate could validate. Fix the mutation error and retry." };
         }

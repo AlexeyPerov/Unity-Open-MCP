@@ -50,7 +50,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Kept as a constant list so the wrapper is independent of the optional
         // com.unity.profiling.core package — the core tool relies on built-in
         // Unity APIs only. Mirrors the UMCP AvailableModules list.
-        static readonly string[] AvailableModules =
+        private static readonly string[] AvailableModules =
         {
             "CPU", "GPU", "Rendering", "Memory", "Audio", "Video",
             "Physics", "Physics2D", "NetworkMessages", "NetworkOperations",
@@ -62,7 +62,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // purely local bookkeeping consumed by GetStatus / ListModules /
         // EnableModule; actual module visibility is controlled from the
         // Profiler window.
-        static readonly HashSet<string> EnabledModules = new HashSet<string>
+        private static readonly HashSet<string> EnabledModules = new HashSet<string>
         {
             "CPU", "GPU", "Rendering", "Memory", "Audio", "Video",
             "Physics", "Physics2D", "UI"
@@ -72,18 +72,18 @@ namespace UnityOpenMcpBridge.TypedTools
         // not part of the public API surface on every Unity version. Mirrors
         // the UCP ProfilerController approach: try once at first use, cache
         // null when unavailable.
-        static readonly Type ProfilerDriverType =
+        private static readonly Type ProfilerDriverType =
             Type.GetType("UnityEditorInternal.ProfilerDriver, UnityEditor");
-        static readonly PropertyInfo DriverEnabledProperty =
+        private static readonly PropertyInfo DriverEnabledProperty =
             ProfilerDriverType?.GetProperty("enabled",
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-        static readonly PropertyInfo ProfileEditorProperty =
+        private static readonly PropertyInfo ProfileEditorProperty =
             ProfilerDriverType?.GetProperty("profileEditor",
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-        static readonly PropertyInfo DeepProfilingProperty =
+        private static readonly PropertyInfo DeepProfilingProperty =
             ProfilerDriverType?.GetProperty("deepProfiling",
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-        static readonly MethodInfo ClearAllFramesMethod =
+        private static readonly MethodInfo ClearAllFramesMethod =
             ProfilerDriverType?.GetMethod("ClearAllFrames",
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
 
@@ -92,19 +92,19 @@ namespace UnityOpenMcpBridge.TypedTools
         // statics on UnityEngine.Profiling.Profiler in 2020+, but we resolve
         // them via reflection so the tool fails closed instead of refusing to
         // compile on older targets.
-        static readonly MethodInfo GetCategoriesCountMethod =
+        private static readonly MethodInfo GetCategoriesCountMethod =
             typeof(UnityProfiler).GetMethod("GetCategoriesCount",
                 BindingFlags.Public | BindingFlags.Static,
                 null, Type.EmptyTypes, null);
-        static readonly MethodInfo GetAllCategoriesMethod =
+        private static readonly MethodInfo GetAllCategoriesMethod =
             typeof(UnityProfiler).GetMethod("GetAllCategories",
                 BindingFlags.Public | BindingFlags.Static,
                 null, new[] { typeof(ProfilerCategory[]) }, null);
-        static readonly MethodInfo IsCategoryEnabledMethod =
+        private static readonly MethodInfo IsCategoryEnabledMethod =
             typeof(UnityProfiler).GetMethod("IsCategoryEnabled",
                 BindingFlags.Public | BindingFlags.Static,
                 null, new[] { typeof(ProfilerCategory) }, null);
-        static readonly MethodInfo SetCategoryEnabledMethod =
+        private static readonly MethodInfo SetCategoryEnabledMethod =
             typeof(UnityProfiler).GetMethod("SetCategoryEnabled",
                 BindingFlags.Public | BindingFlags.Static,
                 null, new[] { typeof(ProfilerCategory), typeof(bool) }, null);
@@ -112,16 +112,16 @@ namespace UnityOpenMcpBridge.TypedTools
         // Cap to keep an accidental call against a huge file from OOMing the
         // Editor. Snapshots written by SaveData are typically a few KB; 10 MB
         // leaves headroom for future schema expansion. Mirrors UMCP.
-        const long MaxLoadFileSizeBytes = 10L * 1024L * 1024L;
+        private const long MaxLoadFileSizeBytes = 10L * 1024L * 1024L;
 
         // Safe-editor memory budget clamps (mirror UCP). maxUsedMemory is an
         // int (bytes) on Unity's API; we clamp before assigning to avoid
         // negative / overflowed values.
-        const long MinimumProfilerMemoryBytes = 16L * 1024L * 1024L;
-        const long DefaultProfilerMemoryBytes = 128L * 1024L * 1024L;
-        const long HeavyProfilerMemoryBytes = 64L * 1024L * 1024L;
-        const long AbsoluteProfilerMemoryBytes = 256L * 1024L * 1024L;
-        const long AbsoluteHeavyProfilerMemoryBytes = 128L * 1024L * 1024L;
+        private const long MinimumProfilerMemoryBytes = 16L * 1024L * 1024L;
+        private const long DefaultProfilerMemoryBytes = 128L * 1024L * 1024L;
+        private const long HeavyProfilerMemoryBytes = 64L * 1024L * 1024L;
+        private const long AbsoluteProfilerMemoryBytes = 256L * 1024L * 1024L;
+        private const long AbsoluteHeavyProfilerMemoryBytes = 128L * 1024L * 1024L;
 
         // ============================ Start =============================
 
@@ -635,7 +635,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Returns the rendering payload by delegating to the M10 rendering
         // tool (sibling registry tool). We dispatch through the registry so
         // the snapshot shape stays in sync with the live read tool.
-        static string InvokeRendering()
+        private static string InvokeRendering()
         {
             try
             {
@@ -649,7 +649,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // snapshot we want just that inner object, not the gate envelope. The
         // direct-response read tools already return the bare payload, so we
         // can pass it through. We guard against null / failed dispatch.
-        static string ExtractPayload(ToolDispatchResult result)
+        private static string ExtractPayload(ToolDispatchResult result)
         {
             if (result == null || !result.Success || string.IsNullOrEmpty(result.Output))
                 return null;
@@ -660,7 +660,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Mirrors UCP's ApplySafeMemoryBudget: heavy-capture (deep profiling
         // or allocation callstacks) gets a tighter cap. Returns warnings for
         // any clamping that happened.
-        static List<string> ApplySafeMemoryBudget(long? requestedBytes,
+        private static List<string> ApplySafeMemoryBudget(long? requestedBytes,
             bool deepProfile, bool allocationCallstacks)
         {
             var warnings = new List<string>();
@@ -690,7 +690,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return warnings;
         }
 
-        static List<string> SetCategoryEnabled(string categoryName, bool enabled)
+        private static List<string> SetCategoryEnabled(string categoryName, bool enabled)
         {
             var warnings = new List<string>();
             var cat = ResolveCategory(categoryName);
@@ -716,7 +716,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return warnings;
         }
 
-        static ProfilerCategory? ResolveCategory(string name)
+        private static ProfilerCategory? ResolveCategory(string name)
         {
             foreach (var c in GetAvailableCategories())
                 if (string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
@@ -724,7 +724,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return null;
         }
 
-        static ProfilerCategory[] GetAvailableCategories()
+        private static ProfilerCategory[] GetAvailableCategories()
         {
             if (GetCategoriesCountMethod == null || GetAllCategoriesMethod == null)
                 return Array.Empty<ProfilerCategory>();
@@ -739,55 +739,55 @@ namespace UnityOpenMcpBridge.TypedTools
             catch { return Array.Empty<ProfilerCategory>(); }
         }
 
-        static bool IsCategoryEnabled(ProfilerCategory category)
+        private static bool IsCategoryEnabled(ProfilerCategory category)
         {
             if (IsCategoryEnabledMethod == null) return false;
             try { return Convert.ToBoolean(IsCategoryEnabledMethod.Invoke(null, new object[] { category })); }
             catch { return false; }
         }
 
-        static bool GetDriverEnabled()
+        private static bool GetDriverEnabled()
         {
             if (DriverEnabledProperty == null) return false;
             try { return Convert.ToBoolean(DriverEnabledProperty.GetValue(null)); }
             catch { return false; }
         }
 
-        static bool GetProfileEditor()
+        private static bool GetProfileEditor()
         {
             if (ProfileEditorProperty == null) return false;
             try { return Convert.ToBoolean(ProfileEditorProperty.GetValue(null)); }
             catch { return false; }
         }
 
-        static bool SetProfileEditor(bool value)
+        private static bool SetProfileEditor(bool value)
         {
             if (ProfileEditorProperty == null) return false;
             try { ProfileEditorProperty.SetValue(null, value); return true; }
             catch { return false; }
         }
 
-        static bool GetDeepProfiling()
+        private static bool GetDeepProfiling()
         {
             if (DeepProfilingProperty == null) return false;
             try { return Convert.ToBoolean(DeepProfilingProperty.GetValue(null)); }
             catch { return false; }
         }
 
-        static bool SetDeepProfiling(bool value)
+        private static bool SetDeepProfiling(bool value)
         {
             if (DeepProfilingProperty == null) return false;
             try { DeepProfilingProperty.SetValue(null, value); return true; }
             catch { return false; }
         }
 
-        static string NormalizeMode(string mode)
+        private static string NormalizeMode(string mode)
             => string.Equals(mode, "edit", StringComparison.OrdinalIgnoreCase) ? "edit" : "play";
 
-        static string NormalizePath(string path)
+        private static string NormalizePath(string path)
             => string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
 
-        static string NormalizeAbsolutePath(string path)
+        private static string NormalizeAbsolutePath(string path)
         {
             var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
             if (string.IsNullOrEmpty(projectRoot))
@@ -799,7 +799,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // escape the project root, aren't .json, or contain '..'. The
         // returned path is OS-normalized; `inputPath` is preserved for the
         // response message. Mirrors ReflectionScriptsObjectsTools.ResolveScriptPath.
-        static string ResolveSnapshotPath(string inputPath, out ToolDispatchResult error)
+        private static string ResolveSnapshotPath(string inputPath, out ToolDispatchResult error)
         {
             error = null;
             if (string.IsNullOrWhiteSpace(inputPath))
@@ -840,16 +840,16 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // JsonBody.GetBool returns a default when the key is missing, so we
         // need a presence check to distinguish "not provided" from "false".
-        static bool HasField(string json, string key)
+        private static bool HasField(string json, string key)
         {
             if (string.IsNullOrEmpty(json)) return false;
             return json.IndexOf("\"" + key + "\"", StringComparison.Ordinal) >= 0;
         }
 
-        static string Num(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
-        static string Num(float f) => f.ToString("0.###", CultureInfo.InvariantCulture);
+        private static string Num(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
+        private static string Num(float f) => f.ToString("0.###", CultureInfo.InvariantCulture);
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "\"\"";
             return "\"" + OutputSerializer.EscapeJsonString(s) + "\"";

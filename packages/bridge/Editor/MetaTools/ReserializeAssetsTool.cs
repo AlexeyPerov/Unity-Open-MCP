@@ -68,7 +68,7 @@ namespace UnityOpenMcpBridge.MetaTools
 
         // Normalize for AssetDatabase: forward slashes, no leading slash, rooted under Assets/.
         // Paths outside Assets/ or with unsupported extensions are rejected before mutation.
-        static System.Collections.Generic.List<string> NormalizePaths(string[] rawPaths)
+        private static System.Collections.Generic.List<string> NormalizePaths(string[] rawPaths)
         {
             var result = new System.Collections.Generic.List<string>(rawPaths.Length);
             foreach (var raw in rawPaths)
@@ -92,7 +92,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return result;
         }
 
-        static System.Collections.Generic.List<string> CollectInvalid(System.Collections.Generic.List<string> paths)
+        private static System.Collections.Generic.List<string> CollectInvalid(System.Collections.Generic.List<string> paths)
         {
             var invalid = new System.Collections.Generic.List<string>();
             foreach (var p in paths)
@@ -118,7 +118,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return invalid;
         }
 
-        static string BuildResult(System.Collections.Generic.List<string> paths, bool includeMeta)
+        private static string BuildResult(System.Collections.Generic.List<string> paths, bool includeMeta)
         {
             var sb = new StringBuilder(256 + paths.Count * 64);
             sb.Append("{\"reserialized\":[");
@@ -134,7 +134,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

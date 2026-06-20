@@ -45,7 +45,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return ToolDispatchResult.Ok(BuildResult(delta, hasNewErrors));
         }
 
-        static string BuildResult(DeltaData delta, bool hasNewErrors)
+        private static string BuildResult(DeltaData delta, bool hasNewErrors)
         {
             var sb = new StringBuilder(512);
             sb.Append("{\"passed\":").Append(!hasNewErrors ? "true" : "false");
@@ -83,7 +83,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        static string Esc(string s)
+        private static string Esc(string s)
         {
             if (s == null) return "";
             var sb = new StringBuilder(s.Length + 4);

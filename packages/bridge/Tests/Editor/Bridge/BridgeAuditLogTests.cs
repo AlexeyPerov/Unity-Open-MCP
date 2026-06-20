@@ -9,7 +9,7 @@ namespace UnityOpenMcpBridge.Tests
     // auditLogEnabled setting to sandbox I/O into a per-test temp dir.
     public class BridgeAuditLogTests
     {
-        string _tempDir;
+        private string _tempDir;
 
         [SetUp]
         public void SetUp()
@@ -150,10 +150,10 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"mutationError\":\"code\\\"with\\\"quotes\"", line);
         }
 
-        string AuditFileFor(string hash) =>
+        private string AuditFileFor(string hash) =>
             Path.Combine(_tempDir, $"audit-{hash}.jsonl");
 
-        static BridgeAuditRecord SampleRecord()
+        private static BridgeAuditRecord SampleRecord()
         {
             return new BridgeAuditRecord
             {

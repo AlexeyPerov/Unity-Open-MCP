@@ -20,7 +20,7 @@ namespace UnityOpenMcpBridge
         // Legacy hardcoded meta-tools. Registry tools carry their own policy on
         // the BridgeToolEntry and are NOT listed here (Resolve() checks the
         // registry first).
-        static readonly Dictionary<string, LifecyclePolicy> HardcodedPolicies = new()
+        private static readonly Dictionary<string, LifecyclePolicy> HardcodedPolicies = new()
         {
             // ----- None: read-only, no settle -----
             { "unity_open_mcp_find_members",     LifecyclePolicy.None },

@@ -13,7 +13,7 @@ namespace UnityOpenMcpBridge
         public MethodInfo Method { get; }
         public Type DeclaringType { get; }
 
-        object _instance;
+        private object _instance;
 
         public BridgeResourceEntry(
             string name,

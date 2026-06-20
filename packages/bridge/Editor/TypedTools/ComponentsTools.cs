@@ -1,4 +1,3 @@
-// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
@@ -334,7 +333,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return null;
         }
 
-        static IEnumerable<System.Type> SafeGetTypes(System.Reflection.Assembly asm)
+        private static IEnumerable<System.Type> SafeGetTypes(System.Reflection.Assembly asm)
         {
             try { return asm.GetTypes(); }
             catch (ReflectionTypeLoadException e)
@@ -345,12 +344,12 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static IEnumerable<System.Type> FilterNull(System.Type[] types)
+        private static IEnumerable<System.Type> FilterNull(System.Type[] types)
         {
             foreach (var t in types) if (t != null) yield return t;
         }
 
-        static void ScanAssembly(System.Reflection.Assembly asm, string query,
+        private static void ScanAssembly(System.Reflection.Assembly asm, string query,
             HashSet<string> seen, List<ComponentTypeEntry> sink, int maxResults)
         {
             var asmName = asm.GetName().Name;
@@ -388,7 +387,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Resolve a single component on a GameObject: by instance_id (a
         // specific component), or by type_name (first match).
-        static bool ResolveComponent(string body,
+        private static bool ResolveComponent(string body,
             out Component component, out ToolDispatchResult error)
         {
             component = null;
@@ -441,14 +440,14 @@ namespace UnityOpenMcpBridge.TypedTools
             return true;
         }
 
-        static bool IsEnabled(Component component)
+        private static bool IsEnabled(Component component)
         {
             if (component is Behaviour b) return b.enabled;
             if (component is Collider c) return c.enabled;
             return true;
         }
 
-        static void AppendSerializedProperty(StringBuilder sb, SerializedProperty prop)
+        private static void AppendSerializedProperty(StringBuilder sb, SerializedProperty prop)
         {
             sb.Append("{\"path\":\"").Append(TypedTargets.Esc(prop.propertyPath));
             sb.Append("\",\"type\":\"").Append(prop.propertyType.ToString());
@@ -456,7 +455,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append('}');
         }
 
-        static string ReadSerializedValue(SerializedProperty prop)
+        private static string ReadSerializedValue(SerializedProperty prop)
         {
             switch (prop.propertyType)
             {
@@ -548,7 +547,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static void WriteSerializedProperty(SerializedProperty sp, string valueRaw, string typeHint)
+        private static void WriteSerializedProperty(SerializedProperty sp, string valueRaw, string typeHint)
         {
             if (valueRaw == null) valueRaw = "null";
             valueRaw = valueRaw.Trim();
@@ -671,21 +670,21 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static int ParseInt(string raw)
+        private static int ParseInt(string raw)
         {
             if (!int.TryParse(StripQuotes(raw), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
                 throw new System.FormatException($"Could not parse int from '{raw}'.");
             return n;
         }
 
-        static float ParseFloat(string raw)
+        private static float ParseFloat(string raw)
         {
             if (!float.TryParse(StripQuotes(raw), NumberStyles.Float, CultureInfo.InvariantCulture, out var f))
                 throw new System.FormatException($"Could not parse float from '{raw}'.");
             return f;
         }
 
-        static string StripQuotes(string s)
+        private static string StripQuotes(string s)
         {
             if (string.IsNullOrEmpty(s)) return s;
             s = s.Trim();
@@ -697,7 +696,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Append non-serialized public properties that are commonly useful to
         // an agent (transform.position, Rigidbody.velocity, etc.). Strictly
         // read-only and bounded by max_fields.
-        static void AppendPublicProperties(StringBuilder sb, Component component,
+        private static void AppendPublicProperties(StringBuilder sb, Component component,
             ref int emitted, int maxFields, ref int truncated)
         {
             bool first = true;
@@ -727,7 +726,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static string SerializeValue(object value)
+        private static string SerializeValue(object value)
         {
             if (value == null) return "null";
             switch (value)
@@ -784,10 +783,10 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        static string BuildOpResult(List<string> done, List<string> errors, string doneLabel)
+        private static string BuildOpResult(List<string> done, List<string> errors, string doneLabel)
             => AssetsTools.BuildFolderOpResult(done, errors, doneLabel);
 
-        static void MarkActiveSceneDirty(GameObject go)
+        private static void MarkActiveSceneDirty(GameObject go)
         {
             var scene = go.scene;
             if (scene.IsValid()) UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
