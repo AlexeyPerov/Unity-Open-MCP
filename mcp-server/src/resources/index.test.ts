@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 
 import { ALL_RESOURCES } from "./index.js";
 
-test("ALL_RESOURCES has exactly three resources", () => {
-  assert.equal(ALL_RESOURCES.length, 3);
+test("ALL_RESOURCES has exactly four resources", () => {
+  assert.equal(ALL_RESOURCES.length, 4);
 });
 
 test("health/summary resource is registered with correct URI", () => {
@@ -42,6 +42,7 @@ test("resource URIs are stable and deterministic across reads", () => {
     "unity-open-mcp://bridge/status",
     "unity-open-mcp://health/baseline",
     "unity-open-mcp://health/summary",
+    "unity-open-mcp://tool-groups",
   ]);
 });
 
@@ -50,8 +51,18 @@ test("no unintended URIs are exposed", () => {
     "unity-open-mcp://health/summary",
     "unity-open-mcp://health/baseline",
     "unity-open-mcp://bridge/status",
+    "unity-open-mcp://tool-groups",
   ]);
   for (const r of ALL_RESOURCES) {
     assert.ok(allowed.has(r.uri), `unexpected URI: ${r.uri}`);
   }
+});
+
+test("tool-groups resource is registered with correct URI", () => {
+  const r = ALL_RESOURCES.find(
+    (r) => r.uri === "unity-open-mcp://tool-groups",
+  );
+  assert.ok(r, "tool-groups must be in ALL_RESOURCES");
+  assert.equal(r!.mimeType, "application/json");
+  assert.ok(r!.name);
 });

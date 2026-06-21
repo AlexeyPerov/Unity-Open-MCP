@@ -60,7 +60,8 @@ namespace UnityOpenMcpBridge
                         destructiveHint: attr.DestructiveHint,
                         lifecycle: attr.Lifecycle,
                         enabled: attr.Enabled,
-                        method: method
+                        method: method,
+                        group: attr.Group
                     );
 
                     _tools[attr.Name] = entry;
@@ -76,6 +77,33 @@ namespace UnityOpenMcpBridge
         public static bool TryGet(string toolName, out BridgeToolEntry entry)
         {
             return _tools.TryGetValue(toolName, out entry);
+        }
+
+        // M18 Plan 2 / T18.2 — group → tool-names mapping for the bridge's
+        // capability surface. Tools with Group = null are always visible
+        // (server meta-tools) and intentionally omitted — the capability
+        // report only enumerates group-bound tools, which is what
+        // manage_tools and the tool_groups resource need to know.
+        //
+        // Returns a fresh dictionary on every call so callers can mutate it
+        // without affecting the registry; the registry itself never mutates
+        // after Scan().
+        public static IDictionary<string, System.Collections.Generic.List<string>> GroupToTools()
+        {
+            var map = new Dictionary<string, System.Collections.Generic.List<string>>();
+            foreach (var entry in _tools.Values)
+            {
+                if (string.IsNullOrEmpty(entry.Group)) continue;
+                if (!map.TryGetValue(entry.Group, out var list))
+                {
+                    list = new System.Collections.Generic.List<string>();
+                    map[entry.Group] = list;
+                }
+                list.Add(entry.Name);
+            }
+            // Stable order — group iteration is deterministic across calls.
+            foreach (var kv in map) kv.Value.Sort(StringComparer.Ordinal);
+            return map;
         }
 
         public static ToolDispatchResult TryDispatch(string toolName, string body)

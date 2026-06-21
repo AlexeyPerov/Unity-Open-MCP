@@ -648,6 +648,26 @@ namespace UnityOpenMcpBridge
                             SendJsonError(context, 405, "method_not_allowed", "GET required for resource endpoints");
                         }
                         break;
+                    case "/tools":
+                        // M18 Plan 2 / T18.2.3 — compiled-state capability
+                        // endpoint. Returns the set of tool names the bridge
+                        // compiled in (KnownTools ∪ BridgeToolRegistry). The
+                        // MCP server consults this from capabilities /
+                        // manage_tools list_groups to report per-group
+                        // availability (e.g. whether the navigation domain
+                        // compiled in via UNITY_OPEN_MCP_EXT_NAVIGATION). Read-
+                        // only, gate-free.
+                        if (context.Request.HttpMethod == "GET")
+                        {
+                            activity.Kind = BridgeActivityKind.ResourceRequest;
+                            HandleToolsList(context);
+                        }
+                        else
+                        {
+                            activity.Kind = BridgeActivityKind.ResourceRequest;
+                            SendJsonError(context, 405, "method_not_allowed", "GET required for /tools");
+                        }
+                        break;
                     default:
                         if (path.StartsWith("/tools/"))
                         {
@@ -1801,6 +1821,68 @@ namespace UnityOpenMcpBridge
                 sb.Append('}');
             }
             sb.Append(']');
+            SendJson(context, 200, sb.ToString());
+        }
+
+        // M18 Plan 2 / T18.2.3 — compiled-state tool inventory. Used by the
+        // MCP server's capabilities surface and manage_tools list_groups to
+        // report per-group availability. The output is the union of the
+        // legacy KnownTools set and the [BridgeTool]-discovered registry.
+        //
+        // Group metadata is also surfaced here so the MCP server can render
+        // the group catalog without a second round-trip. The catalog is the
+        // authoritative per-bridge compiled-state view — only groups whose
+        // tools compiled in appear with a non-empty tool roster.
+        private static void HandleToolsList(HttpListenerContext context)
+        {
+            // Build the unioned tool-name set first.
+            var names = new HashSet<string>(KnownTools, StringComparer.Ordinal);
+            foreach (var entry in BridgeToolRegistry.All())
+            {
+                names.Add(entry.Name);
+            }
+
+            var sortedNames = new List<string>(names);
+            sortedNames.Sort(StringComparer.Ordinal);
+
+            var sb = new StringBuilder(1024);
+            sb.Append("{\"tools\":[");
+            for (int i = 0; i < sortedNames.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(EscapeString(sortedNames[i]));
+            }
+            sb.Append(']');
+
+            // Group → tools map (registry-side). KnownTools entries do not
+            // carry group metadata — only registry-discovered tools have a
+            // Group assignment on the attribute. This keeps the report
+            // faithful to what the bridge actually compiled in.
+            var groupToTools = BridgeToolRegistry.GroupToTools();
+            sb.Append(",\"groups\":[");
+            bool firstGroup = true;
+            // Stable iteration order: alphabetical by group id.
+            var groupIds = new List<string>(groupToTools.Keys);
+            groupIds.Sort(StringComparer.Ordinal);
+            foreach (var groupId in groupIds)
+            {
+                if (!firstGroup) sb.Append(',');
+                firstGroup = false;
+                var toolList = groupToTools[groupId];
+                sb.Append('{');
+                sb.Append("\"id\":").Append(EscapeString(groupId)).Append(',');
+                sb.Append("\"toolCount\":").Append(toolList.Count).Append(',');
+                sb.Append("\"tools\":[");
+                for (int i = 0; i < toolList.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append(EscapeString(toolList[i]));
+                }
+                sb.Append("]}");
+            }
+            sb.Append(']');
+
+            sb.Append('}');
             SendJson(context, 200, sb.ToString());
         }
 

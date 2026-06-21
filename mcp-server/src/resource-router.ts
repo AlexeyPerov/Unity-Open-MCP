@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import type { LiveClient } from "./live-client.js";
 import type { PingCache } from "./ping-cache.js";
+import { TOOL_GROUPS, DEFAULT_ENABLED_GROUPS } from "./capabilities/tool-groups.js";
 
 const DEFAULT_BASELINE_PATH = "CI/unity-open-mcp-baseline.json";
 
@@ -142,6 +143,28 @@ export function handleBridgeStatus(
   });
 }
 
+// M18 Plan 2 / T18.2.3 — static tool-group catalog resource. Returns the
+// catalog entries with default-enabled flags; for compiled-state availability
+// and tool rosters, call unity_open_mcp_capabilities; for session activation
+// state, call unity_open_mcp_manage_tools(list_groups).
+export function handleToolGroups(): ReadResourceResult {
+  return toTextResource("unity-open-mcp://tool-groups", {
+    status: "ok",
+    groups: TOOL_GROUPS.map((g) => ({
+      id: g.id,
+      description: g.description,
+      defaultEnabled: g.defaultEnabled,
+      domainDefine: g.domainDefine ?? null,
+      unityPackage: g.unityPackage ?? null,
+    })),
+    defaultEnabledGroups: Array.from(DEFAULT_ENABLED_GROUPS).sort(),
+    usageHint:
+      "Call unity_open_mcp_manage_tools(action=\"list_groups\") for session " +
+      "activation state and compiled-state availability; call " +
+      "unity_open_mcp_capabilities for the full tool roster per group.",
+  });
+}
+
 export class ResourceRouter {
   private deps: ResourceHandlerDeps;
 
@@ -157,6 +180,8 @@ export class ResourceRouter {
         return handleHealthBaseline(this.deps);
       case "unity-open-mcp://bridge/status":
         return handleBridgeStatus(this.deps);
+      case "unity-open-mcp://tool-groups":
+        return handleToolGroups();
       default:
         return toTextResource(uri, {
           status: "no_data",

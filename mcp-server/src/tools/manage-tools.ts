@@ -1,0 +1,51 @@
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+
+// M18 Plan 2 / T18.2.2 — Coplay-style manage_tools meta-tool.
+//
+// Server-only meta-tool for per-session tool-group visibility. The MCP server
+// holds the session state (ToolSessionState); the bridge does not track it.
+// Activating a group makes its tools appear in subsequent ListTools responses;
+// deactivating removes them. reset() restores the default (`core` only).
+//
+// The tool definition ships with every MCP-server build (always visible — it
+// is in the ALWAYS_VISIBLE_TOOLS allow-list in tool-session-state.ts) so an
+// agent can always reach it before any other group is active.
+//
+// Reference: references/unity-mcp-beta-codev/Server/src/services/tools/
+// manage_tools.py (the Coplay model this matches).
+export const manageTools: Tool = {
+  name: "unity_open_mcp_manage_tools",
+  description:
+    "Manage which tool groups are visible in this session. Sessions start " +
+    "with only the `core` group enabled; activate other groups on demand to " +
+    "add their tools to your ListTools surface (and deactivate to hide " +
+    "them). State is ephemeral and per-session — it resets to `core`-only " +
+    "when the MCP server restarts. Actions: " +
+    "`list_groups` (show every group with active flag, description, and tool " +
+    "roster), `activate` (enable a group — its tools become visible), " +
+    "`deactivate` (hide a group's tools), `reset` (restore `core`-only " +
+    "defaults). Always call `list_groups` first to discover group ids. " +
+    "Group availability also depends on the Unity domain dependency being " +
+    "compiled in — see `unity_open_mcp_capabilities` for compiled-state " +
+    "availability per group.",
+  inputSchema: {
+    type: "object",
+    required: ["action"],
+    properties: {
+      action: {
+        enum: ["list_groups", "activate", "deactivate", "reset"],
+        description:
+          "list_groups: enumerate every group with active flag + tool roster. " +
+          "activate / deactivate: toggle one group (requires `group`). " +
+          "reset: restore the default active set (`core` only).",
+      },
+      group: {
+        type: "string",
+        description:
+          "Group id (required for activate / deactivate). Valid ids are " +
+          "returned by list_groups. Unknown ids return a structured error.",
+      },
+    },
+    additionalProperties: false,
+  },
+};

@@ -13,6 +13,7 @@ import { PingCache } from "./ping-cache.js";
 import { ResourceRouter } from "./resource-router.js";
 import { BridgeEventStream } from "./event-stream.js";
 import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
+import { ToolSessionState } from "./tool-session-state.js";
 
 export interface ResolvedEnv {
   projectPath: string;
@@ -69,6 +70,10 @@ export interface RouterStack {
   pingCache: PingCache;
   resourceRouter: ResourceRouter;
   eventStream: BridgeEventStream;
+  // M18 Plan 2 — per-session tool-group visibility state. Lives here so the
+  // CLI (cli/cli.ts) and the stdio server share one store per process; both
+  // route through the same ToolRouter which mutates it via manage_tools.
+  sessionState: ToolSessionState;
   projectPath: string;
   port: number;
   authToken: string | undefined;
@@ -88,7 +93,8 @@ export function buildRouterStack(env: ResolvedEnv): RouterStack {
     undefined,
     env.authToken,
   );
-  const router = new ToolRouter(live, batch, env.projectPath, eventStream);
+  const sessionState = new ToolSessionState();
+  const router = new ToolRouter(live, batch, env.projectPath, eventStream, sessionState);
   const resourceRouter = new ResourceRouter({
     live,
     pingCache,
@@ -102,6 +108,7 @@ export function buildRouterStack(env: ResolvedEnv): RouterStack {
     pingCache,
     resourceRouter,
     eventStream,
+    sessionState,
     projectPath: env.projectPath,
     port: env.port,
     authToken: env.authToken,

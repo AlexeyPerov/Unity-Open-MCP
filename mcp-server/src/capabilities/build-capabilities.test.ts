@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildCapabilities,
   PLANNED_TOOLS,
+  type BuildCapabilitiesDeps,
 } from "./build-capabilities.js";
 import {
   RULE_CATALOG,
@@ -279,6 +280,131 @@ test("counts reflect implemented vs planned split", () => {
   assert.equal(caps.counts.rulesImplemented, implementedRules().length);
   assert.equal(caps.counts.rulesPlanned, plannedRules().length);
   assert.equal(caps.counts.fixesImplemented, implementedFixes().length);
+});
+
+// ---------------------------------------------------------------------------
+// M18 Plan 2 / T18.2.3 — toolGroups block (compiled-state only)
+// ---------------------------------------------------------------------------
+
+test("capabilities include a toolGroups block", () => {
+  const caps = buildCapabilities(DEPS);
+  assert.ok(Array.isArray(caps.toolGroups));
+  assert.ok(caps.toolGroups.length > 0, "toolGroups must be non-empty");
+});
+
+test("toolGroups block reports the core group as default-enabled", () => {
+  const caps = buildCapabilities(DEPS);
+  const core = caps.toolGroups.find((g) => g.id === "core");
+  assert.ok(core, "core group must be present");
+  assert.equal(core!.defaultEnabled, true);
+  assert.equal(core!.available, true, "core has no domainDefine — always compiled in");
+  assert.equal(core!.domainDefine, null);
+});
+
+test("toolGroups block reports default-enabled count as 1 (core only)", () => {
+  const caps = buildCapabilities(DEPS);
+  assert.equal(caps.counts.toolGroupsDefaultEnabled, 1);
+  assert.equal(caps.counts.toolGroupsTotal, caps.toolGroups.length);
+});
+
+test("every implemented tool carries a group assignment (null or string)", () => {
+  const caps = buildCapabilities(DEPS);
+  for (const t of caps.tools.filter((t) => t.implemented)) {
+    assert.ok(
+      t.group === null || typeof t.group === "string",
+      `${t.name} group must be null or a string`,
+    );
+  }
+});
+
+test("toolGroups lists compiled-in tool names per group", () => {
+  const caps = buildCapabilities(DEPS);
+  // FIXTURE_TOOLS has ping (core) + capabilities/list_rules (null/meta).
+  const core = caps.toolGroups.find((g) => g.id === "core");
+  assert.ok(core);
+  assert.ok(core!.tools.includes("unity_open_mcp_ping"));
+  assert.ok(core!.toolCount >= 1);
+});
+
+test("domain-gated group reports available=null when bridge inventory is omitted", () => {
+  // Local capability call with no bridge probe — availability unknown.
+  const caps = buildCapabilities(DEPS);
+  const nav = caps.toolGroups.find((g) => g.id === "navigation");
+  assert.ok(nav);
+  assert.equal(nav!.available, null);
+  assert.equal(nav!.domainDefine, "UNITY_OPEN_MCP_EXT_NAVIGATION");
+  assert.equal(nav!.unityPackage, "com.unity.ai.navigation");
+  assert.ok(nav!.availableReason !== null);
+});
+
+test("domain-gated group reports available=true when bridge inventory includes its tools", () => {
+  // The fixture must include a navigation tool so the group has a non-empty
+  // roster to test against the bridge inventory. Without it, buildOneGroup
+  // correctly returns available=false (no tools compiled in).
+  const depsWithNav: BuildCapabilitiesDeps = {
+    tools: [
+      ...FIXTURE_TOOLS,
+      {
+        name: "unity_open_mcp_navigation_surface_add",
+        description: "NavMesh surface add (fixture).",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    batchToolNames: FIXTURE_BATCH_NAMES,
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+    availableBridgeTools: new Set<string>([
+      "unity_open_mcp_ping",
+      "unity_open_mcp_navigation_surface_add",
+    ]),
+  };
+  const caps = buildCapabilities(depsWithNav);
+  const nav = caps.toolGroups.find((g) => g.id === "navigation");
+  assert.ok(nav);
+  assert.equal(nav!.available, true);
+  assert.equal(nav!.availableReason, null);
+});
+
+test("domain-gated group reports available=false when bridge inventory omits its tools", () => {
+  const depsWithNav: BuildCapabilitiesDeps = {
+    tools: [
+      ...FIXTURE_TOOLS,
+      {
+        name: "unity_open_mcp_navigation_surface_add",
+        description: "NavMesh surface add (fixture).",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    batchToolNames: FIXTURE_BATCH_NAMES,
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+    availableBridgeTools: new Set<string>(["unity_open_mcp_ping"]),
+  };
+  const caps = buildCapabilities(depsWithNav);
+  const nav = caps.toolGroups.find((g) => g.id === "navigation");
+  assert.ok(nav);
+  assert.equal(nav!.available, false);
+  assert.match(nav!.availableReason!, /com\.unity\.ai\.navigation/);
+});
+
+test("non-default-enabled groups carry a usageHint pointing at manage_tools", () => {
+  const caps = buildCapabilities(DEPS);
+  for (const g of caps.toolGroups) {
+    if (!g.defaultEnabled) {
+      assert.match(
+        g.usageHint,
+        /unity_open_mcp_manage_tools/,
+        `${g.id} usageHint must mention manage_tools`,
+      );
+    }
+  }
+});
+
+test("toolGroups block is returned even with kind=rules filter", () => {
+  // Independent of the kind filter — an agent asking for rules still sees
+  // the group catalog.
+  const caps = buildCapabilities(DEPS, { kind: "rules" });
+  assert.ok(caps.toolGroups.length > 0);
 });
 
 // ---------------------------------------------------------------------------

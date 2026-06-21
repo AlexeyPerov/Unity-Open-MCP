@@ -31,6 +31,10 @@ import { generateSkill } from "./generate-skill.js";
 import { listRules } from "./list-rules.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
+// M18 Plan 2 / T18.2.2 — Coplay-style manage_tools meta-tool (session
+// tool-group visibility). Server-only meta-tool; routes local, always
+// visible regardless of which groups the current session has activated.
+import { manageTools } from "./manage-tools.js";
 // M16 Plan 1 — typed project & asset management tools.
 import { assetsCreateFolder } from "./assets-create-folder.js";
 import { assetsCopy } from "./assets-copy.js";
@@ -224,6 +228,11 @@ export const M13_TOOLS: Tool[] = [pullEvents];
 // Unity spawn) — the one channel that works when the bridge assembly itself
 // has failed to compile.
 export const M14_TOOLS: Tool[] = [readCompileErrors];
+
+// M18 Plan 2 / T18.2.2 — Coplay-style manage_tools meta-tool. Server-only,
+// local-routed, and always visible regardless of which groups the current
+// session has activated (see ALWAYS_VISIBLE_TOOLS in tool-session-state.ts).
+export const M18_PLAN2_TOOLS: Tool[] = [manageTools];
 
 // M16 Plan 1 — Project & Asset Management typed tools. Mutating members run
 // the full gate path with `paths_hint`; read-only members (shader reads,
@@ -523,4 +532,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN10_PROBUILDER_TOOLS,
   ...M16_PLAN10_PARTICLESYSTEM_TOOLS,
   ...M16_PLAN10_ANIMATION_TOOLS,
+  ...M18_PLAN2_TOOLS,
 ];

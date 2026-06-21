@@ -12,6 +12,7 @@ Default bind is loopback (`127.0.0.1`).
 | `/instance` | `GET` | Runtime instance metadata snapshot. |
 | `/events` | `GET` | SSE event stream (console/editor-state events). |
 | `/events/poll` | `GET` | Pull-style event drain endpoint. |
+| `/tools` | `GET` | Compiled-state tool inventory + group→tools map (used by capabilities / manage_tools for per-group availability). |
 | `/tools/{toolName}` | `POST` | Execute one bridge tool. |
 | `/resources` | `GET` | List bridge resources. |
 | `/resources/{route}` | `GET` | Read one bridge resource payload. |

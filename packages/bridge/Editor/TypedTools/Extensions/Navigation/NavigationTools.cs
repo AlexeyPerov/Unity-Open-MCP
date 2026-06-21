@@ -55,7 +55,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             IsMutating = true,
             Gate = GateMode.Enforce,
             IdempotentHint = true,
-            Lifecycle = LifecyclePolicy.EditorSettle)]
+            Lifecycle = LifecyclePolicy.EditorSettle, Group = "navigation")]
         [System.ComponentModel.Description(
             "Add a NavMeshSurface component to a GameObject. Optionally set " +
             "the agent type (default 'Humanoid'), collect geometry mode " +
@@ -112,7 +112,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             IsMutating = true,
             Gate = GateMode.Enforce,
             IdempotentHint = true,
-            Lifecycle = LifecyclePolicy.EditorSettle)]
+            Lifecycle = LifecyclePolicy.EditorSettle, Group = "navigation")]
         [System.ComponentModel.Description(
             "Configure NavMesh bake settings on an existing NavMeshSurface: " +
             "agent type (Humanoid / OEM:Tank / etc.), collect-objects mode " +
@@ -158,7 +158,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             Title = "Navigation: Bake NavMesh Surface",
             IsMutating = true,
             Gate = GateMode.Enforce,
-            Lifecycle = LifecyclePolicy.EditorSettle)]
+            Lifecycle = LifecyclePolicy.EditorSettle, Group = "navigation")]
         [System.ComponentModel.Description(
             "Bake the NavMesh for a NavMeshSurface. Runs the bake " +
             "synchronously — may take seconds on large scenes. The baked " +
@@ -212,7 +212,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             IsMutating = true,
             Gate = GateMode.Enforce,
             IdempotentHint = true,
-            Lifecycle = LifecyclePolicy.EditorSettle)]
+            Lifecycle = LifecyclePolicy.EditorSettle, Group = "navigation")]
         [System.ComponentModel.Description(
             "Add a NavMeshModifier component to a GameObject. Override the " +
             "area type (default 'Walkable') or mark the object as ignored " +
@@ -264,7 +264,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             IsMutating = true,
             Gate = GateMode.Enforce,
             IdempotentHint = true,
-            Lifecycle = LifecyclePolicy.EditorSettle)]
+            Lifecycle = LifecyclePolicy.EditorSettle, Group = "navigation")]
         [System.ComponentModel.Description(
             "Add a NavMeshModifierVolume component to a GameObject and size " +
             "it. Re-tags the NavMesh inside the volume to the given area " +
@@ -320,7 +320,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             IsMutating = true,
             Gate = GateMode.Enforce,
             IdempotentHint = true,
-            Lifecycle = LifecyclePolicy.EditorSettle)]
+            Lifecycle = LifecyclePolicy.EditorSettle, Group = "navigation")]
         [System.ComponentModel.Description(
             "Add a NavMeshLink component to a GameObject. A link connects two " +
             "NavMesh positions (start/end) — use it for jumps, drops, gaps, " +
@@ -384,7 +384,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             IsMutating = true,
             Gate = GateMode.Enforce,
             IdempotentHint = true,
-            Lifecycle = LifecyclePolicy.EditorSettle)]
+            Lifecycle = LifecyclePolicy.EditorSettle, Group = "navigation")]
         [System.ComponentModel.Description(
             "Add a NavMeshAgent component to a GameObject and configure its " +
             "radius / height / speed / angular speed. The agent does nothing " +
@@ -447,7 +447,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             IsMutating = true,
             Gate = GateMode.Enforce,
             IdempotentHint = false,
-            Lifecycle = LifecyclePolicy.None)]
+            Lifecycle = LifecyclePolicy.None, Group = "navigation")]
         [System.ComponentModel.Description(
             "Set a NavMeshAgent's destination as a world-space 'x,y,z'. " +
             "Requires Play Mode — the agent's pathfinder only runs at runtime. " +
@@ -513,7 +513,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             IsMutating = false,
             ReadOnlyHint = true,
             Gate = GateMode.Off,
-            Lifecycle = LifecyclePolicy.None)]
+            Lifecycle = LifecyclePolicy.None, Group = "navigation")]
         [System.ComponentModel.Description(
             "List every NavMeshSurface, NavMeshAgent, NavMeshLink, " +
             "NavMeshModifier, and NavMeshModifierVolume in the open scene(s). " +
@@ -550,7 +550,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             IsMutating = false,
             ReadOnlyHint = true,
             Gate = GateMode.Off,
-            Lifecycle = LifecyclePolicy.None)]
+            Lifecycle = LifecyclePolicy.None, Group = "navigation")]
         [System.ComponentModel.Description(
             "Read every NavMesh component attached to one GameObject " +
             "(NavMeshSurface / NavMeshAgent / NavMeshLink / NavMeshModifier / " +
@@ -662,7 +662,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             Title = "Navigation: Modify Components",
             IsMutating = true,
             Gate = GateMode.Enforce,
-            Lifecycle = LifecyclePolicy.EditorSettle)]
+            Lifecycle = LifecyclePolicy.EditorSettle, Group = "navigation")]
         [System.ComponentModel.Description(
             "Set one or more serialized fields on a NavMesh component attached " +
             "to a target GameObject. Select the component by 'component_type' " +

@@ -129,6 +129,26 @@ namespace UnityOpenMcpBridge.Tests
         }
     }
 
+    namespace TestFixtureJ
+    {
+        // M18 Plan 2 / T18.2.1 — verifies [BridgeTool(Group = ...)] flows
+        // through the registry scanner onto the BridgeToolEntry and the
+        // GroupToTools() mapping. Tools without a Group assignment must
+        // expose Group = null and be omitted from the mapping.
+        [BridgeToolType]
+        public class Tool_WithGroup
+        {
+            [BridgeTool("test_grouped_navigation_tool", Group = "navigation")]
+            public string NavTool() => "nav";
+
+            [BridgeTool("test_grouped_core_tool", Group = "core")]
+            public string CoreTool() => "core";
+
+            [BridgeTool("test_ungrouped_tool")]
+            public string UngroupedTool() => "ungrouped";
+        }
+    }
+
     public class AttributeScannerTests
     {
         [Test]
@@ -226,6 +246,66 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(BridgeToolRegistry.TryGet("test_mutating_tool", out var mutatingEntry));
             Assert.AreEqual(LifecyclePolicy.None, mutatingEntry.Lifecycle,
                 "Omitted lifecycle defaults to None even on mutating tools — policy is explicit.");
+        }
+
+        // M18 Plan 2 / T18.2.1 — [BridgeTool(Group = ...)] flows onto the entry
+        // and the GroupToTools() mapping. Ungrouped tools stay null and are
+        // omitted from the mapping.
+        [Test]
+        public static void Scan_GroupAttribute_FlowsToEntry()
+        {
+            Assert.IsTrue(BridgeToolRegistry.TryGet("test_grouped_navigation_tool", out var navEntry));
+            Assert.AreEqual("navigation", navEntry.Group);
+
+            Assert.IsTrue(BridgeToolRegistry.TryGet("test_grouped_core_tool", out var coreEntry));
+            Assert.AreEqual("core", coreEntry.Group);
+        }
+
+        [Test]
+        public static void Scan_OmittedGroup_DefaultsToNull()
+        {
+            Assert.IsTrue(BridgeToolRegistry.TryGet("test_ungrouped_tool", out var entry));
+            Assert.IsNull(entry.Group, "Omitted Group defaults to null (always visible).");
+        }
+
+        [Test]
+        public static void GroupToTools_IncludesAssignedTools()
+        {
+            var map = BridgeToolRegistry.GroupToTools();
+            // The two grouped fixtures from TestFixtureJ land in their groups.
+            Assert.IsTrue(map.ContainsKey("navigation"));
+            Assert.Contains("test_grouped_navigation_tool", map["navigation"]);
+            Assert.IsTrue(map.ContainsKey("core"));
+            Assert.Contains("test_grouped_core_tool", map["core"]);
+        }
+
+        [Test]
+        public static void GroupToTools_OmitsUngroupedTools()
+        {
+            var map = BridgeToolRegistry.GroupToTools();
+            // test_ungrouped_tool has Group = null — it should NOT appear in
+            // any group roster (it's always visible, so the group system
+            // ignores it).
+            foreach (var kv in map)
+            {
+                Assert.IsFalse(kv.Value.Contains("test_ungrouped_tool"),
+                    $"ungrouped tool must not appear in group '{kv.Key}'");
+            }
+        }
+
+        [Test]
+        public static void GroupToTools_RostersAreSorted()
+        {
+            var map = BridgeToolRegistry.GroupToTools();
+            foreach (var kv in map)
+            {
+                for (int i = 1; i < kv.Value.Count; i++)
+                {
+                    Assert.IsTrue(
+                        string.CompareOrdinal(kv.Value[i - 1], kv.Value[i]) <= 0,
+                        $"group '{kv.Key}' roster must be sorted (got {kv.Value[i - 1]} before {kv.Value[i]})");
+                }
+            }
         }
     }
 }

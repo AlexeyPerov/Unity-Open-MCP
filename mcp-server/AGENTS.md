@@ -23,9 +23,18 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Inherits ro
   - **live** — requires the bridge running; routes to `POST /tools/{name}`.
   - **batch** — headless Unity fallback when live is unavailable.
   - **offline** — local disk parsers, no Unity needed.
-  - **local** — never hits Unity (capabilities, skill generation).
+  - **local** — never hits Unity (capabilities, manage_tools, skill generation).
 - Do not add a new route type without updating `docs/architecture.md` and the route-policy table in `docs/api/mcp-tools.md`.
-- Capability-discovery (`unity_open_mcp_capabilities`) and skill generation (`unity_open_mcp_generate_skill`) are **local-only** — they must never depend on the live bridge or batch Unity.
+- Capability-discovery (`unity_open_mcp_capabilities`), skill generation (`unity_open_mcp_generate_skill`), and `unity_open_mcp_manage_tools` are **local-only** — they must never depend on the live bridge or batch Unity. (`capabilities` and `manage_tools(list_groups)` may probe a live bridge via `GET /tools` for compiled-state availability, but they remain local-route — the probe is a read-only fetch, not a route classification change.)
+
+## Tool-group visibility (M18 Plan 2)
+
+- Canonical group catalog: `src/capabilities/tool-groups.ts` (single source of truth for group ids, descriptions, default-enabled flag, domain defines, and the per-tool group assignment). Adding/removing a group or moving a tool between groups happens there.
+- Per-session state: `src/tool-session-state.ts` (`ToolSessionState`). Ephemeral, in-memory, per stdio server process. Resets to `core`-only on restart.
+- `ListTools` filters via `filterVisibleTools(ALL_TOOLS, sessionState)` in `index.ts`. Always-visible meta-tools (capabilities, manage_tools, ping, …) bypass the filter via the `ALWAYS_VISIBLE_TOOLS` allow-list.
+- `manage_tools` mutates the session state from `tool-router.ts#routeManageTools`. The bridge does NOT see these calls.
+- Compiled-state availability (`available` per group) is probed via `LiveClient.listBridgeTools()` (`GET /tools`). `null` (unknown) when the bridge is offline; `true/false` when reachable. Capabilities and manage_tools share this probe.
+- Domain groups (navigation, input-system, probuilder, particle-system, animation) carry `domainDefine` so an absent Unity package surfaces as `available: false (dependency missing: <package>)`.
 
 ## Instance discovery (M13)
 

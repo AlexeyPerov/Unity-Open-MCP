@@ -17,8 +17,17 @@ Rules for `packages/bridge/` — the Unity Editor HTTP bridge (`com.alexeyperov.
   - A unique `Name` (the MCP tool name, `unity_open_mcp_*` / `unity_senses_*`).
   - `IsMutating` — true if the tool changes Unity state.
   - `Gate` — the default gate mode for mutating tools (`Enforce` / `Warn` / `Off`).
+  - `Group` — the tool-group id from the canonical catalog in `mcp-server/src/capabilities/tool-groups.ts` (M18 Plan 2). Tools that should be always-visible meta-tools omit `Group` (defaults to null). Domain tools set `Group = "<domain-id>"` (e.g. `"navigation"`, `"input-system"`); typed editor tools set `"typed-editor"`. The id must match one of the catalog entries exactly so the bridge-side `GroupToTools()` mapping reconciles with the MCP server.
 - Mutating tools must accept and honor the request-level `gate` value. Read-only tools set `Gate = Off` and `ReadOnlyHint = true`.
 - When adding/removing/renaming a tool, update the hardcoded `KnownTools` / `DirectResponseTools` / `MutatingTools` sets in `BridgeHttpServer.cs` **only if** the tool is not registry-discovered. Registry tools are picked up automatically.
+
+## Tool-group visibility (M18 Plan 2)
+
+- Sessions start with only the `core` group visible in `ListTools`; every other group is hidden until the connected MCP session activates it via `unity_open_mcp_manage_tools`.
+- The bridge does NOT track session state — the MCP server owns it (`ToolSessionState`). The bridge's role is compiled-state reporting only.
+- `BridgeToolRegistry.GroupToTools()` exposes the group→tools map for the bridge capability surface.
+- `GET /tools` (`BridgeHttpServer.HandleToolsList`) returns the unioned tool inventory (KnownTools ∪ registry) plus the registry-side group→tools map. The MCP server consults this from `capabilities` and `manage_tools(list_groups)` to report per-group compiled-state availability (`available: true/false/null`).
+- Group ids in `[BridgeTool(Group = "...")]` MUST match the canonical catalog in `mcp-server/src/capabilities/tool-groups.ts` exactly — the bridge and MCP server reconcile on this string.
 
 ## Embedded domain tools (M18)
 

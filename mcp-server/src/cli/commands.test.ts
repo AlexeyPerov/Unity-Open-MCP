@@ -100,6 +100,7 @@ function makeStack(opts: {
     pingCache: {} as PingCache,
     resourceRouter: {} as ResourceRouter,
     eventStream: { stop() { /* noop */ } } as unknown as BridgeEventStream,
+    sessionState: {} as never,
     projectPath: opts.projectPath ?? "/proj",
     port: opts.port ?? 22028,
     authToken: opts.authToken,

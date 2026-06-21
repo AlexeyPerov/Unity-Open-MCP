@@ -15,6 +15,12 @@ namespace UnityOpenMcpBridge
         public bool DestructiveHint { get; }
         public LifecyclePolicy Lifecycle { get; }
         public bool Enabled { get; }
+        // M18 Plan 2 / T18.2 — tool group id (lowercase, from the canonical
+        // catalog in mcp-server/src/capabilities/tool-groups.ts). Null means
+        // the tool is always visible (server meta-tool). Tools assigned to a
+        // group are hidden from ListTools until the connected MCP session
+        // activates the group via unity_open_mcp_manage_tools.
+        public string Group { get; }
         public MethodInfo Method { get; }
         public ParameterInfo[] Parameters { get; }
         public Type DeclaringType { get; }
@@ -31,7 +37,8 @@ namespace UnityOpenMcpBridge
             bool destructiveHint,
             LifecyclePolicy lifecycle,
             bool enabled,
-            MethodInfo method)
+            MethodInfo method,
+            string group = null)
         {
             Name = name;
             Title = title;
@@ -42,6 +49,7 @@ namespace UnityOpenMcpBridge
             DestructiveHint = destructiveHint;
             Lifecycle = lifecycle;
             Enabled = enabled;
+            Group = group;
             Method = method;
             Parameters = method.GetParameters();
             DeclaringType = method.DeclaringType;

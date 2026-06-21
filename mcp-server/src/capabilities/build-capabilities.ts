@@ -1,10 +1,11 @@
 // Capability-discovery builder.
 //
-// Aggregates the full capability surface (tools + verify rules + fixes) that
-// `unity_open_mcp_capabilities` returns. Every registered tool ships as
-// `implemented: true`; planned typed tools (the curated editor surface) are
-// listed with `implemented: false` and guidance so agents get structured
-// "not yet available" signals instead of discovering gaps by trial and error.
+// Aggregates the full capability surface (tools + verify rules + fixes +
+// tool groups) that `unity_open_mcp_capabilities` returns. Every registered
+// tool ships as `implemented: true`; planned typed tools (the curated editor
+// surface) are listed with `implemented: false` and guidance so agents get
+// structured "not yet available" signals instead of discovering gaps by
+// trial and error.
 //
 // Pure transformation module: dependencies (registered tools, batch allow-list,
 // rule/fix catalogs) are passed in by the caller so this file has zero runtime
@@ -16,6 +17,12 @@ import type {
   FixCapability,
   CapabilityStatus,
 } from "./rule-catalog.js";
+import {
+  TOOL_GROUPS,
+  DEFAULT_ENABLED_GROUPS,
+  groupFor,
+  type ToolGroup,
+} from "./tool-groups.js";
 
 // ---------------------------------------------------------------------------
 // Route metadata — mirrors tool-router.ts / compressible-router.ts decisions
@@ -357,12 +364,64 @@ export interface ToolCapability {
   inputSchema: Tool["inputSchema"];
   /** Present only for planned tools. */
   guidance?: string;
+  /**
+   * M18 Plan 2 / T18.2.3 — group id (from tool-groups.ts). Tools with no
+   * group assignment (server meta-tools) carry `null`. Lets an agent learn
+   * which manage_tools group to activate to surface a planned tool.
+   */
+  group: string | null;
+}
+
+/**
+ * Per-group capability entry as it appears in the capabilities response.
+ *
+ * Compiled-state only — does NOT reflect per-session activation. The session
+ * activation state is exposed via manage_tools `list_groups`. The two concerns
+ * are intentionally split (see M18 execution-plan.md §resolved decisions).
+ */
+export interface ToolGroupCapability {
+  /** Stable lowercase group id (e.g. `"core"`, `"navigation"`). */
+  id: string;
+  description: string;
+  /** True when the group is enabled by default for fresh sessions. */
+  defaultEnabled: boolean;
+  /** Count of compiled-in tools in the group. */
+  toolCount: number;
+  /** Compiled-in tool names in the group, sorted. */
+  tools: string[];
+  /**
+   * Whether the group's Unity domain dependency compiled in. `true` for
+   * groups without a domainDefine (always compiled in); `false` when the
+   * bridge did not compile the domain in. The bridge detection is the
+   * `availableBridgeTools` dependency — when absent (bridge offline),
+   * domain-gated groups report `null` (unknown) and the agent should treat
+   * them as "may or may not be available".
+   */
+  available: boolean | null;
+  /** Free-text reason for `available: false` (dependency missing) or null. */
+  availableReason: string | null;
+  /** Unity package the group depends on, for install guidance. */
+  unityPackage: string | null;
+  /** Bridge compile define that gates this group (null when not gated). */
+  domainDefine: string | null;
+  /**
+   * Usage hint surfaced to the agent. Always points at manage_tools so the
+   * agent knows to activate the group before invoking its tools.
+   */
+  usageHint: string;
 }
 
 export interface CapabilitiesResult {
   tools: ToolCapability[];
   rules: RuleCapability[];
   fixes: FixCapability[];
+  /**
+   * M18 Plan 2 / T18.2.3 — tool-group catalog (compiled-state only). Lets an
+   * agent learn which groups exist, what they contain, and whether the
+   * domain dependency is compiled in — before any tool call. Per-session
+   * activation state is in manage_tools `list_groups`, not here.
+   */
+  toolGroups: ToolGroupCapability[];
   counts: {
     toolsImplemented: number;
     toolsPlanned: number;
@@ -370,6 +429,10 @@ export interface CapabilitiesResult {
     rulesPlanned: number;
     fixesImplemented: number;
     fixesPlanned: number;
+    /** M18 Plan 2 — count of groups enabled by default (`core` only). */
+    toolGroupsDefaultEnabled: number;
+    /** M18 Plan 2 — total group count. */
+    toolGroupsTotal: number;
   };
   /**
    * One-shot routing narrative for agents. Lets a batch-narrative
@@ -422,6 +485,15 @@ export interface BuildCapabilitiesDeps {
   batchToolNames: ReadonlySet<string>;
   rules: RuleCapability[];
   fixes: FixCapability[];
+  /**
+   * M18 Plan 2 / T18.2.3 — optional: the set of tool names the bridge has
+   * compiled in. Used to report per-group compiled-state availability
+   * (`available: true/false` on each ToolGroupCapability). When omitted
+   * (bridge offline, local capability call), domain-gated groups report
+   * `available: null` (unknown) and the agent is directed at
+   * manage_tools(list_groups) which probes the live bridge.
+   */
+  availableBridgeTools?: ReadonlySet<string>;
 }
 
 export function buildCapabilities(
@@ -439,6 +511,7 @@ export function buildCapabilities(
     routePolicy: routePolicyFor(tool.name),
     batchCapable: deps.batchToolNames.has(tool.name),
     inputSchema: tool.inputSchema,
+    group: groupFor(tool.name),
   }));
 
   const plannedTools: ToolCapability[] = includePlanned
@@ -452,6 +525,7 @@ export function buildCapabilities(
         batchCapable: false,
         inputSchema: { type: "object" as const, properties: {} },
         guidance: p.guidance,
+        group: groupFor(p.name),
       }))
     : [];
 
@@ -465,10 +539,18 @@ export function buildCapabilities(
     ? deps.fixes
     : deps.fixes.filter((f) => f.implemented);
 
+  const toolGroups = buildToolGroups(
+    implementedTools.map((t) => t.name),
+    deps.availableBridgeTools,
+  );
+
   return {
     tools: filter.kind === "rules" || filter.kind === "fixes" ? [] : tools,
     rules: filter.kind === "tools" || filter.kind === "fixes" ? [] : rules,
     fixes: filter.kind === "tools" || filter.kind === "rules" ? [] : fixes,
+    // toolGroups is independent of the kind filter — agents that ask for
+    // `kind: "rules"` still benefit from the group catalog.
+    toolGroups,
     counts: {
       toolsImplemented: implementedTools.length,
       toolsPlanned: plannedTools.length,
@@ -480,10 +562,122 @@ export function buildCapabilities(
       fixesPlanned: includePlanned
         ? deps.fixes.filter((f) => !f.implemented).length
         : 0,
+      toolGroupsDefaultEnabled: TOOL_GROUPS.filter((g) => g.defaultEnabled).length,
+      toolGroupsTotal: TOOL_GROUPS.length,
     },
     // The routing summary is independent of the kind filter — agents
     // that ask for `kind: "rules"` still benefit from the routing
     // narrative. It is constant, so no per-call computation.
     routing: ROUTING_SUMMARY,
   };
+}
+
+// ---------------------------------------------------------------------------
+// M18 Plan 2 / T18.2.3 — build the toolGroups catalog block (compiled-state
+// only). Per-session activation lives in manage_tools; this surface reports
+// what compiled in, not what is currently active.
+// ---------------------------------------------------------------------------
+
+function buildToolGroups(
+  implementedToolNames: string[],
+  availableBridgeTools: ReadonlySet<string> | undefined,
+): ToolGroupCapability[] {
+  // Bucket the implemented tool names by group. groupFor returns null for
+  // meta-tools; those are intentionally absent from any group block.
+  const toolsByGroup = new Map<string, string[]>();
+  for (const name of implementedToolNames) {
+    const g = groupFor(name);
+    if (g === null) continue;
+    const list = toolsByGroup.get(g) ?? [];
+    list.push(name);
+    toolsByGroup.set(g, list);
+  }
+
+  return TOOL_GROUPS.map((g) => {
+    const tools = (toolsByGroup.get(g.id) ?? []).slice().sort();
+    return buildOneGroup(g, tools, availableBridgeTools);
+  });
+}
+
+function buildOneGroup(
+  group: ToolGroup,
+  tools: string[],
+  availableBridgeTools: ReadonlySet<string> | undefined,
+): ToolGroupCapability {
+  // No domainDefine → the group is always compiled in (core, gate-and-verify,
+  // typed-editor, etc.).
+  if (!group.domainDefine) {
+    return {
+      id: group.id,
+      description: group.description,
+      defaultEnabled: group.defaultEnabled,
+      toolCount: tools.length,
+      tools,
+      available: true,
+      availableReason: null,
+      unityPackage: null,
+      domainDefine: null,
+      usageHint: buildUsageHint(group),
+    };
+  }
+
+  // Domain-gated group. The bridge signals whether the domain compiled in by
+  // exposing (or not) the group's tool names in its compiled-tool set. When
+  // availableBridgeTools is undefined (bridge offline on a local capability
+  // call), availability is unknown — the agent is directed at manage_tools
+  // (which probes the live bridge) for the authoritative answer.
+  if (availableBridgeTools === undefined) {
+    return {
+      id: group.id,
+      description: group.description,
+      defaultEnabled: group.defaultEnabled,
+      toolCount: tools.length,
+      tools,
+      available: null,
+      availableReason:
+        "Bridge offline — compiled-state availability unknown. Call " +
+        "manage_tools(action=\"list_groups\") when the bridge is up, or " +
+        "install the Unity package to make the group compile in.",
+      unityPackage: group.unityPackage ?? null,
+      domainDefine: group.domainDefine,
+      usageHint: buildUsageHint(group),
+    };
+  }
+
+  // Bridge reachable — infer availability from whether any of the group's
+  // compiled-in tool names appear in the bridge tool set. A single tool
+  // present is enough; we don't need every tool (the bridge may have
+  // disabled one via toggle policy).
+  const anyToolCompiledIn =
+    tools.length === 0 ? false : tools.some((t) => availableBridgeTools.has(t));
+  return {
+    id: group.id,
+    description: group.description,
+    defaultEnabled: group.defaultEnabled,
+    toolCount: tools.length,
+    tools,
+    available: anyToolCompiledIn,
+    availableReason: anyToolCompiledIn
+      ? null
+      : `Unity package '${group.unityPackage}' not installed — the bridge ` +
+        `did not compile the ${group.domainDefine} domain. Install the ` +
+        `package to make the group's tools available.`,
+    unityPackage: group.unityPackage ?? null,
+    domainDefine: group.domainDefine,
+    usageHint: buildUsageHint(group),
+  };
+}
+
+function buildUsageHint(group: ToolGroup): string {
+  if (group.defaultEnabled) {
+    return (
+      "Default-on group. Its tools are visible in a fresh session without " +
+      "calling manage_tools."
+    );
+  }
+  return (
+    `Call unity_open_mcp_manage_tools(action=\"activate\", group=\"${group.id}\") ` +
+    "before invoking this group's tools — fresh sessions start with only " +
+    "`core` enabled."
+  );
 }

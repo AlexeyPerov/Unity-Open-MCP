@@ -584,6 +584,40 @@ export class LiveClient implements Router {
     }
   }
 
+  /**
+   * M18 Plan 2 / T18.2.3 — fetch the compiled-state tool inventory from the
+   * bridge (`GET /tools`). Returns the set of tool names the bridge compiled
+   * in (KnownTools ∪ BridgeToolRegistry), so the MCP server can report per-
+   * group availability in `unity_open_mcp_capabilities` and
+   * `unity_open_mcp_manage_tools(list_groups)`.
+   *
+   * Returns null when the bridge is unreachable or the response is malformed
+   * — callers fall back to `available: null` (unknown) so the agent is
+   * directed at manage_tools when the bridge comes back up.
+   */
+  async listBridgeTools(): Promise<{
+    tools: Set<string>;
+    groups: Array<{ id: string; tools: string[] }>;
+  } | null> {
+    try {
+      const res = await this.fetchWithTimeout(
+        "/tools",
+        { method: "GET" },
+        5_000,
+      );
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        tools?: string[];
+        groups?: Array<{ id: string; tools: string[] }>;
+      };
+      const tools = new Set<string>(Array.isArray(body.tools) ? body.tools : []);
+      const groups = Array.isArray(body.groups) ? body.groups : [];
+      return { tools, groups };
+    } catch {
+      return null;
+    }
+  }
+
   private fetchWithTimeout(
     path: string,
     init: RequestInit,

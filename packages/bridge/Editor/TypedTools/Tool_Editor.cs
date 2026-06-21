@@ -8,7 +8,8 @@ namespace UnityOpenMcpBridge
     public partial class Tool_Editor
     {
         [BridgeTool("unity_open_mcp_editor_status", Title = "Editor Status",
-            IsMutating = false, ReadOnlyHint = true, Lifecycle = LifecyclePolicy.None)]
+            IsMutating = false, ReadOnlyHint = true, Lifecycle = LifecyclePolicy.None,
+            Group = "core")]
         [System.ComponentModel.Description("Returns the current Unity Editor state")]
         public string EditorStatus()
         {

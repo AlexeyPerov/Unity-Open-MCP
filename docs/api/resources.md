@@ -9,6 +9,7 @@ Resources are registered in `mcp-server/src/resources/index.ts` and resolved by 
 | `unity-open-mcp://health/summary` | Health summary | Cached verify health summary from last scan/gate validation. |
 | `unity-open-mcp://health/baseline` | Health baseline | Baseline summary from baseline file on disk. |
 | `unity-open-mcp://bridge/status` | Bridge status | Cached snapshot of latest successful bridge ping state. |
+| `unity-open-mcp://tool-groups` | Tool groups | Static tool-group catalog (ids, descriptions, default-enabled flags). |
 
 ## Payload behavior
 
@@ -42,6 +43,15 @@ Resources are registered in `mcp-server/src/resources/index.ts` and resolved by 
 - When no cached ping exists, returns:
   - `status: "no_data"`
   - `connected: false`
+
+### `unity-open-mcp://tool-groups`
+
+- Static catalog (no bridge round-trip).
+- Returns:
+  - `groups[]` — id, description, defaultEnabled, domainDefine, unityPackage per group.
+  - `defaultEnabledGroups` — array containing `"core"` only.
+  - `usageHint` — points at `manage_tools` for activation and `capabilities` for the per-tool roster.
+- For compiled-state availability and tool rosters, call `unity_open_mcp_capabilities`; for session activation state, call `unity_open_mcp_manage_tools(action="list_groups")`.
 
 ## Unknown URI behavior
 

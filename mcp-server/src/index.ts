@@ -22,6 +22,10 @@ import { KNOWN_COMMANDS } from "./cli/args.js";
 import { runCli } from "./cli/cli.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { readPackageVersion } from "./package-version.js";
+import {
+  ToolSessionState,
+  filterVisibleTools,
+} from "./tool-session-state.js";
 
 // Read the version from package.json at runtime so `npm version` (and the
 // maintainer-panel version-bump in the Hub) keep the reported server + CLI
@@ -103,7 +107,12 @@ export function createServer(
     undefined,
     authToken,
   );
-  const router = new ToolRouter(liveClient, batchSpawn, projectPath, eventStream);
+  // M18 Plan 2 / T18.2.2 — per-session tool-group visibility state. Lives in
+  // the MCP server (matches the Coplay model and the resolved decision in
+  // M18 execution-plan.md). Resets to `core`-only on every server restart;
+  // mutated only by unity_open_mcp_manage_tools and consulted by ListTools.
+  const sessionState = new ToolSessionState();
+  const router = new ToolRouter(liveClient, batchSpawn, projectPath, eventStream, sessionState);
   const resourceRouter = new ResourceRouter({
     live: liveClient,
     pingCache,
@@ -111,8 +120,12 @@ export function createServer(
     port,
   });
 
+  // M18 Plan 2 / T18.2.2 — ListTools filters per the session's active groups.
+  // A fresh session sees only `core` + always-visible meta-tools (capabilities,
+  // manage_tools, ping, ...). Activating a group via manage_tools adds its
+  // tools to subsequent ListTools responses in the same session.
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: ALL_TOOLS,
+    tools: filterVisibleTools(ALL_TOOLS, sessionState),
   }));
 
   server.setRequestHandler(

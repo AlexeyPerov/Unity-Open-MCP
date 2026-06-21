@@ -9,12 +9,18 @@ import { editorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES } from "./unity-log.
 import { summarizeProjectHealth } from "./project-health.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
+import {
+  GROUP_IDS,
+  TOOL_GROUPS,
+  groupToTools,
+} from "./capabilities/tool-groups.js";
 import { listRules } from "./capabilities/list-rules.js";
 import { generateSkill } from "./skill/generate-skill.js";
 import { knownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath } from "./instance-discovery.js";
 import { BATCH_TOOL_NAMES } from "./batch-spawn.js";
+import type { ToolSessionState } from "./tool-session-state.js";
 
 export interface RouteMeta {
   route: "live" | "batch";
@@ -47,6 +53,7 @@ export class ToolRouter implements Router {
     private batch: BatchSpawn,
     private projectPath: string,
     private eventStream: BridgeEventStream,
+    private sessionState: ToolSessionState,
   ) {}
 
   async route(
@@ -90,6 +97,16 @@ export class ToolRouter implements Router {
     // generate_skill — local skill generation (no live/batch hop).
     if (toolName === "unity_open_mcp_generate_skill") {
       return this.routeGenerateSkill(args);
+    }
+
+    // M18 Plan 2 / T18.2.2 — manage_tools is server-only. It mutates the
+    // per-session tool-group visibility state that lives in the MCP server
+    // (ToolSessionState). The bridge does not track session state — it answers
+    // manage_tools meta-calls by reporting the compiled tool set; the MCP
+    // server applies the activate / deactivate filter to ListTools. Always
+    // visible regardless of the current active set (meta-tool).
+    if (toolName === "unity_open_mcp_manage_tools") {
+      return this.routeManageTools(args);
     }
 
     // find_references — offline-first when no bridge is connected; live
@@ -346,12 +363,25 @@ export class ToolRouter implements Router {
         : undefined;
     const includePlanned = args.include_planned !== false;
 
+    // M18 Plan 2 / T18.2.3 — when the bridge is live, probe its compiled-
+    // state tool inventory so per-group `available` reflects whether each
+    // domain dependency compiled in (e.g. UNITY_OPEN_MCP_EXT_NAVIGATION).
+    // Capabilities stays local-route; the bridge probe is a read-only fetch
+    // that does not change the route classification.
+    let availableBridgeTools: ReadonlySet<string> | undefined;
+    const liveAvailable = await this.live.isLiveAvailable();
+    if (liveAvailable) {
+      const inventory = await this.live.listBridgeTools();
+      if (inventory) availableBridgeTools = inventory.tools;
+    }
+
     const result = buildCapabilities(
       {
         tools: ALL_TOOLS,
         batchToolNames: BATCH_TOOL_NAMES,
         rules: RULE_CATALOG,
         fixes: FIX_CATALOG,
+        availableBridgeTools,
       },
       { kind, includePlanned },
     );
@@ -441,11 +471,197 @@ export class ToolRouter implements Router {
     }
   }
 
+  // M18 Plan 2 / T18.2.2 — manage_tools routes local. Mutates the per-
+  // session tool-group visibility state (ToolSessionState) that ListTools
+  // consults to filter tools. The bridge does not see these calls — it is
+  // session-state the MCP server owns (matches the Coplay model and the
+  // resolved decision in M18 execution-plan.md).
+  //
+  // Compiled-state availability (whether the bridge compiled the domain in)
+  // is reported in the `available` + `availableReason` fields per group. The
+  // MCP server detects this by querying the bridge /capabilities surface
+  // when reachable; when the bridge is offline it reports `available: null`
+  // (unknown) and the agent should fall back to `unity_open_mcp_capabilities`
+  // for the authoritative compiled-state report.
+  private async routeManageTools(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const action = typeof args.action === "string" ? args.action : "";
+    const group = typeof args.group === "string" ? args.group.trim() : "";
+
+    if (action === "list_groups") {
+      return this.manageToolsListGroups();
+    }
+
+    if (action === "reset") {
+      this.sessionState.reset();
+      return this.manageToolsResult({
+        reset: true,
+        activeGroups: this.sessionState.activeGroups(),
+        message: "Tool-group visibility restored to defaults (`core` only).",
+      });
+    }
+
+    if (action === "activate" || action === "deactivate") {
+      if (!group) {
+        return this.manageToolsError(
+          "missing_parameter",
+          `'group' is required for action '${action}'.`,
+        );
+      }
+      if (!GROUP_IDS.has(group)) {
+        return this.manageToolsError(
+          "unknown_group",
+          `Unknown group '${group}'. Valid ids: ${Array.from(GROUP_IDS)
+            .sort()
+            .join(", ")}.`,
+        );
+      }
+      const changed =
+        action === "activate"
+          ? this.sessionState.activate(group)
+          : this.sessionState.deactivate(group);
+      return this.manageToolsResult({
+        action,
+        group,
+        changed,
+        activeGroups: this.sessionState.activeGroups(),
+        message:
+          action === "activate"
+            ? changed
+              ? `Group '${group}' activated. Its tools will appear in subsequent ListTools responses.`
+              : `Group '${group}' was already active.`
+            : changed
+              ? `Group '${group}' deactivated. Its tools are now hidden from ListTools.`
+              : `Group '${group}' was already inactive.`,
+      });
+    }
+
+    return this.manageToolsError(
+      "unknown_action",
+      `Unknown action '${action}'. Valid actions: list_groups, activate, deactivate, reset.`,
+    );
+  }
+
+  private async manageToolsListGroups(): Promise<CallToolResult> {
+    const groupsList = groupToTools();
+    const compiledAvailability = await this.resolveCompiledAvailability();
+
+    const groups = TOOL_GROUPS.map((g) => {
+      const tools = groupsList[g.id] ?? [];
+      const availability = compiledAvailability.get(g.id);
+      return {
+        id: g.id,
+        description: g.description,
+        active: this.sessionState.isGroupActive(g.id),
+        defaultEnabled: g.defaultEnabled,
+        // Compiled-state availability of the domain dependency. `true` for
+        // groups without a domainDefine (always compiled in); `false` /
+        // `null` (unknown — bridge offline) otherwise. Session activation
+        // is independent: an agent can activate a group whose dependency is
+        // missing; the tools will appear in ListTools but error at call
+        // time. capabilities is the authoritative compiled-state source.
+        available: availability?.available ?? null,
+        availableReason: availability?.reason ?? null,
+        unityPackage: g.unityPackage ?? null,
+        toolCount: tools.length,
+        tools,
+      };
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            groups,
+            activeGroups: this.sessionState.activeGroups(),
+            note:
+              "Activate a group to add its tools to your ListTools surface; " +
+              "deactivate to hide them. State is per-session and ephemeral — " +
+              "it resets to `core`-only when the MCP server restarts. " +
+              "Compiled-state availability (the `available` field) reflects " +
+              "whether the Unity domain dependency is compiled in; use " +
+              "unity_open_mcp_capabilities for the authoritative compiled-state " +
+              "report.",
+            _source: "local",
+          }),
+        },
+      ],
+      isError: false,
+    };
+  }
+
+  // Resolve compiled-state availability per group from the live bridge. The
+  // bridge reports which tools it compiled in via `GET /tools`; a domain-
+  // gated group is `available: true` when any of its compiled-in tool names
+  // appears in that set, `false` when none do (Unity domain package not
+  // installed), and `null` (unknown) when the bridge is offline.
+  private async resolveCompiledAvailability(): Promise<
+    Map<string, { available: boolean | null; reason: string | null }>
+  > {
+    const out = new Map<string, { available: boolean | null; reason: string | null }>();
+    const liveAvailable = await this.live.isLiveAvailable();
+    const inventory = liveAvailable ? await this.live.listBridgeTools() : null;
+    const groupsList = groupToTools();
+
+    for (const g of TOOL_GROUPS) {
+      if (!g.domainDefine) {
+        out.set(g.id, { available: true, reason: null });
+        continue;
+      }
+      if (!inventory) {
+        out.set(g.id, {
+          available: null,
+          reason:
+            "Bridge offline — compiled-state availability unknown. Call " +
+            "unity_open_mcp_capabilities for the authoritative compiled-state " +
+            "report.",
+        });
+        continue;
+      }
+      const groupTools = groupsList[g.id] ?? [];
+      const anyCompiledIn =
+        groupTools.length > 0 &&
+        groupTools.some((t) => inventory.tools.has(t));
+      out.set(g.id, {
+        available: anyCompiledIn,
+        reason: anyCompiledIn
+          ? null
+          : `Unity package '${g.unityPackage}' not installed — the bridge ` +
+            `did not compile the ${g.domainDefine} domain.`,
+      });
+    }
+    return out;
+  }
+
+  private manageToolsResult(
+    body: Record<string, unknown>,
+  ): CallToolResult {
+    return {
+      content: [
+        { type: "text", text: JSON.stringify({ ...body, _source: "local" }) },
+      ],
+      isError: false,
+    };
+  }
+
+  private manageToolsError(code: string, message: string): CallToolResult {
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ error: { code, message }, _source: "local" }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
   private async routeFindReferences(
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
-    const liveAvailable = await this.live.isLiveAvailable();
-    if (liveAvailable) {
+    const liveAvailable = await this.live.isLiveAvailable();    if (liveAvailable) {
       console.error("[unity-open-mcp] Route: find_references -> live");
       const result = await this.live.route("unity_open_mcp_find_references", args);
       return injectRouteMeta(result, { route: "live" });

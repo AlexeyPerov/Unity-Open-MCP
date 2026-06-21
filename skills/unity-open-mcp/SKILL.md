@@ -22,11 +22,22 @@ Practical skill for AI agents driving a Unity project through the `unity-open-mc
 ## Fast start sequence
 
 1. `unity_open_mcp_capabilities` — discover surface (call first on a fresh project).
-2. `unity_open_mcp_ping` — bridge health.
-3. `unity_open_mcp_find_members` — before reflection-heavy calls.
-4. Mutate with `gate: "enforce"` + scoped `paths_hint`.
-5. On gate failure, prefer `unity_open_mcp_apply_fix` with `dry_run: true` first.
-6. Re-run mutation; confirm `newErrors == 0` or `resolvedErrors > 0`.
+2. `unity_open_mcp_manage_tools(action="list_groups")` — see which tool groups exist and their compiled-state availability. Sessions start with only `core` enabled; activate the group you need before calling its tools (e.g. `activate` `navigation` before `navigation_surface_add`). State is per-session and ephemeral.
+3. `unity_open_mcp_ping` — bridge health.
+4. `unity_open_mcp_find_members` — before reflection-heavy calls.
+5. Mutate with `gate: "enforce"` + scoped `paths_hint`.
+6. On gate failure, prefer `unity_open_mcp_apply_fix` with `dry_run: true` first.
+7. Re-run mutation; confirm `newErrors == 0` or `resolvedErrors > 0`.
+
+## Tool groups and session visibility
+
+Sessions start with only the **`core`** group visible in `ListTools`. Every other group is hidden until you activate it — this keeps the prompt small (~160 tools total). Call `unity_open_mcp_manage_tools` to toggle:
+
+- `list_groups` — every group with active flag, compiled-state availability, and tool roster.
+- `activate` / `deactivate` — toggle one group for this session.
+- `reset` — restore `core`-only.
+
+Common groups: `gate-and-verify`, `asset-intelligence`, `typed-editor` (M16 Plans 1–6, 9), `diagnostics`, `gate-intelligence`, `build-settings`, `navigation`, `input-system`, `probuilder`, `particle-system`, `animation`, `agent-senses`. Compiled-state availability (`available: true/false/null`) reflects whether the Unity domain package compiled in; the authoritative source is `unity_open_mcp_capabilities` → `toolGroups[].available`. State resets to `core`-only on MCP-server restart.
 
 ## Unity state triage (before edits/tests, and on `bridge_offline`)
 
@@ -311,7 +322,7 @@ Results are walked by a depth-limited reflective serializer before becoming `mut
 
 ## Read-only tools (no gate)
 
-`capabilities` · `list_rules` (filter by `asset_kind`/`extension` before `scan_paths`) · `ping` · `find_members` · `validate_edit` (scoped health scan, pre-commit; `include_rules`/`exclude_rules` filter) · `find_references` · `scan_paths` (`fail_on_severity` defaults to `verify.severityThreshold`; override per call) · `read_asset` · `search_assets` · `list_assets` · `checkpoint_create` · `delta`.
+`capabilities` · `manage_tools` (per-session tool-group visibility) · `list_rules` (filter by `asset_kind`/`extension` before `scan_paths`) · `ping` · `find_members` · `validate_edit` (scoped health scan, pre-commit; `include_rules`/`exclude_rules` filter) · `find_references` · `scan_paths` (`fail_on_severity` defaults to `verify.severityThreshold`; override per call) · `read_asset` · `search_assets` · `list_assets` · `checkpoint_create` · `delta`.
 
 ## Optional: project-specific skill
 

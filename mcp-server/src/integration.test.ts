@@ -108,7 +108,7 @@ async function setupClient(
 // Resource listing
 // ---------------------------------------------------------------------------
 
-test("integration: listResources returns exactly the three M6 URIs", async () => {
+test("integration: listResources returns exactly the capability URIs", async () => {
   const tmpDir = await mkdtemp(join(tmpdir(), "mcp-int-list-"));
   try {
     const { client, cleanup } = await setupClient(tmpDir);
@@ -120,6 +120,7 @@ test("integration: listResources returns exactly the three M6 URIs", async () =>
         "unity-open-mcp://bridge/status",
         "unity-open-mcp://health/baseline",
         "unity-open-mcp://health/summary",
+        "unity-open-mcp://tool-groups",
       ]);
 
       for (const r of resources) {
