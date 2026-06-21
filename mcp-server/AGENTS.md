@@ -33,6 +33,7 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Inherits ro
 - Per-session state: `src/tool-session-state.ts` (`ToolSessionState`). Ephemeral, in-memory, per stdio server process. Resets to `core`-only on restart.
 - `ListTools` filters via `filterVisibleTools(ALL_TOOLS, sessionState)` in `index.ts`. Always-visible meta-tools (capabilities, manage_tools, ping, …) bypass the filter via the `ALWAYS_VISIBLE_TOOLS` allow-list.
 - `manage_tools` mutates the session state from `tool-router.ts#routeManageTools`. The bridge does NOT see these calls.
+- When activate/deactivate/reset actually changes the visible tool set, the MCP server emits `notifications/tools/list_changed` (declares `tools.listChanged: true` in server capabilities). Clients should re-issue `tools/list` to refresh descriptors mid-session.
 - Compiled-state availability (`available` per group) is probed via `LiveClient.listBridgeTools()` (`GET /tools`). `null` (unknown) when the bridge is offline; `true/false` when reachable. Capabilities and manage_tools share this probe.
 - Domain groups (navigation, input-system, probuilder, particle-system, animation) carry `domainDefine` so an absent Unity package surfaces as `available: false (dependency missing: <package>)`.
 

@@ -159,8 +159,16 @@ function makeRouter(
   projectPath: string,
   eventStream: BridgeEventStream,
   sessionState: ToolSessionState = new ToolSessionState(),
+  onToolListChanged?: () => void | Promise<void>,
 ): ToolRouter {
-  return new ToolRouter(live, batch, projectPath, eventStream, sessionState);
+  return new ToolRouter(
+    live,
+    batch,
+    projectPath,
+    eventStream,
+    sessionState,
+    onToolListChanged,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -636,4 +644,138 @@ test("route: manage_tools does not hit the live bridge", async () => {
   const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
   await router.route("unity_open_mcp_manage_tools", { action: "list_groups" });
   assert.equal(live.calls.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// M18 Plan 2 — manage_tools emits tools/list_changed when visibility changes
+// ---------------------------------------------------------------------------
+
+test("route: manage_tools activate notifies when visibility changes", async () => {
+  let notifyCount = 0;
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    new ToolSessionState(),
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("unity_open_mcp_manage_tools", {
+    action: "activate",
+    group: "asset-intelligence",
+  });
+  assert.equal(notifyCount, 1);
+});
+
+test("route: manage_tools activate does not notify when idempotent", async () => {
+  let notifyCount = 0;
+  const session = new ToolSessionState();
+  session.activate("asset-intelligence");
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    session,
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("unity_open_mcp_manage_tools", {
+    action: "activate",
+    group: "asset-intelligence",
+  });
+  assert.equal(notifyCount, 0);
+});
+
+test("route: manage_tools deactivate notifies when visibility changes", async () => {
+  let notifyCount = 0;
+  const session = new ToolSessionState();
+  session.activate("navigation");
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    session,
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("unity_open_mcp_manage_tools", {
+    action: "deactivate",
+    group: "navigation",
+  });
+  assert.equal(notifyCount, 1);
+});
+
+test("route: manage_tools deactivate does not notify when idempotent", async () => {
+  let notifyCount = 0;
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    new ToolSessionState(),
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("unity_open_mcp_manage_tools", {
+    action: "deactivate",
+    group: "navigation",
+  });
+  assert.equal(notifyCount, 0);
+});
+
+test("route: manage_tools reset notifies when visibility changes", async () => {
+  let notifyCount = 0;
+  const session = new ToolSessionState();
+  session.activate("navigation");
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    session,
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("unity_open_mcp_manage_tools", { action: "reset" });
+  assert.equal(notifyCount, 1);
+});
+
+test("route: manage_tools reset does not notify when already at defaults", async () => {
+  let notifyCount = 0;
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    new ToolSessionState(),
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("unity_open_mcp_manage_tools", { action: "reset" });
+  assert.equal(notifyCount, 0);
+});
+
+test("route: manage_tools list_groups does not notify", async () => {
+  let notifyCount = 0;
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    new ToolSessionState(),
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("unity_open_mcp_manage_tools", { action: "list_groups" });
+  assert.equal(notifyCount, 0);
 });

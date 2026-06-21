@@ -34,7 +34,7 @@ Practical skill for AI agents driving a Unity project through the `unity-open-mc
 Sessions start with only the **`core`** group visible in `ListTools`. Every other group is hidden until you activate it — this keeps the prompt small (~160 tools total). Call `unity_open_mcp_manage_tools` to toggle:
 
 - `list_groups` — every group with active flag, compiled-state availability, and tool roster.
-- `activate` / `deactivate` — toggle one group for this session.
+- `activate` / `deactivate` — toggle one group for this session. When visibility actually changes, the MCP server emits `notifications/tools/list_changed`; clients that support `listChanged` refresh `ListTools` automatically (no reconnect required).
 - `reset` — restore `core`-only.
 
 Common groups: `gate-and-verify`, `asset-intelligence`, `typed-editor` (M16 Plans 1–6, 9), `diagnostics`, `gate-intelligence`, `build-settings`, `navigation`, `input-system`, `probuilder`, `particle-system`, `animation`, `agent-senses`. Compiled-state availability (`available: true/false/null`) reflects whether the Unity domain package compiled in; the authoritative source is `unity_open_mcp_capabilities` → `toolGroups[].available`. State resets to `core`-only on MCP-server restart.

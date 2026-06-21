@@ -59,6 +59,7 @@ Always-visible meta-tools (no group assignment): `unity_open_mcp_capabilities`, 
 - **Ephemeral, per session.** The MCP server holds the state in memory; it is not persisted.
 - **Resets to `core`-only on MCP-server restart.** Each agent session starts fresh.
 - **Per-session independent.** Two concurrent agent sessions do not share activation state.
+- **List-changed notifications.** The server declares `tools.listChanged: true`. When `activate`, `deactivate`, or `reset` actually changes the filtered `ListTools` surface, the server emits `notifications/tools/list_changed`. MCP clients should re-issue `tools/list` to refresh their tool descriptors (no server restart required). Idempotent activate/deactivate and no-op reset do not emit a notification.
 
 ### Compiled-state availability vs session activation
 

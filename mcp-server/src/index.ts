@@ -92,7 +92,7 @@ export function createServer(
 ): Server {
   const server = new Server(
     { name: "unity-open-mcp", version: PACKAGE_VERSION },
-    { capabilities: { tools: {}, resources: {} } },
+    { capabilities: { tools: { listChanged: true }, resources: {} } },
   );
 
   const pingCache = new PingCache();
@@ -112,7 +112,24 @@ export function createServer(
   // M18 execution-plan.md). Resets to `core`-only on every server restart;
   // mutated only by unity_open_mcp_manage_tools and consulted by ListTools.
   const sessionState = new ToolSessionState();
-  const router = new ToolRouter(liveClient, batchSpawn, projectPath, eventStream, sessionState);
+  const notifyToolListChanged = async (): Promise<void> => {
+    try {
+      await server.notification({ method: "notifications/tools/list_changed" });
+    } catch (err) {
+      console.error(
+        "[unity-open-mcp] Failed to send tools/list_changed notification:",
+        err,
+      );
+    }
+  };
+  const router = new ToolRouter(
+    liveClient,
+    batchSpawn,
+    projectPath,
+    eventStream,
+    sessionState,
+    notifyToolListChanged,
+  );
   const resourceRouter = new ResourceRouter({
     live: liveClient,
     pingCache,

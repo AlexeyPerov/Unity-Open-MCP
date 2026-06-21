@@ -46,6 +46,16 @@ function injectRouteMeta(
   }
 }
 
+function activeGroupsEqual(
+  a: readonly string[],
+  b: readonly string[],
+): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
+}
+
 export class ToolRouter implements Router {
   private readonly modelCache = new AssetModelCache();
   constructor(
@@ -54,6 +64,7 @@ export class ToolRouter implements Router {
     private projectPath: string,
     private eventStream: BridgeEventStream,
     private sessionState: ToolSessionState,
+    private onToolListChanged?: () => void | Promise<void>,
   ) {}
 
   async route(
@@ -494,11 +505,15 @@ export class ToolRouter implements Router {
     }
 
     if (action === "reset") {
+      const before = this.sessionState.activeGroups();
       this.sessionState.reset();
+      await this.maybeNotifyToolListChanged(before);
       return this.manageToolsResult({
         reset: true,
         activeGroups: this.sessionState.activeGroups(),
-        message: "Tool-group visibility restored to defaults (`core` only).",
+        message:
+          "Tool-group visibility restored to defaults (`core` only). " +
+          "MCP clients that support listChanged will refresh ListTools automatically.",
       });
     }
 
@@ -521,6 +536,9 @@ export class ToolRouter implements Router {
         action === "activate"
           ? this.sessionState.activate(group)
           : this.sessionState.deactivate(group);
+      if (changed) {
+        await this.onToolListChanged?.();
+      }
       return this.manageToolsResult({
         action,
         group,
@@ -529,10 +547,10 @@ export class ToolRouter implements Router {
         message:
           action === "activate"
             ? changed
-              ? `Group '${group}' activated. Its tools will appear in subsequent ListTools responses.`
+              ? `Group '${group}' activated. Its tools will appear in subsequent ListTools responses; MCP clients that support listChanged will refresh automatically.`
               : `Group '${group}' was already active.`
             : changed
-              ? `Group '${group}' deactivated. Its tools are now hidden from ListTools.`
+              ? `Group '${group}' deactivated. Its tools are now hidden from ListTools; MCP clients that support listChanged will refresh automatically.`
               : `Group '${group}' was already inactive.`,
       });
     }
@@ -590,6 +608,19 @@ export class ToolRouter implements Router {
       ],
       isError: false,
     };
+  }
+
+  /**
+   * Notify MCP clients when the filtered ListTools surface changed. Skips the
+   * callback when the active group set is unchanged (e.g. no-op reset).
+   */
+  private async maybeNotifyToolListChanged(
+    before: readonly string[],
+  ): Promise<void> {
+    if (!this.onToolListChanged) return;
+    const after = this.sessionState.activeGroups();
+    if (activeGroupsEqual(before, after)) return;
+    await this.onToolListChanged();
   }
 
   // Resolve compiled-state availability per group from the live bridge. The
