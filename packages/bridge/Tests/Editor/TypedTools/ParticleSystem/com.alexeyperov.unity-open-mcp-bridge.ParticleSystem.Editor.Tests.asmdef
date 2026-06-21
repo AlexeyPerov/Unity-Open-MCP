@@ -1,0 +1,23 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.ParticleSystem.Editor.Tests",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.ParticleSystem",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.ParticleSystem.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_OPEN_MCP_EXT_PARTICLESYSTEM",
+    "UNITY_TEST_FRAMEWORK"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

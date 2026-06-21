@@ -15,8 +15,9 @@ step.
 | Particle System | `UnityEngine.ParticleSystemModule` (built-in) | `UNITY_OPEN_MCP_EXT_PARTICLESYSTEM` | `.../Extensions/ParticleSystem/` |
 | Animation | `com.unity.modules.animation` (built-in) | `UNITY_OPEN_MCP_EXT_ANIMATION` | `.../Extensions/Animation/` |
 
-Navigation is the reference template (M18 Plan 1); the other four domains
-migrate into the same layout in M18 Plan 3.
+Navigation was the reference template (M18 Plan 1); InputSystem, ProBuilder,
+ParticleSystem, and Animation migrated into the same layout in M18 Plan 3.
+All five shipped domains are now embedded.
 
 ## Embedded domain model
 

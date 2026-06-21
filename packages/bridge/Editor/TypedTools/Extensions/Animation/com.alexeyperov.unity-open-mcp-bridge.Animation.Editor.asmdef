@@ -1,0 +1,20 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.Animation.Editor",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.Animation",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_OPEN_MCP_EXT_ANIMATION"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

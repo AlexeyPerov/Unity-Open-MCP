@@ -1,15 +1,33 @@
-# ProBuilder — embedded domain tools (scaffold)
+# ProBuilder — embedded domain tools
 
-M18 Plan 1 created this folder as the future home for the ProBuilder domain
-tools. The folder exists so the compile-gated layout is in place; the actual
-tool code migrates here in **M18 Plan 3** (migrate existing extensions),
-following the Navigation reference template in `../Navigation/`.
+ProBuilder typed tools (`unity_open_mcp_probuilder_*`), embedded inside the
+bridge. Five tools for in-editor mesh editing: create shape, get mesh info,
+extrude faces, delete faces, set face material.
+
+Ported in M18 Plan 3 from the former standalone extension pack at
+`packages/extensions/probuilder/` (now frozen). Logic, tool IDs, JSON schema,
+and gate contracts are unchanged from the legacy pack — only the namespace
+moved (`UnityOpenMcpExtensions.ProBuilder` →
+`UnityOpenMcpBridge.Extensions.ProBuilder`).
 
 ## Compile gate
 
-The ProBuilder tools will be gated by the `UNITY_OPEN_MCP_EXT_PROBUILDER`
-define, which the bridge root asmdef
-(`packages/bridge/Editor/com.com.alexeyperov.unity-open-mcp-bridge.Editor.asmdef`)
-sets via `versionDefines` when `com.unity.probuilder` is present.
+Two-layer gate (see `docs/extensions.md` §Embedded domain model):
 
-See `docs/extensions.md` §Embedded domain model for the gating policy.
+1. The bridge root asmdef
+   (`packages/bridge/Editor/com.alexeyperov.unity-open-mcp-bridge.Editor.asmdef`)
+   sets `UNITY_OPEN_MCP_EXT_PROBUILDER` via `versionDefines` when
+   `com.unity.probuilder` resolves.
+2. This folder's sub-asmdef carries
+   `defineConstraints: ["UNITY_OPEN_MCP_EXT_PROBUILDER"]` and references
+   `Unity.ProBuilder`. Unity only compiles it when the define is set, so the
+   optional package reference never breaks a project that lacks it.
+
+Each source file additionally wraps its body in
+`#if UNITY_OPEN_MCP_EXT_PROBUILDER` as a belt-and-suspenders guard.
+
+## Tool group
+
+All five tools belong to the `probuilder` group (M18 Plan 2). Hidden from
+`ListTools` until the session activates the group via
+`unity_open_mcp_manage_tools`.
