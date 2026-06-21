@@ -638,9 +638,62 @@
       };
     }
 
+    // Multi-type: non-Unity projects (Package / Open-MCP / Custom) are
+    // not launchable and never carry a Unity version, so the
+    // "version missing" / "launchable" chips would just be noise. Show
+    // a single "ok" chip when the path exists, or the standard
+    // missing-path chip otherwise. Stale still surfaces separately so
+    // the user can clean up the entry.
+    if (projectKindOf(project) !== "unity") {
+      if (!exists) {
+        const chips: { tone: "ok" | "warn" | "missing" | "running" | "stale" | "info" | "muted"; label: string; title: string }[] = [
+          { tone: "missing", label: "missing path", title: project.path },
+        ];
+        if (stale) {
+          chips.push({
+            tone: "stale",
+            label: "stale",
+            title: "Marked stale — keep the entry but exclude from launch",
+          });
+        }
+        return {
+          pathExists: false,
+          // `hasVersion: true` keeps non-Unity entries out of the
+          // "Missing version" filter — they never carry a Unity version
+          // by design, so the filter (which targets Unity projects with
+          // an unreadable ProjectVersion.txt) must not pick them up.
+          hasVersion: true,
+          running: false,
+          stale,
+          chips,
+          kind: "missingPath",
+          launchable: false,
+        };
+      }
+      const chips: { tone: "ok" | "warn" | "missing" | "running" | "stale" | "info" | "muted"; label: string; title: string }[] = [
+        { tone: "ok", label: "ok", title: "Folder tracked" },
+      ];
+      if (stale) {
+        chips.push({
+          tone: "stale",
+          label: "stale",
+          title: "Marked stale — keep the entry but exclude from launch",
+        });
+      }
+      return {
+        pathExists: true,
+        hasVersion: true,
+        running: false,
+        stale,
+        chips,
+        kind: "ok",
+        launchable: false,
+      };
+    }
+
     // M1.5-15: stale rows are kept visible but never launchable. A
-    // stale row whose path also went missing shows both chips so
-    // the user can decide whether to relink or to keep the entry
+    // stale row whose path also went missing shows both chips so the
+    // user can decide whether to relink or to keep the entry
     // around for record-keeping.
     if (!exists) {
       const chips: { tone: "ok" | "warn" | "missing" | "running" | "stale" | "info" | "muted"; label: string; title: string }[] = [
@@ -2371,7 +2424,11 @@
   let showGitBranch = $derived(projectsStore.settings?.projectList.showGitBranchColumn ?? true);
 
   let gridTemplate = $derived.by(() => {
-    const name = "minmax(8rem, 1.1fr)";
+    // Name column widened ~50% (was `minmax(8rem, 1.1fr)`) so longer
+    // project names fit on one line and the type chip has room to wrap
+    // underneath when it still does not fit (see `.name-text` /
+    // `.source-tag` CSS for the wrapping behavior).
+    const name = "minmax(12rem, 1.65fr)";
     const version = "minmax(6rem, 0.9fr)";
     const modified = "minmax(5rem, 0.7fr)";
     const gitBranch = "minmax(5rem, 0.7fr)";
@@ -2990,14 +3047,21 @@
               class:row-nonlaunchable={kind !== "unity"}
               role="row"
               aria-selected={projectsStore.selectedProjectId === project.id}
+              title={project.path}
               style="grid-template-columns: {gridTemplate};"
-              onclick={() => { if (kind === "unity") handleLaunch(project.id); }}
+              onclick={() => {
+                if (kind === "unity") {
+                  handleLaunch(project.id);
+                } else {
+                  openSettingsPopup(project.id);
+                }
+              }}
               oncontextmenu={(e) => openContextMenu(e, project.id)}
             >
               <div class="cell cell-name" role="gridcell">
                 <div class="name-path">
                   <span class="name-text">
-                    {project.name}
+                    <span class="name-label">{project.name}</span>
                     {#if kind !== "unity"}
                       <span
                         class="source-tag source-kind source-kind-{kind}"
@@ -3026,7 +3090,7 @@
                       >
                     {/if}
                   </span>
-                  <span class="path-text" title={project.path}>{project.path}</span>
+                  <span class="path-text"><span class="path-text-inner" title={project.path}>{project.path}</span></span>
                 </div>
               </div>
               <div class="cell cell-version" role="gridcell">
@@ -4935,10 +4999,11 @@
     transition: background 0.08s ease;
   }
 
-  /* Multi-type: non-Unity rows are not launchable, so drop the
-     pointer cursor to signal that a click will not open Unity. The
-     row stays interactive for selection / context menu / settings. */
-  .row-nonlaunchable { cursor: default; }
+  /* Multi-type: non-Unity rows are not launchable, but a click now
+     opens their settings popup (mirroring the settings gear), so keep
+     the pointer cursor to signal interactivity. The row stays
+     interactive for selection / context menu / settings. */
+  .row-nonlaunchable { cursor: pointer; }
 
   .row:hover { background: var(--hub-surface); }
 
@@ -5017,12 +5082,27 @@
     font-weight: 500;
     color: var(--hub-text);
     font-size: 0.88rem;
-    white-space: nowrap;
+    /* Allow the name + tag(s) to wrap to a second line when they do
+       not fit horizontally. `flex-wrap` keeps each inline child
+       intact: a type chip that does not fit beside the name moves down
+       as a unit rather than breaking mid-word. The container itself
+       still respects the cell width because the parent grid column is
+       sized via `minmax`. */
+    white-space: normal;
     overflow: hidden;
-    text-overflow: ellipsis;
     display: inline-flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.4rem;
+  }
+
+  /* The project name itself wraps across multiple lines when it does
+     not fit on one. Kept as a separate flex child (rather than a bare
+     text node) so `flex-wrap` on `.name-text` moves the chip to a
+     fresh line when the name + chip would overflow. */
+  .name-label {
+    white-space: normal;
+    word-break: break-word;
   }
 
   .source-tag {
@@ -5036,6 +5116,9 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
     border: 1px solid transparent;
+    /* Keep the chip on a single line; if it does not fit beside the
+       name, `flex-wrap` on `.name-text` moves the whole chip to the
+       next line instead of splitting it across lines. */
     white-space: nowrap;
   }
 
@@ -5076,9 +5159,24 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.7rem;
     color: var(--hub-text-placeholder);
+    /* The end of a project path is more valuable than the start
+       (folder name vs. ancestors). Use a flex container right-aligned
+       with overflow hidden on the left so long paths keep their tail
+       visible and clip the prefix instead of the suffix. A leading
+       ellipsis is intentionally omitted — the row title attribute
+       carries the full path on hover. */
+    display: flex;
+    justify-content: flex-end;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
+  }
+
+  /* Inner span carries the actual text. `flex: none` keeps it at its
+     intrinsic width so the parent's `justify-content: flex-end` shifts
+     it right and the left side overflows + clips, rather than the text
+     shrinking to fit. */
+  .path-text-inner {
+    flex: none;
   }
 
   .cell-version .version-text {

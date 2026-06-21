@@ -34,6 +34,24 @@ function emptyPanel(): PanelState {
   return { lines: [], running: false, lastExitCode: null };
 }
 
+/**
+ * Build a fresh, detached `ProjectPanels` object. Used by the Open-MCP
+ * settings component as a non-mutating fallback for `$derived` so the
+ * derived can read a stable shape before the store-side object is seeded
+ * (the store seeds it in an `$effect`, since mutating the store from
+ * inside a `$derived` throws `state_unsafe_mutation` in Svelte 5).
+ */
+export function emptyProjectPanels(): ProjectPanels {
+  return {
+    build: emptyPanel(),
+    test: emptyPanel(),
+    custom: emptyPanel(),
+    version: emptyPanel(),
+    publishDryRun: emptyPanel(),
+    publish: emptyPanel(),
+  };
+}
+
 class CommandLogsStore {
   projects = $state<Record<string, ProjectPanels>>({});
 

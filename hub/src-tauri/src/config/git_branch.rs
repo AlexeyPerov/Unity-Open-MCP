@@ -17,14 +17,42 @@ const GIT_HEAD_FILE: &str = ".git/HEAD";
 ///   be read (corrupt repo, permissions, etc.). The Projects tab renders an
 ///   empty cell for these and never errors out.
 ///
-/// Detection is intentionally minimal: a single `read_to_string` on
-/// `.git/HEAD`. We do not invoke `git`, do not walk up the directory tree
-/// looking for a parent repo, and do not touch `packed-refs` — those are
-/// deferred. The cell renders the resolved value; refresh re-reads it.
+/// Detection walks up the directory tree from `project_path` looking for a
+/// `.git/HEAD` file, mirroring how `git` itself resolves the working tree.
+/// This matters for nested layouts where the registered project lives
+/// inside a parent git repo (e.g. a Unity project checked in as a subfolder
+/// of a monorepo): `.git` only exists at the repo root, so a flat
+/// `<project>/.git/HEAD` read returns nothing and the Branch column looked
+/// empty for every nested entry. The walk is bounded by the depth and by
+/// filesystem boundaries (a parent that does not exist stops the loop), so
+/// a path on a slow/networked volume still resolves quickly.
+///
+/// We do not invoke `git`, parse `.git` worktree files, or touch
+/// `packed-refs` — those are deferred. The cell renders the resolved value;
+/// refresh re-reads it.
 pub fn read_git_branch(project_path: &Path) -> Option<String> {
-    let head_path = project_path.join(GIT_HEAD_FILE);
-    let content = std::fs::read_to_string(&head_path).ok()?;
-    parse_git_head(&content)
+    for dir in ancestors_with_git(project_path) {
+        let head_path = dir.join(GIT_HEAD_FILE);
+        if let Ok(content) = std::fs::read_to_string(&head_path) {
+            return parse_git_head(&content);
+        }
+    }
+    None
+}
+
+/// Yield each ancestor of `start` (inclusive) that could plausibly host a
+/// `.git` directory. Stops at the filesystem root. Used by
+/// [`read_git_branch`] to walk up like `git` does when resolving the
+/// working tree for a nested path.
+fn ancestors_with_git(start: &Path) -> impl Iterator<Item = PathBuf> {
+    let mut next = Some(start.to_path_buf());
+    std::iter::from_fn(move || {
+        let dir = next.take()?;
+        // `Path::parent` returns `None` at the filesystem root, which is
+        // exactly the termination condition we want.
+        next = dir.parent().map(PathBuf::from);
+        Some(dir)
+    })
 }
 
 /// Pure parser for the contents of a `.git/HEAD` file. Exposed so unit
@@ -243,5 +271,58 @@ mod tests {
         // Anything other than 40 hex chars is not a SHA and we don't
         // want to surface misleading `detached:` chips.
         assert_eq!(parse_git_head("deadbeef\n"), None);
+    }
+
+    #[test]
+    fn read_git_branch_walks_up_to_parent_repo() {
+        // A nested project that lives inside a parent git working tree
+        // (e.g. a Unity project checked in as a subfolder of a monorepo)
+        // must still resolve the branch from the parent `.git`. Without
+        // the walk-up the Branch column looked empty for these.
+        let parent = fresh_dir("RepoRoot");
+        write_head(&parent, "ref: refs/heads/develop\n");
+        let nested = parent.join("Assets");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(
+            read_git_branch(&nested),
+            Some("develop".to_string())
+        );
+    }
+
+    #[test]
+    fn read_git_branch_prefers_inner_repo_over_parent() {
+        // When the project path itself is a git repo (the common case),
+        // the walk-up yields the inner `.git/HEAD` on the first iteration
+        // and never inspects the parent — even if a parent repo exists.
+        let parent = fresh_dir("RepoParent");
+        write_head(&parent, "ref: refs/heads/parent-branch\n");
+        let inner = parent.join("subpkg");
+        std::fs::create_dir_all(&inner).unwrap();
+        write_head(&inner, "ref: refs/heads/inner-branch\n");
+        assert_eq!(
+            read_git_branch(&inner),
+            Some("inner-branch".to_string())
+        );
+    }
+
+    #[test]
+    fn read_git_branch_walks_up_multiple_levels() {
+        // Deeply nested layouts (repo root → many intermediate folders →
+        // project) must still resolve by climbing every ancestor.
+        let root = fresh_dir("DeepRoot");
+        write_head(&root, "ref: refs/heads/main\n");
+        let deep = root.join("a/b/c");
+        std::fs::create_dir_all(&deep).unwrap();
+        assert_eq!(read_git_branch(&deep), Some("main".to_string()));
+    }
+
+    #[test]
+    fn read_git_branch_returns_none_when_no_ancestor_is_a_repo() {
+        // A standalone folder tree with no `.git` anywhere up to the
+        // root must resolve to `None` so the cell renders empty.
+        let tmp = tempfile::tempdir().unwrap();
+        let standalone = tmp.path().join("plain");
+        std::fs::create_dir_all(&standalone).unwrap();
+        assert_eq!(read_git_branch(&standalone), None);
     }
 }

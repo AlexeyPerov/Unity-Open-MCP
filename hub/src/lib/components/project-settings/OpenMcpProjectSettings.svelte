@@ -14,7 +14,7 @@
     type McpPackageInfo,
     type NpmRegistryInfo,
   } from "$lib/services/config";
-  import { commandLogsStore, type ProjectPanels } from "$lib/state/command_logs.svelte";
+  import { commandLogsStore, emptyProjectPanels, type ProjectPanels } from "$lib/state/command_logs.svelte";
   import { S } from "$lib/state.svelte";
   import Button from "$lib/components/shell/Button.svelte";
   import Console from "$lib/components/project-settings/Console.svelte";
@@ -28,8 +28,19 @@
     onMutated: (updated: ProjectEntry) => void;
   } = $props();
 
-  // The store lazily creates the panels object on first access.
-  let panels = $derived<ProjectPanels>(commandLogsStore.forProject(project.id));
+  // The store lazily creates the panels object on first access. Svelte 5
+  // forbids mutating state inside a `$derived` (it throws
+  // `state_unsafe_mutation`), so we split the lifecycle: an `$effect`
+  // seeds the panels object for this project once on mount, and the
+  // `$derived` below only reads it. Without this split the modal opened
+  // with a blank body for Open-MCP projects because the derived crashed
+  // before the component could render.
+  $effect(() => {
+    commandLogsStore.forProject(project.id);
+  });
+  let panels = $derived<ProjectPanels>(
+    commandLogsStore.projects[project.id] ?? emptyProjectPanels(),
+  );
 
   let customArgs = $state("run lint");
 
