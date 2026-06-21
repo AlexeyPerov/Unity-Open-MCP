@@ -20,6 +20,15 @@ Rules for `packages/bridge/` — the Unity Editor HTTP bridge (`com.alexeyperov.
 - Mutating tools must accept and honor the request-level `gate` value. Read-only tools set `Gate = Off` and `ReadOnlyHint = true`.
 - When adding/removing/renaming a tool, update the hardcoded `KnownTools` / `DirectResponseTools` / `MutatingTools` sets in `BridgeHttpServer.cs` **only if** the tool is not registry-discovered. Registry tools are picked up automatically.
 
+## Embedded domain tools (M18)
+
+- Shipped domain tools (Nav, Input, ProBuilder, Particles, Animation) live under `Editor/TypedTools/Extensions/<Domain>/`, **not** in `packages/extensions/`. See `docs/extensions.md` §Embedded domain model.
+- **Compile-gating is mandatory.** The bridge root asmdef (`com.alexeyperov.unity-open-mcp-bridge.Editor.asmdef`) declares one `versionDefines` entry per shipped domain that maps the Unity package/module to `UNITY_OPEN_MCP_EXT_<DOMAIN>`. Each domain lives in its own sub-asmdef with `defineConstraints: ["UNITY_OPEN_MCP_EXT_<DOMAIN>"]` and a reference to the domain package — the sub-asmdef only compiles when the dependency is present, so a project with zero optional Unity domain packages still compiles cleanly.
+- **No runtime reflection probing** for shipped domains. When the dependency is absent, the tools are simply not compiled in; the capability surface reports `available: false (dependency missing: <package>)`. Reflection is reserved for version-split APIs only (Cinemachine 2.x/3.x in M18 Plan 7) and must document the split + minimum version.
+- **No manual Player Settings scripting-define writes.** The wizard must not write `UNITY_OPEN_MCP_EXT_*` symbols — they come exclusively from the asmdef `versionDefines`.
+- New first-party domains follow the Navigation reference template (`Editor/TypedTools/Extensions/Navigation/`): sub-asmdef with `defineConstraints` + package ref, source files wrapped in `#if UNITY_OPEN_MCP_EXT_<DOMAIN>`, `[BridgeToolType]` + `[BridgeTool]` discovery (registry scans all loaded assemblies), stable `unity_open_mcp_<domain>_<action>` IDs, gate contracts on mutating tools, and a gated EditMode test asmdef under `Tests/Editor/TypedTools/<Domain>/`.
+- Tool IDs and JSON response schemas are stable across the embed migration — do not change them when moving a domain out of `packages/extensions/`.
+
 ## Gate policy
 
 - The gate flow (checkpoint → mutate → validate → delta) is the bridge's core safety contract. Do not add a mutating dispatch path that bypasses `GatePolicy.Execute`.

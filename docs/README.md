@@ -7,7 +7,7 @@ Use this index to find setup guides, product docs, and API contracts.
 - [Wizard setup](wizard-setup.md) — recommended onboarding with Unity Hub Pro.
 - [Manual setup](manual-setup.md) — direct MCP setup and client config snippets.
 - [Unity Hub Pro](unity-hub-pro.md) — app capabilities, workflows, and maintainer tools.
-- [Extensions](extensions.md) — optional extension packs and installation paths.
+- [Extensions](extensions.md) — embedded domain tools (compile-gated) and legacy/community packs.
 - [Unity version compatibility](unity-version-compat.md) — supported versions and CI coverage.
 
 ## Architecture and APIs

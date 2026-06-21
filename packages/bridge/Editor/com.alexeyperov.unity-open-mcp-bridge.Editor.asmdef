@@ -13,6 +13,32 @@
   "precompiledReferences": [],
   "autoReferenced": true,
   "defineConstraints": [],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.ai.navigation",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_NAVIGATION"
+    },
+    {
+      "name": "com.unity.inputsystem",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_INPUTSYSTEM"
+    },
+    {
+      "name": "com.unity.probuilder",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_PROBUILDER"
+    },
+    {
+      "name": "UnityEngine.ParticleSystemModule",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_PARTICLESYSTEM"
+    },
+    {
+      "name": "com.unity.modules.animation",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_ANIMATION"
+    }
+  ],
   "noEngineReferences": false
 }

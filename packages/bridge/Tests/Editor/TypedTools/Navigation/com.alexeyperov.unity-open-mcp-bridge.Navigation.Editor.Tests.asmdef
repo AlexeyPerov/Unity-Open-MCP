@@ -1,0 +1,24 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.Navigation.Editor.Tests",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Navigation",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.Navigation.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor",
+    "Unity.AI.Navigation"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_OPEN_MCP_EXT_NAVIGATION",
+    "UNITY_TEST_FRAMEWORK"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

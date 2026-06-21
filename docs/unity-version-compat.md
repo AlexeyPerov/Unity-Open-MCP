@@ -37,11 +37,19 @@ only APIs available on both 2022.3 LTS and Unity 6. Notable non-gated call:
   no `#if` guard. It is wrapped in `try/catch` with a `QualitySettings`
   fallback.
 
-The asmdefs (`com.alexeyperov.unity-open-mcp-bridge.Editor.asmdef`,
-`com.alexeyperov.unity-open-mcp-verify.Editor.asmdef`) have empty
-`defineConstraints` / `versionDefines` — the guards rely on Unity's built-in
-`UNITY_6000_0_OR_NEWER` scripting-define symbol, which is set automatically by
-Unity 6.0 and newer.
+The verify asmdef (`com.alexeyperov.unity-open-mcp-verify.Editor.asmdef`) has
+empty `defineConstraints` / `versionDefines` — its guards rely on Unity's
+built-in `UNITY_6000_0_OR_NEWER` scripting-define symbol, which is set
+automatically by Unity 6.0 and newer.
+
+The bridge root asmdef
+(`com.alexeyperov.unity-open-mcp-bridge.Editor.asmdef`) populates
+`versionDefines` to drive the **embedded domain model** (M18 Plan 1): each
+entry maps a Unity domain package/module to a `UNITY_OPEN_MCP_EXT_<DOMAIN>`
+symbol when the dependency resolves. These defines gate the per-domain
+sub-asmdefs under `Editor/TypedTools/Extensions/` — they are independent of
+the Unity-version guards and add no manual Player Settings symbol writes. See
+[Extensions](extensions.md) §Embedded domain model.
 
 ## Wizard behaviour
 

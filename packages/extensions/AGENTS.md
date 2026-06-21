@@ -6,6 +6,8 @@ Rules for `packages/extensions/` — optional domain extension UPM packages that
 
 Each pack lives in its own subfolder (`packages/extensions/<domain>/`) and ships as a standalone UPM package (`com.alexeyperov.unity-open-mcp-ext-<domain>`). Packs are opt-in — projects add only the ones they need to `Packages/manifest.json`.
 
+> **M18 migration in progress.** The five shipped domains (navigation, inputsystem, probuilder, particlesystem, animation) are moving to the **embedded model** inside the bridge (`packages/bridge/Editor/TypedTools/Extensions/*`, compile-gated by `UNITY_OPEN_MCP_EXT_<DOMAIN>`). Navigation was ported in M18 Plan 1; the rest follow in Plan 3. This folder is **frozen for shipped domains** — new first-party domains go into the bridge, not here. The deprecation + duplicate-registration guards land in M18 Plan 6. Until then, a project with both a legacy pack and the embedded copy installed will get a soft "duplicate tool name — keeping first registered" warning from `BridgeToolRegistry` (non-fatal). This folder remains the home for **third-party / community** domain packs. See `docs/extensions.md` §Embedded domain model.
+
 ## Package shape
 
 - Editor-only. All code under `Editor/`, namespace `UnityOpenMcpExtensions.<Domain>`.
