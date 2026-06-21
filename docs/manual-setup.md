@@ -36,6 +36,24 @@ Edit `Packages/manifest.json` in your Unity project.
 }
 ```
 
+### Optional Unity domain dependencies
+
+Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation) are **bundled with the bridge** — they activate automatically once the matching Unity package is present. Add the Unity dependencies you want under `dependencies`:
+
+```json
+{
+  "dependencies": {
+    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v1.0.0",
+    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v1.0.0",
+    "com.unity.ai.navigation": "2.0.0",
+    "com.unity.inputsystem": "1.7.0",
+    "com.unity.probuilder": "6.0.9"
+  }
+}
+```
+
+Particle System and Animation are built-in Unity modules — no manifest entry is needed, the tools compile in as soon as the module is enabled in the Editor. See [extensions.md](extensions.md) for the full domain catalog and the define-symbol model.
+
 ## 2) Configure your MCP client
 
 Use `npx` by default:
@@ -90,6 +108,39 @@ npx -y unity-open-mcp@latest run-tool unity_open_mcp_capabilities --project /pat
 - Tools missing in client: restart client after config changes.
 - Compile-error launch dialog blocks startup: dismiss manually or keep auto-dismiss enabled.
 - Slow first run with `npx`: expected package download behavior.
+
+## Contributor / community-pack workflow
+
+The default install path uses the bridge plus optional Unity domain dependencies (above). Two advanced workflows exist for contributors and third-party pack authors:
+
+### Local monorepo checkout (contributors)
+
+Clone `unity-open-mcp` side-by-side with your Unity project and point the manifest at the local package folders via `file:` URLs. The Hub wizard's **Use local checkout** (Step 2) + **Use local packages** (Step 3) toggles automate this; the manual equivalent is:
+
+```json
+{
+  "dependencies": {
+    "com.alexeyperov.unity-open-mcp-bridge": "file:../../unity-open-mcp/packages/bridge",
+    "com.alexeyperov.unity-open-mcp-verify": "file:../../unity-open-mcp/packages/verify"
+  }
+}
+```
+
+Edit source under `packages/bridge/Editor/` and Unity recompiles on focus. Build the MCP server once with `npm run build` in `mcp-server/` so the wizard's Step 2 fingerprint check passes.
+
+### Community domain packs (third-party)
+
+`packages/extensions/` is the home for **third-party / community** domain packs that are not shipped with the bridge. The shipped domains (Nav, Input, ProBuilder, Particles, Animation) are embedded in the bridge and **must not** also be installed as separate `com.alexeyperov.unity-open-mcp-ext-*` packs — that would double-register tool IDs. See [extensions.md](extensions.md#legacy--community-domain-packs-advanced-path) for the community-pack contract.
+
+To install a community pack, add its UPM id under `dependencies`:
+
+```json
+{
+  "dependencies": {
+    "com.example.my-mcp-ext": "file:../../my-mcp-ext"
+  }
+}
+```
 
 ## Related docs
 

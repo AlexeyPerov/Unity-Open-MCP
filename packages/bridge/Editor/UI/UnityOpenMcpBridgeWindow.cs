@@ -1607,12 +1607,15 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("Extension packs", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
-                "Optional domain extension packs add typed NavMesh / Input System / " +
-                "ProBuilder / Splines / Terrain / Tilemap / Particle System / Animation " +
-                "tools. Each pack is a separate UPM package — install the ones you need " +
-                "via Packages/manifest.json (or the Hub AI Setup wizard's optional " +
-                "checkboxes). The bridge auto-discovers tools in any installed pack — " +
-                "no per-pack wiring in the core bridge.",
+                "Shipped domain tools (NavMesh, Input System, ProBuilder, " +
+                "Particle System, Animation) are embedded inside the bridge " +
+                "and activate automatically when the matching Unity package is " +
+                "present — no separate install, no manifest entry. The Hub AI " +
+                "Setup wizard's Step 3 offers one-click install of the Unity " +
+                "domain dependencies. The rows below list every domain the " +
+                "catalog knows about (shipped + planned); the planned ones are " +
+                "coming-soon placeholders. Third-party / community packs still " +
+                "live under packages/extensions/ as separate UPM packages.",
                 MessageType.None);
 
             BridgeGUIUtilities.HorizontalLine(2, 4);

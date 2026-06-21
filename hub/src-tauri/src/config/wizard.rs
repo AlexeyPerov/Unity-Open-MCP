@@ -239,22 +239,31 @@ pub struct PackageInstallEntry {
     pub package_path: String,
 }
 
-/// A selected extension pack the wizard should install. Each entry
-/// is a (UPM id, repo-relative local path) pair resolved by the
-/// frontend from the TS catalog (`EXTENSION_PACKS`); Rust has no
-/// pack catalog of its own. Packs always install via `file:` URLs
-/// (no published-tag form exists yet).
+/// A Unity domain dependency the wizard should install on opt-in.
+///
+/// M18 Plan 4: domain tools are **embedded** in the bridge (compile-gated
+/// by `UNITY_OPEN_MCP_EXT_<DOMAIN>` versionDefines), so the wizard no
+/// longer installs separate `com.alexeyperov.unity-open-mcp-ext-*` packs.
+/// Instead, the user opts into a Unity domain package
+/// (e.g. `com.unity.ai.navigation`) and the bridge's embedded tool set
+/// compiles + registers automatically once the package resolves. Built-in
+/// Unity module domains (Particle System, Animation) have no UPM id —
+/// the frontend filters them out before calling the planner, so this
+/// type only carries entries that resolve to a real UPM package.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExtensionPackInstall {
+pub struct UnityDomainDepInstall {
+    /// UPM package id (`com.unity.ai.navigation`, …).
     pub id: String,
-    pub local_path: String,
+    /// Pinned version string (e.g. `"2.0.0"`). The frontend supplies the
+    /// catalog default; Rust trusts it.
+    pub version: String,
 }
 
 /// The two package URLs the wizard always derives from a
 /// validated toolkit root (questions-4 Q2 = B; spec §Step 3
 /// "Package URL derivation"), plus the derived entries for any
-/// selected extension packs (always `file:` form).
+/// selected Unity domain dependencies (standard UPM version form).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DerivedPackageUrls {
@@ -262,10 +271,12 @@ pub struct DerivedPackageUrls {
     pub git_remote: String,
     pub bridge: PackageInstallEntry,
     pub verify: PackageInstallEntry,
-    /// Derived `file:` entries for selected extension packs, in the
-    /// order the frontend supplied them.
+    /// Derived UPM entries for selected Unity domain dependencies
+    /// (`com.unity.ai.navigation` etc.), in the order the frontend
+    /// supplied them. Always plain version strings — no `file:` form,
+    /// no git remote — because these come from the public Unity registry.
     #[serde(default)]
-    pub extension_packs: Vec<PackageInstallEntry>,
+    pub unity_domain_deps: Vec<PackageInstallEntry>,
 }
 
 /// A single change the wizard intends to apply. Used by the
@@ -320,14 +331,17 @@ pub struct ManifestMergeParams {
     /// git remote URLs.
     #[serde(default)]
     pub use_local_packages: bool,
-    /// Selected extension packs to install. Each entry is a
-    /// (UPM id, repo-relative local path) pair resolved by the
-    /// frontend from its TS catalog; Rust trusts the ids and
-    /// paths. Packs always install via `file:` URLs (no
-    /// published-tag form exists yet), regardless of
-    /// `use_local_packages`.
+    /// Selected Unity domain dependencies to install. Each entry is a
+    /// (UPM id, version) pair resolved by the frontend from its TS
+    /// catalog; Rust trusts both fields. These are public Unity registry
+    /// packages (`com.unity.ai.navigation`, `com.unity.inputsystem`,
+    /// `com.unity.probuilder`) — never `file:` URLs, because the domain
+    /// tool code is now embedded in the bridge and only the Unity
+    /// dependency needs to land in `Packages/manifest.json`. Built-in
+    /// module domains (Particle System, Animation) are filtered out by
+    /// the frontend and never reach this list.
     #[serde(default)]
-    pub extension_packs: Vec<ExtensionPackInstall>,
+    pub unity_domain_deps: Vec<UnityDomainDepInstall>,
 }
 
 /// The plan returned by [`plan_manifest_merge`]. Includes the
@@ -458,7 +472,7 @@ pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
         &params.version_pin,
         &params.custom_url,
         params.use_local_packages,
-        &params.extension_packs,
+        &params.unity_domain_deps,
     );
     let mut changes = Vec::new();
     let mut proposed = BTreeMap::new();
@@ -484,7 +498,7 @@ pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
         });
         proposed.insert(entry.id.clone(), entry.url.clone());
     }
-    for entry in &derived.extension_packs {
+    for entry in &derived.unity_domain_deps {
         let kind = classify(&read.dependencies, &entry.id, &entry.url, &entry.tag);
         changes.push(PackageChange {
             id: entry.id.clone(),
@@ -504,7 +518,7 @@ pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
         &read.dependencies,
         params.install_bridge,
         params.install_verify,
-        &params.extension_packs,
+        &params.unity_domain_deps,
     );
     ManifestMergePlan {
         project_path: params.project_path,
@@ -553,7 +567,7 @@ pub fn write_manifest_merge(
         &params.version_pin,
         &params.custom_url,
         params.use_local_packages,
-        &params.extension_packs,
+        &params.unity_domain_deps,
     );
     let mut changes = Vec::new();
     let mut proposed = BTreeMap::new();
@@ -597,7 +611,7 @@ pub fn write_manifest_merge(
         });
         proposed.insert(entry.id.clone(), entry.url.clone());
     }
-    for entry in &derived.extension_packs {
+    for entry in &derived.unity_domain_deps {
         let kind = classify(&read.dependencies, &entry.id, &entry.url, &entry.tag);
         if kind == ChangeKind::Upgrade && !params.confirm_upgrades {
             return Err(ManifestError::new(
@@ -922,25 +936,29 @@ pub fn derive_package_urls(
     version_pin: &str,
     custom_url: &str,
     use_local_packages: bool,
-    extension_packs: &[ExtensionPackInstall],
+    unity_domain_deps: &[UnityDomainDepInstall],
 ) -> DerivedPackageUrls {
     let trimmed_root = toolkit_root.trim();
     let trimmed_pin = version_pin.trim();
     let trimmed_custom = custom_url.trim();
 
-    // Extension packs always install via `file:` URLs (no published-tag
-    // form exists yet), so their entries are identical across modes.
-    let project = Path::new(project_path.trim());
-    let packages_dir = project.join("Packages");
-    let extension_pack_entries: Vec<PackageInstallEntry> = extension_packs
+    // Unity domain deps always install from the public Unity registry
+    // (plain version strings — no `file:` form, no git remote), so their
+    // entries are identical across modes. The frontend filters out
+    // built-in-module domains (Particle System, Animation) before calling
+    // the planner, so this list only ever contains real UPM packages.
+    let unity_dep_entries: Vec<PackageInstallEntry> = unity_domain_deps
         .iter()
-        .map(|pack| {
-            let abs = Path::new(trimmed_root).join(&pack.local_path);
-            let rel = relative_path_for_upm(&packages_dir, &abs)
-                .unwrap_or_else(|| format!("../../{}", pack.local_path));
-            build_local_package_entry(&pack.id, &rel)
+        .map(|dep| PackageInstallEntry {
+            id: dep.id.clone(),
+            url: dep.version.clone(),
+            tag: String::new(),
+            package_path: String::new(),
         })
         .collect();
+
+    let project = Path::new(project_path.trim());
+    let packages_dir = project.join("Packages");
 
     if use_local_packages {
         let bridge_abs = Path::new(trimmed_root).join(BRIDGE_PACKAGE_PATH);
@@ -956,7 +974,7 @@ pub fn derive_package_urls(
             git_remote: String::new(),
             bridge,
             verify,
-            extension_packs: extension_pack_entries,
+            unity_domain_deps: unity_dep_entries,
         };
     }
 
@@ -988,7 +1006,7 @@ pub fn derive_package_urls(
         git_remote: remote,
         bridge,
         verify,
-        extension_packs: extension_pack_entries,
+        unity_domain_deps: unity_dep_entries,
     }
 }
 
@@ -1050,7 +1068,7 @@ fn manifest_uses_local_packages(
     dependencies: &BTreeMap<String, String>,
     install_bridge: bool,
     install_verify: bool,
-    extension_packs: &[ExtensionPackInstall],
+    unity_domain_deps: &[UnityDomainDepInstall],
 ) -> bool {
     if install_bridge {
         if let Some(value) = dependencies.get(BRIDGE_PACKAGE_ID) {
@@ -1066,17 +1084,10 @@ fn manifest_uses_local_packages(
             }
         }
     }
-    // Packs always install via `file:` URLs, so any selected pack
-    // that is already present in the manifest counts as a local
-    // install. `extension_packs` is empty when the wizard has no
-    // packs selected, so the loop is a no-op in that case.
-    for pack in extension_packs {
-        if let Some(value) = dependencies.get(&pack.id) {
-            if is_local_file_url(value) {
-                return true;
-            }
-        }
-    }
+    // Unity domain deps are always registry versions, so they cannot
+    // contribute a `file:` entry; the loop is intentionally absent.
+    // Kept here only to keep the signature parallel with `ManifestMergeParams`.
+    let _ = unity_domain_deps;
     false
 }
 
@@ -1661,7 +1672,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         });
         assert!(!plan.has_upgrades);
         assert_eq!(plan.changes.len(), 2);
@@ -1688,7 +1699,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         });
         assert!(plan.has_upgrades);
         let bridge = plan
@@ -1721,7 +1732,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         })
         .unwrap();
         assert!(!result.backup_path.is_empty());
@@ -1753,7 +1764,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         })
         .unwrap();
         assert!(result.backup_path.is_empty());
@@ -1762,25 +1773,27 @@ mod tests {
         assert!(read_after.dependencies.contains_key(BRIDGE_PACKAGE_ID));
     }
 
-    /// A navigation pack fixture used by the extension-pack tests below.
-    /// Mirrors the (id, repo-relative local path) shape the Hub wizard
-    /// derives from its TS catalog; the Rust side trusts both fields.
-    fn nav_pack() -> ExtensionPackInstall {
-        ExtensionPackInstall {
-            id: "com.alexeyperov.unity-open-mcp-ext-navigation".to_string(),
-            local_path: "packages/extensions/navigation".to_string(),
+    /// A Unity domain dependency fixture used by the tests below.
+    /// Mirrors the (UPM id, version) shape the Hub wizard derives
+    /// from its TS catalog; the Rust side trusts both fields.
+    fn nav_dep() -> UnityDomainDepInstall {
+        UnityDomainDepInstall {
+            id: "com.unity.ai.navigation".to_string(),
+            version: "2.0.0".to_string(),
         }
     }
 
     #[test]
-    fn derive_package_urls_emits_file_paths_for_extension_packs() {
-        // Packs always install via `file:` URLs regardless of mode —
-        // there is no published-tag form. Local mode produces a
-        // repo-relative path computed by `relative_path_for_upm`.
+    fn derive_package_urls_emits_registry_versions_for_unity_domain_deps() {
+        // Unity domain deps always install from the public Unity registry
+        // (plain version strings) — never `file:` URLs, never git remotes.
+        // The same shape is produced in both local and git modes because
+        // the dep has nothing to do with the toolkit root.
         let root = tempdir().unwrap();
         let toolkit = root.path().join("toolkit");
         let project = root.path().join("demo");
-        fs::create_dir_all(toolkit.join("packages/extensions/navigation")).unwrap();
+        fs::create_dir_all(toolkit.join("packages/bridge")).unwrap();
+        fs::create_dir_all(toolkit.join("packages/verify")).unwrap();
         make_valid_project(&project);
         let derived = derive_package_urls(
             project.to_str().unwrap(),
@@ -1788,31 +1801,28 @@ mod tests {
             "",
             "",
             true,
-            &[nav_pack()],
+            &[nav_dep()],
         );
-        assert_eq!(derived.extension_packs.len(), 1);
-        let entry = &derived.extension_packs[0];
-        assert_eq!(entry.id, nav_pack().id);
-        assert!(entry.url.starts_with("file:"));
-        assert!(entry.url.contains("packages/extensions/navigation"));
+        assert_eq!(derived.unity_domain_deps.len(), 1);
+        let entry = &derived.unity_domain_deps[0];
+        assert_eq!(entry.id, nav_dep().id);
+        assert_eq!(entry.url, nav_dep().version);
         assert!(entry.tag.is_empty());
-        // Git mode also yields `file:` for packs.
+        // Git mode yields the same registry version.
         let derived_git = derive_package_urls(
             project.to_str().unwrap(),
             toolkit.to_str().unwrap(),
             "",
             "",
             false,
-            &[nav_pack()],
+            &[nav_dep()],
         );
-        assert_eq!(derived_git.extension_packs.len(), 1);
-        assert!(derived_git.extension_packs[0]
-            .url
-            .starts_with("file:"));
+        assert_eq!(derived_git.unity_domain_deps.len(), 1);
+        assert_eq!(derived_git.unity_domain_deps[0].url, nav_dep().version);
     }
 
     #[test]
-    fn plan_manifest_merge_includes_selected_extension_packs_in_changes() {
+    fn plan_manifest_merge_includes_selected_unity_domain_deps_in_changes() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
         let plan = plan_manifest_merge(ManifestMergeParams {
@@ -1824,33 +1834,25 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: vec![nav_pack()],
+            unity_domain_deps: vec![nav_dep()],
         });
-        // Only the pack should surface — no bridge/verify selected.
+        // Only the Unity dep should surface — no bridge/verify selected.
         assert_eq!(plan.changes.len(), 1);
         let change = &plan.changes[0];
-        assert_eq!(change.id, nav_pack().id);
+        assert_eq!(change.id, nav_dep().id);
         assert_eq!(change.kind, ChangeKind::Add);
-        assert!(change.after.starts_with("file:"));
+        assert_eq!(change.after, nav_dep().version);
         assert!(plan
             .proposed_dependencies
-            .contains_key(&nav_pack().id));
+            .contains_key(&nav_dep().id));
         assert!(!plan.has_upgrades);
     }
 
     #[test]
-    fn plan_manifest_merge_marks_extension_pack_noop_when_already_installed() {
+    fn plan_manifest_merge_marks_unity_domain_dep_noop_when_already_installed() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
-        let derived = derive_package_urls(
-            dir.path().to_str().unwrap(),
-            "/repos/uai",
-            "",
-            "",
-            false,
-            &[nav_pack()],
-        );
-        write_manifest(dir.path(), &[(nav_pack().id.as_str(), &derived.extension_packs[0].url)]);
+        write_manifest(dir.path(), &[(nav_dep().id.as_str(), nav_dep().version.as_str())]);
         let plan = plan_manifest_merge(ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
@@ -1860,7 +1862,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: vec![nav_pack()],
+            unity_domain_deps: vec![nav_dep()],
         });
         assert_eq!(plan.changes.len(), 1);
         assert!(plan.changes.iter().all(|c| c.kind == ChangeKind::Unchanged));
@@ -1868,7 +1870,7 @@ mod tests {
     }
 
     #[test]
-    fn write_manifest_merge_adds_extension_packs_and_preserves_unrelated_keys() {
+    fn write_manifest_merge_adds_unity_domain_deps_and_preserves_unrelated_keys() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
         write_manifest(
@@ -1884,7 +1886,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: vec![nav_pack()],
+            unity_domain_deps: vec![nav_dep()],
         })
         .unwrap();
         // Backup is created because an existing manifest was mutated.
@@ -1893,20 +1895,19 @@ mod tests {
         let read_after = read_manifest_inner(dir.path());
         // Unrelated key survives.
         assert!(read_after.dependencies.contains_key("com.unity.ide.rider"));
-        // Pack entry was added with a `file:` value.
-        let written = read_after.dependencies.get(&nav_pack().id).unwrap();
-        assert!(written.starts_with("file:"));
-        assert!(written.contains("packages/extensions/navigation"));
+        // Unity dep entry was added with the requested version string.
+        let written = read_after.dependencies.get(&nav_dep().id).unwrap();
+        assert_eq!(written, &nav_dep().version);
     }
 
     #[test]
-    fn write_manifest_merge_refuses_extension_pack_upgrade_without_confirmation() {
+    fn write_manifest_merge_refuses_unity_domain_dep_upgrade_without_confirmation() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
-        // Existing pack entry points at a different path — an upgrade.
+        // Existing entry pins an older version — an upgrade.
         write_manifest(
             dir.path(),
-            &[(nav_pack().id.as_str(), "file:../../old/path/navigation")],
+            &[(nav_dep().id.as_str(), "1.0.0")],
         );
         let err = write_manifest_merge(ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
@@ -1917,11 +1918,11 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: vec![nav_pack()],
+            unity_domain_deps: vec![nav_dep()],
         })
         .unwrap_err();
         assert_eq!(err.kind, "upgradeNotConfirmed");
-        assert!(err.message.contains(&nav_pack().id));
+        assert!(err.message.contains(&nav_dep().id));
     }
 
     #[test]
@@ -1944,7 +1945,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         })
         .unwrap_err();
         assert_eq!(err.kind, "upgradeNotConfirmed");
@@ -1974,7 +1975,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: true,
             use_local_packages: false,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         })
         .unwrap_err();
         assert_eq!(err.kind, "invalidJson");
@@ -1992,7 +1993,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         });
         assert!(matches!(result, Err(ref e) if e.kind == "notAUnityProject"));
     }
@@ -2010,7 +2011,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         })
         .unwrap();
         assert!(result
@@ -2046,7 +2047,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         })
         .unwrap();
         // All changes are Unchanged, so the writer did not touch
@@ -2128,7 +2129,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: true,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         });
         assert!(plan.use_local_packages);
         assert!(plan.manifest_uses_local_packages);
@@ -2156,7 +2157,7 @@ mod tests {
             custom_url: String::new(),
             confirm_upgrades: false,
             use_local_packages: false,
-            extension_packs: Vec::new(),
+            unity_domain_deps: Vec::new(),
         });
         assert!(!plan.use_local_packages);
         assert!(plan.manifest_uses_local_packages);

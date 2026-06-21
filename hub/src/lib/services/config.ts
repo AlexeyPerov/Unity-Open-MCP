@@ -1403,14 +1403,16 @@ export interface PackageInstallEntry {
 }
 
 /**
- * A selected extension pack the wizard should install. The frontend
- * resolves (id, localPath) from the TS catalog (`EXTENSION_PACKS`);
- * packs always install via `file:` URLs (no published-tag form yet),
- * regardless of `useLocalPackages`.
+ * A Unity domain dependency the wizard should install on opt-in. The
+ * frontend resolves (upmId, version) from the TS catalog
+ * (`installableEmbeddedDomains()`); these are public Unity registry
+ * packages (e.g. `com.unity.ai.navigation`), never `file:` URLs.
+ * Built-in module domains (Particle System, Animation) are filtered
+ * out by the frontend and never reach this type.
  */
-export interface ExtensionPackInstall {
+export interface UnityDomainDepInstall {
   id: string;
-  localPath: string;
+  version: string;
 }
 
 export interface DerivedPackageUrls {
@@ -1418,7 +1420,7 @@ export interface DerivedPackageUrls {
   gitRemote: string;
   bridge: PackageInstallEntry;
   verify: PackageInstallEntry;
-  extensionPacks: PackageInstallEntry[];
+  unityDomainDeps: PackageInstallEntry[];
 }
 
 export interface PackageChange {
@@ -1437,8 +1439,8 @@ export interface ManifestMergeParams {
   customUrl: string;
   confirmUpgrades: boolean;
   useLocalPackages: boolean;
-  /** Selected extension packs to install alongside bridge/verify. */
-  extensionPacks: ExtensionPackInstall[];
+  /** Selected Unity domain dependencies to install alongside bridge/verify. */
+  unityDomainDeps: UnityDomainDepInstall[];
 }
 
 export interface ManifestMergePlan {

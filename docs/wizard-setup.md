@@ -59,7 +59,12 @@ npm run build
 ### Step 3 — Unity packages
 
 - Install or upgrade bridge and verify packages
+- Optional: install Unity domain dependencies (NavMesh, Input System, ProBuilder) that activate the bundled domain tools
 - Review manifest diff before apply
+
+Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation) are **bundled with the bridge** — there is no separate extension-pack install. They compile in automatically once the matching Unity package is present in the project. Toggle the Unity domain dependencies you want the wizard to add to `Packages/manifest.json`; the bridge's embedded tools register after Unity re-imports the manifest. Built-in Unity modules (Particle System, Animation) ship with the Editor and need no manifest entry — the wizard lists them for visibility only.
+
+For the contributor / community-pack `file:` workflow, see [Manual setup](manual-setup.md#contributor--community-pack-workflow).
 
 [[SCREENSHOT:WIZARD-STEP3-PACKAGES-DIFF]]
 

@@ -64,9 +64,9 @@
     summarizeChanges,
   } from "$lib/services/manifest";
   import {
-    EXTENSION_PACKS,
-    findPack,
-    shippedPacks,
+    EMBEDDED_DOMAINS,
+    builtinEmbeddedDomains,
+    installableEmbeddedDomains,
   } from "$lib/services/extensions";
   import {
     type McpClientId,
@@ -236,28 +236,36 @@
   let showDiff = $state(false);
   let upgradeAcknowledged = $state(false);
 
-  // Step 3 — optional extension packs (opt-in checkbox group). Selected
-  // packs flow through the same merge planner as bridge + verify: each
-  // selected pack becomes a `file:` entry written to `Packages/manifest.json`
-  // on Install, with the same backup / upgrade-confirmation envelope. Packs
-  // always install via `file:` URLs (no published-tag form exists yet).
-  let selectedExtensionPacks = $state<Set<string>>(new Set());
+  // Step 3 — optional Unity domain dependencies (opt-in toggle group).
+  // M18 Plan 4: domain tools are bundled inside the bridge, so the wizard
+  // no longer installs separate `com.alexeyperov.unity-open-mcp-ext-*`
+  // packs. Instead, the user opts into the Unity package that activates
+  // each embedded domain (e.g. `com.unity.ai.navigation`). Selected deps
+  // flow through the same merge planner as bridge + verify: each one
+  // becomes a UPM version entry written to `Packages/manifest.json` on
+  // Install, with the same backup / upgrade-confirmation envelope.
+  // Built-in module domains (Particle System, Animation) have no UPM
+  // id and never reach this set — they render as info-only cards.
+  let selectedUnityDomainDeps = $state<Set<string>>(new Set());
 
-  // Resolve the selected pack ids to (id, localPath) pairs the Rust merge
-  // planner expects. Sourced from the TS catalog; the merge writer computes
-  // the correct repo-relative `file:` path per project location.
-  function selectedPackInstalls(): { id: string; localPath: string }[] {
-    return [...selectedExtensionPacks]
-      .map((id) => findPack(id))
-      .filter((p): p is NonNullable<typeof p> => Boolean(p))
-      .map((p) => ({ id: p.id, localPath: p.localPath }));
+  // Resolve the selected UPM ids to (id, version) pairs the Rust merge
+  // planner expects. Sourced from the TS catalog; the merge writer just
+  // carries the version string into `Packages/manifest.json`.
+  function selectedUnityDepInstalls(): { id: string; version: string }[] {
+    const installable = new Map(
+      installableEmbeddedDomains().map((d) => [d.upmDependency, d]),
+    );
+    return [...selectedUnityDomainDeps]
+      .map((id) => installable.get(id))
+      .filter((d): d is NonNullable<typeof d> => Boolean(d))
+      .map((d) => ({ id: d.upmDependency, version: d.defaultVersion }));
   }
 
-  // Static catalog snapshot — extension packs advertised by the wizard. Only
-  // shipped packs are selectable; planned packs render as disabled rows so the
-  // user knows what's coming.
-  const shippedExtensionPacks = shippedPacks();
-  const plannedExtensionPacks = EXTENSION_PACKS.filter((p) => !p.shipped);
+  // Static catalog snapshot — embedded domains advertised by the wizard.
+  // `installable` domains get a toggle; `builtin` ones render as info-only
+  // "always-on" cards because the Unity module ships with the Editor.
+  const installableDomains = installableEmbeddedDomains();
+  const builtinDomains = builtinEmbeddedDomains();
 
   // Step 4 — MCP client state. `bridgePort` is an OPTIONAL override:
   // blank means "derive from the project path" (the per-project hash shared
@@ -412,10 +420,10 @@
   }
 
   function isManifestReady(): boolean {
-    // A pack-only selection (no bridge/verify) is a valid flow when the
-    // selected packs are already present in the manifest.
-    const packIds = [...selectedExtensionPacks];
-    if (!installBridge && !installVerify && packIds.length === 0) return false;
+    // A Unity-dep-only selection (no bridge/verify) is a valid flow when
+    // the selected deps are already present in the manifest.
+    const depIds = [...selectedUnityDomainDeps];
+    if (!installBridge && !installVerify && depIds.length === 0) return false;
     if (!mergePlan) return false;
     if (mergePlan.manifestRead.parseError) return false;
     // Allow Next whenever the selected packages already exist in the
@@ -425,7 +433,7 @@
     const selectedIds: string[] = [];
     if (installBridge) selectedIds.push(BRIDGE_PACKAGE_ID);
     if (installVerify) selectedIds.push(VERIFY_PACKAGE_ID);
-    selectedIds.push(...packIds);
+    selectedIds.push(...depIds);
     return mergePlan.changes.some(
       (c) =>
         selectedIds.includes(c.id) &&
@@ -670,11 +678,11 @@
   $effect(() => {
     if (currentStep !== "step3") return;
     if (!toolkitRoot.trim()) return;
-    // Reading `selectedExtensionPacks` here makes the plan re-run
-    // whenever a pack checkbox is toggled. A pack-only selection
+    // Reading `selectedUnityDomainDeps` here makes the plan re-run
+    // whenever a Unity-dep toggle changes. A Unity-dep-only selection
     // (no bridge/verify) still produces a valid merge plan.
-    const packs = selectedPackInstalls();
-    if (!installBridge && !installVerify && packs.length === 0) {
+    const deps = selectedUnityDepInstalls();
+    if (!installBridge && !installVerify && deps.length === 0) {
       mergePlan = null;
       return;
     }
@@ -692,7 +700,7 @@
           customUrl: packageCustomUrl,
           confirmUpgrades: false,
           useLocalPackages: localMode,
-          extensionPacks: packs,
+          unityDomainDeps: deps,
         });
         if (!cancelled) {
           mergePlan = plan;
@@ -1140,7 +1148,7 @@
         customUrl: packageCustomUrl,
         confirmUpgrades: mergePlan.hasUpgrades,
         useLocalPackages,
-        extensionPacks: selectedPackInstalls(),
+        unityDomainDeps: selectedUnityDepInstalls(),
       });
       mergeResult = result;
       S.appendDrawerLog(
@@ -1536,7 +1544,7 @@
     upgradeAcknowledged = false;
     useLocalPackages = false;
     useLocalPackagesTouched = false;
-    selectedExtensionPacks = new Set();
+    selectedUnityDomainDeps = new Set();
     skillResult = null;
     skillError = null;
     skillOverwriteAck = false;
@@ -2107,16 +2115,19 @@
         <section class="wiz-section">
           <p class="wiz-desc">
             Step 3 adds bridge + verify packages to the project's
-            <code>Packages/manifest.json</code>. The diff preview
-            below is live — it re-computes whenever you change a
-            toggle, version pin, custom URL, or local-package
-            mode. Enable <strong>Use local packages</strong> to
-            install via <code>file:</code> paths from the toolkit
-            root (typical for projects inside this monorepo). An
-            upgrade (existing entry with a different URL or tag)
-            always requires explicit confirmation before the
-            wizard will write. Unrelated dependency entries are
-            preserved verbatim.
+            <code>Packages/manifest.json</code>. Domain tools (NavMesh,
+            Input System, ProBuilder, Particle System, Animation) are
+            <strong>bundled with the bridge</strong> — they activate
+            automatically once the matching Unity package is present, so
+            you install the bridge once and toggle Unity domain deps in
+            the section below. The diff preview is live — it re-computes
+            whenever you change a toggle, version pin, custom URL, or
+            local-package mode. Enable <strong>Use local packages</strong>
+            to install via <code>file:</code> paths from the toolkit root
+            (typical for projects inside this monorepo). An upgrade
+            (existing entry with a different URL or tag) always requires
+            explicit confirmation before the wizard will write. Unrelated
+            dependency entries are preserved verbatim.
           </p>
 
           <div class="wiz-field">
@@ -2194,44 +2205,47 @@
           </details>
 
           <details class="wiz-advanced">
-            <summary>Optional extension packs</summary>
+            <summary>Unity domain dependencies (optional)</summary>
             <p class="wiz-hint">
-              Optional domain packs add typed NavMesh / Input System / ProBuilder
-              / Splines / Terrain / Tilemap / Particle System / Animation tools.
-              Each pack is a separate UPM package — opt in to the ones you need.
-              Selected packs are written to <code>Packages/manifest.json</code>
-              alongside the bridge / verify packages when you click Install (same
-              diff preview, backup, and upgrade confirmation). The bridge window's
-              Extensions tab is the second install path.
+              Domain tools (NavMesh, Input System, ProBuilder, Particle System,
+              Animation) are <strong>bundled with the bridge</strong> — there is
+              no separate install. They activate automatically once the matching
+              Unity package is present in the project. Toggle the dependencies
+              you want the wizard to add to <code>Packages/manifest.json</code>;
+              the bridge's embedded tools compile in after Unity re-imports the
+              manifest. Built-in Unity modules (Particle System, Animation) ship
+              with the Editor and need no manifest entry — they are listed
+              below for visibility.
             </p>
 
-            {#if shippedExtensionPacks.length === 0}
-              <p class="wiz-hint">No extension packs shipped with this toolkit version.</p>
+            {#if installableDomains.length === 0}
+              <p class="wiz-hint">No installable Unity domain dependencies shipped with this toolkit version.</p>
             {:else}
               <ul class="wiz-extension-packs">
-                {#each shippedExtensionPacks as pack (pack.id)}
-                  {@const checked = selectedExtensionPacks.has(pack.id)}
+                {#each installableDomains as dep (dep.upmDependency)}
+                  {@const checked = selectedUnityDomainDeps.has(dep.upmDependency)}
                   <li class="wiz-extension-pack">
                     <label class="wiz-toggle">
                       <input
                         type="checkbox"
                         checked={checked}
                         onchange={(e) => {
-                          const next = new Set(selectedExtensionPacks);
+                          const next = new Set(selectedUnityDomainDeps);
                           if ((e.currentTarget as HTMLInputElement).checked) {
-                            next.add(pack.id);
+                            next.add(dep.upmDependency);
                           } else {
-                            next.delete(pack.id);
+                            next.delete(dep.upmDependency);
                           }
-                          selectedExtensionPacks = next;
+                          selectedUnityDomainDeps = next;
                         }}
                       />
                       <span>
-                        <strong>{pack.displayName}</strong>
-                        {#if pack.upmDependency}
-                          <small>requires <code>{pack.upmDependency}</code></small>
-                        {/if}
-                        <small>{pack.description}</small>
+                        <strong>{dep.displayName}</strong>
+                        <small>
+                          installs <code>{dep.upmDependency}@{dep.defaultVersion}</code>
+                          · {dep.toolIds.length} tool(s)
+                        </small>
+                        <small>{dep.description}</small>
                       </span>
                     </label>
                   </li>
@@ -2239,17 +2253,26 @@
               </ul>
             {/if}
 
-            {#if plannedExtensionPacks.length > 0}
+            {#if builtinDomains.length > 0}
               <p class="wiz-hint wiz-hint-info">
-                Planned (not yet shipped):
-                {plannedExtensionPacks.map((p) => p.displayName).join(", ")}.
+                Always-on (built-in Unity module, no install needed):
+                {builtinDomains.map((d) => d.displayName).join(", ")}.
               </p>
             {/if}
+
+            <p class="wiz-hint">
+              Contributor / community-pack path: the legacy
+              <code>com.alexeyperov.unity-open-mcp-ext-*</code> UPM packages
+              are no longer required for shipped domains (M18 Plan 4) — they
+              remain in <code>packages/extensions/</code> for third-party
+              packs only. See the manual setup guide for the
+              <code>file:</code> workflow.
+            </p>
           </details>
 
           <div class="wiz-field">
             <span class="wiz-label">Manifest status</span>
-            {#if !installBridge && !installVerify && selectedExtensionPacks.size === 0}
+            {#if !installBridge && !installVerify && selectedUnityDomainDeps.size === 0}
               <p class="wiz-hint wiz-hint-warn">
                 Pick at least one package to install.
               </p>
