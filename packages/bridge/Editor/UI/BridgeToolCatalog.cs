@@ -1,8 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Text;
 
 namespace UnityOpenMcpBridge
 {
@@ -120,7 +117,7 @@ namespace UnityOpenMcpBridge
                         IdempotentHint = entry.IdempotentHint,
                         DestructiveHint = entry.DestructiveHint,
                         Lifecycle = entry.Lifecycle,
-                        DeclaringTypeName = entry.DeclaringType != null ? entry.DeclaringType.FullName : null,
+                        DeclaringTypeName = entry.DeclaringType?.FullName,
                         Parameters = RegistryParameterSummary(entry)
                     });
                 }
@@ -138,21 +135,11 @@ namespace UnityOpenMcpBridge
         public static int CountEnabled(IReadOnlyList<BridgeToolCatalogItem> items)
         {
             if (items == null) return 0;
-            int n = 0;
-            for (int i = 0; i < items.Count; i++)
+            var n = 0;
+            foreach (var t in items)
             {
-                if (!BridgeToolTogglePolicy.IsDisabled(items[i].Name)) n++;
-            }
-            return n;
-        }
-
-        public static int CountDisabled(IReadOnlyList<BridgeToolCatalogItem> items)
-        {
-            if (items == null) return 0;
-            int n = 0;
-            for (int i = 0; i < items.Count; i++)
-            {
-                if (BridgeToolTogglePolicy.IsDisabled(items[i].Name)) n++;
+                if (!BridgeToolTogglePolicy.IsDisabled(t.Name)) 
+                    n++;
             }
             return n;
         }
@@ -269,7 +256,7 @@ namespace UnityOpenMcpBridge
             if (t.IsArray)
                 return FriendlyTypeName(t.GetElementType()) + "[]";
             if (t.IsEnum) return t.Name;
-            if (Nullable.GetUnderlyingType(t) is Type inner)
+            if (Nullable.GetUnderlyingType(t) is { } inner)
                 return FriendlyTypeName(inner) + "?";
             return t.Name;
         }

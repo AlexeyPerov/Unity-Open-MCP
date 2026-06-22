@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge.UI.Controls;
-using UnityOpenMcpVerify;
 
 namespace UnityOpenMcpBridge
 {
@@ -140,7 +139,6 @@ namespace UnityOpenMcpBridge
                     {
                         _currentTab = tab;
                         EditorPrefs.SetInt(SelectedTabPref, (int)_currentTab);
-                        GUIUtility.keyboardControl = 0;
                     }
                 }
                 GUI.backgroundColor = prev;
@@ -190,12 +188,6 @@ namespace UnityOpenMcpBridge
                     break;
             }
             EditorGUILayout.EndScrollView();
-        }
-
-        private static void DrawPlaceholderTab(string message)
-        {
-            EditorGUILayout.Space(20);
-            BridgeGUIUtilities.DrawLabelAtCenterHorizontally(message, new Color(0.7f, 0.7f, 0.7f));
         }
 
         private void DrawStatusTab()
@@ -431,12 +423,10 @@ namespace UnityOpenMcpBridge
             if (newSearch != _toolSearch)
             {
                 _toolSearch = newSearch ?? "";
-                GUIUtility.keyboardControl = 0;
             }
             if (GUILayout.Button("Clear", EditorStyles.miniButton, GUILayout.Width(48)))
             {
                 _toolSearch = "";
-                GUIUtility.keyboardControl = 0;
             }
 
             if (GUILayout.Button("Enable all", EditorStyles.miniButton, GUILayout.Width(78)) && disabled > 0)
@@ -472,11 +462,10 @@ namespace UnityOpenMcpBridge
             var search = (_toolSearch ?? "").Trim();
             var hasSearch = !string.IsNullOrEmpty(search);
 
-            _toolListScroll = EditorGUILayout.BeginScrollView(_toolListScroll, GUILayout.MinHeight(280));
-            int shown = 0;
-            for (int i = 0; i < items.Count; i++)
+            _toolListScroll = EditorGUILayout.BeginScrollView(_toolListScroll);
+            var shown = 0;
+            foreach (var item in items)
             {
-                var item = items[i];
                 if (item == null) continue;
                 if (!PassesFilter(item)) continue;
                 if (hasSearch && !MatchesSearch(item, search)) continue;
@@ -759,9 +748,9 @@ namespace UnityOpenMcpBridge
             {
                 EditorGUILayout.Space(2);
                 EditorGUILayout.LabelField("Next steps", EditorStyles.miniBoldLabel);
-                for (int i = 0; i < latest.AgentNextSteps.Length; i++)
+                foreach (var t in latest.AgentNextSteps)
                 {
-                    EditorGUILayout.LabelField($"  • {latest.AgentNextSteps[i]}", EditorStyles.wordWrappedMiniLabel);
+                    EditorGUILayout.LabelField($"  • {t}", EditorStyles.wordWrappedMiniLabel);
                 }
             }
 
@@ -893,7 +882,6 @@ namespace UnityOpenMcpBridge
             if (GUILayout.Button("Use selection", GUILayout.Width(110)))
             {
                 _manualValidateInput = "";
-                GUIUtility.keyboardControl = 0;
             }
             if (GUILayout.Button("Clear result", EditorStyles.miniButton, GUILayout.Width(90)))
             {
@@ -1066,11 +1054,8 @@ namespace UnityOpenMcpBridge
                 $"buffer: {BridgeActivityLog.Count} / {BridgeActivityLog.Capacity}    " +
                 $"recorded: {BridgeActivityLog.TotalRecorded}    trimmed: {BridgeActivityLog.TotalDroppedTrim}",
                 EditorStyles.miniLabel);
-
-            if (_activityVerboseFoldout != newVerbose)
-            {
-                _activityVerboseFoldout = newVerbose;
-            }
+            
+            _activityVerboseFoldout = newVerbose;
         }
 
         private void DrawActivityFilters()
@@ -1089,7 +1074,6 @@ namespace UnityOpenMcpBridge
             if (newSearch != _activitySearch)
             {
                 _activitySearch = newSearch ?? "";
-                GUIUtility.keyboardControl = 0;
             }
             EditorGUILayout.EndHorizontal();
         }
@@ -1453,14 +1437,10 @@ namespace UnityOpenMcpBridge
         {
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(tool, GUILayout.Width(120));
-            string summary;
             // null/empty both mean "built-in defaults" (JsonUtility serializes
             // null as [] on disk, so the distinction is lost across reload).
             var hasCustom = active != null && active.Length > 0;
-            if (!hasCustom)
-                summary = $"defaults ({defaults.Length} patterns)";
-            else
-                summary = $"{active.Length} custom pattern(s)";
+            var summary = !hasCustom ? $"defaults ({defaults.Length} patterns)" : $"{active.Length} custom pattern(s)";
             EditorGUILayout.LabelField(summary);
             EditorGUILayout.EndHorizontal();
         }

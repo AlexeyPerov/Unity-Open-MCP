@@ -45,8 +45,7 @@ namespace UnityOpenMcpBridge
             if (!ToolLifecycle.RequiresDirtyGuard(toolName)) return false;
             // Explicit opt-out: the agent takes responsibility for the dirty
             // state (the lightweight --force equivalent — no auto-save).
-            if (JsonBody.GetBool(body, "ignore_scene_dirty", false)) return false;
-            return true;
+            return !JsonBody.GetBool(body, "ignore_scene_dirty");
         }
 
         // Must be called on the main thread. Returns Allow when there is no
@@ -99,7 +98,7 @@ namespace UnityOpenMcpBridge
             {
                 if (entry == null) continue;
 
-                var scene = EditorSceneManager.GetSceneByPath(entry.path);
+                var scene = SceneManager.GetSceneByPath(entry.path);
                 if (!scene.IsValid()) continue;
 
                 if (scene.isDirty)
