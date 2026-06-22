@@ -54,8 +54,9 @@
   <div class="mini-panel-body">
     <p class="hint">
       Counts newline bytes in source files (extension allowlist), pruning
-      dot-directories and dependency folders. Respects the root
-      <code>.gitignore</code>. The detailed report is appended to the app logs.
+      dot-directories and dependency folders. Respects the root and
+      nested <code>.gitignore</code> files. The detailed report is appended
+      to the app logs.
     </p>
     {#if lastTotal !== null}
       <p class="stat">

@@ -3,9 +3,10 @@
 //!
 //! Counts newline bytes in files whose extension is in the code
 //! allowlist, prunes dot-dirs and the standard dependency/build output
-//! folders, and optionally respects a root `.gitignore`. The output
-//! mirrors LineWalker's four-section report so it can be appended to
-//! the app logs verbatim.
+//! folders, and optionally respects `.gitignore` files (both the root
+//! one and any nested ones found in sub-folders). The output mirrors
+//! LineWalker's four-section report so it can be appended to the app
+//! logs verbatim.
 //!
 //! Two entry points:
 //!   - [`scan`] / [`scan_with_options`] — the full result for the
@@ -115,9 +116,10 @@ fn is_dot_dir(basename: &str) -> bool {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanOptions {
-    /// When true, paths matched by the root `<root>/.gitignore` are
-    /// skipped. Only the root file is consulted (matching LineWalker);
-    /// nested `.gitignore` files are ignored. Defaults to `false`.
+    /// When true, paths matched by `<root>/.gitignore` and any nested
+    /// `.gitignore` files in sub-folders are skipped. Nested gitignores
+    /// only apply to files/dirs at or below their own directory, matching
+    /// standard git semantics. Defaults to `false`.
     #[serde(default)]
     pub use_gitignore: bool,
 }
@@ -207,21 +209,38 @@ fn extension_of(path: &Path) -> String {
 /// A minimal gitignore matcher. We do not pull in the `ignore` crate
 /// (kept the dependency footprint small); instead we implement just
 /// enough of the syntax to cover the common patterns a project root
-/// `.gitignore` uses: exact paths, `dir/` suffix, `*` globs, leading
-/// `/` anchoring, and `!` negation. Comment (`#`) and blank lines are
+/// `.gitignore` uses: exact paths, `dir/` suffix, globs (`*`, `?`),
+/// character classes (`[abc]`, `[a-z]`, `[!abc]`), leading `/`
+/// anchoring, and `!` negation. Comment (`#`) and blank lines are
 /// skipped. Patterns are matched against the relative path (forward
-/// slashes) from the root; directory patterns also match any path
-/// inside them.
+/// slashes) from the directory this matcher was loaded from; directory
+/// patterns also match any path inside them.
+///
+/// A single matcher represents one `.gitignore` file. Nested matchers
+/// are tracked as a stack during the walk so a deeper file's patterns
+/// only apply to paths at or below its directory, matching real git
+/// behaviour. Char-class support matters in practice: the standard
+/// Unity `.gitignore` uses `[Ll]ibrary`, `[Tt]emp`, `[Bb]uild`, etc.
+/// to express case-insensitive matches in a case-sensitive gitignore,
+/// so without it Unity projects scanned with the counter get wildly
+/// inflated numbers from `Library/PackageCache/**`.
 ///
 /// This deliberately mirrors the *subset* of gitignore that the Go
 /// `go-gitignore` library (LineWalker's dependency) implements for
 /// the patterns real projects actually use; full gitignore compliance
-/// (character classes, double-`**`, etc.) is out of scope for a line
+/// (double-`**` spanning slashes, etc.) is out of scope for a line
 /// counter.
+#[derive(Clone)]
 struct GitignoreMatcher {
+    /// Directory this matcher's `.gitignore` lives in, expressed as a
+    /// forward-slash relative path from the scan root (empty for the
+    /// root matcher). Patterns are evaluated against paths *under*
+    /// this directory.
+    scope: String,
     patterns: Vec<GitignorePattern>,
 }
 
+#[derive(Clone)]
 struct GitignorePattern {
     /// The pattern with any leading `!` stripped.
     body: String,
@@ -234,8 +253,11 @@ struct GitignorePattern {
 }
 
 impl GitignoreMatcher {
-    fn load(root: &Path) -> Option<Self> {
-        let gi = root.join(".gitignore");
+    /// Loads a `.gitignore` from `dir` if present. `dir` may be the
+    /// scan root or any nested directory; `scope` is captured so the
+    /// walker can decide which paths the matcher applies to.
+    fn load(dir: &Path, scope: String) -> Option<Self> {
+        let gi = dir.join(".gitignore");
         let content = fs::read_to_string(&gi).ok()?;
         let mut patterns = Vec::new();
         for raw in content.lines() {
@@ -261,18 +283,33 @@ impl GitignoreMatcher {
                 anchored,
             });
         }
-        Some(GitignoreMatcher { patterns })
+        Some(GitignoreMatcher { scope, patterns })
     }
 
-    /// Returns true when `rel_path` (forward-slash relative) should be
-    /// ignored. `is_dir` selects the directory vs file rule branch.
+    /// Returns true when `rel_path` (forward-slash relative to the scan
+    /// root) is ignored by this matcher, i.e. it lives inside `scope`
+    /// and matches one of the patterns. `is_dir` selects the directory
+    /// vs file rule branch.
     fn is_ignored(&self, rel_path: &str, is_dir: bool) -> bool {
+        // Strip the scope prefix so patterns are evaluated relative to
+        // the directory this .gitignore lives in (matching git: a
+        // nested .gitignore's patterns apply below it).
+        let scoped = if self.scope.is_empty() {
+            rel_path.to_string()
+        } else if let Some(stripped) = rel_path.strip_prefix(&self.scope) {
+            // Drop the leading slash so "foo/bar" becomes "foo/bar"
+            // inside a "subdir" scope.
+            stripped.trim_start_matches('/').to_string()
+        } else {
+            // Path is outside this matcher's scope — never ignored.
+            return false;
+        };
         let mut ignored = false;
         for p in &self.patterns {
             if p.dir_only && !is_dir {
                 continue;
             }
-            let matched = pattern_matches(&p.body, p.anchored, rel_path, is_dir);
+            let matched = pattern_matches(&p.body, p.anchored, &scoped, is_dir);
             if matched {
                 ignored = !p.negate;
             }
@@ -320,30 +357,138 @@ fn pattern_matches(body: &str, anchored: bool, rel_path: &str, is_dir: bool) -> 
 /// the same simplification LineWalker's dependency makes for the
 /// common case). Case-sensitive, matching gitignore on case-sensitive
 /// filesystems.
+///
+/// Supports gitignore's full glob syntax subset used by real projects:
+/// `*` (any run of chars), `?` (any single char), and `[...]`
+/// character classes with optional ranges (`a-z`) and negation via
+/// leading `!` or `^`. The standard Unity `.gitignore` shipped with
+/// this repo uses `[Ll]ibrary`, `[Tt]emp`, `[Bb]uild`, etc. — the
+/// bracket form is the canonical way to express case-insensitive
+/// matches in a case-sensitive gitignore.
 fn glob_match(pattern: &str, text: &str) -> bool {
-    // Recursive `*` matcher.
     let p: Vec<char> = pattern.chars().collect();
     let t: Vec<char> = text.chars().collect();
     glob_rec(&p, 0, &t, 0)
+}
+
+/// Returns the length (in chars) of a character class starting at
+/// `pi` (which must point at `[`), or `None` if the brackets don't form
+/// a valid class. The returned length includes both brackets, so the
+/// caller advances `pi` past it.
+fn char_class_len(p: &[char], pi: usize) -> Option<usize> {
+    if pi >= p.len() || p[pi] != '[' {
+        return None;
+    }
+    let mut i = pi + 1;
+    // Optional leading `!` or `^` for negation.
+    if i < p.len() && (p[i] == '!' || p[i] == '^') {
+        i += 1;
+    }
+    let mut seen_closing = false;
+    while i < p.len() {
+        // A `]` as the first class char is a literal `]`.
+        if p[i] == ']' && i > pi + 1 {
+            return Some(i - pi + 1);
+        }
+        // Range like `a-z` — skip the dash, but ignore malformed
+        // ranges (no second char / reversed).
+        if i + 2 < p.len() && p[i + 1] == '-' && p[i + 2] != ']' {
+            i += 3;
+        } else {
+            i += 1;
+        }
+        seen_closing = true;
+    }
+    if seen_closing {
+        // Unterminated class — treat the bracket as literal so we never
+        // silently match anything.
+        Some(2)
+    } else {
+        None
+    }
+}
+
+/// Returns true when `c` is a member of the character class defined by
+/// `cls` (the slice between the outer brackets, exclusive). Handles
+/// ranges and leading `!` / `^` negation.
+fn char_class_matches(cls: &[char], c: char) -> bool {
+    let (negate, chars) = if cls.first().map(|&x| x == '!' || x == '^').unwrap_or(false) {
+        (true, &cls[1..])
+    } else {
+        (false, cls)
+    };
+    let mut matched = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let lo = chars[i];
+        if i + 2 < chars.len() && chars[i + 1] == '-' && chars[i + 2] != ']' {
+            let hi = chars[i + 2];
+            if lo <= hi {
+                if c >= lo && c <= hi {
+                    matched = true;
+                }
+            } else if c >= hi && c <= lo {
+                matched = true;
+            }
+            i += 3;
+        } else {
+            if c == lo {
+                matched = true;
+            }
+            i += 1;
+        }
+    }
+    matched != negate
 }
 
 fn glob_rec(p: &[char], pi: usize, t: &[char], ti: usize) -> bool {
     if pi == p.len() {
         return ti == t.len();
     }
-    if p[pi] == '*' {
-        // Try matching zero or more characters.
-        for skip in ti..=t.len() {
-            if glob_rec(p, pi + 1, t, skip) {
+    match p[pi] {
+        '*' => {
+            // Try matching zero or more characters.
+            for skip in ti..=t.len() {
+                if glob_rec(p, pi + 1, t, skip) {
+                    return true;
+                }
+            }
+            false
+        }
+        '?' => {
+            // Any single char (including `/`, matching gitignore).
+            if ti < t.len() && glob_rec(p, pi + 1, t, ti + 1) {
                 return true;
             }
+            false
         }
-        return false;
+        '[' => {
+            // Character class.
+            let len = match char_class_len(p, pi) {
+                Some(l) => l,
+                None => return false,
+            };
+            // If this isn't a valid class we already returned; len >= 2.
+            if ti >= t.len() {
+                return false;
+            }
+            // Extract the class body (between the brackets).
+            let cls_start = pi + 1;
+            let cls_end = pi + len - 1;
+            let cls = &p[cls_start..cls_end];
+            if char_class_matches(cls, t[ti]) {
+                return glob_rec(p, pi + len, t, ti + 1);
+            }
+            false
+        }
+        _ => {
+            if ti < t.len() && p[pi] == t[ti] {
+                glob_rec(p, pi + 1, t, ti + 1)
+            } else {
+                false
+            }
+        }
     }
-    if ti < t.len() && p[pi] == t[ti] {
-        return glob_rec(p, pi + 1, t, ti + 1);
-    }
-    false
 }
 
 /// Sums the byte size of every regular file under `root`, respecting
@@ -391,24 +536,19 @@ pub fn scan(root: &Path) -> ScanResult {
 }
 
 /// Full scan with the given options. Walks `root`, pruning dot-dirs
-/// and dependency folders, optionally consulting a root `.gitignore`,
-/// and counts newline bytes in every file whose extension is in the
-/// allowlist.
+/// and dependency folders, optionally consulting `.gitignore` files
+/// (root plus any nested ones in sub-folders), and counts newline
+/// bytes in every file whose extension is in the allowlist.
 pub fn scan_with_options(root: &Path, opts: ScanOptions) -> ScanResult {
     let mut result = ScanResult::default();
-    let gi = if opts.use_gitignore {
-        GitignoreMatcher::load(root)
-    } else {
-        None
-    };
+    let mut stack: Vec<GitignoreMatcher> = Vec::new();
+    if opts.use_gitignore {
+        if let Some(m) = GitignoreMatcher::load(root, String::new()) {
+            stack.push(m);
+        }
+    }
     let mut seen_skipped = std::collections::BTreeSet::new();
-    walk_dir(
-        root,
-        root,
-        gi.as_ref(),
-        &mut result,
-        &mut seen_skipped,
-    );
+    walk_dir(root, root, &stack, &mut result, &mut seen_skipped);
     // Stable ordering matching LineWalker: alphabetical by rel_path.
     result.code_files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     result.ignored_files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
@@ -419,7 +559,7 @@ pub fn scan_with_options(root: &Path, opts: ScanOptions) -> ScanResult {
 fn walk_dir(
     root: &Path,
     dir: &Path,
-    gi: Option<&GitignoreMatcher>,
+    gi_stack: &[GitignoreMatcher],
     result: &mut ScanResult,
     seen_skipped: &mut std::collections::BTreeSet<String>,
 ) {
@@ -467,25 +607,29 @@ fn walk_dir(
             .map(|p| p.to_string_lossy().replace('\\', "/").to_string())
             .unwrap_or_else(|_| name.clone());
 
-        // gitignore check (root patterns only).
-        if let Some(gi) = gi {
-            if gi.is_ignored(&rel, is_dir) {
-                if is_dir {
-                    if seen_skipped.insert(rel.clone()) {
-                        result.skipped_dirs.push(rel);
-                    }
-                    continue;
+        // gitignore check (root + every nested .gitignore on the stack).
+        if !gi_stack.is_empty() && is_gitignored(gi_stack, &rel, is_dir) {
+            if is_dir {
+                if seen_skipped.insert(rel.clone()) {
+                    result.skipped_dirs.push(rel);
                 }
-                result.ignored_files.push(IgnoredFile {
-                    rel_path: rel,
-                    reason: "gitignored".to_string(),
-                });
                 continue;
             }
+            result.ignored_files.push(IgnoredFile {
+                rel_path: rel,
+                reason: "gitignored".to_string(),
+            });
+            continue;
         }
 
         if is_dir {
-            walk_dir(root, &path, gi, result, seen_skipped);
+            // Push any nested .gitignore found in this directory onto
+            // the stack so its patterns apply to this dir's descendants.
+            let mut child_stack: Vec<GitignoreMatcher> = gi_stack.to_vec();
+            if let Some(m) = GitignoreMatcher::load(&path, rel.clone()) {
+                child_stack.push(m);
+            }
+            walk_dir(root, &path, &child_stack, result, seen_skipped);
             continue;
         }
 
@@ -528,6 +672,15 @@ fn walk_dir(
     }
 }
 
+/// Returns true when any matcher on the stack (root first, deeper
+/// last) ignores the path. Matchers further up the stack are scoped to
+/// their own directory, so a path outside their scope never matches.
+fn is_gitignored(stack: &[GitignoreMatcher], rel_path: &str, is_dir: bool) -> bool {
+    stack
+        .iter()
+        .any(|m| m.is_ignored(rel_path, is_dir))
+}
+
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
@@ -550,10 +703,11 @@ pub struct CountLinesResult {
 }
 
 /// Manual line-count command invoked from any project type's settings
-/// popup footer. Runs a full scan (`.gitignore` respected), caches the
-/// summary on the project entry so the UI can show a stale "scanned
-/// at" timestamp, and returns the detailed breakdown + report so the
-/// frontend can append the report to the app logs.
+/// popup footer. Runs a full scan (root + nested `.gitignore` files
+/// respected), caches the summary on the project entry so the UI can
+/// show a stale "scanned at" timestamp, and returns the detailed
+/// breakdown + report so the frontend can append the report to the
+/// app logs.
 #[tauri::command]
 pub fn count_lines(
     state: State<AppState>,
@@ -776,6 +930,72 @@ mod tests {
     }
 
     #[test]
+    fn nested_gitignore_ignores_files_in_subdir() {
+        // The root .gitignore is empty; only `pkg/.gitignore` matches
+        // anything, proving the walker picks up nested gitignores.
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("pkg/.gitignore"), "ignored.js\n");
+        write(&dir.path().join("pkg/ignored.js"), "x\n");
+        write(&dir.path().join("pkg/kept.js"), "y\n");
+        write(&dir.path().join("top.js"), "z\n");
+        let r = scan_with_options(dir.path(), ScanOptions { use_gitignore: true });
+        // Only pkg/ignored.js matches the nested gitignore; pkg/kept.js
+        // (different name) and the top-level top.js are both counted.
+        assert_eq!(r.total_lines, 2);
+        assert!(r.ignored_files.iter().any(|f| f.rel_path == "pkg/ignored.js"));
+        assert!(!r.ignored_files.iter().any(|f| f.rel_path == "pkg/kept.js"));
+        assert!(!r.ignored_files.iter().any(|f| f.rel_path == "top.js"));
+    }
+
+    #[test]
+    fn nested_gitignore_only_applies_within_its_directory() {
+        // A nested pattern must not leak to siblings of the dir it lives
+        // in, matching git semantics.
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("pkg/.gitignore"), "*.js\n");
+        write(&dir.path().join("sibling/other.js"), "x\n");
+        write(&dir.path().join("pkg/a.js"), "y\n");
+        let r = scan_with_options(dir.path(), ScanOptions { use_gitignore: true });
+        // pkg/a.js is ignored (under pkg/.gitignore). sibling/other.js
+        // is NOT — the pattern does not scope outside pkg.
+        assert!(r.ignored_files.iter().any(|f| f.rel_path == "pkg/a.js"));
+        assert!(!r.ignored_files.iter().any(|f| f.rel_path == "sibling/other.js"));
+    }
+
+    #[test]
+    fn nested_gitignore_prunes_directory_subtree() {
+        // A directory-only pattern in a nested gitignore must skip the
+        // whole subtree, not just the matching files.
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join("pkg/.gitignore"), "out/\n");
+        write(&dir.path().join("pkg/out/a.js"), "x\n");
+        write(&dir.path().join("pkg/out/deep/b.js"), "y\n");
+        write(&dir.path().join("pkg/kept.js"), "z\n");
+        let r = scan_with_options(dir.path(), ScanOptions { use_gitignore: true });
+        // Only pkg/kept.js is counted; the whole pkg/out subtree is pruned.
+        assert_eq!(r.total_lines, 1);
+        assert!(r.skipped_dirs.iter().any(|d| d == "pkg/out"));
+    }
+
+    #[test]
+    fn root_and_nested_gitignore_compose() {
+        // Root ignores "*.tmp"; pkg/.gitignore ignores "*.js". The
+        // walker must honour both.
+        let dir = tempfile::tempdir().unwrap();
+        write(&dir.path().join(".gitignore"), "*.tmp\n");
+        write(&dir.path().join("pkg/.gitignore"), "*.js\n");
+        write(&dir.path().join("pkg/a.js"), "x\n");
+        write(&dir.path().join("pkg/b.tmp"), "y\n");
+        write(&dir.path().join("pkg/c.rs"), "z\n");
+        write(&dir.path().join("top.rs"), "w\n");
+        let r = scan_with_options(dir.path(), ScanOptions { use_gitignore: true });
+        // Only pkg/c.rs and top.rs are counted (each is one line).
+        assert_eq!(r.total_lines, 2);
+        assert!(r.ignored_files.iter().any(|f| f.rel_path == "pkg/a.js"));
+        assert!(r.ignored_files.iter().any(|f| f.rel_path == "pkg/b.tmp"));
+    }
+
+    #[test]
     fn render_report_has_all_four_sections() {
         let dir = tempfile::tempdir().unwrap();
         write(&dir.path().join("a.rs"), "x\n");
@@ -812,5 +1032,52 @@ mod tests {
         assert!(glob_match("*.rs", "main.rs"));
         assert!(!glob_match("*.rs", "main.go"));
         assert!(glob_match("build", "build"));
+    }
+
+    #[test]
+    fn glob_match_handles_char_classes() {
+        // The Unity .gitignore shipped with this repo uses [Ll]ibrary,
+        // [Tt]emp, etc. to match both cases.
+        assert!(glob_match("[Ll]ibrary", "Library"));
+        assert!(glob_match("[Ll]ibrary", "library"));
+        assert!(!glob_match("[Ll]ibrary", "librarian"));
+        // Wildcards inside a class work too.
+        assert!(glob_match("[a-z]*.cs", "zAnything.cs"));
+        assert!(!glob_match("[a-z]*.cs", "1Bad.cs"));
+        // Negation via `!` or `^`.
+        assert!(glob_match("[!a]*.cs", "b.cs"));
+        assert!(!glob_match("[!a]*.cs", "a.cs"));
+        assert!(glob_match("[^a]*.cs", "b.cs"));
+        // `?` matches any single char.
+        assert!(glob_match("a?.rs", "ab.rs"));
+        assert!(glob_match("a?.rs", "a_.rs"));
+        assert!(!glob_match("a?.rs", "abc.rs"));
+    }
+
+    #[test]
+    fn nested_gitignore_honours_unity_style_char_classes() {
+        // Mirrors the structure of `demo/.gitignore`: anchored,
+        // case-insensitive char-class patterns ignoring Unity's
+        // generated directories. The case-insensitive matching is
+        // verified directly by `glob_match_handles_char_classes` —
+        // here we only verify the integration: that the walker picks
+        // up the patterns and prunes the matched subtrees. Using
+        // distinct directory names (Library/Temp) avoids case-
+        // sensitivity quirks on macOS temp dirs, where Library and
+        // library would alias to a single directory.
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            &dir.path().join("demo/.gitignore"),
+            "/[Ll]ibrary/\n/[Tt]emp/\n/[Bb]uild/\n",
+        );
+        write(&dir.path().join("demo/Library/PackageCache/x.cs"), "a\n");
+        write(&dir.path().join("demo/Temp/z.cs"), "c\n");
+        write(&dir.path().join("demo/Assets/Real.cs"), "d\n");
+        let r = scan_with_options(dir.path(), ScanOptions { use_gitignore: true });
+        // Only the real source under Assets is counted; the whole
+        // Library/ and Temp/ subtrees are pruned.
+        assert_eq!(r.total_lines, 1);
+        assert!(r.skipped_dirs.iter().any(|d| d == "demo/Library"));
+        assert!(r.skipped_dirs.iter().any(|d| d == "demo/Temp"));
     }
 }

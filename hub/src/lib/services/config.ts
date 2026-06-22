@@ -158,7 +158,8 @@ export interface LineCountStats {
    *  knows how stale the cached number is. */
   scannedAt: string;
   /** Human-readable report (extensions counted/ignored, skipped dirs,
-   *  `.gitignore` respected). Surfaced to app logs by "Run line count". */
+   *  root + nested `.gitignore` respected). Surfaced to app logs by
+   *  "Run line count". */
   details: string;
 }
 

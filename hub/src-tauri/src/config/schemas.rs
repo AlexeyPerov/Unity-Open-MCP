@@ -412,8 +412,8 @@ fn default_project_kind() -> ProjectKind {
 
 /// Cached line-counter result. The `details` string is the same
 /// 4-section report the CLI emits (extensions counted/ignored, skipped
-/// dirs, `.gitignore` respected), suitable for appending to the app
-/// logs without re-formatting.
+/// dirs, root + nested `.gitignore` respected), suitable for appending
+/// to the app logs without re-formatting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LineCountStats {
