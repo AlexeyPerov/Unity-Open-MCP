@@ -75,6 +75,7 @@
   import PackageProjectSettings from "$lib/components/project-settings/PackageProjectSettings.svelte";
   import OpenMcpProjectSettings from "$lib/components/project-settings/OpenMcpProjectSettings.svelte";
   import CustomProjectSettings from "$lib/components/project-settings/CustomProjectSettings.svelte";
+  import LineCounterPanel from "$lib/components/project-settings/LineCounterPanel.svelte";
   import { AI_SETUP_ENABLED, MULTI_PROJECT_TYPES_ENABLED } from "$lib/features";
 
   /**
@@ -4594,6 +4595,8 @@
               </Button>
             </div>
           </section>
+
+          <LineCounterPanel project={popupProject} />
         </div>
         {:else if popupKind === "package"}
           <PackageProjectSettings project={popupProject} onMutated={handlePopupProjectMutated} />

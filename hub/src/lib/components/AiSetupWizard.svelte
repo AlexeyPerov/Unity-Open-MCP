@@ -101,8 +101,8 @@
 
   const STEP_TITLES: Record<StepId, string> = {
     step1: "Project detection",
-    step2: "MCP server source",
-    step3: "Install Unity packages",
+    step2: "Install Unity packages",
+    step3: "MCP server source",
     step4: "Configure AI client",
     step4b: "Agent skill (optional)",
     step5: "Launch Unity and verify bridge",
@@ -273,7 +273,7 @@
   // `resolveBridgePort` and surfaced in `resolvedBridgePort` so the UI and
   // Step 5 always work with the real number.
   let mcpClient = $state<McpClientId>("cursor");
-  let cursorProjectScope = $state(false);
+  let cursorProjectScope = $state(true);
   let bridgePort = $state("");
   let resolvedBridgePort = $state<number | null>(null);
   let copyToast = $state<string | null>(null);
@@ -2006,7 +2006,7 @@
                 <small>
                   Point at a cloned <code>unity-open-mcp</code> monorepo instead of the
                   published npm package. Step 4 then launches
-                  <code>node &lt;root&gt;/mcp-server/dist/index.js</code>, and Step 3
+                  <code>node &lt;root&gt;/mcp-server/dist/index.js</code>, and Step 2
                   package installs + skill copy use the toolkit root.
                 </small>
               </span>
@@ -2105,7 +2105,7 @@
               />
               <p class="wiz-hint">
                 Leave empty to use <code>{toolkitRoot || "<toolkit>"}/mcp-server/dist/index.js</code>.
-                Step 3 package URLs and skill copy always use the
+                Step 2 package URLs and skill copy always use the
                 toolkit root regardless of this override.
               </p>
             </div>
@@ -2278,7 +2278,7 @@
               </p>
             {:else if !toolkitRoot.trim() || !toolkitValidation?.ok}
               <p class="wiz-hint wiz-hint-warn">
-                Validate the toolkit root in Step 2 first.
+                Validate the toolkit root in Step 3 first.
               </p>
             {:else if mergePlanning && !mergePlan}
               <p class="wiz-hint">Planning merge…</p>
@@ -2389,7 +2389,7 @@
           <p class="wiz-desc">
             Step 4 writes a <code>unity-open-mcp</code> MCP server
             entry to your client config. The launch command comes from your
-            Step 2 choice — <code>npx -y unity-open-mcp@latest</code> by
+            Step 3 choice — <code>npx -y unity-open-mcp@latest</code> by
             default, or <code>node &lt;root&gt;/mcp-server/dist/index.js</code>
             when <strong>Use local checkout</strong> is on. The wizard calls
             the Rust planner on every form-state change so the live preview
@@ -2464,7 +2464,7 @@
             {:else if !mcpPlan}
               <p class="wiz-hint wiz-hint-warn">
                 {#if useLocalCheckout}
-                  Set and validate the toolkit root in Step 2 to generate a config.
+                  Set and validate the toolkit root in Step 3 to generate a config.
                 {:else}
                   Waiting for the planner — the default <code>npx</code> launch
                   command needs no toolkit root.
@@ -3019,8 +3019,21 @@
     </div>
 
     <footer class="wiz-footer">
-      <div class="wiz-footer-progress">
-        Step {currentStepIndex() + 1} of {STEP_ORDER.length} · {stepLabel(currentStep)}
+      <div class="wiz-footer-left">
+        <span class="wiz-footer-progress">
+          Step {currentStepIndex() + 1} of {STEP_ORDER.length} · {stepLabel(currentStep)}
+        </span>
+        <span class="wiz-footer-clear">
+          <Button
+            class="wiz-clear-btn"
+            variant="secondary"
+            onclick={onClearAiSetup}
+            disabled={clearInProgress}
+            title="Remove every AI-agent artifact the wizard wrote for this project (manifest entries, MCP client configs, skill files). Backups are created first."
+          >
+            {clearInProgress ? "Clearing…" : "Clear AI Setup"}
+          </Button>
+        </span>
       </div>
       <div class="wiz-footer-actions">
         <Button variant="secondary" onclick={cancelWizard}>Cancel</Button>
@@ -3033,17 +3046,6 @@
           disabled={currentStep === "done" ? false : !canGoNext()}
         >
           {nextLabel()}
-        </Button>
-      </div>
-      <div class="wiz-footer-clear">
-        <Button
-          class="wiz-clear-btn"
-          variant="secondary"
-          onclick={onClearAiSetup}
-          disabled={clearInProgress}
-          title="Remove every AI-agent artifact the wizard wrote for this project (manifest entries, MCP client configs, skill files). Backups are created first."
-        >
-          {clearInProgress ? "Clearing…" : "Clear AI Setup"}
         </Button>
       </div>
     </footer>
@@ -3690,6 +3692,14 @@
     background: var(--hub-bg);
   }
 
+  .wiz-footer-left {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
   .wiz-footer-progress {
     font-size: 0.74rem;
     color: var(--hub-text-muted);
@@ -3701,28 +3711,30 @@
     align-items: center;
   }
 
-  /* Destructive "Clear AI Setup" lives at the far right of the footer.
-     Yellow (--hub-warning) so it reads as a cautionary action distinct
-     from the nav Back/Next group. */
+  /* Destructive "Clear AI Setup" — muted gray so it does not attract
+     attention. The footer Back/Next/Finish group stays in the accent
+     family; this button is for users who know they want it. */
   .wiz-footer-clear {
     display: flex;
     align-items: center;
   }
 
   :global(.btn.wiz-clear-btn) {
-    border-color: var(--hub-warning) !important;
-    color: var(--hub-warning) !important;
-    background: rgba(201, 162, 39, 0.10) !important;
+    border-color: var(--hub-border-light) !important;
+    color: var(--hub-text-dim) !important;
+    background: var(--hub-card) !important;
   }
 
   :global(.btn.wiz-clear-btn:hover:not(:disabled)) {
-    background: rgba(201, 162, 39, 0.22) !important;
+    border-color: var(--hub-border-hover) !important;
+    color: var(--hub-text) !important;
+    background: var(--hub-selected) !important;
   }
 
   @media (max-width: 720px) {
     .wiz-progress { grid-template-columns: repeat(3, 1fr); }
     .wiz-radio-grid { grid-template-columns: 1fr; }
     .wiz-footer { flex-wrap: wrap; }
-    .wiz-footer-clear { order: 3; width: 100%; justify-content: flex-end; }
+    .wiz-footer-clear { width: 100%; justify-content: flex-start; }
   }
 </style>

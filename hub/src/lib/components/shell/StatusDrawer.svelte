@@ -51,7 +51,7 @@
   <div class="drawer-bar" onclick={toggle} role="button" tabindex="0" onkeydown={(e) => e.key === "Enter" && toggle()}>
     <div class="drawer-bar-left">
       {#if S.drawerLogs.length > 0}
-        <span class="chip chip-info">{S.drawerLogs.length}</span>
+        <span class="chip chip-muted" title="Log line count (dev only)">{S.drawerLogs.length}</span>
       {/if}
       <span class="drawer-label">Status / Log</span>
       {#if S.drawerLogs.length > 0}
@@ -251,6 +251,12 @@
     background: var(--hub-info-bg);
     color: var(--hub-info-fg);
     border: 1px solid var(--hub-info-fg);
+  }
+
+  .chip-muted {
+    background: var(--hub-selected);
+    color: var(--hub-text-muted);
+    border: 1px solid var(--hub-border-light);
   }
 
   .chip-warn {
