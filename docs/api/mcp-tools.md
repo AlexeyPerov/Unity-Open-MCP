@@ -16,25 +16,27 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 
 ## Tool groups and session visibility
 
-Sessions start with only the **`core`** group enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is ~160 tools) and mirrors Coplay's session-visibility model.
+Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is ~160 tools) and mirrors Coplay's session-visibility model.
 
 ### Groups
 
-| Group | Default | Description |
-|---|---|---|
-| `core` | on | ping, execute_csharp, invoke_method, find_members, execute_menu, editor_status |
-| `gate-and-verify` | off | validate_edit, checkpoint_create, delta, find_references, scan_paths, apply_fix, scan_all, baseline_create, regression_check |
-| `asset-intelligence` | off | reserialize, read_asset, search_assets, list_assets |
-| `typed-editor` | off | M16 Plans 1–6, 9 typed editor surface (assets, materials, shaders, prefabs, GameObjects, components, scenes, packages, console, selection, undo, tags, layers, reflection, scripts, object data) |
-| `diagnostics` | off | Profiler session controls + per-frame capture/memory/rendering reads |
-| `gate-intelligence` | off | impact_preview, gate_budget_estimate, mutation_explain |
-| `build-settings` | off | Build pipeline + ProjectSettings reads and mutators |
-| `navigation` | off | NavMesh tools — compile-gated on `com.unity.ai.navigation` |
-| `input-system` | off | Input System tools — compile-gated on `com.unity.inputsystem` |
-| `probuilder` | off | ProBuilder modeling tools — compile-gated on `com.unity.probuilder` |
-| `particle-system` | off | Particle System tools — compile-gated on `UnityEngine.ParticleSystemModule` |
-| `animation` | off | AnimationClip + AnimatorController tools — compile-gated on `com.unity.modules.animation` |
-| `agent-senses` | off | run_tests, screenshot, read_console, profiler capture/memory/rendering, spatial_query (live-only) |
+
+| Group                | Default | Description                                                                                                                                                                     |
+| -------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core`               | on      | ping, execute_csharp, invoke_method, find_members, execute_menu, editor_status                                                                                                  |
+| `gate-and-verify`    | on      | validate_edit, checkpoint_create, delta, find_references, scan_paths, apply_fix, scan_all, baseline_create, regression_check                                                    |
+| `asset-intelligence` | on      | reserialize, read_asset, search_assets, list_assets                                                                                                                             |
+| `typed-editor`       | on      | typed editor surface (assets, materials, shaders, prefabs, GameObjects, components, scenes, packages, console, selection, undo, tags, layers, reflection, scripts, object data) |
+| `diagnostics`        | off     | Profiler session controls + per-frame capture/memory/rendering reads                                                                                                            |
+| `gate-intelligence`  | off     | impact_preview, gate_budget_estimate, mutation_explain                                                                                                                          |
+| `build-settings`     | off     | Build pipeline + ProjectSettings reads and mutators                                                                                                                             |
+| `navigation`         | off     | NavMesh tools — compile-gated on `com.unity.ai.navigation`                                                                                                                      |
+| `input-system`       | off     | Input System tools — compile-gated on `com.unity.inputsystem`                                                                                                                   |
+| `probuilder`         | off     | ProBuilder modeling tools — compile-gated on `com.unity.probuilder`                                                                                                             |
+| `particle-system`    | off     | Particle System tools — compile-gated on `UnityEngine.ParticleSystemModule`                                                                                                     |
+| `animation`          | off     | AnimationClip + AnimatorController tools — compile-gated on `com.unity.modules.animation`                                                                                       |
+| `agent-senses`       | off     | run_tests, screenshot, read_console, profiler capture/memory/rendering, spatial_query (live-only)                                                                               |
+
 
 Always-visible meta-tools (no group assignment): `unity_open_mcp_capabilities`, `unity_open_mcp_list_rules`, `unity_open_mcp_generate_skill`, `unity_open_mcp_manage_tools`, `unity_open_mcp_pull_events` / `unity_senses_pull_events`, `unity_open_mcp_read_compile_errors`.
 
@@ -149,3 +151,4 @@ Examples: `bridge_unavailable`, `batch_not_supported`, `validation_failed`, `sce
 - `mcp-server/src/capabilities/build-capabilities.ts`
 - `mcp-server/src/capabilities/tool-groups.ts` — canonical tool-group catalog (single source of truth).
 - `mcp-server/src/tool-session-state.ts` — per-session visibility store + ListTools filter.
+

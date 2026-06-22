@@ -31,13 +31,13 @@ Practical skill for AI agents driving a Unity project through the `unity-open-mc
 
 ## Tool groups and session visibility
 
-Sessions start with only the **`core`** group visible in `ListTools`. Every other group is hidden until you activate it — this keeps the prompt small (~160 tools total). Call `unity_open_mcp_manage_tools` to toggle:
+Sessions start with several main groups visible in `ListTools`. Every other group is hidden until you activate it — this keeps the prompt small (~160 tools total). Call `unity_open_mcp_manage_tools` to toggle:
 
 - `list_groups` — every group with active flag, compiled-state availability, and tool roster.
 - `activate` / `deactivate` — toggle one group for this session. When visibility actually changes, the MCP server emits `notifications/tools/list_changed`; clients that support `listChanged` refresh `ListTools` automatically (no reconnect required).
 - `reset` — restore `core`-only.
 
-Common groups: `gate-and-verify`, `asset-intelligence`, `typed-editor` (M16 Plans 1–6, 9), `diagnostics`, `gate-intelligence`, `build-settings`, `navigation`, `input-system`, `probuilder`, `particle-system`, `animation`, `agent-senses`. Compiled-state availability (`available: true/false/null`) reflects whether the Unity domain package compiled in; the authoritative source is `unity_open_mcp_capabilities` → `toolGroups[].available`. State resets to `core`-only on MCP-server restart.
+Common groups: `gate-and-verify`, `asset-intelligence`, `typed-editor`, `diagnostics`, `gate-intelligence`, `build-settings`, `navigation`, `input-system`, `probuilder`, `particle-system`, `animation`, `agent-senses`. Compiled-state availability (`available: true/false/null`) reflects whether the Unity domain package compiled in; the authoritative source is `unity_open_mcp_capabilities` → `toolGroups[].available`. State resets to `core`-only on MCP-server restart.
 
 ## Unity state triage (before edits/tests, and on `bridge_offline`)
 
@@ -61,13 +61,15 @@ ps aux | grep -i "Unity.app/Contents/MacOS/Unity" | grep -v grep     # macOS
 
 The lock at `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` (lowercase hex sha256, forward slashes, no trailing slash) carries `pid`, `port`, `state`, `heartbeatAt` (refreshed every 0.5s), `isCompiling`, `unityVersion`. Check `pid` liveness with `kill -0 <pid>` (exit 0 = alive) and heartbeat freshness (<10s = fresh):
 
-| State | Meaning | Action |
-|---|---|---|
-| Lock missing / `pid` dead | Unity not running | Open Unity or use batch fallback |
-| `pid` alive, heartbeat fresh, `state: idle` | Healthy | **Proceed** |
-| `pid` alive, `state: compiling` / `isCompiling: true` | Unity compiling | **Wait** — poll `curl http://127.0.0.1:<port>/ping`, re-read `isCompiling`. Don't edit/test |
-| `pid` alive, `state: reloading`, heartbeat **stale** (>10s) | **Safe Mode** — bridge assembly failed to recompile | Go to Step 4 |
-| `pid` alive, heartbeat fresh, but every tool returns `bridge_offline` | **Port mismatch** | Go to Step 3 |
+
+| State                                                                 | Meaning                                             | Action                                                                                      |
+| --------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Lock missing / `pid` dead                                             | Unity not running                                   | Open Unity or use batch fallback                                                            |
+| `pid` alive, heartbeat fresh, `state: idle`                           | Healthy                                             | **Proceed**                                                                                 |
+| `pid` alive, `state: compiling` / `isCompiling: true`                 | Unity compiling                                     | **Wait** — poll `curl http://127.0.0.1:<port>/ping`, re-read `isCompiling`. Don't edit/test |
+| `pid` alive, `state: reloading`, heartbeat **stale** (>10s)           | **Safe Mode** — bridge assembly failed to recompile | Go to Step 4                                                                                |
+| `pid` alive, heartbeat fresh, but every tool returns `bridge_offline` | **Port mismatch**                                   | Go to Step 3                                                                                |
+
 
 ### Step 3 — Port mismatch (`UNITY_OPEN_MCP_BRIDGE_PORT` trap)
 
@@ -77,7 +79,7 @@ The lock's `port` is authoritative. An MCP-client config pinned `UNITY_OPEN_MCP_
 
 A C# edit broke the bridge assembly (or a dependency); Unity is stuck mid-reload showing the "Enter Safe Mode?" dialog.
 
-1. Call **`unity_open_mcp_read_compile_errors`** — reads `Editor.log` tail offline, returns structured CSxxxx errors (`file`/`line`/`code`). The **only** diagnostic that survives a dead bridge. (`compile_check` does **not** work here — its batch entry point lives in the same broken assembly, and the per-project lock blocks a second instance.)
+1. Call `**unity_open_mcp_read_compile_errors`** — reads `Editor.log` tail offline, returns structured CSxxxx errors (`file`/`line`/`code`). The **only** diagnostic that survives a dead bridge. (`compile_check` does **not** work here — its batch entry point lives in the same broken assembly, and the per-project lock blocks a second instance.)
 2. Read `errors[].file` / `line` / `code` and **fix the CS error in source first.** Do not retry tests, relaunch Unity, or call `compile_check`.
 3. Trigger a recompile (see [Local package source](#local-package-source-packages-recompile-caveat)); the bridge reloads itself once the assembly compiles. The MCP server auto-dismisses the Safe Mode dialog unless `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` is set.
 4. Only when `read_compile_errors` reports no errors AND the lock shows fresh heartbeat + `state: idle` is the bridge back.
@@ -90,12 +92,12 @@ Safe Mode still owns the per-project lock and may show a window, but the bridge 
 
 Two distinct failure shapes:
 
-- **`bridge_compile_failed`** — bridge assembly itself failed; live Editor stuck, every live tool refuses (including `read_console`). Use `read_compile_errors` (reads `Editor.log` offline; survives the broken bridge).
+- `**bridge_compile_failed`** — bridge assembly itself failed; live Editor stuck, every live tool refuses (including `read_console`). Use `read_compile_errors` (reads `Editor.log` offline; survives the broken bridge).
 - **Plain `bridge_offline`** — Unity may not be running, or not yet recompiled. If Unity **is** open it has already written the latest CSxxxx diagnostics to `Editor.log`; `read_compile_errors` retrieves them.
 
-Either way: call **`unity_open_mcp_read_compile_errors`** → fix `errors[].file`/`line`/`code` → trigger recompile. (If no Editor is open, `Editor.log` is stale from the previous session and won't reflect your latest edits — recompile verification needs Unity running.)
+Either way: call `**unity_open_mcp_read_compile_errors`** → fix `errors[].file`/`line`/`code` → trigger recompile. (If no Editor is open, `Editor.log` is stale from the previous session and won't reflect your latest edits — recompile verification needs Unity running.)
 
-Use **`unity_open_mcp_compile_check`** only for a deliberate "does this build clean from scratch?" check — it spawns a fresh headless Unity and **always** routes to batch. It is not first-line recovery for a broken bridge assembly.
+Use `**unity_open_mcp_compile_check**` only for a deliberate "does this build clean from scratch?" check — it spawns a fresh headless Unity and **always** routes to batch. It is not first-line recovery for a broken bridge assembly.
 
 ## Local package source (`packages/`) recompile caveat
 
@@ -105,13 +107,13 @@ After editing `packages/` source, before tests:
 
 1. Confirm the new source has no CS errors (only meaningful once Unity has seen it once — see Safe Mode recovery if the bridge is already dead).
 2. Trigger the recompile via one of:
-   - **(a, most reliable)** `package_add` / `package_remove` a no-op entry to force UPM resolution + domain reload, then revert it.
-   - **(b)** Ask the user to focus the Unity window after you touch a tracked `Assets/` file.
-   - **(c, if bridge up)** `execute_csharp` calling `AssetDatabase.ImportAsset("Packages/<pkg>/...", ImportAssetOptions.ForceUpdate)` then `CompilationPipeline.RequestScriptCompilation()`.
+  - **(a, most reliable)** `package_add` / `package_remove` a no-op entry to force UPM resolution + domain reload, then revert it.
+  - **(b)** Ask the user to focus the Unity window after you touch a tracked `Assets/` file.
+  - **(c, if bridge up)** `execute_csharp` calling `AssetDatabase.ImportAsset("Packages/<pkg>/...", ImportAssetOptions.ForceUpdate)` then `CompilationPipeline.RequestScriptCompilation()`.
 3. **Verify the DLL actually rebuilt before tests:**
-   ```bash
+  ```bash
    stat -f "%Sm %N" Library/ScriptAssemblies/<assembly>.dll   # macOS
-   ```
+  ```
    Compare mtime to your last edit; do not run tests until DLL mtime > edit mtime.
 
 > **Stale-DLL trap:** if tests fail identically to before your fix, suspect the DLL never recompiled before concluding the fix is wrong.
@@ -137,11 +139,13 @@ If Unity can't be found, batch tools return `unity_not_discovered`; only offline
 
 ### Gate modes
 
-| Mode | When |
-|---|---|
-| `enforce` (default) | Normal edits — fail fast on new errors |
-| `warn` | Exploratory — read `gate.delta` but call does not error |
-| `off` | Trusted admin scripts only — no checkpoint/validate |
+
+| Mode                | When                                                    |
+| ------------------- | ------------------------------------------------------- |
+| `enforce` (default) | Normal edits — fail fast on new errors                  |
+| `warn`              | Exploratory — read `gate.delta` but call does not error |
+| `off`               | Trusted admin scripts only — no checkpoint/validate     |
+
 
 ### Gate failure (canonical shape)
 
@@ -176,16 +180,16 @@ Issue keys in `gate.delta.newIssues` are `ruleId|severity|assetPath|issueCode` (
 
 Authoritative via `capabilities` (call for the live list). Implemented:
 
-- **`missing_references`** — per-PPtr-field view. Codes: `missing_guid` (Error, fix `relink_broken_guid` — unsafe, needs `target_guid`), `missing_fileid` (Error), `missing_script` (Error, fix `remove_missing_script`), `missing_local_fileid` / `empty_local_ref` (Warning), `missing_method` / `type_mismatch` / `duplicate_component` / `invalid_layer` (Warning, full-scan only).
-- **`scene_prefab_health`** — structural health. Codes: `broken_reference` (Error), `high_risk_bootstrap` / `scene_object_count` / `component_hotspot` / `inactive_expensive` / `inactive_heavy` / `deep_nesting` / `override_explosion` (Warning).
-- **`dependencies`** — forward dependency graph. Codes: `broken_dependency` (Error — asset-graph edge to a missing asset; fix `relink_broken_guid` — unsafe), `dependency_cycle` (Warning).
+- `**missing_references**` — per-PPtr-field view. Codes: `missing_guid` (Error, fix `relink_broken_guid` — unsafe, needs `target_guid`), `missing_fileid` (Error), `missing_script` (Error, fix `remove_missing_script`), `missing_local_fileid` / `empty_local_ref` (Warning), `missing_method` / `type_mismatch` / `duplicate_component` / `invalid_layer` (Warning, full-scan only).
+- `**scene_prefab_health**` — structural health. Codes: `broken_reference` (Error), `high_risk_bootstrap` / `scene_object_count` / `component_hotspot` / `inactive_expensive` / `inactive_heavy` / `deep_nesting` / `override_explosion` (Warning).
+- `**dependencies**` — forward dependency graph. Codes: `broken_dependency` (Error — asset-graph edge to a missing asset; fix `relink_broken_guid` — unsafe), `dependency_cycle` (Warning).
 
 ### Fixes
 
 `apply_fix` defaults to `dry_run: true` (the dry-run short-circuits the gate entirely — returns description/candidates without checkpoint+validate):
 
-- **`remove_missing_script`** (safe) — strips `MonoBehaviour` whose script GUID no longer resolves. Works on `.prefab` / `.unity`.
-- **`relink_broken_guid`** (unsafe) — rewrites a broken external GUID reference. Dry-run advertises candidate targets; apply requires `target_guid`. Never auto-applied.
+- `**remove_missing_script**` (safe) — strips `MonoBehaviour` whose script GUID no longer resolves. Works on `.prefab` / `.unity`.
+- `**relink_broken_guid**` (unsafe) — rewrites a broken external GUID reference. Dry-run advertises candidate targets; apply requires `target_guid`. Never auto-applied.
 
 Planned (capabilities advertises with guidance): `remove_orphan_meta`, `fix_duplicate_guid`, `reassign_missing_texture`, `reassign_missing_shader`.
 
@@ -203,12 +207,14 @@ Typical sequence: `impact_preview` (size) → `gate_budget_estimate` `mode: "sam
 
 ## Lifecycle & scene safety
 
-| Policy | Meaning | Tools |
-|---|---|---|
-| `none` | Read-only, returns immediately | `ping`, `find_members`, `validate_edit`, `checkpoint_create`, `delta`, `find_references`, `scan_paths`, `read_asset`, `search_assets`, `list_assets`, `editor_status`, `read_console`, `screenshot`, `profiler_*`, `spatial_query` |
-| `editor_settle` | Mutating; bridge waits for asset refresh/serialization to finish | `apply_fix`, `reserialize` |
-| `restart_then_settle` | Mutating; may trigger domain reload; bridge blocks until compile finishes (cap 60s) | `execute_csharp`, `invoke_method`, `execute_menu`, `compile_check` |
-| `custom_confirmation` | Async; returns immediately, result via external completion signal you poll | `run_tests` |
+
+| Policy                | Meaning                                                                             | Tools                                                                                                                                                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `none`                | Read-only, returns immediately                                                      | `ping`, `find_members`, `validate_edit`, `checkpoint_create`, `delta`, `find_references`, `scan_paths`, `read_asset`, `search_assets`, `list_assets`, `editor_status`, `read_console`, `screenshot`, `profiler_*`, `spatial_query` |
+| `editor_settle`       | Mutating; bridge waits for asset refresh/serialization to finish                    | `apply_fix`, `reserialize`                                                                                                                                                                                                         |
+| `restart_then_settle` | Mutating; may trigger domain reload; bridge blocks until compile finishes (cap 60s) | `execute_csharp`, `invoke_method`, `execute_menu`, `compile_check`                                                                                                                                                                 |
+| `custom_confirmation` | Async; returns immediately, result via external completion signal you poll          | `run_tests`                                                                                                                                                                                                                        |
+
 
 **Active-scene dirty guard.** Before any `restart_then_settle` op, the bridge preflights loaded scenes. If any scene has unsaved changes, the call refuses with `error.code = "scene_dirty"` + `dirtyScenes[]` + `agentNextSteps` so Unity's native save modal never interrupts. Recover by: saving first (`scene_save`), discarding (`EditorSceneManager.RestoreSavedSceneState()`), or passing `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu` / `scene_open` / `editor_set_state` / `build_set_target` / `build_set_defines` / `settings_set_player`.
 
@@ -224,7 +230,7 @@ Treat `capabilities.routePolicy` + `batchCapable` as source of truth.
 - **Batch fallback** — spawns headless Unity (`-batchmode`) **only** for `batchCapable: true` tools when the live bridge is unavailable. Mutating meta-tools (`execute_csharp`, `invoke_method`, `execute_menu`) are blocked in batch — they need a live Editor.
 - **Senses are live-only** — `run_tests`, screenshots, profiler, console, spatial queries have no batch form.
 - **Offline reads** (`list_assets`, `find_references`, `read_asset`, `search_assets`) parse the project from disk and never need Unity.
-- **`compile_check` is always batch** — spawns a fresh headless Unity that recompiles from scratch, even when the live bridge is up.
+- `**compile_check` is always batch** — spawns a fresh headless Unity that recompiles from scratch, even when the live bridge is up.
 
 ## Typed tool catalog
 
@@ -251,6 +257,7 @@ Workflow: `scene_list_opened` → `scene_get_data` → mutate → `scene_get_dir
 Workflow: `package_check` → `package_search` if not installed → `package_add` → after settle, `package_get_info` to confirm resolved version.
 
 **Console / editor state / selection / undo / tags / layers** — write NO assets, so **gate-free** direct-response tools (no gate envelope):
+
 - Console: `console_clear` / `console_log` (`level: log|warning|error`, optional `context_instance_id` / `context_asset_path`).
 - Editor state: `editor_set_state` (`state: play|pause|stop`) — writes no assets but runs dirty guard inline; pass `ignore_scene_dirty: true` to accept. Poll `editor_status` after.
 - Selection: `selection_get` / `selection_set` (single target by `instance_id`/`asset_path`/`path`/`name`, or `targets[]` for multi; `clear: true`).
@@ -260,6 +267,7 @@ Workflow: `package_check` → `package_search` if not installed → `package_add
 **Reflection / scripts / object data** — `type_schema` (read-only; structured member schema for one type; use to plan `invoke_method`/`object_modify`) / `script_read` (read-only, line slicing) / `script_write` (Roslyn pre-validated; `validate: true` default refuses non-compiling code with `validation_failed`) / `script_delete` (mutating; removes `.cs` + `.meta`) / `object_get_data` (read-only reflective walk) / `object_modify` (sets public fields/properties by name; safe by default — refuses static/init-only unless `allow_static: true`). Core reflection enhanced: `find_members` lists every overload separately; `invoke_method` accepts `generic_arg_types` (e.g. `GetComponent<Rigidbody>`) and `arg_type_names` (disambiguate overloads). Prefer `component_get`/`component_modify` for one Component's Inspector fields; use these for ScriptableObjects, Materials, or any non-Component Object.
 
 **Profiler session/diagnostics** — complement the M10 senses (runtime/session layer, not a second per-frame read). Most are gate-free direct-response (write no assets); only `profiler_save_data` runs the gate (`paths_hint` = destination `.json`):
+
 - Session: `profiler_start` (`open_window: false` skips the menu) / `profiler_stop` (idempotent).
 - Reads (gate-free): `profiler_get_status` / `profiler_get_config` / `profiler_get_script_stats`.
 - Config (gate-free): `profiler_set_config` (`mode: play|edit`, `deep_profile`, `allocation_callstacks`, `binary_log`, `output`, `max_used_memory`, `enable_categories[]` / `disable_categories[]`).
@@ -270,6 +278,7 @@ Workflow: `package_check` → `package_search` if not installed → `package_add
 Workflow: `profiler_start` → poll `profiler_get_status` → run workload → `unity_senses_profiler_capture` for frame data → `profiler_save_data` → `profiler_stop`.
 
 **Build pipeline + project settings** (`*_get_*` are gate-free; mutators run gate path scoped to touched `ProjectSettings/*.asset`):
+
 - Build reads (gate-free): `build_get_targets` / `build_get_active_target` / `build_get_scenes` / `build_get_defines`.
 - Build mutators: `build_set_target` (`paths_hint = ["ProjectSettings"]`, restart_then_settle) / `build_set_scenes` (`paths_hint = ["ProjectSettings"]`) / `build_set_defines` (accepts array or `;`-joined string; empty clears; recompiles; `paths_hint = ["ProjectSettings/ProjectSettings.asset"]`) / `build_start` (DESTRUCTIVE — refuses with `build_confirmation_required` unless BOTH `gate: "off"` AND `confirm_bypass: true`).
 - Settings reads (gate-free): `settings_get_player` / `settings_get_quality` / `settings_get_physics` / `settings_get_lighting` (scene-scoped, reflects active scene).
@@ -281,12 +290,12 @@ Workflow (CI build prep): `build_get_scenes` → `build_set_scenes` → `build_g
 
 ## Agent senses (live-only, no batch fallback)
 
-- **`unity_senses_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Set `include_passes: false` on large suites to avoid truncation. **Never fire a second `run_tests` before the first resolves** (no concurrency guard; results interleave).
-- **`unity_senses_read_console`** — console entries via reflection. Filter `type: "error"` to confirm clean compile. `detail: "summary"` for messages only (saves tokens); `detail: "verbose"` includes Unity-internal frames.
-- **`unity_senses_screenshot`** — Scene / Game / isolated 2×2 composite of one GameObject.
-- **`unity_senses_profiler_capture`** / `profiler_memory` / `profiler_rendering` — frame hierarchy, memory allocators, rendering env.
-- **`unity_senses_spatial_query`** — physics-based raycast / overlap / bounds / ground_check / nearest against the live scene.
-- **`unity_senses_pull_events`** — incremental console logs + editor-state transitions (compile start/stop, play-mode). Cheaper than `read_console` for "what happened since my last call"; first call opens the stream, later calls return only new events. Returns `bridge_unavailable` when the bridge is down.
+- `**unity_senses_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Set `include_passes: false` on large suites to avoid truncation. **Never fire a second `run_tests` before the first resolves** (no concurrency guard; results interleave).
+- `**unity_senses_read_console`** — console entries via reflection. Filter `type: "error"` to confirm clean compile. `detail: "summary"` for messages only (saves tokens); `detail: "verbose"` includes Unity-internal frames.
+- `**unity_senses_screenshot**` — Scene / Game / isolated 2×2 composite of one GameObject.
+- `**unity_senses_profiler_capture**` / `profiler_memory` / `profiler_rendering` — frame hierarchy, memory allocators, rendering env.
+- `**unity_senses_spatial_query**` — physics-based raycast / overlap / bounds / ground_check / nearest against the live scene.
+- `**unity_senses_pull_events**` — incremental console logs + editor-state transitions (compile start/stop, play-mode). Cheaper than `read_console` for "what happened since my last call"; first call opens the stream, later calls return only new events. Returns `bridge_unavailable` when the bridge is down.
 
 **Verification habit:** after any C# change, run `read_console` with `type: "error"` (or `run_tests` on the affected assembly) to confirm compile + tests pass before declaring done.
 
@@ -294,7 +303,7 @@ Workflow (CI build prep): `build_get_scenes` → `build_set_scenes` → `build_g
 
 ### Reserialize after direct YAML edits
 
-When you edit `.prefab` / `.unity` / `.asset` / `.mat` / `.controller` / `.anim` directly as YAML text, run **`unity_open_mcp_reserialize`** with the touched `paths` (the `paths` array doubles as gate scope). Round-trip rewrites canonically so missing fields, wrong indentation, and stale `fileID` references surface in `gate.delta`. Whole-project reserialize is intentionally unsupported — enumerate assets you edited. Default targets asset YAML only (no `.meta` diff on body-only edits); pass `include_meta: true` only for upgrade/importer-change workflows.
+When you edit `.prefab` / `.unity` / `.asset` / `.mat` / `.controller` / `.anim` directly as YAML text, run `**unity_open_mcp_reserialize`** with the touched `paths` (the `paths` array doubles as gate scope). Round-trip rewrites canonically so missing fields, wrong indentation, and stale `fileID` references surface in `gate.delta`. Whole-project reserialize is intentionally unsupported — enumerate assets you edited. Default targets asset YAML only (no `.meta` diff on body-only edits); pass `include_meta: true` only for upgrade/importer-change workflows.
 
 > **Edit freely, but always reserialize before trusting a direct YAML change.**
 
@@ -302,7 +311,7 @@ When you edit `.prefab` / `.unity` / `.asset` / `.mat` / `.controller` / `.anim`
 
 Raw Unity YAML is enormous. `read_asset` returns counts, a `cmp` table declaring repeated component sets once (referenced by `c1`/`c2` codes), and a folded `tree`. Drill down with `field_limit` + `component` / `path` / `detail=verbose` instead of re-reading raw YAML. Session cache reuses the parsed model (`_cache: "hit"`). `detail: verbose` disables render-only folding; `field_limit: 0` (default) returns names only — bump it before `component` drill-down so fields are available.
 
-Use **`search_assets`** to locate prefabs/components/GUIDs; each result tags *why* it matched so you know which `read_asset` drill-down to run next.
+Use `**search_assets`** to locate prefabs/components/GUIDs; each result tags *why* it matched so you know which `read_asset` drill-down to run next.
 
 ### Checkpoint → mutate → delta (large refactors)
 
@@ -310,11 +319,12 @@ Use **`search_assets`** to locate prefabs/components/GUIDs; each result tags *wh
 
 ### find_references before delete
 
-Before deleting or moving an asset, call **`find_references`** to see who depends on it. Offline-first (no live bridge needed for text-serialized assets).
+Before deleting or moving an asset, call `**find_references*`* to see who depends on it. Offline-first (no live bridge needed for text-serialized assets).
 
 ### Return serialization (execute_csharp / invoke_method)
 
 Results are walked by a depth-limited reflective serializer before becoming `mutation.output`:
+
 - Structs/POCOs → JSON objects with public fields/props (`return new Vector3(1,2,3)` → `{"$type":"Vector3","x":1,"y":2,"z":3}`).
 - Lists truncate to 100 items (`max_items` configurable); truncated arrays report `{"items":[...],"truncated":N}`.
 - Recursion caps at depth 4 (`max_depth` configurable).
@@ -326,7 +336,7 @@ Results are walked by a depth-limited reflective serializer before becoming `mut
 
 ## Optional: project-specific skill
 
-Call **`unity_open_mcp_generate_skill`** with `{ "write": true }` to generate a project-specific SKILL.md reflecting the actual project — Unity version, installed packages, available verify rules, key MonoBehaviour/ScriptableObject types. The `clients` parameter (`cursor`/`claude`/`opencode`/`agents`) writes to the project-relative skill folder(s) declared in `skills/client-paths.json`. Regenerate after package or script changes.
+Call `**unity_open_mcp_generate_skill**` with `{ "write": true }` to generate a project-specific SKILL.md reflecting the actual project — Unity version, installed packages, available verify rules, key MonoBehaviour/ScriptableObject types. The `clients` parameter (`cursor`/`claude`/`opencode`/`agents`) writes to the project-relative skill folder(s) declared in `skills/client-paths.json`. Regenerate after package or script changes.
 
 For routing details, see the `routing` object on the capabilities response — not this file.
 
@@ -335,12 +345,14 @@ For routing details, see the `routing` object on the capabilities response — n
 ## Agent checklist
 
 **Before mutating**
+
 - [ ] Capabilities refreshed
 - [ ] Unity state classified (lock read, PID/heartbeat checked)
 - [ ] `paths_hint` prepared
 - [ ] (Large refactor) `impact_preview` / `gate_budget_estimate` run
 
 **After mutating**
+
 - [ ] Gate delta reviewed
 - [ ] Fixes applied / retried as needed
 - [ ] Compile verified (`read_console` `type: "error"`, or `read_compile_errors` if bridge down)

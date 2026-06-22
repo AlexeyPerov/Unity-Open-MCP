@@ -12,7 +12,6 @@ Unity Open MCP has four runtime parts:
 - `mcp-server/` — MCP stdio server, tool registry, routing.
 - `packages/bridge/` — Unity HTTP bridge and typed tool handlers. Shipped domain tools live under `Editor/TypedTools/Extensions/` and compile-gate on their Unity dependency (see [Extensions](extensions.md)).
 - `packages/verify/` — validation rules and fixes used by gate flows.
-- `packages/extensions/` — legacy/community domain packs (frozen for shipped domains after M18 Plan 6; new first-party domains go into the bridge).
 - `hub/` — desktop app (Tauri + SvelteKit).
 
 ## Runtime flow

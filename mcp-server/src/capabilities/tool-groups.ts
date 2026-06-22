@@ -68,14 +68,14 @@ export const TOOL_GROUPS: ToolGroup[] = [
     description:
       "Gate, checkpoint, delta, find_references, scan_paths, apply_fix, " +
       "scan_all, baseline_create, regression_check — the verify surface.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "asset-intelligence",
     description:
       "reserialize, read_asset, search_assets, list_assets — offline asset " +
       "reads and reference intelligence.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "typed-editor",
@@ -84,14 +84,14 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "prefabs, GameObjects, components, scenes, packages, console, editor " +
       "state, selection, undo, tags, layers, reflection, scripts, object " +
       "data, build pipeline, project settings.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "diagnostics",
     description:
       "Profiler session control, counters, memory snapshots, and the M10 " +
       "per-frame capture / memory / rendering reads.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "gate-intelligence",
