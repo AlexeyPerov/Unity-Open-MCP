@@ -149,6 +149,32 @@ namespace UnityOpenMcpBridge.Tests
         }
     }
 
+    namespace TestFixtureK
+    {
+        // M18 Plan 6 / T18.6.2 — models the "embedded bridge copy + legacy
+        // extension pack present" duplicate-registration scenario: two
+        // [BridgeToolType] classes in different assemblies/declaring the SAME
+        // tool id. The registry must keep the first-registered entry and
+        // surface the collision via DuplicateCount / DuplicateToolNames so the
+        // guard is observable without log capture. (The real-world case is the
+        // embedded navigation tools vs. the legacy
+        // com.alexeyperov.unity-open-mcp-ext-navigation pack; this fixture
+        // reproduces the shape in the ungated test assembly.)
+        [BridgeToolType]
+        public class Tool_DuplicateFirst
+        {
+            [BridgeTool("test_duplicate_guard_tool")]
+            public string First() => "first";
+        }
+
+        [BridgeToolType]
+        public class Tool_DuplicateSecond
+        {
+            [BridgeTool("test_duplicate_guard_tool")]
+            public string Second() => "second";
+        }
+    }
+
     public class AttributeScannerTests
     {
         [Test]
@@ -178,6 +204,49 @@ namespace UnityOpenMcpBridge.Tests
             // Confirm first-wins semantically: invoking must return the first tool's value.
             var instance = entry.GetInstance();
             Assert.AreEqual("first", entry.Method.Invoke(instance, null));
+        }
+
+        // M18 Plan 6 / T18.6.2 — the duplicate-registration guard. When two
+        // [BridgeToolType] classes declare the same id (the "embedded + legacy
+        // pack present" shape, see TestFixtureK), the registry must:
+        //   (a) record the collision in DuplicateToolNames / DuplicateCount,
+        //   (b) register the tool exactly once (first-wins), never twice.
+        // This is the EditMode half of the M18 Plan 6 duplicate guard; the CI
+        // half (compile the bridge with 0 domain packages) is the
+        // compile-matrix leg.
+        //
+        // DuplicateCount is a global aggregate across every colliding id in
+        // the loaded assemblies (TestFixtureC's test_collision_tool collides
+        // too), so these tests assert containment + non-zero rather than an
+        // exact count — robust against other fixtures and any live embedded +
+        // legacy co-presence in the host project.
+        [Test]
+        public static void Scan_Duplicate_RecordsCollidingId()
+        {
+            Assert.GreaterOrEqual(BridgeToolRegistry.DuplicateCount, 1,
+                "At least one duplicate tool id must be recorded after Scan.");
+            CollectionAssert.Contains(
+                BridgeToolRegistry.DuplicateToolNames(),
+                "test_duplicate_guard_tool",
+                "The colliding id declared by TestFixtureK must be recorded.");
+        }
+
+        [Test]
+        public static void Scan_Duplicate_CollisionDoesNotRegisterTwice()
+        {
+            // First-wins: the colliding id is registered exactly once.
+            Assert.IsTrue(BridgeToolRegistry.Contains("test_duplicate_guard_tool"));
+            int occurrences = 0;
+            foreach (var entry in BridgeToolRegistry.All())
+            {
+                if (entry.Name == "test_duplicate_guard_tool") occurrences++;
+            }
+            Assert.AreEqual(1, occurrences,
+                "A duplicate tool id must register exactly once (first-wins), never twice.");
+
+            // The registered entry is the first-seen class's method.
+            Assert.IsTrue(BridgeToolRegistry.TryGet("test_duplicate_guard_tool", out var kept));
+            Assert.AreEqual("First", kept.Method.Name);
         }
 
         [Test]

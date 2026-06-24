@@ -311,6 +311,108 @@ jobs:
           path: ${{ env.UNITY_LOG_PATH }}
           retention-days: 7
 
+  compile-matrix:
+    name: Compile — 0 domain packages (unity-6)
+    # M18 Plan 6 / T18.6.2 — the compile-gate matrix leg. The demo project's
+    # default manifest carries all three installable Unity domain packages
+    # (Nav, Input, ProBuilder), so the run-tests / regression-check jobs above
+    # already prove the bridge compiles with N domain packages present. This
+    # job proves the other end of the matrix: the bridge compiles cleanly with
+    # ZERO optional Unity domain packages — i.e. every `UNITY_OPEN_MCP_EXT_*`
+    # symbol undefined and none of the gated sub-asmdefs compiled in. Together
+    # the two legs cover the "0 and N" combination span (1-of-N permutations
+    # are a manual-checklist walkthrough, see m18-manual-checklist.md §2).
+    #
+    # It temporarily strips the 3 installable Unity domain ids from the demo
+    # manifest, imports + compiles, then restores the manifest in post: so the
+    # stripped config is never committed. Runs on the unity-6 leg only — the
+    # 2022 leg already proves version resolution via run-tests.
+    runs-on: unity
+    if: vars.UNITY_PATH_UNITY_6 != '' || env.UNITY_PATH != ''
+    env:
+      UNITY_PATH_FOR_JOB: ${{ vars.UNITY_PATH_UNITY_6 != '' && vars.UNITY_PATH_UNITY_6 || env.UNITY_PATH }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Unity is available
+        run: |
+          if [ -z "$UNITY_PATH_FOR_JOB" ]; then
+            echo "::notice::UNITY_PATH_UNITY_6 (or legacy UNITY_PATH) is not set — skipping the 0-domain compile leg."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ ! -f "$UNITY_PATH_FOR_JOB" ]; then
+            echo "::error::Unity ('"$UNITY_PATH_FOR_JOB"') does not exist or is not a file."
+            exit 1
+          fi
+          echo "Unity (unity-6): $UNITY_PATH_FOR_JOB"
+        id: unity
+
+      - name: Strip optional Unity domain packages from demo manifest
+        if: steps.unity.outputs.skip != 'true'
+        # Remove the 3 installable Unity domain ids whose presence defines the
+        # UNITY_OPEN_MCP_EXT_* symbols. Built-in module domains (Particle
+        # System, Animation) cannot be removed (they ship with the Editor) and
+        # are intentionally left in — their symbols are always defined. The
+        # legacy ext packs were already removed from the demo manifest in M18
+        # Plan 6, so this edit only touches the Unity domain deps.
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("demo/Packages/manifest.json")
+          m = json.loads(p.read_text())
+          stripped = []
+          for dep in ("com.unity.ai.navigation", "com.unity.inputsystem", "com.unity.probuilder"):
+              if dep in m.get("dependencies", {}):
+                  del m["dependencies"][dep]
+                  stripped.append(dep)
+          p.write_text(json.dumps(m, indent=2) + "\n")
+          print("Stripped from demo manifest:", ", ".join(stripped) if stripped else "(none present)")
+          PY
+
+      - name: Compile demo with 0 domain packages
+        if: steps.unity.outputs.skip != 'true'
+        run: |
+          echo "::group::Unity batch — import + compile (0 domain packages)"
+          "$UNITY_PATH_FOR_JOB" \
+            -batchmode \
+            -quit \
+            -nographics \
+            -projectPath "$UNITY_PROJECT_PATH" \
+            -logFile "$UNITY_LOG_PATH"
+          EXIT_CODE=$?
+          echo "::endgroup::"
+          echo "Import/compile exit code: $EXIT_CODE"
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Bridge failed to compile with 0 optional Unity domain packages (exit $EXIT_CODE)."
+            echo "::group::Unity log (last 100 lines)"
+            tail -n 100 "$UNITY_LOG_PATH" || true
+            echo "::endgroup::"
+            exit 1
+          fi
+          echo "✓ Bridge compiles cleanly with all UNITY_OPEN_MCP_EXT_* symbols undefined."
+
+      - name: Restore demo manifest
+        if: always() && steps.unity.outputs.skip != 'true'
+        # Always restore — even on compile failure — so the stripped manifest
+        # never leaks into the working tree or a later step.
+        run: |
+          git checkout -- demo/Packages/manifest.json
+          echo "✓ Restored demo/Packages/manifest.json."
+
+      - name: Report skipped leg
+        if: steps.unity.outputs.skip == 'true'
+        run: echo "::notice::Skipped 0-domain compile leg — no unity-6 editor configured."
+
+      - name: Upload Unity log on failure
+        if: failure() && steps.unity.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-compile-matrix-unity-log
+          path: ${{ env.UNITY_LOG_PATH }}
+          retention-days: 7
+
   baseline-update:
     name: Update baseline (demo)
     # Baseline is a Unity 6 artifact by definition — captured on the recommended

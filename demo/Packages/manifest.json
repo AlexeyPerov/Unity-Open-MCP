@@ -2,11 +2,6 @@
   "dependencies": {
     "com.alexeyperov.unity-open-mcp-bridge": "file:../../packages/bridge",
     "com.alexeyperov.unity-open-mcp-verify": "file:../../packages/verify",
-    "com.alexeyperov.unity-open-mcp-ext-navigation": "file:../../packages/extensions/navigation",
-    "com.alexeyperov.unity-open-mcp-ext-inputsystem": "file:../../packages/extensions/inputsystem",
-    "com.alexeyperov.unity-open-mcp-ext-probuilder": "file:../../packages/extensions/probuilder",
-    "com.alexeyperov.unity-open-mcp-ext-particlesystem": "file:../../packages/extensions/particlesystem",
-    "com.alexeyperov.unity-open-mcp-ext-animation": "file:../../packages/extensions/animation",
     "com.unity.ai.navigation": "2.0.0",
     "com.unity.inputsystem": "1.7.0",
     "com.unity.probuilder": "6.0.9",
@@ -18,11 +13,6 @@
   "scopedRegistries": [],
   "testables": [
     "com.alexeyperov.unity-open-mcp-bridge",
-    "com.alexeyperov.unity-open-mcp-verify",
-    "com.alexeyperov.unity-open-mcp-ext-navigation",
-    "com.alexeyperov.unity-open-mcp-ext-inputsystem",
-    "com.alexeyperov.unity-open-mcp-ext-probuilder",
-    "com.alexeyperov.unity-open-mcp-ext-particlesystem",
-    "com.alexeyperov.unity-open-mcp-ext-animation"
+    "com.alexeyperov.unity-open-mcp-verify"
   ]
 }

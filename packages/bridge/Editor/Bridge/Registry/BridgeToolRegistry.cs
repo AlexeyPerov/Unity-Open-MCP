@@ -10,11 +10,27 @@ namespace UnityOpenMcpBridge
     {
         private static readonly Dictionary<string, BridgeToolEntry> _tools = new();
 
+        // M18 Plan 6 / T18.6.2 — the tool ids that were rejected during the
+        // last Scan() because an earlier assembly had already registered them
+        // (e.g. a legacy extension pack + the embedded bridge copy both define
+        // `unity_open_mcp_navigation_surface_add`). Each colliding name is
+        // recorded once regardless of how many duplicates were seen. Exposed
+        // via DuplicateCount / DuplicateToolNames so the duplicate-registration
+        // guard is observable to EditMode tests + diagnostics without relying
+        // on Unity's log capture. The first-wins LogWarning below stays.
+        private static readonly List<string> _duplicateToolNames = new();
+
         public static int Count => _tools.Count;
+
+        /// <summary>Number of distinct tool ids that collided across assemblies
+        /// during the last <see cref="Scan"/>. Non-zero means a duplicate
+        /// registration was detected and silently kept first-registered.</summary>
+        public static int DuplicateCount => _duplicateToolNames.Count;
 
         public static void Scan()
         {
             _tools.Clear();
+            _duplicateToolNames.Clear();
 
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -28,7 +44,22 @@ namespace UnityOpenMcpBridge
                 }
             }
 
+            if (_duplicateToolNames.Count > 0)
+            {
+                Debug.LogWarning(
+                    $"[BridgeToolRegistry] {_duplicateToolNames.Count} duplicate tool id(s) detected across assemblies " +
+                    $"(kept first registered): {string.Join(", ", _duplicateToolNames)}");
+            }
+
             Debug.Log($"[BridgeToolRegistry] Registered {_tools.Count} typed tool(s)");
+        }
+
+        /// <summary>Enumerate the tool ids that collided across assemblies
+        /// during the last <see cref="Scan"/> (empty when none). Returns a
+        /// snapshot; mutating it does not affect the registry.</summary>
+        public static IEnumerable<string> DuplicateToolNames()
+        {
+            return _duplicateToolNames.AsReadOnly();
         }
 
         private static void ScanAssembly(Assembly assembly)
@@ -47,6 +78,11 @@ namespace UnityOpenMcpBridge
                     if (_tools.ContainsKey(attr.Name))
                     {
                         Debug.LogWarning($"[BridgeToolRegistry] Duplicate tool name '{attr.Name}' — keeping first registered");
+                        // M18 Plan 6 / T18.6.2 — record each colliding id once so
+                        // the duplicate-registration guard (EditMode test + CI) can
+                        // observe it without log capture.
+                        if (!_duplicateToolNames.Contains(attr.Name))
+                            _duplicateToolNames.Add(attr.Name);
                         continue;
                     }
 

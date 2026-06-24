@@ -2,11 +2,21 @@
 
 ## Scope
 
-Rules for `packages/extensions/` — optional domain extension UPM packages that add typed helpers on top of the core bridge. Inherits root `AGENTS.md` and `packages/bridge/AGENTS.md`; deeper rules win on overlap.
+Rules for `packages/extensions/` — the home for **third-party / community** domain extension UPM packages that add typed helpers on top of the core bridge. Inherits root `AGENTS.md` and `packages/bridge/AGENTS.md`; deeper rules win on overlap.
+
+The five **shipped** first-party domains (navigation, inputsystem, probuilder, particlesystem, animation) are **embedded in the bridge** and **deprecated** here — see [Deprecation policy](#deprecation-policy-m18-plan-6) below. Only community packs and the `template/` scaffold are live in this folder.
 
 Each pack lives in its own subfolder (`packages/extensions/<domain>/`) and ships as a standalone UPM package (`com.alexeyperov.unity-open-mcp-ext-<domain>`). Packs are opt-in — projects add only the ones they need to `Packages/manifest.json`.
 
-> **M18 migration complete for shipped domains.** The five shipped domains (navigation, inputsystem, probuilder, particlesystem, animation) are now **embedded** inside the bridge (`packages/bridge/Editor/TypedTools/Extensions/*`, compile-gated by `UNITY_OPEN_MCP_EXT_<DOMAIN>`). Navigation was ported in M18 Plan 1; the other four followed in M18 Plan 3. This folder is **frozen for shipped domains** — the copies here are legacy and kept only so pinned manifests still resolve. A project with both a legacy pack and the embedded copy installed will get a soft "duplicate tool name — keeping first registered" warning from `BridgeToolRegistry` (non-fatal); the duplicate-registration CI guard and the manifest cleanup land in M18 Plan 6. This folder remains the home for **third-party / community** domain packs. See `docs/extensions.md` §Embedded domain model.
+## Deprecation policy (M18 Plan 6)
+
+The five **shipped** domains (navigation, inputsystem, probuilder, particlesystem, animation) are **embedded** inside the bridge (`packages/bridge/Editor/TypedTools/Extensions/*`, compile-gated by `UNITY_OPEN_MCP_EXT_<DOMAIN>`) and are the single source of truth for those tool surfaces. The legacy copies in this folder are **deprecated**:
+
+- **Status:** **DEPRECATED.** Do **not** install `com.alexeyperov.unity-open-mcp-ext-<domain>` for any of the five shipped domains in a new project. The bridge's embedded tools activate automatically when the matching Unity package/module is present — no separate pack install, no manifest entry, no onboarding step.
+- **Retention:** The folders are **retained, not deleted**, so any pinned manifest that still references a `file:../../packages/extensions/<domain>` (or git-pinned) copy continues to resolve. New first-party domains go into `packages/bridge/Editor/TypedTools/Extensions/`, never here.
+- **Duplicate-registration guard:** A project that keeps a legacy pack installed **and** the embedded bridge copy active will register the same tool ids twice. `BridgeToolRegistry` keeps the first-registered entry and records the collision (`DuplicateToolNames` / `DuplicateCount` after each `Scan()`), emitting a non-fatal `Debug.LogWarning`. The dogfood demo project migrated off the legacy packs in M18 Plan 6; the only remaining reference to these copies is this deprecation safety net.
+- **Default onboarding:** The Hub wizard **never** installs legacy ext packs — it installs only the bridge + verify packages plus opt-in Unity domain packages (`com.unity.ai.navigation`, …). There is no wizard path that installs `com.alexeyperov.unity-open-mcp-ext-*` for a shipped domain.
+- **Scope of this folder going forward:** This is the home for **third-party / community** domain packs and the `template/` scaffold. See `docs/extensions.md` §Embedded domain model.
 
 ## Package shape
 

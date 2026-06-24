@@ -99,13 +99,36 @@ embedded model — the MCP tool definitions and skills do not change.
 
 ## Legacy / community domain packs (advanced path)
 
-`packages/extensions/` remains the home for **third-party / community** domain
-packs that are not shipped with the bridge. Each is a separate UPM package
-with its own asmdef referencing the bridge. The shipped domains listed above
-**must not** also live here (that would double-register tool IDs).
+`packages/extensions/` is the home for **third-party / community** domain packs
+that are not shipped with the bridge. Each is a separate UPM package with its
+own asmdef referencing the bridge.
 
-This folder is **frozen** for shipped domains after M18 Plan 6 (legacy
-cleanup). New first-party domains go into `TypedTools/Extensions/`.
+### Deprecated shipped-domain copies
+
+The five shipped domains (Nav, Input, ProBuilder, Particles, Animation) also
+have **legacy copies** under `packages/extensions/{navigation,inputsystem,probuilder,particlesystem,animation}/`.
+These are **deprecated** as of M18 Plan 6 (legacy cleanup) and are **retained
+only so pinned manifests keep resolving**:
+
+- Do **not** install `com.alexeyperov.unity-open-mcp-ext-<domain>` for any
+  shipped domain in a new project — the bridge's embedded tools are the source
+  of truth and activate automatically when the Unity dependency is present.
+- Installing a legacy pack **and** the embedded copy registers the same tool
+  ids twice. `BridgeToolRegistry` keeps the first-registered entry and records
+  the collision (`DuplicateCount` / `DuplicateToolNames` after each scan),
+  emitting a non-fatal warning. The dogfood demo migrated off the legacy packs
+  in M18 Plan 6.
+- The Hub wizard **never** installs legacy ext packs — only the bridge, verify,
+  and opt-in Unity domain packages.
+- New first-party domains go into `packages/bridge/Editor/TypedTools/Extensions/`,
+  never here.
+
+### Authoring a community pack
+
+Use `packages/extensions/template/` as the reference scaffold — copy it, rename
+the package, and add typed `[BridgeTool]` helpers for your domain. A community
+pack must not reuse tool ids owned by a shipped embedded domain (that would
+duplicate-register).
 
 ### Manual install (community pack only)
 
