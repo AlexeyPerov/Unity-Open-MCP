@@ -190,6 +190,18 @@ import { animationModify } from "./animation-modify.js";
 import { animatorCreate } from "./animator-create.js";
 import { animatorGetData } from "./animator-get-data.js";
 import { animatorModify } from "./animator-modify.js";
+// M18 Plan 7 / T18.7.3 — Splines extension tools. First backlog domain
+// shipped under the embedded + grouped model. Each tool is compile-gated on
+// the com.unity.splines package in the bridge (UNITY_OPEN_MCP_EXT_SPLINES);
+// the tool definitions live in core so capabilities discovery advertises the
+// surface even before the package is installed.
+import { splinesContainerCreate } from "./splines-container-create.js";
+import { splinesAddKnot } from "./splines-add-knot.js";
+import { splinesSetKnot } from "./splines-set-knot.js";
+import { splinesSetTangentMode } from "./splines-set-tangent-mode.js";
+import { splinesEvaluate } from "./splines-evaluate.js";
+import { splinesGetKnots } from "./splines-get-knots.js";
+import { splinesModify } from "./splines-modify.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -507,6 +519,25 @@ export const M16_PLAN10_ANIMATION_TOOLS: Tool[] = [
   animatorModify,
 ];
 
+// M18 Plan 7 / T18.7.3 — Splines extension tools. The first backlog domain
+// shipped under the embedded + grouped model (Cinemachine, the recommended
+// first domain, was swapped for Splines per the plan's fallback path — see
+// the M18 changelog). Five mutating members (container_create / add_knot /
+// set_knot / set_tangent_mode / modify) run the full gate path with paths_hint
+// scoped to the host scene path (container_create adds a new GameObject to the
+// active scene). Two read-only members (evaluate / get_knots) are gate-free.
+// The seven tools mirror the kebab `splines-*` ids in the upstream
+// Unity-AI-Splines reference pack.
+export const M18_PLAN7_SPLINES_TOOLS: Tool[] = [
+  splinesContainerCreate,
+  splinesAddKnot,
+  splinesSetKnot,
+  splinesSetTangentMode,
+  splinesEvaluate,
+  splinesGetKnots,
+  splinesModify,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -533,4 +564,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN10_PARTICLESYSTEM_TOOLS,
   ...M16_PLAN10_ANIMATION_TOOLS,
   ...M18_PLAN2_TOOLS,
+  ...M18_PLAN7_SPLINES_TOOLS,
 ];

@@ -235,6 +235,20 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_animator_create: "animation",
   unity_open_mcp_animator_get_data: "animation",
   unity_open_mcp_animator_modify: "animation",
+  // M18 Plan 7 / T18.7.3 — Splines extension tools. First backlog domain
+  // shipped under the embedded + grouped model. Compile-gated on
+  // com.unity.splines in the bridge; the tool definitions live in core so
+  // capabilities discovery advertises the surface even before the package is
+  // installed. Mutating members (container_create / add_knot / set_knot /
+  // set_tangent_mode / modify) run the full gate path; read-only members
+  // (evaluate / get_knots) are gate-free.
+  unity_open_mcp_splines_container_create: "splines",
+  unity_open_mcp_splines_add_knot: "splines",
+  unity_open_mcp_splines_set_knot: "splines",
+  unity_open_mcp_splines_set_tangent_mode: "splines",
+  unity_open_mcp_splines_evaluate: "splines",
+  unity_open_mcp_splines_get_knots: "splines",
+  unity_open_mcp_splines_modify: "splines",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",

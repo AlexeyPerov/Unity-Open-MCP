@@ -23,11 +23,18 @@ import {
 // Embedded domains (M18 Plan 4 — wizard Unity-dep toggles).
 // ---------------------------------------------------------------------------
 
-test("EMBEDDED_DOMAINS lists all 5 shipped domains with stable tool-group ids", () => {
+test("EMBEDDED_DOMAINS lists all shipped domains with stable tool-group ids", () => {
   const domains = EMBEDDED_DOMAINS.map((d) => d.domain);
   assert.deepEqual(
     [...domains].sort(),
-    ["animation", "inputsystem", "navigation", "particle_system", "probuilder"],
+    [
+      "animation",
+      "inputsystem",
+      "navigation",
+      "particle_system",
+      "probuilder",
+      "splines",
+    ],
   );
   for (const d of EMBEDDED_DOMAINS) {
     assert.ok(d.displayName.length > 0);
@@ -38,13 +45,14 @@ test("EMBEDDED_DOMAINS lists all 5 shipped domains with stable tool-group ids", 
 
 test("installableEmbeddedDomains excludes built-in module domains", () => {
   const installable = installableEmbeddedDomains();
-  // Nav + Input + ProBuilder are real UPM packages.
-  assert.equal(installable.length, 3);
+  // Nav + Input + ProBuilder + Splines are real UPM packages.
+  assert.equal(installable.length, 4);
   const upmIds = installable.map((d) => d.upmDependency).sort();
   assert.deepEqual(upmIds, [
     "com.unity.ai.navigation",
     "com.unity.inputsystem",
     "com.unity.probuilder",
+    "com.unity.splines",
   ]);
   for (const d of installable) {
     assert.ok(!d.builtin);
@@ -159,7 +167,9 @@ test("EXTENSION_PACKS does not double-list shipped embedded domains", () => {
 
 test("EXTENSION_PACKS advertises the planned placeholders", () => {
   const domains = EXTENSION_PACKS.map((p) => p.domain).sort();
-  assert.deepEqual(domains, ["splines", "terrain", "tilemap"]);
+  // Splines graduated into EMBEDDED_DOMAINS in M18 Plan 7; Terrain + Tilemap
+  // remain planned placeholders.
+  assert.deepEqual(domains, ["terrain", "tilemap"]);
   // All current entries are planned (no shipped community pack yet).
   for (const p of EXTENSION_PACKS) {
     assert.equal(p.shipped, false, `${p.domain} should be a planned placeholder`);
@@ -173,18 +183,21 @@ test("shippedPacks() is empty until a real community pack lands", () => {
 });
 
 test("findPack returns the planned pack and undefined for unknown ids", () => {
-  const splines = findPack("com.alexeyperov.unity-open-mcp-ext-splines");
-  assert.ok(splines, "splines planned pack should be in the catalog");
-  assert.equal(splines?.shipped, false);
+  const terrain = findPack("com.alexeyperov.unity-open-mcp-ext-terrain");
+  assert.ok(terrain, "terrain planned pack should be in the catalog");
+  assert.equal(terrain?.shipped, false);
+  // Splines graduated into EMBEDDED_DOMAINS in M18 Plan 7 — it must no longer
+  // appear as a planned pack.
+  assert.equal(findPack("com.alexeyperov.unity-open-mcp-ext-splines"), undefined);
   assert.equal(findPack("com.alexeyperov.unity-open-mcp-ext-navigation"), undefined);
   assert.equal(findPack("com.alexeyperov.no-such-pack"), undefined);
 });
 
 test("localPackageEntry produces a file: URL relative to Packages", () => {
-  const splines = findPack("com.alexeyperov.unity-open-mcp-ext-splines")!;
+  const terrain = findPack("com.alexeyperov.unity-open-mcp-ext-terrain")!;
   assert.equal(
-    localPackageEntry(splines),
-    "file:../../packages/extensions/splines",
+    localPackageEntry(terrain),
+    "file:../../packages/extensions/terrain",
   );
 });
 

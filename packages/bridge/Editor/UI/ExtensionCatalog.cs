@@ -75,16 +75,6 @@ namespace UnityOpenMcpBridge
         public static readonly ExtensionPack[] Packs =
         {
             new ExtensionPack(
-                id: "com.alexeyperov.unity-open-mcp-ext-splines",
-                domain: "splines",
-                displayName: "Splines",
-                description: "Spline container / knot / tangent authoring and evaluation.",
-                upmDependency: "com.unity.splines",
-                localPath: "packages/extensions/splines",
-                toolIds: System.Array.Empty<string>(),
-                skillPath: "skills/extensions/splines/SKILL.md",
-                shipped: false),
-            new ExtensionPack(
                 id: "com.alexeyperov.unity-open-mcp-ext-terrain",
                 domain: "terrain",
                 displayName: "Terrain",

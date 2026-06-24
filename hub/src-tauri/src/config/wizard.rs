@@ -70,6 +70,7 @@ pub const UNITY_DOMAIN_DEP_IDS: &[&str] = &[
     "com.unity.ai.navigation",
     "com.unity.inputsystem",
     "com.unity.probuilder",
+    "com.unity.splines",
 ];
 
 /// Default git remote used when the toolkit root has no `.git`

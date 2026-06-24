@@ -155,6 +155,16 @@ export const TOOL_GROUPS: ToolGroup[] = [
     unityPackage: "com.unity.modules.animation",
   },
   {
+    id: "splines",
+    description:
+      "Splines tools — SplineContainer authoring, knots, tangent modes, " +
+      "evaluation. Compile-gated on the com.unity.splines package. First " +
+      "backlog domain under the embedded + grouped model (M18 Plan 7).",
+    defaultEnabled: false,
+    domainDefine: "UNITY_OPEN_MCP_EXT_SPLINES",
+    unityPackage: "com.unity.splines",
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot, read_console, profiler " +
@@ -416,6 +426,20 @@ assign(
     "animator_get_data",
     "animator_modify",
   ],
+);
+
+// --- splines (M18 Plan 7 / T18.7.3 — first backlog domain) -----------------
+assign(
+  "splines",
+  [
+    "container_create",
+    "add_knot",
+    "set_knot",
+    "set_tangent_mode",
+    "evaluate",
+    "get_knots",
+    "modify",
+  ].map((suffix) => `unity_open_mcp_splines_${suffix}`),
 );
 
 // --- agent-senses (live-only reads) ----------------------------------------

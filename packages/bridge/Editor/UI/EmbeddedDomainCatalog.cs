@@ -107,6 +107,14 @@ namespace UnityOpenMcpBridge
                 upmDependency: "",
                 typeProbe: "UnityEngine.Animation",
                 builtin: true),
+            new EmbeddedDomain(
+                group: "splines",
+                domain: "splines",
+                displayName: "Splines",
+                description: "SplineContainer authoring: knots, tangent modes, evaluation.",
+                upmDependency: "com.unity.splines",
+                typeProbe: "UnityEngine.Splines.SplineContainer, Unity.Splines",
+                builtin: false),
         };
 
         /// <summary>Enumerate the installable (non-builtin) domains.</summary>

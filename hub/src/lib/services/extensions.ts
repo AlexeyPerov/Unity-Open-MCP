@@ -148,6 +148,23 @@ export const EMBEDDED_DOMAINS: readonly EmbeddedDomain[] = [
       "unity_open_mcp_animator_modify",
     ],
   },
+  {
+    domain: "splines",
+    displayName: "Splines",
+    description: "SplineContainer authoring: knots, tangent modes, evaluation.",
+    upmDependency: "com.unity.splines",
+    defaultVersion: "2.0.0",
+    builtin: false,
+    toolIds: [
+      "unity_open_mcp_splines_container_create",
+      "unity_open_mcp_splines_add_knot",
+      "unity_open_mcp_splines_set_knot",
+      "unity_open_mcp_splines_set_tangent_mode",
+      "unity_open_mcp_splines_evaluate",
+      "unity_open_mcp_splines_get_knots",
+      "unity_open_mcp_splines_modify",
+    ],
+  },
 ] as const;
 
 /**
@@ -276,26 +293,16 @@ export interface ExtensionPack {
 
 /**
  * Catalog of legacy / community / planned extension packs. M18 Plan 5
- * narrowed this to third-party + planned packs only: the five shipped
+ * narrowed this to third-party + planned packs only: the shipped
  * first-party domains are embedded in the bridge and tracked in
  * EMBEDDED_DOMAINS, so they are deliberately absent here. Planned
- * placeholders (Splines, Terrain, Tilemap) advertise coming-soon
- * domains; a real third-party community pack is added here with
- * `shipped: true` only when its tools register from an external
- * assembly. Mirrors `ExtensionCatalog.cs` — keep both in sync.
+ * placeholders (Terrain, Tilemap) advertise coming-soon domains; Splines
+ * graduated out of this list into EMBEDDED_DOMAINS in M18 Plan 7. A real
+ * third-party community pack is added here with `shipped: true` only when
+ * its tools register from an external assembly. Mirrors
+ * `ExtensionCatalog.cs` — keep both in sync.
  */
 export const EXTENSION_PACKS: readonly ExtensionPack[] = [
-  {
-    id: "com.alexeyperov.unity-open-mcp-ext-splines",
-    domain: "splines",
-    displayName: "Splines",
-    description: "Spline container / knot / tangent authoring and evaluation.",
-    upmDependency: "com.unity.splines",
-    localPath: "packages/extensions/splines",
-    toolIds: [],
-    skillPath: "skills/extensions/splines/SKILL.md",
-    shipped: false,
-  },
   {
     id: "com.alexeyperov.unity-open-mcp-ext-terrain",
     domain: "terrain",

@@ -11,7 +11,7 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 - **Asset intelligence**: reserialize, read/search/list assets.
 - **Agent senses**: tests, screenshots, console read, profiler capture, memory/rendering snapshots, spatial queries, event pull.
 - **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers.
-- **Extension domains**: navigation, input system, probuilder, particle system, animation.
+- **Extension domains**: navigation, input system, probuilder, particle system, animation, splines.
 - **Discovery utilities**: capabilities, rules list, skill generation, manage_tools.
 
 ## Tool groups and session visibility
@@ -35,6 +35,7 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | `probuilder`         | off     | ProBuilder modeling tools — compile-gated on `com.unity.probuilder`                                                                                                             |
 | `particle-system`    | off     | Particle System tools — compile-gated on `UnityEngine.ParticleSystemModule`                                                                                                     |
 | `animation`          | off     | AnimationClip + AnimatorController tools — compile-gated on `com.unity.modules.animation`                                                                                       |
+| `splines`            | off     | Splines tools — compile-gated on `com.unity.splines`                                                                                                                            |
 | `agent-senses`       | off     | run_tests, screenshot, read_console, profiler capture/memory/rendering, spatial_query (live-only)                                                                               |
 
 

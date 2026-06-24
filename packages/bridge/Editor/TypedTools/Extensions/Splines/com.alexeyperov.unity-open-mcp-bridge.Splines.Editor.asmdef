@@ -1,0 +1,22 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.Splines.Editor",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.Splines",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "Unity.Splines",
+    "Unity.Mathematics"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_OPEN_MCP_EXT_SPLINES"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

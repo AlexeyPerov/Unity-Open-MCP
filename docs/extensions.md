@@ -14,10 +14,12 @@ step.
 | ProBuilder | `com.unity.probuilder` | `UNITY_OPEN_MCP_EXT_PROBUILDER` | `.../Extensions/ProBuilder/` |
 | Particle System | `UnityEngine.ParticleSystemModule` (built-in) | `UNITY_OPEN_MCP_EXT_PARTICLESYSTEM` | `.../Extensions/ParticleSystem/` |
 | Animation | `com.unity.modules.animation` (built-in) | `UNITY_OPEN_MCP_EXT_ANIMATION` | `.../Extensions/Animation/` |
+| Splines | `com.unity.splines` | `UNITY_OPEN_MCP_EXT_SPLINES` | `.../Extensions/Splines/` |
 
 Navigation was the reference template (M18 Plan 1); InputSystem, ProBuilder,
 ParticleSystem, and Animation migrated into the same layout in M18 Plan 3.
-All five shipped domains are now embedded.
+Splines is the first backlog domain — ported in M18 Plan 7 as proof that the
+embedded + grouped model extends to Ivan-breadth domains.
 
 ## Embedded domain model
 
@@ -59,9 +61,12 @@ reflection domain must document:
 - the minimum version it targets, and
 - the clear error returned for unsupported versions.
 
-**None of the 5 shipped extension domains** (Nav, Input, ProBuilder,
-Particles, Animation) qualifies — all use compile-gating only. The first
-reflection domain is Cinemachine, planned for M18 Plan 7 (backlog domains).
+**None of the shipped extension domains** (Nav, Input, ProBuilder, Particles,
+Animation, Splines) qualifies — all use compile-gating only. Splines shipped in
+M18 Plan 7 as the first backlog domain, deliberately choosing the compile-gate
+fallback over the reflection-recommended Cinemachine so the Ivan-breadth proof
+lands on the proven, single-stable-API path. Cinemachine remains the canonical
+reflection case (2.x/3.x split) and is tracked as a follow-up backlog domain.
 
 ### Wiring in a new embedded domain
 
