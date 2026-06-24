@@ -49,6 +49,21 @@ pub const BRIDGE_PACKAGE_ID: &str = "com.alexeyperov.unity-open-mcp-bridge";
 /// UPM package id for the verify package.
 pub const VERIFY_PACKAGE_ID: &str = "com.alexeyperov.unity-open-mcp-verify";
 
+/// UPM ids of the installable Unity domain dependencies whose typed
+/// tools are bundled in the bridge (M18 Plan 4). Built-in module
+/// domains (Particle System, Animation) have no UPM id and are not
+/// listed here — they are always present in the Editor and need no
+/// manifest entry. Kept in lock-step with `EMBEDDED_DOMAINS` in
+/// `hub/src/lib/services/extensions.ts` and the bridge asmdef
+/// `versionDefines` block. The detect snapshot reports one entry
+/// per id so the Hub can surface a read-only "installed / missing"
+/// chip per domain without a new Tauri command.
+pub const UNITY_DOMAIN_DEP_IDS: &[&str] = &[
+    "com.unity.ai.navigation",
+    "com.unity.inputsystem",
+    "com.unity.probuilder",
+];
+
 /// Default git remote used when the toolkit root has no `.git`
 /// directory or no `[remote "origin"]` block (e.g. a downloaded
 /// zip). Mirrors the canonical repository URL referenced in
@@ -197,6 +212,30 @@ pub struct ProjectState {
     /// Always `NotChecked` in M4; the Step 5 `/ping` verification
     /// rewrites this on Done entry.
     pub bridge_status: BridgeStatusKind,
+    /// Per-installable-domain install state for the Unity domain
+    /// dependencies whose typed tools are bundled in the bridge
+    /// (M18 Plan 4 T18.4.2). Built-in module domains (Particle
+    /// System, Animation) are always present and are NOT listed —
+    /// only the 3 UPM ids in [`UNITY_DOMAIN_DEP_IDS`] appear. The
+    /// Hub surfaces this as a read-only "installed / missing" panel
+    /// in the Unity project settings modal; the bridge window owns
+    /// the one-click install/remove actions.
+    pub unity_domain_deps: Vec<UnityDomainDepState>,
+}
+
+/// Install state for a single installable Unity domain dependency.
+/// Read-only on the Hub side (the Hub cannot run `Client.Add`); the
+/// bridge window owns install/remove.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnityDomainDepState {
+    /// UPM package id (e.g. `com.unity.ai.navigation`).
+    pub id: String,
+    /// `true` when the manifest `dependencies` carries the id.
+    pub installed: bool,
+    /// Manifest reference string (`2.0.0`, `file:…`, git URL) when
+    /// installed; `None` when missing.
+    pub reference: Option<String>,
 }
 
 /// Result of reading `Packages/manifest.json` for the wizard.
@@ -769,7 +808,8 @@ pub fn detect_project_state_at(project: &Path) -> ProjectState {
 
     let manifest_path = project.join("Packages").join("manifest.json");
     let manifest_present = manifest_path.exists();
-    let (bridge_installed, verify_installed) = read_manifest_inner(project).dependencies.iter().fold(
+    let manifest_deps = read_manifest_inner(project).dependencies;
+    let (bridge_installed, verify_installed) = manifest_deps.iter().fold(
         (false, false),
         |(b, v), (k, _)| {
             (
@@ -778,6 +818,21 @@ pub fn detect_project_state_at(project: &Path) -> ProjectState {
             )
         },
     );
+
+    // Unity domain dependencies — read-only install state for the
+    // bundled domain tool groups. Only the 3 installable UPM ids are
+    // surfaced; built-in module domains are always present and omitted.
+    let unity_domain_deps = UNITY_DOMAIN_DEP_IDS
+        .iter()
+        .map(|id| {
+            let reference = manifest_deps.get(*id).cloned();
+            UnityDomainDepState {
+                id: (*id).to_string(),
+                installed: reference.is_some(),
+                reference,
+            }
+        })
+        .collect::<Vec<_>>();
 
     let mcp_configured = read_mcp_heuristic(project);
     let any_skill_installed = any_skill_installed(project);
@@ -799,6 +854,7 @@ pub fn detect_project_state_at(project: &Path) -> ProjectState {
         manifest_writable,
         has_spaces_in_path,
         bridge_status: BridgeStatusKind::NotChecked,
+        unity_domain_deps,
     }
 }
 
@@ -1486,6 +1542,47 @@ mod tests {
         assert!(state.bridge_installed);
         assert!(!state.verify_installed);
         assert!(state.manifest_present);
+        // No Unity domain deps on disk → every entry reports missing.
+        assert_eq!(state.unity_domain_deps.len(), UNITY_DOMAIN_DEP_IDS.len());
+        assert!(state.unity_domain_deps.iter().all(|d| !d.installed));
+    }
+
+    #[test]
+    fn detect_surfaces_unity_domain_dep_install_state() {
+        let dir = tempdir().unwrap();
+        make_valid_project(dir.path());
+        write_manifest(
+            dir.path(),
+            &[
+                (BRIDGE_PACKAGE_ID, "file:../../packages/bridge"),
+                ("com.unity.ai.navigation", "2.0.0"),
+                ("com.unity.probuilder", "6.0.9"),
+            ],
+        );
+        let state = detect_project_state_at(dir.path());
+        // One entry per installable UPM id, in catalog order.
+        assert_eq!(
+            state
+                .unity_domain_deps
+                .iter()
+                .map(|d| d.id.as_str())
+                .collect::<Vec<_>>(),
+            UNITY_DOMAIN_DEP_IDS.to_vec()
+        );
+        let by_id = state
+            .unity_domain_deps
+            .iter()
+            .map(|d| (d.id.as_str(), d))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert!(by_id["com.unity.ai.navigation"].installed);
+        assert_eq!(
+            by_id["com.unity.ai.navigation"].reference.as_deref(),
+            Some("2.0.0")
+        );
+        assert!(by_id["com.unity.probuilder"].installed);
+        // Input System was not written → reports missing, no reference.
+        assert!(!by_id["com.unity.inputsystem"].installed);
+        assert!(by_id["com.unity.inputsystem"].reference.is_none());
     }
 
     #[test]

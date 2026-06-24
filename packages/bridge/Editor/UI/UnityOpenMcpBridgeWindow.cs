@@ -1572,30 +1572,44 @@ namespace UnityOpenMcpBridge
                 MessageType.None);
         }
 
-        // ---------- Extensions tab (M16 Plan 10) ----------
+        // ---------- Extensions tab (M16 Plan 10 / M18 Plan 4 T18.4.2) ----------
 
         [NonSerialized] private Vector2 _extensionsTabScroll;
 
-        // The extension pack catalog ships with the bridge assembly, so this
-        // tab needs no live network round-trip — every pack entry is static
-        // metadata. Installed detection uses the same registry scan result
-        // the Tools tab already depends on.
+        // The Extensions tab has two sections:
+        //  1. Optional Unity dependencies (M18 T18.4.2) — the live install /
+        //     status panel for the embedded domain tool groups. Owns the
+        //     one-click UPM install/remove actions.
+        //  2. Community / planned packs — the legacy ExtensionCatalog mirror.
+        //     Shipped domains no longer need a separate pack (their tools are
+        //     embedded), so this section now advertises only third-party and
+        //     planned packs.
         private void DrawExtensionsTab()
         {
             _extensionsTabScroll = EditorGUILayout.BeginScrollView(_extensionsTabScroll);
 
-            EditorGUILayout.Space(6);
-            EditorGUILayout.LabelField("Extension packs", EditorStyles.boldLabel);
+            OptionalDependenciesPanel.Draw();
+
+            BridgeGUIUtilities.HorizontalLine(2, 8);
+
+            DrawCommunityPacksSection();
+
+            EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawCommunityPacksSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Community / planned packs", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Shipped domain tools (NavMesh, Input System, ProBuilder, " +
                 "Particle System, Animation) are embedded inside the bridge " +
                 "and activate automatically when the matching Unity package is " +
-                "present — no separate install, no manifest entry. The Hub AI " +
-                "Setup wizard's Step 3 offers one-click install of the Unity " +
-                "domain dependencies. The rows below list every domain the " +
-                "catalog knows about (shipped + planned); the planned ones are " +
-                "coming-soon placeholders. Third-party / community packs still " +
-                "live under packages/extensions/ as separate UPM packages.",
+                "present — see the Optional Unity dependencies panel above for " +
+                "one-click install. The rows below cover the legacy catalog: " +
+                "third-party / community packs still live under " +
+                "packages/extensions/ as separate UPM packages, and planned " +
+                "domains are coming-soon placeholders.",
                 MessageType.None);
 
             BridgeGUIUtilities.HorizontalLine(2, 4);
@@ -1614,8 +1628,6 @@ namespace UnityOpenMcpBridge
                 "Catalog source: packages/bridge/Editor/UI/ExtensionCatalog.cs " +
                 "(add a new pack here + mirror it in hub/src/lib/services/extensions.ts).",
                 EditorStyles.miniLabel);
-
-            EditorGUILayout.EndScrollView();
         }
 
         // Returns true when the pack is installed in this project.

@@ -54,6 +54,10 @@ Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation) are
 
 Particle System and Animation are built-in Unity modules — no manifest entry is needed, the tools compile in as soon as the module is enabled in the Editor. See [extensions.md](extensions.md) for the full domain catalog and the define-symbol model.
 
+### Optional dependencies (in-Editor)
+
+Once the bridge is installed, you can add or remove Unity domain dependencies without editing the manifest by hand. Open **Tools → Unity Open MCP Bridge → Extensions** and use the **Optional Unity dependencies** panel: one row per domain shows installed / missing status, with a one-click **Install…** / **Remove…** action for each UPM package. Unity re-imports the manifest and recompiles; the embedded tools register (or stop compiling) on the next domain reload. The Unity Hub Pro project settings modal mirrors this as a read-only status panel.
+
 ## 2) Configure your MCP client
 
 Use `npx` by default:

@@ -169,6 +169,75 @@ export function findEmbeddedDomainByUpmId(upmId: string): EmbeddedDomain | undef
 }
 
 // ---------------------------------------------------------------------------
+// M18 Plan 4 T18.4.2 — Hub read-only install-state surface.
+//
+// The Hub cannot run `Client.Add` (it is a separate process), so it surfaces
+// the installed/missing status of each embedded Unity domain dependency as a
+// read-only panel. The Rust `detect_project_state` snapshot already carries
+// one entry per installable UPM id; this helper joins it with the static
+// `EMBEDDED_DOMAINS` catalog so the panel can render display names + the
+// always-on built-in module domains in one pass.
+// ---------------------------------------------------------------------------
+
+/** View-model row for the Hub's Unity-domain-deps panel. Joins the static
+ *  `EMBEDDED_DOMAINS` catalog with the live install-state snapshot. */
+export interface EmbeddedDomainInstallRow {
+  /** snake_case domain stem (matches `EmbeddedDomain.domain`). */
+  domain: string;
+  /** User-facing label. */
+  displayName: string;
+  /** `true` for built-in Unity module domains (always-on, no install). */
+  builtin: boolean;
+  /** UPM package id (empty for built-in module domains). */
+  upmDependency: string;
+  /** `true` when the manifest carries the UPM id. Always `true` for
+   *  built-in module domains (the Unity module ships with the Editor). */
+  installed: boolean;
+  /** Manifest reference string (`2.0.0`, `file:…`, git URL) when
+   *  installed; `null` otherwise. */
+  reference: string | null;
+}
+
+/**
+ * Build the Hub's read-only install-state view for every embedded Unity
+ * domain. Built-in module domains (Particle System, Animation) render as
+ * always-on; installable domains report the install state from the Rust
+ * snapshot keyed by UPM id.
+ *
+ * @param depStates Live install-state entries from `detect_project_state`
+ *   (`ProjectState.unityDomainDeps`). May be empty/undefined when the
+ *   backend snapshot is stale — installable domains then report missing.
+ */
+export function buildEmbeddedDomainInstallRows(
+  depStates:
+    | readonly { id: string; installed: boolean; reference: string | null }[]
+    | undefined,
+): EmbeddedDomainInstallRow[] {
+  const byId = new Map((depStates ?? []).map((d) => [d.id, d] as const));
+  return EMBEDDED_DOMAINS.map((d) => {
+    if (d.builtin) {
+      return {
+        domain: d.domain,
+        displayName: d.displayName,
+        builtin: true,
+        upmDependency: "",
+        installed: true,
+        reference: null,
+      };
+    }
+    const state = byId.get(d.upmDependency);
+    return {
+      domain: d.domain,
+      displayName: d.displayName,
+      builtin: false,
+      upmDependency: d.upmDependency,
+      installed: state?.installed ?? false,
+      reference: state?.reference ?? null,
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Legacy extension-pack catalog (mirror of ExtensionCatalog.cs).
 //
 // The bridge's in-Editor Extensions tab still renders every entry here

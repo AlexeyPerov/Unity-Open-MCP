@@ -64,6 +64,8 @@ npm run build
 
 Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation) are **bundled with the bridge** — there is no separate extension-pack install. They compile in automatically once the matching Unity package is present in the project. Toggle the Unity domain dependencies you want the wizard to add to `Packages/manifest.json`; the bridge's embedded tools register after Unity re-imports the manifest. Built-in Unity modules (Particle System, Animation) ship with the Editor and need no manifest entry — the wizard lists them for visibility only.
 
+After onboarding, you can add or remove Unity domain dependencies at any time from the bridge window (**Tools → Unity Open MCP Bridge → Extensions → Optional Unity dependencies**) — one click per domain, no manifest editing. The Hub's project settings modal also shows a read-only installed / missing status per domain.
+
 For the contributor / community-pack `file:` workflow, see [Manual setup](manual-setup.md#contributor--community-pack-workflow).
 
 [[SCREENSHOT:WIZARD-STEP3-PACKAGES-DIFF]]

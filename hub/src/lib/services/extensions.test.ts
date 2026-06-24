@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import {
   EMBEDDED_DOMAINS,
   EXTENSION_PACKS,
+  buildEmbeddedDomainInstallRows,
   builtinEmbeddedDomains,
   findEmbeddedDomainByUpmId,
   findPack,
@@ -75,6 +76,59 @@ test("navigation embedded domain lists all 11 tools", () => {
   const nav = findEmbeddedDomainByUpmId("com.unity.ai.navigation");
   assert.ok(nav);
   assert.equal(nav?.toolIds.length, 11);
+});
+
+// ---------------------------------------------------------------------------
+// buildEmbeddedDomainInstallRows (M18 Plan 4 T18.4.2 — Hub read-only panel).
+// ---------------------------------------------------------------------------
+
+test("buildEmbeddedDomainInstallRows renders one row per catalog domain", () => {
+  const rows = buildEmbeddedDomainInstallRows([]);
+  assert.equal(rows.length, EMBEDDED_DOMAINS.length);
+  // Order matches the static catalog.
+  assert.deepEqual(
+    rows.map((r) => r.domain),
+    EMBEDDED_DOMAINS.map((d) => d.domain),
+  );
+});
+
+test("buildEmbeddedDomainInstallRows marks every installable dep missing on empty snapshot", () => {
+  const rows = buildEmbeddedDomainInstallRows([]);
+  for (const r of rows) {
+    if (r.builtin) {
+      assert.equal(r.installed, true, `${r.domain} should be always-on`);
+      assert.equal(r.reference, null);
+    } else {
+      assert.equal(r.installed, false, `${r.domain} should be missing`);
+      assert.equal(r.reference, null);
+      assert.ok(r.upmDependency.length > 0);
+    }
+  }
+});
+
+test("buildEmbeddedDomainInstallRows joins the snapshot by UPM id", () => {
+  const rows = buildEmbeddedDomainInstallRows([
+    { id: "com.unity.ai.navigation", installed: true, reference: "2.0.0" },
+    { id: "com.unity.probuilder", installed: true, reference: "file:../../pb" },
+    { id: "com.unity.inputsystem", installed: false, reference: null },
+  ]);
+  const byDomain = new Map(rows.map((r) => [r.domain, r]));
+  assert.equal(byDomain.get("navigation")?.installed, true);
+  assert.equal(byDomain.get("navigation")?.reference, "2.0.0");
+  assert.equal(byDomain.get("probuilder")?.installed, true);
+  assert.equal(byDomain.get("probuilder")?.reference, "file:../../pb");
+  assert.equal(byDomain.get("inputsystem")?.installed, false);
+  assert.equal(byDomain.get("inputsystem")?.reference, null);
+  // Built-in module domains stay always-on regardless of snapshot.
+  assert.equal(byDomain.get("particle_system")?.builtin, true);
+  assert.equal(byDomain.get("particle_system")?.installed, true);
+  assert.equal(byDomain.get("animation")?.builtin, true);
+});
+
+test("buildEmbeddedDomainInstallRows tolerates a missing snapshot", () => {
+  const rows = buildEmbeddedDomainInstallRows(undefined);
+  assert.equal(rows.length, EMBEDDED_DOMAINS.length);
+  assert.ok(rows.filter((r) => !r.builtin).every((r) => r.installed === false));
 });
 
 // ---------------------------------------------------------------------------

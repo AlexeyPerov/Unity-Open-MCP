@@ -1372,6 +1372,26 @@ export interface ProjectState {
   hasSpacesInPath: boolean;
   /** Always `notChecked` in M4; Step 5 `/ping` would rewrite this. */
   bridgeStatus: BridgeStatusKind;
+  /** Per-installable-domain install state for the Unity domain
+   *  dependencies whose typed tools are bundled in the bridge
+   *  (M18 Plan 4 T18.4.2). Built-in module domains (Particle System,
+   *  Animation) are always present and are NOT listed — only the 3
+   *  UPM ids (`com.unity.ai.navigation`, `com.unity.inputsystem`,
+   *  `com.unity.probuilder`) appear. The Hub surfaces this as a
+   *  read-only panel; the bridge window owns install/remove. */
+  unityDomainDeps: UnityDomainDepState[];
+}
+
+/** Install state for a single installable Unity domain dependency.
+ *  Mirrors the Rust `UnityDomainDepState` in `wizard.rs`. */
+export interface UnityDomainDepState {
+  /** UPM package id (e.g. `com.unity.ai.navigation`). */
+  id: string;
+  /** `true` when the manifest `dependencies` carries the id. */
+  installed: boolean;
+  /** Manifest reference string (`2.0.0`, `file:…`, git URL) when
+   *  installed; `null` when missing. */
+  reference: string | null;
 }
 
 export async function detectProjectState(
