@@ -17,6 +17,16 @@ import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream, PullResult } from "./event-stream.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ToolSessionState } from "./tool-session-state.js";
+import { DEFAULT_ENABLED_GROUPS } from "./capabilities/tool-groups.js";
+
+// The default-active group set is the single source of truth in
+// `capabilities/tool-groups.ts` (the catalog's `defaultEnabled: true`
+// entries). Several manage_tools tests assert against the *current* default
+// set; derive it here so the tests track the catalog instead of hard-coding a
+// stale `["core"]`-only snapshot.
+function expectedDefaultActive(): string[] {
+  return Array.from(DEFAULT_ENABLED_GROUPS).sort();
+}
 
 // ---------------------------------------------------------------------------
 // fakes
@@ -530,7 +540,10 @@ test("route: manage_tools activate adds a group to the session", async () => {
   const body = parseBody(result);
   assert.equal(result.isError, false);
   assert.equal(body.changed, true);
-  assert.deepEqual(body.activeGroups, ["core", "navigation"]);
+  assert.deepEqual(
+    body.activeGroups,
+    [...expectedDefaultActive(), "navigation"].sort(),
+  );
   // The store reflects the change.
   assert.ok(session.isGroupActive("navigation"));
 });
@@ -601,7 +614,7 @@ test("route: manage_tools deactivate removes a group", async () => {
   });
   const body = parseBody(result);
   assert.equal(body.changed, true);
-  assert.deepEqual(body.activeGroups, ["core"]);
+  assert.deepEqual(body.activeGroups, expectedDefaultActive());
   assert.equal(session.isGroupActive("navigation"), false);
 });
 
@@ -621,7 +634,7 @@ test("route: manage_tools reset restores core-only", async () => {
   });
   const body = parseBody(result);
   assert.equal(body.reset, true);
-  assert.deepEqual(body.activeGroups, ["core"]);
+  assert.deepEqual(body.activeGroups, expectedDefaultActive());
 });
 
 test("route: manage_tools unknown action returns structured error", async () => {
@@ -664,7 +677,10 @@ test("route: manage_tools activate notifies when visibility changes", async () =
   );
   await router.route("unity_open_mcp_manage_tools", {
     action: "activate",
-    group: "asset-intelligence",
+    // Activate a group that is NOT in the default-enabled set so the call
+    // actually changes visibility and emits a notification. Domain groups
+    // (navigation, …) are always opt-in.
+    group: "navigation",
   });
   assert.equal(notifyCount, 1);
 });

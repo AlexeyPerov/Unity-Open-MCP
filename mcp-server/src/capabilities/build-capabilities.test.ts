@@ -301,9 +301,15 @@ test("toolGroups block reports the core group as default-enabled", () => {
   assert.equal(core!.domainDefine, null);
 });
 
-test("toolGroups block reports default-enabled count as 1 (core only)", () => {
+test("toolGroups block reports the default-enabled count from the catalog", () => {
+  // The default-enabled set is the catalog's `defaultEnabled: true` entries
+  // (extended beyond `core` in the "Extended default-enabled tools" change).
+  // Derive the expectation from the built capabilities so this test tracks
+  // the catalog instead of a stale hard-coded count.
   const caps = buildCapabilities(DEPS);
-  assert.equal(caps.counts.toolGroupsDefaultEnabled, 1);
+  const defaultCount = caps.toolGroups.filter((g) => g.defaultEnabled).length;
+  assert.ok(defaultCount >= 1, "at least core must be default-enabled");
+  assert.equal(caps.counts.toolGroupsDefaultEnabled, defaultCount);
   assert.equal(caps.counts.toolGroupsTotal, caps.toolGroups.length);
 });
 

@@ -1,5 +1,5 @@
 /**
- * M16 Plan 10 → M18 Plan 4 — extension catalog (Hub mirror).
+ * M16 Plan 10 → M18 Plan 5 — extension catalog (Hub mirror).
  *
  * Two catalogs live here:
  *
@@ -11,14 +11,15 @@
  *    tools compile in and register automatically — no separate
  *    install. Built-in Unity module domains (Particle System,
  *    Animation) have no UPM id and render as info-only "always-on"
- *    cards.
+ *    cards. This is the catalog for the five shipped first-party
+ *    domains (Nav, Input, ProBuilder, Particles, Animation).
  *
- * 2. `EXTENSION_PACKS` — the legacy extension-pack mirror. The
- *    bridge's in-Editor Extensions tab (`ExtensionCatalog.cs`) still
- *    surfaces these for community / planned packs, so the mirror
- *    stays in sync. The wizard Step 3 no longer consumes this
- *    catalog for shipped domains (M18 Plan 4) — only
- *    `EMBEDDED_DOMAINS` drives the new Unity-dep install flow.
+ * 2. `EXTENSION_PACKS` — the third-party / community / planned pack
+ *    mirror. Shipped first-party domains are deliberately absent here
+ *    (they live in `EMBEDDED_DOMAINS`); this catalog advertises only
+ *    planned placeholders (Splines, Terrain, Tilemap) and any future
+ *    real third-party community pack. Mirrors the bridge's in-Editor
+ *    `ExtensionCatalog.cs` (the "Community / planned packs" section).
  *
  * Pure data — no runtime deps. Run with:
  *   node --test --experimental-strip-types --no-warnings src/lib/services/extensions.test.ts
@@ -240,11 +241,16 @@ export function buildEmbeddedDomainInstallRows(
 // ---------------------------------------------------------------------------
 // Legacy extension-pack catalog (mirror of ExtensionCatalog.cs).
 //
-// The bridge's in-Editor Extensions tab still renders every entry here
-// so users see community / planned packs; the Hub keeps the mirror in
-// sync. The wizard Step 3 no longer consumes this catalog for shipped
-// domains after M18 Plan 4 — see EMBEDDED_DOMAINS above for the new
-// Unity-domain-dep install flow.
+// M18 Plan 5 — this catalog covers ONLY third-party / community and
+// planned packs. The five shipped first-party domains (Nav, Input,
+// ProBuilder, Particles, Animation) are deliberately ABSENT: their
+// tools are embedded in the bridge and live in EMBEDDED_DOMAINS above.
+// Listing them here again would double-describe the surface (and risk
+// duplicate tool registration if a legacy pack were still installed —
+// see M18 Plan 6). The Hub wizard Step 3 consumes EMBEDDED_DOMAINS for
+// the Unity-domain-dep install flow; this catalog is kept only so the
+// bridge's in-Editor "Community / planned packs" section + the Hub stay
+// in sync on placeholders and any future community pack.
 // ---------------------------------------------------------------------------
 
 export interface ExtensionPack {
@@ -269,74 +275,16 @@ export interface ExtensionPack {
 }
 
 /**
- * Catalog of legacy / community extension packs. Shipped first-party
- * domains (Nav, Input, ProBuilder, Particles, Animation) are listed
- * with `shipped: true` for parity with the bridge's Extensions tab,
- * but the wizard Step 3 ignores them — embedded tools ship with the
- * bridge now. Community / planned packs remain real UPM packages.
+ * Catalog of legacy / community / planned extension packs. M18 Plan 5
+ * narrowed this to third-party + planned packs only: the five shipped
+ * first-party domains are embedded in the bridge and tracked in
+ * EMBEDDED_DOMAINS, so they are deliberately absent here. Planned
+ * placeholders (Splines, Terrain, Tilemap) advertise coming-soon
+ * domains; a real third-party community pack is added here with
+ * `shipped: true` only when its tools register from an external
+ * assembly. Mirrors `ExtensionCatalog.cs` — keep both in sync.
  */
 export const EXTENSION_PACKS: readonly ExtensionPack[] = [
-  {
-    id: "com.alexeyperov.unity-open-mcp-ext-navigation",
-    domain: "navigation",
-    displayName: "Navigation (NavMesh)",
-    description:
-      "NavMeshSurface bake, agent setup, off-mesh links, and navigation modifiers.",
-    upmDependency: "com.unity.ai.navigation",
-    localPath: "packages/extensions/navigation",
-    toolIds: [
-      "unity_open_mcp_navigation_surface_add",
-      "unity_open_mcp_navigation_set_bake_settings",
-      "unity_open_mcp_navigation_surface_bake",
-      "unity_open_mcp_navigation_modifier_add",
-      "unity_open_mcp_navigation_modifier_volume_add",
-      "unity_open_mcp_navigation_link_add",
-      "unity_open_mcp_navigation_agent_add",
-      "unity_open_mcp_navigation_agent_set_destination",
-      "unity_open_mcp_navigation_list",
-      "unity_open_mcp_navigation_get",
-      "unity_open_mcp_navigation_modify",
-    ],
-    skillPath: "skills/extensions/navigation/SKILL.md",
-    shipped: true,
-  },
-  {
-    id: "com.alexeyperov.unity-open-mcp-ext-inputsystem",
-    domain: "inputsystem",
-    displayName: "Input System",
-    description:
-      "Input Action asset authoring (maps, actions, bindings, control schemes).",
-    upmDependency: "com.unity.inputsystem",
-    localPath: "packages/extensions/inputsystem",
-    toolIds: [
-      "unity_open_mcp_inputsystem_asset_create",
-      "unity_open_mcp_inputsystem_actionmap_add",
-      "unity_open_mcp_inputsystem_action_add",
-      "unity_open_mcp_inputsystem_binding_add",
-      "unity_open_mcp_inputsystem_binding_composite_add",
-      "unity_open_mcp_inputsystem_controlscheme_add",
-      "unity_open_mcp_inputsystem_get",
-    ],
-    skillPath: "skills/extensions/inputsystem/SKILL.md",
-    shipped: true,
-  },
-  {
-    id: "com.alexeyperov.unity-open-mcp-ext-probuilder",
-    domain: "probuilder",
-    displayName: "ProBuilder",
-    description: "In-editor mesh editing: shape creation, extrude, face materials.",
-    upmDependency: "com.unity.probuilder",
-    localPath: "packages/extensions/probuilder",
-    toolIds: [
-      "unity_open_mcp_probuilder_create_shape",
-      "unity_open_mcp_probuilder_get_mesh_info",
-      "unity_open_mcp_probuilder_extrude",
-      "unity_open_mcp_probuilder_delete_faces",
-      "unity_open_mcp_probuilder_set_face_material",
-    ],
-    skillPath: "skills/extensions/probuilder/SKILL.md",
-    shipped: true,
-  },
   {
     id: "com.alexeyperov.unity-open-mcp-ext-splines",
     domain: "splines",
@@ -369,38 +317,6 @@ export const EXTENSION_PACKS: readonly ExtensionPack[] = [
     toolIds: [],
     skillPath: "skills/extensions/tilemap/SKILL.md",
     shipped: false,
-  },
-  {
-    id: "com.alexeyperov.unity-open-mcp-ext-particlesystem",
-    domain: "particle_system",
-    displayName: "Particle System",
-    description: "Particle module discovery and reflective mutation.",
-    upmDependency: "",
-    localPath: "packages/extensions/particlesystem",
-    toolIds: [
-      "unity_open_mcp_particle_system_get",
-      "unity_open_mcp_particle_system_modify",
-    ],
-    skillPath: "skills/extensions/particlesystem/SKILL.md",
-    shipped: true,
-  },
-  {
-    id: "com.alexeyperov.unity-open-mcp-ext-animation",
-    domain: "animation",
-    displayName: "Animation",
-    description: "AnimationClip curves and AnimatorController state machines.",
-    upmDependency: "",
-    localPath: "packages/extensions/animation",
-    toolIds: [
-      "unity_open_mcp_animation_create",
-      "unity_open_mcp_animation_get_data",
-      "unity_open_mcp_animation_modify",
-      "unity_open_mcp_animator_create",
-      "unity_open_mcp_animator_get_data",
-      "unity_open_mcp_animator_modify",
-    ],
-    skillPath: "skills/extensions/animation/SKILL.md",
-    shipped: true,
   },
 ] as const;
 

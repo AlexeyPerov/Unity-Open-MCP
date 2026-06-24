@@ -40,7 +40,11 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
  *
  * Lifecycle:
  *  - Constructed once per stdio server process (one connected MCP client).
- *  - Initial active set is {@link DEFAULT_ENABLED_GROUPS} (`{ "core" }`).
+ *  - Initial active set is {@link DEFAULT_ENABLED_GROUPS} — the groups
+ *    marked `defaultEnabled: true` in the canonical tool-group catalog
+ *    (see `capabilities/tool-groups.ts`). Today that is `core` plus the
+ *    always-useful `gate-and-verify` / `asset-intelligence` / `typed-editor`
+ *    / `diagnostics` groups; the catalog is the single source of truth.
  *  - Mutated only by {@link activate} / {@link deactivate} / {@link reset}
  *    (called from the manage_tools router).
  *  - Read by {@link isGroupActive} (manage_tools list_groups) and
@@ -85,7 +89,7 @@ export class ToolSessionState {
     return true;
   }
 
-  /** Restore the default active set (`core` only). Always returns true. */
+  /** Restore the default active set (see {@link DEFAULT_ENABLED_GROUPS}). Always returns true. */
   reset(): boolean {
     this.active = new Set(DEFAULT_ENABLED_GROUPS);
     return true;

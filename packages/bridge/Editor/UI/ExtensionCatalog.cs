@@ -2,6 +2,22 @@ using System.Collections.Generic;
 
 namespace UnityOpenMcpBridge
 {
+    /// <summary>
+    /// A third-party / community or planned domain extension pack.
+    /// </summary>
+    /// <remarks>
+    /// M18 Plan 5 — this catalog covers ONLY packs that are NOT shipped
+    /// embedded in the bridge. The five shipped domains (navigation,
+    /// inputsystem, probuilder, particlesystem, animation) live in
+    /// <see cref="EmbeddedDomainCatalog"/> now and activate automatically
+    /// when their Unity dependency is present. Listing them here again would
+    /// double-describe the surface (and would risk duplicate tool
+    /// registration if a legacy pack were still installed — see M18 Plan 6).
+    /// The entries here are therefore <c>shipped: false</c> planned
+    /// placeholders plus any future community pack (third-party
+    /// <c>com.*.unity-open-mcp-ext-*</c> UPM packages under
+    /// <c>packages/extensions/</c>).
+    /// </remarks>
     public class ExtensionPack
     {
         public string Id { get; }
@@ -37,72 +53,27 @@ namespace UnityOpenMcpBridge
         }
     }
 
+    /// <summary>
+    /// Catalog of third-party / community and planned domain extension packs.
+    /// </summary>
+    /// <remarks>
+    /// Shipped first-party domains are deliberately ABSENT — see the
+    /// <see cref="ExtensionPack"/> class doc. The in-Editor Extensions tab
+    /// renders one row per entry here under "Community / planned packs"; the
+    /// shipped domains get their own "Optional Unity dependencies" panel
+    /// driven by <see cref="EmbeddedDomainCatalog"/>.
+    /// </remarks>
     public static class ExtensionCatalog
     {
+        // Planned packs — advertised with shipped:false so the window shows
+        // "coming soon" rather than hides them. When a planned domain ships
+        // as an embedded bridge domain (M18 Plan 7+), it moves into
+        // EmbeddedDomainCatalog and is REMOVED from here, not flipped to
+        // shipped:true. A real third-party / community pack is added here
+        // with shipped:true only when its tools register from an external
+        // assembly.
         public static readonly ExtensionPack[] Packs =
         {
-            new ExtensionPack(
-                id: "com.alexeyperov.unity-open-mcp-ext-navigation",
-                domain: "navigation",
-                displayName: "Navigation (NavMesh)",
-                description: "NavMeshSurface bake, agent setup, off-mesh links, and navigation modifiers.",
-                upmDependency: "com.unity.ai.navigation",
-                localPath: "packages/extensions/navigation",
-                toolIds: new[]
-                {
-                    "unity_open_mcp_navigation_surface_add",
-                    "unity_open_mcp_navigation_set_bake_settings",
-                    "unity_open_mcp_navigation_surface_bake",
-                    "unity_open_mcp_navigation_modifier_add",
-                    "unity_open_mcp_navigation_modifier_volume_add",
-                    "unity_open_mcp_navigation_link_add",
-                    "unity_open_mcp_navigation_agent_add",
-                    "unity_open_mcp_navigation_agent_set_destination",
-                    "unity_open_mcp_navigation_list",
-                    "unity_open_mcp_navigation_get",
-                    "unity_open_mcp_navigation_modify",
-                },
-                skillPath: "skills/extensions/navigation/SKILL.md",
-                shipped: true),
-            // Planned packs — advertised with shipped:false so the window /
-            // wizard can show "coming soon" rather than hide them. When a
-            // pack lands (T6.6.4+), flip shipped to true and fill the fields.
-            new ExtensionPack(
-                id: "com.alexeyperov.unity-open-mcp-ext-inputsystem",
-                domain: "inputsystem",
-                displayName: "Input System",
-                description: "Input Action asset authoring (maps, actions, bindings, control schemes).",
-                upmDependency: "com.unity.inputsystem",
-                localPath: "packages/extensions/inputsystem",
-                toolIds: new[]
-                {
-                    "unity_open_mcp_inputsystem_asset_create",
-                    "unity_open_mcp_inputsystem_actionmap_add",
-                    "unity_open_mcp_inputsystem_action_add",
-                    "unity_open_mcp_inputsystem_binding_add",
-                    "unity_open_mcp_inputsystem_binding_composite_add",
-                    "unity_open_mcp_inputsystem_controlscheme_add",
-                    "unity_open_mcp_inputsystem_get",
-                },
-                skillPath: "skills/extensions/inputsystem/SKILL.md",
-                shipped: true),
-            new ExtensionPack(
-                id: "com.alexeyperov.unity-open-mcp-ext-probuilder",
-                domain: "probuilder",
-                displayName: "ProBuilder",
-                description: "In-editor mesh editing: shape creation, extrude, face materials.",
-                upmDependency: "com.unity.probuilder",
-                localPath: "packages/extensions/probuilder",
-                toolIds: new[]
-                {
-                    "unity_open_mcp_probuilder_create_shape",
-                    "unity_open_mcp_probuilder_get_mesh_info",
-                    "unity_open_mcp_probuilder_extrude",
-                    "unity_open_mcp_probuilder_delete_faces",
-                    "unity_open_mcp_probuilder_set_face_material",
-                },
-                skillPath: "skills/extensions/probuilder/SKILL.md",
-                shipped: true),
             new ExtensionPack(
                 id: "com.alexeyperov.unity-open-mcp-ext-splines",
                 domain: "splines",
@@ -133,45 +104,15 @@ namespace UnityOpenMcpBridge
                 toolIds: System.Array.Empty<string>(),
                 skillPath: "skills/extensions/tilemap/SKILL.md",
                 shipped: false),
-            new ExtensionPack(
-                id: "com.alexeyperov.unity-open-mcp-ext-particlesystem",
-                domain: "particle_system",
-                displayName: "Particle System",
-                description: "Particle module discovery and reflective mutation.",
-                upmDependency: "",
-                localPath: "packages/extensions/particlesystem",
-                toolIds: new[]
-                {
-                    "unity_open_mcp_particle_system_get",
-                    "unity_open_mcp_particle_system_modify",
-                },
-                skillPath: "skills/extensions/particlesystem/SKILL.md",
-                shipped: true),
-            new ExtensionPack(
-                id: "com.alexeyperov.unity-open-mcp-ext-animation",
-                domain: "animation",
-                displayName: "Animation",
-                description: "AnimationClip curves and AnimatorController state machines.",
-                upmDependency: "",
-                localPath: "packages/extensions/animation",
-                toolIds: new[]
-                {
-                    "unity_open_mcp_animation_create",
-                    "unity_open_mcp_animation_get_data",
-                    "unity_open_mcp_animation_modify",
-                    "unity_open_mcp_animator_create",
-                    "unity_open_mcp_animator_get_data",
-                    "unity_open_mcp_animator_modify",
-                },
-                skillPath: "skills/extensions/animation/SKILL.md",
-                shipped: true),
         };
 
         /// <summary>
-        /// True when the bridge assembly that owns the given tool id belongs
-        /// to a shipped extension pack. Used by the window to surface
-        /// "extension pack not installed" hints when an agent calls a pack
-        /// tool that the project has not opted into.
+        /// True when the given tool id belongs to a known pack in this
+        /// catalog. Used by the window to surface "extension pack not
+        /// installed" hints when an agent calls a pack tool that the project
+        /// has not opted into. Note: shipped embedded domain tool ids are
+        /// NOT in this catalog — they are probed via
+        /// <see cref="BridgeToolRegistry"/> / <see cref="EmbeddedDomainCatalog"/>.
         /// </summary>
         public static bool IsExtensionToolId(string toolName)
         {

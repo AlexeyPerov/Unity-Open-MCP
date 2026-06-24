@@ -132,7 +132,7 @@ test("buildEmbeddedDomainInstallRows tolerates a missing snapshot", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Legacy extension-pack catalog (still mirrored for the bridge UI).
+// Legacy extension-pack catalog (M18 Plan 5 — community / planned only).
 // ---------------------------------------------------------------------------
 
 test("EXTENSION_PACKS is non-empty and unique by id", () => {
@@ -141,42 +141,50 @@ test("EXTENSION_PACKS is non-empty and unique by id", () => {
   assert.equal(new Set(ids).size, ids.length);
 });
 
-test("navigation pack is shipped and lists all 11 tools", () => {
-  const nav = findPack("com.alexeyperov.unity-open-mcp-ext-navigation");
-  assert.ok(nav, "navigation pack should be in the catalog");
-  assert.equal(nav?.shipped, true);
-  assert.equal(nav?.toolIds.length, 11);
-  assert.equal(nav?.upmDependency, "com.unity.ai.navigation");
-});
-
-test("planned packs are not in shippedPacks()", () => {
-  const shipped = shippedPacks();
-  // navigation + inputsystem + probuilder + particlesystem + animation ship.
-  assert.equal(
-    shipped.length,
-    5,
-    "navigation + inputsystem + probuilder + particlesystem + animation ship",
+test("EXTENSION_PACKS does not double-list shipped embedded domains", () => {
+  // The five shipped first-party domains are embedded in the bridge
+  // (EMBEDDED_DOMAINS) and MUST NOT also appear in the legacy catalog —
+  // that would double-describe the surface and risk duplicate tool
+  // registration if a legacy pack were still installed (M18 Plan 5/6).
+  const shippedDomains = new Set(
+    EMBEDDED_DOMAINS.map((d) => d.domain),
   );
-  const shippedDomains = shipped.map((p) => p.domain);
-  assert.ok(shippedDomains.includes("navigation"));
-  assert.ok(shippedDomains.includes("inputsystem"));
-  assert.ok(shippedDomains.includes("probuilder"));
-  assert.ok(shippedDomains.includes("particle_system"));
-  assert.ok(shippedDomains.includes("animation"));
-  for (const p of shipped) {
-    assert.equal(p.shipped, true);
+  for (const p of EXTENSION_PACKS) {
+    assert.ok(
+      !shippedDomains.has(p.domain),
+      `${p.domain} is embedded — must not be in EXTENSION_PACKS`,
+    );
   }
 });
 
-test("findPack returns undefined for an unknown id", () => {
+test("EXTENSION_PACKS advertises the planned placeholders", () => {
+  const domains = EXTENSION_PACKS.map((p) => p.domain).sort();
+  assert.deepEqual(domains, ["splines", "terrain", "tilemap"]);
+  // All current entries are planned (no shipped community pack yet).
+  for (const p of EXTENSION_PACKS) {
+    assert.equal(p.shipped, false, `${p.domain} should be a planned placeholder`);
+  }
+});
+
+test("shippedPacks() is empty until a real community pack lands", () => {
+  // No shipped first-party or community pack in this catalog after M18
+  // Plan 5; shipped domains live in EMBEDDED_DOMAINS.
+  assert.equal(shippedPacks().length, 0);
+});
+
+test("findPack returns the planned pack and undefined for unknown ids", () => {
+  const splines = findPack("com.alexeyperov.unity-open-mcp-ext-splines");
+  assert.ok(splines, "splines planned pack should be in the catalog");
+  assert.equal(splines?.shipped, false);
+  assert.equal(findPack("com.alexeyperov.unity-open-mcp-ext-navigation"), undefined);
   assert.equal(findPack("com.alexeyperov.no-such-pack"), undefined);
 });
 
 test("localPackageEntry produces a file: URL relative to Packages", () => {
-  const nav = findPack("com.alexeyperov.unity-open-mcp-ext-navigation")!;
+  const splines = findPack("com.alexeyperov.unity-open-mcp-ext-splines")!;
   assert.equal(
-    localPackageEntry(nav),
-    "file:../../packages/extensions/navigation",
+    localPackageEntry(splines),
+    "file:../../packages/extensions/splines",
   );
 });
 

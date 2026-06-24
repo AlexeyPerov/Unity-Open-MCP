@@ -41,13 +41,18 @@ test("every group carries a non-empty description", () => {
   }
 });
 
-test("DEFAULT_ENABLED_GROUPS is exactly { core }", () => {
-  // The resolved decision in M18 execution-plan.md — fresh sessions see only
-  // `core`. Do not let this drift without updating manage_tools docs.
-  assert.deepEqual(
-    Array.from(DEFAULT_ENABLED_GROUPS).sort(),
-    ["core"],
-  );
+test("DEFAULT_ENABLED_GROUPS matches the catalog's defaultEnabled entries", () => {
+  // Single source of truth: the set of groups marked `defaultEnabled: true`
+  // in the catalog. Today that is `core` plus the always-useful verify /
+  // asset / typed-editor / diagnostics groups (extended in the "Extended
+  // default-enabled tools" change). Asserting against the catalog keeps this
+  // test honest when defaults change instead of hard-coding a snapshot.
+  const expected = TOOL_GROUPS.filter((g) => g.defaultEnabled)
+    .map((g) => g.id)
+    .sort();
+  assert.deepEqual(Array.from(DEFAULT_ENABLED_GROUPS).sort(), expected);
+  // `core` is always default-on — the essential entry points live there.
+  assert.ok(DEFAULT_ENABLED_GROUPS.has("core"));
 });
 
 test("every domain-gated group carries both domainDefine and unityPackage", () => {
@@ -177,15 +182,25 @@ test("groupToTools navigation roster has all 11 navigation tools", () => {
 // Session state — activate / deactivate / reset
 // ---------------------------------------------------------------------------
 
-test("fresh session state has only core active", () => {
+// The default-active set is the catalog's `defaultEnabled` entries. Several
+// session-state tests assert against it; derive here so they track the
+// catalog instead of a stale `["core"]`-only snapshot.
+function expectedDefaultActive(): string[] {
+  return Array.from(DEFAULT_ENABLED_GROUPS).sort();
+}
+
+test("fresh session state has the default-active groups", () => {
   const s = new ToolSessionState();
-  assert.deepEqual(s.activeGroups(), ["core"]);
+  assert.deepEqual(s.activeGroups(), expectedDefaultActive());
 });
 
 test("activate adds a group", () => {
   const s = new ToolSessionState();
   assert.equal(s.activate("navigation"), true);
-  assert.deepEqual(s.activeGroups(), ["core", "navigation"]);
+  assert.deepEqual(
+    s.activeGroups(),
+    [...expectedDefaultActive(), "navigation"].sort(),
+  );
   // activating again is a no-op (returns false)
   assert.equal(s.activate("navigation"), false);
 });
@@ -193,14 +208,14 @@ test("activate adds a group", () => {
 test("activate rejects unknown groups", () => {
   const s = new ToolSessionState();
   assert.equal(s.activate("does-not-exist"), false);
-  assert.deepEqual(s.activeGroups(), ["core"]);
+  assert.deepEqual(s.activeGroups(), expectedDefaultActive());
 });
 
 test("deactivate removes a group", () => {
   const s = new ToolSessionState();
   s.activate("navigation");
   assert.equal(s.deactivate("navigation"), true);
-  assert.deepEqual(s.activeGroups(), ["core"]);
+  assert.deepEqual(s.activeGroups(), expectedDefaultActive());
   // deactivating again is a no-op
   assert.equal(s.deactivate("navigation"), false);
 });
@@ -216,7 +231,7 @@ test("deactivate allows removing core", () => {
   // want a minimal surface.
   const s = new ToolSessionState();
   assert.equal(s.deactivate("core"), true);
-  assert.deepEqual(s.activeGroups(), []);
+  assert.ok(!s.isGroupActive("core"));
 });
 
 test("reset restores the default active set", () => {
@@ -225,7 +240,7 @@ test("reset restores the default active set", () => {
   s.activate("probuilder");
   s.deactivate("core");
   assert.equal(s.reset(), true);
-  assert.deepEqual(s.activeGroups(), ["core"]);
+  assert.deepEqual(s.activeGroups(), expectedDefaultActive());
 });
 
 test("isGroupActive reflects the active set", () => {
@@ -248,15 +263,15 @@ function tools(...names: string[]): Tool[] {
   }));
 }
 
-test("filterVisibleTools: fresh session shows core + meta-tools, hides others", () => {
+test("filterVisibleTools: fresh session shows default-active + meta-tools, hides opt-in groups", () => {
   const state = new ToolSessionState();
   const filtered = filterVisibleTools(
     tools(
-      "unity_open_mcp_ping", // core
+      "unity_open_mcp_ping", // core — default-on
       "unity_open_mcp_capabilities", // meta (always visible)
       "unity_open_mcp_manage_tools", // meta (always visible)
-      "unity_open_mcp_navigation_surface_add", // navigation — hidden
-      "unity_open_mcp_gameobject_create", // typed-editor — hidden
+      "unity_open_mcp_navigation_surface_add", // navigation — opt-in, hidden
+      "unity_open_mcp_build_start", // build-settings — opt-in, hidden
     ),
     state,
   );
@@ -268,7 +283,7 @@ test("filterVisibleTools: fresh session shows core + meta-tools, hides others", 
   ]);
 });
 
-test("filterVisibleTools: activating a group reveals its tools", () => {
+test("filterVisibleTools: activating an opt-in group reveals its tools", () => {
   const state = new ToolSessionState();
   state.activate("navigation");
   const filtered = filterVisibleTools(
@@ -276,7 +291,7 @@ test("filterVisibleTools: activating a group reveals its tools", () => {
       "unity_open_mcp_ping",
       "unity_open_mcp_navigation_surface_add",
       "unity_open_mcp_navigation_modify",
-      "unity_open_mcp_gameobject_create", // still hidden
+      "unity_open_mcp_build_start", // build-settings — still opt-in, hidden
     ),
     state,
   );

@@ -10,7 +10,7 @@ The MCP server is published to npm as [`unity-open-mcp`](https://www.npmjs.com/p
 - Asset intelligence tools including reserialize, structured asset read/search, and reference analysis.
 - Live + fallback routing (live Unity bridge, batch mode for supported tools, offline readers where possible).
 - Typed Unity tool surface for scenes, GameObjects, components, packages, build settings, profiler controls, and project settings.
-- Optional extension packs for Navigation, Input System, ProBuilder, Particle System, and Animation.
+- Bundled domain tool groups for Navigation, Input System, ProBuilder, Particle System, and Animation — embedded in the bridge, compiled in automatically when the matching Unity package is present, and surfaced per session via tool groups.
 - Unity Hub Pro wizard for guided setup and maintainer workflows.
 
 ## MCP tools at a glance
