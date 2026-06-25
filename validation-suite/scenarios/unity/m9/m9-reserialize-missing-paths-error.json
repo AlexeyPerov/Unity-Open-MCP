@@ -1,0 +1,54 @@
+{
+  "id": "m9-reserialize-missing-paths-error",
+  "title": "Reserialize rejects a missing paths parameter",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 110,
+  "requirementLevel": "optional",
+  "tags": ["m9", "reserialize", "error-path", "plan-1"],
+  "automatedCoverage": [
+    "ReserializeAssetsToolTests.Execute_MissingPaths_ReturnsMissingParameter",
+    "ReserializeAssetsToolTests.Execute_EmptyPathsArray_ReturnsMissingParameter",
+    "ReserializeAssetsToolTests.Execute_NullPaths_ReturnsMissingParameter"
+  ],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Optional, automated-covered error path: confirm the pre-flight validation rejects a missing/empty/null `paths` before any mutation. The missing-parameter branch is asserted by the automated tests below; no fs setup is needed."
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Call reserialize with no paths",
+      "tool": "unity_open_mcp_reserialize",
+      "payload": {
+        "gate": "enforce"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "mutation.success is false / absent (no mutation happened)",
+        "error.code is \"missing_parameter\"",
+        "error message mentions 'paths' and that whole-project reserialize is not supported"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw error envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "note": "Prompt-only error path (no mutation, no fixture); nothing to revert on disk."
+  }
+}

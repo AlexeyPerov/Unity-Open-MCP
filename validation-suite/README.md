@@ -72,15 +72,45 @@ Per active project + Unity profile:
 - **State file:** `UserSettings/ValidationSuite/.state.json` — atomic read/write; survives app restart.
 - **Manifests:** `UserSettings/ValidationSuite/manifests/` — per-step artifact manifests for reset.
 - **Actuals:** `UserSettings/ValidationSuite/actuals/` (wired in Phase 2).
-- **Exports:** `UserSettings/ValidationSuite/exports/` (Phase 5).
+- **Exports:** `UserSettings/ValidationSuite/exports/` — run-summary markdown (Phase 5).
 - **Fixtures:** `Assets/_ValidationSuite/<test-id>/`.
 
 State is **not migrated** between versions: a version mismatch produces a warning with reset guidance.
+
+### Demo project hygiene
+
+The suite stages disposable fixtures under `Assets/_ValidationSuite/` and writes local state under `UserSettings/ValidationSuite/`. The bundled `demo/` project's `.gitignore` ignores both so they never get committed:
+
+- `Assets/_ValidationSuite/` — staged and reverted per scenario by the suite.
+- `UserSettings/ValidationSuite/` — operator state, manifests, actuals, exports.
+
+## Requirement tiers and optional scenarios
+
+Every scenario declares a `requirementLevel` (idea.md → Coverage policy):
+
+- **required-core** — the milestone closeout gate. Use the **Required · core** filter to isolate these.
+- **required-extended** — a recommended confidence pass.
+- **optional** — runnable; usually shows automated coverage. Collapsed into a default-closed "Optional" subsection within each milestone group, with an **Auto** badge when `automatedCoverage` references exist.
+
+Optional scenarios carry an `automatedCoverage` array naming the tests that already cover the behavior; they stay runnable so an operator can do a live confidence pass even when automation exists.
+
+## Export (run summary)
+
+Use **Export…** in the top bar to produce a sign-off markdown summary of the current run:
+
+- **Copy summary to clipboard** — markdown ready to paste into a milestone checklist or changelog.
+- **Save summary as file…** — writes a timestamped `.md` under `UserSettings/ValidationSuite/exports/`.
+
+The summary includes the project path, engine profile id, timestamp, a requirement-tier breakdown, one status table per milestone (required grouped, optional folded under an "Optional" subheading), and the closeout-gate verdict (passes only when every `required-core` scenario is `done`). The builder is engine-neutral (`packages/core/src/export.ts`) and unit-tested.
 
 ## Status
 
 Phases 0–1: design contracts + app foundation — Tauri + SvelteKit scaffold, core package, project + profile selection, scenario loader with validation, state persistence, baseline UI.
 
-Phase 2 (this directory): action executor (`fs_*`, `mcp_tool`, `manual`) with project-root sandboxing, manifest-based reset, the MCP CLI subprocess runner, and a per-step action log panel.
+Phase 2: action executor (`fs_*`, `mcp_tool`, `manual`) with project-root sandboxing, manifest-based reset, the MCP CLI subprocess runner, and a per-step action log panel.
 
-Later phases add bridge admin tools (Phase 3), the M9 required scenarios (Phase 4), and optional/export/process integration (Phase 5).
+Phase 3: operator-only bridge admin (`bridge_status` MCP tool) wired into the TopBar chip and offline scenarios.
+
+Phase 4: the M9 `required-core` + `required-extended` scenario set, runnable end-to-end.
+
+Phase 5 (this directory): optional automated-covered scenarios (extension matrix, error paths, compact-read quantitative checks, serializer behavior), the Export run summary, and milestone process wiring — the manual checklist convention now supports a Validation Suite index model and the demo `.gitignore` documents suite data paths.

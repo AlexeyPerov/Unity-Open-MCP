@@ -1,0 +1,56 @@
+{
+  "id": "m9-search-assets-reason-tags",
+  "title": "search_assets: matches carry reason tags and capped object lists",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 121,
+  "requirementLevel": "optional",
+  "tags": ["m9", "search-assets", "compression", "plan-2"],
+  "automatedCoverage": [
+    "compress.test.ts: renderSearchSummary preserves reason tags and caps objects per file",
+    "compress.test.ts: compactPath drops Assets/ prefix and normalizes slashes",
+    "compress.test.ts: extForKind maps known kinds to extensions"
+  ],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Optional, automated-covered quantitative check: confirm `unity_open_mcp_search_assets` tags why each file matched and caps the per-file object list. The reason-tag rendering + object capping is asserted by the automated test below; this scenario is a runnable confidence pass."
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Search for a component that exists in the demo",
+      "tool": "unity_open_mcp_search_assets",
+      "payload": {
+        "component": "MeshRenderer",
+        "type": "prefab",
+        "max_results": 20
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "matches array; each entry has path (Assets/ prefix dropped), kind, and reasons (including component and/or gameobject)",
+        "a capped objects list per file, with moreObjectsHidden when the cap is hit",
+        "an ext table maps each kind to its extension"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "note": "search_assets is read-only; no fixture is staged and nothing is reverted on disk."
+  }
+}

@@ -210,3 +210,15 @@ export function loadStepManifest(id: string): Promise<StepManifest | null> {
 export function deleteStepManifest(id: string): Promise<void> {
   return invoke<void>("delete_step_manifest", { id });
 }
+
+// ── Phase 5: run-summary export ──────────────────────────────────────────────
+
+/**
+ * Write a run-summary export markdown body to the project's `exportsDir`
+ * (`UserSettings/ValidationSuite/exports/`). Returns the project-relative
+ * path the file landed at. `stem` is a short label (e.g. `m9`);
+ * `generatedAt` is the ISO-8601 timestamp already baked into the body.
+ */
+export function saveExport(stem: string, generatedAt: string, body: string): Promise<string> {
+  return invoke<string>("save_export", { stem, generatedAt, body });
+}

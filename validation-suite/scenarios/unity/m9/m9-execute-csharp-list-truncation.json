@@ -1,0 +1,54 @@
+{
+  "id": "m9-execute-csharp-list-truncation",
+  "title": "execute_csharp: list truncation emits an explicit elided count",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 132,
+  "requirementLevel": "optional",
+  "tags": ["m9", "execute-csharp", "serialization", "plan-4"],
+  "automatedCoverage": [
+    "OutputSerializerTests.Serialize_ListTruncation_EmitsTruncatedCount",
+    "OutputSerializerTests.Serialize_NestedListInPoco_RespectsDepthAndTruncation"
+  ],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Optional, automated-covered serialization check: confirm the serializer caps large lists at max_items and reports the elided count. List truncation is asserted by the automated test below; this scenario is a runnable confidence pass against the live serializer."
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Return a large list and cap it",
+      "tool": "unity_open_mcp_execute_csharp",
+      "payload": {
+        "code": "return Enumerable.Range(0, 250).ToList();",
+        "max_items": 10
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "mutation.output is an object {\"items\":[0,1,...,9],\"truncated\":240}",
+        "the elided (truncated) count is explicit and equals total - kept",
+        "a list under the cap returns a plain array with no truncated field"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "note": "execute_csharp is transient (no disk artifact); nothing is reverted on disk."
+  }
+}

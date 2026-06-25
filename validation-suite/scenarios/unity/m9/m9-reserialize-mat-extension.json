@@ -1,0 +1,80 @@
+{
+  "id": "m9-reserialize-mat-extension",
+  "title": "Reserialize round-trips a .mat material asset",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 103,
+  "requirementLevel": "optional",
+  "tags": ["m9", "reserialize", "extension-matrix", "plan-1"],
+  "automatedCoverage": [
+    "ReserializeAssetsToolTests.SupportedExtensions_IncludesAllRequiredFormats"
+  ],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Optional extension-matrix check (automated-covered): confirm `.mat` is accepted and round-tripped. The supported-extension surface is asserted by the automated test; this is a runnable confidence pass against a live material."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Stage a non-canonical copy of a material",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Assets/Materials/TestMaterial.mat",
+          "to": "{fixtureRoot}/ExtMat.mat"
+        },
+        {
+          "action": "fs_patch",
+          "path": "{fixtureRoot}/ExtMat.mat",
+          "patches": [
+            {
+              "op": "trim_trailing_whitespace"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Run reserialize on the .mat",
+      "tool": "unity_open_mcp_reserialize",
+      "payload": {
+        "paths": ["{fixtureRoot}/ExtMat.mat"],
+        "gate": "enforce"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "mutation.success is true (extension accepted)",
+        "mutation.output.reserialized contains the .mat path; totalCount: 1",
+        "gate.validation.passed is true",
+        "file on disk is canonical Unity YAML"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [{ "action": "fs_delete", "paths": ["{fixtureRoot}"] }]
+      }
+    },
+    "note": "Optional, automated-covered scenario. The supported-extension contract is asserted by ReserializeAssetsToolTests; this runnable pass is for operator confidence against a live material."
+  }
+}

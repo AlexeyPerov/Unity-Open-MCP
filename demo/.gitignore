@@ -92,3 +92,12 @@ crashlytics-build.properties
 
 *.bak
 *.bak.meta
+
+# Validation Suite (standalone Tauri app at validation-suite/).
+# Disposable per-scenario fixtures + local operator state must never be
+# committed; the suite stages and reverts them itself.
+/[Aa]ssets/_ValidationSuite/
+/[Aa]ssets/_ValidationSuite.meta
+# UserSettings/ is already ignored above; this line documents that the
+# suite's state/manifests/actuals/exports live there too.
+/[Uu]ser[Ss]ettings/[Vv]alidationSuite/

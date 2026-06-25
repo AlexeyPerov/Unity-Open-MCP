@@ -1,0 +1,71 @@
+{
+  "id": "m9-reserialize-anim-extension",
+  "title": "Reserialize round-trips a .anim animation-clip asset",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 105,
+  "requirementLevel": "optional",
+  "tags": ["m9", "reserialize", "extension-matrix", "plan-1"],
+  "automatedCoverage": [
+    "ReserializeAssetsToolTests.SupportedExtensions_IncludesAllRequiredFormats"
+  ],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Optional extension-matrix check (automated-covered): confirm `.anim` is accepted and round-tripped. The supported-extension surface is asserted by the automated test; this is a runnable confidence pass. The bundled demo has no `.anim` asset, so point the `fs_copy` source (and the reserialize path) at a real AnimationClip in your project before running setup."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Stage a copy of a .anim (adjust the source path)",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Assets/Path/To/Your.anim",
+          "to": "{fixtureRoot}/ExtAnim.anim"
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Run reserialize on the .anim",
+      "tool": "unity_open_mcp_reserialize",
+      "payload": {
+        "paths": ["{fixtureRoot}/ExtAnim.anim"],
+        "gate": "enforce"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "mutation.success is true (extension accepted)",
+        "mutation.output.reserialized contains the .anim path; totalCount: 1",
+        "gate.validation.passed is true",
+        "file on disk is canonical Unity YAML"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [{ "action": "fs_delete", "paths": ["{fixtureRoot}"] }]
+      }
+    },
+    "note": "Optional, automated-covered scenario. The supported-extension contract is asserted by ReserializeAssetsToolTests; this runnable pass is for operator confidence. The demo ships no .anim, so adjust the source path before running."
+  }
+}

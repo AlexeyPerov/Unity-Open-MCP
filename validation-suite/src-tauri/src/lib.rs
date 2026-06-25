@@ -7,6 +7,7 @@
 //! engine-neutral core TS package (`packages/core`).
 
 pub mod commands;
+pub mod export_store;
 pub mod fs_ops;
 pub mod manifest_store;
 pub mod mcp_runner;
@@ -50,6 +51,7 @@ pub fn run() {
             commands::save_step_manifest,
             commands::load_step_manifest,
             commands::delete_step_manifest,
+            commands::save_export,
         ])
         .run(tauri::generate_context!())
         .expect("error while running validation-suite");

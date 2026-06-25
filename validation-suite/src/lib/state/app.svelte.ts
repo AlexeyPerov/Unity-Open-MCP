@@ -14,8 +14,10 @@
  */
 
 import {
+  buildExportMarkdown,
   ensureTestState,
   loadScenarios,
+  nowIso,
   parseProfile,
   resetStep as coreResetStep,
   resetTest as coreResetTest,
@@ -493,6 +495,62 @@ class AppState {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Build the run-summary export markdown (phase-5 deliverable: export)
+   * from the loaded scenarios + suite state. The body is built by the
+   * engine-neutral core builder so it stays testable without a backend.
+   * Returns the markdown; the caller decides copy-to-clipboard vs. save.
+   */
+  buildExportMarkdown(): string {
+    const generatedAt = nowIso();
+    return buildExportMarkdown({
+      scenarios: this.scenarios,
+      state: this.suite,
+      projectPath: this.activeProject,
+      engineProfileId: this.profile?.id ?? null,
+      generatedAt,
+    });
+  }
+
+  /**
+   * Copy the run-summary export markdown to the clipboard. The operator
+   * pastes it into a milestone checklist or changelog as the sign-off
+   * record (convention-patch-outline → checklist as index + sign-off).
+   * Returns true on success.
+   */
+  async copyExport(): Promise<boolean> {
+    const md = this.buildExportMarkdown();
+    const ok = await this.copy(md);
+    if (ok) logs.log("export copied to clipboard");
+    else logs.error("export clipboard copy failed");
+    return ok;
+  }
+
+  /**
+   * Save the run-summary export markdown to a file under the project's
+   * `exportsDir` (phase-5 deliverable: optional file export). The backend
+   * owns the atomic write + timestamped filename; returns the
+   * project-relative path the file landed at. Throws on backend failure
+   * (the caller surfaces the error).
+   */
+  async saveExportFile(): Promise<string> {
+    if (!this.activeProject) throw new Error("No project selected.");
+    const generatedAt = nowIso();
+    const body = buildExportMarkdown({
+      scenarios: this.scenarios,
+      state: this.suite,
+      projectPath: this.activeProject,
+      engineProfileId: this.profile?.id ?? null,
+      generatedAt,
+    });
+    // Stem: the active milestone if all scenarios share one, else "run".
+    const milestones = new Set(this.scenarios.map((s) => s.milestone));
+    const stem = milestones.size === 1 ? [...milestones][0] : "run";
+    const path = await backend.saveExport(stem, generatedAt, body);
+    logs.log(`export saved: ${path}`);
+    return path;
   }
 }
 

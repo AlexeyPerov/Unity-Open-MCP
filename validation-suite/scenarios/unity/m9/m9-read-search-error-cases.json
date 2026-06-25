@@ -1,0 +1,83 @@
+{
+  "id": "m9-read-search-error-cases",
+  "title": "read_asset / search_assets: pre-flight error cases are actionable",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 122,
+  "requirementLevel": "optional",
+  "tags": ["m9", "read-asset", "search-assets", "error-path", "plan-2"],
+  "automatedCoverage": [
+    "ReadAssetToolTests.Execute_MissingAssetPath_ReturnsMissingParameter",
+    "ReadAssetToolTests.Execute_NullAssetPath_ReturnsMissingParameter",
+    "ReadAssetToolTests.Execute_UnsupportedExtension_ReturnsInvalidPaths",
+    "ReadAssetToolTests.Execute_FileNotFound_ReturnsAssetNotFound",
+    "SearchAssetsToolTests.Execute_NoFilters_ReturnsMissingParameter",
+    "SearchAssetsToolTests.Execute_OnlyTypeFilter_ReturnsMissingParameter"
+  ],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Optional, automated-covered error paths: confirm the pre-flight validation on read_asset and search_assets rejects bad input before any work. These branches are asserted by the automated tests below; no fs setup is needed."
+    },
+    {
+      "id": "prompt-read-missing",
+      "type": "agent_prompt",
+      "title": "read_asset with no asset_path",
+      "tool": "unity_open_mcp_read_asset",
+      "payload": {}
+    },
+    {
+      "id": "prompt-read-unsupported",
+      "type": "agent_prompt",
+      "title": "read_asset with an unsupported extension",
+      "tool": "unity_open_mcp_read_asset",
+      "payload": {
+        "asset_path": "Assets/Scripts/Foo.cs"
+      }
+    },
+    {
+      "id": "prompt-read-notfound",
+      "type": "agent_prompt",
+      "title": "read_asset with a non-existent .prefab",
+      "tool": "unity_open_mcp_read_asset",
+      "payload": {
+        "asset_path": "Assets/__DoesNotExist.prefab"
+      }
+    },
+    {
+      "id": "prompt-search-missing",
+      "type": "agent_prompt",
+      "title": "search_assets with no name/component/guid",
+      "tool": "unity_open_mcp_search_assets",
+      "payload": {
+        "type": "prefab"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "read_asset with no asset_path → error.code: \"missing_parameter\"",
+        "read_asset with .cs → error.code: \"invalid_paths\" (unsupported extension)",
+        "read_asset with a non-existent .prefab → error.code: \"asset_not_found\"",
+        "search_assets with only a type filter → error.code: \"missing_parameter\""
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent outputs (one per error case)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "note": "Prompt-only error paths (no mutation, no fixture); nothing to revert on disk."
+  }
+}

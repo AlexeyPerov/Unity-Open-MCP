@@ -406,6 +406,26 @@ pub fn delete_step_manifest(
         .map_err(|e| format!("Failed to delete manifest: {e}"))
 }
 
+/// Write a run-summary export markdown body to the project's `exportsDir`
+/// (phase-5 deliverable: export). The body is built by the frontend
+/// (`packages/core/src/export.ts`); the backend owns the atomic disk
+/// write + a timestamped filename. Returns the project-relative path so
+/// the UI can show where the file landed. `stem` is a short label
+/// (e.g. `m9`); `generated_at` is the ISO-8601 timestamp already baked
+/// into the export body.
+#[tauri::command]
+pub fn save_export(
+    state: State<'_, AppState>,
+    stem: String,
+    generated_at: String,
+    body: String,
+) -> Result<String, String> {
+    let (root, profile) = active_root_profile(&state)?;
+    let filename = crate::export_store::export_filename(&stem, &generated_at);
+    crate::export_store::save(&root, &profile.paths.exports_dir, &filename, &body)
+        .map_err(|e| format!("Failed to write export: {e}"))
+}
+
 // ── helpers re-exported for tests ────────────────────────────────────────────
 /// Construct a default awaiting test state (used by tests).
 pub fn test_state_default() -> TestState {

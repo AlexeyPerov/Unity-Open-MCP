@@ -1,0 +1,52 @@
+{
+  "id": "m9-execute-csharp-vector3-reflection",
+  "title": "execute_csharp: struct reflection (Vector3 fields)",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 130,
+  "requirementLevel": "optional",
+  "tags": ["m9", "execute-csharp", "serialization", "plan-4"],
+  "automatedCoverage": [
+    "OutputSerializerTests.Serialize_Vector3_ReflectsFields"
+  ],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Optional, automated-covered serialization check: confirm the reflective serializer walks struct fields and emits a JSON object (not the old stringified \"(x, y, z)\" form). Field reflection is asserted by the automated test below; this scenario is a runnable confidence pass against the live serializer."
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Return a Vector3",
+      "tool": "unity_open_mcp_execute_csharp",
+      "payload": {
+        "code": "return new Vector3(1, 2, 3);"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "mutation.output is a JSON object, e.g. {\"$type\":\"Vector3\",\"x\":1,\"y\":2,\"z\":3,...}",
+        "not the old stringified \"(1, 2, 3)\" form",
+        "if include_properties is on, computed properties appear but the payload stays a single object"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "note": "execute_csharp is transient (no disk artifact); nothing is reverted on disk."
+  }
+}
