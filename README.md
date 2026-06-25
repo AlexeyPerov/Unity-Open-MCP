@@ -2,6 +2,14 @@
   <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="310">
 </p>
 
+| [English](README.md) | [简体中文](docs/i18n/README-zh.md) |
+|----------------------|---------------------------------|
+
+
+[![Docs](https://img.shields.io/badge/Docs-unity--mcp-4f46e5)](https://alexeyperov.github.io/)
+[![](https://img.shields.io/badge/Unity-000000?style=flat&logo=unity&logoColor=blue 'Unity')](https://unity.com/releases/editor/archive)
+[![](https://badge.mcpx.dev?status=on 'MCP Enabled')](https://modelcontextprotocol.io/introduction)
+[![](https://img.shields.io/badge/License-MIT-red.svg 'MIT License')](https://opensource.org/licenses/MIT)
 
 # Unity Open MCP
 
@@ -56,3 +64,5 @@ For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-too
 - Open issues for bugs, feature requests, and documentation improvements.
 - PRs are welcome for core packages, extension packs, and docs.
 - Start with the docs above, then package-level READMEs for local development details.
+
+**License:** MIT — see [LICENSE](LICENSE).
