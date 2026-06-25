@@ -19,6 +19,11 @@ Use this index to find setup guides, product docs, and API contracts.
 - [MCP resources API](api/resources.md) — resource URIs and payloads.
 - [Code conventions](code-conventions.md) — non-obvious C# decisions (instance IDs, namespace aliasing).
 
+## Benchmarking
+
+- [Benchmark methodology](../benchmarks/docs/methodology.md) — release-quality prompt-template benchmarks: flow, scoring, gates, failure taxonomy.
+- [Hexa Sort template](../benchmarks/hexa-sort/README.md) — the first runnable benchmark template.
+
 ## Fast lookup
 
 - Route behavior (live/batch/offline): [api/mcp-tools.md](api/mcp-tools.md)
