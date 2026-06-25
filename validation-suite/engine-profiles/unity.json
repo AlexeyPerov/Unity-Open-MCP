@@ -1,0 +1,26 @@
+{
+  "id": "unity",
+  "displayName": "Unity Open MCP",
+  "mcpCliBinary": "unity-open-mcp",
+  "paths": {
+    "fixtureRoot": "Assets/_ValidationSuite/<test-id>/",
+    "stateRoot": "UserSettings/ValidationSuite/",
+    "stateFile": "UserSettings/ValidationSuite/.state.json",
+    "actualsDir": "UserSettings/ValidationSuite/actuals/",
+    "exportsDir": "UserSettings/ValidationSuite/exports/"
+  },
+  "markers": {
+    "dirs": ["Assets", "ProjectSettings"],
+    "files": ["ProjectSettings/ProjectVersion.txt"]
+  },
+  "companions": [
+    { "primary": "*.prefab", "companion": "*.prefab.meta" },
+    { "primary": "*.unity", "companion": "*.unity.meta" },
+    { "primary": "*.asset", "companion": "*.asset.meta" },
+    { "primary": "*.mat", "companion": "*.mat.meta" },
+    { "primary": "*.controller", "companion": "*.controller.meta" },
+    { "primary": "*.anim", "companion": "*.anim.meta" }
+  ],
+  "placeholders": ["{fixtureRoot}", "{projectRoot}"],
+  "toolNamePrefix": "unity_open_mcp_"
+}

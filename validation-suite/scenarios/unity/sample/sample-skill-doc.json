@@ -1,0 +1,26 @@
+{
+  "id": "sample-skill-doc-loop",
+  "title": "Edit → reserialize → validate loop is documented in the skill",
+  "milestone": "sample",
+  "engineId": "unity",
+  "order": 1,
+  "requirementLevel": "required-extended",
+  "tags": ["sample", "docs"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "body": "Open the agent skill and confirm the reserialize loop guidance is present and accurate."
+    },
+    {
+      "id": "open-doc",
+      "type": "external_doc",
+      "docPath": "skills/unity-open-mcp/SKILL.md",
+      "title": "Open the MCP skill file"
+    },
+    {
+      "id": "done",
+      "type": "mark_done"
+    }
+  ]
+}

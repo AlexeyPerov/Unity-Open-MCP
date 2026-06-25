@@ -1,0 +1,11 @@
+{
+  "name": "@validation-suite/core",
+  "version": "0.1.0",
+  "description": "Engine-neutral scenario orchestration: DTOs, loader, state model.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "license": "MIT"
+}

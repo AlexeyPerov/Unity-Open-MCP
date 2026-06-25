@@ -1,0 +1,56 @@
+/* Global reset + base. Tokens are injected once at the root. */
+:global(:root) {
+  --bg: #0f1115;
+  --bg-elev: #161a21;
+  --bg-elev-2: #1d222b;
+  --border: #2a313c;
+  --border-strong: #3a424f;
+  --text: #e6e9ef;
+  --text-dim: #9aa3b2;
+  --text-faint: #6b7382;
+  --accent: #4f8cff;
+  --accent-soft: rgba(79, 140, 255, 0.16);
+  --ok: #3fb950;
+  --ok-soft: rgba(63, 185, 80, 0.16);
+  --warn: #d29922;
+  --warn-soft: rgba(210, 153, 34, 0.16);
+  --bad: #f85149;
+  --bad-soft: rgba(248, 81, 73, 0.16);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+:global(*) {
+  box-sizing: border-box;
+}
+
+:global(html, body) {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+:global(button) {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+:global(::-webkit-scrollbar) {
+  width: 10px;
+  height: 10px;
+}
+:global(::-webkit-scrollbar-thumb) {
+  background: var(--border-strong);
+  border-radius: 6px;
+}
+:global(::-webkit-scrollbar-track) {
+  background: transparent;
+}

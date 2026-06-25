@@ -1,0 +1,27 @@
+{
+  "id": "sample-ping-smoke",
+  "title": "Bridge ping smoke check (automated-covered)",
+  "milestone": "sample",
+  "engineId": "unity",
+  "order": 2,
+  "requirementLevel": "optional",
+  "tags": ["sample", "bridge"],
+  "automatedCoverage": ["BridgePingTests.*"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "body": "Confirm the bridge answers a ping. This scenario has automated coverage; run it manually for confidence."
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "tool": "unity_open_mcp_ping",
+      "title": "Run ping in the MCP client"
+    },
+    {
+      "id": "done",
+      "type": "mark_done"
+    }
+  ]
+}

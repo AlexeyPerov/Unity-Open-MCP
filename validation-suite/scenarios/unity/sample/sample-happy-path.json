@@ -1,0 +1,74 @@
+{
+  "id": "sample-reserialize-happy-path",
+  "title": "Reserialize normalizes a direct YAML edit (happy path)",
+  "milestone": "sample",
+  "engineId": "unity",
+  "order": 0,
+  "requirementLevel": "required-core",
+  "tags": ["sample", "reserialize"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Unity project open, bridge running, MCP client configured."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Stage fixture (Phase 2 runs the actions)",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Assets/Prefabs/Player.prefab",
+          "to": "{fixtureRoot}/Player.prefab"
+        },
+        {
+          "action": "fs_patch",
+          "path": "{fixtureRoot}/Player.prefab",
+          "patches": [
+            { "op": "replace_line_contains", "match": "  m_Name:", "replace": "  m_Name: PlayerPatched" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Run reserialize in the MCP client",
+      "tool": "unity_open_mcp_reserialize",
+      "payload": {
+        "paths": ["{fixtureRoot}/Player.prefab"],
+        "gate": "enforce"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "mutation.success is true",
+        "gate.validation.passed is true",
+        "file on disk is canonical Unity YAML"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [{ "action": "fs_delete", "paths": ["{fixtureRoot}"] }]
+      }
+    },
+    "note": "Companion .meta files are auto-tracked by the executor (Phase 2). For offline scenarios, bridge restore is a manual toolbar gate confirmed by unity_open_mcp_bridge_status."
+  }
+}

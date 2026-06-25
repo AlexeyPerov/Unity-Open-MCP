@@ -43,6 +43,7 @@ For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-too
 - [Bridge HTTP API](docs/api/bridge-http.md)
 - [MCP tools API](docs/api/mcp-tools.md)
 - [MCP resources API](docs/api/resources.md)
+- [Validation Suite](validation-suite/README.md) — standalone app for guided milestone manual validation.
 - [Benchmarks](benchmarks/README.md) — release-quality prompt-template benchmark suite.
 
 ## Contributing

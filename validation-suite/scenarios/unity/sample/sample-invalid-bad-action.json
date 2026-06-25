@@ -1,0 +1,17 @@
+{
+  "id": "sample-invalid-bad-action",
+  "title": "INVALID on purpose — exercises the load-error path",
+  "milestone": "sample",
+  "engineId": "unity",
+  "order": 99,
+  "requirementLevel": "optional",
+  "steps": [
+    {
+      "id": "setup",
+      "type": "setup",
+      "actions": [
+        { "action": "fs_blast_from_orbit", "path": "{fixtureRoot}/x.prefab" }
+      ]
+    }
+  ]
+}
