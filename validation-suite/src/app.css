@@ -1,9 +1,15 @@
 /* Global reset + base. Tokens mirror the Hub's `--hub-*` palette so the
  * shell widgets ported from hub/ render identically. Theme is driven by
  * [data-theme="dark" | "light"] on <html>; v1 ships dark-only but the
- * light overrides are kept for parity with the Hub. */
+ * light overrides are kept for parity with the Hub.
+ *
+ * NOTE: this file is imported as a *global* stylesheet (not a scoped
+ * component style), so the selectors must be plain CSS — do NOT wrap
+ * them in Svelte's `:global(...)`. Wrapping them emits the literal
+ * `:global(:root)` string into the build, which the browser ignores,
+ * silently dropping every token and breaking the whole theme. */
 
-:global(:root) {
+:root {
   --hub-bg: #14151a;
   --hub-surface: #1e1f26;
   --hub-card: #24252c;
@@ -29,7 +35,7 @@
   --hub-error-fg: #f0a8b8;
 }
 
-:global([data-theme="light"]) {
+[data-theme="light"] {
   --hub-bg: #f5f6f9;
   --hub-surface: #ffffff;
   --hub-card: #ffffff;
@@ -55,12 +61,12 @@
   --hub-error-fg: #c0234f;
 }
 
-:global(*) {
+* {
   box-sizing: border-box;
 }
 
-:global(html),
-:global(body) {
+html,
+body {
   margin: 0;
   height: 100%;
   overflow: hidden;
@@ -77,26 +83,26 @@
   font-size: 14px;
 }
 
-:global(body) {
+body {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-:global(button) {
+button {
   font-family: inherit;
   font-size: inherit;
   cursor: pointer;
 }
 
-:global(::-webkit-scrollbar) {
+::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
-:global(::-webkit-scrollbar-thumb) {
+::-webkit-scrollbar-thumb {
   background: var(--hub-border-hover);
   border-radius: 6px;
 }
-:global(::-webkit-scrollbar-track) {
+::-webkit-scrollbar-track {
   background: transparent;
 }
