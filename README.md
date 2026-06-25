@@ -1,3 +1,5 @@
+<img width="310" height="310" alt="MCP for Unity" src="hub/src-tauri/icons/Square310x310Logo.png" />
+
 # Unity Open MCP
 
 Unity Open MCP connects AI agents to Unity projects with a bridge + gate workflow: make changes, run validation, inspect results, and iterate safely.
