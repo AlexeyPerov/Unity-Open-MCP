@@ -11,7 +11,7 @@
  *
  * Panels: build / test / custom predate the maintainer workflow; the
  * npm-maintainer panels (version / publishDryRun / publish) cover the
- * Plan 3 maintainer panel.
+ * Open-MCP maintainer panel (npm version / publish dry-run / publish).
  */
 const MAX_LOG_LINES = 1000;
 

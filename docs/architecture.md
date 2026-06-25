@@ -14,6 +14,10 @@ Unity Open MCP has four runtime parts:
 - `packages/verify/` — validation rules and fixes used by gate flows.
 - `hub/` — desktop app (Tauri + SvelteKit).
 
+### Open-MCP npm cwd
+
+When the Hub detects a checkout as an Open-MCP repository (`mcp-server/` directory plus a root `package.json` marker), every npm invocation in the maintainer panel runs with cwd `{repo}/mcp-server` — the publishable package, its scripts, and `files` whitelist live there, not at the repo root. The repo root `package.json` is a detection marker only. This rule is centralized in Rust (`resolve_npm_cwd` in `hub/src-tauri/src/config/command_runner.rs`) so every maintainer-panel command shares one resolution path; Unity `Package` projects keep using the project root.
+
 ## Runtime flow
 
 1. AI client calls an MCP tool.
