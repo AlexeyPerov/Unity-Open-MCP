@@ -147,6 +147,20 @@ class AppState {
     return this.suite?.tests[scenarioId]?.status ?? "awaiting";
   }
 
+  /**
+   * Count scenarios in a list whose test rollup is `done`. Used by the
+   * TestNav group headers to render a `[done] / [total]` progress chip
+   * per milestone. Reads through `statusOf` so it shares the same
+   * default-`awaiting` semantics as the row badges.
+   */
+  countDone(scenarios: Scenario[]): number {
+    let done = 0;
+    for (const s of scenarios) {
+      if (this.statusOf(s.id) === "done") done += 1;
+    }
+    return done;
+  }
+
   // ── lifecycle ──────────────────────────────────────────────────────────────
 
   /** Bootstrap on app open: load profile + last project pointer. */
@@ -485,6 +499,33 @@ class AppState {
 
   toggleFilter(key: keyof Filters): void {
     this.filters = { ...this.filters, [key]: !this.filters[key] };
+  }
+
+  /**
+   * Dismiss the non-blocking state warning banner. This is a local UI
+   * dismiss only — the underlying state file is untouched, so a malformed/
+   * incompatible state resurfaces the warning on the next load. Kept
+   * separate from `resetAll` so an operator can clear the banner without
+   * committing to a destructive reset.
+   */
+  dismissWarning(): void {
+    this.warning = null;
+  }
+
+  /**
+   * Dismiss the read-errors banner. The files stay unreadable on disk;
+   * this only hides the banner until scenarios are reloaded.
+   */
+  dismissReadErrors(): void {
+    this.readErrors = [];
+  }
+
+  /**
+   * Dismiss the load-errors (structural validation) banner. The scenarios
+   * stay invalid on disk; this only hides the banner until reload.
+   */
+  dismissLoadErrors(): void {
+    this.loadErrors = [];
   }
 
   /** Copy arbitrary text to the clipboard (agent_prompt payload, etc.). */

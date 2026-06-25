@@ -9,7 +9,16 @@
 <section class="runner">
   {#if app.warning}
     <div class="banner banner-warn" role="alert">
-      <span class="banner-label">⚠ {app.warning.title}</span>
+      <div class="banner-head">
+        <span class="banner-label">⚠ {app.warning.title}</span>
+        <button
+          type="button"
+          class="banner-close"
+          title="Dismiss"
+          aria-label="Dismiss warning"
+          onclick={() => app.dismissWarning()}
+        >×</button>
+      </div>
       <p class="banner-body">{app.warning.body}</p>
       <div class="banner-actions">
         <Button variant="destructive" onclick={() => app.resetAll()} disabled={app.busy}>
@@ -21,7 +30,16 @@
 
   {#if app.readErrors.length > 0}
     <div class="banner banner-error" role="alert">
-      <span class="banner-label">Some scenario files could not be read</span>
+      <div class="banner-head">
+        <span class="banner-label">Some scenario files could not be read</span>
+        <button
+          type="button"
+          class="banner-close"
+          title="Dismiss"
+          aria-label="Dismiss read errors"
+          onclick={() => app.dismissReadErrors()}
+        >×</button>
+      </div>
       <ul class="banner-list">
         {#each app.readErrors as err}
           <li><code>{err.source}</code> — {err.message}</li>
@@ -32,7 +50,16 @@
 
   {#if app.loadErrors.length > 0}
     <div class="banner banner-warn">
-      <span class="banner-label">Some scenario files failed validation and were skipped</span>
+      <div class="banner-head">
+        <span class="banner-label">Some scenario files failed validation and were skipped</span>
+        <button
+          type="button"
+          class="banner-close"
+          title="Dismiss"
+          aria-label="Dismiss validation errors"
+          onclick={() => app.dismissLoadErrors()}
+        >×</button>
+      </div>
       <ul class="banner-list">
         {#each app.loadErrors as err}
           <li><code>{err.source}</code> — {err.message}</li>
@@ -156,6 +183,49 @@
 
   .banner-error .banner-label {
     color: var(--hub-error-fg);
+  }
+
+  /* Header row: label on the left, dismiss × on the right. The × is a
+     low-affordance dismiss (it only hides the banner locally); destructive
+     actions like Reset local data stay as explicit buttons. */
+  .banner-head {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .banner-head .banner-label {
+    margin-bottom: 0;
+  }
+
+  .banner-close {
+    flex-shrink: 0;
+    width: 1.4rem;
+    height: 1.4rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--hub-border-light);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--hub-text-muted);
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    transition: background 0.1s ease, color 0.1s ease;
+  }
+
+  .banner-close:hover {
+    background: var(--hub-bg);
+    color: var(--hub-text-bright);
+  }
+
+  .banner-close:focus-visible {
+    outline: 2px solid var(--hub-accent);
+    outline-offset: 1px;
   }
 
   .banner-body {

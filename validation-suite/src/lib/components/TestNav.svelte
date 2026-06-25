@@ -10,6 +10,8 @@
   // required scenarios render directly while optional scenarios collapse
   // into a default-closed subsection (idea.md → Coverage policy: optional
   // scenarios are runnable but de-emphasized; most show automated coverage).
+  // The milestone group itself is a <details> collapsed by default, with a
+  // `[done] / [total]` progress chip on its summary.
   const groups = $derived.by(() => {
     const filteredIds = new Set(app.filteredScenarios.map((s) => s.id));
     return app.milestones
@@ -41,8 +43,14 @@
     {/if}
 
     {#each groups as group (group.milestone)}
-      <section class="group">
-        <h3 class="group-heading">{group.milestone}</h3>
+      {@const allInGroup = [...group.required, ...group.optional]}
+      <details class="group">
+        <summary class="group-heading">
+          <span class="group-label">{group.milestone}</span>
+          <span class="group-count" title="Done / total scenarios in this group">
+            {app.countDone(allInGroup)} / {allInGroup.length}
+          </span>
+        </summary>
         <ul class="rows">
           {#each group.required as s (s.id)}
             <li>
@@ -91,7 +99,7 @@
             </ul>
           </details>
         {/if}
-      </section>
+      </details>
     {/each}
   </div>
 </aside>
@@ -140,15 +148,84 @@
 
   .group {
     margin-bottom: 0.6rem;
+    border: 1px solid var(--hub-border-light);
+    border-radius: 6px;
+    background: transparent;
+    overflow: hidden;
   }
 
+  /* Milestone group is a <details> collapsed by default. The summary is a
+     clickable disclosure row: triangle marker + milestone label + a
+     `[done] / [total]` progress chip pinned to the right. */
   .group-heading {
-    margin: 0.6rem 0.5rem 0.3rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0.5rem 0.65rem;
     font-size: 0.7rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--hub-text-placeholder);
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+
+  .group-heading:hover {
+    background: var(--hub-bg);
+    color: var(--hub-text-muted);
+  }
+
+  /* Replace the native disclosure triangle with a CSS marker so it reads
+     cleanly alongside the label + counter. */
+  .group-heading::-webkit-details-marker {
+    display: none;
+  }
+
+  .group-heading::before {
+    content: "▸";
+    font-size: 0.68rem;
+    color: var(--hub-text-placeholder);
+    transition: transform 0.12s ease;
+  }
+
+  .group[open] > .group-heading::before {
+    transform: rotate(90deg);
+  }
+
+  .group-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Progress chip: done / total. Uses the same muted pill style as the
+     optional count badge so the two disclosures look related. */
+  .group-count {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.4rem;
+    padding: 0 0.4rem;
+    height: 1.15rem;
+    border-radius: 8px;
+    background: var(--hub-selected);
+    color: var(--hub-text-muted);
+    border: 1px solid var(--hub-border-light);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .group > .rows {
+    padding: 0.15rem 0.35rem 0.3rem;
   }
 
   .rows {
