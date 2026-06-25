@@ -33,6 +33,7 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_pull_events",
   "unity_senses_pull_events",
   "unity_open_mcp_read_compile_errors",
+  "unity_open_mcp_bridge_status",
 ]);
 
 /**

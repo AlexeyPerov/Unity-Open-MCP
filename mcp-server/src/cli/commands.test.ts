@@ -284,6 +284,32 @@ test("runRunToolCommand: schema defaults are injected (timeout_ms on run_tests)"
   assert.equal(receivedArgs?.timeout_ms, 60_000);
 });
 
+test("runRunToolCommand: bridge_status is a known tool (CLI parity)", async () => {
+  // phase-3: the operator-only bridge_status tool must be reachable from the
+  // CLI `run-tool` surface, not just the MCP server. ALL_TOOLS registration is
+  // what makes it known; this guards against accidental removal.
+  const statusResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ status: "running", ready: true, _source: "local" }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(statusResult) });
+  const result = await runRunToolCommand(stack, {
+    json: true,
+    toolName: "unity_open_mcp_bridge_status",
+    toolArgs: {},
+  });
+  assert.equal(result.exitCode, 0);
+  const json = result.json as { tool: string; isError: boolean; result: { status: string } };
+  assert.equal(json.tool, "unity_open_mcp_bridge_status");
+  assert.equal(json.isError, false);
+  assert.equal(json.result.status, "running");
+});
+
 // ---------------------------------------------------------------------------
 // help / version text
 // ---------------------------------------------------------------------------

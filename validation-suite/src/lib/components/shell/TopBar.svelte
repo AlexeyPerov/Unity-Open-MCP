@@ -1,6 +1,22 @@
 <script lang="ts">
-  import { app } from "../../state/app.svelte.ts";
+  import { app, type BridgeStatusToken } from "../../state/app.svelte.ts";
   import Button from "./Button.svelte";
+
+  function bridgeLabel(status: BridgeStatusToken): string {
+    switch (status) {
+      case "running": return "Bridge · running";
+      case "compiling": return "Bridge · compiling";
+      case "stopped": return "Bridge · stopped";
+      case "dead_bridge": return "Bridge · dead";
+      default: return "Bridge · ?"; // unknown / never probed
+    }
+  }
+
+  function bridgeTitle(status: BridgeStatusToken, nextStep: string | null): string {
+    const head = bridgeLabel(status);
+    if (nextStep && nextStep.length > 0) return `${head}\n${nextStep}`;
+    return `${head}\nClick to re-check via unity_open_mcp_bridge_status.`;
+  }
 </script>
 
 <header class="topbar">
@@ -16,6 +32,15 @@
     {#if app.activeProject}
       <span class="label">Project</span>
       <code class="path" title={app.activeProject}>{app.activeProject}</code>
+      <button
+        class="bridge-chip bridge-{app.bridgeStatus}"
+        onclick={() => app.refreshBridgeStatus()}
+        disabled={app.busy || app.bridgeRefreshing}
+        title={bridgeTitle(app.bridgeStatus, app.bridgeNextStep)}
+      >
+        <span class="bridge-dot" aria-hidden="true"></span>
+        {bridgeLabel(app.bridgeStatus)}
+      </button>
     {:else}
       <span class="muted">No project selected</span>
     {/if}
@@ -110,6 +135,57 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .bridge-chip {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.74rem;
+    font-family: inherit;
+    color: var(--hub-text);
+    background: var(--hub-bg);
+    border: 1px solid var(--hub-border-light);
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+    transition: background 0.1s ease;
+  }
+
+  .bridge-chip:hover:not(:disabled) {
+    background: var(--hub-surface);
+  }
+
+  .bridge-chip:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+
+  .bridge-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--hub-text-placeholder);
+    flex-shrink: 0;
+  }
+
+  /* Phase 3: bridge_status token → chip color. running = green, compiling =
+     amber, stopped = muted gray, dead_bridge = red, unknown = neutral. */
+  .bridge-running .bridge-dot {
+    background: #4ade80;
+    box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.18);
+  }
+  .bridge-compiling .bridge-dot {
+    background: #fbbf24;
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.18);
+  }
+  .bridge-stopped .bridge-dot {
+    background: var(--hub-text-placeholder);
+  }
+  .bridge-dead_bridge .bridge-dot {
+    background: #f87171;
+    box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.2);
   }
 
   .muted {

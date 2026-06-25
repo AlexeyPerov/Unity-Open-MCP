@@ -18,7 +18,7 @@ import { listRules } from "./capabilities/list-rules.js";
 import { generateSkill } from "./skill/generate-skill.js";
 import { knownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
-import { lockPath } from "./instance-discovery.js";
+import { lockPath, readInstanceLock, classifyInstance, type InstanceLock } from "./instance-discovery.js";
 import { BATCH_TOOL_NAMES } from "./batch-spawn.js";
 import type { ToolSessionState } from "./tool-session-state.js";
 
@@ -54,6 +54,76 @@ function activeGroupsEqual(
   const sa = [...a].sort();
   const sb = [...b].sort();
   return sa.every((v, i) => v === sb[i]);
+}
+
+// Extract the typed /ping body from a CallToolResult's first text content.
+// Returns null on a non-text / non-JSON / non-object result so the
+// bridge_status synthesis can fall through to the "stopped" branch without
+// throwing.
+function parsePingBody(result: {
+  isError?: boolean;
+  content: Array<{ type: string; text?: string }>;
+}): {
+  connected?: boolean;
+  compiling?: boolean;
+  isPlaying?: boolean;
+  unityVersion?: string | null;
+  bridgeVersion?: string;
+  mode?: string;
+} | null {
+  const first = result.content[0];
+  if (!first || first.type !== "text" || typeof first.text !== "string") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(first.text);
+    if (parsed && typeof parsed === "object") {
+      return parsed as {
+        connected?: boolean;
+        compiling?: boolean;
+        isPlaying?: boolean;
+        unityVersion?: string | null;
+        bridgeVersion?: string;
+        mode?: string;
+      };
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+// Compact lock summary for the bridge_status response. Mirrors the field set
+// the CLI `status` command surfaces so operators see the same pid/port/state
+// metadata regardless of how they asked.
+function summarizeBridgeStatusLock(lock: InstanceLock) {
+  return {
+    pid: lock.pid,
+    port: lock.port,
+    state: lock.state,
+    isCompiling: lock.isCompiling,
+    isPlaying: lock.isPlaying,
+    heartbeatAt: lock.heartbeatAt,
+    bridgeVersion: lock.bridgeVersion,
+    unityVersion: lock.unityVersion,
+  };
+}
+
+// Operator-facing "what to do next" hint for each coarse status. Kept short
+// and action-oriented so the Validation Suite can render it inline.
+function bridgeStatusNextStep(
+  status: "running" | "compiling" | "stopped" | "dead_bridge",
+): string {
+  switch (status) {
+    case "running":
+      return "Bridge is ready. Proceed with live-only MCP tools.";
+    case "compiling":
+      return "Unity is compiling. Wait for the bridge to return to idle, or poll unity_open_mcp_bridge_status again.";
+    case "stopped":
+      return "Bridge listener is not reachable. Open the bridge window (Unity menu: Tools/Unity Open MCP Bridge) and ensure it is started, or launch Unity if it is not running, then call unity_open_mcp_bridge_status again to confirm.";
+    case "dead_bridge":
+      return "The bridge assembly failed to recompile and Unity is in a bad state. Call unity_open_mcp_read_compile_errors to retrieve the compiler errors from Editor.log, fix the cited file/line, then trigger a recompile.";
+  }
 }
 
 export class ToolRouter implements Router {
@@ -118,6 +188,15 @@ export class ToolRouter implements Router {
     // visible regardless of the current active set (meta-tool).
     if (toolName === "unity_open_mcp_manage_tools") {
       return this.routeManageTools(args);
+    }
+
+    // testsuite-tauri phase-3 — bridge_status. Operator-only health snapshot.
+    // Server-resolved (classifyInstance + one /ping via the LiveClient); never
+    // hits the bridge tool endpoint and never spawns Unity. Returns a coarse
+    // `status` token (running/compiling/stopped/dead_bridge) the Validation
+    // Suite app drives its offline-scenario gate off. Read-only, gate-free.
+    if (toolName === "unity_open_mcp_bridge_status") {
+      return this.routeBridgeStatus(args);
     }
 
     // find_references — offline-first when no bridge is connected; live
@@ -686,6 +765,96 @@ export class ToolRouter implements Router {
         },
       ],
       isError: true,
+    };
+  }
+
+  // testsuite-tauri phase-3 — bridge_status. Combines the instance-lock
+  // classifier (the same pure function the LiveClient uses for dead-bridge
+  // detection) with a single /ping probe. The /ping is driven through the
+  // LiveClient's ping handler so it mirrors what `unity_open_mcp_ping` and
+  // the CLI `ping`/`wait-for-ready` see (auth header, ping cache, body shape).
+  //
+  // The coarse `status` token is derived from the two signals:
+  //
+  //   lock="dead_bridge"                       → "dead_bridge"
+  //   /ping reachable, compiling=true          → "compiling"
+  //   /ping reachable, connected=true          → "running"
+  //   otherwise (offline / toolbar off / gone) → "stopped"
+  //
+  // "stopped" intentionally folds two indistinguishable cases from the
+  // MCP-server's vantage point: Unity is not running at all, OR Unity is
+  // running but the operator toggled the bridge off via the toolbar. The
+  // lock summary in the response disambiguates them (`lock === null` → no
+  // Unity; `lock.pid` alive but no listener → toolbar off). The tool never
+  // errors on an offline bridge — `stopped` IS the answer in that case.
+  private async routeBridgeStatus(
+    _args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const lockOnDisk = lockPath(this.projectPath);
+    let lock: InstanceLock | null = null;
+    try {
+      lock = readInstanceLock(this.projectPath);
+    } catch {
+      // Unreadable lock → treat as no lock (gone).
+      lock = null;
+    }
+    const classification = classifyInstance(lock);
+
+    // One /ping probe. The LiveClient's ping handler returns the full body
+    // on success, or an isError result with `bridge_offline` on ECONNREFUSED
+    // — both shapes are valid inputs here. A compile-in-progress bridge
+    // returns HTTP 503 from /ping which isLiveAvailable() treats as reachable;
+    // the ping body's `compiling` field is the authoritative signal.
+    const pingResult = await this.live.route("unity_open_mcp_ping", {});
+    const pingBody = parsePingBody(pingResult);
+    const pingReachable = !pingResult.isError && pingBody !== null;
+    const compiling = pingReachable === true && pingBody?.compiling === true;
+    const connected = pingReachable === true && pingBody?.connected === true;
+
+    let status: "running" | "compiling" | "stopped" | "dead_bridge";
+    if (classification === "dead_bridge") {
+      status = "dead_bridge";
+    } else if (compiling) {
+      status = "compiling";
+    } else if (connected) {
+      status = "running";
+    } else {
+      status = "stopped";
+    }
+
+    const body = {
+      status,
+      // Coarse ready flag for clients that want a single boolean: true only
+      // when the bridge is connected AND idle (the same rule wait-for-ready
+      // uses for poll termination).
+      ready: status === "running",
+      projectPath: this.projectPath,
+      instance: {
+        lockPath: lockOnDisk,
+        classification,
+        lock: lock ? summarizeBridgeStatusLock(lock) : null,
+      },
+      ping: pingReachable
+        ? {
+            reachable: true,
+            connected: pingBody?.connected ?? null,
+            compiling: pingBody?.compiling ?? null,
+            isPlaying: pingBody?.isPlaying ?? null,
+            unityVersion: pingBody?.unityVersion ?? null,
+            bridgeVersion: pingBody?.bridgeVersion ?? null,
+            mode: pingBody?.mode ?? null,
+          }
+        : { reachable: false },
+      nextStep: bridgeStatusNextStep(status),
+      _source: "local",
+    };
+
+    // bridge_status never reports an error — even a stopped bridge is a
+    // successful status read. _source=local because the synthesis happens in
+    // the MCP server (no bridge tool endpoint, no batch Unity).
+    return {
+      content: [{ type: "text", text: JSON.stringify(body) }],
+      isError: false,
     };
   }
 

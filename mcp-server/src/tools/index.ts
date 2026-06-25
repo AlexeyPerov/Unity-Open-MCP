@@ -31,6 +31,7 @@ import { generateSkill } from "./generate-skill.js";
 import { listRules } from "./list-rules.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
+import { bridgeStatus } from "./bridge-status.js";
 // M18 Plan 2 / T18.2.2 — Coplay-style manage_tools meta-tool (session
 // tool-group visibility). Server-only meta-tool; routes local, always
 // visible regardless of which groups the current session has activated.
@@ -240,6 +241,15 @@ export const M13_TOOLS: Tool[] = [pullEvents];
 // Unity spawn) — the one channel that works when the bridge assembly itself
 // has failed to compile.
 export const M14_TOOLS: Tool[] = [readCompileErrors];
+
+// testsuite-tauri phase-3 — operator-only bridge admin surface. v1 ships
+// `bridge_status` only (a thin wrapper over the instance-lock classifier +
+// one /ping). `bridge_stop` / `bridge_start` are deferred (need new bridge
+// HTTP routes; `stop` has a self-disconnect hazard). Like `read_compile_errors`,
+// these carry no tool-group assignment → they are always-visible meta-tools
+// (operators / the Validation Suite reach them; the agent skill does NOT
+// document them in mutate/gate sections). See docs/api/mcp-tools.md.
+export const BRIDGE_ADMIN_TOOLS: Tool[] = [bridgeStatus];
 
 // M18 Plan 2 / T18.2.2 — Coplay-style manage_tools meta-tool. Server-only,
 // local-routed, and always visible regardless of which groups the current
@@ -549,6 +559,7 @@ export const ALL_TOOLS: Tool[] = [
   ...M12_TOOLS,
   ...M13_TOOLS,
   ...M14_TOOLS,
+  ...BRIDGE_ADMIN_TOOLS,
   ...M16_PLAN1_TOOLS,
   ...M16_PLAN2_TOOLS,
   ...M16_PLAN3_TOOLS,

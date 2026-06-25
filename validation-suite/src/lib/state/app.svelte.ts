@@ -56,6 +56,18 @@ export interface AppWarning {
   body: string;
 }
 
+/**
+ * Coarse bridge health token shown in the project bar (phase-3). Mirrors the
+ * `status` field returned by the operator-only `unity_open_mcp_bridge_status`
+ * MCP tool, plus `unknown` for the pre-probe state.
+ */
+export type BridgeStatusToken =
+  | "unknown"
+  | "running"
+  | "compiling"
+  | "stopped"
+  | "dead_bridge";
+
 class AppState {
   // ── project + profile ──────────────────────────────────────────────────────
   activeProject = $state<string | null>(null);
@@ -80,6 +92,14 @@ class AppState {
   // ── ui ─────────────────────────────────────────────────────────────────────
   selectedScenarioId = $state<string | null>(null);
   filters = $state<Filters>({ ...DEFAULT_FILTERS });
+
+  // ── bridge status (phase-3) ────────────────────────────────────────────────
+  /** Coarse bridge health token shown in the TopBar chip. `unknown` until probed. */
+  bridgeStatus = $state<BridgeStatusToken>("unknown");
+  /** Operator-facing next-step hint from the last bridge_status call. */
+  bridgeNextStep = $state<string | null>(null);
+  /** True while a bridge_status probe is in flight (disables the chip button). */
+  bridgeRefreshing = $state(false);
 
   // ── derived ────────────────────────────────────────────────────────────────
   /** Scenarios grouped by milestone, then ordered (core ordering applied). */
@@ -207,8 +227,52 @@ class AppState {
     try {
       await this.loadScenarios();
       await this.loadSuite();
+      // Probe the bridge once on project load so the TopBar chip reflects the
+      // current state. Fire-and-forget; failure leaves `unknown` + a log line.
+      void this.refreshBridgeStatus();
     } finally {
       this.busy = false;
+    }
+  }
+
+  /**
+   * Probe bridge health via the operator-only
+   * `unity_open_mcp_bridge_status` MCP tool and update the TopBar chip. The
+   * tool returns a coarse `status` token (running/compiling/stopped/
+   * dead_bridge) synthesized from the instance-lock classifier + one /ping;
+   * it never errors on an offline bridge (stopped IS the answer), so a
+   * transport failure is the only error path. Refreshes are best-effort and
+   * never block the UI (busy is not set).
+   */
+  async refreshBridgeStatus(): Promise<void> {
+    if (!this.activeProject) {
+      this.bridgeStatus = "unknown";
+      this.bridgeNextStep = null;
+      return;
+    }
+    this.bridgeRefreshing = true;
+    try {
+      const result = await backend.mcpToolAction(
+        "unity_open_mcp_bridge_status",
+        {},
+        15_000,
+      );
+      const body = (result.mcp?.result ?? {}) as {
+        status?: string;
+        nextStep?: string;
+      };
+      const token = bridgeStatusTokenFromString(body.status);
+      this.bridgeStatus = token;
+      this.bridgeNextStep = typeof body.nextStep === "string" ? body.nextStep : null;
+      logs.log(`bridge_status: ${token}`);
+    } catch (e) {
+      // Transport/CLI failure (binary not on PATH, etc.) — keep `unknown` so
+      // the chip stays neutral rather than falsely reporting `stopped`.
+      this.bridgeStatus = "unknown";
+      this.bridgeNextStep = null;
+      logs.error(`bridge_status probe failed: ${String(e)}`);
+    } finally {
+      this.bridgeRefreshing = false;
     }
   }
 
@@ -444,5 +508,22 @@ export function tierLabel(level: RequirementLevel): string {
       return "Required · extended";
     case "optional":
       return "Optional";
+  }
+}
+
+/**
+ * Coerce a raw `status` string from the bridge_status MCP tool into the UI's
+ * `BridgeStatusToken`. Unknown / missing values fall back to `unknown` so the
+ * TopBar chip stays neutral rather than crashing on a shape drift.
+ */
+function bridgeStatusTokenFromString(raw: string | undefined): BridgeStatusToken {
+  switch (raw) {
+    case "running":
+    case "compiling":
+    case "stopped":
+    case "dead_bridge":
+      return raw;
+    default:
+      return "unknown";
   }
 }

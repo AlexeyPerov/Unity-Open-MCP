@@ -41,7 +41,7 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | `agent-senses`       | off     | run_tests, screenshot, read_console, profiler capture/memory/rendering, spatial_query (live-only)                                                                               |
 
 
-Always-visible meta-tools (no group assignment): `unity_open_mcp_capabilities`, `unity_open_mcp_list_rules`, `unity_open_mcp_generate_skill`, `unity_open_mcp_manage_tools`, `unity_open_mcp_pull_events` / `unity_senses_pull_events`, `unity_open_mcp_read_compile_errors`.
+Always-visible meta-tools (no group assignment): `unity_open_mcp_capabilities`, `unity_open_mcp_list_rules`, `unity_open_mcp_generate_skill`, `unity_open_mcp_manage_tools`, `unity_open_mcp_pull_events` / `unity_senses_pull_events`, `unity_open_mcp_read_compile_errors`, `unity_open_mcp_bridge_status`.
 
 ### manage_tools actions
 
@@ -117,6 +117,7 @@ Common route behavior:
   - `unity_open_mcp_compile_check` always uses batch.
   - `unity_open_mcp_read_compile_errors` always uses offline.
   - `unity_open_mcp_capabilities`, `unity_open_mcp_generate_skill`, and `unity_open_mcp_manage_tools` are local.
+  - `unity_open_mcp_bridge_status` is local (server-resolved from the instance lock + one `/ping` probe).
 
 ## Batch support notes
 
@@ -145,6 +146,50 @@ Errors are returned as JSON with:
 
 Examples: `bridge_unavailable`, `batch_not_supported`, `validation_failed`, `scene_dirty`.
 
+## Bridge admin tools (operator-only)
+
+A small surface for operators and tooling that needs a coarse bridge health signal stronger than a raw `/ping`. These tools carry **no tool-group assignment** → they sit in the always-visible meta-tool bucket, but they are intentionally **not documented in the agent skill** (`skills/unity-open-mcp/SKILL.md`): they exist for the Validation Suite app and operators driving manual offline scenarios, not for general agent workflow. Agents use `unity_open_mcp_ping` / `read_compile_errors` for health.
+
+### `unity_open_mcp_bridge_status`
+
+Wraps the instance-lock classifier (`instance-discovery.ts#classifyInstance`) + one `/ping` probe and returns a coarse `status` token the Validation Suite drives its manual offline-scenario gate off.
+
+```json
+{
+  "status": "running",            // running | compiling | stopped | dead_bridge
+  "ready": true,                  // true only when connected AND idle
+  "projectPath": "/abs/project",
+  "instance": {
+    "lockPath": "~/.unity-open-mcp/instances/<sha256>.json",
+    "classification": "healthy",  // healthy | reloading | dead_bridge | gone
+    "lock": { "pid": 12345, "port": 24678, "state": "idle", ... }
+  },
+  "ping": { "reachable": true, "connected": true, "compiling": false, ... },
+  "nextStep": "Bridge is ready. Proceed with live-only MCP tools.",
+  "_source": "local"
+}
+```
+
+`status` derivation:
+
+| Lock classification        | /ping         | `status`       |
+| -------------------------- | ------------- | -------------- |
+| `dead_bridge`              | —             | `dead_bridge`  |
+| —                          | reachable, `compiling: true` | `compiling` |
+| —                          | reachable, `connected: true` | `running`   |
+| otherwise                  | —             | `stopped`      |
+
+`stopped` intentionally folds two indistinguishable cases from the MCP-server's vantage point: Unity is not running at all, OR Unity is running but the operator toggled the bridge off via the toolbar. `instance.lock` in the response disambiguates (`lock === null` → no Unity; `lock.pid` alive but no listener → toolbar off). The tool **never** errors on an offline bridge — `stopped` IS the answer in that case. Read-only, gate-free, never spawns Unity.
+
+### Deferred: `bridge_stop` / `bridge_start`
+
+`bridge_stop` and `bridge_start` are **not** shipped. Two reasons, recorded so a future revisit has context:
+
+1. **No bridge HTTP route for start/stop.** Today only the Unity Editor toolbar toggles the bridge (`packages/bridge/Editor/UI/BridgeToolbarToggle.cs`). Adding those tools means new bridge-side work — a `/bridge/stop` + `/bridge/start` route that calls `BridgeHttpServer.Stop()/Start()` on the main thread.
+2. **Self-disconnect hazard on `stop`.** The `stop` request arrives over the very HTTP listener it is about to tear down. A correct implementation must send the response *before* the listener stops (deferred / async stop), or the caller gets a connection-reset instead of the OK.
+
+Offline scenarios are therefore **operator-driven** in v1: stop/start via the toolbar, gated by `manual` setup actions and confirmed by `bridge_status` (or `ping` / the CLI `wait-for-ready`). Revisit the stop/start routes only if the manual pattern proves too painful across milestones.
+
 ## Source references
 
 - `mcp-server/src/tools/index.ts`
@@ -154,4 +199,5 @@ Examples: `bridge_unavailable`, `batch_not_supported`, `validation_failed`, `sce
 - `mcp-server/src/capabilities/build-capabilities.ts`
 - `mcp-server/src/capabilities/tool-groups.ts` — canonical tool-group catalog (single source of truth).
 - `mcp-server/src/tool-session-state.ts` — per-session visibility store + ListTools filter.
+- `mcp-server/src/tools/bridge-status.ts` — operator-only bridge admin tool (phase-3).
 

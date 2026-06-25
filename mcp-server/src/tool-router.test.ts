@@ -795,3 +795,206 @@ test("route: manage_tools list_groups does not notify", async () => {
   await router.route("unity_open_mcp_manage_tools", { action: "list_groups" });
   assert.equal(notifyCount, 0);
 });
+
+// ---------------------------------------------------------------------------
+// testsuite-tauri phase-3 — bridge_status
+//
+// bridge_status is server-resolved: it reads the instance lock from disk
+// (classifyInstance) and issues one /ping via the LiveClient, then synthesizes
+// a coarse `status` token. The tests below inject a fake LiveClient that
+// returns a specific ping body for `unity_open_mcp_ping`, plus a real (empty)
+// project path so the lock read resolves to `null` → "gone" classification.
+// ---------------------------------------------------------------------------
+
+// A LiveClient fake whose `route` returns a ping-shaped body specifically for
+// `unity_open_mcp_ping`, and `isLiveAvailable` derived from that body's
+// `connected` flag (so bridge_status's /ping probe + the classifier compose
+// the same way they do in production).
+function makePingFakeLive(opts: {
+  pingBody?: Record<string, unknown> | null;
+  pingIsError?: boolean;
+  available?: boolean;
+  bridgeTools?: Set<string> | null;
+}): LiveClient & { calls: LiveCall[] } {
+  const calls: LiveCall[] = [];
+  const pingBody = opts.pingBody ?? null;
+  const pingIsError = opts.pingIsError ?? false;
+  const available = opts.available ?? (pingBody?.connected === true);
+  const bridgeTools = opts.bridgeTools;
+  return {
+    calls,
+    async isLiveAvailable() {
+      return available;
+    },
+    async route(tool: string, args: Record<string, unknown>) {
+      calls.push({ tool, args });
+      if (tool === "unity_open_mcp_ping") {
+        if (pingBody === null) {
+          // Mirror LiveClient.handlePing's offline error shape.
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  error: { code: "bridge_offline", message: "Cannot connect" },
+                }),
+              },
+            ],
+            isError: true,
+          } as CallToolResult;
+        }
+        return {
+          content: [{ type: "text", text: JSON.stringify(pingBody) }],
+          isError: pingIsError,
+        } as CallToolResult;
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify({ ok: true }) }],
+        isError: false,
+      } as CallToolResult;
+    },
+    async listBridgeTools() {
+      if (bridgeTools === null) return null;
+      if (bridgeTools === undefined) {
+        return { tools: new Set<string>(), groups: [] };
+      }
+      return { tools: bridgeTools, groups: [] };
+    },
+  } as unknown as LiveClient & { calls: LiveCall[] };
+}
+
+test("route: bridge_status returns running when /ping is connected and idle", async () => {
+  await withTmp("router-bstatus-running-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makePingFakeLive({
+      pingBody: { connected: true, compiling: false, mode: "live", unityVersion: "6000.0.0" },
+    });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    const result = await router.route("unity_open_mcp_bridge_status", {});
+    const body = parseBody(result);
+    assert.equal(result.isError, false, "bridge_status never errors");
+    assert.equal(body.status, "running");
+    assert.equal(body.ready, true);
+    assert.equal(body._source, "local");
+    const instance = body.instance as { classification: string };
+    const ping = body.ping as { reachable: boolean; connected?: boolean; compiling?: boolean };
+    assert.equal(instance.classification, "gone"); // no lock file in tmp
+    assert.equal(ping.reachable, true);
+    assert.equal(ping.connected, true);
+    assert.equal(ping.compiling, false);
+    assert.equal(live.calls.length, 1);
+    assert.equal(live.calls[0].tool, "unity_open_mcp_ping");
+  });
+});
+
+test("route: bridge_status returns compiling when /ping reports compiling=true", async () => {
+  await withTmp("router-bstatus-compiling-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makePingFakeLive({
+      pingBody: { connected: true, compiling: true, mode: "live" },
+    });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    const result = await router.route("unity_open_mcp_bridge_status", {});
+    const body = parseBody(result);
+    assert.equal(result.isError, false);
+    assert.equal(body.status, "compiling");
+    assert.equal(body.ready, false);
+    const ping = body.ping as { compiling?: boolean };
+    assert.equal(ping.compiling, true);
+  });
+});
+
+test("route: bridge_status returns stopped when bridge is offline", async () => {
+  await withTmp("router-bstatus-stopped-", async (tmp) => {
+    await setupProject(tmp);
+    // No lock file + offline ping → "gone" classification + unreachable ping.
+    const live = makePingFakeLive({ pingBody: null, available: false });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    const result = await router.route("unity_open_mcp_bridge_status", {});
+    const body = parseBody(result);
+    assert.equal(result.isError, false, "stopped is not an error");
+    assert.equal(body.status, "stopped");
+    assert.equal(body.ready, false);
+    const ping = body.ping as { reachable: boolean };
+    const instance = body.instance as { classification: string; lock: unknown };
+    assert.equal(ping.reachable, false);
+    assert.equal(instance.classification, "gone");
+    assert.equal(instance.lock, null);
+    assert.ok(typeof body.nextStep === "string" && body.nextStep.length > 0);
+  });
+});
+
+test("route: bridge_status returns dead_bridge when the lock classifies dead", async () => {
+  await withTmp("router-bstatus-dead-", async (tmp) => {
+    await setupProject(tmp);
+    // Plant a lock whose pid is alive (this test process) but heartbeat is
+    // stale — the dead-bridge signature. classifyInstance returns dead_bridge.
+    // We redirect homedir() at a sandbox so readInstanceLock sees our planted
+    // lock for this project path.
+    const sandboxDir = await mkdtemp(join(tmpdir(), "uomcp-bstatus-"));
+    const prevHome = process.env.HOME;
+    const prevUserProfile = process.env.USERPROFILE;
+    process.env.HOME = sandboxDir;
+    process.env.USERPROFILE = sandboxDir;
+    try {
+      const { projectHash } = await import("./instance-discovery.js");
+      const hash = projectHash(tmp);
+      const instancesDir = join(sandboxDir, ".unity-open-mcp", "instances");
+      await mkdir(instancesDir, { recursive: true });
+      const stale = new Date(Date.now() - 60_000).toISOString();
+      const payload = {
+        pid: process.pid,
+        port: 24678,
+        projectPath: tmp,
+        projectHash: hash,
+        startedAt: stale,
+        updatedAt: stale,
+        heartbeatAt: stale,
+        state: "reloading",
+        isPlaying: false,
+        isCompiling: false,
+        bridgeVersion: "0.0.0",
+        unityVersion: "6000.0.0",
+      };
+      await writeFile(join(instancesDir, `${hash}.json`), JSON.stringify(payload));
+
+      // Ping unreachable (the dead bridge never answers).
+      const live = makePingFakeLive({ pingBody: null, available: false });
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+      const result = await router.route("unity_open_mcp_bridge_status", {});
+      const body = parseBody(result);
+      assert.equal(result.isError, false);
+      assert.equal(body.status, "dead_bridge");
+      const instance = body.instance as { classification: string };
+      assert.equal(instance.classification, "dead_bridge");
+      assert.ok(
+        typeof body.nextStep === "string" && body.nextStep.includes("read_compile_errors"),
+        "dead_bridge nextStep points at read_compile_errors",
+      );
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevUserProfile;
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("route: bridge_status is registered in ALL_TOOLS and always-visible", async () => {
+  const { ALL_TOOLS } = await import("./tools/index.js");
+  const { filterVisibleTools } = await import("./tool-session-state.js");
+  const names = ALL_TOOLS.map((t) => t.name);
+  assert.ok(names.includes("unity_open_mcp_bridge_status"));
+  // A fresh session (core-only) must still see bridge_status.
+  const freshSession = new ToolSessionState();
+  const visible = filterVisibleTools(ALL_TOOLS, freshSession).map((t) => t.name);
+  assert.ok(
+    visible.includes("unity_open_mcp_bridge_status"),
+    "bridge_status is always-visible (no group assignment)",
+  );
+});
