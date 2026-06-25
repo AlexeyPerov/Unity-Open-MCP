@@ -1,0 +1,68 @@
+{
+  "id": "m9-reserialize-gate-off-skip-check",
+  "title": "Reserialize with gate off skips validation",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 12,
+  "requirementLevel": "required-core",
+  "tags": ["m9", "reserialize", "gate", "plan-1"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. This scenario re-uses the happy-path staged fixture (or any existing canonical asset). Goal: confirm that `gate: off` skips the checkpoint + validation entirely and still round-trips the asset, so the operator has a fast path when they trust the input."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Stage a clean canonical prefab (no edit)",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Assets/Fixtures/HealthyFixture.prefab",
+          "to": "{fixtureRoot}/GateOff.prefab"
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Run reserialize with gate off",
+      "tool": "unity_open_mcp_reserialize",
+      "payload": {
+        "paths": ["{fixtureRoot}/GateOff.prefab"],
+        "gate": "off"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "mutation.success is true",
+        "gate.skipped is true (no checkpoint taken, no validation categories run)",
+        "no gate.validation / gate.delta block is populated (or it reports skipped)",
+        "the asset is still round-tripped through Unity's serializer (canonical YAML on disk)"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [{ "action": "fs_delete", "paths": ["{fixtureRoot}"] }]
+      }
+    },
+    "note": "Prompt-only with respect to the gate (no enforcement), but still stages a disposable fixture so the demo source asset is never touched."
+  }
+}

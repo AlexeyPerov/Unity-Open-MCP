@@ -1,0 +1,79 @@
+{
+  "id": "m9-read-asset-component-drilldown",
+  "title": "read_asset: compact summary then component drill-down",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 20,
+  "requirementLevel": "required-core",
+  "tags": ["m9", "read-asset", "drill-down", "plan-2"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Goal: confirm `unity_open_mcp_read_asset` returns a compact summary by default, and that the `component` drill-down flag expands field detail without re-pulling raw YAML (cache hit). We stage a prefab so the source demo asset is never depended on for live reads."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Stage a prefab with a non-trivial component set",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Assets/Fixtures/BrokenRefFixture.prefab",
+          "to": "{fixtureRoot}/Drilldown.prefab"
+        }
+      ]
+    },
+    {
+      "id": "prompt-summary",
+      "type": "agent_prompt",
+      "title": "Read the asset summary (default detail)",
+      "tool": "unity_open_mcp_read_asset",
+      "payload": {
+        "asset_path": "{fixtureRoot}/Drilldown.prefab"
+      }
+    },
+    {
+      "id": "prompt-drilldown",
+      "type": "agent_prompt",
+      "title": "Drill into one component (fetch fields, then component flag)",
+      "tool": "unity_open_mcp_read_asset",
+      "payload": {
+        "asset_path": "{fixtureRoot}/Drilldown.prefab",
+        "field_limit": 30,
+        "component": "MeshFilter"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "Summary response is a compact JSON object (asset/path/guid/objects/components + cmp table + folded tree), dramatically shorter than cat-ing the .prefab",
+        "Repeated component sets are declared once in cmp and referenced by code in tree rows",
+        "_cache: \"miss\" and _route.route: \"live\" on the summary call",
+        "Drill-down returns a componentMatches array; each entry has object (hierarchy path), component, and fields (name/value pairs)",
+        "Drill-down reports _cache: \"hit\" (the model was reused, no re-parse)"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste both responses (summary + drill-down)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [{ "action": "fs_delete", "paths": ["{fixtureRoot}"] }]
+      }
+    },
+    "note": "read_asset is read-only; the only artifact is the staged fixture, reverted by the afterStep delete."
+  }
+}

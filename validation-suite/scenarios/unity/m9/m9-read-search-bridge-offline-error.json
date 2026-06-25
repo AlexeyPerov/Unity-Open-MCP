@@ -1,0 +1,109 @@
+{
+  "id": "m9-read-search-bridge-offline-error",
+  "title": "read_asset / search_assets fail fast when the bridge is offline",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 21,
+  "requirementLevel": "required-core",
+  "tags": ["m9", "read-asset", "search-assets", "bridge-offline", "plan-2"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running initially. Uses the standard manual offline pattern (engine-profiles/unity.md). Goal: confirm read_asset / search_assets return a clear offline error (no batch fallback) when the bridge is down, and that the error is actionable."
+    },
+    {
+      "id": "stage-fixture",
+      "type": "setup",
+      "title": "Stage a fixture path (while the bridge is still up)",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Assets/Fixtures/HealthyFixture.prefab",
+          "to": "{fixtureRoot}/OfflineRead.prefab"
+        }
+      ]
+    },
+    {
+      "id": "go-offline",
+      "type": "setup",
+      "title": "Stop the bridge via the Unity toolbar (manual gate)",
+      "actions": [
+        {
+          "action": "manual",
+          "note": "In the Unity Editor, click the bridge toolbar toggle to STOP the bridge (or close the Editor). Do not proceed until the toolbar shows the bridge as stopped."
+        },
+        {
+          "action": "mcp_tool",
+          "tool": "unity_open_mcp_bridge_status",
+          "args": {},
+          "timeoutMs": 20000
+        }
+      ]
+    },
+    {
+      "id": "prompt-read",
+      "type": "agent_prompt",
+      "title": "Run read_asset in the MCP client (bridge down)",
+      "tool": "unity_open_mcp_read_asset",
+      "payload": {
+        "asset_path": "{fixtureRoot}/OfflineRead.prefab"
+      }
+    },
+    {
+      "id": "prompt-search",
+      "type": "agent_prompt",
+      "title": "Run search_assets in the MCP client (bridge down)",
+      "tool": "unity_open_mcp_search_assets",
+      "payload": {
+        "component": "Transform",
+        "type": "prefab",
+        "max_results": 5
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "The bridge_status mcp_tool in the go-offline step reports the bridge as stopped/dead before you continue",
+        "read_asset returns a live-unavailable / bridge_offline error (no batch fallback in this milestone)",
+        "search_assets returns the same live-unavailable / bridge_offline error",
+        "Neither call hangs; the agent can recover by reconnecting the Editor"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste both responses (read + search)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "go-offline": {
+        "actions": [
+          {
+            "action": "manual",
+            "note": "In the Unity Editor, click the bridge toolbar toggle to START the bridge. Wait for it to reconnect before continuing."
+          },
+          {
+            "action": "mcp_tool",
+            "tool": "unity_open_mcp_bridge_status",
+            "args": {},
+            "timeoutMs": 30000
+          }
+        ]
+      },
+      "stage-fixture": {
+        "actions": [{ "action": "fs_delete", "paths": ["{fixtureRoot}"] }]
+      }
+    },
+    "note": "Reset restarts the bridge and confirms readiness via bridge_status (prefer the CLI `unity-open-mcp wait-for-ready` for a stronger check). The bridge MUST be back online before the next scenario runs."
+  }
+}

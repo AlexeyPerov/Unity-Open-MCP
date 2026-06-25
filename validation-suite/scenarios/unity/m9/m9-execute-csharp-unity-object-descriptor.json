@@ -1,0 +1,50 @@
+{
+  "id": "m9-execute-csharp-unity-object-descriptor",
+  "title": "execute_csharp: live Unity object descriptor (no infinite loop)",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 30,
+  "requirementLevel": "required-core",
+  "tags": ["m9", "execute-csharp", "serialization", "plan-4"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Goal: confirm the depth-limited reflective serializer returns a compact descriptor for a live GameObject/Component instead of reflecting into the cyclic GameObject↔Component graph (which previously infinite-looped or threw)."
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Return a live Transform from execute_csharp",
+      "tool": "unity_open_mcp_execute_csharp",
+      "payload": {
+        "code": "var go = new GameObject(\"Probe\"); return go.transform;"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "mutation.output is a compact descriptor object, e.g. {\"$type\":\"UnityEngine.Transform\", \"name\":\"Probe\", \"instanceId\":<int>, ...}",
+        "No reflection recurses into the GameObject↔Component graph (no hang, no stack overflow)",
+        "The call returns promptly",
+        "If include_properties is on, computed properties appear but the graph stays bounded"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "note": "execute_csharp creates a transient GameObject in the open scene; it is not persisted to disk and is not tracked by the fs manifest. If a leftover \"Probe\" object clutters the scene, delete it manually in the Editor (it is not part of the disposable fixture tree)."
+  }
+}

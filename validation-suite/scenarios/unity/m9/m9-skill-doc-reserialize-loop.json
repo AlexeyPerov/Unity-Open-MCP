@@ -1,0 +1,42 @@
+{
+  "id": "m9-skill-doc-reserialize-loop",
+  "title": "Edit → reserialize → validate loop is documented in the skill",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 40,
+  "requirementLevel": "required-extended",
+  "tags": ["m9", "docs", "skill", "plan-1"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "body": "Open the agent skill and confirm the reserialize loop guidance is present and accurate, so an agent following the skill can execute the edit → reserialize → read-delta loop end-to-end."
+    },
+    {
+      "id": "open-doc",
+      "type": "external_doc",
+      "docPath": "skills/unity-open-mcp/SKILL.md",
+      "title": "Open the MCP skill file"
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "The mutate/gate tool list includes unity_open_mcp_reserialize",
+        "An \"Example: reserialize after direct YAML edits\" section exists with workflow steps (edit → reserialize → read delta)",
+        "The example includes a request payload and a response envelope (mutation + gate + agentNextSteps)",
+        "The supported-extensions list (.prefab/.unity/.asset/.mat/.controller/.anim) and the whole-project-not-supported caveat are present",
+        "No internal milestone IDs leak into the rendered skill text"
+      ]
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "note": "Documentation-only scenario; no fixtures or artifacts to revert."
+  }
+}

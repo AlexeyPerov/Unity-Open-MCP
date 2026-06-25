@@ -1,0 +1,87 @@
+{
+  "id": "m9-read-asset-path-scope-drilldown",
+  "title": "read_asset: path-scope drill-down (subtree filter)",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 41,
+  "requirementLevel": "required-extended",
+  "tags": ["m9", "read-asset", "drill-down", "plan-2"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Extended confidence pass for the compact read model: confirm the `path` flag scopes the tree to a subtree, and that `detail: verbose` disables render-only folding. Pick a prefab whose hierarchy has at least one named child to scope to."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Stage a prefab (use a hierarchy-bearing fixture)",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Assets/Fixtures/RestorableRefFixture.prefab",
+          "to": "{fixtureRoot}/PathScope.prefab"
+        }
+      ]
+    },
+    {
+      "id": "prompt-summary",
+      "type": "agent_prompt",
+      "title": "Read the asset summary (default detail)",
+      "tool": "unity_open_mcp_read_asset",
+      "payload": {
+        "asset_path": "{fixtureRoot}/PathScope.prefab"
+      }
+    },
+    {
+      "id": "prompt-path-scope",
+      "type": "agent_prompt",
+      "title": "Scope the tree to a named subtree",
+      "tool": "unity_open_mcp_read_asset",
+      "payload": {
+        "asset_path": "{fixtureRoot}/PathScope.prefab",
+        "path": "<a child name from the summary tree>"
+      }
+    },
+    {
+      "id": "prompt-verbose",
+      "type": "agent_prompt",
+      "title": "Read with detail: verbose (folding disabled)",
+      "tool": "unity_open_mcp_read_asset",
+      "payload": {
+        "asset_path": "{fixtureRoot}/PathScope.prefab",
+        "detail": "verbose"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "path-scope response returns only rows matching the subtree; pathScope echoes the filter",
+        "verbose response has collapsed: 0 (render-only folding disabled) and more rows than the summary",
+        "Size ordering holds: summary <= normal <= verbose",
+        "_cache stays \"hit\" across the drill-down calls (model reused, no re-parse after the first miss)"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the responses (summary + path-scope + verbose)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [{ "action": "fs_delete", "paths": ["{fixtureRoot}"] }]
+      }
+    },
+    "note": "read_asset is read-only; the only artifact is the staged fixture, reverted by the afterStep delete."
+  }
+}

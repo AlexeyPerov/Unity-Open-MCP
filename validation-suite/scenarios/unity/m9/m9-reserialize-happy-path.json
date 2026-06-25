@@ -1,0 +1,81 @@
+{
+  "id": "m9-reserialize-happy-path",
+  "title": "Reserialize normalizes a direct YAML edit (happy path)",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 10,
+  "requirementLevel": "required-core",
+  "tags": ["m9", "reserialize", "plan-1"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Unity project open, bridge running (`unity_open_mcp_ping` → `connected: true`), MCP client configured. Goal: confirm `unity_open_mcp_reserialize` rewrites a text-serialized asset through Unity's serializer after a direct YAML edit, and that the gate envelope reports a clean delta."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Stage a non-canonical copy of a working prefab",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Assets/Fixtures/HealthyFixture.prefab",
+          "to": "{fixtureRoot}/HappyPath.prefab"
+        },
+        {
+          "action": "fs_patch",
+          "path": "{fixtureRoot}/HappyPath.prefab",
+          "patches": [
+            {
+              "op": "insert_after_line_contains",
+              "match": "  m_Name: HealthyFixture",
+              "insert": "  m_TagString: Untagged "
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Run reserialize in the MCP client (assets-only round-trip)",
+      "tool": "unity_open_mcp_reserialize",
+      "payload": {
+        "paths": ["{fixtureRoot}/HappyPath.prefab"],
+        "gate": "enforce"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "mutation.success is true",
+        "mutation.output contains reserialized: [\"<fixture>/HappyPath.prefab\"], totalCount: 1, wholeProject: false, includeMeta: false",
+        "gate.validation.passed is true",
+        "gate.delta.newErrors: 0 and gate.delta.newIssues: []",
+        "file on disk is canonical Unity YAML (consistent 2-space indents, no trailing whitespace inside scalars, %YAML 1.1 header preserved, fileID lines untouched)",
+        "companion HappyPath.prefab.meta is unchanged (default round-trips asset YAML only)"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [{ "action": "fs_delete", "paths": ["{fixtureRoot}"] }]
+      }
+    },
+    "note": "fs_copy tracks the companion .meta when the source companion exists; the afterStep fs_delete {fixtureRoot} reverts the whole staged tree. The fs_patch snapshot restore runs before the declared delete."
+  }
+}

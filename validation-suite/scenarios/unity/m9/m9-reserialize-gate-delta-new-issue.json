@@ -1,0 +1,80 @@
+{
+  "id": "m9-reserialize-gate-delta-new-issue",
+  "title": "Gate delta surfaces issues the round-trip exposes",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 11,
+  "requirementLevel": "required-core",
+  "tags": ["m9", "reserialize", "gate", "plan-1"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running. Goal: confirm that when a direct YAML edit introduces a problem the serializer cares about (a broken reference), the gate delta lists it as a new issue. We start from a clean prefab and break a GUID by hand so the delta is attributable to our edit, not a pre-existing condition."
+    },
+    {
+      "id": "setup-fixture",
+      "type": "setup",
+      "title": "Stage a clean prefab and break a reference GUID",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Assets/Fixtures/BrokenRefFixture.prefab",
+          "to": "{fixtureRoot}/GateDelta.prefab"
+        },
+        {
+          "action": "fs_patch",
+          "path": "{fixtureRoot}/GateDelta.prefab",
+          "patches": [
+            {
+              "op": "replace_line_contains",
+              "match": "  m_Mesh: {fileID: 4300000, guid:",
+              "replace": "  m_Mesh: {fileID: 4300000, guid: 00000000000000000000000000000000, type: 2}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Run reserialize with enforced gate",
+      "tool": "unity_open_mcp_reserialize",
+      "payload": {
+        "paths": ["{fixtureRoot}/GateDelta.prefab"],
+        "gate": "enforce"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "reserialize itself does not throw on broken refs (mutation.success may be true)",
+        "gate.validation.passed is false",
+        "gate.delta.newErrors >= 1",
+        "gate.delta.newIssues contains an issue key for the broken asset (e.g. a missing_references|Error|...|MISSING_* entry)",
+        "agentNextSteps points to apply_fix when a fix is available for the issue"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "setup-fixture": {
+        "actions": [{ "action": "fs_delete", "paths": ["{fixtureRoot}"] }]
+      }
+    },
+    "note": "The fixture is disposable; the snapshot restore reverts the GUID patch and the declared delete removes the staged tree. The source demo asset (BrokenRefFixture) is never modified."
+  }
+}

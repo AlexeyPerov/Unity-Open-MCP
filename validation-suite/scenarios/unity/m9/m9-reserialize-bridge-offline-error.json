@@ -1,0 +1,99 @@
+{
+  "id": "m9-reserialize-bridge-offline-error",
+  "title": "Reserialize fails fast when the bridge is offline",
+  "milestone": "m9",
+  "engineId": "unity",
+  "order": 13,
+  "requirementLevel": "required-core",
+  "tags": ["m9", "reserialize", "bridge-offline", "plan-1"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Bridge running initially (so the offline step is attributable). Uses the standard manual offline pattern (engine-profiles/unity.md → Bridge-offline scenario pattern). The app has no HTTP route to stop/start the bridge in v1, so stop/start are operator-driven via the Unity toolbar, gated by `manual` actions and confirmed by `bridge_status`."
+    },
+    {
+      "id": "stage-fixture",
+      "type": "setup",
+      "title": "Stage a fixture path (while the bridge is still up)",
+      "actions": [
+        {
+          "action": "fs_copy",
+          "from": "Assets/Fixtures/HealthyFixture.prefab",
+          "to": "{fixtureRoot}/Offline.prefab"
+        }
+      ]
+    },
+    {
+      "id": "go-offline",
+      "type": "setup",
+      "title": "Stop the bridge via the Unity toolbar (manual gate)",
+      "actions": [
+        {
+          "action": "manual",
+          "note": "In the Unity Editor, click the bridge toolbar toggle to STOP the bridge (or close the Editor). Do not proceed until the toolbar shows the bridge as stopped."
+        },
+        {
+          "action": "mcp_tool",
+          "tool": "unity_open_mcp_bridge_status",
+          "args": {},
+          "timeoutMs": 20000
+        }
+      ]
+    },
+    {
+      "id": "prompt",
+      "type": "agent_prompt",
+      "title": "Run reserialize in the MCP client (bridge down)",
+      "tool": "unity_open_mcp_reserialize",
+      "payload": {
+        "paths": ["{fixtureRoot}/Offline.prefab"],
+        "gate": "enforce"
+      }
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "The bridge_status mcp_tool in the go-offline step reports the bridge as stopped/dead before you continue",
+        "reserialize returns a live-unavailable error (reserialize is not a batch tool, so there is no Node-side fallback)",
+        "error does not hang; the agent can recover by reconnecting the Editor",
+        "mutation.success is false / absent (no mutation happened while offline)"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw error envelope)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "go-offline": {
+        "actions": [
+          {
+            "action": "manual",
+            "note": "In the Unity Editor, click the bridge toolbar toggle to START the bridge. Wait for it to reconnect before continuing."
+          },
+          {
+            "action": "mcp_tool",
+            "tool": "unity_open_mcp_bridge_status",
+            "args": {},
+            "timeoutMs": 30000
+          }
+        ]
+      },
+      "stage-fixture": {
+        "actions": [{ "action": "fs_delete", "paths": ["{fixtureRoot}"] }]
+      }
+    },
+    "note": "Reset order is reverse by step: the fixture delete runs, and the go-offline reset restarts the bridge and confirms readiness via bridge_status. Prefer the CLI `unity-open-mcp wait-for-ready` for a stronger readiness check if bridge_status alone is ambiguous. The bridge MUST be back online before the next scenario runs."
+  }
+}
