@@ -1,4 +1,7 @@
-<img width="310" height="310" alt="MCP for Unity" src="hub/src-tauri/icons/Square310x310Logo.png" />
+<p align="center">
+  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="310">
+</p>
+
 
 # Unity Open MCP
 
