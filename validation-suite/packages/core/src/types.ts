@@ -14,6 +14,41 @@
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Patch operations (pinned in phase-2 spec)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Patch operations understood by `fs_patch` (pinned in the Phase 2 spec).
+ * The loader rejects any other op at scenario-load time (config-action
+ * drift guard — see phase-2 task 3). Reversion uses a file snapshot, not
+ * an inverse recipe (see phase-2 spec → revert strategy: snapshot). The
+ * matching vocabulary array {@link PATCH_OPS} lives in `errors.ts`.
+ */
+export type PatchOp =
+  | "replace_line_contains"
+  | "insert_after_line_contains"
+  | "insert_before_line_contains"
+  | "trim_trailing_whitespace";
+
+/**
+ * A single deterministic text patch. `match` selects the line to act on
+ * (substring match; first matching line per op). Field usage by `op`:
+ *  - `replace_line_contains`         → needs `match` + `replace`.
+ *  - `insert_after_line_contains`    → needs `match` + `insert`.
+ *  - `insert_before_line_contains`   → needs `match` + `insert`.
+ *  - `trim_trailing_whitespace`      → ignores `match`/`replace`/`insert`.
+ */
+export interface FsPatchEntry {
+  op: PatchOp;
+  /** Substring used to select the target line. */
+  match?: string;
+  /** Replacement line (full line) for `replace_line_contains`. */
+  replace?: string;
+  /** Line(s) to insert for the insert ops. */
+  insert?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Requirement tiers & status
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -67,13 +102,6 @@ export interface SetupAction {
   /** Free-form params. Shape depends on `action`; opaque at load time. */
   [key: string]: unknown;
 }
-
-/** Patch operations understood by `fs_patch` (pinned in phase-2 spec). */
-export type PatchOp =
-  | "replace_line_contains"
-  | "insert_after_line_contains"
-  | "insert_before_line_contains"
-  | "trim_trailing_whitespace";
 
 /**
  * A scenario step. `id` is stable and keys into the state file's
@@ -143,16 +171,111 @@ export interface Scenario {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Manifest (reserved for Phase 2)
+// Manifest (Phase 2 — artifact tracking for reset)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Manifest entry reserved for Phase 2. Phase 1 may write `null` here
- * (unity.md → State file schema → manifestRefs). Each mutating `fs_*`
- * action records created/modified artifact metadata so reset can clean
- * up deterministically.
+ * The kind of artifact a manifest entry describes. Determines how reset
+ * reverts it (phase-2 spec → Reset contract):
+ *  - `created`  → reset deletes the path (and its companion if any).
+ *  - `modified` → reset restores the snapshot taken before the patch.
+ *  - `deleted`  → reset does nothing (the delete was the cleanup).
+ */
+export type ManifestEntryKind = "created" | "modified" | "deleted";
+
+/**
+ * One artifact recorded by an `fs_*` action. Paths are project-relative
+ * (forward-slash) so the manifest is portable across OSes and survives a
+ * project root move. `snapshot` holds the pre-patch file bytes (encoded
+ * utf-8) for `fs_patch` entries; reset writes it back verbatim
+ * (phase-2 spec → revert strategy: snapshot).
+ */
+export interface ManifestEntry {
+  kind: ManifestEntryKind;
+  /** Project-relative path (forward-slash) of the primary artifact. */
+  path: string;
+  /** True when a companion (e.g. `.meta`) was also touched. */
+  companionPath?: string;
+  /** Pre-patch file contents (utf-8) for `modified` entries; else absent. */
+  snapshot?: string;
+}
+
+/**
+ * A per-step manifest: the ordered list of artifacts a step's setup
+ * actions produced. Reverse-order reset walks this list from the back so
+ * later operations unwind before earlier ones (phase-2 task 6). The
+ * backend persists manifests as blobs in `UserSettings/ValidationSuite/`;
+ * the state file only keeps the blob id reference per step.
+ */
+export interface StepManifest {
+  scenarioId: string;
+  stepId: string;
+  entries: ManifestEntry[];
+}
+
+/**
+ * Manifest reference stored in `.state.json`. `null` while Phase 1 (no
+ * manifest); from Phase 2 onward it is the manifest blob id the backend
+ * uses to load the full {@link StepManifest} (see
+ * engine-profiles/unity.md → State file schema → manifestRefs).
  */
 export type ManifestRef = string | null;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Action execution results + action log (Phase 2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Severity of an action-log line shown in the step's action log panel. */
+export type ActionLogLevel = "info" | "warn" | "error";
+
+/** A single line in a step's action log (phase-2 deliverable: log panel). */
+export interface ActionLogLine {
+  level: ActionLogLevel;
+  message: string;
+  /** Optional CLI output snippet (stderr/stdout) for `mcp_tool` actions. */
+  snippet?: string;
+}
+
+/** Outcome of running a single setup action within a step. */
+export interface ActionResult {
+  /** True when the action completed without error. */
+  ok: boolean;
+  /** Human-readable summary (e.g. `copied 2 file(s)`). */
+  summary: string;
+  /** Log lines produced by this action (forwarded to the log panel). */
+  logs: ActionLogLine[];
+  /** Manifest entries recorded by this action (empty for read-only ops). */
+  entries: ManifestEntry[];
+  /**
+   * For `mcp_tool`: the parsed CLI result body + isError flag. Absent for
+   * `fs_*`/`manual`.
+   */
+  mcp?: { isError: boolean; result: unknown };
+}
+
+/**
+ * Outcome of running all actions in a step (phase-2 deliverable: action
+ * executor). `ok` is false if any action failed; execution stops at the
+ * first failure (setup is ordered + deterministic — partial application
+ * would leave an inconsistent fixture). The `manifestId` is what gets
+ * stored in `manifestRefs[stepId]` so reset can reload the entries.
+ */
+export interface StepRunResult {
+  ok: boolean;
+  results: ActionResult[];
+  /** Backend manifest blob id for this step (null when nothing mutated). */
+  manifestId: ManifestRef;
+  /** Aggregated log lines across all actions. */
+  logs: ActionLogLine[];
+}
+
+/** Outcome of a reset (step or all). */
+export interface ResetResult {
+  ok: boolean;
+  /** Per-step warnings from best-effort cleanup (incomplete manifests). */
+  warnings: string[];
+  logs: ActionLogLine[];
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State file (.state.json)

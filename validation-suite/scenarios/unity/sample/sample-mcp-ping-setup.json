@@ -1,0 +1,41 @@
+{
+  "id": "sample-mcp-ping-setup",
+  "title": "mcp_tool setup action smoke check",
+  "milestone": "sample",
+  "engineId": "unity",
+  "order": 3,
+  "requirementLevel": "optional",
+  "tags": ["sample", "phase-2", "mcp_tool"],
+  "automatedCoverage": ["BridgePingTests.*"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "body": "Exercises the Phase 2 mcp_tool action handler. Run setup to invoke unity_open_mcp_ping via the engine CLI; the result appears in the action log."
+    },
+    {
+      "id": "ping",
+      "type": "setup",
+      "title": "Run a bridge ping via mcp_tool",
+      "actions": [
+        {
+          "action": "mcp_tool",
+          "tool": "unity_open_mcp_ping",
+          "timeoutMs": 15000
+        }
+      ]
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "items": [
+        "Action log shows mcp_tool result with isError=false when the bridge is running",
+        "Action log surfaces a tool error (isError=true) without crashing when the bridge is offline"
+      ]
+    },
+    {
+      "id": "done",
+      "type": "mark_done"
+    }
+  ]
+}

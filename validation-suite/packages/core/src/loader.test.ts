@@ -92,6 +92,76 @@ test("parseScenario rejects unknown action type in setup step", () => {
   assert.match(error!, /Unknown action type/);
 });
 
+// ── fs_patch patch-op validation (phase-2 task 3) ────────────────────────────
+
+test("parseScenario rejects unknown fs_patch op at load time", () => {
+  const raw = sampleScenario({
+    steps: [
+      {
+        id: "setup",
+        type: "setup",
+        actions: [
+          { action: "fs_patch", path: "x", patches: [{ op: "nuke_everything" }] },
+        ],
+      },
+    ],
+  });
+  const { error } = parseScenario("a.json", raw);
+  assert.match(error!, /Unknown patch op/);
+});
+
+test("parseScenario rejects fs_patch without patches array", () => {
+  const raw = sampleScenario({
+    steps: [
+      { id: "setup", type: "setup", actions: [{ action: "fs_patch", path: "x" }] },
+    ],
+  });
+  const { error } = parseScenario("a.json", raw);
+  assert.match(error!, /non-empty "patches" array/);
+});
+
+test("parseScenario rejects replace_line_contains missing match/replace", () => {
+  const raw = sampleScenario({
+    steps: [
+      {
+        id: "setup",
+        type: "setup",
+        actions: [
+          { action: "fs_patch", path: "x", patches: [{ op: "replace_line_contains", replace: "y" }] },
+        ],
+      },
+    ],
+  });
+  const { error } = parseScenario("a.json", raw);
+  assert.match(error!, /replace_line_contains needs "match"/);
+});
+
+test("parseScenario accepts all four pinned patch ops with required params", () => {
+  const raw = sampleScenario({
+    steps: [
+      {
+        id: "setup",
+        type: "setup",
+        actions: [
+          {
+            action: "fs_patch",
+            path: "x",
+            patches: [
+              { op: "replace_line_contains", match: "a", replace: "b" },
+              { op: "insert_after_line_contains", match: "a", insert: "c" },
+              { op: "insert_before_line_contains", match: "a", insert: "d" },
+              { op: "trim_trailing_whitespace" },
+            ],
+          },
+        ],
+      },
+    ],
+  });
+  const { error, scenario } = parseScenario("a.json", raw);
+  assert.equal(error, undefined);
+  assert.equal(scenario!.steps[0].actions!.length, 1);
+});
+
 test("parseScenario rejects setup step without actions", () => {
   const raw = sampleScenario({
     steps: [{ id: "setup", type: "setup" }],
@@ -122,7 +192,7 @@ test("parseScenario accepts all five action verbs", () => {
         type: "setup",
         actions: [
           { action: "fs_copy", from: "a", to: "b" },
-          { action: "fs_patch", path: "b", patches: [] },
+          { action: "fs_patch", path: "b", patches: [{ op: "trim_trailing_whitespace" }] },
           { action: "fs_delete", paths: ["b"] },
           { action: "mcp_tool", tool: "unity_open_mcp_ping" },
           { action: "manual", note: "do it" },

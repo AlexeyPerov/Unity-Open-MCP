@@ -15,6 +15,7 @@
 
 use std::path::PathBuf;
 
+use serde_json::Value;
 use tauri::{AppHandle, State};
 use tauri::Manager;
 
@@ -23,7 +24,8 @@ use crate::profile_loader;
 use crate::project_kind;
 use crate::scenario_loader;
 use crate::schemas::{
-    AppConfig, EngineProfile, ProjectCheck, ScenarioFile, SuiteState, TestState, Status,
+    ActionResult, AppConfig, EngineProfile, ProjectCheck, ScenarioFile, StepManifest, SuiteState,
+    TestState, Status,
 };
 
 /// Shared app state. We cache the active engine profile + last-known
@@ -61,8 +63,12 @@ pub fn select_project(
     let candidate = PathBuf::from(&path);
     let check = project_kind::check_project(&candidate, &profile);
     if check.valid {
-        // Scope the app to this project and persist the pointer.
-        *state.project_root.lock().unwrap() = Some(candidate.clone());
+        // Canonicalize before scoping so the project root the action
+        // executor sandboxes against matches the canonical paths the
+        // fs ops resolve to (on macOS `/var` → `/private/var` etc.).
+        // Falls back to the raw path if canonicalization fails.
+        let canonical = std::fs::canonicalize(&candidate).unwrap_or(candidate.clone());
+        *state.project_root.lock().unwrap() = Some(canonical.clone());
         *state.engine_profile.lock().unwrap() = Some(profile.clone());
         let _ = persistence::save_app_config(&AppConfig {
             last_project_path: Some(path.clone()),
@@ -224,6 +230,180 @@ pub fn reveal_path(path: String) -> Result<(), String> {
     // backend-side path validation (Phase 2 sandbox).
     let _ = path;
     Ok(())
+}
+
+/// Resolve the active project root + profile for an action command. All
+/// phase-2 action commands share this prologue: they need both the
+/// sandbox root and the profile (companions, CLI binary).
+fn active_root_profile(
+    state: &State<'_, AppState>,
+) -> Result<(PathBuf, EngineProfile), String> {
+    let root = state
+        .project_root
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "No project selected.".to_string())?;
+    let profile = state
+        .engine_profile
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "No engine profile active.".to_string())?;
+    Ok((root, profile))
+}
+
+/// Resolve the fixture root (absolute) for a scenario id by interpolating
+/// `<test-id>` in the profile's `fixtureRoot` pattern. The TS runner uses
+/// this to build its placeholder context before expanding action params.
+#[tauri::command]
+pub fn resolve_fixture_root(
+    handle: AppHandle,
+    scenario_id: String,
+) -> Result<String, String> {
+    let profile = profile_loader::active_profile(resource_dir(&handle).as_ref())?;
+    Ok(fixture_root_abs(&profile.paths.fixture_root, &scenario_id))
+}
+
+/// Build the absolute fixture root for a scenario id. `fixtureRoot` is a
+/// profile-relative pattern with a `<test-id>` token (unity.md).
+pub fn fixture_root_abs(fixture_root_pattern: &str, scenario_id: &str) -> String {
+    // Pattern is project-relative (e.g. `Assets/_ValidationSuite/<test-id>/`);
+    // we return it relative to the project root (the caller prepends the
+    // root) — keep the trailing slash stripped for path-join ergonomics.
+    let rel = fixture_root_pattern.replace("<test-id>", scenario_id);
+    rel.trim_end_matches('/').to_string()
+}
+
+/// `fs_copy` action (phase-2 task 2). Copies a file or directory tree,
+/// auto-tracking companions when the source companion exists. Paths are
+/// project-relative and sandboxed to the project root.
+#[tauri::command]
+pub fn fs_copy_action(
+    state: State<'_, AppState>,
+    from: String,
+    to: String,
+) -> Result<ActionResult, String> {
+    let (root, profile) = active_root_profile(&state)?;
+    crate::fs_ops::fs_copy(&root, &from, &to, &profile.companions)
+}
+
+/// `fs_patch` action (phase-2 task 3). Applies deterministic patches,
+/// snapshotting the pre-patch file for reset. `snapshot_override` (when
+/// set) restores that exact content instead of applying patches (reset path).
+#[tauri::command]
+pub fn fs_patch_action(
+    state: State<'_, AppState>,
+    path: String,
+    patches: Vec<Value>,
+    snapshot_override: Option<String>,
+) -> Result<ActionResult, String> {
+    let (root, _profile) = active_root_profile(&state)?;
+    crate::fs_ops::fs_patch(&root, &path, &patches, snapshot_override.as_deref())
+}
+
+/// `fs_delete` action (phase-2 task 4). Deletes manifest-listed paths only;
+/// used by reset. Paths are sandboxed to the project root.
+#[tauri::command]
+pub fn fs_delete_action(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<ActionResult, String> {
+    let (root, _profile) = active_root_profile(&state)?;
+    crate::fs_ops::fs_delete(&root, &paths)
+}
+
+/// `mcp_tool` action (phase-2 task 5). Runs an MCP tool via the engine
+/// CLI (`unity-open-mcp run-tool`) and parses its JSON result, surfacing
+/// `isError` and the tool body. `args` is an optional JSON object.
+#[tauri::command]
+pub fn mcp_tool_action(
+    handle: AppHandle,
+    state: State<'_, AppState>,
+    tool: String,
+    args: Option<Value>,
+    timeout_ms: Option<u64>,
+) -> Result<ActionResult, String> {
+    let (_root, profile) = active_root_profile(&state)?;
+    let project_root = state
+        .project_root
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "No project selected.".to_string())?;
+    let _ = handle;
+    crate::mcp_runner::run_tool(
+        &profile,
+        &project_root.to_string_lossy(),
+        &tool,
+        args.as_ref(),
+        timeout_ms,
+        None,
+    )
+}
+
+/// MCP health check (`status` or `ping`) via the engine CLI. Used to
+/// surface bridge readiness in the project bar / action log (Phase 3
+/// wires `bridge_status`; this command is the generic runner).
+#[tauri::command]
+pub fn mcp_health_action(
+    state: State<'_, AppState>,
+    subcommand: String,
+    timeout_ms: Option<u64>,
+) -> Result<ActionResult, String> {
+    let (_root, profile) = active_root_profile(&state)?;
+    let project_root = state
+        .project_root
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "No project selected.".to_string())?;
+    crate::mcp_runner::run_health(&profile, &project_root.to_string_lossy(), &subcommand, timeout_ms, None)
+}
+
+/// Persist a step manifest blob and return its id (phase-2: manifest
+/// recording on every mutating setup action). Stored under the project's
+/// `UserSettings/ValidationSuite/manifests/`.
+#[tauri::command]
+pub fn save_step_manifest(
+    state: State<'_, AppState>,
+    scenario_id: String,
+    step_id: String,
+    entries: Vec<crate::schemas::ManifestEntry>,
+) -> Result<String, String> {
+    let (root, profile) = active_root_profile(&state)?;
+    let counter = crate::manifest_store::count_for(&root, &profile.paths.state_root, &scenario_id, &step_id) + 1;
+    let id = crate::manifest_store::make_id(&scenario_id, &step_id, counter);
+    let manifest = StepManifest {
+        scenario_id: scenario_id.clone(),
+        step_id: step_id.clone(),
+        entries,
+    };
+    crate::manifest_store::save(&root, &profile.paths.state_root, &id, &manifest)
+        .map_err(|e| format!("Failed to save manifest: {e}"))?;
+    Ok(id)
+}
+
+/// Load a step manifest blob by id (best-effort; `null` when absent so
+/// reset can warn rather than crash — phase-2 reset contract).
+#[tauri::command]
+pub fn load_step_manifest(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<StepManifest>, String> {
+    let (root, profile) = active_root_profile(&state)?;
+    crate::manifest_store::load(&root, &profile.paths.state_root, &id)
+}
+
+/// Delete a step manifest blob after reset consumes it.
+#[tauri::command]
+pub fn delete_step_manifest(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    let (root, profile) = active_root_profile(&state)?;
+    crate::manifest_store::delete(&root, &profile.paths.state_root, &id)
+        .map_err(|e| format!("Failed to delete manifest: {e}"))
 }
 
 // ── helpers re-exported for tests ────────────────────────────────────────────

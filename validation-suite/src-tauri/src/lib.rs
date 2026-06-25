@@ -7,10 +7,14 @@
 //! engine-neutral core TS package (`packages/core`).
 
 pub mod commands;
+pub mod fs_ops;
+pub mod manifest_store;
+pub mod mcp_runner;
 pub mod paths;
 pub mod persistence;
 pub mod profile_loader;
 pub mod project_kind;
+pub mod sandbox;
 pub mod scenario_loader;
 pub mod schemas;
 
@@ -37,6 +41,15 @@ pub fn run() {
             commands::save_suite_state,
             commands::reset_suite_state,
             commands::reveal_path,
+            commands::resolve_fixture_root,
+            commands::fs_copy_action,
+            commands::fs_patch_action,
+            commands::fs_delete_action,
+            commands::mcp_tool_action,
+            commands::mcp_health_action,
+            commands::save_step_manifest,
+            commands::load_step_manifest,
+            commands::delete_step_manifest,
         ])
         .run(tauri::generate_context!())
         .expect("error while running validation-suite");

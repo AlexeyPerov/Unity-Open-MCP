@@ -24,6 +24,7 @@ dirs = "6"
 log = "0.4"
 env_logger = "0.11"
 chrono = { version = "0.4", features = ["serde", "clock"], default-features = false }
+wait-timeout = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

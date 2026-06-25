@@ -17,6 +17,7 @@
 
 import {
   ACTION_TYPES,
+  PATCH_OPS,
   REQUIREMENT_LEVELS,
   STEP_TYPES,
   missingField,
@@ -25,6 +26,8 @@ import {
 import type {
   ActionType,
   EngineProfile,
+  FsPatchEntry,
+  PatchOp,
   RequirementLevel,
   Scenario,
   ScenarioLoadError,
@@ -53,17 +56,57 @@ function asStringArray(v: unknown): string[] | undefined {
   return out;
 }
 
+/** Validate the patches of an `fs_patch` action (phase-2 task 3). */
+function validateFsPatchPatches(
+  raw: unknown,
+  stepId: string,
+  actionIndex: number,
+): string | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return `steps ("${stepId}"): actions[${actionIndex}]: fs_patch needs a non-empty "patches" array.`;
+  }
+  for (const [i, entry] of raw.entries()) {
+    if (!isRecord(entry)) {
+      return `steps ("${stepId}"): actions[${actionIndex}]: patches[${i}] must be an object.`;
+    }
+    const op = asString(entry.op) as PatchOp | undefined;
+    if (!op) {
+      return `steps ("${stepId}"): actions[${actionIndex}]: patches[${i}]: ${missingField("op")}`;
+    }
+    if (!PATCH_OPS.includes(op)) {
+      return `steps ("${stepId}"): actions[${actionIndex}]: patches[${i}]: ${unknownValue("patch op", op, PATCH_OPS)}`;
+    }
+    if (op === "replace_line_contains") {
+      if (!asString(entry.match)) {
+        return `steps ("${stepId}"): actions[${actionIndex}]: patches[${i}]: replace_line_contains needs "match".`;
+      }
+      if (typeof entry.replace !== "string") {
+        return `steps ("${stepId}"): actions[${actionIndex}]: patches[${i}]: replace_line_contains needs "replace".`;
+      }
+    } else if (op === "insert_after_line_contains" || op === "insert_before_line_contains") {
+      if (!asString(entry.match)) {
+        return `steps ("${stepId}"): actions[${actionIndex}]: patches[${i}]: ${op} needs "match".`;
+      }
+      if (typeof entry.insert !== "string") {
+        return `steps ("${stepId}"): actions[${actionIndex}]: patches[${i}]: ${op} needs "insert".`;
+      }
+    }
+    // trim_trailing_whitespace takes no params.
+  }
+  return undefined;
+}
+
 /** Validate a single setup action's `action` verb + basic shape. */
 function validateAction(
   raw: unknown,
   stepId: string,
   index: number,
-): SetupAction | undefined {
+): { action?: SetupAction; error?: string } {
   // Returns the action if valid; the caller collects the error message.
   // (We re-validate inside validateStep, but keep this typed helper so
   // the happy path produces a strongly-typed action.)
-  if (!isRecord(raw)) return undefined;
-  return raw as SetupAction;
+  if (!isRecord(raw)) return {};
+  return { action: raw as SetupAction };
   // Full per-action validation is deferred to the Phase 2 executor; the
   // verb-level check happens in validateStep so we can report the step.
 }
@@ -126,7 +169,14 @@ function validateSteps(raw: unknown): { steps?: ScenarioStep[]; error?: string }
             error: `steps[${i}] ("${id}"): actions[${j}]: ${unknownValue("action type", verb, ACTION_TYPES)}`,
           };
         }
-        actions.push(validateAction(rawAction, id, j)!);
+        // Phase 2: validate the pinned patch-op vocabulary for fs_patch
+        // at load time (config-action drift guard; phase-2 task 3).
+        if (verb === "fs_patch") {
+          const patchErr = validateFsPatchPatches(rawAction.patches, id, j);
+          if (patchErr) return { error: patchErr };
+        }
+        const { action } = validateAction(rawAction, id, j);
+        actions.push(action!);
       }
       step.actions = actions;
     }
@@ -199,6 +249,18 @@ export function parseScenario(
           if (!isRecord(ra)) continue;
           const verb = asString(ra.action) as ActionType | undefined;
           if (!verb || !ACTION_TYPES.includes(verb)) continue;
+          // Same patch-op guard as setup actions (config-action drift).
+          if (verb === "fs_patch") {
+            let patchBad = false;
+            if (Array.isArray(ra.patches)) {
+              for (const entry of ra.patches) {
+                if (!isRecord(entry)) { patchBad = true; break; }
+                const op = asString(entry.op) as PatchOp | undefined;
+                if (!op || !PATCH_OPS.includes(op)) { patchBad = true; break; }
+              }
+            }
+            if (patchBad) continue;
+          }
           actions.push(ra as SetupAction);
         }
         resolved[stepId] = { actions };

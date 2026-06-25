@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "../state/app.svelte.ts";
   import { logs } from "../state/logs.svelte";
+  import ActionLog from "./ActionLog.svelte";
   import StatusBadge from "./StatusBadge.svelte";
   import Button from "./shell/Button.svelte";
   import type { Scenario, ScenarioStep, Status } from "@validation-suite/core";
@@ -34,6 +35,16 @@
 
   function setStatus(s: Status) {
     void app.setStep(scenario, step.id, s);
+  }
+
+  // Phase 2: setup steps are run through the action executor; their
+  // status is set by run/reset rather than the manual mark-done controls.
+  const isSetup = $derived(step.type === "setup");
+  async function runSetup() {
+    await app.runStep(scenario, step.id);
+  }
+  async function resetSetup() {
+    await app.resetStep(scenario, step.id);
   }
 
   // agent_prompt payload rendered as readable JSON for copy + display.
@@ -70,9 +81,8 @@
       {/if}
     {:else if step.type === "setup"}
       <p class="prose muted">
-        Setup runs <strong>{step.actions?.length ?? 0}</strong> action(s):
-        {step.actions?.map((a) => a.action).join(", ")}. Execution lands in Phase 2;
-        for now, stage the fixture manually and mark the step done.
+        Runs <strong>{step.actions?.length ?? 0}</strong> setup action(s):
+        {step.actions?.map((a) => a.action).join(", ")}.
       </p>
       <ol class="actions">
         {#each step.actions ?? [] as action}
@@ -82,6 +92,7 @@
           </li>
         {/each}
       </ol>
+      <ActionLog scenarioId={scenario.id} stepId={step.id} />
     {:else if step.type === "agent_prompt"}
       {#if step.tool}
         <p class="prose">Run this in your MCP client:</p>
@@ -111,7 +122,21 @@
   </div>
 
   <footer class="step-foot">
-    {#if status === "done"}
+    {#if isSetup}
+      {#if status === "done"}
+        <Button variant="secondary" onclick={resetSetup} disabled={app.busy}>Re-run setup</Button>
+        <Button variant="secondary" onclick={() => setStatus("awaiting")} disabled={app.busy}>
+          Clear status
+        </Button>
+      {:else}
+        <Button variant="primary" onclick={runSetup} disabled={app.busy}>Run setup</Button>
+        {#if status !== "blocked"}
+          <Button variant="secondary" onclick={() => setStatus("blocked")} disabled={app.busy}>
+            Mark blocked
+          </Button>
+        {/if}
+      {/if}
+    {:else if status === "done"}
       <Button variant="secondary" onclick={() => setStatus("awaiting")}>Mark awaiting</Button>
     {:else}
       <Button variant="primary" onclick={() => setStatus("done")}>Mark done</Button>

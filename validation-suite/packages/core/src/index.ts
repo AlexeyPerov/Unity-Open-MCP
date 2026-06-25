@@ -11,3 +11,6 @@ export * from "./types.ts";
 export * from "./errors.ts";
 export * from "./loader.ts";
 export * from "./state.ts";
+export * from "./placeholders.ts";
+export * from "./patch.ts";
+export * from "./actions.ts";

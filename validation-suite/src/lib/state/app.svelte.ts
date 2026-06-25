@@ -17,8 +17,12 @@ import {
   ensureTestState,
   loadScenarios,
   parseProfile,
-  resetTestState as coreResetTest,
+  resetStep as coreResetStep,
+  resetTest as coreResetTest,
+  resetTestState,
+  runStep as coreRunStep,
   setStepStatus,
+  type EngineProfile,
   type RequirementLevel,
   type Scenario,
   type ScenarioLoadResult,
@@ -27,6 +31,8 @@ import {
 } from "@validation-suite/core";
 
 import * as backend from "../services/backend.ts";
+import { buildContext, tauriBackend } from "../services/action_backend.ts";
+import { actionLog } from "./action_log.svelte.ts";
 import { logs } from "./logs.svelte.ts";
 
 /** Top-level requirement-tier filters (idea.md → UI shape). */
@@ -193,6 +199,10 @@ class AppState {
   /** Load scenarios + suite state for the active project. */
   async loadAll(): Promise<void> {
     if (!this.activeProject) return;
+    // Action logs are project-scoped (paths/manifests belong to the old
+    // project); clear them when switching projects so stale traces never
+    // render against a different fixture tree.
+    actionLog.clearAll();
     this.busy = true;
     try {
       await this.loadScenarios();
@@ -287,12 +297,107 @@ class AppState {
     await this.persist();
   }
 
-  /** Reset a whole test (all steps awaiting; payloads/manifests cleared). */
+  /**
+   * Run a setup step's actions through the action executor (phase-2).
+   * Records the manifest id in `manifestRefs`, writes the action log,
+   * and marks the step done on success / blocked on failure. Execution
+   * is ordered + deterministic; a partial fixture is never left behind
+   * (the runner stops at the first failed action).
+   */
+  async runStep(scenario: Scenario, stepId: string): Promise<boolean> {
+    if (!this.suite || !this.profile || !this.activeProject) return false;
+    const step = scenario.steps.find((s) => s.id === stepId);
+    if (!step || step.type !== "setup") return false;
+    this.busy = true;
+    try {
+      const ctx = await buildContext(this.activeProject, this.profile as unknown as EngineProfile, scenario.id);
+      const result = await coreRunStep(scenario, step, ctx, tauriBackend());
+      actionLog.set(scenario.id, stepId, result.logs);
+      for (const line of result.logs) {
+        if (line.level === "error") logs.error(`${scenario.id} › ${stepId}: ${line.message}`);
+        else logs.log(`${scenario.id} › ${stepId}: ${line.message}`);
+      }
+      if (result.ok) {
+        // Record the manifest id so reset can revert this step.
+        this.suite = setStepStatus(this.suite, scenario, stepId, "done");
+        const test = this.suite.tests[scenario.id];
+        if (test) test.manifestRefs[stepId] = result.manifestId;
+        await this.persist();
+        logs.log(`${scenario.id} › ${stepId} setup ok`);
+        return true;
+      }
+      this.suite = setStepStatus(this.suite, scenario, stepId, "blocked");
+      await this.persist();
+      logs.error(`${scenario.id} › ${stepId} setup failed`);
+      return false;
+    } catch (e) {
+      actionLog.append(scenario.id, stepId, [
+        { level: "error", message: `Setup crashed: ${String(e)}` },
+      ]);
+      logs.error(`${scenario.id} › ${stepId} setup crashed: ${String(e)}`);
+      this.suite = setStepStatus(this.suite, scenario, stepId, "blocked");
+      await this.persist();
+      return false;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /**
+   * Reset a single setup step: revert its recorded manifest (reverse
+   * order) + run declared reset actions, then clear the step status +
+   * manifest ref. Missing manifests warn (best-effort) rather than crash
+   * (phase-2 reset contract).
+   */
+  async resetStep(scenario: Scenario, stepId: string): Promise<boolean> {
+    if (!this.suite || !this.profile || !this.activeProject) return false;
+    const step = scenario.steps.find((s) => s.id === stepId);
+    if (!step || step.type !== "setup") return false;
+    this.busy = true;
+    try {
+      const manifestId = this.suite.tests[scenario.id]?.manifestRefs[stepId] ?? null;
+      const ctx = await buildContext(this.activeProject, this.profile as unknown as EngineProfile, scenario.id);
+      const result = await coreResetStep(scenario, step, ctx, tauriBackend(), manifestId);
+      actionLog.append(scenario.id, stepId, result.logs);
+      for (const line of result.logs) {
+        if (line.level === "warn" || line.level === "error") {
+          logs.error(`${scenario.id} › ${stepId} reset: ${line.message}`);
+        } else {
+          logs.log(`${scenario.id} › ${stepId} reset: ${line.message}`);
+        }
+      }
+      for (const w of result.warnings) logs.error(`${scenario.id} › ${stepId} reset warn: ${w}`);
+      // Clear the step status + manifest ref regardless of warnings.
+      this.suite = setStepStatus(this.suite, scenario, stepId, "awaiting");
+      const test = this.suite.tests[scenario.id];
+      if (test) test.manifestRefs[stepId] = null;
+      await this.persist();
+      logs.log(`${scenario.id} › ${stepId} reset${result.ok ? "" : " (with warnings)"}`);
+      return result.ok;
+    } catch (e) {
+      logs.error(`${scenario.id} › ${stepId} reset crashed: ${String(e)}`);
+      return false;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Reset a whole test (revert setup steps, then clear state). */
   async resetTest(scenario: Scenario): Promise<void> {
-    if (!this.suite) return;
-    this.suite = coreResetTest(this.suite, scenario);
-    logs.log(`reset test ${scenario.id}`);
-    await this.persist();
+    if (!this.suite || !this.profile || !this.activeProject) return;
+    this.busy = true;
+    try {
+      const refs = this.suite.tests[scenario.id]?.manifestRefs ?? {};
+      const ctx = await buildContext(this.activeProject, this.profile as unknown as EngineProfile, scenario.id);
+      const result = await coreResetTest(scenario, ctx, tauriBackend(), refs);
+      for (const line of result.logs) logs.log(`${scenario.id} reset: ${line.message}`);
+      for (const w of result.warnings) logs.error(`${scenario.id} reset warn: ${w}`);
+      this.suite = resetTestState(this.suite, scenario);
+      await this.persist();
+      logs.log(`reset test ${scenario.id}`);
+    } finally {
+      this.busy = false;
+    }
   }
 
   /** Hard reset: delete the state file entirely and re-seed fresh. */

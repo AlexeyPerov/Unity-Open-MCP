@@ -65,6 +65,37 @@ export interface SuiteStateOutcome {
   foundVersion?: number;
 }
 
+// ── Phase 2: action execution + manifest result types ────────────────────────
+
+/** Mirrors `src-tauri/src/schemas.rs` `ActionLogLevel`. */
+export type ActionLogLevel = "info" | "warn" | "error";
+
+export interface ActionLogLine {
+  level: ActionLogLevel;
+  message: string;
+  snippet?: string;
+}
+
+export interface McpResult {
+  isError: boolean;
+  result: unknown;
+}
+
+/** Mirrors `ActionResult` / `StepManifest` from the Rust schemas. */
+export interface ActionResult {
+  ok: boolean;
+  summary: string;
+  logs: ActionLogLine[];
+  entries: import("@validation-suite/core").ManifestEntry[];
+  mcp?: McpResult;
+}
+
+export interface StepManifest {
+  scenarioId: string;
+  stepId: string;
+  entries: import("@validation-suite/core").ManifestEntry[];
+}
+
 // ── Command wrappers ─────────────────────────────────────────────────────────
 
 /** The bundled active engine profile (v1: always `unity`). */
@@ -108,4 +139,74 @@ export function saveSuiteState(suite: import("@validation-suite/core").SuiteStat
 /** Delete the state file for the active project (reset local data). */
 export function resetSuiteState(): Promise<void> {
   return invoke<void>("reset_suite_state");
+}
+
+// ── Phase 2: action execution + manifest commands ────────────────────────────
+
+/**
+ * Resolve the fixture root for a scenario id. Returns a project-relative
+ * path (the `<test-id>` token interpolated from the profile pattern). The
+ * runner joins this with the project root to build its placeholder context.
+ */
+export function resolveFixtureRoot(scenarioId: string): Promise<string> {
+  return invoke<string>("resolve_fixture_root", { scenarioId });
+}
+
+/** `fs_copy` action: copy file/dir, auto-tracking companions. */
+export function fsCopyAction(from: string, to: string): Promise<ActionResult> {
+  return invoke<ActionResult>("fs_copy_action", { from, to });
+}
+
+/** `fs_patch` action: apply patches (or restore a snapshot when override set). */
+export function fsPatchAction(
+  path: string,
+  patches: unknown[],
+  snapshotOverride: string | null,
+): Promise<ActionResult> {
+  return invoke<ActionResult>("fs_patch_action", {
+    path,
+    patches,
+    snapshotOverride,
+  });
+}
+
+/** `fs_delete` action: delete manifest-listed paths. */
+export function fsDeleteAction(paths: string[]): Promise<ActionResult> {
+  return invoke<ActionResult>("fs_delete_action", { paths });
+}
+
+/** `mcp_tool` action: run an MCP tool via the engine CLI. */
+export function mcpToolAction(
+  tool: string,
+  args: unknown,
+  timeoutMs: number | null,
+): Promise<ActionResult> {
+  return invoke<ActionResult>("mcp_tool_action", { tool, args, timeoutMs });
+}
+
+/** MCP health check (`status` or `ping`) via the engine CLI. */
+export function mcpHealthAction(
+  subcommand: "status" | "ping",
+  timeoutMs: number | null,
+): Promise<ActionResult> {
+  return invoke<ActionResult>("mcp_health_action", { subcommand, timeoutMs });
+}
+
+/** Persist a step manifest blob; returns its id. */
+export function saveStepManifest(
+  scenarioId: string,
+  stepId: string,
+  entries: import("@validation-suite/core").ManifestEntry[],
+): Promise<string> {
+  return invoke<string>("save_step_manifest", { scenarioId, stepId, entries });
+}
+
+/** Load a step manifest blob by id (best-effort; may resolve null). */
+export function loadStepManifest(id: string): Promise<StepManifest | null> {
+  return invoke<StepManifest | null>("load_step_manifest", { id });
+}
+
+/** Delete a step manifest blob after reset consumes it. */
+export function deleteStepManifest(id: string): Promise<void> {
+  return invoke<void>("delete_step_manifest", { id });
 }

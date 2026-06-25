@@ -7,7 +7,7 @@
  * offending field.
  */
 
-import type { ActionType, RequirementLevel, StepType } from "./types.ts";
+import type { ActionType, PatchOp, RequirementLevel, StepType } from "./types.ts";
 
 /** Vocabularies recognized by the loader. Kept here so tests + the
  *  loader share one source of truth. */
@@ -27,6 +27,18 @@ export const ACTION_TYPES: readonly ActionType[] = [
   "fs_delete",
   "mcp_tool",
   "manual",
+] as const;
+
+/**
+ * Patch-op vocabulary for `fs_patch` (pinned in the Phase 2 spec). The
+ * loader rejects any op outside this list at scenario-load time so a
+ * typo never reaches the executor (config-action drift guard).
+ */
+export const PATCH_OPS: readonly PatchOp[] = [
+  "replace_line_contains",
+  "insert_after_line_contains",
+  "insert_before_line_contains",
+  "trim_trailing_whitespace",
 ] as const;
 
 export const REQUIREMENT_LEVELS: readonly RequirementLevel[] = [

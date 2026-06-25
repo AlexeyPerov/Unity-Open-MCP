@@ -15,11 +15,11 @@ Tauri 2 + SvelteKit + Svelte 5 (mirrors the Hub frontend). Engine-neutral orches
 ```
 validation-suite/
   src/                         SvelteKit UI
-  src/lib/state/               Svelte 5 runes app state
-  src/lib/services/            Tauri IPC wrappers
-  src/lib/components/          UI components (project bar, test nav, step renderer)
-  src-tauri/                   Rust shell (fs ops, persistence, project detection)
-  packages/core/               scenario DTOs, loader, state model (engine-neutral TS)
+  src/lib/state/               Svelte 5 runes app state (+ per-step action log)
+  src/lib/services/            Tauri IPC wrappers (+ action backend adapter)
+  src/lib/components/          UI components (project bar, test nav, step renderer, action log)
+  src-tauri/                   Rust shell (sandboxed fs ops, MCP CLI runner, manifests, persistence)
+  packages/core/               scenario DTOs, loader, state, action runner, patch transform (engine-neutral TS)
   engine-profiles/
     unity.json                 Unity v1 profile (paths, CLI, companions, markers)
   scenarios/
@@ -49,19 +49,38 @@ npm run check
 cd src-tauri && cargo test
 ```
 
+## Setup actions and reset (Phase 2)
+
+Scenario `setup` steps run **declarative actions** through an engine-neutral runner (`packages/core/src/actions.ts`) that delegates to a Rust backend. Every fs action is **sandboxed to the project root** — traversal outside the project is rejected.
+
+| Action | Executor | Behavior |
+|---|---|---|
+| `fs_copy` | Rust | Copies a file or directory tree; auto-tracks companion `.meta` when the source companion exists. |
+| `fs_patch` | Rust | Applies the pinned patch-op vocabulary (`replace_line_contains`, `insert_after_line_contains`, `insert_before_line_contains`, `trim_trailing_whitespace`); snapshots the pre-patch file for reset. |
+| `fs_delete` | Rust | Deletes manifest-listed paths (used by reset; no heuristic deletes). |
+| `mcp_tool` | Rust subprocess | Runs an MCP tool via `unity-open-mcp run-tool --json`; surfaces `isError` and the tool body in the action log. |
+| `manual` | UI gate | Records an info log; the operator confirms the action. |
+
+Patch ops are validated at scenario-load time, so an unknown op never reaches the executor. Each mutating step records a **manifest** (created/modified artifacts + snapshots) under `UserSettings/ValidationSuite/manifests/`; the state file keeps only the blob id per step.
+
+**Reset** walks a step's manifest in reverse order: modified files restore from their snapshot, created artifacts are deleted. Missing/incomplete manifest metadata warns and continues (best-effort) rather than crashing. Run setup from a step's **Run setup** button; re-run or reset with **Re-run setup** / the test-level **Reset test**.
+
 ## Where data lives
 
 Per active project + Unity profile:
 
 - **State file:** `UserSettings/ValidationSuite/.state.json` — atomic read/write; survives app restart.
+- **Manifests:** `UserSettings/ValidationSuite/manifests/` — per-step artifact manifests for reset.
 - **Actuals:** `UserSettings/ValidationSuite/actuals/` (wired in Phase 2).
 - **Exports:** `UserSettings/ValidationSuite/exports/` (Phase 5).
-- **Fixtures:** `Assets/_ValidationSuite/<test-id>/` (Phase 2).
+- **Fixtures:** `Assets/_ValidationSuite/<test-id>/`.
 
 State is **not migrated** between versions: a version mismatch produces a warning with reset guidance.
 
 ## Status
 
-Phase 1 (this directory): app foundation — Tauri + SvelteKit scaffold, core package, project + profile selection, scenario loader with validation, state persistence, baseline UI.
+Phases 0–1: design contracts + app foundation — Tauri + SvelteKit scaffold, core package, project + profile selection, scenario loader with validation, state persistence, baseline UI.
 
-Later phases add the action executor (`fs_*`, `mcp_tool`, `manual`) and manifest-based reset (Phase 2), bridge admin tools (Phase 3), the M9 required scenarios (Phase 4), and optional/export/process integration (Phase 5).
+Phase 2 (this directory): action executor (`fs_*`, `mcp_tool`, `manual`) with project-root sandboxing, manifest-based reset, the MCP CLI subprocess runner, and a per-step action log panel.
+
+Later phases add bridge admin tools (Phase 3), the M9 required scenarios (Phase 4), and optional/export/process integration (Phase 5).

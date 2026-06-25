@@ -80,6 +80,137 @@ pub struct AppConfig {
     pub engine_profile_id: Option<String>,
 }
 
+// ── Phase 2: manifest + action execution DTOs ────────────────────────────────
+
+/// Kind of artifact a manifest entry describes (mirrors the core TS
+/// `ManifestEntryKind`). Determines how reset reverts it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestEntryKind {
+    /// Reset deletes the path (and companion if any).
+    Created,
+    /// Reset restores the recorded `snapshot` (pre-patch file contents).
+    Modified,
+    /// Reset does nothing (the delete was the cleanup).
+    Deleted,
+}
+
+/// One artifact recorded by an `fs_*` action. `path` is project-relative
+/// (forward-slash) so the manifest is portable. `snapshot` holds the
+/// pre-patch file bytes (utf-8) for `Modified` entries.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestEntry {
+    pub kind: ManifestEntryKind,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub companion_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<String>,
+}
+
+/// A per-step manifest blob: the ordered list of artifacts a step's
+/// setup actions produced. Persisted under `UserSettings/ValidationSuite/`
+/// and referenced from `.state.json` by blob id.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepManifest {
+    pub scenario_id: String,
+    pub step_id: String,
+    #[serde(default)]
+    pub entries: Vec<ManifestEntry>,
+}
+
+/// Severity of an action-log line (mirrors the core TS `ActionLogLevel`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionLogLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+/// A single line in a step's action log panel.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ActionLogLine {
+    pub level: ActionLogLevel,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+}
+
+/// Parsed MCP CLI result body for `mcp_tool` actions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct McpResult {
+    pub is_error: bool,
+    pub result: Value,
+}
+
+/// Outcome of running a single setup action (mirrors core TS
+/// `ActionResult`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ActionResult {
+    pub ok: bool,
+    pub summary: String,
+    #[serde(default)]
+    pub logs: Vec<ActionLogLine>,
+    #[serde(default)]
+    pub entries: Vec<ManifestEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<McpResult>,
+}
+
+impl ActionResult {
+    pub fn ok(summary: impl Into<String>) -> Self {
+        Self {
+            ok: true,
+            summary: summary.into(),
+            logs: vec![],
+            entries: vec![],
+            mcp: None,
+        }
+    }
+
+    pub fn err(summary: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            summary: summary.into(),
+            logs: vec![ActionLogLine {
+                level: ActionLogLevel::Error,
+                message: message.into(),
+                snippet: None,
+            }],
+            entries: vec![],
+            mcp: None,
+        }
+    }
+}
+
+/// Outcome of running all actions in a step (mirrors core TS
+/// `StepRunResult`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepRunResult {
+    pub ok: bool,
+    #[serde(default)]
+    pub results: Vec<ActionResult>,
+    /// Backend manifest blob id for this step (null when nothing mutated).
+    pub manifest_id: Option<String>,
+    #[serde(default)]
+    pub logs: Vec<ActionLogLine>,
+}
+
+/// Outcome of a reset (step or all).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetResult {
+    pub ok: bool,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    #[serde(default)]
+    pub logs: Vec<ActionLogLine>,
+}
+
 /// Result of a project detection check (unity.md → Project detection).
 /// Carries a clear, human-readable reason for rejection so the project
 /// bar can show actionable copy.
