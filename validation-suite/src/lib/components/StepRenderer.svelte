@@ -1,6 +1,8 @@
 <script lang="ts">
   import { app } from "../state/app.svelte.ts";
+  import { logs } from "../state/logs.svelte";
   import StatusBadge from "./StatusBadge.svelte";
+  import Button from "./shell/Button.svelte";
   import type { Scenario, ScenarioStep, Status } from "@validation-suite/core";
 
   let {
@@ -25,6 +27,7 @@
     const ok = await app.copy(text);
     if (ok) {
       copied = true;
+      logs.log(`copied prompt for ${scenario.id} › ${step.id}`);
       setTimeout(() => (copied = false), 1400);
     }
   }
@@ -46,14 +49,14 @@
   });
 </script>
 
-<article class="step {status}">
-  <header>
-    <span class="type">{step.type}</span>
-    {#if step.title}<h4>{step.title}</h4>{/if}
-    <span class="status"><StatusBadge status={status} /></span>
-  </header>
+<article class="step" class:step-done={status === "done"}>
+  <div class="step-head">
+    <span class="step-type">{step.type}</span>
+    {#if step.title}<span class="step-title">{step.title}</span>{/if}
+    <span class="step-status"><StatusBadge status={status} /></span>
+  </div>
 
-  <div class="body">
+  <div class="step-body">
     {#if step.type === "info" || step.type === "expected"}
       {#if step.body}
         <p class="prose">{step.body}</p>
@@ -66,15 +69,15 @@
         </ul>
       {/if}
     {:else if step.type === "setup"}
-      <p class="prose dim">
+      <p class="prose muted">
         Setup runs <strong>{step.actions?.length ?? 0}</strong> action(s):
         {step.actions?.map((a) => a.action).join(", ")}. Execution lands in Phase 2;
         for now, stage the fixture manually and mark the step done.
       </p>
       <ol class="actions">
-        {#each step.actions ?? [] as action, i}
+        {#each step.actions ?? [] as action}
           <li>
-            <code>{action.action}</code>
+            <code class="verb">{action.action}</code>
             <pre>{JSON.stringify(action, null, 2)}</pre>
           </li>
         {/each}
@@ -83,35 +86,37 @@
       {#if step.tool}
         <p class="prose">Run this in your MCP client:</p>
         <pre class="prompt">{promptText}</pre>
-        <button class="copy" onclick={() => copy(promptText)}>
-          {copied ? "Copied" : "Copy prompt"}
-        </button>
+        <Button variant="secondary" onclick={() => copy(promptText)}>
+          {copied ? "Copied ✓" : "Copy prompt"}
+        </Button>
       {/if}
     {:else if step.type === "actual"}
-      <p class="prose dim">
+      <p class="prose muted">
         Paste the agent's output here. Payloads persist to
         <code>{scenario.id}-{step.id}.json</code> under the project's
-        <code>actuals/</code> dir (Phase 2 wires the save; for now keep
-        the paste in your notes).
+        <code>actuals/</code> dir (Phase 2 wires the save; for now keep the paste in your notes).
       </p>
       <textarea placeholder="Paste actual output…" rows="4"></textarea>
     {:else if step.type === "external_doc"}
       <p class="prose">Open and review: <code>{step.docPath}</code></p>
-      <button class="copy" onclick={() => window.open(`file://${step.docPath}`, "_blank")}>
+      <Button
+        variant="secondary"
+        onclick={() => window.open(`file://${step.docPath}`, "_blank")}
+      >
         Open doc
-      </button>
+      </Button>
     {:else if step.type === "mark_done"}
-      <p class="prose dim">Confirm this test is complete.</p>
+      <p class="prose muted">Confirm this test is complete.</p>
     {/if}
   </div>
 
-  <footer>
+  <footer class="step-foot">
     {#if status === "done"}
-      <button class="ghost" onclick={() => setStatus("awaiting")}>Mark awaiting</button>
+      <Button variant="secondary" onclick={() => setStatus("awaiting")}>Mark awaiting</Button>
     {:else}
-      <button class="ok" onclick={() => setStatus("done")}>Mark done</button>
+      <Button variant="primary" onclick={() => setStatus("done")}>Mark done</Button>
       {#if status !== "blocked"}
-        <button class="ghost" onclick={() => setStatus("blocked")}>Mark blocked</button>
+        <Button variant="secondary" onclick={() => setStatus("blocked")}>Mark blocked</Button>
       {/if}
     {/if}
   </footer>
@@ -119,128 +124,151 @@
 
 <style>
   .step {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--bg-elev);
+    border: 1px solid var(--hub-border);
+    border-radius: 8px;
+    background: var(--hub-bg);
     overflow: hidden;
   }
-  .step.done {
-    border-color: var(--border);
+
+  .step-done {
+    border-color: var(--hub-success);
   }
-  .step.done .body {
+
+  .step-done .step-body {
     opacity: 0.7;
   }
-  header {
+
+  .step-head {
     display: flex;
+    flex-direction: row;
     align-items: center;
-    gap: 10px;
-    padding: 9px 14px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-elev-2);
+    gap: 0.6rem;
+    padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid var(--hub-card);
+    background: var(--hub-surface);
   }
-  .type {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--accent);
-    text-transform: lowercase;
+
+  .step-type {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+    color: var(--hub-accent);
+    background: var(--hub-bg);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    border: 1px solid var(--hub-border-light);
+    flex-shrink: 0;
   }
-  h4 {
-    margin: 0;
+
+  .step-title {
     flex: 1;
-    font-size: 13.5px;
+    min-width: 0;
+    font-size: 0.85rem;
     font-weight: 600;
+    color: var(--hub-text-bright);
   }
-  .status {
+
+  .step-status {
     flex: none;
   }
-  .body {
-    padding: 12px 14px;
+
+  .step-body {
+    padding: 0.7rem 0.95rem 0.85rem;
   }
+
   .prose {
-    margin: 0 0 8px;
+    margin: 0 0 0.5rem;
+    line-height: 1.5;
   }
-  .prose.dim {
-    color: var(--text-dim);
+
+  .prose.muted {
+    color: var(--hub-text-muted);
   }
+
+  .prose code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+    background: var(--hub-surface);
+    padding: 0 0.3rem;
+    border-radius: 3px;
+    color: var(--hub-text);
+  }
+
   .items {
-    margin: 6px 0 0;
-    padding-left: 18px;
+    margin: 0.4rem 0 0;
+    padding-left: 1.1rem;
   }
+
   .items li {
-    margin-bottom: 4px;
+    margin-bottom: 0.3rem;
   }
+
   .actions {
-    margin: 8px 0 0;
-    padding-left: 18px;
+    margin: 0.5rem 0 0;
+    padding-left: 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
   }
+
   .actions li {
-    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
   }
-  code {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--accent);
-    background: var(--bg-elev-2);
-    padding: 1px 5px;
+
+  .verb {
+    align-self: flex-start;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.74rem;
+    color: var(--hub-accent);
+    background: var(--hub-surface);
+    padding: 0.1rem 0.45rem;
     border-radius: 4px;
+    border: 1px solid var(--hub-border-light);
   }
+
   pre {
-    margin: 6px 0 0;
-    padding: 10px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-family: var(--mono);
-    font-size: 12px;
+    margin: 0;
+    padding: 0.55rem 0.7rem;
+    background: var(--hub-surface);
+    border: 1px solid var(--hub-border-light);
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.76rem;
+    line-height: 1.45;
     overflow-x: auto;
-    color: var(--text-dim);
+    color: var(--hub-text-dim);
     white-space: pre-wrap;
   }
+
   .prompt {
-    color: var(--text);
+    color: var(--hub-text);
+    margin-bottom: 0.5rem;
   }
+
   textarea {
     width: 100%;
     resize: vertical;
-    background: var(--bg);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 8px;
-    font-family: var(--mono);
-    font-size: 12px;
+    background: var(--hub-surface);
+    color: var(--hub-text);
+    border: 1px solid var(--hub-border-light);
+    border-radius: 6px;
+    padding: 0.5rem 0.65rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.78rem;
+    line-height: 1.45;
   }
-  footer {
+
+  textarea:focus {
+    outline: none;
+    border-color: var(--hub-accent);
+  }
+
+  .step-foot {
     display: flex;
-    gap: 8px;
-    padding: 9px 14px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-elev-2);
-  }
-  .ok {
-    background: var(--ok);
-    color: #04130a;
-    border: none;
-    padding: 6px 12px;
-    border-radius: var(--radius-sm);
-    font-weight: 600;
-  }
-  .ghost {
-    background: transparent;
-    color: var(--text-dim);
-    border: 1px solid var(--border-strong);
-    padding: 6px 12px;
-    border-radius: var(--radius-sm);
-  }
-  .ghost:hover {
-    border-color: var(--text-dim);
-  }
-  .copy {
-    margin-top: 6px;
-    background: var(--bg-elev-2);
-    color: var(--text);
-    border: 1px solid var(--border-strong);
-    padding: 6px 12px;
-    border-radius: var(--radius-sm);
+    gap: 0.5rem;
+    padding: 0.55rem 0.95rem;
+    border-top: 1px solid var(--hub-card);
+    background: var(--hub-surface);
   }
 </style>

@@ -5,6 +5,30 @@
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Validation Suite</title>
+    <!-- Apply the persisted theme before the JS bundle loads so the
+         first paint is already in the right palette (no flash of the
+         wrong theme). Mirrors the Hub's app.html pre-paint script. The
+         validation-suite ships dark-only for v1, but the attribute is
+         still set so light overrides (if added later) work on first
+         paint. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("vs-theme");
+          var resolved = "dark";
+          if (stored === "dark" || stored === "light") {
+            resolved = stored;
+          } else {
+            var mq = window.matchMedia("(prefers-color-scheme: light)");
+            resolved = mq.matches ? "light" : "dark";
+          }
+          document.documentElement.setAttribute("data-theme", resolved);
+        } catch (_e) {
+          // localStorage can throw in private-browsing modes on some
+          // browsers; fall back to the system default.
+        }
+      })();
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

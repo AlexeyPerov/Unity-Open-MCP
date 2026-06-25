@@ -4,43 +4,51 @@
   let { level, automated = false }: { level: RequirementLevel; automated?: boolean } = $props();
 
   const map: Record<RequirementLevel, { label: string; cls: string }> = {
-    "required-core": { label: "Required · core", cls: "core" },
-    "required-extended": { label: "Required · extended", cls: "extended" },
-    optional: { label: "Optional", cls: "optional" },
+    "required-core": { label: "Required · core", cls: "tier-core" },
+    "required-extended": { label: "Required · extended", cls: "tier-extended" },
+    optional: { label: "Optional", cls: "tier-optional" },
   };
 </script>
 
 <span class="tier {map[level].cls}">{map[level].label}</span>
 {#if automated}
-  <span class="auto" title="This scenario has automated test coverage">Auto-covered</span>
+  <span class="tier tier-auto" title="This scenario has automated test coverage">Auto</span>
 {/if}
 
 <style>
-  .tier,
-  .auto {
+  .tier {
     display: inline-flex;
     align-items: center;
-    padding: 2px 7px;
-    border-radius: var(--radius-sm);
-    font-size: 11px;
-    font-weight: 500;
+    padding: 0.1rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.3;
     white-space: nowrap;
   }
-  .core {
-    color: var(--accent);
-    background: var(--accent-soft);
+
+  .tier-core {
+    background: var(--hub-info-bg);
+    color: var(--hub-info-fg);
+    border: 1px solid var(--hub-info-fg);
   }
-  .extended {
-    color: var(--warn);
-    background: var(--warn-soft);
+
+  .tier-extended {
+    background: var(--hub-warn-bg);
+    color: var(--hub-warn-fg);
+    border: 1px solid var(--hub-warn-fg);
   }
-  .optional {
-    color: var(--text-dim);
-    background: var(--bg-elev-2);
+
+  .tier-optional {
+    background: var(--hub-selected);
+    color: var(--hub-text-muted);
+    border: 1px solid var(--hub-border-light);
   }
-  .auto {
-    color: var(--ok);
-    background: var(--ok-soft);
-    margin-left: 4px;
+
+  .tier-auto {
+    background: var(--hub-warn-bg);
+    color: var(--hub-warn-fg);
+    border: 1px solid var(--hub-warn-fg);
+    margin-left: 0.3rem;
   }
 </style>

@@ -10,34 +10,35 @@
   };
 </script>
 
-<span class="badge {status}" title={label[status]}>{label[status]}</span>
+<span class="chip chip-{status}" title={label[status]}>{label[status]}</span>
 
 <style>
-  .badge {
+  .chip {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    padding: 0.1rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1.3;
     white-space: nowrap;
   }
-  .awaiting {
-    color: var(--text-dim);
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
+
+  .chip-awaiting {
+    background: var(--hub-selected);
+    color: var(--hub-text-muted);
+    border: 1px solid var(--hub-border-light);
   }
-  .done {
-    color: var(--ok);
-    background: var(--ok-soft);
-    border: 1px solid transparent;
+
+  .chip-done {
+    background: var(--hub-warn-bg);
+    color: var(--hub-warn-fg);
+    border: 1px solid var(--hub-warn-fg);
   }
-  .blocked {
-    color: var(--bad);
-    background: var(--bad-soft);
-    border: 1px solid transparent;
+
+  .chip-blocked {
+    background: var(--hub-error-bg);
+    color: var(--hub-error-fg);
+    border: 1px solid var(--hub-error-fg);
   }
 </style>
