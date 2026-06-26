@@ -420,6 +420,16 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Parse "x,y,z" → Vector3. Returns `fallback` on parse failure.
+        //
+        // Canonical vector parser for the bridge. Several TypedTools copies
+        // (Extensions/Navigation/NavigationTools.cs, ProBuilder/ProBuilderTools.cs,
+        // Splines/SplinesTools.cs) ship private ParseVector3 helpers that are
+        // near-identical EXCEPT they reject `parts.Length != 3` strictly, while
+        // this one accepts `parts.Length < 3` (so "1,2,3,4" parses to (1,2,3)
+        // here but returns fallback there). The two behaviors only differ on
+        // malformed input no legitimate caller sends; do NOT silently collapse
+        // the copies onto this one without auditing each call site's arity
+        // expectation. See PrefabToolsTests.ParseVector_* for the pinned cases.
         public static Vector3 ParseVector(string raw, Vector3 fallback)
         {
             if (string.IsNullOrEmpty(raw)) return fallback;

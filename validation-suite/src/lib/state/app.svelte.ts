@@ -61,14 +61,17 @@ export interface AppWarning {
 /**
  * Coarse bridge health token shown in the project bar (phase-3). Mirrors the
  * `status` field returned by the operator-only `unity_open_mcp_bridge_status`
- * MCP tool, plus `unknown` for the pre-probe state.
+ * MCP tool, plus `unknown` for the pre-probe state and `cli_missing` for the
+ * self-diagnosing "engine CLI binary not found on PATH" transport error
+ * (surfaced by the Rust runner as a `cli_not_found:` sentinel).
  */
 export type BridgeStatusToken =
   | "unknown"
   | "running"
   | "compiling"
   | "stopped"
-  | "dead_bridge";
+  | "dead_bridge"
+  | "cli_missing";
 
 class AppState {
   // ── project + profile ──────────────────────────────────────────────────────
@@ -282,11 +285,23 @@ class AppState {
       this.bridgeNextStep = typeof body.nextStep === "string" ? body.nextStep : null;
       logs.log(`bridge_status: ${token}`);
     } catch (e) {
-      // Transport/CLI failure (binary not on PATH, etc.) — keep `unknown` so
-      // the chip stays neutral rather than falsely reporting `stopped`.
-      this.bridgeStatus = "unknown";
-      this.bridgeNextStep = null;
-      logs.error(`bridge_status probe failed: ${String(e)}`);
+      const msg = String(e);
+      // The Rust runner emits a `cli_not_found:<binary>` sentinel when the
+      // configured engine CLI isn't resolvable on PATH. Surface that as a
+      // distinct `cli_missing` token so the operator gets an actionable hint
+      // ("install/link the CLI") instead of a neutral `unknown` that looks
+      // identical to "never probed". Other transport failures still fall back
+      // to `unknown` so the chip never falsely reports `stopped`.
+      if (msg.startsWith(CLI_NOT_FOUND_PREFIX)) {
+        const binary = msg.slice(CLI_NOT_FOUND_PREFIX.length) || "the engine CLI";
+        this.bridgeStatus = "cli_missing";
+        this.bridgeNextStep = `${binary} is not on PATH. Install or link the engine CLI (e.g. \`cd mcp-server && npm install && npm run build && npm link\`), then re-check.`;
+        logs.error(`bridge_status: CLI binary not found — ${binary}`);
+      } else {
+        this.bridgeStatus = "unknown";
+        this.bridgeNextStep = null;
+        logs.error(`bridge_status probe failed: ${msg}`);
+      }
     } finally {
       this.bridgeRefreshing = false;
     }
@@ -609,6 +624,15 @@ export function tierLabel(level: RequirementLevel): string {
       return "Optional";
   }
 }
+
+/**
+ * Sentinel prefix for the "engine CLI binary not found on PATH" transport
+ * error emitted by the Rust runner (`src-tauri/src/mcp_runner.rs`).
+ * Mirrors the Rust `CLI_NOT_FOUND_PREFIX` constant so the two sides stay in
+ * lockstep without a shared type across the Tauri `Result<_, String>` boundary.
+ * Kept in lockstep manually — if Rust changes the prefix, update this too.
+ */
+const CLI_NOT_FOUND_PREFIX = "cli_not_found:";
 
 /**
  * Coerce a raw `status` string from the bridge_status MCP tool into the UI's

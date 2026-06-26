@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -12,370 +11,37 @@ using UnityOpenMcpBridge.TypedTools;
 
 namespace UnityOpenMcpBridge
 {
+    // The Unity-side HTTP bridge. Boots on [InitializeOnLoad], opens an
+    // HttpListener on a per-project port (InstancePortResolver), and routes
+    // MCP tool/resource/event requests. Mutating tools run through the gate
+    // flow (GatePolicy); read-only tools return JSON directly.
+    //
+    // This file is the transport + dispatch-orchestration core. Concerns that
+    // used to live inline have been split into sibling internal helpers:
+    //   - BridgeToolCatalog      — KnownTools / DirectResponseTools / MutatingTools tables
+    //   - BridgeJson             — JSON escape + envelope builders
+    //   - BridgeRequestBody      — timeout/gate/issue-id body parsing
+    //   - BridgeActivityRecorder — per-request activity bookkeeping
+    //   - BridgeAuditRecorder    — gate-run + on-disk audit recording
+    //   - BridgeHttpResponse     — SendJson / Send*NotFound helpers
     [InitializeOnLoad]
     public static class BridgeHttpServer
     {
         private const string PortEnvVar = "UNITY_OPEN_MCP_BRIDGE_PORT";
         private const string PortArgPrefix = "-UNITY_OPEN_MCP_BRIDGE_PORT=";
-        private const int DefaultTimeoutMs = 30000;
-        private const int MinTimeoutMs = 1000;
-        // Matches the documented maximum in the run-tests tool schema
-        // (mcp-server/src/tools/run-tests.ts). Previously 300000, which silently
-        // clamped a caller's explicit value below the advertised ceiling.
-        private const int MaxTimeoutMs = 600000;
 
-        private static readonly HashSet<string> KnownTools = new()
-        {
-            "unity_open_mcp_execute_csharp",
-            "unity_open_mcp_invoke_method",
-            "unity_open_mcp_execute_menu",
-            "unity_open_mcp_find_members",
-            "unity_open_mcp_validate_edit",
-            "unity_open_mcp_checkpoint_create",
-            "unity_open_mcp_delta",
-            "unity_open_mcp_find_references",
-            "unity_open_mcp_scan_paths",
-            "unity_open_mcp_apply_fix",
-            "unity_open_mcp_reserialize",
-            "unity_open_mcp_read_asset",
-            "unity_open_mcp_search_assets",
-            // M16 Plan 1 — typed asset/material/shader/prefab tools.
-            "unity_open_mcp_assets_create_folder",
-            "unity_open_mcp_assets_copy",
-            "unity_open_mcp_assets_move",
-            "unity_open_mcp_assets_delete",
-            "unity_open_mcp_assets_refresh",
-            "unity_open_mcp_material_create",
-            "unity_open_mcp_material_get_properties",
-            "unity_open_mcp_material_set_property",
-            "unity_open_mcp_material_get_keywords",
-            "unity_open_mcp_material_set_keyword",
-            "unity_open_mcp_material_set_shader",
-            "unity_open_mcp_shader_list_all",
-            "unity_open_mcp_shader_get_data",
-            "unity_open_mcp_prefab_instantiate",
-            "unity_open_mcp_prefab_create",
-            "unity_open_mcp_prefab_open",
-            "unity_open_mcp_prefab_close",
-            "unity_open_mcp_prefab_save",
-            "unity_open_mcp_prefab_apply",
-            "unity_open_mcp_prefab_revert",
-            "unity_open_mcp_prefab_unpack",
-            "unity_open_mcp_prefab_get_overrides",
-            "unity_open_mcp_prefab_status",
-            // M16 Plan 2 — typed GameObject/component tools.
-            "unity_open_mcp_gameobject_create",
-            "unity_open_mcp_gameobject_destroy",
-            "unity_open_mcp_gameobject_duplicate",
-            "unity_open_mcp_gameobject_find",
-            "unity_open_mcp_gameobject_modify",
-            "unity_open_mcp_gameobject_set_parent",
-            "unity_open_mcp_component_add",
-            "unity_open_mcp_component_destroy",
-            "unity_open_mcp_component_get",
-            "unity_open_mcp_component_modify",
-            "unity_open_mcp_component_list_all",
-            // M16 Plan 3 — typed scene management tools.
-            "unity_open_mcp_scene_create",
-            "unity_open_mcp_scene_open",
-            "unity_open_mcp_scene_save",
-            "unity_open_mcp_scene_unload",
-            "unity_open_mcp_scene_set_active",
-            "unity_open_mcp_scene_list_opened",
-            "unity_open_mcp_scene_get_data",
-            "unity_open_mcp_scene_get_dirty_summary",
-            "unity_open_mcp_scene_focus",
-            // M16 Plan 4 — typed Package Manager tools.
-            "unity_open_mcp_package_list",
-            "unity_open_mcp_package_search",
-            "unity_open_mcp_package_add",
-            "unity_open_mcp_package_remove",
-            "unity_open_mcp_package_get_info",
-            "unity_open_mcp_package_get_dependencies",
-            "unity_open_mcp_package_check",
-            // M16 Plan 5 — typed console / editor state / selection / undo /
-            // tags / layers tools.
-            "unity_open_mcp_console_clear",
-            "unity_open_mcp_console_log",
-            "unity_open_mcp_editor_set_state",
-            "unity_open_mcp_selection_get",
-            "unity_open_mcp_selection_set",
-            "unity_open_mcp_editor_undo",
-            "unity_open_mcp_editor_redo",
-            "unity_open_mcp_editor_get_tags",
-            "unity_open_mcp_editor_get_layers",
-            "unity_open_mcp_editor_add_tag",
-            "unity_open_mcp_editor_add_layer",
-            // M16 Plan 6 — typed reflection / scripts / object data tools.
-            "unity_open_mcp_type_schema",
-            "unity_open_mcp_script_read",
-            "unity_open_mcp_script_write",
-            "unity_open_mcp_script_delete",
-            "unity_open_mcp_object_get_data",
-            "unity_open_mcp_object_modify",
-            // M16 Plan 7 — typed profiler session / diagnostics tools. Most
-            // mutate editor state but write no assets (gate-free); save_data
-            // writes a .json snapshot (MutatingTools below).
-            "unity_open_mcp_profiler_start",
-            "unity_open_mcp_profiler_stop",
-            "unity_open_mcp_profiler_get_status",
-            "unity_open_mcp_profiler_get_config",
-            "unity_open_mcp_profiler_set_config",
-            "unity_open_mcp_profiler_list_modules",
-            "unity_open_mcp_profiler_enable_module",
-            "unity_open_mcp_profiler_clear_data",
-            "unity_open_mcp_profiler_save_data",
-            "unity_open_mcp_profiler_load_data",
-            "unity_open_mcp_profiler_get_script_stats",
-            // M16 Plan 8 — typed gate intelligence tools (read-only).
-            "unity_open_mcp_impact_preview",
-            "unity_open_mcp_gate_budget_estimate",
-            "unity_open_mcp_mutation_explain",
-            // M16 Plan 9 — typed build pipeline + project-settings tools. The
-            // read members are gate-free; build_set_target / build_set_scenes /
-            // build_set_defines / settings_set_* / build_start run the full
-            // gate path (build_start additionally requires the deny bypass).
-            "unity_open_mcp_build_get_targets",
-            "unity_open_mcp_build_get_active_target",
-            "unity_open_mcp_build_set_target",
-            "unity_open_mcp_build_get_scenes",
-            "unity_open_mcp_build_set_scenes",
-            "unity_open_mcp_build_start",
-            "unity_open_mcp_build_get_defines",
-            "unity_open_mcp_build_set_defines",
-            "unity_open_mcp_settings_get_player",
-            "unity_open_mcp_settings_set_player",
-            "unity_open_mcp_settings_get_quality",
-            "unity_open_mcp_settings_set_quality",
-            "unity_open_mcp_settings_get_physics",
-            "unity_open_mcp_settings_set_physics",
-            "unity_open_mcp_settings_get_lighting",
-            "unity_open_mcp_settings_set_lighting",
-            "unity_senses_run_tests",
-            "unity_senses_screenshot",
-            "unity_senses_read_console",
-            "unity_senses_profiler_capture",
-            "unity_senses_profiler_memory",
-            "unity_senses_profiler_rendering",
-            "unity_senses_spatial_query"
-        };
-
-        private static readonly HashSet<string> DirectResponseTools = new()
-        {
-            "unity_open_mcp_validate_edit",
-            "unity_open_mcp_checkpoint_create",
-            "unity_open_mcp_delta",
-            "unity_open_mcp_find_references",
-            "unity_open_mcp_scan_paths",
-            // Compact drill-down reads: bridge returns the structured model JSON
-            // directly; the MCP server applies the shared compression module.
-            "unity_open_mcp_read_asset",
-            "unity_open_mcp_search_assets",
-            // Test runner: starts async test run, returns { status, runId } directly.
-            "unity_senses_run_tests",
-            // Agent senses (non-mutating): return tool JSON directly.
-            "unity_senses_screenshot",
-            "unity_senses_read_console",
-            "unity_senses_profiler_capture",
-            "unity_senses_profiler_memory",
-            "unity_senses_profiler_rendering",
-            "unity_senses_spatial_query",
-            // M16 Plan 1 — read-only typed tools (gate-free). They return JSON
-            // directly without the gate envelope, matching search_assets/read_asset.
-            "unity_open_mcp_material_get_properties",
-            "unity_open_mcp_material_get_keywords",
-            "unity_open_mcp_shader_list_all",
-            "unity_open_mcp_shader_get_data",
-            "unity_open_mcp_prefab_get_overrides",
-            "unity_open_mcp_prefab_status",
-            // M16 Plan 2 — read-only typed tools (gate-free).
-            "unity_open_mcp_gameobject_find",
-            "unity_open_mcp_component_get",
-            "unity_open_mcp_component_list_all",
-            // M16 Plan 3 — read-only typed tools (gate-free). scene_get_data
-            // is the structured scene hierarchy read that supersedes the
-            // standalone M10 scene snapshot.
-            "unity_open_mcp_scene_list_opened",
-            "unity_open_mcp_scene_get_data",
-            "unity_open_mcp_scene_get_dirty_summary",
-            // M16 Plan 4 — read-only typed Package Manager tools (gate-free).
-            // list / search / get_info hit UPM async requests;
-            // get_dependencies / check read Packages/manifest.json directly.
-            "unity_open_mcp_package_list",
-            "unity_open_mcp_package_search",
-            "unity_open_mcp_package_get_info",
-            "unity_open_mcp_package_get_dependencies",
-            "unity_open_mcp_package_check",
-            // M16 Plan 5 — gate-free typed editor-state tools. They mutate
-            // editor state (console, selection, play mode, undo/redo) but
-            // write NO assets, so the gate (asset-reference validation) has
-            // nothing to validate. editor_set_state runs its own inline dirty
-            // guard (entering play mode can trigger Unity's native save modal).
-            // editor_get_tags / editor_get_layers are pure reads.
-            // editor_add_tag / editor_add_layer are NOT here — they write
-            // TagManager.asset and run the full gate (see MutatingTools).
-            "unity_open_mcp_console_clear",
-            "unity_open_mcp_console_log",
-            "unity_open_mcp_editor_set_state",
-            "unity_open_mcp_selection_get",
-            "unity_open_mcp_selection_set",
-            "unity_open_mcp_editor_undo",
-            "unity_open_mcp_editor_redo",
-            "unity_open_mcp_editor_get_tags",
-            "unity_open_mcp_editor_get_layers",
-            // M16 Plan 6 — read-only typed reflection / object tools (gate-
-            // free). type_schema reflects on a type's members; script_read
-            // reads a .cs file from disk; object_get_data reflects on a live
-            // UnityEngine.Object. None mutate project state.
-            "unity_open_mcp_type_schema",
-            "unity_open_mcp_script_read",
-            "unity_open_mcp_object_get_data",
-            // M16 Plan 7 — typed profiler tools that mutate editor state but
-            // write NO assets (start / stop / set_config / enable_module /
-            // clear_data) plus the read-only members (get_status /
-            // get_config / list_modules / load_data / get_script_stats). The
-            // gate validates asset-reference fallout, which does not apply —
-            // they route as direct-response tools. profiler_save_data is NOT
-            // here — it writes a .json snapshot and runs the full gate
-            // (MutatingTools).
-            "unity_open_mcp_profiler_start",
-            "unity_open_mcp_profiler_stop",
-            "unity_open_mcp_profiler_get_status",
-            "unity_open_mcp_profiler_get_config",
-            "unity_open_mcp_profiler_set_config",
-            "unity_open_mcp_profiler_list_modules",
-            "unity_open_mcp_profiler_enable_module",
-            "unity_open_mcp_profiler_clear_data",
-            "unity_open_mcp_profiler_load_data",
-            "unity_open_mcp_profiler_get_script_stats",
-            // M16 Plan 8 — read-only gate intelligence tools (gate-free). They
-            // compose checkpoint / validate / delta / run-history foundations
-            // to project pre-mutation scope risk + cost and post-mutation
-            // narrative. None mutate project state.
-            "unity_open_mcp_impact_preview",
-            "unity_open_mcp_gate_budget_estimate",
-            "unity_open_mcp_mutation_explain",
-            // M16 Plan 9 — read-only build + settings reads (gate-free). The
-            // mutating members (build_set_target / build_set_scenes /
-            // build_set_defines / build_start / settings_set_*) run the full
-            // gate path (MutatingTools).
-            "unity_open_mcp_build_get_targets",
-            "unity_open_mcp_build_get_active_target",
-            "unity_open_mcp_build_get_scenes",
-            "unity_open_mcp_build_get_defines",
-            "unity_open_mcp_settings_get_player",
-            "unity_open_mcp_settings_get_quality",
-            "unity_open_mcp_settings_get_physics",
-            "unity_open_mcp_settings_get_lighting"
-        };
-
-        private static readonly HashSet<string> MutatingTools = new()
-        {
-            "unity_open_mcp_execute_csharp",
-            "unity_open_mcp_invoke_method",
-            "unity_open_mcp_execute_menu",
-            "unity_open_mcp_apply_fix",
-            "unity_open_mcp_reserialize",
-            // M16 Plan 1 — typed asset/material/prefab mutators. Each requires
-            // paths_hint; assets_refresh is a light mutation that may bind
-            // whole-project scope when whole_project: true (handled below).
-            "unity_open_mcp_assets_create_folder",
-            "unity_open_mcp_assets_copy",
-            "unity_open_mcp_assets_move",
-            "unity_open_mcp_assets_delete",
-            "unity_open_mcp_assets_refresh",
-            "unity_open_mcp_material_create",
-            "unity_open_mcp_material_set_property",
-            "unity_open_mcp_material_set_keyword",
-            "unity_open_mcp_material_set_shader",
-            "unity_open_mcp_prefab_instantiate",
-            "unity_open_mcp_prefab_create",
-            "unity_open_mcp_prefab_open",
-            "unity_open_mcp_prefab_close",
-            "unity_open_mcp_prefab_save",
-            "unity_open_mcp_prefab_apply",
-            "unity_open_mcp_prefab_revert",
-            "unity_open_mcp_prefab_unpack",
-            // M16 Plan 2 — typed GameObject/component mutators. Each requires
-            // paths_hint scoped to the scene that contains (or will contain)
-            // the target. They touch scene hierarchy only — no asset writes.
-            "unity_open_mcp_gameobject_create",
-            "unity_open_mcp_gameobject_destroy",
-            "unity_open_mcp_gameobject_duplicate",
-            "unity_open_mcp_gameobject_modify",
-            "unity_open_mcp_gameobject_set_parent",
-            "unity_open_mcp_component_add",
-            "unity_open_mcp_component_destroy",
-            "unity_open_mcp_component_modify",
-            // M16 Plan 3 — typed scene mutators. paths_hint is the scene asset
-            // path (or scene hierarchy path for scene_focus). scene_open is
-            // RestartThenSettle (Single-mode open can lose unsaved changes in
-            // currently-open scenes — the dirty guard preflights it).
-            "unity_open_mcp_scene_create",
-            "unity_open_mcp_scene_open",
-            "unity_open_mcp_scene_save",
-            "unity_open_mcp_scene_unload",
-            "unity_open_mcp_scene_set_active",
-            "unity_open_mcp_scene_focus",
-            // M16 Plan 4 — typed Package Manager mutators. Each writes
-            // Packages/manifest.json and triggers package resolution; the
-            // caller must scope paths_hint to "Packages/manifest.json"
-            // (the lock file is touched implicitly).
-            "unity_open_mcp_package_add",
-            "unity_open_mcp_package_remove",
-            // M16 Plan 5 — typed TagManager mutators. Each rewrites
-            // ProjectSettings/TagManager.asset; the caller must scope
-            // paths_hint to that asset. The other Plan 5 tools mutate editor
-            // state (console, selection, play mode, undo/redo) but write NO
-            // assets, so they are NOT mutating in gate terms — they route as
-            // gate-free direct-response tools (see DirectResponseTools).
-            "unity_open_mcp_editor_add_tag",
-            "unity_open_mcp_editor_add_layer",
-            // M16 Plan 6 — typed reflection / scripts / object mutators.
-            // script_write creates/overwrites a .cs (Roslyn pre-validated);
-            // script_delete removes .cs (+.meta). Both refresh AssetDatabase
-            // (recompile / domain reload may follow). object_modify sets
-            // public fields/properties on any live Object via reflection.
-            // Each requires paths_hint scoped to the affected .cs path /
-            // asset / scene.
-            "unity_open_mcp_script_write",
-            "unity_open_mcp_script_delete",
-            "unity_open_mcp_object_modify",
-            // M16 Plan 7 — typed profiler mutator. profiler_save_data writes a
-            // .json snapshot to disk (composed from the read surfaces in this
-            // tool family); the caller must scope paths_hint to the
-            // destination .json path. The other Plan 7 tools mutate editor
-            // state but write no assets and route as gate-free direct-
-            // response tools (DirectResponseTools).
-            "unity_open_mcp_profiler_save_data",
-            // M16 Plan 9 — typed build + settings mutators. Each rewrites
-            // ProjectSettings/*.asset (or EditorBuildSettings) and runs the
-            // full gate path; the caller scopes paths_hint to the touched
-            // ProjectSettings asset (see each tool's description). build_start
-            // additionally requires the deny bypass (gate: "off" +
-            // confirm_bypass: true) because BuildPipeline.BuildPlayer is on the
-            // default deny list.
-            "unity_open_mcp_build_set_target",
-            "unity_open_mcp_build_set_scenes",
-            "unity_open_mcp_build_set_defines",
-            "unity_open_mcp_build_start",
-            "unity_open_mcp_settings_set_player",
-            "unity_open_mcp_settings_set_quality",
-            "unity_open_mcp_settings_set_physics",
-            "unity_open_mcp_settings_set_lighting"
-        };
+        // Tool classification tables (KnownTools / DirectResponseTools /
+        // MutatingTools) live in BridgeToolCatalog.cs. Aliased here so the
+        // dispatch path reads them as plain KnownTools.Contains(...) without
+        // qualifying every call site.
+        private static readonly HashSet<string> KnownTools = BridgeToolCatalog.KnownTools;
+        private static readonly HashSet<string> DirectResponseTools = BridgeToolCatalog.DirectResponseTools;
+        private static readonly HashSet<string> MutatingTools = BridgeToolCatalog.MutatingTools;
 
         private static HttpListener _listener;
         private static Thread _listenerThread;
         private static volatile bool _running;
         private static int _port;
-
-        // Per-request activity record. Set on the listener worker thread at the start
-        // of HandleRequest and read by nested handlers (e.g. HandleToolDispatch) before
-        // FinishActivity records it to the ring buffer. Thread-static because each
-        // request runs on a ThreadPool worker.
-        [ThreadStatic] private static BridgeActivityEvent _currentActivity;
-        private static BridgeActivityEvent CurrentActivity => _currentActivity;
 
         public static int Port => _port;
         public static bool IsRunning => _running;
@@ -445,11 +111,12 @@ namespace UnityOpenMcpBridge
             return InstancePortResolver.ResolvePort(GetProjectPathForPort(), envPort, argPort);
         }
 
-        // The project path used for port hashing. Falls back to a stable
-        // placeholder if the editor hasn't initialized Application.dataPath
-        // yet — in practice this runs inside [InitializeOnLoad] after the
-        // project is loaded, but we never want to throw during static init.
-        private static string GetProjectPathForPort()
+        // The project path used for port hashing (and by BridgeAuditRecorder for
+        // the audit project hash). Falls back to a stable placeholder if the
+        // editor hasn't initialized Application.dataPath yet — in practice this
+        // runs inside [InitializeOnLoad] after the project is loaded, but we
+        // never want to throw during static init.
+        internal static string GetProjectPathForPort()
         {
             try
             {
@@ -587,8 +254,8 @@ namespace UnityOpenMcpBridge
 
         private static void HandleRequest(HttpListenerContext context)
         {
-            var activity = BeginActivity(context);
-            _currentActivity = activity;
+            var activity = BridgeActivityRecorder.BeginActivity(context);
+            BridgeActivityRecorder.CurrentActivity = activity;
             try
             {
                 // M14 — auth check runs before routing so every endpoint
@@ -621,7 +288,7 @@ namespace UnityOpenMcpBridge
                         else
                         {
                             activity.Kind = BridgeActivityKind.ResourceRequest;
-                            SendJsonError(context, 405, "method_not_allowed", "GET required for /events");
+                            BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "GET required for /events");
                         }
                         break;
                     case "/events/poll":
@@ -633,7 +300,7 @@ namespace UnityOpenMcpBridge
                         else
                         {
                             activity.Kind = BridgeActivityKind.ResourceRequest;
-                            SendJsonError(context, 405, "method_not_allowed", "GET required for /events/poll");
+                            BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "GET required for /events/poll");
                         }
                         break;
                     case "/resources":
@@ -645,7 +312,7 @@ namespace UnityOpenMcpBridge
                         else
                         {
                             activity.Kind = BridgeActivityKind.ResourceRequest;
-                            SendJsonError(context, 405, "method_not_allowed", "GET required for resource endpoints");
+                            BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "GET required for resource endpoints");
                         }
                         break;
                     case "/tools":
@@ -665,7 +332,7 @@ namespace UnityOpenMcpBridge
                         else
                         {
                             activity.Kind = BridgeActivityKind.ResourceRequest;
-                            SendJsonError(context, 405, "method_not_allowed", "GET required for /tools");
+                            BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "GET required for /tools");
                         }
                         break;
                     default:
@@ -685,7 +352,7 @@ namespace UnityOpenMcpBridge
                                     activity.Kind = BridgeActivityKind.ToolError;
                                     activity.Outcome = BridgeActivityOutcome.Failed;
                                     activity.ErrorCode = "tool_not_found";
-                                    SendToolNotFound(context, toolName);
+                                    BridgeHttpResponse.SendToolNotFound(context, toolName);
                                 }
                             }
                             else
@@ -693,7 +360,7 @@ namespace UnityOpenMcpBridge
                                 activity.Kind = BridgeActivityKind.ToolError;
                                 activity.Outcome = BridgeActivityOutcome.Failed;
                                 activity.ErrorCode = "method_not_allowed";
-                                SendJsonError(context, 405, "method_not_allowed", "POST required for tool endpoints");
+                                BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "POST required for tool endpoints");
                             }
                         }
                         else if (path.StartsWith("/resources/"))
@@ -707,13 +374,13 @@ namespace UnityOpenMcpBridge
                             else
                             {
                                 activity.Kind = BridgeActivityKind.ResourceRequest;
-                                SendJsonError(context, 405, "method_not_allowed", "GET required for resource endpoints");
+                                BridgeHttpResponse.SendJsonError(context, 405, "method_not_allowed", "GET required for resource endpoints");
                             }
                         }
                         else
                         {
                             activity.Kind = BridgeActivityKind.UnknownPath;
-                            SendNotFound(context, path);
+                            BridgeHttpResponse.SendNotFound(context, path);
                         }
                         break;
                 }
@@ -729,13 +396,13 @@ namespace UnityOpenMcpBridge
                             : activity.Kind);
                     activity.Outcome = BridgeActivityOutcome.Failed;
                     activity.ErrorCode = "bridge_internal_error";
-                    SendJsonError(context, 500, "bridge_internal_error", "Unhandled bridge exception");
+                    BridgeHttpResponse.SendJsonError(context, 500, "bridge_internal_error", "Unhandled bridge exception");
                 }
                 catch { }
             }
             finally
             {
-                FinishActivity(context, activity);
+                BridgeActivityRecorder.FinishActivity(context, activity);
                 // SSE owns its own response lifecycle — it streams for minutes and
                 // closes the OutputStream itself. Closing here would abort the
                 // long-lived stream the moment HandleRequest returned.
@@ -765,57 +432,10 @@ namespace UnityOpenMcpBridge
             activity.Kind = BridgeActivityKind.UnknownPath;
             activity.Outcome = BridgeActivityOutcome.Failed;
             activity.ErrorCode = "unauthorized";
-            SendJsonError(context, 401, "unauthorized",
+            BridgeHttpResponse.SendJsonError(context, 401, "unauthorized",
                 "Missing or invalid Authorization header. Set authMode to \"none\" in " +
                 ".unity-open-mcp/settings.json, or send Authorization: Bearer <token>.");
             return false;
-        }
-
-        private static BridgeActivityEvent BeginActivity(HttpListenerContext context)
-        {
-            var evt = new BridgeActivityEvent
-            {
-                Timestamp = DateTime.Now,
-                Kind = BridgeActivityKind.UnknownPath,
-                ToolName = null,
-                GateMode = null,
-                Outcome = BridgeActivityOutcome.Unknown,
-                DurationMs = 0,
-                HttpStatus = 0,
-                RequestBodyLength = SafeContentLength(context?.Request),
-                ErrorCode = null,
-                ErrorMessage = null
-            };
-            return evt;
-        }
-
-        private static int SafeContentLength(HttpListenerRequest request)
-        {
-            if (request == null) return 0;
-            try
-            {
-                var cl = request.ContentLength64;
-                if (cl > 0 && cl < int.MaxValue) return (int)cl;
-                return 0;
-            }
-            catch { return 0; }
-        }
-
-        private static void FinishActivity(HttpListenerContext context, BridgeActivityEvent activity)
-        {
-            if (activity == null) return;
-            try
-            {
-                activity.HttpStatus = context?.Response?.StatusCode ?? 0;
-                if (activity.Outcome == BridgeActivityOutcome.Unknown)
-                {
-                    if (activity.HttpStatus >= 500) activity.Outcome = BridgeActivityOutcome.Failed;
-                    else if (activity.HttpStatus >= 400) activity.Outcome = BridgeActivityOutcome.Failed;
-                    else if (activity.HttpStatus > 0) activity.Outcome = BridgeActivityOutcome.Success;
-                }
-            }
-            catch { }
-            try { BridgeActivityLog.Record(activity); } catch { }
         }
 
         private static void HandlePing(HttpListenerContext context)
@@ -823,11 +443,11 @@ namespace UnityOpenMcpBridge
             if (!BridgeSession.IsInitialized)
             {
                 var fallback = "{\"connected\":false,\"projectPath\":null,\"unityVersion\":null,\"bridgeVersion\":\"0.1.0\",\"mode\":\"live\",\"compiling\":true,\"isPlaying\":false}";
-                SendJson(context, 503, fallback);
+                BridgeHttpResponse.SendJson(context, 503, fallback);
                 return;
             }
-            var json = BuildPingJson();
-            SendJson(context, 200, json);
+            var json = BridgeJson.BuildPingJson();
+            BridgeHttpResponse.SendJson(context, 200, json);
         }
 
         // M13 T4.3 — /instance returns the live instance lock JSON so the MCP
@@ -839,10 +459,10 @@ namespace UnityOpenMcpBridge
             var json = BridgeInstanceLock.ReadCurrentJson();
             if (json == null)
             {
-                SendJson(context, 503, "{\"error\":{\"code\":\"no_instance\",\"message\":\"Bridge has not acquired an instance lock.\"}}");
+                BridgeHttpResponse.SendJson(context, 503, "{\"error\":{\"code\":\"no_instance\",\"message\":\"Bridge has not acquired an instance lock.\"}}");
                 return;
             }
-            SendJson(context, 200, json);
+            BridgeHttpResponse.SendJson(context, 200, json);
         }
 
         // M13 T4.4 — SSE streaming endpoint. Subscribes to BridgeEventSource,
@@ -874,7 +494,7 @@ namespace UnityOpenMcpBridge
 
             // Take ownership of the response lifecycle so HandleRequest's finally
             // does not Close() on us mid-stream.
-            var activity = CurrentActivity;
+            var activity = BridgeActivityRecorder.CurrentActivity;
             if (activity != null) activity.StreamingResponse = true;
 
             try
@@ -885,7 +505,7 @@ namespace UnityOpenMcpBridge
 
                 // Initial hello so the client immediately knows the subscriber id
                 // and that the stream is live (without waiting for the first event).
-                WriteSseEvent(context, "ready", "{\"subscriber\":\"" + EscapeStringContent(subscriber) + "\"}");
+                WriteSseEvent(context, "ready", "{\"subscriber\":\"" + BridgeJson.EscapeStringContent(subscriber) + "\"}");
 
                 var deadline = DateTime.UtcNow.AddMilliseconds(sseTimeoutMs);
                 while (_running && BridgeSession.Connected && DateTime.UtcNow < deadline)
@@ -955,14 +575,14 @@ namespace UnityOpenMcpBridge
                 maxEvents = parsed;
 
             var drain = BridgeEventSource.Drain(subscriber, maxEvents);
-            SendJson(context, 200, BridgeEventSource.RenderDrain(drain));
+            BridgeHttpResponse.SendJson(context, 200, BridgeEventSource.RenderDrain(drain));
         }
 
         private static void HandleToolDispatch(HttpListenerContext context, string toolName)
         {
-            var body = ReadRequestBody(context.Request);
-            var timeoutMs = ExtractTimeoutMs(body);
-            var activity = CurrentActivity;
+            var body = BridgeRequestBody.ReadRequestBody(context.Request);
+            var timeoutMs = BridgeRequestBody.ExtractTimeoutMs(body);
+            var activity = BridgeActivityRecorder.CurrentActivity;
 
             if (BridgeActivityLog.Verbose && activity != null && !string.IsNullOrEmpty(body))
             {
@@ -977,7 +597,7 @@ namespace UnityOpenMcpBridge
                     activity.Outcome = BridgeActivityOutcome.Skipped;
                     activity.ErrorCode = BridgeToolTogglePolicy.DisabledErrorCode;
                 }
-                SendJson(context, 200, BridgeToolTogglePolicy.BuildDisabledErrorJson(toolName));
+                BridgeHttpResponse.SendJson(context, 200, BridgeToolTogglePolicy.BuildDisabledErrorJson(toolName));
                 return;
             }
 
@@ -987,7 +607,7 @@ namespace UnityOpenMcpBridge
                 return;
             }
 
-            var gateMode = ExtractGateMode(body);
+            var gateMode = BridgeRequestBody.ExtractGateMode(body);
             var sw = Stopwatch.StartNew();
 
             bool isRegistryTool = BridgeToolRegistry.TryGet(toolName, out var registryEntry);
@@ -1031,7 +651,7 @@ namespace UnityOpenMcpBridge
                     if (toolName == "unity_open_mcp_apply_fix")
                     {
                         var issueId = JsonBody.GetString(body, "issue_id");
-                        pathsHint = PathsFromIssueId(issueId);
+                        pathsHint = BridgeRequestBody.PathsFromIssueId(issueId);
                     }
                     else if (toolName == "unity_open_mcp_reserialize")
                     {
@@ -1062,7 +682,7 @@ namespace UnityOpenMcpBridge
                                 activity.ErrorCode = "paths_hint_required";
                                 activity.DurationMs = sw.ElapsedMilliseconds;
                             }
-                            SendJson(context, 200, BuildPathsHintErrorEnvelope(toolName, effectiveGateMode));
+                            BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildPathsHintErrorEnvelope(toolName, effectiveGateMode));
                             return;
                         }
                     }
@@ -1090,9 +710,9 @@ namespace UnityOpenMcpBridge
                     result.SettleMs = EditorSettleWait.Wait(lifecycle);
                 }
 
-                RecordGateRun(toolName, effectiveGateMode, result, pathsHint);
-                ApplyToolResultToActivity(activity, result, sw.ElapsedMilliseconds);
-                SendJson(context, 200, BuildGateEnvelope(result, effectiveGateMode, lifecycle));
+                BridgeAuditRecorder.RecordGateRun(toolName, effectiveGateMode, result, pathsHint);
+                BridgeActivityRecorder.ApplyToolResultToActivity(activity, result, sw.ElapsedMilliseconds);
+                BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(result, effectiveGateMode, lifecycle));
             }
             catch (AggregateException ae)
             {
@@ -1100,161 +720,21 @@ namespace UnityOpenMcpBridge
                 var inner = ae.InnerException;
                 if (inner is TimeoutException)
                 {
-                    ApplyToolFailureToActivity(activity, "timeout", inner.Message, sw.ElapsedMilliseconds);
-                    SendJson(context, 200, BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs));
+                    BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "timeout", inner.Message, sw.ElapsedMilliseconds);
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs));
                 }
                 else
                 {
-                    ApplyToolFailureToActivity(activity, "execution_error", inner?.Message, sw.ElapsedMilliseconds);
-                    SendJson(context, 200, BuildFaultEnvelope(inner, effectiveGateMode));
+                    BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "execution_error", inner?.Message, sw.ElapsedMilliseconds);
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildFaultEnvelope(inner, effectiveGateMode));
                 }
             }
             catch (System.Exception e)
             {
                 sw.Stop();
-                ApplyToolFailureToActivity(activity, "execution_error", e.Message, sw.ElapsedMilliseconds);
-                SendJson(context, 200, BuildFaultEnvelope(e, effectiveGateMode));
+                BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "execution_error", e.Message, sw.ElapsedMilliseconds);
+                BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildFaultEnvelope(e, effectiveGateMode));
             }
-        }
-
-        private static void ApplyToolResultToActivity(BridgeActivityEvent activity, GateDispatchResult result, long durationMs)
-        {
-            if (activity == null) return;
-            activity.DurationMs = durationMs;
-            activity.Outcome = result.Outcome switch
-            {
-                GateOutcome.Passed => BridgeActivityOutcome.Success,
-                GateOutcome.Warned => BridgeActivityOutcome.Success,
-                GateOutcome.Skipped => BridgeActivityOutcome.Skipped,
-                GateOutcome.Failed => result.Mutation != null && !result.Mutation.Success
-                    ? BridgeActivityOutcome.Failed
-                    : BridgeActivityOutcome.Failed,
-                _ => BridgeActivityOutcome.Unknown
-            };
-            if (result.Mutation != null && !result.Mutation.Success && !string.IsNullOrEmpty(result.Mutation.ErrorCode))
-            {
-                activity.ErrorCode = result.Mutation.ErrorCode;
-                activity.ErrorMessage = TruncateMessage(result.Mutation.ErrorMessage);
-            }
-        }
-
-        private static void ApplyToolFailureToActivity(BridgeActivityEvent activity, string code, string message, long durationMs)
-        {
-            if (activity == null) return;
-            activity.DurationMs = durationMs;
-            activity.Outcome = code == "timeout" ? BridgeActivityOutcome.Timeout : BridgeActivityOutcome.Failed;
-            activity.ErrorCode = code;
-            activity.ErrorMessage = TruncateMessage(message);
-        }
-
-        private static string TruncateMessage(string message)
-        {
-            if (string.IsNullOrEmpty(message)) return null;
-            const int max = 200;
-            return message.Length <= max ? message : message.Substring(0, max) + "…";
-        }
-
-        private static void RecordGateRun(string toolName, string effectiveMode, GateDispatchResult result, string[] pathsHint)
-        {
-            try
-            {
-                var record = new BridgeGateRunRecord
-                {
-                    ToolName = toolName,
-                    RequestedMode = effectiveMode,
-                    EffectiveMode = effectiveMode,
-                    Outcome = result.Outcome,
-                    GateRan = result.GateRan,
-                    GateFailed = result.GateFailed,
-                    NewErrors = result.Delta?.NewErrors ?? 0,
-                    NewWarnings = result.Delta?.NewWarnings ?? 0,
-                    ResolvedErrors = result.Delta?.ResolvedErrors ?? 0,
-                    ResolvedWarnings = result.Delta?.ResolvedWarnings ?? 0,
-                    CheckpointDurationMs = result.CheckpointDurationMs,
-                    ValidationDurationMs = result.ValidationDurationMs,
-                    TotalGateDurationMs = result.TotalGateDurationMs,
-                    CategoriesRun = result.CategoriesRun,
-                    AgentNextSteps = result.AgentNextSteps,
-                    MutationError = result.Mutation?.ErrorMessage,
-                    Timestamp = DateTime.Now
-                };
-                BridgeGateRunHistory.Record(record);
-            }
-            catch
-            {
-                // History capture is best-effort; never let it break the response.
-            }
-
-            // M14 T5.5 — on-disk audit log (opt-in). Mirrors the gate-run
-            // record shape so an auditor can correlate the two. Best-effort:
-            // a write failure is logged once and the record dropped, never
-            // breaking the dispatch path.
-            try
-            {
-                RecordAudit(toolName, effectiveMode, result, pathsHint);
-            }
-            catch
-            {
-                // ignored — audit logging is non-essential
-            }
-        }
-
-        // M14 T5.5 — build + persist the audit record. Outcome vocabulary is
-        // the GateOutcome enum lowercased, plus "denied" when the deny
-        // heuristic refused the mutation (carried as the mutation error code).
-        private static void RecordAudit(string toolName, string effectiveMode, GateDispatchResult result, string[] pathsHint)
-        {
-            if (!BridgeAuditLog.Enabled) return;
-
-            var mutationError = result.Mutation?.ErrorCode;
-            var denied = mutationError == "denied_by_policy" || mutationError == "menu_blocked";
-            var outcome = denied
-                ? "denied"
-                : result.Outcome.ToString().ToLowerInvariant();
-
-            var record = new BridgeAuditRecord
-            {
-                Timestamp = DateTime.UtcNow,
-                ProjectHash = ResolveAuditProjectHash(),
-                Tool = toolName,
-                GateMode = effectiveMode,
-                PathsHint = pathsHint,
-                Outcome = outcome,
-                GateRan = result.GateRan,
-                NewErrors = result.Delta?.NewErrors ?? 0,
-                NewWarnings = result.Delta?.NewWarnings ?? 0,
-                ResolvedErrors = result.Delta?.ResolvedErrors ?? 0,
-                ResolvedWarnings = result.Delta?.ResolvedWarnings ?? 0,
-                CheckpointId = result.CheckpointId,
-                TotalGateDurationMs = result.TotalGateDurationMs,
-                MutationErrorCode = mutationError,
-                BypassedDenyList = effectiveMode == BridgeGateDefaultPolicy.Off && !denied,
-                DeniedPattern = ExtractDeniedPattern(result.Mutation?.ErrorMessage)
-            };
-            BridgeAuditLog.Record(record);
-        }
-
-        private static string ResolveAuditProjectHash()
-        {
-            var projectPath = BridgeSession.ProjectPath ?? GetProjectPathForPort();
-            try { return InstancePortResolver.ProjectHash(projectPath); }
-            catch { return "unknown"; }
-        }
-
-        // The deny heuristic embeds "Matched pattern: <pat>." in the error
-        // message. Extract it so the audit record has a structured field for
-        // grep / SIEM correlation. Returns null when the message isn't a deny
-        // refusal.
-        private static string ExtractDeniedPattern(string errorMessage)
-        {
-            if (string.IsNullOrEmpty(errorMessage)) return null;
-            const string marker = "Matched pattern: ";
-            var idx = errorMessage.IndexOf(marker, StringComparison.Ordinal);
-            if (idx < 0) return null;
-            var start = idx + marker.Length;
-            var end = errorMessage.IndexOf('.', start);
-            if (end < 0) end = errorMessage.Length;
-            return errorMessage.Substring(start, end - start);
         }
 
         private static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint)
@@ -1282,7 +762,7 @@ namespace UnityOpenMcpBridge
                         Outcome = GateOutcome.Failed,
                         GateFailed = true,
                         DirtyScenePaths = guard.DirtyScenePaths,
-                        AgentNextSteps = BuildSceneDirtyNextSteps(guard.DirtyScenePaths)
+                        AgentNextSteps = BridgeJson.BuildSceneDirtyNextSteps(guard.DirtyScenePaths)
                     };
                 }
             }
@@ -1300,26 +780,6 @@ namespace UnityOpenMcpBridge
             }
 
             return GatePolicy.Execute(mode, pathsHint, () => DispatchTool(toolName, body));
-        }
-
-        private static string[] BuildSceneDirtyNextSteps(string[] dirtyPaths)
-        {
-            var list = new List<string>(3);
-            if (dirtyPaths == null || dirtyPaths.Length == 0)
-            {
-                list.Add("Save or discard the active scene's unsaved changes, then retry.");
-            }
-            else
-            {
-                list.Add("Save or discard changes to the dirty scene(s) before retrying: "
-                    + string.Join(", ", dirtyPaths) + ".");
-            }
-            list.Add("To save via the bridge: unity_open_mcp_execute_csharp with " +
-                     "EditorSceneManager.SaveScene(EditorSceneManager.GetSceneManagerSetup()[0].path) " +
-                     "(or MarkSceneDirty + SaveScene for an unsaved scene).");
-            list.Add("To discard: EditorSceneManager.RestoreSavedSceneState(), or retry the " +
-                     "original call with ignore_scene_dirty: true to proceed and accept the risk.");
-            return list.ToArray();
         }
 
         private static ToolDispatchResult DispatchTool(string toolName, string body)
@@ -1506,9 +966,9 @@ namespace UnityOpenMcpBridge
                 };
 
                 sw.Stop();
-                RecordGateRun("unity_open_mcp_apply_fix", gateMode, gateResult, null);
-                ApplyToolResultToActivity(activity, gateResult, sw.ElapsedMilliseconds);
-                SendJson(context, 200, BuildGateEnvelope(gateResult, gateMode, LifecyclePolicy.EditorSettle));
+                BridgeAuditRecorder.RecordGateRun("unity_open_mcp_apply_fix", gateMode, gateResult, null);
+                BridgeActivityRecorder.ApplyToolResultToActivity(activity, gateResult, sw.ElapsedMilliseconds);
+                BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildGateEnvelope(gateResult, gateMode, LifecyclePolicy.EditorSettle));
             }
             catch (AggregateException ae)
             {
@@ -1516,20 +976,20 @@ namespace UnityOpenMcpBridge
                 var inner = ae.InnerException;
                 if (inner is TimeoutException)
                 {
-                    ApplyToolFailureToActivity(activity, "timeout", inner.Message, sw.ElapsedMilliseconds);
-                    SendJson(context, 200, BuildTimeoutEnvelope("unity_open_mcp_apply_fix", gateMode, timeoutMs));
+                    BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "timeout", inner.Message, sw.ElapsedMilliseconds);
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildTimeoutEnvelope("unity_open_mcp_apply_fix", gateMode, timeoutMs));
                 }
                 else
                 {
-                    ApplyToolFailureToActivity(activity, "execution_error", inner?.Message, sw.ElapsedMilliseconds);
-                    SendJson(context, 200, BuildFaultEnvelope(inner, gateMode));
+                    BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "execution_error", inner?.Message, sw.ElapsedMilliseconds);
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildFaultEnvelope(inner, gateMode));
                 }
             }
             catch (System.Exception e)
             {
                 sw.Stop();
-                ApplyToolFailureToActivity(activity, "execution_error", e.Message, sw.ElapsedMilliseconds);
-                SendJson(context, 200, BuildFaultEnvelope(e, gateMode));
+                BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "execution_error", e.Message, sw.ElapsedMilliseconds);
+                BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildFaultEnvelope(e, gateMode));
             }
         }
 
@@ -1543,265 +1003,24 @@ namespace UnityOpenMcpBridge
                 var result = task.Result;
 
                 if (result.Success && result.Output != null)
-                    SendJson(context, 200, result.Output);
+                    BridgeHttpResponse.SendJson(context, 200, result.Output);
                 else if (!result.Success)
-                    SendJson(context, 200, BuildDirectToolErrorJson(result));
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildDirectToolErrorJson(result));
                 else
-                    SendJson(context, 200, "{\"error\":{\"code\":\"empty_output\",\"message\":\"Tool returned empty output\"}}");
+                    BridgeHttpResponse.SendJson(context, 200, "{\"error\":{\"code\":\"empty_output\",\"message\":\"Tool returned empty output\"}}");
             }
             catch (AggregateException ae)
             {
                 var inner = ae.InnerException;
                 if (inner is TimeoutException)
-                    SendJson(context, 200, $"{{\"error\":{{\"code\":\"timeout\",\"message\":\"Tool '{EscapeStringContent(toolName)}' timed out after {timeoutMs}ms\"}}}}");
+                    BridgeHttpResponse.SendJson(context, 200, $"{{\"error\":{{\"code\":\"timeout\",\"message\":\"Tool '{BridgeJson.EscapeStringContent(toolName)}' timed out after {timeoutMs}ms\"}}}}");
                 else
-                    SendJson(context, 200, $"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{EscapeStringContent(inner?.Message ?? ae.Message)}\"}}}}");
+                    BridgeHttpResponse.SendJson(context, 200, $"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{BridgeJson.EscapeStringContent(inner?.Message ?? ae.Message)}\"}}}}");
             }
             catch (System.Exception e)
             {
-                SendJson(context, 200, $"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{EscapeStringContent(e.Message)}\"}}}}");
+                BridgeHttpResponse.SendJson(context, 200, $"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{BridgeJson.EscapeStringContent(e.Message)}\"}}}}");
             }
-        }
-
-        private static string BuildDirectToolErrorJson(ToolDispatchResult result)
-        {
-            return $"{{\"error\":{{\"code\":\"{EscapeStringContent(result.ErrorCode)}\",\"message\":\"{EscapeStringContent(result.ErrorMessage)}\"}}}}";
-        }
-
-        private static string ReadRequestBody(HttpListenerRequest request)
-        {
-            using var stream = request.InputStream;
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            return reader.ReadToEnd();
-        }
-
-        internal static int ExtractTimeoutMs(string body)
-        {
-            if (string.IsNullOrEmpty(body)) return DefaultTimeoutMs;
-
-            const string key = "\"timeout_ms\"";
-            var idx = body.IndexOf(key, StringComparison.Ordinal);
-            if (idx < 0) return DefaultTimeoutMs;
-
-            var colonIdx = body.IndexOf(':', idx + key.Length);
-            if (colonIdx < 0) return DefaultTimeoutMs;
-
-            var start = colonIdx + 1;
-            while (start < body.Length && char.IsWhiteSpace(body[start])) start++;
-
-            var end = start;
-            while (end < body.Length && char.IsDigit(body[end])) end++;
-
-            if (end == start || !int.TryParse(body.Substring(start, end - start), out var ms))
-                return DefaultTimeoutMs;
-
-            return Math.Clamp(ms, MinTimeoutMs, MaxTimeoutMs);
-        }
-
-        private static string ExtractGateMode(string body)
-        {
-            // Precedence per architecture/gate-policy.md:
-            //   1. Request body `gate` value
-            //   2. Project default from `.unity-open-mcp/settings.json`
-            //   3. Tool-level default (caller-provided)
-            if (string.IsNullOrEmpty(body)) return BridgeGateDefaultPolicy.GetDefault();
-
-            const string key = "\"gate\"";
-            var idx = body.IndexOf(key, StringComparison.Ordinal);
-            if (idx < 0) return BridgeGateDefaultPolicy.GetDefault();
-
-            var colonIdx = body.IndexOf(':', idx + key.Length);
-            if (colonIdx < 0) return BridgeGateDefaultPolicy.GetDefault();
-
-            var start = colonIdx + 1;
-            while (start < body.Length && char.IsWhiteSpace(body[start])) start++;
-
-            if (start >= body.Length || body[start] != '"') return BridgeGateDefaultPolicy.GetDefault();
-            start++;
-
-            var end = start;
-            while (end < body.Length && body[end] != '"') end++;
-
-            if (end == start) return BridgeGateDefaultPolicy.GetDefault();
-
-            var value = body.Substring(start, end - start);
-            return BridgeGateDefaultPolicy.IsValid(value) ? value : BridgeGateDefaultPolicy.GetDefault();
-        }
-
-        private static string[] PathsFromIssueId(string issueId)
-        {
-            if (string.IsNullOrEmpty(issueId)) return null;
-            var parts = issueId.Split('|');
-            if (parts.Length < 3) return null;
-            var assetPath = parts[2];
-            if (string.IsNullOrEmpty(assetPath)) return null;
-            return new[] { assetPath };
-        }
-
-        private static string BuildGateEnvelope(GateDispatchResult result, string gateMode, LifecyclePolicy lifecycle)
-        {
-            var sb = new StringBuilder(1024);
-
-            sb.Append("{\"mutation\":{\"success\":");
-            sb.Append(result.Mutation.Success ? "true" : "false");
-            sb.Append(",\"output\":");
-            sb.Append(result.Mutation.Output ?? "null");
-            if (result.Mutation.ErrorCode != null)
-            {
-                sb.Append(",\"error\":{\"code\":\"").Append(EscapeStringContent(result.Mutation.ErrorCode));
-                sb.Append("\",\"message\":\"").Append(EscapeStringContent(result.Mutation.ErrorMessage ?? ""));
-                sb.Append("\"}");
-            }
-            else
-            {
-                sb.Append(",\"error\":null");
-            }
-            sb.Append('}');
-
-            sb.Append(",\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
-            sb.Append("\"");
-
-            if (!result.GateRan)
-            {
-                if (result.CheckpointId != null)
-                    sb.Append(",\"checkpointId\":\"").Append(EscapeStringContent(result.CheckpointId)).Append("\"");
-                sb.Append(",\"skipped\":true,\"validation\":null,\"delta\":null");
-            }
-            else
-            {
-                sb.Append(",\"checkpointId\":\"").Append(EscapeStringContent(result.CheckpointId));
-                sb.Append("\",\"skipped\":false");
-                sb.Append(",\"validation\":{\"passed\":").Append(result.Outcome == GateOutcome.Passed ? "true" : "false");
-                sb.Append(",\"categoriesRun\":[");
-                if (result.CategoriesRun != null)
-                {
-                    for (int i = 0; i < result.CategoriesRun.Length; i++)
-                    {
-                        if (i > 0) sb.Append(',');
-                        sb.Append('"').Append(EscapeStringContent(result.CategoriesRun[i])).Append('"');
-                    }
-                }
-                sb.Append("],\"durationMs\":").Append(result.ValidationDurationMs);
-                sb.Append('}');
-
-                sb.Append(",\"delta\":{\"newErrors\":").Append(result.Delta?.NewErrors ?? 0);
-                sb.Append(",\"newWarnings\":").Append(result.Delta?.NewWarnings ?? 0);
-                sb.Append(",\"resolvedErrors\":").Append(result.Delta?.ResolvedErrors ?? 0);
-                sb.Append(",\"resolvedWarnings\":").Append(result.Delta?.ResolvedWarnings ?? 0);
-                sb.Append(",\"newIssues\":[");
-                if (result.Delta?.NewIssueKeys != null)
-                {
-                    for (int i = 0; i < result.Delta.NewIssueKeys.Length; i++)
-                    {
-                        if (i > 0) sb.Append(',');
-                        sb.Append('"').Append(EscapeStringContent(result.Delta.NewIssueKeys[i])).Append('"');
-                    }
-                }
-                sb.Append("],\"resolvedIssues\":[");
-                if (result.Delta?.ResolvedIssueKeys != null)
-                {
-                    for (int i = 0; i < result.Delta.ResolvedIssueKeys.Length; i++)
-                    {
-                        if (i > 0) sb.Append(',');
-                        sb.Append('"').Append(EscapeStringContent(result.Delta.ResolvedIssueKeys[i])).Append('"');
-                    }
-                }
-                sb.Append("]}");
-            }
-
-            sb.Append('}');
-
-            // M13 T4.1 — lifecycle hint + settle telemetry. Emitted on every
-            // gate envelope so agents know whether the op was read-only, may
-            // have settled, or survived a domain reload. settleMs is the time
-            // the bridge blocked waiting for the editor to finish compiling.
-            sb.Append(",\"lifecycle\":\"").Append(lifecycle.ToWireString()).Append("\"");
-            sb.Append(",\"settleMs\":").Append(result.SettleMs);
-
-            // M13 T4.2 — dirty-scene paths when the op was refused by the
-            // active-scene guard. Omitted (null) when allowed.
-            if (result.DirtyScenePaths != null && result.DirtyScenePaths.Length > 0)
-            {
-                sb.Append(",\"dirtyScenes\":[");
-                for (int i = 0; i < result.DirtyScenePaths.Length; i++)
-                {
-                    if (i > 0) sb.Append(',');
-                    sb.Append('"').Append(EscapeStringContent(result.DirtyScenePaths[i])).Append('"');
-                }
-                sb.Append("]");
-            }
-            else
-            {
-                sb.Append(",\"dirtyScenes\":null");
-            }
-
-            sb.Append(",\"agentNextSteps\":[");
-            var steps = result.AgentNextSteps;
-            if (steps != null)
-            {
-                for (int i = 0; i < steps.Length; i++)
-                {
-                    if (i > 0) sb.Append(',');
-                    sb.Append('"').Append(EscapeStringContent(steps[i])).Append('"');
-                }
-            }
-            sb.Append("]}");
-
-            return sb.ToString();
-        }
-
-        private static string BuildTimeoutEnvelope(string toolName, string gateMode, int timeoutMs)
-        {
-            var sb = new StringBuilder(512);
-            sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"timeout\",\"message\":\"Tool '");
-            sb.Append(EscapeStringContent(toolName));
-            sb.Append("' timed out after ");
-            sb.Append(timeoutMs);
-            sb.Append("ms\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
-            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
-            sb.Append(",\"agentNextSteps\":[\"Tool execution timed out. Consider increasing timeout_ms or simplifying the operation.\"]}");
-            return sb.ToString();
-        }
-
-        private static string BuildFaultEnvelope(System.Exception e, string gateMode)
-        {
-            var sb = new StringBuilder(512);
-            sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"execution_error\",\"message\":\"");
-            sb.Append(EscapeStringContent(e.Message));
-            sb.Append("\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
-            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
-            sb.Append(",\"agentNextSteps\":[\"Tool execution failed with an unexpected error.\"]}");
-            return sb.ToString();
-        }
-
-        private static string BuildPathsHintErrorEnvelope(string toolName, string gateMode)
-        {
-            var sb = new StringBuilder(512);
-            sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"paths_hint_required\",\"message\":\"");
-            sb.Append("Mutating tool '");
-            sb.Append(EscapeStringContent(toolName));
-            sb.Append("' requires a non-empty 'paths_hint' array. ");
-            sb.Append("Provide asset paths likely to be affected (e.g. [\\\"Assets/Prefabs/Player.prefab\\\"]) so the gate can scope validation correctly. ");
-            sb.Append("There is no whole-project fallback — explicit paths are mandatory.");
-            sb.Append("\"}},\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
-            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
-            sb.Append(",\"agentNextSteps\":[\"Add 'paths_hint' with at least one asset path before retrying.\"]}");
-            return sb.ToString();
-        }
-
-        private static string BuildPingJson()
-        {
-            var sb = new StringBuilder(256);
-            sb.Append('{');
-            sb.Append("\"connected\":").Append(BridgeSession.Connected && BridgeSession.IsInitialized ? "true" : "false").Append(',');
-            sb.Append("\"projectPath\":").Append(EscapeString(BridgeSession.ProjectPath)).Append(',');
-            sb.Append("\"unityVersion\":").Append(EscapeString(BridgeSession.UnityVersion)).Append(',');
-            sb.Append("\"bridgeVersion\":").Append(EscapeString(BridgeSession.BridgeVersion)).Append(',');
-            sb.Append("\"mode\":").Append(EscapeString(BridgeSession.Mode)).Append(',');
-            sb.Append("\"compiling\":").Append(BridgeSession.IsCompiling ? "true" : "false").Append(',');
-            sb.Append("\"isPlaying\":").Append(BridgeSession.IsPlaying ? "true" : "false");
-            sb.Append('}');
-            return sb.ToString();
         }
 
         private static void HandleResourceList(HttpListenerContext context)
@@ -1814,14 +1033,14 @@ namespace UnityOpenMcpBridge
                 if (i > 0) sb.Append(',');
                 var r = resources[i];
                 sb.Append('{');
-                sb.Append("\"name\":").Append(EscapeString(r.Name)).Append(',');
-                sb.Append("\"route\":").Append(EscapeString(r.Route)).Append(',');
-                sb.Append("\"mimeType\":").Append(EscapeString(r.MimeType)).Append(',');
-                sb.Append("\"description\":").Append(r.Description != null ? EscapeString(r.Description) : "null");
+                sb.Append("\"name\":").Append(BridgeJson.EscapeString(r.Name)).Append(',');
+                sb.Append("\"route\":").Append(BridgeJson.EscapeString(r.Route)).Append(',');
+                sb.Append("\"mimeType\":").Append(BridgeJson.EscapeString(r.MimeType)).Append(',');
+                sb.Append("\"description\":").Append(r.Description != null ? BridgeJson.EscapeString(r.Description) : "null");
                 sb.Append('}');
             }
             sb.Append(']');
-            SendJson(context, 200, sb.ToString());
+            BridgeHttpResponse.SendJson(context, 200, sb.ToString());
         }
 
         // M18 Plan 2 / T18.2.3 — compiled-state tool inventory. Used by the
@@ -1850,7 +1069,7 @@ namespace UnityOpenMcpBridge
             for (int i = 0; i < sortedNames.Count; i++)
             {
                 if (i > 0) sb.Append(',');
-                sb.Append(EscapeString(sortedNames[i]));
+                sb.Append(BridgeJson.EscapeString(sortedNames[i]));
             }
             sb.Append(']');
 
@@ -1870,20 +1089,20 @@ namespace UnityOpenMcpBridge
                 firstGroup = false;
                 var toolList = groupToTools[groupId];
                 sb.Append('{');
-                sb.Append("\"id\":").Append(EscapeString(groupId)).Append(',');
+                sb.Append("\"id\":").Append(BridgeJson.EscapeString(groupId)).Append(',');
                 sb.Append("\"toolCount\":").Append(toolList.Count).Append(',');
                 sb.Append("\"tools\":[");
                 for (int i = 0; i < toolList.Count; i++)
                 {
                     if (i > 0) sb.Append(',');
-                    sb.Append(EscapeString(toolList[i]));
+                    sb.Append(BridgeJson.EscapeString(toolList[i]));
                 }
                 sb.Append("]}");
             }
             sb.Append(']');
 
             sb.Append('}');
-            SendJson(context, 200, sb.ToString());
+            BridgeHttpResponse.SendJson(context, 200, sb.ToString());
         }
 
         private static void HandleResourceDispatch(HttpListenerContext context, string route)
@@ -1891,8 +1110,8 @@ namespace UnityOpenMcpBridge
             var entry = BridgeResourceRegistry.FindByRoute(route);
             if (entry == null)
             {
-                var json = $"{{\"error\":{{\"code\":\"resource_not_found\",\"message\":\"Unknown resource route: {EscapeStringContent(route)}\"}}}}";
-                SendJson(context, 404, json);
+                var json = $"{{\"error\":{{\"code\":\"resource_not_found\",\"message\":\"Unknown resource route: {BridgeJson.EscapeStringContent(route)}\"}}}}";
+                BridgeHttpResponse.SendJson(context, 404, json);
                 return;
             }
 
@@ -1915,73 +1134,7 @@ namespace UnityOpenMcpBridge
             catch (System.Exception e)
             {
                 var inner = e is AggregateException ae ? ae.InnerException?.Message : e.Message;
-                SendJsonError(context, 500, "execution_error", inner ?? e.Message);
-            }
-        }
-
-        private static void SendToolNotFound(HttpListenerContext context, string toolName)
-        {
-            var json = $"{{\"error\":{{\"code\":\"tool_not_found\",\"message\":\"Unknown tool: {EscapeStringContent(toolName)}\"}}}}";
-            SendJson(context, 404, json);
-        }
-
-        private static void SendNotFound(HttpListenerContext context, string path)
-        {
-            var json = $"{{\"error\":{{\"code\":\"not_found\",\"message\":\"Unknown endpoint: {EscapeStringContent(path)}\"}}}}";
-            SendJson(context, 404, json);
-        }
-
-        private static void SendJsonError(HttpListenerContext context, int statusCode, string code, string message)
-        {
-            var json = $"{{\"error\":{{\"code\":\"{EscapeStringContent(code)}\",\"message\":\"{EscapeStringContent(message)}\"}}}}";
-            SendJson(context, statusCode, json);
-        }
-
-        private static void SendJson(HttpListenerContext context, int statusCode, string json)
-        {
-            var bytes = Encoding.UTF8.GetBytes(json);
-            context.Response.StatusCode = statusCode;
-            context.Response.ContentType = "application/json; charset=utf-8";
-            context.Response.ContentLength64 = bytes.Length;
-            context.Response.OutputStream.Write(bytes, 0, bytes.Length);
-        }
-
-        private static string EscapeString(string s)
-        {
-            if (s == null) return "null";
-            var sb = new StringBuilder(s.Length + 8);
-            sb.Append('"');
-            EscapeStringContentTo(sb, s);
-            sb.Append('"');
-            return sb.ToString();
-        }
-
-        private static string EscapeStringContent(string s)
-        {
-            if (s == null) return "";
-            var sb = new StringBuilder(s.Length + 4);
-            EscapeStringContentTo(sb, s);
-            return sb.ToString();
-        }
-
-        private static void EscapeStringContentTo(StringBuilder sb, string s)
-        {
-            foreach (var c in s)
-            {
-                switch (c)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (c < 32)
-                            sb.Append($"\\u{(int)c:X4}");
-                        else
-                            sb.Append(c);
-                        break;
-                }
+                BridgeHttpResponse.SendJsonError(context, 500, "execution_error", inner ?? e.Message);
             }
         }
     }

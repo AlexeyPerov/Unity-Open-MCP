@@ -21,6 +21,7 @@ import {
 } from "./compression/compact.js";
 import { readAssetOffline, isOfflineAsset } from "./offline.js";
 import { searchAssetsOffline } from "./offline.js";
+import { makeErrorResult } from "./results.js";
 
 const COMPRESSIBLE = new Set([
   "unity_open_mcp_read_asset",
@@ -69,13 +70,6 @@ export class AssetModelCache {
   }
 }
 
-function makeErrorResult(message: string, code: string): CallToolResult {
-  return {
-    content: [{ type: "text", text: JSON.stringify({ error: { code, message } }) }],
-    isError: true,
-  };
-}
-
 function makeResult(payload: unknown, cacheHit: boolean, source?: "offline" | "live"): CallToolResult {
   return {
     content: [
@@ -118,7 +112,7 @@ async function routeReadAsset(
 ): Promise<CallToolResult> {
   const assetPath = typeof args.asset_path === "string" ? args.asset_path : "";
   if (assetPath === "") {
-    return makeErrorResult("'asset_path' is required.", "missing_parameter");
+    return makeErrorResult({ code: "missing_parameter", message: "'asset_path' is required." });
   }
 
   const fieldLimit = typeof args.field_limit === "number" ? args.field_limit : 0;
@@ -148,19 +142,19 @@ async function routeReadAsset(
       // Fall back to live bridge (for binary formats or parse failures).
       const liveAvailable = await live.isLiveAvailable();
       if (!liveAvailable) {
-        return makeErrorResult(
-          isOfflineAsset(assetPath)
+        return makeErrorResult({
+          code: "source_unavailable",
+          message: isOfflineAsset(assetPath)
             ? `Offline parse failed and live bridge is unavailable for: ${assetPath}`
             : `Binary or unsupported format requires the live bridge, which is unavailable: ${assetPath}`,
-          "source_unavailable",
-        );
+        });
       }
       const raw = await live.route("unity_open_mcp_read_asset", args);
       const parsed = parseContentJson(raw);
       if (parsed === null) {
         return raw.isError
           ? raw
-          : makeErrorResult("Bridge returned an unreadable asset model.", "bridge_error");
+          : makeErrorResult({ code: "bridge_error", message: "Bridge returned an unreadable asset model." });
       }
       if (parsed.error) {
         return { ...raw, isError: true };
@@ -214,7 +208,7 @@ async function routeSearchAssets(
   if (parsed === null) {
     return raw.isError
       ? raw
-      : makeErrorResult("Bridge returned an unreadable search result.", "bridge_error");
+      : makeErrorResult({ code: "bridge_error", message: "Bridge returned an unreadable search result." });
   }
   if (parsed.error) {
     return { ...raw, isError: true };

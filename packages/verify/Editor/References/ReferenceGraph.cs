@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEditor;
+using UnityOpenMcpVerify.Internals.AssetDatabase;
+using UnityOpenMcpVerify.Internals.RegexPatterns;
 
 namespace UnityOpenMcpVerify.References
 {
@@ -114,9 +116,8 @@ namespace UnityOpenMcpVerify.References
             return reverseDeps;
         }
 
-        private static readonly Regex GuidRegex = new Regex(
-            @"m_AssetGUID:\s*([0-9a-fA-F]{32})",
-            RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        // m_AssetGUID references are matched with SharedRegex.AssetReferenceGuid
+        // (same pattern + RegexOptions) instead of a local copy — see Internals.
 
         private static string[] GetAllDependencies(string assetPath, bool binarySerialization, bool recursive = true)
         {
@@ -170,7 +171,7 @@ namespace UnityOpenMcpVerify.References
                 return regular;
 
             HashSet<string> set = null;
-            foreach (Match match in GuidRegex.Matches(content))
+            foreach (Match match in SharedRegex.AssetReferenceGuid.Matches(content))
             {
                 if (match == null || match.Groups.Count <= 1) continue;
                 var guid = match.Groups[1].Value;
@@ -189,8 +190,7 @@ namespace UnityOpenMcpVerify.References
 
         private static bool CanContainAssetReferences(string assetPath)
         {
-            var ext = Path.GetExtension(assetPath).ToLowerInvariant();
-            return ext == ".asset" || ext == ".prefab" || ext == ".unity";
+            return AssetTypeUtilities.CanContainAssetReferences(assetPath);
         }
 
         private static void ScanTerrainDataReferences(Dictionary<string, List<string>> reverseDeps)
@@ -208,9 +208,8 @@ namespace UnityOpenMcpVerify.References
 
             if (guidToPath.Count == 0) return;
 
-            var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".prefab", ".unity" };
             var candidates = AssetDatabase.GetAllAssetPaths()
-                .Where(p => exts.Contains(Path.GetExtension(p)))
+                .Where(AssetTypeUtilities.IsSceneOrPrefab)
                 .ToList();
 
             foreach (var candidate in candidates)

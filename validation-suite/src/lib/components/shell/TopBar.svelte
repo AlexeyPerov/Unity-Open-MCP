@@ -9,12 +9,19 @@
       case "compiling": return "Bridge · compiling";
       case "stopped": return "Bridge · stopped";
       case "dead_bridge": return "Bridge · dead";
+      case "cli_missing": return "CLI · missing";
       default: return "Bridge · ?"; // unknown / never probed
     }
   }
 
   function bridgeTitle(status: BridgeStatusToken, nextStep: string | null): string {
     const head = bridgeLabel(status);
+    if (status === "cli_missing") {
+      // Self-diagnosing hint: the engine CLI isn't on PATH. The actionable
+      // detail (binary name + install command) lives in nextStep.
+      const detail = nextStep ?? "The engine CLI binary was not found on PATH.";
+      return `${head}\n${detail}`;
+    }
     if (nextStep && nextStep.length > 0) return `${head}\n${nextStep}`;
     return `${head}\nClick to re-check via unity_open_mcp_bridge_status.`;
   }
@@ -219,7 +226,8 @@
   }
 
   /* Phase 3: bridge_status token → chip color. running = green, compiling =
-     amber, stopped = muted gray, dead_bridge = red, unknown = neutral. */
+     amber, stopped = muted gray, dead_bridge = red, cli_missing = warning
+     amber (action needed: install/link the CLI), unknown = neutral. */
   .bridge-running .bridge-dot {
     background: #4ade80;
     box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.18);
@@ -234,6 +242,10 @@
   .bridge-dead_bridge .bridge-dot {
     background: #f87171;
     box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.2);
+  }
+  .bridge-cli_missing .bridge-dot {
+    background: #fbbf24;
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.22);
   }
 
   .muted {

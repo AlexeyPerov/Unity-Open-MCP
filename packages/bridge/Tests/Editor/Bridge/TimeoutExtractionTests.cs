@@ -14,17 +14,17 @@ namespace UnityOpenMcpBridge.Tests
         {
             Assert.AreEqual(
                 30000,
-                BridgeHttpServer.ExtractTimeoutMs("{}"),
+                BridgeRequestBody.ExtractTimeoutMs("{}"),
                 "tools without a timeout_ms declaration keep the 30s default"
             );
-            Assert.AreEqual(30000, BridgeHttpServer.ExtractTimeoutMs(""));
-            Assert.AreEqual(30000, BridgeHttpServer.ExtractTimeoutMs(null!));
+            Assert.AreEqual(30000, BridgeRequestBody.ExtractTimeoutMs(""));
+            Assert.AreEqual(30000, BridgeRequestBody.ExtractTimeoutMs(null!));
         }
 
         [Test]
         public void ExplicitTimeout_IsPassedThrough()
         {
-            Assert.AreEqual(60000, BridgeHttpServer.ExtractTimeoutMs("{\"timeout_ms\":60000}"));
+            Assert.AreEqual(60000, BridgeRequestBody.ExtractTimeoutMs("{\"timeout_ms\":60000}"));
         }
 
         [Test]
@@ -36,14 +36,14 @@ namespace UnityOpenMcpBridge.Tests
             // which is correct for tools whose schema default IS 30s.
             // run_tests documents 60000; the MCP layer adds it, so the bridge
             // receives 60000 and returns it verbatim (below MaxTimeoutMs).
-            Assert.AreEqual(60000, BridgeHttpServer.ExtractTimeoutMs("{\"timeout_ms\":60000}"));
+            Assert.AreEqual(60000, BridgeRequestBody.ExtractTimeoutMs("{\"timeout_ms\":60000}"));
         }
 
         [Test]
         public void Timeout_BelowMinimum_ClampedTo1000()
         {
-            Assert.AreEqual(1000, BridgeHttpServer.ExtractTimeoutMs("{\"timeout_ms\":0}"));
-            Assert.AreEqual(1000, BridgeHttpServer.ExtractTimeoutMs("{\"timeout_ms\":-5}"));
+            Assert.AreEqual(1000, BridgeRequestBody.ExtractTimeoutMs("{\"timeout_ms\":0}"));
+            Assert.AreEqual(1000, BridgeRequestBody.ExtractTimeoutMs("{\"timeout_ms\":-5}"));
         }
 
         [Test]
@@ -53,12 +53,12 @@ namespace UnityOpenMcpBridge.Tests
             // value of 600000 down to 300000. It must now pass through.
             Assert.AreEqual(
                 600000,
-                BridgeHttpServer.ExtractTimeoutMs("{\"timeout_ms\":600000}"),
+                BridgeRequestBody.ExtractTimeoutMs("{\"timeout_ms\":600000}"),
                 "600000 is the documented run-tests maximum and must survive the clamp"
             );
             Assert.AreEqual(
                 600000,
-                BridgeHttpServer.ExtractTimeoutMs("{\"timeout_ms\":999999999}"),
+                BridgeRequestBody.ExtractTimeoutMs("{\"timeout_ms\":999999999}"),
                 "values beyond the documented maximum clamp down to 600000"
             );
         }
@@ -68,17 +68,17 @@ namespace UnityOpenMcpBridge.Tests
         {
             Assert.AreEqual(
                 60000,
-                BridgeHttpServer.ExtractTimeoutMs("{\"timeout_ms\":   60000   }"),
+                BridgeRequestBody.ExtractTimeoutMs("{\"timeout_ms\":   60000   }"),
                 "whitespace around the number is tolerated"
             );
             Assert.AreEqual(
                 30000,
-                BridgeHttpServer.ExtractTimeoutMs("{\"timeout_ms\":\"oops\"}"),
+                BridgeRequestBody.ExtractTimeoutMs("{\"timeout_ms\":\"oops\"}"),
                 "non-numeric value falls back to default rather than throwing"
             );
             Assert.AreEqual(
                 30000,
-                BridgeHttpServer.ExtractTimeoutMs("{\"timeout_ms\":}"),
+                BridgeRequestBody.ExtractTimeoutMs("{\"timeout_ms\":}"),
                 "missing number falls back to default"
             );
         }

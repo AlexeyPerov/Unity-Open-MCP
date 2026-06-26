@@ -300,10 +300,11 @@ namespace UnityOpenMcpBridge.Tests
 
         // ----------------------- Dispatch wiring -------------------------
         //
-        // The dispatch switch and the KnownTools / DirectResponseTools /
-        // MutatingTools sets live in BridgeHttpServer. We assert the static
-        // membership contracts so a future edit that forgets to wire a new
-        // scene tool fails loudly here, not silently at runtime.
+        // The dispatch switch lives in BridgeHttpServer; the KnownTools /
+        // DirectResponseTools / MutatingTools classification sets live in
+        // BridgeToolCatalog (aliased into BridgeHttpServer). We assert the
+        // static membership contracts so a future edit that forgets to wire a
+        // new scene tool fails loudly here, not silently at runtime.
 
         [Test]
         public void DirtyGuard_PreflightsSceneOpen_NotOtherSceneMutators()

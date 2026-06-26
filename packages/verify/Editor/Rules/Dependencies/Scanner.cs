@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEditor;
+using UnityOpenMcpVerify.Internals.AssetDatabase;
 using UnityOpenMcpVerify.Internals.RegexPatterns;
 
 namespace UnityOpenMcpVerify.Rules.Dependencies
@@ -166,9 +167,7 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
             try
             {
                 if (!File.Exists(assetPath)) return result;
-                var ext = Path.GetExtension(assetPath).ToLowerInvariant();
-                if (ext != ".prefab" && ext != ".unity" && ext != ".asset" &&
-                    ext != ".mat" && ext != ".controller" && ext != ".anim")
+                if (!AssetTypeUtilities.IsTextSerializedYaml(assetPath))
                     return result;
                 result.AddRange(File.ReadAllLines(assetPath));
             }

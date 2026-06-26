@@ -12,6 +12,7 @@ import {
   type PollAndDismissOptions,
 } from "./dialog-dismiss.js";
 import { readInstanceLock, classifyInstance, lockPath } from "./instance-discovery.js";
+import { makeErrorResult } from "./results.js";
 
 const MAX_COMPILE_WAIT_MS = 120_000;
 const COMPILE_POLL_INTERVAL_MS = 2_000;
@@ -58,20 +59,6 @@ interface HttpErrorBody {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function makeErrorResult(message: string, detail?: unknown): CallToolResult {
-  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(
-          detail ?? { error: { code: "bridge_error", message } },
-        ),
-      },
-    ],
-    isError: true,
-  };
 }
 
 const OFFLINE_HINT =
@@ -177,15 +164,16 @@ export class LiveClient implements Router {
         isError: false,
       };
     } catch {
-      return makeErrorResult(
-        `Bridge is not reachable at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
-        {
+      return makeErrorResult({
+        code: "bridge_offline",
+        message: `Bridge is not reachable at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
+        detail: {
           error: {
             code: "bridge_offline",
             message: `Cannot connect to bridge at ${this.baseUrl}`,
           },
         },
-      );
+      });
     }
   }
 
@@ -284,17 +272,18 @@ export class LiveClient implements Router {
       intervalMs = Math.min(intervalMs * 2, maxIntervalMs);
     }
 
-    return makeErrorResult(
-      `Test results for run ${runId} were not available within ` +
+    return makeErrorResult({
+      code: "test_results_timeout",
+      message: `Test results for run ${runId} were not available within ` +
         `${timeoutMs / 1000}s. The test run may still be in progress or ` +
         "the bridge may have lost the callback.",
-      {
+      detail: {
         error: {
           code: "test_results_timeout",
           message: `Test results poll timed out after ${timeoutMs / 1000}s`,
         },
       },
-    );
+    });
   }
 
   private async postTool(
@@ -325,15 +314,16 @@ export class LiveClient implements Router {
         const body = (await res
           .json()
           .catch(() => null)) as HttpErrorBody | null;
-        return makeErrorResult(
-          body?.error?.message ?? `Bridge returned HTTP ${res.status}`,
-          body ?? {
+        return makeErrorResult({
+          code: "bridge_http_error",
+          message: body?.error?.message ?? `Bridge returned HTTP ${res.status}`,
+          detail: body ?? {
             error: {
               code: "bridge_http_error",
               message: `HTTP ${res.status}`,
             },
           },
-        );
+        });
       }
 
       if (DIRECT_RESPONSE_TOOLS.has(toolName)) {
@@ -358,15 +348,16 @@ export class LiveClient implements Router {
         isError: deriveIsError(body),
       };
     } catch {
-      return makeErrorResult(
-        `Failed to reach bridge at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
-        {
+      return makeErrorResult({
+        code: "bridge_offline",
+        message: `Failed to reach bridge at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
+        detail: {
           error: {
             code: "bridge_offline",
             message: `Cannot connect to bridge at ${this.baseUrl}`,
           },
         },
-      );
+      });
     }
   }
 
@@ -379,24 +370,26 @@ export class LiveClient implements Router {
       }
 
       if (!res.ok) {
-        return makeErrorResult(
-          `Bridge /ping returned unexpected HTTP ${res.status}`,
-        );
+        return makeErrorResult({
+          code: "bridge_error",
+          message: `Bridge /ping returned unexpected HTTP ${res.status}`,
+        });
       }
 
       const body = (await res.json()) as PingResponse;
       this.pingCache.record(body);
 
       if (!body.connected) {
-        return makeErrorResult(
-          "Bridge listener is running but session is not initialized.",
-          {
+        return makeErrorResult({
+          code: "bridge_not_connected",
+          message: "Bridge listener is running but session is not initialized.",
+          detail: {
             error: {
               code: "bridge_not_connected",
               message: "Bridge session not connected",
             },
           },
-        );
+        });
       }
 
       if (body.compiling) {
@@ -414,15 +407,16 @@ export class LiveClient implements Router {
       const deadBridge = this.deadBridgeResult();
       if (deadBridge) return deadBridge;
 
-      return makeErrorResult(
-        `Bridge is not reachable at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
-        {
+      return makeErrorResult({
+        code: "bridge_offline",
+        message: `Bridge is not reachable at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
+        detail: {
           error: {
             code: "bridge_offline",
             message: `Cannot connect to bridge at ${this.baseUrl}`,
           },
         },
-      );
+      });
     }
   }
 
@@ -525,16 +519,18 @@ export class LiveClient implements Router {
       const deadBridge = this.deadBridgeResult();
       if (deadBridge) return deadBridge;
 
-      return makeErrorResult(
-        `Unity is still compiling after ${MAX_COMPILE_WAIT_MS / 1000}s. ` +
+      return makeErrorResult({
+        code: "compile_timeout",
+        message:
+          `Unity is still compiling after ${MAX_COMPILE_WAIT_MS / 1000}s. ` +
           "The compile-wait timeout was exceeded.",
-        {
+        detail: {
           error: {
             code: "compile_timeout",
             message: `Compile-wait exceeded ${MAX_COMPILE_WAIT_MS / 1000}s`,
           },
         },
-      );
+      });
     } finally {
       // Compile wait resolved (idle) OR timed out — either way there is
       // nothing more to dismiss. Aborting unblocks the dismiss loop's sleep.

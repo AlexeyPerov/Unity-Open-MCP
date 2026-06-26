@@ -12,14 +12,14 @@ Rules for `packages/bridge/` — the Unity Editor HTTP bridge (`com.alexeyperov.
 
 ## Tool registration
 
-- Registry tools are discovered via `[BridgeToolType]` on a class + `[BridgeTool]` on methods (`Editor/Bridge/Attributes/`). The HTTP server (`BridgeHttpServer.cs`) also has a hardcoded `KnownTools` set for legacy tools — prefer the registry path for new tools.
+- Registry tools are discovered via `[BridgeToolType]` on a class + `[BridgeTool]` on methods (`Editor/Bridge/Attributes/`). The HTTP server (`BridgeHttpServer.cs`) also classifies tools via hardcoded sets in `Editor/Bridge/BridgeToolCatalog.cs` (`KnownTools` / `DirectResponseTools` / `MutatingTools`) for legacy tools — prefer the registry path for new tools.
 - Every new tool must declare:
   - A unique `Name` (the MCP tool name, `unity_open_mcp_*` / `unity_senses_*`).
   - `IsMutating` — true if the tool changes Unity state.
   - `Gate` — the default gate mode for mutating tools (`Enforce` / `Warn` / `Off`).
   - `Group` — the tool-group id from the canonical catalog in `mcp-server/src/capabilities/tool-groups.ts` (M18 Plan 2). Tools that should be always-visible meta-tools omit `Group` (defaults to null). Domain tools set `Group = "<domain-id>"` (e.g. `"navigation"`, `"input-system"`); typed editor tools set `"typed-editor"`. The id must match one of the catalog entries exactly so the bridge-side `GroupToTools()` mapping reconciles with the MCP server.
 - Mutating tools must accept and honor the request-level `gate` value. Read-only tools set `Gate = Off` and `ReadOnlyHint = true`.
-- When adding/removing/renaming a tool, update the hardcoded `KnownTools` / `DirectResponseTools` / `MutatingTools` sets in `BridgeHttpServer.cs` **only if** the tool is not registry-discovered. Registry tools are picked up automatically.
+- When adding/removing/renaming a tool, update the hardcoded `KnownTools` / `DirectResponseTools` / `MutatingTools` sets in `Editor/Bridge/BridgeToolCatalog.cs` **only if** the tool is not registry-discovered. Registry tools are picked up automatically. (`BridgeHttpServer` aliases these sets locally so the dispatch path reads them as plain `KnownTools.Contains(...)`.)
 
 ## Tool-group visibility (M18 Plan 2)
 

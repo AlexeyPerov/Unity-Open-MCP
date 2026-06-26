@@ -117,5 +117,32 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(Vector3.one, PrefabTools.ParseVector("not-a-vector", Vector3.one));
             Assert.AreEqual(Vector3.one, PrefabTools.ParseVector("1,2", Vector3.one));
         }
+
+        // Pins the lenient-arity contract: this helper uses `< 3`, so a 4-part
+        // string parses to the first three components rather than failing. The
+        // private ParseVector3 copies in Extensions/{Navigation,ProBuilder,Splines}
+        // use strict `!= 3` and would return fallback here. This divergence only
+        // matters on malformed input no legitimate caller sends, but the case is
+        // pinned so a future consolidation onto this helper doesn't silently
+        // change behavior for any call site.
+        [Test]
+        public void ParseVector_ExtraComponents_ParsesFirstThree()
+        {
+            Assert.AreEqual(new Vector3(1, 2, 3), PrefabTools.ParseVector("1,2,3,4", Vector3.zero));
+        }
+
+        // ParseVector must be invariant-culture-stable: locales that use comma
+        // as the decimal separator (e.g. de-DE writes "1,5" for 1.5) must NOT
+        // misread coordinates. The parser splits on ',' then float-parses each
+        // part with InvariantCulture, so "1,5,2" → (1, 5, 2), not (1.5, 2, ?).
+        [Test]
+        public void ParseVector_IsInvariantCulture_StableAcrossLocales()
+        {
+            // Pinned regardless of the host machine's culture. Authoritative
+            // expectation under any culture: three comma-separated scalars.
+            Assert.AreEqual(new Vector3(1f, 5f, 2f), PrefabTools.ParseVector("1,5,2", Vector3.zero));
+            // Decimal points are honored via InvariantCulture, not the locale.
+            Assert.AreEqual(new Vector3(1.5f, 2.5f, -3f), PrefabTools.ParseVector("1.5,2.5,-3", Vector3.zero));
+        }
     }
 }

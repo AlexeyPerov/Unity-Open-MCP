@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import { resolveUnityPath, scannedHubRoots } from "./unity-install-discovery.js";
 import { readInstanceLock } from "./instance-discovery.js";
+import { makeErrorResult } from "./results.js";
 
 const VERIFY_EXECUTE_METHOD = "UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run";
 const BRIDGE_EXECUTE_METHOD = "UnityOpenMcpBridge.Batch.BridgeBatchEntry.Run";
@@ -39,17 +40,6 @@ interface ParsedBatchResult {
   json: Record<string, unknown>;
   exitCode: number;
   elapsedMs: number;
-}
-
-function makeErrorResult(code: string, message: string, detail?: unknown): CallToolResult {  return {
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(detail ?? { error: { code, message } }),
-      },
-    ],
-    isError: true,
-  };
 }
 
 function extractJson(stdout: string): string | null {
@@ -210,33 +200,35 @@ export class BatchSpawn implements Router {
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
     if (LIMITED_META_TOOLS.has(toolName)) {
-      return makeErrorResult(
-        "batch_not_supported",
-        LIMITED_META_MESSAGES[toolName] ??
+      return makeErrorResult({
+        code: "batch_not_supported",
+        message:
+          LIMITED_META_MESSAGES[toolName] ??
           `${toolName} is not supported in batch mode.`,
-      );
+      });
     }
 
     const verifyOperation = VERIFY_TOOL_TO_OPERATION[toolName];
     const metaOperation = META_TOOL_TO_OPERATION[toolName];
 
     if (!verifyOperation && !metaOperation) {
-      return makeErrorResult(
-        "unknown_batch_tool",
-        `Tool '${toolName}' is not a batch tool.`,
-      );
+      return makeErrorResult({
+        code: "unknown_batch_tool",
+        message: `Tool '${toolName}' is not a batch tool.`,
+      });
     }
 
     const pathError = await this.validateUnityPath();
     if (pathError) return pathError;
 
     if (!this.projectPath) {
-      return makeErrorResult(
-        "project_path_missing",
-        "UNITY_PROJECT_PATH environment variable is required for batch operations " +
+      return makeErrorResult({
+        code: "project_path_missing",
+        message:
+          "UNITY_PROJECT_PATH environment variable is required for batch operations " +
           "(or open the project in Unity once so the instance lock records its path — " +
           "the MCP server falls back to the lock's projectPath when the env var is unset).",
-      );
+      });
     }
 
     const executeMethod = verifyOperation
@@ -250,7 +242,7 @@ export class BatchSpawn implements Router {
       parsed = await this.spawnUnity(operation, args, executeMethod, argBuilder);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return makeErrorResult("batch_spawn_failed", message);
+      return makeErrorResult({ code: "batch_spawn_failed", message });
     }
 
     const body = parsed.json;
@@ -286,33 +278,36 @@ export class BatchSpawn implements Router {
       // from "discovery was disabled".
       const roots = this.discoveryRoots ?? scannedHubRoots();
       const rootList = roots.length > 0 ? roots.join(", ") : "(no Hub paths found for this OS)";
-      return makeErrorResult(
-        "unity_not_discovered",
-        "No Unity Editor found. The MCP server auto-discovers Unity from the " +
+      return makeErrorResult({
+        code: "unity_not_discovered",
+        message:
+          "No Unity Editor found. The MCP server auto-discovers Unity from the " +
           "OS-default Unity Hub install paths (+ UNITY_HUB env override); " +
           `scanned: ${rootList}. Either install Unity there, or set UNITY_PATH ` +
           "to an explicit editor executable " +
           "(macOS: /Applications/Unity/Hub/Editor/<version>/Unity.app/Contents/MacOS/Unity, " +
           "Windows: C:\\Program Files\\Unity\\Hub\\Editor\\<version>\\Editor\\Unity.exe, " +
           "Linux: ~/Unity/Hub/Editor/<version>/Unity).",
-      );
+      });
     }
 
     try {
       const s = await stat(this.unityPath);
       if (!s.isFile()) {
-        return makeErrorResult(
-          "unity_path_invalid",
-          `Unity path '${this.unityPath}' is not a file. ` +
+        return makeErrorResult({
+          code: "unity_path_invalid",
+          message:
+            `Unity path '${this.unityPath}' is not a file. ` +
             "Set UNITY_PATH to the Unity Editor executable.",
-        );
+        });
       }
     } catch {
-      return makeErrorResult(
-        "unity_path_not_found",
-        `Unity path '${this.unityPath}' does not exist or is not accessible. ` +
+      return makeErrorResult({
+        code: "unity_path_not_found",
+        message:
+          `Unity path '${this.unityPath}' does not exist or is not accessible. ` +
           "Verify the path points to a valid Unity Editor executable.",
-      );
+      });
     }
 
     return null;

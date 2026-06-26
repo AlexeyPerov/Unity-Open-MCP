@@ -706,8 +706,13 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             bool firstError = true;
 
             // fields_json is a JSON array of {field, value, type?} objects.
-            // Parse it directly — the bridge's JsonBody helpers are not visible
-            // outside the bridge assembly, so do a minimal hand-rolled parse.
+            // NOTE: JsonBody (UnityOpenMcpBridge.JsonBody) IS visible to this
+            // assembly via `using UnityOpenMcpBridge;`. This file keeps its own
+            // ExtractRawValue because it captures nested objects/arrays with
+            // semantics tailored to field values, and the sibling copies in
+            // InputSystem/Splines are intentionally simpler. Consolidating onto
+            // JsonBody.GetRawValue is feasible but would change unescaping
+            // behavior for quoted values — left as-is until audited per call site.
             var entries = ParseFieldArray(fields_json);
             if (entries == null)
                 return NavigationJson.Error("missing_parameter",

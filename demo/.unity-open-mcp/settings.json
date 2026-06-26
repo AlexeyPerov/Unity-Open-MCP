@@ -2,5 +2,10 @@
     "disabledTools": [],
     "defaultGateMode": "enforce",
     "autoStart": true,
-    "verboseActivityLog": false
+    "verboseActivityLog": false,
+    "authMode": "none",
+    "csharpDenyPatterns": [],
+    "menuDenyPatterns": [],
+    "bindAddress": "127.0.0.1",
+    "auditLogEnabled": false
 }
