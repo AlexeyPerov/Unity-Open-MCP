@@ -128,6 +128,50 @@ namespace UnityOpenMcpBridge
                 // Skip registry enumeration; hardcoded list is still complete.
             }
 
+            // The hardcoded meta-tools above cover only the 10 dispatcher
+            // entry points that mirror their input schemas here. The remaining
+            // ~90 typed tools (gameobject/scene/component/material/prefab/
+            // package/build/settings/profiler/...) are dispatched by the
+            // hardcoded switch in BridgeHttpServer.DispatchTool and carry no
+            // [BridgeTool] attribute, so they never enter BridgeToolRegistry.
+            // Without this pass the Tools tab silently hid them even though
+            // GET /tools (HandleToolsList) reports them via KnownTools. This
+            // unions KnownTools into the catalog so the tab matches what the
+            // bridge actually dispatches — same source of truth the MCP client
+            // sees. Parameter schemas live server-side (mcp-server/src/tools)
+            // and are intentionally not mirrored in C#; the catalog shows the
+            // tool name, title, mutability, and gate mode only.
+            try
+            {
+                foreach (var name in BridgeToolClassification.KnownTools)
+                {
+                    if (string.IsNullOrEmpty(name)) continue;
+                    if (!seen.Add(name)) continue;
+
+                    bool isMutating = BridgeToolClassification.MutatingTools.Contains(name);
+                    items.Add(new BridgeToolCatalogItem
+                    {
+                        Name = name,
+                        Title = SynthesizeTitle(name),
+                        Source = BridgeToolSource.Hardcoded,
+                        Mutability = isMutating ? BridgeToolMutability.Mutating : BridgeToolMutability.ReadOnly,
+                        GateMode = isMutating ? "enforce" : "n/a",
+                        ReadOnlyHint = !isMutating,
+                        IdempotentHint = false,
+                        DestructiveHint = false,
+                        Lifecycle = ToolLifecycle.Resolve(name),
+                        DeclaringTypeName = null,
+                        Parameters = HardcodedParameterSummary(name)
+                    });
+                }
+            }
+            catch (Exception)
+            {
+                // BridgeToolClassification is a static table; this only fails
+                // if the bridge assembly failed to load. The already-collected
+                // hardcoded + registry entries remain valid.
+            }
+
             items.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
             return items;
         }
@@ -160,6 +204,41 @@ namespace UnityOpenMcpBridge
                 GateMode.Off => "off",
                 _ => "enforce"
             };
+        }
+
+        // Display-only title derived from the tool id for the KnownTools pass.
+        // Strips the unity_open_mcp_ / unity_senses_ prefix and Title-Cases the
+        // remainder (e.g. unity_open_mcp_gameobject_create -> "Gameobject
+        // Create"). The canonical human titles live in the MCP server tool
+        // definitions; this is just a readable label for the Editor window.
+        private static string SynthesizeTitle(string toolName)
+        {
+            if (string.IsNullOrEmpty(toolName)) return toolName;
+            var rest = toolName;
+            if (rest.StartsWith("unity_open_mcp_")) rest = rest.Substring("unity_open_mcp_".Length);
+            else if (rest.StartsWith("unity_senses_")) rest = rest.Substring("unity_senses_".Length);
+
+            if (string.IsNullOrEmpty(rest)) return toolName;
+            var sb = new System.Text.StringBuilder(rest.Length);
+            bool capitalizeNext = true;
+            foreach (var c in rest)
+            {
+                if (c == '_')
+                {
+                    sb.Append(' ');
+                    capitalizeNext = true;
+                }
+                else if (capitalizeNext)
+                {
+                    sb.Append(char.ToUpperInvariant(c));
+                    capitalizeNext = false;
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
         }
 
         private static List<BridgeToolParameterSummary> RegistryParameterSummary(BridgeToolEntry entry)

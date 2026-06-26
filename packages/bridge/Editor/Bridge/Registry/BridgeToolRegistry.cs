@@ -27,13 +27,28 @@ namespace UnityOpenMcpBridge
         /// registration was detected and silently kept first-registered.</summary>
         public static int DuplicateCount => _duplicateToolNames.Count;
 
+        // Production scan entry point. Excludes test assemblies (anything
+        // referencing nunit.framework) so the [BridgeTool] fixtures that drive
+        // the bridge's own EditMode tests never leak into the Tools tab,
+        // GET /tools, or the group→tools capability map. See Scan(bool).
         public static void Scan()
+        {
+            Scan(includeTestAssemblies: false);
+        }
+
+        // Tests opt into scanning their own nunit assembly via
+        // includeTestAssemblies: true (the AttributeScannerTests fixtures live
+        // in com.alexeyperov.unity-open-mcp-bridge.Editor.Tests, which
+        // references nunit.framework and is therefore excluded by the default
+        // Scan()). Production callers always use the parameterless Scan().
+        internal static void Scan(bool includeTestAssemblies)
         {
             _tools.Clear();
             _duplicateToolNames.Clear();
 
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
+                if (!includeTestAssemblies && IsTestAssembly(assembly)) continue;
                 try
                 {
                     ScanAssembly(assembly);
@@ -267,6 +282,33 @@ namespace UnityOpenMcpBridge
         public static IEnumerable<BridgeToolEntry> All()
         {
             return _tools.Values;
+        }
+
+        // A test assembly is identified by a reference to nunit.framework — the
+        // test framework every EditMode test asmdef pulls in. This catches all
+        // current test assemblies plus any future one regardless of its name,
+        // and never matches production assemblies (the TestRunner tool lives in
+        // com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor, which does
+        // NOT reference nunit.framework). GetReferencedAssemblies can throw on
+        // dynamic/error assemblies; treat those as non-test (the ScanAssembly
+        // try/catch reports the real error).
+        private static bool IsTestAssembly(Assembly assembly)
+        {
+            AssemblyName[] refs;
+            try
+            {
+                refs = assembly.GetReferencedAssemblies();
+            }
+            catch
+            {
+                return false;
+            }
+            if (refs == null) return false;
+            foreach (var r in refs)
+            {
+                if (r != null && r.Name == "nunit.framework") return true;
+            }
+            return false;
         }
     }
 }

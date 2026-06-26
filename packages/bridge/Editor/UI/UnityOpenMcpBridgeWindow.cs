@@ -16,7 +16,8 @@ namespace UnityOpenMcpBridge
         Gate,
         Activity,
         Settings,
-        Extensions
+        Extensions,
+        Info
     }
 
     public class UnityOpenMcpBridgeWindow : EditorWindow
@@ -24,6 +25,39 @@ namespace UnityOpenMcpBridge
         private const string MenuPath = "Tools/Unity Open MCP Bridge";
         private const string SelectedTabPref = "UOMCB_SelectedTab";
         private const string BindAddress = "127.0.0.1";
+
+        // Canonical repo URL — single source for every Info-tab link and any
+        // in-window reference to the project.
+        private const string RepoUrl = "https://github.com/AlexeyPerov/Unity-Open-MCP";
+
+        // Shared hover-tooltip text for cell values / labels that surface
+        // internal bridge concepts. Centralised so wording stays consistent
+        // across the Tools tab, details foldout, and Activity rows.
+        private const string TooltipMutating =
+            "Mutating tool: changes Unity state (scene, assets, settings). " +
+            "Runs the gate safety flow (checkpoint → mutate → validate → delta) when the gate mode is enforce/warn.";
+        private const string TooltipReadOnly =
+            "Read-only tool: does not change Unity state. Skips the gate flow.";
+        private const string TooltipGateEnforce =
+            "Gate mode 'enforce': the tool runs the checkpoint → mutate → validate flow and the MCP call fails if the mutation introduces new compile errors.";
+        private const string TooltipGateWarn =
+            "Gate mode 'warn': the gate still runs, but new compile errors surface as warnings rather than failing the call.";
+        private const string TooltipGateOff =
+            "Gate mode 'off': no checkpoint/validate — the mutation runs without the safety flow. Opt-in only.";
+        private const string TooltipGateNa =
+            "Read-only tool — the gate does not apply.";
+        private const string TooltipSourceRegistry =
+            "Registry tool: discovered via the [BridgeTool] attribute on a method. Its declaring type and parameter schema are reflected at load time.";
+        private const string TooltipSourceHardcoded =
+            "Built-in tool: dispatched by a hardcoded path in the bridge (not attribute-discovered). The parameter schema is mirrored from the MCP server definitions.";
+        private const string TooltipEnabledToggle =
+            "When unchecked, POST /tools/<name> is blocked and returns a 'tool_disabled' error before dispatch. State persists in settings.json.";
+        private const string TooltipListener =
+            "The local HTTP listener that MCP clients connect to. Green = running, yellow = compiling, red = stopped.";
+        private const string TooltipBindUrl =
+            "The URL MCP clients use to reach this bridge. Copy this into your MCP client config (or let the MCP server auto-discover it via the instance lock).";
+        private const string TooltipPing =
+            "Send a GET /ping to the local listener to confirm it is responding. Useful after Start or when an agent reports a connection failure.";
 
         private static readonly HttpClient SharedHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
 
@@ -51,6 +85,13 @@ namespace UnityOpenMcpBridge
         [NonSerialized] private Vector2 _toolListScroll;
         [NonSerialized] private readonly HashSet<string> _toolFoldoutExpanded = new HashSet<string>();
 
+        // Tools pagination (M20 UX pass). Page size 20 keeps a long tool catalog
+        // navigable; "All" is offered only when the filtered set is small.
+        private const int ToolsPageSize = 20;
+        private const int ToolsShowAllThreshold = 150;
+        [NonSerialized] private int? _toolPageToShow = 0;
+        [NonSerialized] private Vector2 _toolPagesScroll;
+
         // Gate tab state (M4.5-7/8/9)
         [NonSerialized] private string _manualValidateInput = "";
         [NonSerialized] private Vector2 _gateTabScroll;
@@ -76,6 +117,12 @@ namespace UnityOpenMcpBridge
 
         // Settings tab state (M4.5-11)
         [NonSerialized] private Vector2 _settingsTabScroll;
+
+        // Status tab foldouts — Editor state and Project are diagnostic/debug
+        // fields, so they are collapsed by default to keep the runtime + control
+        // surface at the top focused.
+        [NonSerialized] private bool _statusEditorStateFoldout = false;
+        [NonSerialized] private bool _statusProjectFoldout = false;
 
         private void OnEnable()
         {
@@ -130,10 +177,10 @@ namespace UnityOpenMcpBridge
             foreach (var tab in tabs)
             {
                 var isCurrent = tab == _currentTab;
-                var label = new GUIContent(TabLabel(tab));
+                var label = new GUIContent(TabLabel(tab), TabTooltip(tab));
                 var prev = GUI.backgroundColor;
                 if (isCurrent) GUI.backgroundColor = new Color(0.7f, 0.85f, 1f);
-                if (GUILayout.Button(label, EditorStyles.toolbarButton, GUILayout.Width(80)))
+                if (GUILayout.Button(label, EditorStyles.toolbarButton, GUILayout.Width(72)))
                 {
                     if (!isCurrent)
                     {
@@ -159,7 +206,24 @@ namespace UnityOpenMcpBridge
                 BridgeWindowTab.Activity => "Activity",
                 BridgeWindowTab.Settings => "Settings",
                 BridgeWindowTab.Extensions => "Extensions",
+                BridgeWindowTab.Info => "Info",
                 _ => tab.ToString()
+            };
+        }
+
+        // Short hover tooltip for each tab button — one line, no internal jargon.
+        private static string TabTooltip(BridgeWindowTab tab)
+        {
+            return tab switch
+            {
+                BridgeWindowTab.Status => "Listener state and start/stop controls.",
+                BridgeWindowTab.Tools => "Catalog of dispatchable tools; toggle or inspect each tool.",
+                BridgeWindowTab.Gate => "Gate policy: project default, latest result, manual validate.",
+                BridgeWindowTab.Activity => "Live log of HTTP events hitting the bridge.",
+                BridgeWindowTab.Settings => "Project runtime settings persisted to settings.json.",
+                BridgeWindowTab.Extensions => "Optional Unity domain tools and community packs.",
+                BridgeWindowTab.Info => "Links to docs, repo, and quick references.",
+                _ => null
             };
         }
 
@@ -186,6 +250,9 @@ namespace UnityOpenMcpBridge
                 case BridgeWindowTab.Extensions:
                     DrawExtensionsTab();
                     break;
+                case BridgeWindowTab.Info:
+                    DrawInfoTab();
+                    break;
             }
             EditorGUILayout.EndScrollView();
         }
@@ -202,7 +269,7 @@ namespace UnityOpenMcpBridge
                 : "Stopped";
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Listener", GUILayout.Width(120));
+            BridgeGUIUtilities.FieldLabel("Listener", TooltipListener, 120);
             var prev = GUI.color;
             GUI.color = statusColor;
             GUILayout.Label(statusText, EditorStyles.boldLabel);
@@ -210,56 +277,22 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Bind URL", GUILayout.Width(120));
+            BridgeGUIUtilities.FieldLabel("Bind URL", TooltipBindUrl, 120);
             EditorGUILayout.SelectableLabel($"http://{BindAddress}:{BridgeHttpServer.Port}/", EditorStyles.textField, GUILayout.Height(EditorGUIUtility.singleLineHeight));
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Mode", GUILayout.Width(120));
+            BridgeGUIUtilities.FieldLabel("Mode", "Editor session mode reported to MCP clients (live = a real Editor process).", 120);
             EditorGUILayout.LabelField(BridgeSession.Mode);
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Editor state", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Compiling", GUILayout.Width(120));
-            var compileColor = BridgeSession.IsCompiling ? Color.yellow : new Color(0.6f, 0.9f, 0.6f);
-            var prevC = GUI.color;
-            GUI.color = compileColor;
-            GUILayout.Label(BridgeSession.IsCompiling ? "Yes" : "No", EditorStyles.boldLabel);
-            GUI.color = prevC;
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Play mode", GUILayout.Width(120));
-            var playColor = BridgeSession.IsPlaying ? new Color(0.5f, 0.8f, 1f) : new Color(0.7f, 0.7f, 0.7f);
-            prevC = GUI.color;
-            GUI.color = playColor;
-            GUILayout.Label(BridgeSession.IsPlaying ? "Playing" : "Edit", EditorStyles.boldLabel);
-            GUI.color = prevC;
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Project", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Project path", GUILayout.Width(120));
-            EditorGUILayout.SelectableLabel(BridgeSession.ProjectPath ?? "(unknown)", EditorStyles.textField);
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Unity version", GUILayout.Width(120));
-            EditorGUILayout.LabelField(BridgeSession.UnityVersion ?? "(unknown)");
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Bridge version", GUILayout.Width(120));
-            EditorGUILayout.LabelField(BridgeSession.BridgeVersion);
             EditorGUILayout.EndHorizontal();
 
             BridgeGUIUtilities.HorizontalLine(8, 6);
             EditorGUILayout.LabelField("Controls", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Start / Stop control the local HTTP listener that MCP clients connect to.\n" +
+                "• Start — launch the listener so agents can call tools. Auto-starts on Editor load unless disabled in Settings.\n" +
+                "• Stop — shut the listener down. Any connected agent loses MCP connectivity until you Start again (two-click confirm).",
+                MessageType.None);
             DrawRuntimeControls();
             DrawLocalPing();
 
@@ -267,6 +300,56 @@ namespace UnityOpenMcpBridge
             {
                 EditorGUILayout.Space(6);
                 EditorGUILayout.HelpBox(_lastPingResult, _lastPingMessageType);
+            }
+
+            BridgeGUIUtilities.HorizontalLine(8, 6);
+
+            // Editor state + Project are diagnostic fields — collapsed by default.
+            _statusEditorStateFoldout = EditorGUILayout.Foldout(
+                _statusEditorStateFoldout, "Editor state (diagnostics)", true);
+            if (_statusEditorStateFoldout)
+            {
+                EditorGUI.indentLevel++;
+                EditorGUILayout.BeginHorizontal();
+                BridgeGUIUtilities.FieldLabel("Compiling", "Whether Unity is currently recompiling scripts. During compile, tool dispatch is paused.", 120);
+                var compileColor = BridgeSession.IsCompiling ? Color.yellow : new Color(0.6f, 0.9f, 0.6f);
+                var prevC = GUI.color;
+                GUI.color = compileColor;
+                GUILayout.Label(BridgeSession.IsCompiling ? "Yes" : "No", EditorStyles.boldLabel);
+                GUI.color = prevC;
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.BeginHorizontal();
+                BridgeGUIUtilities.FieldLabel("Play mode", "Whether the Editor is in Play mode. Some tools behave differently (or are gated) while playing.", 120);
+                var playColor = BridgeSession.IsPlaying ? new Color(0.5f, 0.8f, 1f) : new Color(0.7f, 0.7f, 0.7f);
+                prevC = GUI.color;
+                GUI.color = playColor;
+                GUILayout.Label(BridgeSession.IsPlaying ? "Playing" : "Edit", EditorStyles.boldLabel);
+                GUI.color = prevC;
+                EditorGUILayout.EndHorizontal();
+                EditorGUI.indentLevel--;
+            }
+
+            _statusProjectFoldout = EditorGUILayout.Foldout(
+                _statusProjectFoldout, "Project (diagnostics)", true);
+            if (_statusProjectFoldout)
+            {
+                EditorGUI.indentLevel++;
+                EditorGUILayout.BeginHorizontal();
+                BridgeGUIUtilities.FieldLabel("Project path", "Absolute path to the Unity project root (the folder containing Assets/).", 120);
+                EditorGUILayout.SelectableLabel(BridgeSession.ProjectPath ?? "(unknown)", EditorStyles.textField);
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.BeginHorizontal();
+                BridgeGUIUtilities.FieldLabel("Unity version", "Unity Editor version this bridge is running in.", 120);
+                EditorGUILayout.LabelField(BridgeSession.UnityVersion ?? "(unknown)");
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.BeginHorizontal();
+                BridgeGUIUtilities.FieldLabel("Bridge version", "Version of the bridge package loaded in this Editor.", 120);
+                EditorGUILayout.LabelField(BridgeSession.BridgeVersion);
+                EditorGUILayout.EndHorizontal();
+                EditorGUI.indentLevel--;
             }
         }
 
@@ -276,7 +359,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.BeginHorizontal();
 
             EditorGUI.BeginDisabledGroup(running);
-            if (GUILayout.Button("Start", GUILayout.Width(110)))
+            if (GUILayout.Button(new GUIContent("Start", "Launch the local HTTP listener so MCP clients (agents) can connect and call tools."), GUILayout.Width(110)))
             {
                 try
                 {
@@ -292,7 +375,10 @@ namespace UnityOpenMcpBridge
 
             EditorGUI.BeginDisabledGroup(!running);
             var buttonLabel = _stopConfirmPending ? "Confirm Stop" : "Stop";
-            if (GUILayout.Button(buttonLabel, GUILayout.Width(110)))
+            var buttonTooltip = _stopConfirmPending
+                ? "Click again to confirm: stops the listener and drops MCP connectivity for any active agent."
+                : "Shut the listener down. Requires a two-click confirm because it disconnects any active agent.";
+            if (GUILayout.Button(new GUIContent(buttonLabel, buttonTooltip), GUILayout.Width(110)))
             {
                 if (!_stopConfirmPending)
                 {
@@ -340,7 +426,7 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.Space(2);
             EditorGUILayout.BeginHorizontal();
             EditorGUI.BeginDisabledGroup(_pingInFlight || !BridgeHttpServer.IsRunning);
-            if (GUILayout.Button("Ping", GUILayout.Width(110)))
+            if (GUILayout.Button(new GUIContent("Ping", TooltipPing), GUILayout.Width(110)))
             {
                 _ = RunLocalPingAsync();
             }
@@ -391,15 +477,36 @@ namespace UnityOpenMcpBridge
                 MessageType.None);
 
             var items = BridgeToolCatalog.Build();
-            DrawToolFilters(items);
+            var filtered = BuildFilteredToolList(items);
+            DrawToolFilters(items, filtered);
             BridgeGUIUtilities.HorizontalLine(2, 4);
-            DrawToolList(items);
+            DrawToolList(filtered);
         }
 
-        private void DrawToolFilters(List<BridgeToolCatalogItem> items)
+        // Apply the current filter + search once per frame and return the
+        // already-narrowed list. DrawToolList then paginates this result so the
+        // page count reflects exactly what the operator sees.
+        private List<BridgeToolCatalogItem> BuildFilteredToolList(List<BridgeToolCatalogItem> items)
         {
-            int total = items?.Count ?? 0;
-            int enabled = BridgeToolCatalog.CountEnabled(items);
+            var result = new List<BridgeToolCatalogItem>();
+            if (items == null) return result;
+
+            var search = (_toolSearch ?? "").Trim();
+            var hasSearch = !string.IsNullOrEmpty(search);
+            foreach (var item in items)
+            {
+                if (item == null) continue;
+                if (!PassesFilter(item)) continue;
+                if (hasSearch && !MatchesSearch(item, search)) continue;
+                result.Add(item);
+            }
+            return result;
+        }
+
+        private void DrawToolFilters(List<BridgeToolCatalogItem> allItems, List<BridgeToolCatalogItem> filtered)
+        {
+            int total = allItems?.Count ?? 0;
+            int enabled = BridgeToolCatalog.CountEnabled(allItems);
             int disabled = total - enabled;
 
             EditorGUILayout.Space(4);
@@ -418,18 +525,20 @@ namespace UnityOpenMcpBridge
 
             GUILayout.FlexibleSpace();
 
-            EditorGUILayout.LabelField("Search", GUILayout.Width(50));
+            EditorGUILayout.LabelField(new GUIContent("Search", "Filter the list by tool name, title, declaring type, or parameter name/type."), GUILayout.Width(50));
             var newSearch = EditorGUILayout.TextField(_toolSearch ?? "", EditorStyles.toolbarSearchField, GUILayout.Width(180));
             if (newSearch != _toolSearch)
             {
                 _toolSearch = newSearch ?? "";
+                _toolPageToShow = null;
             }
-            if (GUILayout.Button("Clear", EditorStyles.miniButton, GUILayout.Width(48)))
+            if (GUILayout.Button(new GUIContent("Clear", "Clear the search box."), EditorStyles.miniButton, GUILayout.Width(48)))
             {
                 _toolSearch = "";
+                _toolPageToShow = null;
             }
 
-            if (GUILayout.Button("Enable all", EditorStyles.miniButton, GUILayout.Width(78)) && disabled > 0)
+            if (GUILayout.Button(new GUIContent("Enable all", "Re-enable every tool (clears the disabled-tool list in settings.json)."), EditorStyles.miniButton, GUILayout.Width(78)) && disabled > 0)
             {
                 BridgeToolTogglePolicy.Clear();
             }
@@ -442,7 +551,7 @@ namespace UnityOpenMcpBridge
             var isCurrent = mode == current;
             var prev = GUI.color;
             if (isCurrent) GUI.color = new Color(0.7f, 0.85f, 1f);
-            if (GUILayout.Toggle(isCurrent, label, EditorStyles.miniButton, GUILayout.Width(isCurrent ? 110 : 80)) != isCurrent)
+            if (GUILayout.Toggle(isCurrent, label, EditorStyles.miniButton, GUILayout.Width(110)) != isCurrent)
             {
                 GUI.color = prev;
                 return mode;
@@ -451,25 +560,29 @@ namespace UnityOpenMcpBridge
             return current;
         }
 
-        private void DrawToolList(List<BridgeToolCatalogItem> items)
+        private void DrawToolList(List<BridgeToolCatalogItem> filtered)
         {
-            if (items == null || items.Count == 0)
+            if (filtered == null || filtered.Count == 0)
             {
                 BridgeGUIUtilities.DrawLabelAtCenterHorizontally("No dispatchable tools discovered in this Editor session.", new Color(0.7f, 0.7f, 0.7f));
                 return;
             }
 
-            var search = (_toolSearch ?? "").Trim();
-            var hasSearch = !string.IsNullOrEmpty(search);
+            DrawToolPagination(filtered.Count);
 
             _toolListScroll = EditorGUILayout.BeginScrollView(_toolListScroll);
-            var shown = 0;
-            foreach (var item in items)
-            {
-                if (item == null) continue;
-                if (!PassesFilter(item)) continue;
-                if (hasSearch && !MatchesSearch(item, search)) continue;
 
+            int pagesCount = filtered.Count / ToolsPageSize + (filtered.Count % ToolsPageSize > 0 ? 1 : 0);
+            bool paginated = pagesCount > 1 && _toolPageToShow.HasValue;
+            int page = _toolPageToShow ?? 0;
+            int start = paginated ? page * ToolsPageSize : 0;
+            int end = paginated ? Mathf.Min((page + 1) * ToolsPageSize, filtered.Count) : filtered.Count;
+
+            int shown = 0;
+            for (int i = start; i < end; i++)
+            {
+                var item = filtered[i];
+                if (item == null) continue;
                 DrawToolRow(item);
                 shown++;
             }
@@ -480,6 +593,66 @@ namespace UnityOpenMcpBridge
                 EditorGUILayout.Space(4);
                 BridgeGUIUtilities.DrawLabelAtCenterHorizontally("No tools match the current filter / search.", new Color(0.7f, 0.7f, 0.7f));
             }
+        }
+
+        // Page selector modelled on Unity-Dependencies-Hunter: numbered page
+        // buttons, plus an "All" affordance when the filtered set is small.
+        // Selecting "All" sets _toolPageToShow to null (show everything).
+        private void DrawToolPagination(int totalCount)
+        {
+            int pagesCount = totalCount / ToolsPageSize + (totalCount % ToolsPageSize > 0 ? 1 : 0);
+            if (pagesCount <= 1)
+            {
+                // No pagination needed — but clamp stale state so re-expanding a
+                // filtered set doesn't leave a phantom page selection.
+                if (_toolPageToShow.HasValue && _toolPageToShow.Value > 0) _toolPageToShow = null;
+                EditorGUILayout.Space(2);
+                return;
+            }
+
+            EditorGUILayout.Space(4);
+            _toolPagesScroll = EditorGUILayout.BeginScrollView(_toolPagesScroll, GUILayout.Height(EditorGUIUtility.singleLineHeight + 4));
+            EditorGUILayout.BeginHorizontal();
+
+            var showAllButton = totalCount <= ToolsShowAllThreshold;
+            if (showAllButton)
+            {
+                var prevAll = GUI.backgroundColor;
+                GUI.backgroundColor = !_toolPageToShow.HasValue ? new Color(1f, 0.95f, 0.4f) : Color.white;
+                if (GUILayout.Button("All", GUILayout.Width(34f)))
+                {
+                    _toolPageToShow = null;
+                }
+                GUI.backgroundColor = prevAll;
+            }
+
+            // If "All" is no longer available but state was null, land on page 0.
+            if (!showAllButton && !_toolPageToShow.HasValue)
+            {
+                _toolPageToShow = 0;
+            }
+
+            for (var i = 0; i < pagesCount; i++)
+            {
+                var prevPage = GUI.backgroundColor;
+                GUI.backgroundColor = _toolPageToShow == i ? new Color(1f, 0.95f, 0.4f) : Color.white;
+                if (GUILayout.Button((i + 1).ToString(), GUILayout.Width(30f)))
+                {
+                    _toolPageToShow = i;
+                }
+                GUI.backgroundColor = prevPage;
+            }
+
+            // Clamp the selected page if the filtered set shrank (e.g. search
+            // narrowed the list while page 5 was selected).
+            if (_toolPageToShow.HasValue && _toolPageToShow.Value > pagesCount - 1)
+            {
+                _toolPageToShow = pagesCount - 1;
+            }
+
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndScrollView();
+            EditorGUILayout.Space(2);
         }
 
         private bool PassesFilter(BridgeToolCatalogItem item)
@@ -526,7 +699,10 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.BeginHorizontal();
 
-            var newEnabled = EditorGUILayout.ToggleLeft("Enabled", enabled, GUILayout.Width(70));
+            // ToggleLeft doesn't expose a tooltip directly; bind one via a label
+            // rect so hovering "Enabled" explains what disabling does.
+            var toggleRect = GUILayoutUtility.GetRect(new GUIContent("Enabled", TooltipEnabledToggle), EditorStyles.label, GUILayout.Width(70));
+            var newEnabled = GUI.Toggle(toggleRect, enabled, new GUIContent("Enabled", TooltipEnabledToggle));
             if (newEnabled != enabled)
             {
                 BridgeToolTogglePolicy.SetDisabled(item.Name, !newEnabled);
@@ -534,16 +710,18 @@ namespace UnityOpenMcpBridge
             }
 
             var labelStyle = EditorStyles.boldLabel;
+            var nameContent = new GUIContent(item.Name,
+                $"MCP tool id. Agents call this via POST /tools/{item.Name}.");
             if (!enabled)
             {
                 var prev = GUI.color;
                 GUI.color = new Color(0.85f, 0.55f, 0.55f);
-                GUILayout.Label(item.Name, labelStyle);
+                GUILayout.Label(nameContent, labelStyle);
                 GUI.color = prev;
             }
             else
             {
-                GUILayout.Label(item.Name, labelStyle);
+                GUILayout.Label(nameContent, labelStyle);
             }
 
             GUILayout.FlexibleSpace();
@@ -551,9 +729,10 @@ namespace UnityOpenMcpBridge
             var mutColor = item.Mutability == BridgeToolMutability.Mutating
                 ? new Color(1f, 0.75f, 0.45f)
                 : new Color(0.6f, 0.85f, 0.6f);
+            var mutTooltip = item.Mutability == BridgeToolMutability.Mutating ? TooltipMutating : TooltipReadOnly;
             BridgeGUIUtilities.DrawColoredLabel(
                 item.Mutability == BridgeToolMutability.Mutating ? "mutating" : "read-only",
-                mutColor, 70);
+                mutColor, 70, mutTooltip);
 
             var gateColor = !enabled
                 ? new Color(0.7f, 0.7f, 0.7f)
@@ -561,13 +740,18 @@ namespace UnityOpenMcpBridge
                 : item.GateMode == "warn" ? new Color(1f, 0.9f, 0.4f)
                 : item.GateMode == "off" ? new Color(0.6f, 0.85f, 0.6f)
                 : new Color(0.7f, 0.7f, 0.7f));
-            BridgeGUIUtilities.DrawColoredLabel($"gate: {item.GateMode}", gateColor, 110);
+            BridgeGUIUtilities.DrawColoredLabel(
+                $"gate: {item.GateMode}", gateColor, 110, GateModeTooltip(item.GateMode));
 
             var sourceLabel = item.Source == BridgeToolSource.Registry ? "registry" : "hardcoded";
-            BridgeGUIUtilities.DrawColoredLabel(sourceLabel, new Color(0.7f, 0.85f, 1f), 70);
+            var sourceTooltip = item.Source == BridgeToolSource.Registry ? TooltipSourceRegistry : TooltipSourceHardcoded;
+            BridgeGUIUtilities.DrawColoredLabel(sourceLabel, new Color(0.7f, 0.85f, 1f), 70, sourceTooltip);
 
             var expandLabel = expanded ? "Hide" : "Details";
-            if (GUILayout.Button(expandLabel, EditorStyles.miniButton, GUILayout.Width(60)))
+            var expandTooltip = expanded
+                ? "Collapse the parameter / metadata panel for this tool."
+                : "Expand to see the human title, mutability, hints, and parameter list for this tool.";
+            if (GUILayout.Button(new GUIContent(expandLabel, expandTooltip), EditorStyles.miniButton, GUILayout.Width(60)))
             {
                 if (expanded) _toolFoldoutExpanded.Remove(item.Name);
                 else _toolFoldoutExpanded.Add(item.Name);
@@ -587,21 +771,40 @@ namespace UnityOpenMcpBridge
             {
                 EditorGUILayout.Space(2);
                 if (!string.IsNullOrEmpty(item.Title))
-                    EditorGUILayout.LabelField("Title", item.Title);
-                EditorGUILayout.LabelField("Mutability",
+                    BridgeGUIUtilities.RowLabel("Title", "Human-readable name shown to MCP clients.", item.Title);
+                BridgeGUIUtilities.RowLabel("Mutability",
+                    item.Mutability == BridgeToolMutability.Mutating ? TooltipMutating : TooltipReadOnly,
                     item.Mutability == BridgeToolMutability.Mutating ? "mutating (gate-routed)" : "read-only");
                 if (item.Source == BridgeToolSource.Registry && !string.IsNullOrEmpty(item.DeclaringTypeName))
-                    EditorGUILayout.LabelField("Declaring type", item.DeclaringTypeName);
+                    BridgeGUIUtilities.RowLabel("Declaring type", TooltipSourceRegistry, item.DeclaringTypeName);
 
                 var hints = BuildHintSummary(item);
                 if (!string.IsNullOrEmpty(hints))
-                    EditorGUILayout.LabelField("Hints", hints);
+                    BridgeGUIUtilities.RowLabel("Hints",
+                        "MCP annotations advertised to the client: read-only, idempotent, destructive, default gate, and lifecycle policy.",
+                        hints);
 
-                EditorGUILayout.LabelField("Parameters", BridgeToolCatalog.FormatParameterList(item));
+                EditorGUILayout.LabelField(
+                    new GUIContent("Parameters",
+                        "Input schema for this tool (name: type, with defaults). For built-in tools this is mirrored from the MCP server definitions."),
+                    new GUIContent(BridgeToolCatalog.FormatParameterList(item)));
                 EditorGUILayout.Space(2);
             }
 
             EditorGUILayout.EndVertical();
+        }
+
+        // Pick the gate-mode tooltip that matches the cell value.
+        private static string GateModeTooltip(string gateMode)
+        {
+            return gateMode switch
+            {
+                "enforce" => TooltipGateEnforce,
+                "warn"    => TooltipGateWarn,
+                "off"     => TooltipGateOff,
+                "n/a"     => TooltipGateNa,
+                _ => null
+            };
         }
 
         private static string BuildHintSummary(BridgeToolCatalogItem item)
@@ -706,15 +909,21 @@ namespace UnityOpenMcpBridge
             _gateLatestScroll = EditorGUILayout.BeginScrollView(_gateLatestScroll, GUILayout.MinHeight(80));
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUILayout.LabelField("Tool", latest.ToolName ?? "(unknown)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(
+                new GUIContent("Tool", "The mutating tool call that triggered this gate run."),
+                new GUIContent(latest.ToolName ?? "(unknown)"), EditorStyles.boldLabel);
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Mode", GUILayout.Width(120));
+            BridgeGUIUtilities.FieldLabel("Mode",
+                "The effective gate mode that ran for this call (request-level gate overrides the project default).",
+                120);
             EditorGUILayout.LabelField(latest.EffectiveMode ?? "(unknown)");
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Outcome", GUILayout.Width(120));
+            BridgeGUIUtilities.FieldLabel("Outcome",
+                "Result of the gate flow. Passed = no new errors. Warned = errors downgraded to warnings. Failed = new errors blocked the call. Skipped = gate off.",
+                120);
             var outcomeColor = OutcomeColor(latest.Outcome);
             var prev = GUI.color;
             GUI.color = outcomeColor;
@@ -729,19 +938,27 @@ namespace UnityOpenMcpBridge
 
             BridgeGUIUtilities.HorizontalLine(2, 4);
 
-            EditorGUILayout.LabelField("Delta",
-                $"new errors: {latest.NewErrors}    new warnings: {latest.NewWarnings}    resolved errors: {latest.ResolvedErrors}    resolved warnings: {latest.ResolvedWarnings}");
+            EditorGUILayout.LabelField(
+                new GUIContent("Delta",
+                    "Change in console errors/warnings between the pre-mutation checkpoint and the post-mutation validate. 'new' = introduced by the call; 'resolved' = fixed by it."),
+                new GUIContent($"new errors: {latest.NewErrors}    new warnings: {latest.NewWarnings}    resolved errors: {latest.ResolvedErrors}    resolved warnings: {latest.ResolvedWarnings}"));
 
-            EditorGUILayout.LabelField("Durations (ms)",
-                $"checkpoint: {latest.CheckpointDurationMs}    validation: {latest.ValidationDurationMs}    total: {latest.TotalGateDurationMs}");
+            EditorGUILayout.LabelField(
+                new GUIContent("Durations (ms)",
+                    "Time spent in each gate phase: snapshotting the error state (checkpoint), re-validating after the mutation (validation), and the total."),
+                new GUIContent($"checkpoint: {latest.CheckpointDurationMs}    validation: {latest.ValidationDurationMs}    total: {latest.TotalGateDurationMs}"));
 
             if (latest.CategoriesRun != null && latest.CategoriesRun.Length > 0)
             {
-                EditorGUILayout.LabelField("Categories", string.Join(", ", latest.CategoriesRun));
+                EditorGUILayout.LabelField(
+                    new GUIContent("Categories", "Verify rule categories that ran during the post-mutation validate pass."),
+                    new GUIContent(string.Join(", ", latest.CategoriesRun)));
             }
             else
             {
-                EditorGUILayout.LabelField("Categories", "(none — gate skipped or off)");
+                EditorGUILayout.LabelField(
+                    new GUIContent("Categories", "Verify rule categories that ran during the post-mutation validate pass."),
+                    new GUIContent("(none — gate skipped or off)"));
             }
 
             if (latest.AgentNextSteps != null && latest.AgentNextSteps.Length > 0)
@@ -1043,7 +1260,7 @@ namespace UnityOpenMcpBridge
 
             GUILayout.FlexibleSpace();
 
-            if (GUILayout.Button("Clear", EditorStyles.miniButton, GUILayout.Width(80)))
+            if (GUILayout.Button(new GUIContent("Clear", "Empty the in-memory activity buffer. Not persisted, so this only affects the current session."), EditorStyles.miniButton, GUILayout.Width(80)))
             {
                 BridgeActivityLog.Clear();
             }
@@ -1054,7 +1271,7 @@ namespace UnityOpenMcpBridge
                 $"buffer: {BridgeActivityLog.Count} / {BridgeActivityLog.Capacity}    " +
                 $"recorded: {BridgeActivityLog.TotalRecorded}    trimmed: {BridgeActivityLog.TotalDroppedTrim}",
                 EditorStyles.miniLabel);
-            
+
             _activityVerboseFoldout = newVerbose;
         }
 
@@ -1063,19 +1280,37 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.Space(2);
             EditorGUILayout.LabelField("Filters", EditorStyles.miniBoldLabel);
             EditorGUILayout.BeginHorizontal();
-            _activityFilterToolRequests = EditorGUILayout.ToggleLeft("Tool requests", _activityFilterToolRequests, GUILayout.Width(120));
-            _activityFilterDisabled = EditorGUILayout.ToggleLeft("Tool disabled", _activityFilterDisabled, GUILayout.Width(110));
-            _activityFilterErrors = EditorGUILayout.ToggleLeft("Errors", _activityFilterErrors, GUILayout.Width(80));
-            _activityFilterPing = EditorGUILayout.ToggleLeft("/ping", _activityFilterPing, GUILayout.Width(70));
-            _activityFilterResources = EditorGUILayout.ToggleLeft("Resources", _activityFilterResources, GUILayout.Width(90));
+            _activityFilterToolRequests = DrawActivityFilterToggle(
+                _activityFilterToolRequests, "Tool requests", 120,
+                "Show successful / in-flight tool dispatch calls (POST /tools/<name>).");
+            _activityFilterDisabled = DrawActivityFilterToggle(
+                _activityFilterDisabled, "Tool disabled", 110,
+                "Show calls rejected because the tool is toggled off (tool_disabled error).");
+            _activityFilterErrors = DrawActivityFilterToggle(
+                _activityFilterErrors, "Errors", 80,
+                "Show failed dispatches, unknown paths, and resource errors.");
+            _activityFilterPing = DrawActivityFilterToggle(
+                _activityFilterPing, "/ping", 70,
+                "Show connectivity checks (GET /ping) the MCP server sends.");
+            _activityFilterResources = DrawActivityFilterToggle(
+                _activityFilterResources, "Resources", 90,
+                "Show resource reads (GET /resources/...).");
             GUILayout.FlexibleSpace();
-            EditorGUILayout.LabelField("Search", GUILayout.Width(50));
+            EditorGUILayout.LabelField(new GUIContent("Search", "Filter events by tool name, error code/message, or gate mode."), GUILayout.Width(50));
             var newSearch = EditorGUILayout.TextField(_activitySearch ?? "", EditorStyles.toolbarSearchField, GUILayout.Width(160));
             if (newSearch != _activitySearch)
             {
                 _activitySearch = newSearch ?? "";
             }
             EditorGUILayout.EndHorizontal();
+        }
+
+        // Filter toggle with a hover tooltip. EditorGUILayout.ToggleLeft does
+        // not take a GUIContent, so we reserve the rect and use GUI.Toggle.
+        private static bool DrawActivityFilterToggle(bool value, string label, int width, string tooltip)
+        {
+            var rect = GUILayoutUtility.GetRect(new GUIContent(label, tooltip), EditorStyles.label, GUILayout.Width(width));
+            return GUI.Toggle(rect, value, new GUIContent(label, tooltip));
         }
 
         private void DrawActivityList()
@@ -1153,7 +1388,9 @@ namespace UnityOpenMcpBridge
             }
             if (!string.IsNullOrEmpty(evt.GateMode))
             {
-                EditorGUILayout.LabelField($"gate: {evt.GateMode}", GUILayout.Width(110));
+                EditorGUILayout.LabelField(
+                    new GUIContent($"gate: {evt.GateMode}", GateModeTooltip(evt.GateMode)),
+                    GUILayout.Width(110));
             }
             BridgeGUIUtilities.DrawColoredLabel(
                 ActivityOutcomeLabel(evt.Outcome),
@@ -1646,22 +1883,29 @@ namespace UnityOpenMcpBridge
                     : new Color(1f, 0.85f, 0.4f);
             var prev = GUI.color;
             GUI.color = dotColor;
-            GUILayout.Label("●", EditorStyles.boldLabel, GUILayout.Width(18));
+            GUILayout.Label(new GUIContent("●",
+                "Pack status: green = installed in this project, amber = available but not installed, grey = planned (not yet shipped)."),
+                EditorStyles.boldLabel, GUILayout.Width(18));
             GUI.color = prev;
 
             EditorGUILayout.LabelField(pack.DisplayName, EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
 
-            BridgeGUIUtilities.DrawColoredLabel(
-                !pack.Shipped ? "planned" : (installed ? "installed" : "available"),
-                dotColor, 90);
+            var statusLabel = !pack.Shipped ? "planned" : (installed ? "installed" : "available");
+            var statusTooltip = !pack.Shipped
+                ? "Planned pack: not yet shipped. Listed as a preview of upcoming domains."
+                : installed
+                    ? "Installed: the pack's assembly is loaded and its tools are registered in this project."
+                    : "Available: the pack is shipped but not installed in this project. Add the UPM dependency to enable it.";
+            BridgeGUIUtilities.DrawColoredLabel(statusLabel, dotColor, 90, statusTooltip);
 
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.LabelField(pack.Description, EditorStyles.wordWrappedMiniLabel);
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Package", GUILayout.Width(70));
+            BridgeGUIUtilities.FieldLabel("Package",
+                "UPM package id for this extension pack.", 70);
             EditorGUILayout.SelectableLabel(pack.Id, EditorStyles.textField,
                 GUILayout.Height(EditorGUIUtility.singleLineHeight));
             EditorGUILayout.EndHorizontal();
@@ -1669,7 +1913,9 @@ namespace UnityOpenMcpBridge
             if (!string.IsNullOrEmpty(pack.UpmDependency))
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Unity dep", GUILayout.Width(70));
+                BridgeGUIUtilities.FieldLabel("Unity dep",
+                    "Unity package this domain needs to compile (e.g. com.unity.ai.navigation). Install it to activate the embedded tools.",
+                    70);
                 EditorGUILayout.LabelField(pack.UpmDependency, EditorStyles.miniLabel);
                 EditorGUILayout.EndHorizontal();
             }
@@ -1677,7 +1923,8 @@ namespace UnityOpenMcpBridge
             if (pack.ToolIds != null && pack.ToolIds.Length > 0)
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Tools", GUILayout.Width(70));
+                BridgeGUIUtilities.FieldLabel("Tools",
+                    "Tool ids this pack contributes. Once installed they appear in the Tools tab.", 70);
                 EditorGUILayout.LabelField(
                     $"{pack.ToolIds.Length} tool(s) — {pack.ToolIds[0]}…",
                     EditorStyles.miniLabel);
@@ -1685,7 +1932,9 @@ namespace UnityOpenMcpBridge
             }
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Install", GUILayout.Width(70));
+            BridgeGUIUtilities.FieldLabel("Install",
+                "Snippet to paste into your Packages/manifest.json dependencies to add this pack via local file reference.",
+                70);
             EditorGUILayout.SelectableLabel(
                 $"\"{pack.Id}\": \"file:../../{pack.LocalPath}\"",
                 EditorStyles.textField,
@@ -1704,6 +1953,109 @@ namespace UnityOpenMcpBridge
             if (!pack.Shipped || pack.ToolIds == null || pack.ToolIds.Length == 0)
                 return false;
             return BridgeToolRegistry.Contains(pack.ToolIds[0]);
+        }
+
+        // ---------- Info tab ----------
+
+        private Vector2 _infoTabScroll;
+
+        // Single source of truth for the doc links surfaced in the Info tab.
+        // Each entry is (label, relative path under docs/, tooltip). The repo
+        // URL + branch prefix is prepended so links open the rendered markdown
+        // on GitHub.
+        private static readonly (string Label, string Path, string Tooltip)[] DocLinks =
+        {
+            ("README", "README.md", "Project overview, feature set, and quick links."),
+            ("Docs index", "docs/README.md", "Top-level documentation index — every doc linked from here."),
+            ("Wizard setup", "docs/wizard-setup.md", "Recommended onboarding flow via Unity Hub Pro."),
+            ("Manual setup", "docs/manual-setup.md", "Direct MCP setup and client config snippets."),
+            ("Architecture", "docs/architecture.md", "Repository structure and cross-package boundaries."),
+            ("Bridge HTTP API", "docs/api/bridge-http.md", "Bridge endpoints, envelopes, /ping, and remote bind."),
+            ("MCP tools API", "docs/api/mcp-tools.md", "Tool catalog, route policy, and gate behavior."),
+            ("MCP resources API", "docs/api/resources.md", "Resource URIs and payloads."),
+            ("Extensions", "docs/extensions.md", "Embedded domain tools (compile-gated) and community packs."),
+            ("Skills", "docs/skills.md", "Agent playbooks shipped into a project."),
+            ("Unity version compatibility", "docs/unity-version-compat.md", "Supported Unity versions and CI coverage."),
+            ("Code conventions", "docs/code-conventions.md", "Non-obvious C# decisions (instance IDs, namespaces)."),
+        };
+
+        private void DrawInfoTab()
+        {
+            _infoTabScroll = EditorGUILayout.BeginScrollView(_infoTabScroll);
+
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("Unity Open MCP Bridge", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Unity Open MCP is an open MCP server for Unity — it exposes the Editor to " +
+                "MCP-compatible AI clients (Claude, Cursor, …) over a local HTTP bridge so an " +
+                "agent can drive scene editing, asset work, builds, and validation.\n\n" +
+                "The links below open the latest documentation on GitHub.",
+                MessageType.None);
+
+            DrawInfoSection("Documentation", DocLinks, RepoUrl);
+
+            BridgeGUIUtilities.HorizontalLine(2, 8);
+
+            DrawInfoSection("Project", new[]
+            {
+                ("GitHub repository", "", "Source code, issues, and releases."),
+                ("Issues", "issues", "Bug reports and feature requests."),
+                ("Releases", "releases", "Version history and release notes."),
+            }, RepoUrl);
+
+            BridgeGUIUtilities.HorizontalLine(2, 8);
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Quick references", EditorStyles.miniBoldLabel);
+            DrawInfoLinkRow("Local bind URL",
+                $"http://{BindAddress}:{BridgeHttpServer.Port}/",
+                "The listener address MCP clients connect to (see Status tab).");
+            DrawInfoLinkRow("Settings file",
+                BridgeProjectSettings.SettingsPath ?? "(no project root)",
+                "Per-project runtime settings (.unity-open-mcp/settings.json). Persistent; edit by hand or via the Settings tab.");
+            DrawInfoLinkRow("Instance lock",
+                "~/.unity-open-mcp/instances/<project-hash>.json",
+                "Per-project lock file used for discovery + heartbeat by the MCP server. Regenerated each session.");
+            DrawInfoLinkRow("Audit log",
+                "~/.unity-open-mcp/audit/",
+                "Optional on-disk audit of gate runs and deny-list refusals (enable in Settings).");
+
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField(
+                $"Bridge {BridgeSession.BridgeVersion}  •  Unity {BridgeSession.UnityVersion ?? "?"}  •  {BridgeSession.Mode} mode",
+                EditorStyles.miniLabel);
+
+            EditorGUILayout.EndScrollView();
+        }
+
+        // Renders a titled list of links. Each row: a label-style button that
+        // opens the URL via Application.OpenURL, plus a tooltip. `urlPrefix`
+        // is prepended to each entry's relative path (empty path ⇒ the prefix
+        // itself, e.g. the repo root).
+        private void DrawInfoSection(string title, IEnumerable<(string Label, string Path, string Tooltip)> links, string urlPrefix)
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField(title, EditorStyles.miniBoldLabel);
+            foreach (var link in links)
+            {
+                var url = string.IsNullOrEmpty(link.Path) ? urlPrefix : $"{urlPrefix}/{link.Path}";
+                DrawInfoLinkRow(link.Label, url, link.Tooltip);
+            }
+        }
+
+        // Label column + selectable URL + an "Open" button that launches the
+        // system browser. The URL is selectable so it can be copied.
+        private void DrawInfoLinkRow(string label, string url, string tooltip)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(new GUIContent(label, tooltip), GUILayout.Width(180));
+            EditorGUILayout.SelectableLabel(url, EditorStyles.textField,
+                GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            if (GUILayout.Button(new GUIContent("Open", "Open this link in your default browser."), GUILayout.Width(64)))
+            {
+                Application.OpenURL(url);
+            }
+            EditorGUILayout.EndHorizontal();
         }
     }
 }

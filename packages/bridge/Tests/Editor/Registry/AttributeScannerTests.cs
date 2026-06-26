@@ -177,6 +177,20 @@ namespace UnityOpenMcpBridge.Tests
 
     public class AttributeScannerTests
     {
+        // The [BridgeTool] / [BridgeResource] fixtures above live in this test
+        // assembly, which references nunit.framework. The production
+        // BridgeToolRegistry.Scan() / BridgeResourceRegistry.Scan() now EXCLUDE
+        // test assemblies so test_* ids never leak into the Tools tab,
+        // GET /tools, or the group→tools map. These tests opt back into
+        // scanning their own assembly via the includeTestAssemblies overload so
+        // the scanner behavior is still exercised end-to-end.
+        [OneTimeSetUp]
+        public static void ScanWithTestFixtures()
+        {
+            BridgeToolRegistry.Scan(includeTestAssemblies: true);
+            BridgeResourceRegistry.Scan(includeTestAssemblies: true);
+        }
+
         [Test]
         public static void Scan_FindsSingleTool()
         {
@@ -374,6 +388,67 @@ namespace UnityOpenMcpBridge.Tests
                         string.CompareOrdinal(kv.Value[i - 1], kv.Value[i]) <= 0,
                         $"group '{kv.Key}' roster must be sorted (got {kv.Value[i - 1]} before {kv.Value[i]})");
                 }
+            }
+        }
+
+        // The production scan entry point MUST exclude test assemblies: the
+        // test_* fixtures declared above are scanner exercisers, not real tools,
+        // and must never reach the Tools tab, GET /tools, or the group→tools
+        // capability map. Run the parameterless Scan() (the one production
+        // calls from BridgeHttpServer) and assert no test_* id survives.
+        [Test]
+        public static void DefaultScan_ExcludesTestAssemblies()
+        {
+            BridgeToolRegistry.Scan(); // production entry point
+            try
+            {
+                foreach (var entry in BridgeToolRegistry.All())
+                {
+                    Assert.IsFalse(entry.Name.StartsWith("test_"),
+                        $"production registry must not contain test fixtures, found: {entry.Name}");
+                }
+                Assert.IsFalse(BridgeToolRegistry.Contains("test_single_tool"),
+                    "test_single_tool must NOT be registered by the default (production) Scan().");
+
+                // The group→tools map must not carry any test_* ids either.
+                foreach (var kv in BridgeToolRegistry.GroupToTools())
+                {
+                    foreach (var id in kv.Value)
+                    {
+                        Assert.IsFalse(id.StartsWith("test_"),
+                            $"group '{kv.Key}' must not contain test fixtures, found: {id}");
+                    }
+                }
+            }
+            finally
+            {
+                // Restore the test-inclusive scan so the rest of this fixture's
+                // tests still see their fixtures registered.
+                BridgeToolRegistry.Scan(includeTestAssemblies: true);
+                BridgeResourceRegistry.Scan(includeTestAssemblies: true);
+            }
+        }
+
+        // Mirrors the tool test above for the resource registry: the
+        // unity-open-mcp://test/* fixtures must not survive the production scan.
+        [Test]
+        public static void DefaultResourceScan_ExcludesTestAssemblies()
+        {
+            BridgeResourceRegistry.Scan(); // production entry point
+            try
+            {
+                Assert.IsNull(BridgeResourceRegistry.FindByRoute("unity-open-mcp://test/resource"),
+                    "test resource must NOT be registered by the default (production) resource Scan().");
+                foreach (var entry in BridgeResourceRegistry.All())
+                {
+                    Assert.IsFalse(entry.Route.StartsWith("unity-open-mcp://test/"),
+                        $"production resource registry must not contain test fixtures, found: {entry.Route}");
+                }
+            }
+            finally
+            {
+                BridgeResourceRegistry.Scan(includeTestAssemblies: true);
+                BridgeToolRegistry.Scan(includeTestAssemblies: true);
             }
         }
     }

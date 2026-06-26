@@ -12,12 +12,27 @@ namespace UnityOpenMcpBridge
 
         public static int Count => _resources.Count;
 
+        // Production scan entry point. Excludes test assemblies (anything
+        // referencing nunit.framework) so the [BridgeResource] fixtures that
+        // drive the bridge's EditMode tests never leak into GET /resources or
+        // the resource catalog. Mirrors BridgeToolRegistry.Scan(bool).
         public static void Scan()
+        {
+            Scan(includeTestAssemblies: false);
+        }
+
+        // Tests opt into scanning their own nunit assembly via
+        // includeTestAssemblies: true (the AttributeScannerTests resource
+        // fixtures live in com.alexeyperov.unity-open-mcp-bridge.Editor.Tests,
+        // which references nunit.framework and is therefore excluded by the
+        // default Scan()).
+        internal static void Scan(bool includeTestAssemblies)
         {
             _resources.Clear();
 
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
+                if (!includeTestAssemblies && IsTestAssembly(assembly)) continue;
                 try
                 {
                     ScanAssembly(assembly);
@@ -73,6 +88,27 @@ namespace UnityOpenMcpBridge
         {
             _resources.TryGetValue(route, out var entry);
             return entry;
+        }
+
+        // Same identification as BridgeToolRegistry.IsTestAssembly — a
+        // reference to nunit.framework marks an EditMode test assembly.
+        private static bool IsTestAssembly(Assembly assembly)
+        {
+            AssemblyName[] refs;
+            try
+            {
+                refs = assembly.GetReferencedAssemblies();
+            }
+            catch
+            {
+                return false;
+            }
+            if (refs == null) return false;
+            foreach (var r in refs)
+            {
+                if (r != null && r.Name == "nunit.framework") return true;
+            }
+            return false;
         }
     }
 }
