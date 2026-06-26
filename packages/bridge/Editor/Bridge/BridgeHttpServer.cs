@@ -612,6 +612,13 @@ namespace UnityOpenMcpBridge
 
             bool isRegistryTool = BridgeToolRegistry.TryGet(toolName, out var registryEntry);
             bool isMutating = MutatingTools.Contains(toolName) || (isRegistryTool && registryEntry.IsMutating);
+            // Effective gate precedence (packages/bridge/AGENTS.md §Gate policy):
+            //   request `gate`  →  project default (BridgeGateDefaultPolicy)  →  tool attribute.
+            // ExtractGateMode already resolves (1) → (2); the [BridgeTool].Gate
+            // attribute is catalog metadata only (the tool's recommended gate)
+            // and must NOT override the project default here. Previously registry
+            // tools let the attribute win, which silently bypassed the project
+            // default the user set in the Settings/Gate tab.
             string effectiveGateMode = gateMode;
 
             // apply_fix in dry_run mode is a no-op mutation — the gate would run a
@@ -627,19 +634,6 @@ namespace UnityOpenMcpBridge
             if (activity != null)
             {
                 activity.GateMode = effectiveGateMode;
-            }
-
-            bool runtimeGateSpecified = !string.IsNullOrEmpty(body) && body.Contains("\"gate\"");
-            if (isRegistryTool && !runtimeGateSpecified)
-            {
-                var attrGate = registryEntry.Gate;
-                effectiveGateMode = attrGate switch
-                {
-                    GateMode.Enforce => "enforce",
-                    GateMode.Warn => "warn",
-                    GateMode.Off => "off",
-                    _ => BridgeGateDefaultPolicy.GetDefault()
-                };
             }
 
             string[] pathsHint = null;

@@ -167,6 +167,49 @@ namespace UnityOpenMcpBridge
             }
         }
 
+        // Lightweight read-only view of the fields the UI / diagnostics care
+        // about. Extracted from the lock JSON by TryParseSnapshot without a JSON
+        // dependency (the bridge has no Newtonsoft), mirroring the ExtractPid
+        // pattern below.
+        public readonly struct LockSnapshot
+        {
+            public readonly bool Valid;
+            public readonly int Pid;
+            public readonly int Port;
+            public readonly string State;
+            public readonly string UpdatedAt;
+            public readonly string HeartbeatAt;
+
+            public LockSnapshot(bool valid, int pid, int port, string state, string updatedAt, string heartbeatAt)
+            {
+                Valid = valid;
+                Pid = pid;
+                Port = port;
+                State = state;
+                UpdatedAt = updatedAt;
+                HeartbeatAt = heartbeatAt;
+            }
+        }
+
+        // Parse the diagnostic fields out of a lock JSON string. Pure (no file
+        // I/O, no Unity APIs) so it is unit-testable. Returns Valid=false on any
+        // malformed input rather than throwing. Used by the Status-tab MCP
+        // connectivity panel and reusable by any future diagnostics surface.
+        public static LockSnapshot TryParseSnapshot(string json)
+        {
+            if (string.IsNullOrEmpty(json))
+                return new LockSnapshot(false, 0, 0, null, null, null);
+
+            var pid = ExtractInt(json, "pid");
+            var port = ExtractInt(json, "port");
+            var state = ExtractString(json, "state");
+            var updatedAt = ExtractString(json, "updatedAt");
+            var heartbeatAt = ExtractString(json, "heartbeatAt");
+            // pid is the minimum signal that this is a real lock payload.
+            var valid = pid > 0;
+            return new LockSnapshot(valid, pid, port, state, updatedAt, heartbeatAt);
+        }
+
         // ----- internals -----
 
         private static void WriteLock(string state, bool isPlaying, bool isCompiling, DateTime now)
@@ -297,19 +340,74 @@ namespace UnityOpenMcpBridge
 
         // Minimal pid extractor: pull the integer value of "pid":N out of the
         // lock JSON without a JSON parser (bridge has no Newtonsoft).
-        private static int ExtractPid(string json)
+        private static int ExtractPid(string json) => ExtractInt(json, "pid");
+
+        // Generic integer-field extractor: finds "key":N and returns N, or -1
+        // when the key is absent / unparseable. Used by TryParseSnapshot.
+        private static int ExtractInt(string json, string key)
         {
-            const string key = "\"pid\"";
-            var idx = json.IndexOf(key, StringComparison.Ordinal);
+            var quotedKey = "\"" + key + "\"";
+            var idx = json.IndexOf(quotedKey, StringComparison.Ordinal);
             if (idx < 0) return -1;
-            var colon = json.IndexOf(':', idx + key.Length);
+            var colon = json.IndexOf(':', idx + quotedKey.Length);
             if (colon < 0) return -1;
             var start = colon + 1;
             while (start < json.Length && (json[start] == ' ' || json[start] == '\t')) start++;
             var end = start;
             while (end < json.Length && json[end] >= '0' && json[end] <= '9') end++;
             if (end == start) return -1;
-            return int.TryParse(json.Substring(start, end - start), NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid) ? pid : -1;
+            return int.TryParse(json.Substring(start, end - start), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : -1;
+        }
+
+        // Generic string-field extractor: finds "key":"value" and returns the
+        // unescaped inner value, or null when absent. Handles the standard
+        // \" \\ \/ \b \f \n \r \t \uXXXX escapes so quoted lock fields round-trip
+        // correctly. Used by TryParseSnapshot.
+        private static string ExtractString(string json, string key)
+        {
+            var quotedKey = "\"" + key + "\"";
+            var idx = json.IndexOf(quotedKey, StringComparison.Ordinal);
+            if (idx < 0) return null;
+            var colon = json.IndexOf(':', idx + quotedKey.Length);
+            if (colon < 0) return null;
+            var start = colon + 1;
+            while (start < json.Length && (json[start] == ' ' || json[start] == '\t')) start++;
+            if (start >= json.Length || json[start] != '"') return null;
+            start++;
+            var sb = new StringBuilder();
+            var i = start;
+            while (i < json.Length)
+            {
+                var c = json[i];
+                if (c == '"') return sb.ToString();
+                if (c == '\\' && i + 1 < json.Length)
+                {
+                    var next = json[i + 1];
+                    switch (next)
+                    {
+                        case '"': sb.Append('"'); i += 2; continue;
+                        case '\\': sb.Append('\\'); i += 2; continue;
+                        case '/': sb.Append('/'); i += 2; continue;
+                        case 'b': sb.Append('\b'); i += 2; continue;
+                        case 'f': sb.Append('\f'); i += 2; continue;
+                        case 'n': sb.Append('\n'); i += 2; continue;
+                        case 'r': sb.Append('\r'); i += 2; continue;
+                        case 't': sb.Append('\t'); i += 2; continue;
+                        case 'u':
+                            if (i + 5 < json.Length &&
+                                int.TryParse(json.Substring(i + 2, 4), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var code))
+                            {
+                                sb.Append((char)code);
+                                i += 6;
+                                continue;
+                            }
+                            break;
+                    }
+                }
+                sb.Append(c);
+                i++;
+            }
+            return sb.ToString(); // unterminated string — return what we have
         }
 
         // kill -0 equivalent. Process.GetProcessById throws on a dead pid on

@@ -272,5 +272,75 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(0, leftovers.Length,
                 $"Expected no leftover temp files, got: {string.Join(", ", leftovers)}");
         }
+
+        // ----- TryParseSnapshot (pure JSON field extraction for diagnostics) -----
+
+        [Test]
+        public void TryParseSnapshot_NullOrEmpty_NotValid()
+        {
+            Assert.IsFalse(BridgeInstanceLock.TryParseSnapshot(null).Valid);
+            Assert.IsFalse(BridgeInstanceLock.TryParseSnapshot("").Valid);
+        }
+
+        [Test]
+        public void TryParseSnapshot_NoPid_NotValid()
+        {
+            // Without a pid the payload can't be trusted as a real lock.
+            var snap = BridgeInstanceLock.TryParseSnapshot("{\"port\":22028,\"state\":\"idle\"}");
+            Assert.IsFalse(snap.Valid);
+        }
+
+        [Test]
+        public void TryParseSnapshot_FullPayload_ExtractsAllFields()
+        {
+            var json =
+                "{\"pid\":12345,\"port\":22028,\"authToken\":\"abc\",\"projectPath\":\"/p\"," +
+                "\"state\":\"compiling\",\"updatedAt\":\"2026-06-26T10:00:00Z\"," +
+                "\"heartbeatAt\":\"2026-06-26T10:00:01Z\"}";
+            var snap = BridgeInstanceLock.TryParseSnapshot(json);
+
+            Assert.IsTrue(snap.Valid);
+            Assert.AreEqual(12345, snap.Pid);
+            Assert.AreEqual(22028, snap.Port);
+            Assert.AreEqual("compiling", snap.State);
+            Assert.AreEqual("2026-06-26T10:00:00Z", snap.UpdatedAt);
+            Assert.AreEqual("2026-06-26T10:00:01Z", snap.HeartbeatAt);
+        }
+
+        [Test]
+        public void TryParseSnapshot_HandlesEscapedStringValues()
+        {
+            // state value with an escaped quote — the extractor must unescape.
+            var json = "{\"pid\":1,\"state\":\"a\\\"b\"}";
+            var snap = BridgeInstanceLock.TryParseSnapshot(json);
+            Assert.IsTrue(snap.Valid);
+            Assert.AreEqual("a\"b", snap.State);
+        }
+
+        [Test]
+        public void TryParseSnapshot_MissingOptionalFields_ReturnsNulls()
+        {
+            var snap = BridgeInstanceLock.TryParseSnapshot("{\"pid\":7}");
+            Assert.IsTrue(snap.Valid);
+            Assert.AreEqual(7, snap.Pid);
+            Assert.AreEqual(0, snap.Port); // absent → default
+            Assert.IsNull(snap.State);
+            Assert.IsNull(snap.UpdatedAt);
+            Assert.IsNull(snap.HeartbeatAt);
+        }
+
+        [Test]
+        public void TryParseSnapshot_RoundTripsRealAcquiredLock()
+        {
+            BridgeInstanceLock.Acquire(TestProjectPath, 22028);
+            var json = BridgeInstanceLock.ReadCurrentJson();
+            Assert.IsNotNull(json);
+
+            var snap = BridgeInstanceLock.TryParseSnapshot(json);
+            Assert.IsTrue(snap.Valid);
+            Assert.AreEqual(22028, snap.Port);
+            Assert.AreEqual(System.Diagnostics.Process.GetCurrentProcess().Id, snap.Pid);
+            Assert.AreEqual(BridgeInstanceLock.StateIdle, snap.State);
+        }
     }
 }

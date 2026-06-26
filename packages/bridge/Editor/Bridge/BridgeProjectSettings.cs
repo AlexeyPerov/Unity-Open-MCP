@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityOpenMcpVerify.Cache;
 
 namespace UnityOpenMcpBridge
 {
@@ -33,6 +34,13 @@ namespace UnityOpenMcpBridge
         // (pass / fail / warn) is appended to a rolling JSON-lines file under
         // .unity-open-mcp/audit/. Survives domain reload and editor restart.
         public bool auditLogEnabled = false;
+
+        // TTL (seconds) for the in-memory verify health snapshot cache
+        // (VerifyCacheService). Governs how stale the `health/summary` MCP
+        // resource and the `gate_budget_estimate` "cache" mode consider the
+        // last scan/validate/gate result. Clamped to [15, 3600] on load/write;
+        // default 60s matches VerifyCacheService.DefaultTtl.
+        public int verifyCacheTtlSeconds = 60;
     }
 
     public static class BridgeProjectSettings
@@ -99,6 +107,9 @@ namespace UnityOpenMcpBridge
                     // M14 T5.4 — coerce invalid bind addresses to loopback.
                     if (!BridgeBindAddress.IsValid(_data.bindAddress))
                         _data.bindAddress = BridgeBindAddress.Loopback;
+                    // Clamp the verify cache TTL into range; out-of-range values
+                    // on disk (e.g. hand-edited settings.json) fall back to 60s.
+                    _data.verifyCacheTtlSeconds = ClampVerifyCacheTtl(_data.verifyCacheTtlSeconds);
                 }
             }
             catch (Exception e)
@@ -109,6 +120,10 @@ namespace UnityOpenMcpBridge
             finally
             {
                 _loaded = true;
+                // Push the persisted TTL into the runtime cache service so the
+                // editor honors it on every load / domain reload. Done in finally
+                // so a fresh default data object also seeds the default TTL.
+                ApplyRuntimeSettings();
             }
         }
 
@@ -330,6 +345,74 @@ namespace UnityOpenMcpBridge
             _data.auditLogEnabled = value;
             Save();
             try { Changed?.Invoke(); } catch { }
+        }
+
+        // Verify cache TTL (seconds). Controls how long the in-memory verify
+        // health snapshot (VerifyCacheService) is considered fresh — drives the
+        // `health/summary` MCP resource and `gate_budget_estimate` cache mode.
+        // Clamped to [MinVerifyCacheTtlSeconds, MaxVerifyCacheTtlSeconds].
+        public const int MinVerifyCacheTtlSeconds = 15;
+        public const int MaxVerifyCacheTtlSeconds = 3600;
+        public const int DefaultVerifyCacheTtlSeconds = 60;
+
+        public static int VerifyCacheTtlSeconds
+        {
+            get
+            {
+                if (!_loaded) Load();
+                return ClampVerifyCacheTtl(_data.verifyCacheTtlSeconds);
+            }
+        }
+
+        public static void SetVerifyCacheTtlSeconds(int value)
+        {
+            if (!_loaded) Load();
+            var clamped = ClampVerifyCacheTtl(value);
+            if (_data.verifyCacheTtlSeconds == clamped)
+            {
+                // Still apply the runtime side effect in case the in-memory TTL
+                // drifted (e.g. a test set VerifyCacheService.Ttl directly).
+                ApplyVerifyCacheTtl(clamped);
+                return;
+            }
+            _data.verifyCacheTtlSeconds = clamped;
+            Save();
+            ApplyVerifyCacheTtl(clamped);
+            try { Changed?.Invoke(); } catch { }
+        }
+
+        // Clamp an arbitrary int into the allowed TTL range. Values outside the
+        // range (0, negative, huge, or non-sensical hand-edited values) fall back
+        // to the default rather than being rejected outright.
+        private static int ClampVerifyCacheTtl(int value)
+        {
+            if (value < MinVerifyCacheTtlSeconds) return DefaultVerifyCacheTtlSeconds;
+            if (value > MaxVerifyCacheTtlSeconds) return MaxVerifyCacheTtlSeconds;
+            return value;
+        }
+
+        // Push the persisted TTL into the runtime cache service. Called on Load
+        // and on SetVerifyCacheTtlSeconds so the editor and the cache stay in
+        // sync without each reader having to re-resolve the setting.
+        private static void ApplyVerifyCacheTtl(int seconds)
+        {
+            try
+            {
+                VerifyCacheService.Ttl = TimeSpan.FromSeconds(seconds);
+            }
+            catch (Exception e)
+            {
+                // The cache service is in the verify assembly; never let a wiring
+                // failure here break settings load.
+                Debug.LogWarning($"[BridgeProjectSettings] Failed to apply verify cache TTL: {e.Message}");
+            }
+        }
+
+        // Single wiring point for runtime-bound settings (values that live in a
+        // static service in addition to the persisted JSON). Called from Load().
+        private static void ApplyRuntimeSettings()
+        {
+            ApplyVerifyCacheTtl(ClampVerifyCacheTtl(_data.verifyCacheTtlSeconds));
         }
 
         // Keep the array shape consistent: null when no patterns supplied (so

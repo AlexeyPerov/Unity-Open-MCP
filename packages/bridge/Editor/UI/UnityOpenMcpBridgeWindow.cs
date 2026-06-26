@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge.UI.Controls;
+using UnityOpenMcpVerify.Cache;
 
 namespace UnityOpenMcpBridge
 {
@@ -123,6 +124,15 @@ namespace UnityOpenMcpBridge
         // surface at the top focused.
         [NonSerialized] private bool _statusEditorStateFoldout = false;
         [NonSerialized] private bool _statusProjectFoldout = false;
+
+        // MCP connectivity panel (read-only diagnostics). The bridge has no
+        // handle on the external Node MCP server process, so this surfaces the
+        // signals the MCP server itself uses (instance lock + derived port) and
+        // offers an opt-in probe via `npx unity-open-mcp status`.
+        [NonSerialized] private bool _mcpConnectivityFoldout = false;
+        [NonSerialized] private string _mcpProbeResult = "";
+        [NonSerialized] private MessageType _mcpProbeMessageType = MessageType.None;
+        [NonSerialized] private bool _mcpProbeInFlight;
 
         private void OnEnable()
         {
@@ -304,6 +314,10 @@ namespace UnityOpenMcpBridge
 
             BridgeGUIUtilities.HorizontalLine(8, 6);
 
+            DrawMcpConnectivitySection();
+
+            BridgeGUIUtilities.HorizontalLine(8, 6);
+
             // Editor state + Project are diagnostic fields — collapsed by default.
             _statusEditorStateFoldout = EditorGUILayout.Foldout(
                 _statusEditorStateFoldout, "Editor state (diagnostics)", true);
@@ -458,6 +472,236 @@ namespace UnityOpenMcpBridge
             {
                 _pingInFlight = false;
                 Repaint();
+            }
+        }
+
+        // ---------- MCP connectivity panel (read-only diagnostics) ----------
+        //
+        // The bridge runs inside Unity and has no handle on the external Node MCP
+        // server process (it is spawned by the MCP client via `npx`). This panel
+        // surfaces the same signals the MCP server uses to discover this bridge
+        // (derived port + instance lock), plus an opt-in probe that shells out to
+        // `npx unity-open-mcp status` so the operator can self-diagnose end-to-end
+        // connectivity without leaving Unity. It is strictly read-only — there is
+        // no start/stop of the MCP server here (that's the MCP client's job).
+
+        private void DrawMcpConnectivitySection()
+        {
+            _mcpConnectivityFoldout = EditorGUILayout.Foldout(
+                _mcpConnectivityFoldout, "MCP connectivity", true);
+            if (!_mcpConnectivityFoldout) return;
+
+            EditorGUI.indentLevel++;
+            EditorGUILayout.HelpBox(
+                "The bridge runs inside Unity; the MCP server is a separate Node process the MCP client " +
+                "(Cursor/Claude) spawns via `npx`. This panel shows the discovery signals the MCP server " +
+                "uses to reach this bridge, and lets you probe end-to-end connectivity.",
+                MessageType.None);
+
+            var projectPath = BridgeSession.ProjectPath;
+
+            // Derived port — what the MCP server computes for this project.
+            var hasProject = !string.IsNullOrEmpty(projectPath);
+            var derivedPort = hasProject ? InstancePortResolver.ComputePort(projectPath) : 0;
+            EditorGUILayout.BeginHorizontal();
+            BridgeGUIUtilities.FieldLabel(
+                "Derived port",
+                "Port the MCP server derives for this project (20000 + sha256(path) % 10000). " +
+                "UNITY_OPEN_MCP_BRIDGE_PORT env / -UNITY_OPEN_MCP_BRIDGE_PORT CLI override this on the server side.",
+                120);
+            EditorGUILayout.SelectableLabel(
+                hasProject ? derivedPort.ToString() : "(unknown project path)",
+                EditorStyles.textField,
+                GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            EditorGUILayout.EndHorizontal();
+
+            // Instance lock — the discovery/heartbeat file the MCP server reads.
+            EditorGUILayout.BeginHorizontal();
+            BridgeGUIUtilities.FieldLabel(
+                "Instance lock",
+                "Lock + heartbeat file at ~/.unity-open-mcp/instances/<hash>.json. The MCP server reads it " +
+                "to find this bridge's port + auth token without an HTTP round-trip.",
+                120);
+            EditorGUILayout.SelectableLabel(
+                hasProject ? InstancePortResolver.LockPath(projectPath) : "(unknown project path)",
+                EditorStyles.textField,
+                GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            EditorGUILayout.EndHorizontal();
+
+            // Live lock state parsed from the on-disk file.
+            var lockAcquired = BridgeInstanceLock.IsAcquired;
+            var lockJson = BridgeInstanceLock.ReadCurrentJson();
+            var snap = BridgeInstanceLock.TryParseSnapshot(lockJson);
+            EditorGUILayout.BeginHorizontal();
+            BridgeGUIUtilities.FieldLabel(
+                "Lock state",
+                "Whether this bridge has acquired the instance lock and the last heartbeat written.",
+                120);
+            var prevColor = GUI.color;
+            GUI.color = lockAcquired ? new Color(0.6f, 0.9f, 0.6f) : new Color(1f, 0.5f, 0.5f);
+            GUILayout.Label(lockAcquired ? "acquired" : "not acquired", EditorStyles.boldLabel);
+            GUI.color = prevColor;
+            EditorGUILayout.EndHorizontal();
+
+            if (snap.Valid)
+            {
+                if (!string.IsNullOrEmpty(snap.State))
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    BridgeGUIUtilities.FieldLabel("Heartbeat state", "Last editor state written to the lock.", 120);
+                    EditorGUILayout.LabelField(snap.State);
+                    EditorGUILayout.EndHorizontal();
+                }
+                if (!string.IsNullOrEmpty(snap.HeartbeatAt))
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    BridgeGUIUtilities.FieldLabel("Heartbeat at", "Timestamp of the last heartbeat write (UTC).", 120);
+                    EditorGUILayout.LabelField(snap.HeartbeatAt);
+                    EditorGUILayout.EndHorizontal();
+                }
+            }
+
+            // Expected launch command for the MCP client — what the operator
+            // (or their MCP client config) should run to connect.
+            EditorGUILayout.BeginHorizontal();
+            BridgeGUIUtilities.FieldLabel(
+                "Client launch",
+                "The command the MCP client runs to start the MCP server for this project. " +
+                "The MCP server auto-discovers the bridge port via the instance lock.",
+                120);
+            EditorGUILayout.SelectableLabel(
+                hasProject ? $"UNITY_PROJECT_PATH=\"{projectPath}\" npx -y unity-open-mcp@latest" : "(unknown project path)",
+                EditorStyles.textField,
+                GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            EditorGUILayout.EndHorizontal();
+
+            // Opt-in probe. Shells out to the MCP server's own status command.
+            EditorGUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUI.BeginDisabledGroup(_mcpProbeInFlight || !hasProject);
+            if (GUILayout.Button(
+                new GUIContent(_mcpProbeInFlight ? "Probing…" : "Probe MCP server",
+                    "Runs `npx -y unity-open-mcp@latest status` to check end-to-end discovery + bridge reachability. " +
+                    "Requires Node/npx on PATH. Does not start a long-running server."),
+                GUILayout.Width(160)))
+            {
+                _ = RunMcpProbeAsync(projectPath);
+            }
+            EditorGUI.EndDisabledGroup();
+            EditorGUILayout.EndHorizontal();
+
+            if (!string.IsNullOrEmpty(_mcpProbeResult))
+            {
+                EditorGUILayout.Space(4);
+                EditorGUILayout.HelpBox(_mcpProbeResult, _mcpProbeMessageType);
+            }
+
+            EditorGUI.indentLevel--;
+        }
+
+        // Probe the MCP server end-to-end by shelling out to its status command.
+        // Runs the process on a background thread (npx can take several seconds
+        // to resolve the package) and marshals the result back to the UI thread
+        // for display. Failures (npx missing, non-zero exit, timeout) are
+        // reported clearly and never fatal.
+        private async Task RunMcpProbeAsync(string projectPath)
+        {
+            _mcpProbeInFlight = true;
+            _mcpProbeResult = "Probing… (running `npx -y unity-open-mcp@latest status`)";
+            _mcpProbeMessageType = MessageType.Info;
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "npx",
+                    Arguments = $"-y unity-open-mcp@latest status --project \"{projectPath}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+
+                var stdout = await ReadProcessAsync(psi, TimeSpan.FromSeconds(20)).ConfigureAwait(true);
+                var trimmed = (stdout.Stdout ?? "").Trim();
+                var trimmedErr = (stdout.Stderr ?? "").Trim();
+                var exit = stdout.ExitCode;
+
+                if (exit == 0)
+                {
+                    _mcpProbeResult = string.IsNullOrEmpty(trimmed)
+                        ? "Probe completed (exit 0, no output)."
+                        : trimmed;
+                    _mcpProbeMessageType = MessageType.Info;
+                }
+                else
+                {
+                    var msg = $"Probe exited with code {exit}.";
+                    if (!string.IsNullOrEmpty(trimmedErr)) msg += $"\n{trimmedErr}";
+                    if (!string.IsNullOrEmpty(trimmed)) msg += $"\n--- stdout ---\n{trimmed}";
+                    _mcpProbeResult = msg;
+                    _mcpProbeMessageType = MessageType.Warning;
+                }
+            }
+            catch (System.ComponentModel.Win32Exception e)
+            {
+                // Most common: `npx` not found on PATH.
+                _mcpProbeResult =
+                    $"Could not start `npx` ({e.Message}). Install Node.js (includes npx) or add it to PATH " +
+                    "to use the probe. The bridge itself does not require Node.";
+                _mcpProbeMessageType = MessageType.Warning;
+            }
+            catch (Exception e)
+            {
+                _mcpProbeResult = $"Probe failed: {e.Message}";
+                _mcpProbeMessageType = MessageType.Error;
+            }
+            finally
+            {
+                _mcpProbeInFlight = false;
+                Repaint();
+            }
+        }
+
+        // Run a process to completion off the main thread, with a hard timeout.
+        // Returns merged stdout/stderr + exit code. Captures-but-discards the
+        // process on timeout so it can't outlive the probe.
+        private static async Task<ProcessOutput> ReadProcessAsync(
+            System.Diagnostics.ProcessStartInfo psi, TimeSpan timeout)
+        {
+            return await Task.Run(() =>
+            {
+                using var p = new System.Diagnostics.Process { StartInfo = psi };
+                var stdoutBuilder = new System.Text.StringBuilder();
+                var stderrBuilder = new System.Text.StringBuilder();
+                p.OutputDataReceived += (_, e) => { if (e.Data != null) stdoutBuilder.AppendLine(e.Data); };
+                p.ErrorDataReceived += (_, e) => { if (e.Data != null) stderrBuilder.AppendLine(e.Data); };
+
+                if (!p.Start()) return new ProcessOutput("", "Failed to start process.", -1);
+                p.BeginOutputReadLine();
+                p.BeginErrorReadLine();
+
+                if (!p.WaitForExit((int)timeout.TotalMilliseconds))
+                {
+                    try { p.Kill(); } catch { }
+                    return new ProcessOutput(stdoutBuilder.ToString(), "(timed out)", -1);
+                }
+                // WaitForExit(int) can return before async streams flush; this
+                // no-arg overload blocks until the readers close.
+                p.WaitForExit();
+                return new ProcessOutput(stdoutBuilder.ToString(), stderrBuilder.ToString(), p.ExitCode);
+            }).ConfigureAwait(true);
+        }
+
+        private readonly struct ProcessOutput
+        {
+            public readonly string Stdout;
+            public readonly string Stderr;
+            public readonly int ExitCode;
+            public ProcessOutput(string stdout, string stderr, int exitCode)
+            {
+                Stdout = stdout;
+                Stderr = stderr;
+                ExitCode = exitCode;
             }
         }
 
@@ -840,25 +1084,75 @@ namespace UnityOpenMcpBridge
         {
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("Project default gate mode", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox(
-                "Sets the project-wide default for the gate policy. " +
-                "Applies to all mutating tool calls that do not supply an explicit request-level `gate`. " +
-                "Persists in `.unity-open-mcp/settings.json`.",
-                MessageType.None);
+            DrawGlobalGateModeControl(showStorageHint: true);
+        }
 
+        // Shared, highlighted rendering of the project-wide gate control, used by
+        // both the Gate tab and the Settings tab so there is one visual source of
+        // truth. This is the global gate on/off: setting it to `off` disables the
+        // checkpoint→mutate→validate safety flow project-wide for any mutating
+        // call that does not send an explicit request-level `gate`. The control is
+        // tinted yellow to stand out, and the dangerous states (`off`, `warn`)
+        // get explicit warning text so the operator can't miss them.
+        private static void DrawGlobalGateModeControl(bool showStorageHint)
+        {
             var current = BridgeGateDefaultPolicy.GetDefault();
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Default mode", GUILayout.Width(120));
-            var newMode = EditorGUILayout.Popup(IndexOfMode(current), ModeLabels());
-            EditorGUILayout.EndHorizontal();
-            if (newMode != IndexOfMode(current))
-            {
-                BridgeGateDefaultPolicy.SetDefault(BridgeGateDefaultPolicy.ValidModes[newMode]);
-            }
 
-            EditorGUILayout.LabelField("Effective policy", ModeDescriptor(current), EditorStyles.miniLabel);
-            EditorGUILayout.LabelField("Precedence", BridgeGateDefaultPolicy.DescribePrecedence(), EditorStyles.miniLabel);
-            EditorGUILayout.LabelField("Storage", BridgeProjectSettings.SettingsPath ?? "(no project root)", EditorStyles.miniLabel);
+            // Soft yellow tint over the whole control so the global safety knob is
+            // visually distinct from the per-tool rows around it.
+            var prevBg = GUI.backgroundColor;
+            GUI.backgroundColor = new Color(1f, 0.96f, 0.7f);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            GUI.backgroundColor = prevBg;
+
+            try
+            {
+                EditorGUILayout.LabelField(
+                    "This is the global gate on/off control for this project.",
+                    EditorStyles.miniLabel);
+
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Default mode", GUILayout.Width(120));
+                var newMode = EditorGUILayout.Popup(IndexOfMode(current), ModeLabels());
+                EditorGUILayout.EndHorizontal();
+                if (newMode != IndexOfMode(current))
+                {
+                    BridgeGateDefaultPolicy.SetDefault(BridgeGateDefaultPolicy.ValidModes[newMode]);
+                    current = BridgeGateDefaultPolicy.GetDefault();
+                }
+
+                EditorGUILayout.LabelField("Effective policy", ModeDescriptor(current), EditorStyles.miniLabel);
+
+                // State-specific callouts so the dangerous modes are unmissable.
+                if (current == BridgeGateDefaultPolicy.Off)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Gate is OFF project-wide. Mutating tools run WITHOUT the checkpoint → validate safety flow, " +
+                        "so a mutation that introduces compile errors will not fail the MCP call. " +
+                        "This is the global turn-off — re-enable with `enforce` or `warn`.",
+                        MessageType.Error);
+                }
+                else if (current == BridgeGateDefaultPolicy.Warn)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Gate is in `warn` mode project-wide: mutating tools still run the safety flow, but new " +
+                        "compile errors surface as warnings instead of failing the MCP call.",
+                        MessageType.Warning);
+                }
+
+                EditorGUILayout.LabelField("Precedence", BridgeGateDefaultPolicy.DescribePrecedence(), EditorStyles.miniLabel);
+                if (showStorageHint)
+                {
+                    EditorGUILayout.LabelField(
+                        "Storage",
+                        BridgeProjectSettings.SettingsPath ?? "(no project root)",
+                        EditorStyles.miniLabel);
+                }
+            }
+            finally
+            {
+                EditorGUILayout.EndVertical();
+            }
         }
 
         private static GUIContent[] ModeLabels()
@@ -1518,6 +1812,8 @@ namespace UnityOpenMcpBridge
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawActivityLogSection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawVerifyCacheSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawSettingsStorageSection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawSettingsPassiveBatchHint();
@@ -1548,20 +1844,7 @@ namespace UnityOpenMcpBridge
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Project default gate mode", EditorStyles.miniBoldLabel);
-            EditorGUILayout.HelpBox(
-                "Used when an incoming mutating tool request omits a `gate` value. " +
-                "Per-request `gate` always wins (see Gate tab for full precedence).",
-                MessageType.None);
-
-            var current = BridgeGateDefaultPolicy.GetDefault();
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Default mode", GUILayout.Width(120));
-            var newIndex = EditorGUILayout.Popup(IndexOfMode(current), ModeLabels());
-            EditorGUILayout.EndHorizontal();
-            if (newIndex != IndexOfMode(current))
-            {
-                BridgeGateDefaultPolicy.SetDefault(BridgeGateDefaultPolicy.ValidModes[newIndex]);
-            }
+            DrawGlobalGateModeControl(showStorageHint: false);
         }
 
         private void DrawAuthSection()
@@ -1754,6 +2037,46 @@ namespace UnityOpenMcpBridge
                 MessageType.None);
         }
 
+        private void DrawVerifyCacheSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Verify cache", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "Time-to-live for the in-memory verify health snapshot. Drives how fresh the " +
+                "`health/summary` MCP resource and the `gate_budget_estimate` \"cache\" mode are — " +
+                "within the TTL they reuse the last scan/validate/gate result instead of re-running. " +
+                "Shorter = fresher but more work; longer = faster but staler. Range " +
+                $"{BridgeProjectSettings.MinVerifyCacheTtlSeconds}–{BridgeProjectSettings.MaxVerifyCacheTtlSeconds}s, " +
+                $"default {BridgeProjectSettings.DefaultVerifyCacheTtlSeconds}s.",
+                MessageType.None);
+
+            var prev = BridgeProjectSettings.VerifyCacheTtlSeconds;
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("TTL (seconds)", GUILayout.Width(120));
+            var next = EditorGUILayout.IntField(prev);
+            EditorGUILayout.EndHorizontal();
+            // IntField returns 0 for empty input and allows arbitrary values;
+            // the setter clamps, but we also surface the clamped delta visually.
+            if (next != prev)
+            {
+                BridgeProjectSettings.SetVerifyCacheTtlSeconds(next);
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Effective", GUILayout.Width(120));
+            EditorGUILayout.LabelField(
+                $"{BridgeProjectSettings.VerifyCacheTtlSeconds}s  " +
+                $"(snapshot {(VerifyCacheService.HasData ? "present" : "empty")}" +
+                $"{(VerifyCacheService.HasData && VerifyCacheService.IsStale() ? ", stale" : "")})",
+                EditorStyles.miniLabel);
+            EditorGUILayout.EndHorizontal();
+
+            if (GUILayout.Button("Invalidate now", EditorStyles.miniButton))
+            {
+                VerifyCacheService.Clear();
+            }
+        }
+
         private void DrawSettingsStorageSection()
         {
             EditorGUILayout.Space(4);
@@ -1780,6 +2103,7 @@ namespace UnityOpenMcpBridge
                 "  - csharpDenyPatterns: string[] (regex; non-empty overrides defaults)\n" +
                 "  - menuDenyPatterns: string[] (regex; non-empty overrides defaults)\n" +
                 "  - auditLogEnabled: bool\n" +
+                "  - verifyCacheTtlSeconds: int (15–3600; verify health snapshot TTL)\n" +
                 "Future fields can extend this schema in place without breaking v1 readers.",
                 MessageType.None);
         }
