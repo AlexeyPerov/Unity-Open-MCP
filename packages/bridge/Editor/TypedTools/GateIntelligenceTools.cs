@@ -607,8 +607,15 @@ namespace UnityOpenMcpBridge.TypedTools
             {
                 explicitCheckpoint = CheckpointStore.Get(checkpointId);
                 if (explicitCheckpoint == null)
-                    return ToolDispatchResult.Fail("checkpoint_not_found",
-                        $"No checkpoint found with id '{checkpointId}'.");
+                {
+                    // Item F — missing checkpoint is not a tool failure. Checkpoints
+                    // are session-scoped (in-memory) and are cleared on recompile /
+                    // domain reload / restart; a hard error would block the agent.
+                    // Return success with an `unavailable` warning and fall-back
+                    // guidance. The caller can still get the latest gate-run
+                    // narrative by re-invoking without checkpoint_id.
+                    return ToolDispatchResult.Ok(BuildCheckpointUnavailableExplain(checkpointId));
+                }
             }
 
             BridgeGateRunRecord record = null;
@@ -897,6 +904,48 @@ namespace UnityOpenMcpBridge.TypedTools
                   .Append(OutputSerializer.EscapeJsonString(record.MutationError)).Append("\"");
             }
 
+            sb.Append(",\"heuristicNote\":\"mutation_explain projects the recorded gate run into a narrative. When the gate was skipped (gate=off) or the run predates the current editor state, the delta may be empty — pass an explicit checkpoint_id to compare against a known baseline.\"");
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        // Item F — explain-shaped payload for a missing checkpoint. Mirrors the
+        // fields produced by BuildExplainJson (narrative/summary/agentNextSteps)
+        // so downstream parsers see a consistent shape, but flags `unavailable`
+        // and outcome "unavailable" instead of failing the tool call.
+        private static string BuildCheckpointUnavailableExplain(string checkpointId)
+        {
+            var narrative =
+                "Checkpoint '" + (checkpointId ?? "") + "' is no longer available. " +
+                "Checkpoints are session-scoped (in-memory) and are cleared on script " +
+                "recompile, domain reload, or editor restart; no baseline delta can be computed.";
+
+            var nextSteps = new[]
+            {
+                "The pre-change baseline is gone, so a delta cannot be computed.",
+                "To inspect the latest mutation, re-invoke mutation_explain WITHOUT checkpoint_id " +
+                "to project the most recent gate-run record.",
+                "To verify current state directly, call unity_open_mcp_validate_edit (or " +
+                "unity_open_mcp_scan_paths) on the relevant paths.",
+                "For future delta checks, call unity_open_mcp_checkpoint_create immediately " +
+                "before mutating, then unity_open_mcp_delta right after."
+            };
+
+            var sb = new StringBuilder(640);
+            sb.Append('{');
+            sb.Append("\"narrative\":\"").Append(OutputSerializer.EscapeJsonString(narrative)).Append("\",");
+            sb.Append("\"summary\":{");
+            sb.Append("\"tool\":\"checkpoint_compare\",");
+            sb.Append("\"outcome\":\"unavailable\"");
+            sb.Append('}');
+            sb.Append(",\"unavailable\":true");
+            sb.Append(",\"agentNextSteps\":[");
+            for (int i = 0; i < nextSteps.Length; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append('"').Append(OutputSerializer.EscapeJsonString(nextSteps[i])).Append('"');
+            }
+            sb.Append(']');
             sb.Append(",\"heuristicNote\":\"mutation_explain projects the recorded gate run into a narrative. When the gate was skipped (gate=off) or the run predates the current editor state, the delta may be empty — pass an explicit checkpoint_id to compare against a known baseline.\"");
             sb.Append('}');
             return sb.ToString();

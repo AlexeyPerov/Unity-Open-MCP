@@ -340,7 +340,7 @@ export function findPack(id: string): ExtensionPack | undefined {
 /**
  * Build the local-package manifest entry for a pack. Mirrors the wizard's
  * `file:` URL derivation for the bridge/verify packages. Retained for
- * contributor / community-pack workflows (see manual-setup.md) — the
+ * contributor / community-pack workflows (see development-setup.md) — the
  * default wizard flow no longer uses this for shipped domains.
  */
 export function localPackageEntry(pack: ExtensionPack): string {

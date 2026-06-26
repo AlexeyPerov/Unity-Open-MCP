@@ -59,7 +59,7 @@ fn release_type_for(version: &str) -> String {
         'b' => "Beta".to_string(),
         'f' => {
             let lower = version.to_ascii_lowercase();
-            // Known Unity LTS lines (kept in sync with docs/unity-version-compat.md).
+            // Known Unity LTS lines (min supported by the packages is 2022.3 LTS).
             let is_known_lts = lower.starts_with("6000.0")
                 || lower.starts_with("2022.3")
                 || lower.starts_with("2021.3")

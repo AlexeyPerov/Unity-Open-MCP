@@ -105,6 +105,9 @@ namespace UnityOpenMcpBridge
         [NonSerialized] private bool _gateLatestFoldout = true;
         [NonSerialized] private bool _gateCheckpointFoldout = true;
         [NonSerialized] private bool _gateManualFoldout = true;
+        // Item C — two-click confirm state for the "Clear history" button on the
+        // Gate tab's checkpoint section. Mirrors the listener stop pattern.
+        [NonSerialized] private bool _checkpointClearPending;
 
         // Activity tab state (M4.5-10)
         [NonSerialized] private Vector2 _activityTabScroll;
@@ -1315,7 +1318,43 @@ namespace UnityOpenMcpBridge
                 "In-memory only — no on-disk persistence in v1.",
                 MessageType.None);
 
+            // Item C — let the operator reclaim the session checkpoint memory
+            // explicitly. Checkpoints are not persisted, so this touches nothing
+            // on disk; gate-run history (BridgeGateRunHistory) is left intact.
+            // Two-click confirm mirrors the listener stop pattern so an
+            // accidental click can't drop a baseline an agent is still using.
             var count = CheckpointStore.Count;
+            if (count > 0)
+            {
+                var pending = _checkpointClearPending;
+                var label = pending ? "Confirm clear" : "Clear history";
+                var tooltip = pending
+                    ? "Click again to confirm: removes all session checkpoints from the in-memory ring buffer."
+                    : "Removes all session checkpoints from the in-memory ring buffer. " +
+                      "Checkpoints are not persisted to disk, so nothing on disk is affected. " +
+                      "Gate-run history is left intact. Re-capture with the unity_open_mcp_checkpoint_create tool.";
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button(new GUIContent(label, tooltip), EditorStyles.miniButton, GUILayout.Width(120)))
+                {
+                    if (pending)
+                    {
+                        CheckpointStore.Clear();
+                        _checkpointClearPending = false;
+                        Repaint();
+                    }
+                    else
+                    {
+                        _checkpointClearPending = true;
+                        Repaint();
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+            }
+            else
+            {
+                _checkpointClearPending = false;
+            }
             if (count == 0)
             {
                 BridgeGUIUtilities.DrawLabelAtCenterHorizontally(
@@ -2290,16 +2329,15 @@ namespace UnityOpenMcpBridge
         private static readonly (string Label, string Path, string Tooltip)[] DocLinks =
         {
             ("README", "README.md", "Project overview, feature set, and quick links."),
-            ("Docs index", "docs/README.md", "Top-level documentation index — every doc linked from here."),
             ("Wizard setup", "docs/wizard-setup.md", "Recommended onboarding flow via Unity Hub Pro."),
             ("Manual setup", "docs/manual-setup.md", "Direct MCP setup and client config snippets."),
+            ("Development setup", "docs/development-setup.md", "Local checkout, contributor and maintainer workflows."),
             ("Architecture", "docs/architecture.md", "Repository structure and cross-package boundaries."),
             ("Bridge HTTP API", "docs/api/bridge-http.md", "Bridge endpoints, envelopes, /ping, and remote bind."),
             ("MCP tools API", "docs/api/mcp-tools.md", "Tool catalog, route policy, and gate behavior."),
             ("MCP resources API", "docs/api/resources.md", "Resource URIs and payloads."),
             ("Extensions", "docs/extensions.md", "Embedded domain tools (compile-gated) and community packs."),
             ("Skills", "docs/skills.md", "Agent playbooks shipped into a project."),
-            ("Unity version compatibility", "docs/unity-version-compat.md", "Supported Unity versions and CI coverage."),
             ("Code conventions", "docs/code-conventions.md", "Non-obvious C# decisions (instance IDs, namespaces)."),
         };
 

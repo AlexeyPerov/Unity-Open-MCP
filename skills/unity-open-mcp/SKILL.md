@@ -337,6 +337,10 @@ Raw Unity data is large. Prefer the cheap, structured reads before reaching for 
 
 `checkpoint_create` with scoped paths → run mutations (`gate: off` for bulk, or `enforce` per call) → `delta` against the checkpoint for a single verification pass.
 
+- **Session-scoped.** Checkpoints live in an in-memory ring buffer (capacity 20, LRU-evicted on access recency) and are cleared on script recompile, domain reload, or editor restart — they are never persisted to disk. Capture immediately before mutating and delta right after; do not hold a checkpoint id across a recompile.
+- **Missing checkpoint is non-blocking.** If `delta` (or `mutation_explain` with a `checkpoint_id`) references a checkpoint that is gone (evicted, or lost to a reload), the call returns success with `"unavailable": true` + `agentNextSteps` rather than an error. Treat it as "no baseline to delta against" and fall back to `validate_edit` / `scan_paths` on the relevant paths. It does not block the workflow.
+- **Clear from the editor.** The Bridge window → Gate tab → Checkpoint history has a "Clear history" button (two-click confirm) that empties the session ring buffer. It touches nothing on disk and leaves gate-run history intact.
+
 ### find_references before delete
 
 Before deleting or moving an asset, call `**find_references*`* to see who depends on it. Offline-first (no live bridge needed for text-serialized assets).

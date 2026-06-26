@@ -157,12 +157,19 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
-        public void MutationExplain_UnknownCheckpoint_ReturnsCheckpointNotFound()
+        public void MutationExplain_UnknownCheckpoint_ReturnsUnavailableWarning()
         {
+            // Item F — a missing checkpoint is not a tool failure (checkpoints are
+            // session-scoped and cleared on recompile/reload). The call must
+            // succeed with an explicit `unavailable` flag and recovery guidance
+            // so it does not block agent workflows (isError stays false).
             var result = GateIntelligenceTools.MutationExplain(
                 "{\"checkpoint_id\":\"cp_doesnotexist\"}");
-            Assert.IsFalse(result.Success);
-            Assert.AreEqual("checkpoint_not_found", result.ErrorCode);
+            Assert.IsTrue(result.Success, "missing checkpoint must not fail the tool call");
+            Assert.IsNull(result.ErrorCode);
+            StringAssert.Contains("\"unavailable\":true", result.Output);
+            StringAssert.Contains("\"outcome\":\"unavailable\"", result.Output);
+            StringAssert.Contains("\"agentNextSteps\":", result.Output);
         }
 
         [Test]

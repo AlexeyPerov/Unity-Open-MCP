@@ -14,8 +14,15 @@ namespace UnityOpenMcpBridge.MetaTools
 
             var stored = CheckpointStore.Get(checkpointId);
             if (stored == null)
-                return ToolDispatchResult.Fail("checkpoint_not_found",
-                    $"No checkpoint found with id '{checkpointId}'.");
+            {
+                // Item F — a missing checkpoint is NOT a tool failure: checkpoints
+                // are session-scoped (in-memory) and are wiped on script recompile,
+                // domain reload, or editor restart. Returning a hard error would set
+                // isError:true on the MCP response and block agent workflows. Instead
+                // return success with an explicit `unavailable` warning + recovery
+                // guidance so the agent can proceed (e.g. fall back to validate_edit).
+                return ToolDispatchResult.Ok(BuildUnavailableResult(checkpointId));
+            }
 
             var paths = JsonBody.GetStringArray(body, "paths") ?? stored.Paths;
             var categories = stored.Categories;
@@ -80,6 +87,26 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append(']');
 
             sb.Append('}');
+            return sb.ToString();
+        }
+
+        // Item F — payload returned when the requested checkpoint is no longer in
+        // the session-scoped store. `passed:true` + `unavailable:true` lets the
+        // agent treat this as "no new errors detected, but I have no baseline to
+        // delta against" rather than a hard failure.
+        private static string BuildUnavailableResult(string checkpointId)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append("{\"passed\":true");
+            sb.Append(",\"unavailable\":true");
+            sb.Append(",\"warning\":\"Checkpoint '")
+              .Append(Esc(checkpointId))
+              .Append("' is no longer available. Checkpoints are session-scoped (in-memory) and are cleared on script recompile, domain reload, or editor restart — this does not indicate a problem with the project.\"");
+            sb.Append(",\"agentNextSteps\":[");
+            sb.Append("\"The pre-change baseline is gone, so a delta cannot be computed.\",");
+            sb.Append("\"To verify current state directly, call unity_open_mcp_validate_edit (or unity_open_mcp_scan_paths) on the relevant paths.\",");
+            sb.Append("\"For future delta checks, call unity_open_mcp_checkpoint_create immediately before mutating, then unity_open_mcp_delta right after.\"");
+            sb.Append("]}");
             return sb.ToString();
         }
 

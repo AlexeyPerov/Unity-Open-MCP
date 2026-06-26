@@ -39,7 +39,7 @@ pub const MIN_UNITY_MINOR: u32 = 3;
 /// Recommended Unity major version (Unity 6). Projects at or above
 /// the minimum but below this version install and run, but surface a
 /// soft warning in the wizard (older editors get the legacy toolbar
-/// fallback path). Never a hard block. See `docs/unity-version-compat.md`.
+/// fallback path). Never a hard block.
 pub const RECOMMENDED_UNITY_MAJOR: u32 = 6000;
 
 /// UPM package id for the bridge package. Used by detect (is the
