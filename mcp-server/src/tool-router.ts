@@ -32,15 +32,22 @@ function injectRouteMeta(
   meta: RouteMeta,
 ): CallToolResult {
   if (result.content.length === 0) return result;
-  const first = result.content[0];
-  if (first.type !== "text") return result;
+  // M20 Plan 1 / T20.1.1 — capture_inline returns an MCP image content block
+  // followed by a text metadata block. Inject _route into whichever text block
+  // carries JSON; leave image/other blocks untouched. Fall back to the first
+  // block when it is text (the common single-block path).
+  const textIndex = result.content.findIndex(
+    (c) => c.type === "text",
+  );
+  if (textIndex < 0) return result;
+  const block = result.content[textIndex];
+  if (block.type !== "text") return result;
   try {
-    const body = JSON.parse(first.text) as Record<string, unknown>;
+    const body = JSON.parse(block.text) as Record<string, unknown>;
     body._route = meta;
-    return {
-      ...result,
-      content: [{ type: "text", text: JSON.stringify(body) }],
-    };
+    const newContent = result.content.slice();
+    newContent[textIndex] = { type: "text", text: JSON.stringify(body) };
+    return { ...result, content: newContent };
   } catch {
     return result;
   }

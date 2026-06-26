@@ -15,12 +15,17 @@ namespace UnityOpenMcpBridge
     //   - MutatingTools:        tools that run the full gate path and require a
     //                            non-empty paths_hint.
     //
+    // Named BridgeToolClassification (not BridgeToolCatalog) to avoid clashing
+    // with the UI-side BridgeToolCatalog in Editor/UI/, which builds the
+    // Tools-tab catalog of titles/parameters/mutability hints — a different
+    // concern.
+    //
     // Registry-discovered tools ([BridgeTool] attribute, BridgeToolRegistry) are
     // NOT listed here — they are picked up automatically and carry their own
     // IsMutating/Gate/Group metadata. Per packages/bridge/AGENTS.md §Tool
     // registration: only add to these sets when the tool is NOT registry-discovered.
 
-    internal static class BridgeToolCatalog
+    internal static class BridgeToolClassification
     {
         internal static readonly HashSet<string> KnownTools = new()
         {
@@ -151,6 +156,19 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_settings_set_lighting",
             "unity_senses_run_tests",
             "unity_senses_screenshot",
+            // M20 Plan 1 / T20.1.1 — senses parity residual. screenshot_camera
+            // (arbitrary pose, file path) and capture_inline (inline base64 PNG)
+            // extend the screenshot surface. Both are registry-discovered and
+            // also listed here so they return tool JSON directly (matching
+            // unity_senses_screenshot) — capture_inline's inlineImage field must
+            // surface at the top level for the MCP server to unwrap into an
+            // image content block.
+            //
+            // M20 Plan 1 / T20.1.2 — screenshot_window captures an EditorWindow
+            // (Win-only full-fidelity, cross-platform best-effort readback).
+            "unity_senses_screenshot_camera",
+            "unity_senses_capture_inline",
+            "unity_senses_screenshot_window",
             "unity_senses_read_console",
             "unity_senses_profiler_capture",
             "unity_senses_profiler_memory",
@@ -173,6 +191,16 @@ namespace UnityOpenMcpBridge
             "unity_senses_run_tests",
             // Agent senses (non-mutating): return tool JSON directly.
             "unity_senses_screenshot",
+            // M20 Plan 1 / T20.1.1 — senses parity residual. screenshot_camera
+            // + capture_inline are read-only (gate off, no scene dirty); route
+            // as direct-response tools so the inlineImage field on capture_inline
+            // surfaces at the top level for MCP-side unwrapping.
+            //
+            // M20 Plan 1 / T20.1.2 — screenshot_window is read-only (captures an
+            // EditorWindow; transient repaint only, no asset/scene write).
+            "unity_senses_screenshot_camera",
+            "unity_senses_capture_inline",
+            "unity_senses_screenshot_window",
             "unity_senses_read_console",
             "unity_senses_profiler_capture",
             "unity_senses_profiler_memory",

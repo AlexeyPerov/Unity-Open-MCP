@@ -35,6 +35,11 @@ namespace UnityOpenMcpBridge.Tests
         [TestCase("unity_senses_profiler_memory", ExpectedResult = LifecyclePolicy.None)]
         [TestCase("unity_senses_profiler_rendering", ExpectedResult = LifecyclePolicy.None)]
         [TestCase("unity_senses_spatial_query", ExpectedResult = LifecyclePolicy.None)]
+        // M20 Plan 1 / T20.1.1–T20.1.2 — new senses parity tools are read-only
+        // registry tools; Resolve() must surface their LifecyclePolicy.None.
+        [TestCase("unity_senses_screenshot_camera", ExpectedResult = LifecyclePolicy.None)]
+        [TestCase("unity_senses_capture_inline", ExpectedResult = LifecyclePolicy.None)]
+        [TestCase("unity_senses_screenshot_window", ExpectedResult = LifecyclePolicy.None)]
         public static LifecyclePolicy Resolve_ReadOnlyRegistryTools_None(string tool)
         {
             return ToolLifecycle.Resolve(tool);

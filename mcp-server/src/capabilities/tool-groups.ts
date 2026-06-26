@@ -446,6 +446,12 @@ assign(
 assign("agent-senses", [
   "unity_senses_run_tests",
   "unity_senses_screenshot",
+  // M20 Plan 1 / T20.1.1 — senses parity residual. Arbitrary-pose screenshot
+  // + inline-image capture extend the screenshot surface.
+  "unity_senses_screenshot_camera",
+  "unity_senses_capture_inline",
+  // M20 Plan 1 / T20.1.2 — EditorWindow capture.
+  "unity_senses_screenshot_window",
   "unity_senses_read_console",
   "unity_senses_profiler_capture",
   "unity_senses_profiler_memory",

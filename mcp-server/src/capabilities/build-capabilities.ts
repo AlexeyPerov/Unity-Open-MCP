@@ -254,6 +254,13 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_generate_skill: "capability-discovery",
   unity_senses_run_tests: "agent-senses",
   unity_senses_screenshot: "agent-senses",
+  // M20 Plan 1 / T20.1.1 — senses parity residual. Two new read-only senses
+  // tools extending the screenshot surface.
+  unity_senses_screenshot_camera: "agent-senses",
+  unity_senses_capture_inline: "agent-senses",
+  // M20 Plan 1 / T20.1.2 — EditorWindow capture (Win-only full-fidelity,
+  // cross-platform best-effort readback).
+  unity_senses_screenshot_window: "agent-senses",
   unity_senses_read_console: "agent-senses",
   unity_senses_profiler_capture: "agent-senses",
   unity_senses_profiler_memory: "agent-senses",

@@ -33,6 +33,13 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_senses_run_tests",
   // Agent senses (non-mutating): return tool JSON directly.
   "unity_senses_screenshot",
+  // M20 Plan 1 / T20.1.1 — capture_inline returns an inlineImage field (base64
+  // PNG). The postTool handler unwraps it into an MCP image content block so
+  // the agent receives a viewable image without reading the filesystem.
+  "unity_senses_capture_inline",
+  "unity_senses_screenshot_camera",
+  // M20 Plan 1 / T20.1.2 — EditorWindow capture (file path). Read-only.
+  "unity_senses_screenshot_window",
   "unity_senses_read_console",
   "unity_senses_profiler_capture",
   "unity_senses_profiler_memory",
@@ -331,6 +338,34 @@ export class LiveClient implements Router {
           string,
           unknown
         > | null;
+
+        // M20 Plan 1 / T20.1.1 — capture_inline returns an `inlineImage` base64
+        // PNG field. Unwrap it into an MCP image content block alongside a text
+        // metadata block (matching the AnkleBreaker unity_graphics_*_capture
+        // contract: [{type: image}, {type: text}]). The image carries the same
+        // viewable payload a file-path screenshot would; the metadata keeps the
+        // view / resolution / byteLength fields without the base64 blob.
+        const inlineImage = directBody?.inlineImage;
+        if (
+          directBody != null &&
+          typeof inlineImage === "string" &&
+          inlineImage.length > 0 &&
+          directBody.error == null
+        ) {
+          const body: Record<string, unknown> = directBody;
+          const mimeType =
+            typeof body.mimeType === "string" ? body.mimeType : "image/png";
+          const metadata = { ...body };
+          delete metadata.inlineImage;
+          return {
+            content: [
+              { type: "image", data: inlineImage, mimeType },
+              { type: "text", text: JSON.stringify(metadata) },
+            ],
+            isError: false,
+          };
+        }
+
         return {
           content: [
             {

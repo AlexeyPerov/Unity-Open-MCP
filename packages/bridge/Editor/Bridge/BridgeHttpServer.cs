@@ -31,12 +31,12 @@ namespace UnityOpenMcpBridge
         private const string PortArgPrefix = "-UNITY_OPEN_MCP_BRIDGE_PORT=";
 
         // Tool classification tables (KnownTools / DirectResponseTools /
-        // MutatingTools) live in BridgeToolCatalog.cs. Aliased here so the
+        // MutatingTools) live in BridgeToolClassification.cs. Aliased here so the
         // dispatch path reads them as plain KnownTools.Contains(...) without
         // qualifying every call site.
-        private static readonly HashSet<string> KnownTools = BridgeToolCatalog.KnownTools;
-        private static readonly HashSet<string> DirectResponseTools = BridgeToolCatalog.DirectResponseTools;
-        private static readonly HashSet<string> MutatingTools = BridgeToolCatalog.MutatingTools;
+        private static readonly HashSet<string> KnownTools = BridgeToolClassification.KnownTools;
+        private static readonly HashSet<string> DirectResponseTools = BridgeToolClassification.DirectResponseTools;
+        private static readonly HashSet<string> MutatingTools = BridgeToolClassification.MutatingTools;
 
         private static HttpListener _listener;
         private static Thread _listenerThread;

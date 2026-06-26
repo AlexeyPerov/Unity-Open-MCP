@@ -21,6 +21,14 @@ import { searchAssets } from "./search-assets.js";
 import { listAssets } from "./list-assets.js";
 import { runTests } from "./run-tests.js";
 import { screenshot } from "./screenshot.js";
+// M20 Plan 1 / T20.1.1 — senses parity residual: arbitrary-pose screenshot +
+// inline-image capture. Both extend the existing screenshot surface; sibling
+// files to screenshot.ts.
+import { screenshotCamera } from "./screenshot-camera.js";
+import { captureInline } from "./capture-inline.js";
+// M20 Plan 1 / T20.1.2 — Editor window screenshot. Win-only full-fidelity via
+// PrintWindow; cross-platform best-effort readback with platformLimited flag.
+import { screenshotWindow } from "./screenshot-window.js";
 import { readConsole } from "./read-console.js";
 import { profilerCapture } from "./profiler-capture.js";
 import { profilerMemory } from "./profiler-memory.js";
@@ -229,6 +237,23 @@ export const M10_TOOLS: Tool[] = [
   profilerMemory,
   profilerRendering,
   spatialQuery,
+];
+
+// M20 Plan 1 / T20.1.1 — senses parity residual. Two new read-only senses
+// tools that extend the existing screenshot surface: screenshot_camera renders
+// from an arbitrary world-space pose (transient camera, scene camera untouched),
+// and capture_inline returns the PNG as an inline base64 image content block
+// (no temp file) so agents that don't read the filesystem still get a viewable
+// image. Both are live-only (no batch fallback) and route as direct-response
+// tools — the bridge returns tool JSON directly (inlineImage field carried by
+// capture_inline is unwrapped into an MCP image block in live-client.ts).
+//
+// M20 Plan 1 / T20.1.2 adds screenshot_window (EditorWindow capture; Win-only
+// full-fidelity, cross-platform best-effort readback with platformLimited).
+export const M20_PLAN1_TOOLS: Tool[] = [
+  screenshotCamera,
+  captureInline,
+  screenshotWindow,
 ];
 
 export const M11_TOOLS: Tool[] = [agentCapabilities, generateSkill];
@@ -555,6 +580,7 @@ export const ALL_TOOLS: Tool[] = [
   ...M5_TOOLS,
   ...M9_TOOLS,
   ...M10_TOOLS,
+  ...M20_PLAN1_TOOLS,
   ...M11_TOOLS,
   ...M12_TOOLS,
   ...M13_TOOLS,

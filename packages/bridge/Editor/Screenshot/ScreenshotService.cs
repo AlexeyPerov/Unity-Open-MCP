@@ -31,24 +31,109 @@ namespace UnityOpenMcpBridge.Screenshot
             if (sv == null || sv.camera == null)
                 throw new InvalidOperationException("No active Scene view found.");
 
-            var cam = sv.camera;
-            return CaptureCamera(cam, width, height, PathStamp("scene"));
+            return WritePng(RenderCameraToPng(sv.camera, width, height), PathStamp("scene"));
+        }
+
+        // M20 Plan 1 / T20.1.1 — byte-returning capture for unity_senses_capture_inline.
+        // Mirrors the file-returning capture but skips the disk write so an MCP
+        // client that doesn't read the filesystem can still receive the image as
+        // an inline base64 content block.
+        public static byte[] CaptureSceneViewBytes(int width, int height)
+        {
+            var sv = SceneView.lastActiveSceneView;
+            if (sv == null || sv.camera == null)
+                throw new InvalidOperationException("No active Scene view found.");
+
+            return RenderCameraToPng(sv.camera, width, height);
         }
 
         public static string CaptureGameView(int width, int height)
         {
-            var cam = Camera.main;
-            if (cam == null)
+            var cam = ResolveMainCamera();
+            return WritePng(RenderCameraToPng(cam, width, height), PathStamp("game"));
+        }
+
+        public static byte[] CaptureGameViewBytes(int width, int height)
+        {
+            var cam = ResolveMainCamera();
+            return RenderCameraToPng(cam, width, height);
+        }
+
+        // M20 Plan 1 / T20.1.1 — render from an arbitrary camera pose without
+        // moving the scene/game camera. A transient Camera is positioned at the
+        // requested pose, renders to a RenderTexture, then is destroyed. The
+        // scene camera is never touched. When a main camera exists its
+        // cullingMask / nearClip / farClip are mirrored so the pose render sees
+        // the same layers the player would; otherwise sensible defaults apply.
+        public static string CaptureFromPose(
+            Vector3 position, Vector3 rotationEuler, float fov,
+            int width, int height, string background)
+        {
+            var png = CaptureFromPoseBytes(position, rotationEuler, fov, width, height, background);
+            return WritePng(png, PathStamp("camera"));
+        }
+
+        public static byte[] CaptureFromPoseBytes(
+            Vector3 position, Vector3 rotationEuler, float fov,
+            int width, int height, string background)
+        {
+            var go = new GameObject("___screenshot_pose_cam_temp");
+            try
             {
-                var all = Object.FindObjectsByType<Camera>();
-                if (all == null || all.Length == 0)
-                    throw new InvalidOperationException("No camera found in the scene.");
-                cam = all[0];
+                var cam = go.AddComponent<Camera>();
+                cam.transform.position = position;
+                cam.transform.rotation = Quaternion.Euler(rotationEuler);
+                cam.fieldOfView = fov;
+                cam.clearFlags = ParseClearFlags(background);
+                cam.backgroundColor = background == "transparent"
+                    ? new Color(0, 0, 0, 0)
+                    : new Color32(64, 64, 64, 255);
+
+                // Mirror the main camera's view setup when available so the pose
+                // render sees the same layers/depth range as the live game view.
+                // Falls back to rendering everything but IgnoreRaycast.
+                var main = Camera.main;
+                if (main != null)
+                {
+                    cam.cullingMask = main.cullingMask;
+                    cam.nearClipPlane = main.nearClipPlane;
+                    cam.farClipPlane = main.farClipPlane;
+                }
+                else
+                {
+                    cam.cullingMask = ~(1 << 2); // everything except IgnoreRaycast
+                    cam.nearClipPlane = 0.01f;
+                    cam.farClipPlane = 1000f;
+                }
+
+                return RenderCameraToPng(cam, width, height);
             }
-            return CaptureCamera(cam, width, height, PathStamp("game"));
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        private static Camera ResolveMainCamera()
+        {
+            var cam = Camera.main;
+            if (cam != null) return cam;
+            var all = Object.FindObjectsByType<Camera>();
+            if (all == null || all.Length == 0)
+                throw new InvalidOperationException("No camera found in the scene.");
+            return all[0];
         }
 
         public static string CaptureIsolated(GameObject target, int quadWidth, int quadHeight, string background)
+        {
+            return WritePng(CaptureIsolatedBytes(target, quadWidth, quadHeight, background), PathStamp("isolated"));
+        }
+
+        // M20 Plan 1 / T20.1.1 — byte-returning isolated capture for the inline
+        // path. Reuses CompositeToPngBytes so capture_inline can serve the same
+        // 2x2 composite as the file-returning screenshot tool without a temp
+        // file round-trip.
+        public static byte[] CaptureIsolatedBytes(GameObject target, int quadWidth, int quadHeight, string background)
         {
             if (target == null)
                 throw new InvalidOperationException("Target GameObject not found.");
@@ -99,7 +184,7 @@ namespace UnityOpenMcpBridge.Screenshot
                     composites[i] = RenderQuad(cam, quadWidth, quadHeight);
                 }
 
-                return CompositeToPng(composites, quadWidth, quadHeight, PathStamp("isolated"));
+                return CompositeToPngBytes(composites, quadWidth, quadHeight);
             }
             finally
             {
@@ -111,7 +196,17 @@ namespace UnityOpenMcpBridge.Screenshot
 
         // ---- helpers ----
 
-        private static string CaptureCamera(Camera cam, int width, int height, string outPath)
+        private static string WritePng(byte[] png, string outPath)
+        {
+            Directory.CreateDirectory(OutputDir);
+            File.WriteAllBytes(outPath, png);
+            return outPath;
+        }
+
+        // Render an existing Camera to PNG bytes. The camera's targetTexture is
+        // swapped to a transient RenderTexture and restored in finally — the
+        // caller's camera is left untouched.
+        private static byte[] RenderCameraToPng(Camera cam, int width, int height)
         {
             var rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
             var prevTarget = cam.targetTexture;
@@ -128,11 +223,8 @@ namespace UnityOpenMcpBridge.Screenshot
                 tex.Apply();
 
                 var png = ImageConversion.EncodeToPNG(tex);
-                Directory.CreateDirectory(OutputDir);
-                File.WriteAllBytes(outPath, png);
-
                 Object.DestroyImmediate(tex);
-                return outPath;
+                return png;
             }
             finally
             {
@@ -177,6 +269,14 @@ namespace UnityOpenMcpBridge.Screenshot
 
         private static string CompositeToPng(Texture2D[] quads, int qw, int qh, string outPath)
         {
+            var png = CompositeToPngBytes(quads, qw, qh);
+            Directory.CreateDirectory(OutputDir);
+            File.WriteAllBytes(outPath, png);
+            return outPath;
+        }
+
+        private static byte[] CompositeToPngBytes(Texture2D[] quads, int qw, int qh)
+        {
             int totalW = qw * 2;
             int totalH = qh * 2;
 
@@ -216,10 +316,8 @@ namespace UnityOpenMcpBridge.Screenshot
             composite.Apply();
 
             var png = ImageConversion.EncodeToPNG(composite);
-            Directory.CreateDirectory(OutputDir);
-            File.WriteAllBytes(outPath, png);
             Object.DestroyImmediate(composite);
-            return outPath;
+            return png;
         }
 
         private static Bounds? ComputeBounds(GameObject go)

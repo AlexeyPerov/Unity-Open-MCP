@@ -293,6 +293,9 @@ Workflow (CI build prep): `build_get_scenes` → `build_set_scenes` → `build_g
 - `**unity_senses_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Set `include_passes: false` on large suites to avoid truncation. **Never fire a second `run_tests` before the first resolves** (no concurrency guard; results interleave).
 - `**unity_senses_read_console`** — console entries via reflection. Filter `type: "error"` to confirm clean compile. `detail: "summary"` for messages only (saves tokens); `detail: "verbose"` includes Unity-internal frames.
 - `**unity_senses_screenshot**` — Scene / Game / isolated 2×2 composite of one GameObject.
+- `**unity_senses_screenshot_camera**` — render from an arbitrary world-space pose (position + rotation + fov) without moving the scene/game camera; transient camera, scene camera untouched.
+- `**unity_senses_capture_inline**` — same targets as `screenshot` but returns the PNG as an inline base64 image (no temp file) for agents that don't read the filesystem.
+- `**unity_senses_screenshot_window**` — capture an Editor window (Console / Hierarchy / Inspector / Project / Scene / Game / custom). Windows-only full-fidelity via PrintWindow; on macOS/Linux a best-effort readback is used and the response carries `platformLimited: true`.
 - `**unity_senses_profiler_capture**` / `profiler_memory` / `profiler_rendering` — frame hierarchy, memory allocators, rendering env.
 - `**unity_senses_spatial_query**` — physics-based raycast / overlap / bounds / ground_check / nearest against the live scene.
 - `**unity_senses_pull_events**` — incremental console logs + editor-state transitions (compile start/stop, play-mode). Cheaper than `read_console` for "what happened since my last call"; first call opens the stream, later calls return only new events. Returns `bridge_unavailable` when the bridge is down.
