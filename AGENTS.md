@@ -14,11 +14,11 @@
 - **Docs are part of done.** If a change affects public behavior, API contracts, architecture boundaries, or developer workflows, update tracked docs in `README.md` and/or `docs/` in the same task.
 - **Agent skill sync.** `skills/unity-open-mcp/SKILL.md` is agent-facing guidance (the playbook agents see inside a game project). The MCP package owns keeping it in sync with tool/capability/routing changes alongside `docs/api/mcp-tools.md` — see `mcp-server/AGENTS.md` §Agent skill sync for the rule. Skill install paths come from the single-source `skills/client-paths.json` manifest, not from per-package constants.
 - **Docs layout and ownership.**
-  - Root `README.md` stays short: intro, current feature set, quick links.
-  - `docs/README.md` is the docs index and must link every top-level doc.
+  - Root `README.md` stays short: intro, current feature set, quick links, and a **Documentation** section that is the docs index (no separate `docs/README.md`).
+  - `README.md`'s Documentation section is the docs index and must link every top-level doc, **without duplicating** links already provided by other README sections (Quick setup, Key features, Unity Hub Pro, Contributing). When a new top-level doc is added, link it from this section in the same task.
   - `docs/architecture.md` covers repo structure and cross-package boundaries.
   - `docs/api.md` documents externally relevant interfaces and contracts.
-- **Doc update scope rule.** Edit only docs that match the changed area; avoid unrelated rewrites. If a new docs domain is introduced, add it to `docs/README.md` in the same task.
+- **Doc update scope rule.** Edit only docs that match the changed area; avoid unrelated rewrites. If a new docs domain is introduced, add it to `README.md`'s Documentation section in the same task.
 - **When docs updates can be skipped.** Typos, formatting-only edits, comments-only changes, and internal refactors that do not alter behavior or contracts.
 - **Agent reporting requirement.** If code changes but tracked docs are not updated, explicitly state why docs were not needed in the final handoff message.
 

@@ -2,7 +2,7 @@
 
 This page summarizes the MCP tool surface exposed by `unity-open-mcp`.
 
-> **Install / connect.** The MCP server ships on npm as [`unity-open-mcp`](https://www.npmjs.com/package/unity-open-mcp). Most users never install it manually — the AI client spawns it via `npx -y unity-open-mcp@latest` (no repo clone required). See [Manual setup](../manual-setup.md) for the full client-config snippets and environment variables, and the [Maintainer publish flow](../manual-setup.md#maintainer-publish-flow) for how the package is published and updated.
+> **Install / connect.** The MCP server ships on npm as [`unity-open-mcp`](https://www.npmjs.com/package/unity-open-mcp). Most users never install it manually — the AI client spawns it via `npx -y unity-open-mcp@latest` (no repo clone required). See [Manual setup](../manual-setup.md) for the full client-config snippets and environment variables, and the [Maintainer publish flow](../development-setup.md#maintainer-publish-flow) for how the package is published and updated.
 
 For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open_mcp_capabilities`.
 

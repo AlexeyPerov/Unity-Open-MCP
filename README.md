@@ -1,6 +1,3 @@
-<p align="center">
-  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="310">
-</p>
 
 | [English](README.md) | [简体中文](docs/i18n/README-zh.md) |
 |----------------------|---------------------------------|
@@ -14,6 +11,8 @@
 # Unity Open MCP
 
 Unity Open MCP connects AI agents to Unity projects with a bridge + gate workflow: make changes, run validation, inspect results, and iterate safely.
+
+Requires **Unity 2022.3 LTS or newer** (Unity 6 recommended).
 
 The MCP server consist of a total of **160** tools.
 
@@ -45,17 +44,24 @@ For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-too
 
 ## Documentation
 
-- [Docs index](docs/README.md)
-- [Architecture](docs/architecture.md)
-- [Wizard setup](docs/wizard-setup.md)
-- [Manual setup](docs/manual-setup.md)
-- [Extensions](docs/extensions.md)
-- [Skills](docs/skills.md)
-- [API index](docs/api.md)
-- [Bridge HTTP API](docs/api/bridge-http.md)
-- [MCP tools API](docs/api/mcp-tools.md)
-- [MCP resources API](docs/api/resources.md)
-- [Unity Hub Pro](docs/unity-hub-pro.md)
+- [Development setup](docs/development-setup.md) — local checkout, building the MCP server, contributor and maintainer workflows.
+- [Architecture](docs/architecture.md) — repository boundaries and runtime flow.
+- [Skills](docs/skills.md) — agent playbooks (`SKILL.md`) shipped into a project.
+- [API index](docs/api.md) — contract documentation map.
+- [Bridge HTTP API](docs/api/bridge-http.md) — bridge endpoints and envelopes.
+- [MCP resources API](docs/api/resources.md) — resource URIs and payloads.
+- [Code conventions](docs/code-conventions.md) — non-obvious C# decisions (instance IDs, namespace aliasing).
+
+Setup, the tools API, the Hub, extensions, and the comparison matrix are linked in their own sections above.
+
+## Unity Hub Pro
+
+<p align="center">
+  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="310">
+</p>
+
+Unity Hub Pro is the desktop companion app for Unity Open MCP. It helps you manage projects, run the AI Setup wizard, and handle maintainer workflows from one UI.
+[See docs for details.](docs/unity-hub-pro.md)
 
 ## Contributing
 

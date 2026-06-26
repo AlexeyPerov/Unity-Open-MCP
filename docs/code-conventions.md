@@ -72,5 +72,3 @@ see the NavMesh rule in [`packages/extensions/AGENTS.md`](../packages/extensions
 ## Related docs
 
 - [Architecture](architecture.md) — package boundaries and runtime flow.
-- [Unity version compatibility](unity-version-compat.md) — supported editor
-  versions and version-gated APIs.

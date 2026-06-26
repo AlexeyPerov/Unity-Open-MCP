@@ -151,6 +151,4 @@ for a local monorepo development copy of a community pack:
 ## Related docs
 
 - [Architecture](architecture.md) — bridge / verify / MCP server boundaries.
-- [Unity version compatibility](unity-version-compat.md) — version-gated APIs
-  and the define-symbol model.
 - [MCP tools API](api/mcp-tools.md)

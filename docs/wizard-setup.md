@@ -66,7 +66,7 @@ Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation) are
 
 After onboarding, you can add or remove Unity domain dependencies at any time from the bridge window (**Tools → Unity Open MCP Bridge → Extensions → Optional Unity dependencies**) — one click per domain, no manifest editing. The Hub's project settings modal also shows a read-only installed / missing status per domain.
 
-For the contributor / community-pack `file:` workflow, see [Manual setup](manual-setup.md#contributor--community-pack-workflow).
+For the contributor / community-pack `file:` workflow, see [Development setup](development-setup.md).
 
 [[SCREENSHOT:WIZARD-STEP3-PACKAGES-DIFF]]
 

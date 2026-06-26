@@ -9,7 +9,7 @@
 #
 # Authentication: `NPM_TOKEN` must be configured as a repository secret on the
 # publishing npm account (automation token with 2FA on the account). The
-# Hub's maintainer panel (docs/manual-setup.md §Maintainer publish flow) is the
+# Hub's maintainer panel (docs/development-setup.md §Maintainer publish flow) is the
 # other publish channel — it never touches this secret and never creates the
 # git tag. See the release runbook for when to use each path.
 
