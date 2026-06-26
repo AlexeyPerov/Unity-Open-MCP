@@ -1,0 +1,43 @@
+{
+  "id": "hexa-sort-a05-validation",
+  "title": "A-05 Validation pass — machine-checkable evidence against the canonical spec",
+  "milestone": "hexa-sort",
+  "engineId": "unity",
+  "order": 60,
+  "requirementLevel": "required-extended",
+  "tags": ["hexa-sort", "validation"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prompt (send verbatim to the agent)",
+      "body": "Run the final validation pass for the Hexa Sort implementation against the canonical spec.\n\nCheck and record each as PASS/FAIL with short evidence:\n1) Compile status — zero compile errors.\n2) Required scene objects exist — BoardRoot, SlotsRoot, PiecesRoot, GameManager.\n3) Reference solution — replay the four moves from canonical-spec.md §7 from LoadSeed() and record whether IsSolved becomes true and SolvedFiredCount equals 1. Prefer an EditMode test; if you run it, include the pass/fail.\n4) Negative cases — confirm each case in §7 returns the expected MoveResult (SameSlot, EmptySource, ColorMismatch, DestFull).\n5) Solved predicate on partial boards — confirm SolvedFiredCount stays 0 on the seed and after each non-final move.\n\nWrite Assets/_Benchmark/Run/A-05-validation.md in this format:\n- Check name | Result (PASS/FAIL) | Evidence (short) | Follow-up action if FAIL."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes (done_when — verify each with the named tool)",
+      "items": [
+        "unity_open_mcp_compile_check reports zero compile errors",
+        "unity_open_mcp_scene_get_data confirms the required root objects still exist (BoardRoot, SlotsRoot, PiecesRoot, GameManager)",
+        "The reference solution from canonical-spec.md §7 replays to IsSolved == true and SolvedFiredCount == 1 (run as an EditMode test if one was written; otherwise a documented deterministic replay)",
+        "The negative cases from §7 return the expected non-Ok MoveResult (Move(0,0)→SameSlot, Move(3,0) on seed→EmptySource, Move(0,1) on seed→ColorMismatch, overflow→DestFull)",
+        "SolvedFiredCount stays 0 on the seed and after each non-final move",
+        "Assets/_Benchmark/Run/A-05-validation.md records each check with PASS/FAIL + evidence"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output / A-05-validation.md contents"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this step complete"
+    }
+  ],
+  "reset": {
+    "note": "The agent authors A-05-validation.md under Assets/_Benchmark/Run/, which the suite has no manifest for. To reset before another run: delete Assets/_Benchmark/HexaSort/ and Assets/_Benchmark/Run/, delete any Hexa Sort scene, then confirm editor idle (editor_status not compiling, not in play mode; read_compile_errors zero)."
+  }
+}

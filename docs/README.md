@@ -18,12 +18,7 @@ Use this index to find setup guides, product docs, and API contracts.
 - [MCP tools API](api/mcp-tools.md) — tool catalog and route policy.
 - [MCP resources API](api/resources.md) — resource URIs and payloads.
 - [Code conventions](code-conventions.md) — non-obvious C# decisions (instance IDs, namespace aliasing).
-- [Validation Suite](../validation-suite/README.md) — standalone Tauri app for guided milestone manual validation.
-
-## Benchmarking
-
-- [Benchmark methodology](../benchmarks/docs/methodology.md) — release-quality prompt-template benchmarks: flow, scoring, gates, failure taxonomy.
-- [Hexa Sort template](../benchmarks/hexa-sort/README.md) — the first runnable benchmark template.
+- [Validation Suite](../validation-suite/README.md) — standalone Tauri app for guided milestone manual validation; ships runnable scenario packs (e.g. the `hexa-sort` build-and-validate pack under `scenarios/unity/hexa-sort/`).
 
 ## Fast lookup
 

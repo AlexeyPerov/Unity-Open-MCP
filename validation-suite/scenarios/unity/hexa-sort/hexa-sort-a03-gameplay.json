@@ -1,0 +1,41 @@
+{
+  "id": "hexa-sort-a03-gameplay",
+  "title": "A-03 Core gameplay scripts — board model and move logic",
+  "milestone": "hexa-sort",
+  "engineId": "unity",
+  "order": 40,
+  "requirementLevel": "required-extended",
+  "tags": ["hexa-sort", "gameplay"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prompt (send verbatim to the agent)",
+      "body": "Implement the Hexa Sort board model and move logic per canonical-spec.md §2-§4.\n\nPlace scripts under Assets/_Benchmark/HexaSort/ in namespace HexaSort.\n\nImplement exactly:\n- HexColor enum (Red, Green, Blue).\n- HexaBoard with SLOT_COUNT=4, CAP=2, TARGET=2.\n- LoadSeed() producing the seed board from §3 verbatim.\n- Move(srcSlot, dstSlot) enforcing the legality rules in §4 and returning the matching MoveResult for each failure (SameSlot, EmptySource, DestFull, ColorMismatch, OutOfRange, Ok). On a non-Ok result the board must not change.\n- IsSolved implementing the predicate in §6.\n\nKeep the board model UnityEngine-free so EditMode tests can exercise it. Prefer small focused classes over one large manager.\n\nThen write Assets/_Benchmark/Run/A-03-gameplay-notes.md listing:\n- Script/class list and responsibilities.\n- How each MoveResult case is detected and returned.\n- Any unresolved TODOs.\n\nDo not add the win-completion signal yet (that is A-04) and do not add polish."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes (done_when — verify each with the named tool)",
+      "items": [
+        "unity_open_mcp_compile_check (fallback: unity_open_mcp_read_compile_errors) reports zero compile errors",
+        "unity_open_mcp_script_read (or equivalent read) confirms the declared script files exist under Assets/_Benchmark/HexaSort/",
+        "Assets/_Benchmark/Run/A-03-gameplay-notes.md exists and documents class responsibilities and how each MoveResult case is produced",
+        "The board model (HexaBoard) has no UnityEngine dependency so it is EditMode-testable"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output / compile_check + script_read results"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this step complete"
+    }
+  ],
+  "reset": {
+    "note": "The agent authors scripts under Assets/_Benchmark/HexaSort/ and A-03-gameplay-notes.md, none of which the suite tracks in a manifest. To reset: delete Assets/_Benchmark/HexaSort/ and Assets/_Benchmark/Run/, then confirm editor idle (editor_status not compiling, not in play mode; read_compile_errors zero)."
+  }
+}

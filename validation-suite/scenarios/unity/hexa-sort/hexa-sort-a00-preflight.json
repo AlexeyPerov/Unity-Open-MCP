@@ -1,0 +1,70 @@
+{
+  "id": "hexa-sort-a00-preflight",
+  "title": "Preflight — bridge healthy, surface present, zero compile errors",
+  "milestone": "hexa-sort",
+  "engineId": "unity",
+  "order": 10,
+  "requirementLevel": "required-core",
+  "tags": ["hexa-sort", "preflight"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Goal",
+      "body": "Confirm Unity Open MCP is wired, healthy, and exposes the surface this template needs before any build work. The setup step runs the checks automatically; verify each result against the Expected list. Do not begin A-01 until preflight is green."
+    },
+    {
+      "id": "run-preflight",
+      "type": "setup",
+      "title": "Run preflight checks (automated, read-only)",
+      "actions": [
+        {
+          "action": "mcp_tool",
+          "tool": "unity_open_mcp_bridge_status",
+          "args": {},
+          "timeoutMs": 30000
+        },
+        {
+          "action": "mcp_tool",
+          "tool": "unity_open_mcp_capabilities",
+          "args": {}
+        },
+        {
+          "action": "mcp_tool",
+          "tool": "unity_open_mcp_manage_tools",
+          "args": { "action": "list_groups" }
+        },
+        {
+          "action": "mcp_tool",
+          "tool": "unity_open_mcp_read_compile_errors",
+          "args": {}
+        }
+      ]
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes",
+      "items": [
+        "bridge_status reports the bridge as running (connected); not stopped/dead/unknown",
+        "capabilities returns a non-empty tool list",
+        "capabilities reports available: true for the groups this template depends on: core, gate-and-verify, typed-editor",
+        "manage_tools (action: list_groups) shows core, gate-and-verify, and typed-editor as active or available to this session",
+        "read_compile_errors reports zero compile errors at baseline"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste any notable output"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Preflight passed — proceed to A-01"
+    }
+  ],
+  "reset": {
+    "note": "Read-only checks; no project artifacts are created. Nothing to clean between runs."
+  }
+}

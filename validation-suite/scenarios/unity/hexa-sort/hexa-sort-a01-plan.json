@@ -1,0 +1,46 @@
+{
+  "id": "hexa-sort-a01-plan",
+  "title": "A-01 Plan — produce an implementation plan for the canonical spec",
+  "milestone": "hexa-sort",
+  "engineId": "unity",
+  "order": 20,
+  "requirementLevel": "required-extended",
+  "tags": ["hexa-sort", "plan"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prompt (send verbatim to the agent)",
+      "body": "You are implementing a benchmark level: Hexa Sort. The full, authoritative rules are in canonical-spec.md (open it from the next step). Read it and implement to it; do not invent your own rules, board, or win condition.\n\nProduce ONLY an implementation plan. Do not write gameplay code yet.\n\nWrite it to Assets/_Benchmark/Run/A-01-plan.md with these exact sections:\n1) Scope — in/out for v1 (must match canonical-spec.md §9 out-of-scope list).\n2) Data model — the HexaBoard / HexColor / MoveResult types from §2, and how the seed board from §3 will be represented.\n3) Move rule — how you will enforce the legality rules in §4 and return the correct MoveResult for each failure.\n4) Win condition — how the solved-state predicate (§6) and the single-fire completion signal (§5) will be implemented.\n5) Implementation task list — ordered steps to build board model, scene skeleton, and wiring (A-02..A-05).\n6) Risks and mitigations — at least: how you keep the board model UnityEngine-free so EditMode tests can run it, and how you prevent duplicate completion firing.\n\nKeep it deterministic and simple. No save/load, networking, procedural gen, or polish (canonical-spec.md §9)."
+    },
+    {
+      "id": "spec",
+      "type": "external_doc",
+      "title": "Open the canonical spec (the requirement the agent implements to)",
+      "docPath": "validation-suite/scenarios/unity/hexa-sort/canonical-spec.md"
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes (done_when)",
+      "items": [
+        "Assets/_Benchmark/Run/A-01-plan.md exists and contains all six required sections (1 Scope, 2 Data model, 3 Move rule, 4 Win condition, 5 Implementation task list, 6 Risks and mitigations)",
+        "The plan references the canonical board constants SLOT_COUNT=4, CAP=2, TARGET=2",
+        "The plan reproduces the seed board from canonical-spec.md §3 verbatim (slot 0 [Red, Green], slot 1 [Red, Blue], slot 2 [Green, Blue], slot 3 empty)"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output / A-01-plan.md contents"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this step complete"
+    }
+  ],
+  "reset": {
+    "note": "The agent authors A-01-plan.md under Assets/_Benchmark/Run/, which the suite has no manifest for. To reset: delete Assets/_Benchmark/Run/ and Assets/_Benchmark/HexaSort/, delete any Hexa Sort scene, then confirm the editor is idle (editor_status not compiling, not in play mode; read_compile_errors reports zero)."
+  }
+}

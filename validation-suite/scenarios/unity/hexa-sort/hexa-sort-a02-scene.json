@@ -1,0 +1,41 @@
+{
+  "id": "hexa-sort-a02-scene",
+  "title": "A-02 Scene skeleton — create the baseline scene structure",
+  "milestone": "hexa-sort",
+  "engineId": "unity",
+  "order": 30,
+  "requirementLevel": "required-extended",
+  "tags": ["hexa-sort", "scene"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prompt (send verbatim to the agent)",
+      "body": "Create the scene skeleton for Hexa Sort per the plan in A-01 and canonical-spec.md §8 (scene representation).\n\nCreate (if missing): a main camera and a directional light.\nCreate root GameObjects: BoardRoot, SlotsRoot, PiecesRoot, GameManager.\nUnder SlotsRoot create four slot placeholders (indices 0..3) matching SLOT_COUNT.\nThe empty/fourth slot from the seed board must still exist as a placeholder.\n\nAfter creation, write Assets/_Benchmark/Run/A-02-scene-summary.md with:\n- The full created hierarchy (tree).\n- Which objects/components were newly created vs already present.\n- Any assumptions made.\n\nDo not implement gameplay yet."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes (done_when — verify each with the named tool)",
+      "items": [
+        "unity_open_mcp_scene_get_data (or gameobject_find) shows root GameObjects BoardRoot, SlotsRoot, PiecesRoot, and GameManager exist",
+        "unity_open_mcp_scene_get_data shows a main camera and a directional light",
+        "unity_open_mcp_scene_get_data shows four slot placeholders (indices 0..3) under SlotsRoot matching SLOT_COUNT=4, including the empty fourth slot",
+        "Assets/_Benchmark/Run/A-02-scene-summary.md exists and lists the created hierarchy"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output / scene_get_data result"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this step complete"
+    }
+  ],
+  "reset": {
+    "note": "The agent creates scene objects and A-02-scene-summary.md, none of which the suite tracks in a manifest. To reset: delete the Hexa Sort scene created this run, delete Assets/_Benchmark/Run/, then confirm editor idle (editor_status not compiling, not in play mode; read_compile_errors zero)."
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "hexa-sort-a04-win",
+  "title": "A-04 Win condition — single-fire completion signal",
+  "milestone": "hexa-sort",
+  "engineId": "unity",
+  "order": 50,
+  "requirementLevel": "required-extended",
+  "tags": ["hexa-sort", "win-condition"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prompt (send verbatim to the agent)",
+      "body": "Add the Hexa Sort completion logic per canonical-spec.md §5-§6.\n\nImplement:\n- SolvedFiredCount, starting at 0.\n- After each successful Move, evaluate IsSolved. When a legal move first makes IsSolved true, increment SolvedFiredCount to 1 and emit a clear completion signal (a log line is sufficient). It must NOT fire on the seed, on a partial board, on an illegal move, or more than once.\n\nKeep it deterministic and easy to verify in logs.\n\nWrite Assets/_Benchmark/Run/A-04-win-condition.md with:\n- The exact solved-state predicate (copy from §6).\n- Where the completion signal is emitted.\n- How duplicate firing is prevented (the guard).\n\nDo not add animation, particles, audio, or UI."
+    },
+    {
+      "id": "expected",
+      "type": "expected",
+      "title": "Expected outcomes (done_when — verify each with the named tool)",
+      "items": [
+        "unity_open_mcp_compile_check (fallback: unity_open_mcp_read_compile_errors) reports zero compile errors",
+        "Assets/_Benchmark/Run/A-04-win-condition.md exists and states the exact solved-state predicate copied from canonical-spec.md §6",
+        "The doc states where the completion signal is emitted and how duplicate firing is prevented (the guard)"
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output / compile_check result"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this step complete"
+    }
+  ],
+  "reset": {
+    "note": "The agent updates scripts under Assets/_Benchmark/HexaSort/ and writes A-04-win-condition.md, none of which the suite tracks in a manifest. To reset: delete Assets/_Benchmark/HexaSort/ and Assets/_Benchmark/Run/, then confirm editor idle (editor_status not compiling, not in play mode; read_compile_errors zero)."
+  }
+}
