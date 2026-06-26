@@ -41,6 +41,8 @@ Current tool surface from `mcp-server/src/tools/index.ts`:
 
 For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-tools.md).
 
+> Looking at other options? See the [MCP tools for Unity comparison](docs/mcp-tools-comparison.md) — a side-by-side feature matrix of Unity Open MCP and the other MCP tools / AI assistants in the space.
+
 ## Documentation
 
 - [Docs index](docs/README.md)
@@ -48,6 +50,7 @@ For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-too
 - [Wizard setup](docs/wizard-setup.md)
 - [Manual setup](docs/manual-setup.md)
 - [Extensions](docs/extensions.md)
+- [Skills](docs/skills.md)
 - [API index](docs/api.md)
 - [Bridge HTTP API](docs/api/bridge-http.md)
 - [MCP tools API](docs/api/mcp-tools.md)

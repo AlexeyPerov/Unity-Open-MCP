@@ -8,7 +8,9 @@ Use this index to find setup guides, product docs, and API contracts.
 - [Manual setup](manual-setup.md) — direct MCP setup and client config snippets.
 - [Unity Hub Pro](unity-hub-pro.md) — app capabilities, workflows, and maintainer tools.
 - [Extensions](extensions.md) — embedded domain tools (compile-gated) and legacy/community packs.
+- [Skills](skills.md) — agent playbooks (`SKILL.md`) that ship into a project and guide the AI on how/when to call tools.
 - [Unity version compatibility](unity-version-compat.md) — supported versions and CI coverage.
+- [MCP tools for Unity comparison](mcp-tools-comparison.md) — side-by-side feature matrix of Unity Open MCP vs. other MCP tools and AI assistants.
 
 ## Architecture and APIs
 

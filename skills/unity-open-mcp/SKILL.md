@@ -81,7 +81,7 @@ A C# edit broke the bridge assembly (or a dependency); Unity is stuck mid-reload
 
 1. Call `**unity_open_mcp_read_compile_errors`** — reads `Editor.log` tail offline, returns structured CSxxxx errors (`file`/`line`/`code`). The **only** diagnostic that survives a dead bridge. (`compile_check` does **not** work here — its batch entry point lives in the same broken assembly, and the per-project lock blocks a second instance.)
 2. Read `errors[].file` / `line` / `code` and **fix the CS error in source first.** Do not retry tests, relaunch Unity, or call `compile_check`.
-3. Trigger a recompile (see [Local package source](#local-package-source-packages-recompile-caveat)); the bridge reloads itself once the assembly compiles. The MCP server auto-dismisses the Safe Mode dialog unless `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` is set.
+3. Trigger a recompile (see [Local package source recompile caveat](#local-package-source-recompile-caveat) if you develop against `packages/` source; otherwise a normal recompile from Unity is enough); the bridge reloads itself once the assembly compiles. The MCP server auto-dismisses the Safe Mode dialog unless `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` is set.
 4. Only when `read_compile_errors` reports no errors AND the lock shows fresh heartbeat + `state: idle` is the bridge back.
 
 ### Step 5 — Never conclude "Unity not running" while a process is alive
@@ -99,13 +99,29 @@ Either way: call `**unity_open_mcp_read_compile_errors`** → fix `errors[].file
 
 Use `**unity_open_mcp_compile_check**` only for a deliberate "does this build clean from scratch?" check — it spawns a fresh headless Unity and **always** routes to batch. It is not first-line recovery for a broken bridge assembly.
 
-## Local package source (`packages/`) recompile caveat
+## Batch fallback / Unity discovery
 
-Edits under `packages/` (referenced as `file:../../packages/...` from the project's `Packages/manifest.json`) live **outside** Unity's `Assets/` watch root — Unity does not auto-detect them, and neither `assets_refresh` nor `RequestScriptCompilation()` reliably picks them up. If you skip this, you'll run tests against the stale DLL and conclude your fix failed when it was never compiled in.
+`compile_check` is always batch. Other batch-capable tools fall back to batch only when the live bridge is down. The MCP server auto-discovers Unity from OS-default Hub install paths (macOS `/Applications/Unity/Hub/Editor`, Windows `C:\Program Files\Unity\Hub\Editor`, Linux `~/Unity/Hub/Editor`) plus the `UNITY_HUB` override; picks the newest unless the lock records a `unityVersion`, then matches that minor line. Explicit env vars:
+
+- `UNITY_PATH` — **optional**, override auto-discovered Unity executable (highest priority).
+- `UNITY_PROJECT_PATH` — absolute project root (optional when a lock exists).
+- `UNITY_HUB` — **optional**, override Hub install root.
+
+If Unity can't be found, batch tools return `unity_not_discovered`; only offline reads + `read_compile_errors` still work.
+
+---
+
+## Debug / contributor (skip if you use the released package)
+
+> *Only relevant if you develop against the `packages/` source tree (e.g. a `file:../../packages/...` reference in `Packages/manifest.json`) rather than an installed release. End users on the published package can ignore this section.*
+
+### Local package source recompile caveat
+
+Edits under `packages/` live **outside** Unity's `Assets/` watch root — Unity does not auto-detect them, and neither `assets_refresh` nor `RequestScriptCompilation()` reliably picks them up. If you skip this, you'll run tests against the stale DLL and conclude your fix failed when it was never compiled in.
 
 After editing `packages/` source, before tests:
 
-1. Confirm the new source has no CS errors (only meaningful once Unity has seen it once — see Safe Mode recovery if the bridge is already dead).
+1. Confirm the new source has no CS errors (only meaningful once Unity has seen it once — see [Safe Mode recovery](#step-4--safe-mode--bridge_compile_failed-recovery) if the bridge is already dead).
 2. Trigger the recompile via one of:
   - **(a, most reliable)** `package_add` / `package_remove` a no-op entry to force UPM resolution + domain reload, then revert it.
   - **(b)** Ask the user to focus the Unity window after you touch a tracked `Assets/` file.
@@ -117,16 +133,6 @@ After editing `packages/` source, before tests:
    Compare mtime to your last edit; do not run tests until DLL mtime > edit mtime.
 
 > **Stale-DLL trap:** if tests fail identically to before your fix, suspect the DLL never recompiled before concluding the fix is wrong.
-
-## Batch fallback / Unity discovery
-
-`compile_check` is always batch. Other batch-capable tools fall back to batch only when the live bridge is down. The MCP server auto-discovers Unity from OS-default Hub install paths (macOS `/Applications/Unity/Hub/Editor`, Windows `C:\Program Files\Unity\Hub\Editor`, Linux `~/Unity/Hub/Editor`) plus the `UNITY_HUB` override; picks the newest unless the lock records a `unityVersion`, then matches that minor line. Explicit env vars:
-
-- `UNITY_PATH` — **optional**, override auto-discovered Unity executable (highest priority).
-- `UNITY_PROJECT_PATH` — absolute project root (optional when a lock exists).
-- `UNITY_HUB` — **optional**, override Hub install root.
-
-If Unity can't be found, batch tools return `unity_not_discovered`; only offline reads + `read_compile_errors` still work.
 
 ## Core loop: mutate → gate → fix
 
@@ -266,7 +272,7 @@ Workflow: `package_check` → `package_search` if not installed → `package_add
 
 **Reflection / scripts / object data** — `type_schema` (read-only; structured member schema for one type; use to plan `invoke_method`/`object_modify`) / `script_read` (read-only, line slicing) / `script_write` (Roslyn pre-validated; `validate: true` default refuses non-compiling code with `validation_failed`) / `script_delete` (mutating; removes `.cs` + `.meta`) / `object_get_data` (read-only reflective walk) / `object_modify` (sets public fields/properties by name; safe by default — refuses static/init-only unless `allow_static: true`). Core reflection enhanced: `find_members` lists every overload separately; `invoke_method` accepts `generic_arg_types` (e.g. `GetComponent<Rigidbody>`) and `arg_type_names` (disambiguate overloads). Prefer `component_get`/`component_modify` for one Component's Inspector fields; use these for ScriptableObjects, Materials, or any non-Component Object.
 
-**Profiler session/diagnostics** — complement the M10 senses (runtime/session layer, not a second per-frame read). Most are gate-free direct-response (write no assets); only `profiler_save_data` runs the gate (`paths_hint` = destination `.json`):
+**Profiler session/diagnostics** — complement the agent-senses profiler tools (runtime/session layer, not a second per-frame read). Most are gate-free direct-response (write no assets); only `profiler_save_data` runs the gate (`paths_hint` = destination `.json`):
 
 - Session: `profiler_start` (`open_window: false` skips the menu) / `profiler_stop` (idempotent).
 - Reads (gate-free): `profiler_get_status` / `profiler_get_config` / `profiler_get_script_stats`.
@@ -315,6 +321,17 @@ When you edit `.prefab` / `.unity` / `.asset` / `.mat` / `.controller` / `.anim`
 Raw Unity YAML is enormous. `read_asset` returns counts, a `cmp` table declaring repeated component sets once (referenced by `c1`/`c2` codes), and a folded `tree`. Drill down with `field_limit` + `component` / `path` / `detail=verbose` instead of re-reading raw YAML. Session cache reuses the parsed model (`_cache: "hit"`). `detail: verbose` disables render-only folding; `field_limit: 0` (default) returns names only — bump it before `component` drill-down so fields are available.
 
 Use `**search_assets`** to locate prefabs/components/GUIDs; each result tags *why* it matched so you know which `read_asset` drill-down to run next.
+
+### Reads that save tokens
+
+Raw Unity data is large. Prefer the cheap, structured reads before reaching for verbose output:
+
+- **`read_asset`** returns a folded `tree` + `cmp` table + counts, not raw YAML. Drill into a subtree with `component` / `path` + `field_limit` instead of re-reading the whole asset; the parsed model is session-cached (`_cache: "hit"`). `field_limit: 0` (default) returns field names only — bump it only for a `component` drill-down where you need values.
+- **`manage_tools(action="list_groups")`** — sessions start `core`-only; activate only the group you need so ~160 tools stay out of the prompt.
+- **`read_console`** with `detail: "summary"` returns messages only; reserve `detail: "verbose"` for when you need Unity-internal stack frames.
+- **`search_assets`** tags *why* each result matched, so you skip broad reads and go straight to the right drill-down.
+- **`capabilities`** before assuming tool names/schemas/route policy — cheaper than discovering a tool's real signature by trial and error.
+- **Prefer typed tools** (`component_modify`, `scene_get_data`, …) over `execute_csharp` / `invoke_method` — explicit schemas, smaller request/response envelopes, same gate.
 
 ### Checkpoint → mutate → delta (large refactors)
 
