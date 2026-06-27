@@ -442,7 +442,7 @@ namespace UnityOpenMcpBridge
         {
             if (!BridgeSession.IsInitialized)
             {
-                var fallback = "{\"connected\":false,\"projectPath\":null,\"unityVersion\":null,\"bridgeVersion\":\"0.1.0\",\"mode\":\"live\",\"compiling\":true,\"isPlaying\":false}";
+                var fallback = "{\"connected\":false,\"projectPath\":null,\"unityVersion\":null,\"bridgeVersion\":\"0.1.1\",\"mode\":\"live\",\"compiling\":true,\"isPlaying\":false}";
                 BridgeHttpResponse.SendJson(context, 503, fallback);
                 return;
             }
