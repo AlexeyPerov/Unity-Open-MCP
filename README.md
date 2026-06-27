@@ -28,7 +28,7 @@ Use any of this options:
 
 1. Install Unity Hub Pro and use its **AI Setup wizard** (simplest, no console needed): see [Wizard setup](docs/wizard-setup.md).
 
-![plot](./art/hub-wizard-7.png)
+![plot](./screenshots/hub-wizard-7.png)
 
 2. If you prefer manual setup: see [Manual setup](docs/manual-setup.md).
 3. If prefer cloning this repo and working with it directly: see [Development setup](docs/development-setup.md). Fits contributor workflow.

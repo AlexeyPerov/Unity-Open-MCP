@@ -6,7 +6,7 @@ This page summarizes the MCP tool surface exposed by `unity-open-mcp`.
 
 For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open_mcp_capabilities`.
 
-| ![plot](./art/bridge-status.png) | ![plot](./art/bridge-tools.png) |
+| ![plot](../screenshots/bridge-status.png) | ![plot](../screenshots/bridge-tools.png) |
 
 ## Tool families
 
