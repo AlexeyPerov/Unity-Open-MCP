@@ -24,6 +24,7 @@ import {
   resetTestState,
   runStep as coreRunStep,
   setStepStatus,
+  type ExpandContext,
   type EngineProfile,
   type RequirementLevel,
   type Scenario,
@@ -97,6 +98,15 @@ class AppState {
   // ── ui ─────────────────────────────────────────────────────────────────────
   selectedScenarioId = $state<string | null>(null);
   filters = $state<Filters>({ ...DEFAULT_FILTERS });
+
+  /**
+   * Resolved placeholder context for the selected scenario (`{fixtureRoot}` /
+   * `{projectRoot}`), used to expand tokens in displayed prompts + setup
+   * action JSON. `null` until a project + scenario are active or while the
+   * fixture root is resolving; the renderer falls back to raw tokens then.
+   * Mirrors the context the runner builds for execution, cached per selection.
+   */
+  expandContext = $state<ExpandContext | null>(null);
 
   // ── bridge status (phase-3) ────────────────────────────────────────────────
   /** Coarse bridge health token shown in the TopBar chip. `unknown` until probed. */
@@ -246,6 +256,11 @@ class AppState {
     try {
       await this.loadScenarios();
       await this.loadSuite();
+      // Re-resolve the placeholder context for the (possibly preserved)
+      // selection against the now-active project. loadScenarios already
+      // refreshes when it auto-selects; this covers a kept selection on a
+      // project switch. Fire-and-forget; failures fall back to raw tokens.
+      void this.refreshExpandContext();
       // Probe the bridge once on project load so the TopBar chip reflects the
       // current state. Fire-and-forget; failure leaves `unknown` + a log line.
       void this.refreshBridgeStatus();
@@ -325,6 +340,7 @@ class AppState {
     // Auto-select the first scenario if nothing is selected.
     if (!this.selectedScenarioId && this.scenarios.length > 0) {
       this.selectedScenarioId = this.scenarios[0].id;
+      void this.refreshExpandContext();
     }
   }
 
@@ -510,6 +526,34 @@ class AppState {
 
   select(scenarioId: string): void {
     this.selectedScenarioId = scenarioId;
+    void this.refreshExpandContext();
+  }
+
+  /**
+   * Resolve the placeholder context (`{fixtureRoot}` / `{projectRoot}`) for
+   * the currently selected scenario so the renderer can expand tokens in
+   * displayed prompts + setup actions. Reuses the same `buildContext` path
+   * the runner uses for execution; cached per selection and re-resolved on
+   * every scenario/project switch. Stale values are cleared first so a
+   * brief async window never shows the previous scenario's resolved paths.
+   * Failures are non-fatal: the renderer falls back to raw tokens.
+   */
+  private async refreshExpandContext(): Promise<void> {
+    if (!this.activeProject || !this.profile || !this.selectedScenarioId) {
+      this.expandContext = null;
+      return;
+    }
+    this.expandContext = null;
+    try {
+      const ctx = await buildContext(
+        this.activeProject,
+        this.profile as unknown as EngineProfile,
+        this.selectedScenarioId,
+      );
+      this.expandContext = { projectRoot: ctx.projectRoot, fixtureRoot: ctx.fixtureRoot };
+    } catch (e) {
+      logs.log(`expand context resolve skipped: ${String(e)}`);
+    }
   }
 
   toggleFilter(key: keyof Filters): void {

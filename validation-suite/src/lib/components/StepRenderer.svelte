@@ -4,12 +4,23 @@
   import ActionLog from "./ActionLog.svelte";
   import StatusBadge from "./StatusBadge.svelte";
   import Button from "./shell/Button.svelte";
-  import type { Scenario, ScenarioStep, Status } from "@validation-suite/core";
+  import {
+    expandValue,
+    type ExpandContext,
+    type Scenario,
+    type ScenarioStep,
+    type SetupAction,
+    type Status,
+  } from "@validation-suite/core";
 
   let {
     scenario,
     step,
-  }: { scenario: Scenario; step: ScenarioStep } = $props();
+    ctx = null,
+  }: { scenario: Scenario; step: ScenarioStep; ctx?: ExpandContext | null } = $props();
+
+  /** Collapse state — all steps expanded by default. Pure UI, not persisted. */
+  let open = $state(true);
 
   // Step status is read from the suite state; defaults to awaiting.
   const status = $derived(
@@ -48,103 +59,120 @@
   }
 
   // agent_prompt payload rendered as readable JSON for copy + display.
+  // Placeholders (`{fixtureRoot}` / `{projectRoot}`) are expanded against
+  // the resolved context when available, so the operator sees + copies the
+  // real paths. Falls back to raw tokens before the context resolves.
   const promptText = $derived.by(() => {
     if (step.type !== "agent_prompt") return "";
     const lines: string[] = [];
     if (step.tool) lines.push(`Tool: ${step.tool}`);
     if (step.payload !== undefined) {
       lines.push("Payload:");
-      lines.push(JSON.stringify(step.payload, null, 2));
+      lines.push(JSON.stringify(ctx ? expandValue(step.payload, ctx) : step.payload, null, 2));
     }
     return lines.join("\n");
   });
+
+  /** Expand a setup action's placeholders for display (raw when no ctx). */
+  function expandAction(action: SetupAction): unknown {
+    return ctx ? expandValue(action, ctx) : action;
+  }
 </script>
 
 <article class="step" class:step-done={status === "done"}>
-  <div class="step-head">
+  <button
+    type="button"
+    class="step-head"
+    class:step-head-collapsed={!open}
+    aria-expanded={open}
+    onclick={() => (open = !open)}
+  >
+    <span class="step-chevron" class:step-chevron-open={open} aria-hidden="true">▸</span>
     <span class="step-type">{step.type}</span>
     {#if step.title}<span class="step-title">{step.title}</span>{/if}
     <span class="step-status"><StatusBadge status={status} /></span>
-  </div>
+  </button>
 
-  <div class="step-body">
-    {#if step.type === "info" || step.type === "expected"}
-      {#if step.body}
-        <p class="prose">{step.body}</p>
-      {/if}
-      {#if step.items?.length}
-        <ul class="items">
-          {#each step.items as item}
-            <li>{item}</li>
+  {#if open}
+    <div class="step-body">
+      {#if step.type === "info" || step.type === "expected"}
+        {#if step.body}
+          <p class="prose">{step.body}</p>
+        {/if}
+        {#if step.items?.length}
+          <ul class="items">
+            {#each step.items as item}
+              <li>{item}</li>
+            {/each}
+          </ul>
+        {/if}
+      {:else if step.type === "setup"}
+        <p class="prose muted">
+          Runs <strong>{step.actions?.length ?? 0}</strong> setup action(s):
+          {step.actions?.map((a) => a.action).join(", ")}.
+        </p>
+        <ol class="actions">
+          {#each step.actions ?? [] as action}
+            <li>
+              <code class="verb">{action.action}</code>
+              <pre>{JSON.stringify(expandAction(action), null, 2)}</pre>
+            </li>
           {/each}
-        </ul>
-      {/if}
-    {:else if step.type === "setup"}
-      <p class="prose muted">
-        Runs <strong>{step.actions?.length ?? 0}</strong> setup action(s):
-        {step.actions?.map((a) => a.action).join(", ")}.
-      </p>
-      <ol class="actions">
-        {#each step.actions ?? [] as action}
-          <li>
-            <code class="verb">{action.action}</code>
-            <pre>{JSON.stringify(action, null, 2)}</pre>
-          </li>
-        {/each}
-      </ol>
-      <ActionLog scenarioId={scenario.id} stepId={step.id} />
-    {:else if step.type === "agent_prompt"}
-      {#if step.tool}
-        <p class="prose">Run this in your MCP client:</p>
-        <pre class="prompt">{promptText}</pre>
-        <Button variant="secondary" onclick={() => copy(promptText)}>
-          {copied ? "Copied ✓" : "Copy prompt"}
-        </Button>
-      {/if}
-    {:else if step.type === "actual"}
-      <p class="prose muted">
-        Paste the agent's output here. Payloads persist to
-        <code>{scenario.id}-{step.id}.json</code> under the project's
-        <code>actuals/</code> dir (Phase 2 wires the save; for now keep the paste in your notes).
-      </p>
-      <textarea placeholder="Paste actual output…" rows="4"></textarea>
-    {:else if step.type === "external_doc"}
-      <p class="prose">Open and review: <code>{step.docPath}</code></p>
-      <Button
-        variant="secondary"
-        onclick={() => window.open(`file://${step.docPath}`, "_blank")}
-      >
-        Open doc
-      </Button>
-    {:else if step.type === "mark_done"}
-      <p class="prose muted">Confirm this test is complete.</p>
-    {/if}
-  </div>
-
-  <footer class="step-foot">
-    {#if isSetup}
-      {#if status === "done"}
-        <Button variant="secondary" onclick={resetSetup} disabled={app.busy}>Re-run setup</Button>
-        <Button variant="secondary" onclick={() => setStatus("awaiting")} disabled={app.busy}>
-          Clear status
-        </Button>
-      {:else}
-        <Button variant="primary" onclick={runSetup} disabled={app.busy}>Run setup</Button>
-        {#if status !== "blocked"}
-          <Button variant="secondary" onclick={() => setStatus("blocked")} disabled={app.busy}>
-            Mark blocked
+        </ol>
+        <ActionLog scenarioId={scenario.id} stepId={step.id} />
+      {:else if step.type === "agent_prompt"}
+        {#if step.tool}
+          <p class="prose">Run this in your MCP client:</p>
+          <pre class="prompt">{promptText}</pre>
+          <Button variant="secondary" onclick={() => copy(promptText)}>
+            {copied ? "Copied ✓" : "Copy prompt"}
           </Button>
         {/if}
+      {:else if step.type === "actual"}
+        <p class="prose muted">
+          Paste the agent's output here. Payloads persist to
+          <code>{scenario.id}-{step.id}.json</code> under the project's
+          <code>actuals/</code> dir (Phase 2 wires the save; for now keep the paste in your notes).
+        </p>
+        <textarea placeholder="Paste actual output…" rows="4"></textarea>
+      {:else if step.type === "external_doc"}
+        <p class="prose">Open and review: <code>{step.docPath}</code></p>
+        <Button
+          variant="secondary"
+          onclick={() => window.open(`file://${step.docPath}`, "_blank")}
+        >
+          Open doc
+        </Button>
+      {:else if step.type === "mark_done"}
+        <p class="prose muted">Confirm this test is complete.</p>
       {/if}
-    {:else if status === "done"}
-      <Button variant="secondary" onclick={() => setStatus("awaiting")}>Mark awaiting</Button>
-    {:else}
-      <Button variant="primary" onclick={() => setStatus("done")}>Mark done</Button>
-      {#if status !== "blocked"}
-        <Button variant="secondary" onclick={() => setStatus("blocked")}>Mark blocked</Button>
+    </div>
+
+    <footer class="step-foot">
+      {#if isSetup}
+        {#if status === "done"}
+          <Button variant="secondary" onclick={resetSetup} disabled={app.busy}>Re-run setup</Button>
+          <Button variant="secondary" onclick={() => setStatus("awaiting")} disabled={app.busy}>
+            Clear status
+          </Button>
+        {:else}
+          <Button variant="primary" onclick={runSetup} disabled={app.busy}>Run setup</Button>
+          {#if status !== "blocked"}
+            <Button variant="secondary" onclick={() => setStatus("blocked")} disabled={app.busy}>
+              Mark blocked
+            </Button>
+          {/if}
+        {/if}
+      {:else if status === "done"}
+        <Button variant="secondary" onclick={() => setStatus("awaiting")}>Mark awaiting</Button>
+      {:else}
+        <Button variant="primary" onclick={() => setStatus("done")}>Mark done</Button>
+        {#if status !== "blocked"}
+          <Button variant="secondary" onclick={() => setStatus("blocked")}>Mark blocked</Button>
+        {/if}
       {/if}
-    {/if}
-  </footer>
+    </footer>
+  {/if}
 </article>
 
 <style>
@@ -164,13 +192,47 @@
   }
 
   .step-head {
+    width: 100%;
     display: flex;
     flex-direction: row;
     align-items: center;
     gap: 0.6rem;
     padding: 0.6rem 0.85rem;
+    border: none;
     border-bottom: 1px solid var(--hub-card);
     background: var(--hub-surface);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.1s ease;
+  }
+
+  .step-head:hover {
+    background: var(--hub-card);
+  }
+
+  .step-head:focus-visible {
+    outline: 2px solid var(--hub-accent);
+    outline-offset: -2px;
+  }
+
+  /* Collapsed head is a clean single row — drop the divider. */
+  .step-head-collapsed {
+    border-bottom: none;
+  }
+
+  .step-chevron {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 0.9rem;
+    color: var(--hub-text-muted);
+    font-size: 0.7rem;
+    transition: transform 0.15s ease;
+  }
+
+  .step-chevron-open {
+    transform: rotate(90deg);
   }
 
   .step-type {

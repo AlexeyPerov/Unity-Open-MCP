@@ -84,7 +84,7 @@
 
     <div class="steps">
       {#each scenario.steps as step (step.id)}
-        <StepRenderer {scenario} {step} />
+        <StepRenderer {scenario} {step} ctx={app.expandContext} />
       {/each}
     </div>
   {:else if app.scenarios.length === 0 && app.activeProject}
