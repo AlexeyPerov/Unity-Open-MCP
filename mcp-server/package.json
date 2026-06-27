@@ -1,6 +1,6 @@
 {
   "name": "unity-open-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MCP server (stdio) routing tool calls to the live Unity Open MCP Bridge or batch Unity processes.",
   "type": "module",
   "main": "dist/index.js",

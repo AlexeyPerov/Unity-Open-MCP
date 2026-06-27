@@ -1,7 +1,7 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge",
   "displayName": "Unity Open MCP Bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "unity": "2022.3",
   "description": "Live HTTP connector for Unity Open MCP. Exposes meta-tool dispatch and GatePolicy over localhost.",
   "author": {
