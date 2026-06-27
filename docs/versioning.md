@@ -1,0 +1,286 @@
+# Versioning
+
+How versions are managed across the npm MCP server, the Unity bridge/verify packages, and the Unity Hub Pro app — and what happens when the running bridge and the MCP server don't match.
+
+This document has two parts: **[For users](#for-users)** (you installed unity-open-mcp into a project) and **[For contributors](#for-contributors)** (you're changing or releasing this repo).
+
+---
+
+## Table of contents
+
+**For users**
+- [How versions are organized](#how-versions-are-organized)
+- [Finding your version](#finding-your-version)
+- [The compatibility warning](#the-compatibility-warning)
+- [Resolving a mismatch](#resolving-a-mismatch)
+- [The escape hatch](#the-escape-hatch)
+- [Unity Editor version compatibility](#unity-editor-version-compatibility)
+- [The Hub app](#the-hub-app)
+
+**For contributors**
+- [Where the version lives](#where-the-version-lives)
+- [Bumping the shared version](#bumping-the-shared-version)
+- [Bumping the Hub app](#bumping-the-hub-app)
+- [The CI drift gate](#the-ci-drift-gate)
+- [Release channels and tag namespaces](#release-channels-and-tag-namespaces)
+- [Pre-1.0 semver convention](#pre-10-semver-convention)
+- [Adding a new version surface](#adding-a-new-version-surface)
+- [Runtime handshake internals](#runtime-handshake-internals)
+- [Why no monorepo tooling](#why-no-monorepo-tooling)
+
+---
+
+# For users
+
+## How versions are organized
+
+unity-open-mcp ships as **three tightly-coupled artifacts that share one version number**:
+
+| Artifact | What it is | Installed via |
+|---|---|---|
+| **MCP server** (`unity-open-mcp`) | The npm package your AI client (Claude, Cursor, …) launches | npm |
+| **Bridge** | The Unity Editor package that exposes Unity to the server | Unity Package Manager (git URL) |
+| **Verify** | The Unity Editor package for validation rules | Unity Package Manager (git URL) |
+
+These three ship breaking changes **together** and always carry the same version (e.g. if the server is `0.5.2`, the bridge and verify packages are also `0.5.2`). The number is identical across all three by design.
+
+The **Unity Hub Pro** desktop app is a separate, **optional** companion app on its **own independent version**. It is not coupled to the three above and doesn't need to match them.
+
+## Finding your version
+
+The easiest way is the CLI `status` command (ships with the npm package):
+
+```bash
+npx unity-open-mcp status
+```
+
+Output includes:
+
+```
+Bridge ver: 0.5.2
+Compat:   ok (server 0.5.2 / bridge 0.5.2)
+```
+
+- **`Bridge ver`** — the version the running Unity Editor's bridge reports (from its `/ping`).
+- **`Compat`** — `ok` when the server and bridge match, `ok (drift)` when they differ only by patch (compatible), `WARN` when they're considered incompatible. See [The compatibility warning](#the-compatibility-warning).
+
+You can also see the server's own version with:
+
+```bash
+npx unity-open-mcp --version
+# unity-open-mcp 0.5.2
+```
+
+And the bridge version of an installed Unity package from Unity: **Window → Package Manager**, find *Unity Open MCP Bridge*, read the version column.
+
+## The compatibility warning
+
+When the running bridge and the MCP server are on **incompatible** versions, the server prints a one-time warning to stderr at the first successful connection — for example:
+
+```
+unity-open-mcp: INCOMPATIBLE versions — server 0.5.0, bridge 0.4.0.
+  The bridge is older. To fix: In Unity: Window → Package Manager → update the
+  bridge package (tag bridge-v0.5.0).
+  (Set UNITY_OPEN_MCP_SKIP_VERSION_CHECK=1 to suppress this warning.)
+```
+
+This is **advisory** — the connection proceeds and tools keep working. We warn rather than hard-fail so a mixed pair never silently misbehaves, but also never blocks a user mid-task. The warning fires **once per server process**, not on every request.
+
+What counts as "incompatible" follows our [pre-1.0 convention](#pre-10-semver-convention): while the version starts with `0.`, a difference in the **middle** (minor) number is incompatible, while a difference in only the **last** (patch) number is compatible and produces a softer `ok (drift)` line instead of `WARN`.
+
+| Server | Bridge | Compat | Why |
+|---|---|---|---|
+| `0.5.2` | `0.5.2` | `ok` | identical |
+| `0.5.0` | `0.5.1` | `ok (drift)` | patch-only difference — compatible |
+| `0.5.0` | `0.4.0` | `WARN` | minor differs — incompatible (pre-1.0) |
+| `0.5.0` | `0.6.0` | `WARN` | minor differs — incompatible (pre-1.0) |
+
+## Resolving a mismatch
+
+The warning message tells you which side is older and the exact command. In general:
+
+**Bridge older than server** — update the Unity package:
+1. Open your Unity project.
+2. **Window → Package Manager**.
+3. Find *Unity Open MCP Bridge*, click it, then **Update** to the version the server reports (or reinstall from the git URL pinned to `bridge-v<version>`).
+4. Do the same for *Unity Open MCP Verify* if present.
+
+**Server older than bridge** — update the npm package:
+
+```bash
+npm install -g unity-open-mcp@<bridge-version>
+# or, if you run it via npx:
+npx unity-open-mcp@<bridge-version> ...
+```
+
+Use the version the bridge reports (`Bridge ver:` from `status`).
+
+## The escape hatch
+
+If you intentionally want to run a mixed pair (e.g. during development, or you've verified a specific combination works), silence the warning with an environment variable:
+
+```bash
+export UNITY_OPEN_MCP_SKIP_VERSION_CHECK=1
+```
+
+Set it in the environment your AI client uses to launch the server. This **only suppresses the warning** — it does not make an incompatible pair actually compatible. If tools then misbehave, the version difference is still the likely cause.
+
+## Unity Editor version compatibility
+
+The bridge and verify Unity packages declare a minimum Unity version in their manifests (`"unity": "2022.3"`). They work on Unity 2022.3 LTS and newer, including Unity 6. The MCP server itself doesn't depend on a Unity version — it talks to whatever bridge is running.
+
+## The hub app
+
+Unity Hub Pro is a standalone desktop app (macOS / Windows) with its **own version number and release cadence**, independent of the server/bridge/verify trio. You do not need the Hub app to use unity-open-mcp, and the Hub app's version is unrelated to the versions above. The Hub app is distributed as signed installers from its GitHub releases (`hub-v*` tags).
+
+---
+
+# For contributors
+
+## Where the version lives
+
+There are **two independent single-source-of-truth files**. Every other version string in the repo is **generated** from one of them by `scripts/sync-version.mjs`:
+
+| Source of truth | Governs | Independent? |
+|---|---|---|
+| `version.json` (repo root) | The shared **trio**: npm server + bridge Unity pkg + verify Unity pkg | — |
+| `hub/version.json` | The **Unity Hub Pro** desktop app | independent cadence |
+
+**Never hand-edit a generated target.** Bump the source file and run the sync script. The [CI drift gate](#the-ci-drift-gate) fails any PR where a generated target disagrees with its source.
+
+The generated targets, mapped to their sources:
+
+**From `version.json` →**
+
+| Generated file | Field | Notes |
+|---|---|---|
+| `mcp-server/package.json` | `version` | read at runtime by the server |
+| `packages/bridge/package.json` | `version` | what Unity Package Manager shows |
+| `packages/verify/package.json` | `version` | what Unity Package Manager shows |
+| `packages/bridge/Editor/Bridge/BridgeSession.cs` | `BridgeVersion` constant | reported by `/ping` |
+| `packages/bridge/Editor/Bridge/BridgeHttpServer.cs` | `/ping` 503 fallback literal | pre-init body, before `BridgeSession` is ready |
+
+**From `hub/version.json` →**
+
+| Generated file | Field |
+|---|---|
+| `hub/src-tauri/tauri.conf.json` | `version` |
+| `hub/src-tauri/Cargo.toml` | `version` |
+| `hub/package.json` | `version` |
+
+The deprecated extension packages under `packages/extensions/*` are intentionally **not** synced — they're legacy pins kept at `0.1.0` for compatibility, and new domain tools live inside the bridge. The root `package.json` is a private marker (`0.0.0`) and is also not touched.
+
+## Bumping the shared version
+
+This is the normal release flow for the npm server + bridge + verify together. From the repo root:
+
+```bash
+# 1. Bump. Updates version.json AND rewrites all five trio targets.
+node scripts/sync-version.mjs bump patch    # or minor / major
+
+# 2. Review what changed (the script prints each file it touched).
+git diff
+
+# 3. Commit and tag.
+git add -A
+git commit -m "chore: bump to 0.X.Y"
+git tag v0.X.Y
+git push origin v0.X.Y        # triggers the npm-publish workflow
+```
+
+Pushing the `v*` tag triggers `.github/workflows/npm-publish.yml`, which:
+1. Verifies the tag matches `mcp-server/package.json`.
+2. Verifies the whole trio is in sync (`sync-version.mjs --check`).
+3. Builds and publishes to npm.
+
+The Unity packages have **no registry publish step** — they're consumed via git URL. Users pick up the new version by updating their Package Manager git URL to the new `bridge-v*` / `verify-v*` tag (or just hitting **Update** if they installed from a moving ref).
+
+## Bumping the Hub app
+
+The Hub is on its own version, so it has its own flag:
+
+```bash
+node scripts/sync-version.mjs bump patch --hub
+
+git add -A
+git commit -m "chore: hub bump to 0.X.Y"
+git tag hub-v0.X.Y
+git push origin hub-v0.X.Y     # triggers the hub-release workflow
+```
+
+The `hub-v*` tag triggers `.github/workflows/hub-release.yml`, which first verifies the tag matches `hub/version.json` and that all Hub targets are in sync, then builds the macOS/Windows installers and creates a GitHub Release.
+
+## The CI drift gate
+
+`.github/workflows/version-sync.yml` runs on every PR (and push to `main`/`master`) that touches any version-related file. It runs `sync-version.mjs --check` twice — once for the trio, once for the Hub — and **fails the PR** if any generated target has drifted from its source.
+
+The fix for a failed gate is always: run the bump or sync script, never hand-edit a single file. Concretely:
+
+```bash
+node scripts/sync-version.mjs           # rewrite all trio targets from version.json
+node scripts/sync-version.mjs --hub     # rewrite all Hub targets from hub/version.json
+```
+
+You can run `--check` locally before pushing to catch drift early:
+
+```bash
+node scripts/sync-version.mjs --check
+node scripts/sync-version.mjs --check --hub
+```
+
+## Release channels and tag namespaces
+
+| Tag pattern | What it releases | Workflow | Publishes to |
+|---|---|---|---|
+| `v*` (e.g. `v0.5.2`) | The shared trio (npm server is what gets pushed; bridge/verify move with it via git URL) | `npm-publish.yml` | npm registry |
+| `hub-v*` (e.g. `hub-v0.3.0`) | The Unity Hub Pro desktop app | `hub-release.yml` | GitHub Release (installers) |
+| `bridge-v*` / `verify-v*` | (Convention) git-URL install pins for the Unity packages | — (no workflow) | n/a — users pin in their manifest |
+
+The `bridge-v*`/`verify-v*` tags have no workflow because the Unity packages aren't published to a registry; they exist purely so users can pin a known-good version in their `Packages/manifest.json` git URL. If you cut a trio release as `v0.5.2`, also tag the same commit `bridge-v0.5.2` and `verify-v0.5.2` so the git-URL pins resolve.
+
+## Pre-1.0 semver convention
+
+While the major version is **0**, the **minor** digit is the breaking axis. This is the standard pre-1.0 reading of semver and it's what the runtime handshake enforces:
+
+- `0.4.x` ↔ `0.5.x` → **incompatible** (minor differs) → `WARN`
+- `0.5.0` ↔ `0.5.1` → **compatible** (patch differs) → `ok (drift)`
+- `0.5.2` ↔ `0.5.2` → **identical** → `ok`
+
+Once the project reaches **1.0**, the standard rule takes over: the **major** digit becomes the breaking axis (`1.x` ↔ `2.x` incompatible; `1.2` ↔ `1.9` compatible). The handshake code handles both regimes — see [`Runtime handshake internals`](#runtime-handshake-internals).
+
+Practical implication for contributors: **treat a minor bump as a breaking change** while on `0.x`. Anything that would break an existing project's setup (a changed tool signature, a removed tool, a changed wire field) is a minor bump, not a patch.
+
+## Adding a new version surface
+
+If you introduce a new place that must carry the shared version (e.g. a new C# constant, a new generated manifest):
+
+1. Open `scripts/sync-version.mjs`.
+2. Add an entry to `TRIO_TARGETS` (or `HUB_TARGETS` for the Hub). Each entry is `{ file, kind, description, replace }` where `replace(body, version)` returns the file content with the version swapped in. Use a regex narrow enough to match only the version slot.
+3. The `--check` and `bump` paths pick it up automatically — no other change needed.
+4. Add the new file path to the `paths:` list in `.github/workflows/version-sync.yml` so PRs touching it run the gate.
+
+Always prefer reading the version from the runtime source where possible (e.g. the MCP server reads its own `package.json` at runtime via `package-version.ts`; the bridge reports its constant over `/ping`). Only add a *generated* target when there's no way to read the source at runtime in that context.
+
+## Runtime handshake internals
+
+The compatibility check lives in `mcp-server/src/compat.ts`:
+
+- `SHARED_VERSION` — the server's own version, read once at module load from `package.json` (via `readPackageVersion()`).
+- `checkBridgeCompat(bridgeVersion)` — compares the bridge's reported version against the server's. Returns `{ ok, serverVersion, bridgeVersion, message }`. The rule:
+  - If either side is unparseable → `ok: true` with an advisory message (forward-compatible with very old bridges that predate version reporting).
+  - If equal → `ok: true`, empty message.
+  - If the breaking axis differs (minor pre-1.0, major post-1.0) → `ok: false` with a message naming the older side and the exact upgrade command.
+  - If only a non-breaking digit differs (patch) → `ok: true` with a softer advisory message.
+- `isVersionCheckSuppressed()` — `true` when `UNITY_OPEN_MCP_SKIP_VERSION_CHECK=1`.
+
+It is wired into two places in `mcp-server/src/live-client.ts`:
+
+- `isLiveAvailable()` and `handlePing()` — both already parse the `/ping` body. After recording the ping, each calls `maybeWarnCompat(body.bridgeVersion)`, which is a **one-shot** (`compatWarned` flag) so the warning fires at most once per process. Suppressed entirely by the env var. The check is advisory: the connection proceeds regardless of the result.
+
+The CLI `status` command (`mcp-server/src/cli/commands.ts`) computes `checkBridgeCompat` from the ping body and adds both a `compat` object to the JSON output and a `Compat:` line to the human output, so operators can see drift without parsing stderr.
+
+## Why no monorepo tooling
+
+This repo deliberately does **not** use changesets, lerna, nx, turbo, or a pnpm workspace. One bespoke sync script (`scripts/sync-version.mjs`, ~250 lines, zero runtime dependencies) is the proven minimal pattern for a repo with two version lines and a handful of generated targets each — the same approach taken by comparable projects (a root version file + a sync script + a CI `--check` gate). Adopting heavier tooling would add dependency surface and learning cost without meaningful benefit at this size.
+
+Revisit if the number of independently-versioned artifacts grows well beyond two, or if per-package independent versioning becomes a requirement (at which point changesets would be the natural fit).

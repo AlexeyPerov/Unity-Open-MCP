@@ -16,7 +16,7 @@
 
 Unity Open MCP connects AI agents to Unity projects with a bridge + gate workflow: make changes, run validation, inspect results, and iterate safely.
 
-Requires **Unity 2022.3 LTS or newer** (Unity 6 recommended).
+Requires **Unity 2022.3 LTS or newer**.
 
 The MCP server consist of a total of **160** tools.
 
@@ -31,8 +31,9 @@ Current tool surface from `mcp-server/src/tools/index.ts`:
 
 Use any of this options:
 
-1. Use the **AI Setup wizard** in Unity Hub Pro (recommended): [Wizard setup](docs/wizard-setup.md).
-2. If you prefer manual setup and client config snippets: [Manual setup](docs/manual-setup.md).
+1. Install Unity-Hun-Pro and use its **AI Setup wizard** (simplest, no console needed): see [Wizard setup](docs/wizard-setup.md).
+2. If you prefer manual setup: see [Manual setup](docs/manual-setup.md).
+3. If prefer cloning this repo and working with it directly: see [Development setuo](docs/development-setup.md). Fits contributor workflow.
 
 Optional: install extension packs for domain-specific workflows: [Extensions](docs/extensions.md).
 
@@ -47,19 +48,17 @@ Optional: install extension packs for domain-specific workflows: [Extensions](do
 
 For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-tools.md).
 
-> Looking at other options? See the [MCP tools for Unity comparison](docs/mcp-tools-comparison.md) — a side-by-side feature matrix of Unity Open MCP and the other MCP tools / AI assistants in the space.
+> Would like to see other MCP options? See the [MCP tools for Unity comparison](docs/mcp-tools-comparison.md) — a side-by-side feature matrix of Unity Open MCP and the other MCP tools / AI assistants in the space.
 
 ## Documentation
 
-- [Development setup](docs/development-setup.md) — local checkout, building the MCP server, contributor and maintainer workflows.
 - [Architecture](docs/architecture.md) — repository boundaries and runtime flow.
 - [Skills](docs/skills.md) — agent playbooks (`SKILL.md`) shipped into a project.
 - [API index](docs/api.md) — contract documentation map.
 - [Bridge HTTP API](docs/api/bridge-http.md) — bridge endpoints and envelopes.
 - [MCP resources API](docs/api/resources.md) — resource URIs and payloads.
 - [Code conventions](docs/code-conventions.md) — non-obvious C# decisions (instance IDs, namespace aliasing).
-
-Setup, the tools API, the Hub, extensions, and the comparison matrix are linked in their own sections above.
+- [Versioning](docs/versioning.md) — how the shared server/bridge/verify version and the Hub app version are managed, bumped, and kept in sync; the runtime compatibility check.
 
 ## Unity Hub Pro
 
@@ -72,11 +71,10 @@ Unity Hub Pro is the desktop companion app for Unity Open MCP. It helps you mana
 
 ## Contributing
 
-- Open issues for bugs, feature requests, and documentation improvements.
-- PRs are welcome for core packages, extension packs, and docs.
-- Start with the docs above, then package-level READMEs for local development details.
+- Feel free to open issues for bugs, feature requests, and documentation improvements.
+- PRs are welcome. Start with the docs above, then package-level READMEs for local development details.
 
-Helpful resources for contributors or those who would liketo work on their own forls:
-- [Validation Suite](validation-suite/README.md) — standalone app for guided manual validation; ships runnable scenario packs (e.g. the `hexa-sort` build-and-validate pack).
+Helpful resources for contributors or those who would like to work on their own forks:
+- [Validation Suite](validation-suite/README.md) — app for guided manual validation; ships runnable scenario packs.
 
 **License:** MIT — see [LICENSE](LICENSE).

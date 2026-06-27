@@ -13,6 +13,10 @@ import {
 } from "./dialog-dismiss.js";
 import { readInstanceLock, classifyInstance, lockPath } from "./instance-discovery.js";
 import { makeErrorResult } from "./results.js";
+import {
+  checkBridgeCompat,
+  isVersionCheckSuppressed,
+} from "./compat.js";
 
 const MAX_COMPILE_WAIT_MS = 120_000;
 const COMPILE_POLL_INTERVAL_MS = 2_000;
@@ -113,6 +117,9 @@ export class LiveClient implements Router {
    *  exercise the fail-fast path keep working; when absent, a /ping failure
    *  falls back to the original bridge_offline behavior. */
   private projectPath: string | undefined;
+  /** One-shot guard so the version-compat warning (server vs bridge) is emitted
+   *  at most once per process — every /ping would otherwise re-warn. */
+  private compatWarned: boolean;
 
   constructor(
     port: number,
@@ -133,6 +140,26 @@ export class LiveClient implements Router {
     this.dismissEnabled = dismissCfg.enabled;
     this.dismissTimeoutMs = dismissCfg.timeoutMs;
     this.dismissIntervalMs = dismissCfg.intervalMs;
+    this.compatWarned = false;
+  }
+
+  /**
+   * Emit the server/bridge version-compatibility warning at most once per
+   * process. Advisory only — the caller never blocks on this. Suppressed
+   * entirely by UNITY_OPEN_MCP_SKIP_VERSION_CHECK=1. See docs/versioning.md.
+   */
+  private maybeWarnCompat(bridgeVersion: string | undefined): void {
+    if (this.compatWarned) return;
+    if (bridgeVersion === undefined || bridgeVersion === null) return;
+    if (isVersionCheckSuppressed()) {
+      this.compatWarned = true;
+      return;
+    }
+    const result = checkBridgeCompat(String(bridgeVersion));
+    this.compatWarned = true;
+    if (result.message) {
+      console.warn(result.message);
+    }
   }
 
   async isLiveAvailable(): Promise<boolean> {
@@ -142,6 +169,7 @@ export class LiveClient implements Router {
       if (!res.ok) return false;
       const body = (await res.json()) as PingResponse;
       this.pingCache.record(body);
+      this.maybeWarnCompat(body.bridgeVersion);
       return body.connected;
     } catch {
       return false;
@@ -166,6 +194,7 @@ export class LiveClient implements Router {
       const res = await this.fetchWithTimeout("/ping", { method: "GET" });
       const body: PingResponse = await res.json();
       this.pingCache.record(body);
+      this.maybeWarnCompat(body.bridgeVersion);
       return {
         content: [{ type: "text", text: JSON.stringify(body) }],
         isError: false,

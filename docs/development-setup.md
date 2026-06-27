@@ -145,23 +145,30 @@ workflows. Either way, only the `files` whitelist (`dist/`, `README.md`,
 
 ### CI publish (tag-triggered)
 
-The standard release path. Bump the version in `mcp-server/`, commit, tag, and
-push the tag:
+The standard release path. The npm MCP server, the bridge Unity package, and the
+verify Unity package share **one version** — bumping it is a single command from
+the repo root, not a per-package `npm version`:
 
 ```bash
-cd mcp-server
-npm version patch        # or minor / major — bumps mcp-server/package.json
-git add mcp-server/package.json mcp-server/package-lock.json
-git commit -m "Bump unity-open-mcp to vX.Y.Z"
+node scripts/sync-version.mjs bump patch    # or minor / major
+git add -A
+git commit -m "Bump to vX.Y.Z"
 git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
+`bump` updates the single source (`version.json`) **and** rewrites every
+generated target (the server + bridge + verify `package.json`, plus the two C#
+version constants the bridge reports over `/ping`). See
+[docs/versioning.md](versioning.md) for the full policy, the drift gate, and how
+the Hub app (which has its own independent version) is bumped.
+
 The `npm-publish.yml` workflow then runs `npm ci && npm publish --access public`
 on the tag (the `prepublishOnly` script rebuilds `dist/` first, so the tarball
 is always fresh). It refuses to publish when the tag version does not match
-`mcp-server/package.json` — a maintainer who forgot `npm version` gets a clear
-failure instead of a mismatched tarball.
+`mcp-server/package.json` **or** when the trio has drifted out of sync — a
+maintainer who hand-edited one file gets a clear failure instead of a
+mismatched tarball.
 
 First publish only: the name must be claimed with one manual `npm publish`
 before CI can publish to it (npm requires the first publish of a name to come

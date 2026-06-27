@@ -64,6 +64,16 @@ jobs:
             exit 1
           fi
 
+      - name: Verify shared trio is in sync
+        # The npm server, bridge Unity pkg, and verify Unity pkg share ONE
+        # version (version.json). A v* tag is a release of that trio, so refuse
+        # to ship if any trio target drifted from version.json — the published
+        # npm tarball's version must match the bridge/verify package.json that
+        # users install alongside it. Run from repo root so the script resolves
+        # version.json. See docs/versioning.md.
+        working-directory: .
+        run: node scripts/sync-version.mjs --check
+
       - name: Build + publish
         # `npm publish` runs `prepublishOnly` (npm run build) automatically, then
         # ships the tarball to the registry. `--access public` keeps the

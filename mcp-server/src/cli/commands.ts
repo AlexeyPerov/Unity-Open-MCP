@@ -30,6 +30,7 @@ import {
   type PollOutcome,
   type PingBody,
 } from "./ping-poller.js";
+import { checkBridgeCompat } from "../compat.js";
 
 export interface CliCommandResult {
   /** Process exit code. 0 = success, non-zero = failure. */
@@ -162,6 +163,15 @@ export async function runStatusCommand(
   // Cheap readiness probe — one /ping, no compile-wait.
   const poll = await singlePing(stack.live, PING_FETCH_TIMEOUT_MS);
 
+  // Advisory version-compat between this CLI/server and the running bridge.
+  // Computed from the bridge's reported bridgeVersion; ok=false means the pair
+  // is considered incompatible (pre-1.0: minor differs). The status command
+  // never hard-fails on this — it just surfaces the line so operators see drift.
+  const compat =
+    poll.body?.bridgeVersion !== undefined && poll.body?.bridgeVersion !== null
+      ? checkBridgeCompat(String(poll.body.bridgeVersion))
+      : null;
+
   const json = {
     command: "status",
     projectPath: stack.projectPath,
@@ -178,6 +188,14 @@ export async function runStatusCommand(
       ready: poll.status === "ready",
       body: poll.body,
     },
+    compat: compat
+      ? {
+          ok: compat.ok,
+          serverVersion: compat.serverVersion,
+          bridgeVersion: compat.bridgeVersion,
+          message: compat.message,
+        }
+      : null,
   };
 
   return {
@@ -207,6 +225,7 @@ function formatStatusHuman(json: {
   authTokenDiscovered: boolean;
   instance: { classification: InstanceClassification; lock: unknown };
   bridge: { status: string; ready: boolean; body: PingBody | null };
+  compat: { ok: boolean; serverVersion: string; bridgeVersion: string; message: string } | null;
 }): string {
   const lines = [
     `Project:   ${json.projectPath}`,
@@ -221,6 +240,16 @@ function formatStatusHuman(json: {
     if (body.bridgeVersion) lines.push(`Bridge ver: ${body.bridgeVersion}`);
     if (body.compiling) lines.push(`State:     compiling`);
     if (body.isPlaying) lines.push(`Playmode:  playing`);
+  }
+  if (json.compat) {
+    const tag = json.compat.ok
+      ? json.compat.message
+        ? "ok (drift)"
+        : "ok"
+      : "WARN";
+    lines.push(
+      `Compat:   ${tag} (server ${json.compat.serverVersion} / bridge ${json.compat.bridgeVersion})`,
+    );
   }
   return lines.join("\n");
 }

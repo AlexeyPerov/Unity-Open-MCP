@@ -9,7 +9,38 @@ permissions:
   contents: write
 
 jobs:
+  # Preflight: refuse to build if the hub-v* tag disagrees with hub/version.json
+  # or if any Hub target (tauri.conf.json, Cargo.toml, hub/package.json) has
+  # drifted from hub/version.json. Better to fail here in ~20s than after the
+  # full macos/windows matrix build. See docs/versioning.md.
+  verify-version:
+    name: Verify Hub version matches tag + sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify Hub targets match hub/version.json
+        run: node scripts/sync-version.mjs --check --hub
+
+      - name: Verify tag matches hub/version.json
+        run: |
+          TAG="${GITHUB_REF_NAME#hub-v}"
+          SRC_VERSION=$(node -p "require('./hub/version.json').version")
+          echo "Tag version: $TAG"
+          echo "hub/version.json: $SRC_VERSION"
+          if [ "$TAG" != "$SRC_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match hub/version.json version $SRC_VERSION. Run 'node scripts/sync-version.mjs bump <level> --hub' before tagging."
+            exit 1
+          fi
+
   build:
+    needs: verify-version
     strategy:
       fail-fast: false
       matrix:
