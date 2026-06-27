@@ -31,6 +31,7 @@ from one UI.
 - Shows git status and line-count views in project settings.
 - Provides maintainer actions for Open MCP repositories (build, test, version bump, publish dry-run, publish).
 
+| Projects                            | Tools                                |
 |------------------------------------------|-------------------------------------------------|
 | ![plot](./art/hub-projects.png) | ![plot](./art/hub-tools.png) |
 

@@ -60,8 +60,6 @@ For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-too
 
 ## Unity Hub Pro
 
-| ![plot](./art/hub-projects.png) | ![plot](./art/hub-settings.png) |
-
 Unity Hub Pro is the desktop companion app for Unity Open MCP. It helps you manage projects, run the AI Setup wizard, and handle maintainer workflows from one UI.
 [See docs for details.](docs/unity-hub-pro.md)
 
