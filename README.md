@@ -1,11 +1,11 @@
-<p align="center">
-  <img src="art/unity-open-mcp-logo.png" alt="MCP for Unity" width="384">
-</p>
-
 [![Docs](https://img.shields.io/badge/Docs-unity--mcp-4f46e5)](https://alexeyperov.github.io/)
 [![](https://img.shields.io/badge/Unity-000000?style=flat&logo=unity&logoColor=blue 'Unity')](https://unity.com/releases/editor/archive)
 [![](https://badge.mcpx.dev?status=on 'MCP Enabled')](https://modelcontextprotocol.io/introduction)
 [![](https://img.shields.io/badge/License-MIT-red.svg 'MIT License')](https://opensource.org/licenses/MIT)
+
+<p align="center">
+  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="250">
+</p>
 
 # Unity Open MCP
 
