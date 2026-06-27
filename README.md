@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="art/unity-open-mcp-logo.png" alt="MCP for Unity" width="460">
+  <img src="art/unity-open-mcp-logo.png" alt="MCP for Unity" width="384">
 </p>
 
 
