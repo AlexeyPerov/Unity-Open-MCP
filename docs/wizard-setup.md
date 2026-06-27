@@ -32,7 +32,7 @@ For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md)
 5. Restart your MCP client.
 6. Run a Unity MCP call to confirm connectivity.
 
-[[SCREENSHOT:WIZARD-OPEN]]
+![projects](./art/hub-ai-buttons.png)
 
 ## Wizard steps
 
@@ -49,7 +49,7 @@ The wizard shows a clickable progress strip at the top. Segments turn **green** 
 
 This step is the environment gate: the **Next** button is disabled until the project is valid, meets the minimum Unity version, has a writable manifest, and Node.js 18+ is detected. **Re-detect** refreshes the snapshot from disk and shows a confirmation when it completes.
 
-[[SCREENSHOT:WIZARD-STEP1-PROJECT-CHECK]]
+![projects](./art/hub-wizard-1.png)
 
 ### Step 2 — MCP server source
 
@@ -69,7 +69,7 @@ npm install
 npm run build
 ```
 
-[[SCREENSHOT:WIZARD-STEP2-ENVIRONMENT]]
+![projects](./art/hub-wizard-2.png)
 
 ### Step 3 — Unity packages
 
@@ -83,7 +83,7 @@ After onboarding, you can add or remove Unity domain dependencies at any time fr
 
 For the contributor / community-pack `file:` workflow, see [Development setup](development-setup.md).
 
-[[SCREENSHOT:WIZARD-STEP3-PACKAGES-DIFF]]
+![projects](./art/hub-wizard-3.png)
 
 ### Step 4 — MCP client config
 
@@ -91,14 +91,14 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 - Review the generated config preview
 - Write config to the target location (or copy a CLI command / JSON snippet for Claude Code / Manual)
 
-[[SCREENSHOT:WIZARD-STEP4-MCP-CONFIG-PREVIEW]]
+![projects](./art/hub-wizard-4.png)
 
 ### Step 5 — Agent skill (optional)
 
 - Copy `SKILL.md` for your selected client
 - Optional overwrite with backup
 
-[[SCREENSHOT:WIZARD-STEP5-SKILL]]
+![projects](./art/hub-wizard-5.png)
 
 ### Step 6 — Launch and verify
 
@@ -106,7 +106,7 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 - Wait for compile and bridge readiness
 - Finish when health checks pass
 
-[[SCREENSHOT:WIZARD-STEP6-VERIFY]]
+![projects](./art/hub-wizard-6.png)
 
 ## Clear AI Setup
 

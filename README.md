@@ -2,7 +2,6 @@
   <img src="art/unity-open-mcp-logo.png" alt="MCP for Unity" width="384">
 </p>
 
-
 [![Docs](https://img.shields.io/badge/Docs-unity--mcp-4f46e5)](https://alexeyperov.github.io/)
 [![](https://img.shields.io/badge/Unity-000000?style=flat&logo=unity&logoColor=blue 'Unity')](https://unity.com/releases/editor/archive)
 [![](https://badge.mcpx.dev?status=on 'MCP Enabled')](https://modelcontextprotocol.io/introduction)
@@ -28,6 +27,9 @@ Current tool surface from `mcp-server/src/tools/index.ts`:
 Use any of this options:
 
 1. Install Unity Hub Pro and use its **AI Setup wizard** (simplest, no console needed): see [Wizard setup](docs/wizard-setup.md).
+
+![plot](./art/hub-wizard-7.png)
+
 2. If you prefer manual setup: see [Manual setup](docs/manual-setup.md).
 3. If prefer cloning this repo and working with it directly: see [Development setup](docs/development-setup.md). Fits contributor workflow.
 
@@ -58,9 +60,7 @@ For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-too
 
 ## Unity Hub Pro
 
-<p align="center">
-  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="250">
-</p>
+| ![plot](./art/hub-projects.png) | ![plot](./art/hub-settings.png) |
 
 Unity Hub Pro is the desktop companion app for Unity Open MCP. It helps you manage projects, run the AI Setup wizard, and handle maintainer workflows from one UI.
 [See docs for details.](docs/unity-hub-pro.md)

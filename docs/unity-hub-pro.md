@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="250">
+</p>
+
 # Unity Hub Pro
 
 Unity Hub Pro is the optional desktop companion app for Unity Open MCP. It helps
@@ -27,7 +31,8 @@ from one UI.
 - Shows git status and line-count views in project settings.
 - Provides maintainer actions for Open MCP repositories (build, test, version bump, publish dry-run, publish).
 
-[[SCREENSHOT:UNITY-HUB-PRO-PROJECTS-TAB]]
+|------------------------------------------|-------------------------------------------------|
+| ![plot](./art/hub-projects.png) | ![plot](./art/hub-tools.png) |
 
 ## Main workflows
 
@@ -37,7 +42,7 @@ from one UI.
 - Open project-specific settings.
 - Launch Unity with per-project configuration.
 
-[[SCREENSHOT:UNITY-HUB-PRO-PROJECT-SETTINGS]]
+![projects](./art/hub-settings.png)
 
 ### 2) AI setup
 
@@ -45,7 +50,7 @@ from one UI.
 - Follow wizard steps for packages, MCP client config, and verification.
 - Re-run verification when Unity or dependencies change.
 
-[[SCREENSHOT:UNITY-HUB-PRO-AI-SETUP-BUTTON]]
+![projects](./art/hub-ai-buttons.png)
 
 For full setup steps, see [wizard-setup.md](wizard-setup.md).
 
@@ -54,8 +59,6 @@ For full setup steps, see [wizard-setup.md](wizard-setup.md).
 - Run `npm run build` and `npm test` from the `mcp-server/` workspace.
 - Bump package version.
 - Run publish dry-run and publish with confirmation.
-
-[[SCREENSHOT:UNITY-HUB-PRO-MAINTAINER-PANEL]]
 
 ## Installation
 

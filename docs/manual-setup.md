@@ -118,8 +118,6 @@ What that means:
 > missing, and a wrong path means the AI can drive a different Unity project
 > than the one you have open.
 
-[[SCREENSHOT:MANUAL-SETUP-MCP-CONFIG]]
-
 ### Environment variables
 
 - **Required:** `UNITY_PROJECT_PATH` — absolute path to the Unity project root.
