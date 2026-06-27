@@ -16,10 +16,9 @@ step.
 | Animation | `com.unity.modules.animation` (built-in) | `UNITY_OPEN_MCP_EXT_ANIMATION` | `.../Extensions/Animation/` |
 | Splines | `com.unity.splines` | `UNITY_OPEN_MCP_EXT_SPLINES` | `.../Extensions/Splines/` |
 
-Navigation was the reference template (M18 Plan 1); InputSystem, ProBuilder,
-ParticleSystem, and Animation migrated into the same layout in M18 Plan 3.
-Splines is the first backlog domain — ported in M18 Plan 7 as proof that the
-embedded + grouped model extends to Ivan-breadth domains.
+Navigation is the reference template; InputSystem, ProBuilder, ParticleSystem,
+and Animation share the same layout. Splines is the most recently added domain
+— it proves the embedded + grouped model extends to additional Unity APIs.
 
 ## Embedded domain model
 
@@ -31,7 +30,7 @@ dependency is present, using a two-layer gate:
    (`packages/bridge/Editor/com.alexeyperov.unity-open-mcp-bridge.Editor.asmdef`)
    set `UNITY_OPEN_MCP_EXT_<DOMAIN>` when the Unity package/module resolves.
    The symbol naming convention is `UNITY_OPEN_MCP_EXT_<DOMAIN>` (uppercase,
-   `<DOMAIN>` matches the tool-group id used by M18 Plan 2).
+   `<DOMAIN>` matches the tool-group id).
 2. **A per-domain sub-asmdef** under `TypedTools/Extensions/<Domain>/` carries
    `defineConstraints: ["UNITY_OPEN_MCP_EXT_<DOMAIN>"]` and references the
    domain package. Unity only compiles the sub-asmdef when the define is set,
@@ -62,11 +61,11 @@ reflection domain must document:
 - the clear error returned for unsupported versions.
 
 **None of the shipped extension domains** (Nav, Input, ProBuilder, Particles,
-Animation, Splines) qualifies — all use compile-gating only. Splines shipped in
-M18 Plan 7 as the first backlog domain, deliberately choosing the compile-gate
-fallback over the reflection-recommended Cinemachine so the Ivan-breadth proof
-lands on the proven, single-stable-API path. Cinemachine remains the canonical
-reflection case (2.x/3.x split) and is tracked as a follow-up backlog domain.
+Animation, Splines) qualifies — all use compile-gating only. Splines, the most
+recently added domain, deliberately uses the compile-gate path (a single stable
+API) rather than the reflection-recommended Cinemachine, so the model lands on
+the proven path first. Cinemachine remains the canonical reflection case
+(2.x/3.x split) and is tracked as a follow-up domain.
 
 ### Wiring in a new embedded domain
 
@@ -112,8 +111,8 @@ own asmdef referencing the bridge.
 
 The five shipped domains (Nav, Input, ProBuilder, Particles, Animation) also
 have **legacy copies** under `packages/extensions/{navigation,inputsystem,probuilder,particlesystem,animation}/`.
-These are **deprecated** as of M18 Plan 6 (legacy cleanup) and are **retained
-only so pinned manifests keep resolving**:
+These are **deprecated** and are **retained only so pinned manifests keep
+resolving**:
 
 - Do **not** install `com.alexeyperov.unity-open-mcp-ext-<domain>` for any
   shipped domain in a new project — the bridge's embedded tools are the source
@@ -121,8 +120,7 @@ only so pinned manifests keep resolving**:
 - Installing a legacy pack **and** the embedded copy registers the same tool
   ids twice. `BridgeToolRegistry` keeps the first-registered entry and records
   the collision (`DuplicateCount` / `DuplicateToolNames` after each scan),
-  emitting a non-fatal warning. The dogfood demo migrated off the legacy packs
-  in M18 Plan 6.
+  emitting a non-fatal warning.
 - The Hub wizard **never** installs legacy ext packs — only the bridge, verify,
   and opt-in Unity domain packages.
 - New first-party domains go into `packages/bridge/Editor/TypedTools/Extensions/`,

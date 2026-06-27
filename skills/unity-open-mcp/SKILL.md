@@ -31,7 +31,7 @@ Practical skill for AI agents driving a Unity project through the `unity-open-mc
 
 ## Tool groups and session visibility
 
-Sessions start with several main groups visible in `ListTools`. Every other group is hidden until you activate it — this keeps the prompt small (~160 tools total). Call `unity_open_mcp_manage_tools` to toggle:
+Sessions start with several main groups visible in `ListTools`. Every other group is hidden until you activate it — this keeps the prompt small (172 tools total). Call `unity_open_mcp_manage_tools` to toggle:
 
 - `list_groups` — every group with active flag, compiled-state availability, and tool roster.
 - `activate` / `deactivate` — toggle one group for this session. When visibility actually changes, the MCP server emits `notifications/tools/list_changed`; clients that support `listChanged` refresh `ListTools` automatically (no reconnect required).
@@ -327,7 +327,7 @@ Use `**search_assets`** to locate prefabs/components/GUIDs; each result tags *wh
 Raw Unity data is large. Prefer the cheap, structured reads before reaching for verbose output:
 
 - **`read_asset`** returns a folded `tree` + `cmp` table + counts, not raw YAML. Drill into a subtree with `component` / `path` + `field_limit` instead of re-reading the whole asset; the parsed model is session-cached (`_cache: "hit"`). `field_limit: 0` (default) returns field names only — bump it only for a `component` drill-down where you need values.
-- **`manage_tools(action="list_groups")`** — sessions start `core`-only; activate only the group you need so ~160 tools stay out of the prompt.
+- **`manage_tools(action="list_groups")`** — sessions start `core`-only; activate only the group you need so 172 tools stay out of the prompt.
 - **`read_console`** with `detail: "summary"` returns messages only; reserve `detail: "verbose"` for when you need Unity-internal stack frames.
 - **`search_assets`** tags *why* each result matched, so you skip broad reads and go straight to the right drill-down.
 - **`capabilities`** before assuming tool names/schemas/route policy — cheaper than discovering a tool's real signature by trial and error.

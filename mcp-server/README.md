@@ -4,7 +4,7 @@
 [![license](https://img.shields.io/npm/l/unity-open-mcp.svg)](./LICENSE)
 
 MCP server (stdio) that routes Model Context Protocol tool calls to a **live Unity
-Editor** via the [Unity Open MCP Bridge](https://github.com/AlexeyPerov/unity-open-mcp),
+Editor** via the [Unity Open MCP Bridge](https://github.com/AlexeyPerov/Unity-Open-MCP),
 with batch (headless Unity) and offline (disk-parse) fallbacks. Works with Cursor,
 Claude Desktop, Claude Code, OpenCode, ZCode, and any MCP stdio client.
 
@@ -105,7 +105,7 @@ Then use `"command": "unity-open-mcp", "args": []` (Cursor / Claude Desktop) or
    Unity (batch) or offline disk parsing.
 
 The bridge package must be installed in your Unity project. See the
-[manual setup guide](https://github.com/AlexeyPerov/unity-open-mcp/blob/main/docs/manual-setup.md)
+[manual setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/manual-setup.md)
 for the `Packages/manifest.json` entries.
 
 ## CLI
@@ -122,7 +122,7 @@ npx unity-open-mcp run-tool unity_open_mcp_capabilities \
 
 Commands: `ping`, `wait-for-ready`, `status`, `run-tool`, `--help`, `--version`.
 All accept `--json` for machine-readable output. See the
-[manual setup guide](https://github.com/AlexeyPerov/unity-open-mcp/blob/main/docs/manual-setup.md#cli-for-ci--automation)
+[manual setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/manual-setup.md#cli-for-ci--automation)
 for the full option reference.
 
 ## Version pinning
@@ -134,11 +134,11 @@ version globally.
 
 ## Documentation
 
-- [Full manual setup](https://github.com/AlexeyPerov/unity-open-mcp/blob/main/docs/manual-setup.md)
-- [Unity Hub Pro wizard walkthrough](https://github.com/AlexeyPerov/unity-open-mcp/blob/main/docs/wizard-setup.md)
-- [MCP tool catalog and routing](https://github.com/AlexeyPerov/unity-open-mcp/blob/main/docs/api/mcp-tools.md)
-- [Bridge HTTP API](https://github.com/AlexeyPerov/unity-open-mcp/blob/main/docs/api/bridge-http.md)
-- [Architecture](https://github.com/AlexeyPerov/unity-open-mcp/blob/main/docs/architecture.md)
+- [Full manual setup](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/manual-setup.md)
+- [Unity Hub Pro wizard walkthrough](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/wizard-setup.md)
+- [MCP tool catalog and routing](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/api/mcp-tools.md)
+- [Bridge HTTP API](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/api/bridge-http.md)
+- [Architecture](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/architecture.md)
 
 ## License
 

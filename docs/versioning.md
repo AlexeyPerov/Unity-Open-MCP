@@ -210,6 +210,24 @@ git push origin hub-v0.X.Y     # triggers the hub-release workflow
 
 The `hub-v*` tag triggers `.github/workflows/hub-release.yml`, which first verifies the tag matches `hub/version.json` and that all Hub targets are in sync, then builds the macOS/Windows installers and creates a GitHub Release.
 
+## Setting an exact version
+
+`bump` only increments. To jump to a specific version (e.g. to align the trio and Hub after they diverged, or to land a deliberate number), use `set`:
+
+```bash
+node scripts/sync-version.mjs set 0.2.0          # trio: version.json + all five trio targets
+node scripts/sync-version.mjs set 0.2.0 --hub    # hub:  hub/version.json + all three hub targets
+```
+
+`set` behaves exactly like `bump` otherwise — it writes the source file and rewrites every generated target — then prints the same commit/tag hint. The target version must be plain `major.minor.patch` (a leading `v` is tolerated and stripped); pre-release/build metadata are not supported. From there, commit and tag exactly as you would after a `bump`:
+
+```bash
+git add -A
+git commit -m "chore: bump to 0.2.0"
+git tag v0.2.0            # or hub-v0.2.0 for the Hub
+git push origin v0.2.0
+```
+
 ## The CI drift gate
 
 `.github/workflows/version-sync.yml` runs on every PR (and push to `main`/`master`) that touches any version-related file. It runs `sync-version.mjs --check` twice — once for the trio, once for the Hub — and **fails the PR** if any generated target has drifted from its source.
@@ -284,3 +302,9 @@ The CLI `status` command (`mcp-server/src/cli/commands.ts`) computes `checkBridg
 This repo deliberately does **not** use changesets, lerna, nx, turbo, or a pnpm workspace. One bespoke sync script (`scripts/sync-version.mjs`, ~250 lines, zero runtime dependencies) is the proven minimal pattern for a repo with two version lines and a handful of generated targets each — the same approach taken by comparable projects (a root version file + a sync script + a CI `--check` gate). Adopting heavier tooling would add dependency surface and learning cost without meaningful benefit at this size.
 
 Revisit if the number of independently-versioned artifacts grows well beyond two, or if per-package independent versioning becomes a requirement (at which point changesets would be the natural fit).
+
+## Related docs
+
+- [Architecture](architecture.md) — repository boundaries and runtime flow.
+- [MCP tools API](api/mcp-tools.md)
+- [Unity Hub Pro](unity-hub-pro.md)

@@ -2,22 +2,35 @@
 
 Use the AI Setup wizard in Unity Hub Pro to connect a Unity project to `unity-open-mcp`.
 
-For non-wizard setup, see [manual-setup.md](manual-setup.md).
+## Who is this for
+
+This is the **simplest** path — no terminal, no hand-editing JSON, no Git URLs.
+It's ideal if you're an artist or designer prototyping a game with AI, or a
+developer who hasn't used Node/npm before. The wizard walks you through every
+step, checks your environment, edits `manifest.json` and your MCP-client config
+for you, and verifies the connection at the end.
+
+For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md).
 
 ## Requirements
 
-- Unity 2022.3 LTS or newer (Unity 6 recommended)
-- Node.js 18 or newer
-- Unity Hub Pro
-- MCP client (Cursor, Claude Desktop, OpenCode, ZCode, or similar)
+- **Unity 2022.3 LTS or newer** (Unity 6 recommended).
+- **Node.js 18 or newer** — only needed because the MCP server is a small Node
+  program. Install it from <https://nodejs.org/> (the **LTS** button) if you
+  don't have it. The wizard checks this and tells you if it's missing or too old.
+- **Unity Hub Pro** — install it first. See [unity-hub-pro.md](unity-hub-pro.md)
+  (download the installer for your OS from the GitHub Releases page).
+- **An MCP client** (Cursor, Claude Desktop, Claude Code, OpenCode, ZCode, or
+  similar) — the AI tool you'll actually drive Unity from.
 
 ## Quick flow
 
-1. Open Unity Hub Pro and add your Unity project.
-2. Click the **AI** action for that project. The button turns **green** when the agent is already installed and configured for that project; otherwise it is amber/blue and opens the wizard.
-3. Complete the wizard steps.
-4. Restart your MCP client.
-5. Run a Unity MCP call to confirm connectivity.
+1. **Install Unity Hub Pro** if you haven't (see [unity-hub-pro.md](unity-hub-pro.md)).
+2. Open Unity Hub Pro and add your Unity project.
+3. Click the **AI** action for that project. The button turns **green** when the agent is already installed and configured for that project; otherwise it is amber/blue and opens the wizard.
+4. Complete the wizard steps.
+5. Restart your MCP client.
+6. Run a Unity MCP call to confirm connectivity.
 
 [[SCREENSHOT:WIZARD-OPEN]]
 
@@ -40,11 +53,13 @@ This step is the environment gate: the **Next** button is disabled until the pro
 
 ### Step 2 — MCP server source
 
-Choose how the `unity-open-mcp` server is launched:
+Choose how the `unity-open-mcp` server is launched. Not sure? Leave it on the
+default — `npx` downloads and runs the latest version automatically, no extra
+install step.
 
-- default: `npx -y unity-open-mcp@latest`
-- optional: global install (`npm i -g unity-open-mcp`)
-- optional: local checkout path (cloned `unity-open-mcp` monorepo)
+- default: `npx -y unity-open-mcp@latest` ← recommended for most users
+- optional: global install (`npm i -g unity-open-mcp`) — installs once, then the client launches it directly.
+- optional: local checkout path (only if you cloned the `unity-open-mcp` monorepo to hack on it).
 
 If you use local checkout, build first:
 
@@ -105,11 +120,19 @@ A `.bak` backup is created next to each changed file. Per-target failures are re
 
 ## Troubleshooting
 
-- AI action missing: re-check project path and Unity version detection.
-- Package install disabled: resolve the Step 1 environment checks first (Unity version, Node.js, writable manifest).
-- Tools unavailable in client: restart client after writing config.
-- Bridge unavailable: verify project path, Unity runtime state, and Node path.
-- Re-detect does nothing: it refreshes the on-disk snapshot only — bridge reachability is checked in Step 6 while Unity is running.
+- **AI action missing on a project row:** re-check the project path and that
+  Unity version detection passed in Step 1.
+- **Package install disabled (Next greyed out):** resolve the Step 1 environment
+  checks first — the project must meet the minimum Unity version, have Node.js
+  18+, and a writable `Packages/manifest.json`.
+- **Tools unavailable in the client after finishing:** restart the client. Most
+  MCP clients only read their config at startup.
+- **Bridge unavailable in Step 6:** verify the project path is right, Unity
+  actually launched, and finished compiling. The health check runs while Unity is
+  running.
+- **Re-detect does nothing:** it refreshes the on-disk snapshot only — bridge
+  reachability is checked in Step 6 while Unity is running.
+- **npx first run looks slow:** expected — the server downloads on first launch.
 
 ## Related docs
 

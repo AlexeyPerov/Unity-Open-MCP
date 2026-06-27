@@ -1,6 +1,23 @@
 # Unity Hub Pro
 
-Unity Hub Pro is the desktop companion app for Unity Open MCP. It helps you manage projects, run the AI Setup wizard, and handle maintainer workflows from one UI.
+Unity Hub Pro is the optional desktop companion app for Unity Open MCP. It helps
+you manage projects, run the AI Setup wizard, and handle maintainer workflows
+from one UI.
+
+> **You do not need the Hub to use Unity Open MCP.** The manual path in
+> [Manual setup](manual-setup.md) works with no extra app. The Hub just automates
+> the fiddly parts — editing `Packages/manifest.json`, writing the MCP-client
+> config, copying the agent skill — so you don't have to touch a text editor or a
+> terminal. If you're new to Node, MCP clients, or JSON config files, start here.
+
+## Who is this for
+
+- **Artists and designers** who want to prototype with AI but don't want to edit
+  JSON or run terminal commands.
+- **Unity developers who haven't used Node/npm before** — the wizard handles the
+  server side for you and explains what it's doing.
+- **Anyone maintaining an Open MCP checkout** — the maintainer panel runs build,
+  test, version bump, and publish actions from a UI.
 
 ## What it does
 
@@ -42,7 +59,39 @@ For full setup steps, see [wizard-setup.md](wizard-setup.md).
 
 ## Installation
 
-From `hub/`:
+Unity Hub Pro ships as pre-built installers — you do **not** need Node, npm, or
+any build toolchain to run it. Grab the latest release for your operating system:
+
+> **Download:** [Unity Hub Pro releases](https://github.com/AlexeyPerov/Unity-AI-Hub/releases)
+> — look for the latest **`hub-v*`** tag.
+
+### macOS
+
+1. Download the `.dmg` (pick the **macOS ARM** build on Apple Silicon, or **macOS x64** on Intel).
+2. Open the `.dmg` and drag **Unity Hub Pro** to your **Applications** folder.
+3. On first launch, macOS may block the app because it isn't from the App Store.
+   Right-click the app → **Open** → confirm in the dialog. You only need to do
+   this once. (If Gatekeeper still refuses: **System Settings → Privacy &
+   Security → Open Anyway**.)
+
+### Windows
+
+1. Download the **Windows x64** build — either the `.msi` installer or the
+   `-setup.exe`.
+2. Run it. SmartScreen may warn about an unrecognized publisher; choose
+   **More info → Run anyway**.
+3. Launch **Unity Hub Pro** from the Start menu.
+
+### Verifying it works
+
+Open the app and add a Unity project from disk — it should appear in the project
+list. Click the **AI** action on that row to start the wizard (see
+[wizard-setup.md](wizard-setup.md)).
+
+## For developers (build from source)
+
+If you want to build the Hub yourself — to run a local modification or debug —
+you need Node and Rust. From `hub/`:
 
 ```bash
 npm install

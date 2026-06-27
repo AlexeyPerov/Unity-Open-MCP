@@ -22,8 +22,12 @@
 //   node scripts/sync-version.mjs --check --hub  # read-only drift check for the HUB
 //   node scripts/sync-version.mjs bump <level>            # bump version.json + sync trio
 //   node scripts/sync-version.mjs bump <level> --hub      # bump hub/version.json + sync hub
+//   node scripts/sync-version.mjs set <X.Y.Z>             # set version.json to <X.Y.Z> + sync trio
+//   node scripts/sync-version.mjs set <X.Y.Z> --hub       # set hub/version.json to <X.Y.Z> + sync hub
 //
 //   <level> = major | minor | patch
+//   <X.Y.Z> = plain major.minor.patch (a leading "v" is tolerated and stripped);
+//             pre-release/build metadata are not supported.
 //
 // Modeled on the approach used by reference projects (UCP's sync-version.mjs,
 // Unity-MCP-main's bump-version.ps1): one bespoke script is the proven minimal
@@ -255,17 +259,31 @@ const argv = process.argv.slice(2);
 const CHECK = argv.includes("--check");
 const HUB = argv.includes("--hub");
 const bumpIdx = argv.indexOf("bump");
+const setIdx = argv.indexOf("set");
 const isBump = bumpIdx !== -1;
+const isSet = setIdx !== -1;
 const bumpLevel = isBump ? argv[bumpIdx + 1] : undefined;
+const setRaw = isSet ? argv[setIdx + 1] : undefined;
 
 if (isBump && !["major", "minor", "patch"].includes(String(bumpLevel))) {
-  console.error(
-    "Usage: bump <level> where level is major | minor | patch",
-  );
+  console.error("Usage: bump <level> where level is major | minor | patch");
   process.exit(2);
 }
-if (CHECK && isBump) {
-  console.error("--check and bump are mutually exclusive.");
+// A leading "v" is tolerated and stripped; pre-release/build metadata are rejected.
+const setVersion =
+  isSet && typeof setRaw === "string" && /^v?\d+\.\d+\.\d+$/.test(setRaw)
+    ? setRaw.replace(/^v/, "")
+    : undefined;
+if (isSet && setVersion === undefined) {
+  console.error('Usage: set <X.Y.Z> where X.Y.Z is plain major.minor.patch');
+  process.exit(2);
+}
+if (isBump && isSet) {
+  console.error("bump and set are mutually exclusive.");
+  process.exit(2);
+}
+if (CHECK && (isBump || isSet)) {
+  console.error("--check is mutually exclusive with bump and set.");
   process.exit(2);
 }
 
@@ -273,13 +291,16 @@ const sourceFile = HUB ? HUB_SOURCE : TRIO_SOURCE;
 const targets = HUB ? HUB_TARGETS : TRIO_TARGETS;
 const label = HUB ? "Hub app" : "shared trio";
 
-// Bump path: update the source first, then sync.
-if (isBump) {
+// Bump/set path: update the source first, then sync.
+if (isBump || isSet) {
   const current = readSourceVersion(sourceFile);
-  const next = bumpSemver(current, /** @type {"major"|"minor"|"patch"} */ (bumpLevel));
+  const next = isBump
+    ? bumpSemver(current, /** @type {"major"|"minor"|"patch"} */ (bumpLevel))
+    : /** @type {string} */ (setVersion);
   writeSource(sourceFile, next);
   const { changed, missing } = syncTargets(sourceFile, targets, "write");
-  console.log(`Bumped ${label}: ${current} → ${next}`);
+  const verb = isBump ? "Bumped" : "Set";
+  console.log(`${verb} ${label}: ${current} → ${next}`);
   console.log(`  source: ${sourceFile}`);
   for (const c of changed) {
     console.log(`  ${c.file}${c.from ? ` (${c.from} → ${c.to})` : ""}`);

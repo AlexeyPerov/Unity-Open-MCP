@@ -3,10 +3,6 @@
 </p>
 
 
-| [English](README.md) | [简体中文](docs/i18n/README-zh.md) |
-|----------------------|---------------------------------|
-
-
 [![Docs](https://img.shields.io/badge/Docs-unity--mcp-4f46e5)](https://alexeyperov.github.io/)
 [![](https://img.shields.io/badge/Unity-000000?style=flat&logo=unity&logoColor=blue 'Unity')](https://unity.com/releases/editor/archive)
 [![](https://badge.mcpx.dev?status=on 'MCP Enabled')](https://modelcontextprotocol.io/introduction)
@@ -18,22 +14,22 @@ Unity Open MCP connects AI agents to Unity projects with a bridge + gate workflo
 
 Requires **Unity 2022.3 LTS or newer**.
 
-The MCP server consist of a total of **160** tools.
+The MCP server consists of a total of **172** tools.
 
 Current tool surface from `mcp-server/src/tools/index.ts`:
 
 - Core + gate + validation tools: **16**
-- Asset intelligence + senses + discovery + diagnostics tools: **16**
+- Asset intelligence + senses + discovery + diagnostics + meta tools: **21**
 - Typed editor/project tools (core package): **97**
-- Optional extension-pack tools: **31**
+- Optional extension-pack tools: **38**
 
 ## Quick setup
 
 Use any of this options:
 
-1. Install Unity-Hun-Pro and use its **AI Setup wizard** (simplest, no console needed): see [Wizard setup](docs/wizard-setup.md).
+1. Install Unity Hub Pro and use its **AI Setup wizard** (simplest, no console needed): see [Wizard setup](docs/wizard-setup.md).
 2. If you prefer manual setup: see [Manual setup](docs/manual-setup.md).
-3. If prefer cloning this repo and working with it directly: see [Development setuo](docs/development-setup.md). Fits contributor workflow.
+3. If prefer cloning this repo and working with it directly: see [Development setup](docs/development-setup.md). Fits contributor workflow.
 
 Optional: install extension packs for domain-specific workflows: [Extensions](docs/extensions.md).
 
@@ -43,7 +39,7 @@ Optional: install extension packs for domain-specific workflows: [Extensions](do
 - Asset intelligence tools including reserialize, structured asset read/search, and reference analysis.
 - Live + fallback routing (live Unity bridge, batch mode for supported tools, offline readers where possible).
 - Typed Unity tool surface for scenes, GameObjects, components, packages, build settings, profiler controls, and project settings.
-- Bundled domain tool groups for Navigation, Input System, ProBuilder, Particle System, and Animation — embedded in the bridge, compiled in automatically when the matching Unity package is present, and surfaced per session via tool groups.
+- Bundled domain tool groups for Navigation, Input System, ProBuilder, Particle System, Animation, and Splines — embedded in the bridge, compiled in automatically when the matching Unity package is present, and surfaced per session via tool groups.
 - Unity Hub Pro wizard for guided setup and maintainer workflows.
 
 For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-tools.md).

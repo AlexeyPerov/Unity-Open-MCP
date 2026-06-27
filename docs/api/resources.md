@@ -64,3 +64,9 @@ Unknown resource URIs return a JSON payload with:
 - `mcp-server/src/resources/index.ts`
 - `mcp-server/src/resource-router.ts`
 - `mcp-server/src/ping-cache.ts`
+
+## Related docs
+
+- [MCP tools API](mcp-tools.md)
+- [Bridge HTTP API](bridge-http.md)
+- [API index](../api.md)

@@ -18,7 +18,7 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 
 ## Tool groups and session visibility
 
-Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is ~160 tools) and mirrors Coplay's session-visibility model.
+Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is 172 tools) and mirrors Coplay's session-visibility model.
 
 ### Groups
 
@@ -188,7 +188,7 @@ Wraps the instance-lock classifier (`instance-discovery.ts#classifyInstance`) + 
 1. **No bridge HTTP route for start/stop.** Today only the Unity Editor toolbar toggles the bridge (`packages/bridge/Editor/UI/BridgeToolbarToggle.cs`). Adding those tools means new bridge-side work — a `/bridge/stop` + `/bridge/start` route that calls `BridgeHttpServer.Stop()/Start()` on the main thread.
 2. **Self-disconnect hazard on `stop`.** The `stop` request arrives over the very HTTP listener it is about to tear down. A correct implementation must send the response *before* the listener stops (deferred / async stop), or the caller gets a connection-reset instead of the OK.
 
-Offline scenarios are therefore **operator-driven** in v1: stop/start via the toolbar, gated by `manual` setup actions and confirmed by `bridge_status` (or `ping` / the CLI `wait-for-ready`). Revisit the stop/start routes only if the manual pattern proves too painful across milestones.
+Offline scenarios are therefore **operator-driven** in v1: stop/start via the toolbar, gated by `manual` setup actions and confirmed by `bridge_status` (or `ping` / the CLI `wait-for-ready`). Revisit the stop/start routes only if the manual pattern proves too painful in practice.
 
 ## Source references
 
@@ -199,5 +199,5 @@ Offline scenarios are therefore **operator-driven** in v1: stop/start via the to
 - `mcp-server/src/capabilities/build-capabilities.ts`
 - `mcp-server/src/capabilities/tool-groups.ts` — canonical tool-group catalog (single source of truth).
 - `mcp-server/src/tool-session-state.ts` — per-session visibility store + ListTools filter.
-- `mcp-server/src/tools/bridge-status.ts` — operator-only bridge admin tool (phase-3).
+- `mcp-server/src/tools/bridge-status.ts` — operator-only bridge admin tool.
 

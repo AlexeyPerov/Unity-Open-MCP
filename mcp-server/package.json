@@ -41,12 +41,12 @@
   },
   "license": "MIT",
   "author": "Alexey Perov",
-  "homepage": "https://github.com/AlexeyPerov/unity-open-mcp",
+  "homepage": "https://github.com/AlexeyPerov/Unity-Open-MCP",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AlexeyPerov/unity-open-mcp.git"
+    "url": "git+https://github.com/AlexeyPerov/Unity-Open-MCP.git"
   },
   "bugs": {
-    "url": "https://github.com/AlexeyPerov/unity-open-mcp/issues"
+    "url": "https://github.com/AlexeyPerov/Unity-Open-MCP/issues"
   }
 }

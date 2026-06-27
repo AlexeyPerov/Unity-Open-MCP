@@ -20,7 +20,7 @@ Columns are abbreviated; see **Projects** below for full names and links.
 | Cost | free | free | free | free | free | free | free | Unity sub + credits | $60–$200/mo² |
 | Unity versions | ✅ 2022.3 LTS+ | 2021.3+ | ✅ 2021.3+ | 6 only | 2021.3+ | 2021.3+ | 2021.3 LTS+ | 6+ | see site |
 | Setup experience | ⭐ Hub wizard + launcher | ✅ in-Unity window + CLI | ✅ in-Unity configurator | install script | `ucp install` + `doctor` | copy folder | 🟡 plugin + manual JSON config | in-Editor settings | plugin + account |
-| Tool surface | ✅ ~160 | ✅ 70+ | ✅ 43 grouped | ~11 | ~30 | ~52 | ✅ ~288 | growing | n/a (assistant) |
+| Tool surface | ✅ 172 | ✅ 70+ | ✅ 43 grouped | ~11 | ~30 | ~52 | ✅ ~288 | growing | n/a (assistant) |
 | Scene / GameObject / component editing | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Asset read / search / references | ✅ | ✅ | ✅ | 🟡 | ✅ | 🟡 | ✅ | 🟡 | 🟡 full-project context |
 | Screenshots | ✅ | ⭐ scene/game/iso | ✅ | ✅ | ✅ | ❌ | ✅ | 🟡 | 🟡 visual-bug tracing |
@@ -31,7 +31,7 @@ Columns are abbreviated; see **Projects** below for full names and links.
 | Safety: checkpoints / validation / undo | ⭐ gate + delta + regression | ❌ | ❌ | ❌ | 🟡 dirty-guard | ❌ | ❌ | ❌ | ✅ reviewable + one-click undo |
 | Offline / CI / batch | ✅ | ✅ server mode | ✅ CLI + remote | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Multi-agent concurrency | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⭐ fair queue + routing | ❌ | ❌ |
-| Extension / domain packs | ✅ 5 (Nav/Input/ProBuilder/…) | ⭐ 10 (Cinemachine/Terrain/…) | 🟡 tool groups | custom | — | module stubs | 🟡 package-gated | — | — |
+| Extension / domain packs | ✅ 6 (Nav/Input/ProBuilder/Particles/Animation/Splines) | ⭐ 10 (Cinemachine/Terrain/…) | 🟡 tool groups | custom | — | module stubs | 🟡 package-gated | — | — |
 | AI client auto-config | ✅ Cursor/Claude/OpenCode/Zed | ⭐ 14+ | ⭐ broad matrix | manual | Claude plugin | generic | ❌ manual | n/a | n/a |
 
 ¹ AnkleBreaker uses a custom "AnkleBreaker Open License" (attribution required, resale forbidden) — read it before depending on it commercially.
