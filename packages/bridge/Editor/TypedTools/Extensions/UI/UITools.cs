@@ -29,6 +29,7 @@
 //
 // Naming: `unity_open_mcp_ui_<action>` (snake_case domain prefix).
 #pragma warning disable CS0618
+using System.Linq;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -554,13 +555,6 @@ namespace UnityOpenMcpBridge.Extensions.UI
             string text, Color? color, Sprite sprite,
             StringBuilder addedComponents, ref bool first)
         {
-            void AppendAdded(string componentType)
-            {
-                if (!first) addedComponents.Append(',');
-                first = false;
-                addedComponents.Append('"').Append(componentType).Append('"');
-            }
-
             switch (elementType)
             {
                 case "Text":
@@ -568,7 +562,7 @@ namespace UnityOpenMcpBridge.Extensions.UI
                     var t = Undo.AddComponent<Text>(go);
                     if (text != null) t.text = text;
                     if (color.HasValue) t.color = color.Value;
-                    AppendAdded("Text");
+                    AppendAdded(addedComponents, ref first, "Text");
                     return null;
                 }
                 case "TMP_Text":
@@ -601,7 +595,7 @@ namespace UnityOpenMcpBridge.Extensions.UI
                         if (colorProp != null && colorProp.CanWrite)
                             colorProp.SetValue(mb2, color.Value);
                     }
-                    AppendAdded("TMP_Text");
+                    AppendAdded(addedComponents, ref first, "TMP_Text");
                     return null;
                 }
                 case "Image":
@@ -609,7 +603,7 @@ namespace UnityOpenMcpBridge.Extensions.UI
                     var img = Undo.AddComponent<Image>(go);
                     if (sprite != null) img.sprite = sprite;
                     if (color.HasValue) img.color = color.Value;
-                    AppendAdded("Image");
+                    AppendAdded(addedComponents, ref first, "Image");
                     return null;
                 }
                 case "Button":
@@ -618,8 +612,8 @@ namespace UnityOpenMcpBridge.Extensions.UI
                     if (sprite != null) img.sprite = sprite;
                     if (color.HasValue) img.color = color.Value;
                     Undo.AddComponent<Button>(go);
-                    AppendAdded("Image");
-                    AppendAdded("Button");
+                    AppendAdded(addedComponents, ref first, "Image");
+                    AppendAdded(addedComponents, ref first, "Button");
                     return null;
                 }
                 case "Slider":
@@ -630,7 +624,7 @@ namespace UnityOpenMcpBridge.Extensions.UI
                     // the bare component — agents wire the sub-targets via
                     // ui_element_modify (Slider.fillRect / handleRect / etc.).
                     Undo.AddComponent<Slider>(go);
-                    AppendAdded("Slider");
+                    AppendAdded(addedComponents, ref first, "Slider");
                     return null;
                 }
                 case "Toggle":
@@ -640,8 +634,8 @@ namespace UnityOpenMcpBridge.Extensions.UI
                     if (color.HasValue) img.color = color.Value;
                     var toggle = Undo.AddComponent<Toggle>(go);
                     toggle.isOn = true;
-                    AppendAdded("Image");
-                    AppendAdded("Toggle");
+                    AppendAdded(addedComponents, ref first, "Image");
+                    AppendAdded(addedComponents, ref first, "Toggle");
                     return null;
                 }
                 case "InputField":
@@ -651,7 +645,7 @@ namespace UnityOpenMcpBridge.Extensions.UI
                     // enough for the field-patch surface — agents wire the
                     // textComponent / placeholder via ui_element_modify.
                     Undo.AddComponent<InputField>(go);
-                    AppendAdded("InputField");
+                    AppendAdded(addedComponents, ref first, "InputField");
                     return null;
                 }
                 default:
@@ -664,6 +658,20 @@ namespace UnityOpenMcpBridge.Extensions.UI
         // =====================================================================
         // Helpers — TMP presence detection (reflection; no compile-time ref)
         // =====================================================================
+
+        // Append one component-type name to the addedComponents JSON array,
+        // inserting a leading comma when this is not the first entry. The
+        // `first` flag is passed by ref so the caller tracks comma insertion
+        // across multiple AppendAdded calls. Declared as a regular static
+        // method (not a local function) because C# forbids capturing a ref
+        // parameter in a lambda / local function.
+        private static void AppendAdded(StringBuilder addedComponents, ref bool first,
+            string componentType)
+        {
+            if (!first) addedComponents.Append(',');
+            first = false;
+            addedComponents.Append('"').Append(componentType).Append('"');
+        }
 
         // Resolve the abstract TMP_Text type (TMPro.TMP_Text). Returns null when
         // TMP is not installed. The base type is abstract — we resolve the

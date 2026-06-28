@@ -316,12 +316,23 @@ namespace UnityOpenMcpBridge.Extensions.Lighting
             {
                 if (mode == "realtime")
                 {
-                    // ReflectionProbe.RenderProbe renders into the probe's
-                    // runtime texture; Bake() writes a baked snapshot. We use
-                    // Bake() to match the documented behavior (realtime here
-                    // means "bake into the probe now, not via lightmapping").
+                    // Unity's public ReflectionProbe API has no Bake() instance
+                    // method, and Lightmapping.BakeReflectionProbeSnapshot is
+                    // internal-only. The public bake-to-texture path is
+                    // Lightmapping.BakeReflectionProbe(probe, path) — but for a
+                    // "realtime" / quick snapshot (no GI), we reach the internal
+                    // BakeReflectionProbeSnapshot(probe) via reflection. When
+                    // that internal is unavailable on a future Unity version,
+                    // we fall through to RenderProbe (renders the probe's
+                    // runtime texture in place).
                     Undo.RecordObject(probe, "Bake ReflectionProbe");
-                    probe.Bake();
+                    if (!TryBakeReflectionProbeSnapshot(probe))
+                    {
+                        // Fallback: render into the probe's runtime texture.
+                        // This is the runtime-quality render, not a baked
+                        // snapshot, but it is the closest public API.
+                        probe.RenderProbe();
+                    }
                 }
                 else if (mode == "baked")
                 {
@@ -342,21 +353,13 @@ namespace UnityOpenMcpBridge.Extensions.Lighting
                         return LightingJson.Error("invalid_asset_path",
                             "target_path must be Assets/-rooted and end with '.cubemap'.");
 
-                    // Ensure the asset exists — BakeReflectionProbeSnapshot
-                    // writes into an existing cubemap asset, so create an empty
-                    // one first if it does not.
-                    var cubemap = AssetDatabase.LoadAssetAtPath<Cubemap>(target_path);
-                    if (cubemap == null)
-                    {
-                        EnsureFolderFor(target_path);
-                        var probeTexture = new Cubemap(probe.resolution, probe.hdr ? TextureFormat.RGBAHalf : TextureFormat.RGBA32, true);
-                        AssetDatabase.CreateAsset(probeTexture, target_path);
-                        cubemap = AssetDatabase.LoadAssetAtPath<Cubemap>(target_path);
-                    }
+                    // Lightmapping.BakeReflectionProbe(probe, path) is the
+                    // public bake-to-cubemap-asset API. It creates / overwrites
+                    // the cubemap at the path — no need to pre-create it.
+                    EnsureFolderFor(target_path);
                     Undo.RecordObject(probe, "Bake ReflectionProbe (custom)");
-                    Lightmapping.BakeReflectionProbeSnapshot(probe, target_path);
+                    Lightmapping.BakeReflectionProbe(probe, target_path);
                     bakedAssetPath = target_path;
-                    EditorUtility.SetDirty(cubemap);
                 }
             }
             catch (System.Exception e)
@@ -821,6 +824,30 @@ namespace UnityOpenMcpBridge.Extensions.Lighting
         // =====================================================================
         // Helpers — asset folder creation for custom cubemap bake
         // =====================================================================
+
+        // Invoke Lightmapping.BakeReflectionProbeSnapshot(probe) via reflection.
+        // That method is the public-adjacent "quick snapshot, no GI" bake, but
+        // Unity marks it `internal` (see Lightmapping.bindings.cs), so the
+        // Lighting tools reach it via reflection rather than a direct call.
+        // Returns true when the snapshot baked; false when the internal is
+        // unavailable (callers fall back to RenderProbe / the public bake path).
+        private static bool TryBakeReflectionProbeSnapshot(ReflectionProbe probe)
+        {
+            try
+            {
+                var method = typeof(Lightmapping).GetMethod(
+                    "BakeReflectionProbeSnapshot",
+                    System.Reflection.BindingFlags.NonPublic |
+                    System.Reflection.BindingFlags.Static);
+                if (method == null) return false;
+                var result = method.Invoke(null, new object[] { probe });
+                return result is bool b && b;
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
         private static void EnsureFolderFor(string assetPath)
         {
