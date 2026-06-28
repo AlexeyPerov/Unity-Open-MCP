@@ -16,15 +16,16 @@ step.
 | Animation | `com.unity.modules.animation` (built-in) | `UNITY_OPEN_MCP_EXT_ANIMATION` | `.../Extensions/Animation/` |
 | Splines | `com.unity.splines` | `UNITY_OPEN_MCP_EXT_SPLINES` | `.../Extensions/Splines/` |
 | Lighting | built-in (`Light` / `ReflectionProbe` / `RenderSettings` / `Lightmapping`) | *(none — ungated)* | `.../Extensions/Lighting/` |
+| Audio | built-in (`AudioSource` / `AudioListener` / `AudioMixer` / `AudioMixerGroup`) | *(none — ungated)* | `.../Extensions/Audio/` |
 
 Navigation is the reference template; InputSystem, ProBuilder, ParticleSystem,
 and Animation share the same layout. Splines is the most recently added
 compile-gated domain — it proves the embedded + grouped model extends to
-additional Unity APIs. Lighting is the first **ungated** domain: its types are
-unconditionally present in every Unity install, so it ships without a
-`UNITY_OPEN_MCP_EXT_*` define and compiles into every bridge build (its
-`lighting` tool group is still hidden from `ListTools` until the session
-activates it via `manage_tools`).
+additional Unity APIs. Lighting and Audio are **ungated** domains: their types
+are unconditionally present in every Unity install, so they ship without a
+`UNITY_OPEN_MCP_EXT_*` define and compile into every bridge build (their
+`lighting` / `audio` tool groups are still hidden from `ListTools` until the
+session activates them via `manage_tools`).
 
 ## Embedded domain model
 

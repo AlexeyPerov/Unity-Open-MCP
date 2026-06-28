@@ -239,6 +239,22 @@ import { reflectionProbeBake } from "./reflection-probe-bake.js";
 import { reflectionProbeGet } from "./reflection-probe-get.js";
 import { skyboxSet } from "./skybox-set.js";
 import { skyboxGet } from "./skybox-get.js";
+// M20 Plan 3 / T20.3.1 — Audio domain tools. Built-in audio module (AudioSource /
+// AudioListener / AudioMixer / AudioMixerGroup from UnityEngine.AudioModule) —
+// ungated in the bridge (no UNITY_OPEN_MCP_EXT_AUDIO define), always compiled.
+// The `audio` group is hidden from ListTools until the session activates it via
+// manage_tools. Mutating members (audio_source_add / audio_source_modify /
+// audio_mixer_set_parameter) run the full gate path with paths_hint scoped to
+// the host scene path (or the mixer asset path for audio_mixer_set_parameter).
+// Read-only members (audio_listener_get / audio_mixer_get_parameter) are
+// gate-free. Closes the Audio parity gap with AnkleBreaker's audio category;
+// the mixer-parameter round-trip (set then read-back) is the documented
+// advantage.
+import { audioSourceAdd } from "./audio-source-add.js";
+import { audioSourceModify } from "./audio-source-modify.js";
+import { audioMixerSetParameter } from "./audio-mixer-set-parameter.js";
+import { audioListenerGet } from "./audio-listener-get.js";
+import { audioMixerGetParameter } from "./audio-mixer-get-parameter.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -627,6 +643,21 @@ export const M20_PLAN2_LIGHTING_TOOLS: Tool[] = [
   skyboxGet,
 ];
 
+// M20 Plan 3 / T20.3.1 — Audio domain tools. Built-in audio module — ungated
+// in the bridge (always compiled). Three mutating members (audio_source_add /
+// audio_source_modify / audio_mixer_set_parameter) run the full gate path with
+// paths_hint scoped to the host scene path (audio_source_*) or the mixer asset
+// path (audio_mixer_set_parameter). Two read-only members (audio_listener_get /
+// audio_mixer_get_parameter) are gate-free. Closes the Audio parity gap with
+// AnkleBreaker's audio category.
+export const M20_PLAN3_AUDIO_TOOLS: Tool[] = [
+  audioSourceAdd,
+  audioSourceModify,
+  audioMixerSetParameter,
+  audioListenerGet,
+  audioMixerGetParameter,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -657,4 +688,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M18_PLAN2_TOOLS,
   ...M18_PLAN7_SPLINES_TOOLS,
   ...M20_PLAN2_LIGHTING_TOOLS,
+  ...M20_PLAN3_AUDIO_TOOLS,
 ];

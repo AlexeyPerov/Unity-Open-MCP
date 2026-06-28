@@ -202,6 +202,29 @@ test("groupToTools lighting roster has all 7 lighting tools", () => {
   assert.ok(map.lighting.includes("unity_open_mcp_skybox_set"));
 });
 
+test("groupFor assigns audio tools to audio", () => {
+  for (const name of [
+    "unity_open_mcp_audio_source_add",
+    "unity_open_mcp_audio_source_modify",
+    "unity_open_mcp_audio_mixer_set_parameter",
+    "unity_open_mcp_audio_listener_get",
+    "unity_open_mcp_audio_mixer_get_parameter",
+  ]) {
+    assert.equal(groupFor(name), "audio", `${name} must map to audio`);
+  }
+});
+
+test("groupToTools audio roster has all 5 audio tools", () => {
+  const map = groupToTools();
+  // 5 tools — audio_source_add / audio_source_modify +
+  // audio_mixer_set_parameter / audio_mixer_get_parameter +
+  // audio_listener_get (M20 Plan 3 / T20.3.1).
+  assert.equal(map.audio.length, 5);
+  assert.ok(map.audio.includes("unity_open_mcp_audio_source_add"));
+  assert.ok(map.audio.includes("unity_open_mcp_audio_mixer_set_parameter"));
+  assert.ok(map.audio.includes("unity_open_mcp_audio_listener_get"));
+});
+
 // ---------------------------------------------------------------------------
 // Session state — activate / deactivate / reset
 // ---------------------------------------------------------------------------

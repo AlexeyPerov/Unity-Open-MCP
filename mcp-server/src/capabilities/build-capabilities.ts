@@ -262,6 +262,17 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_reflection_probe_get: "lighting",
   unity_open_mcp_skybox_set: "lighting",
   unity_open_mcp_skybox_get: "lighting",
+  // M20 Plan 3 / T20.3.1 — Audio domain tools. Built-in audio module
+  // (AudioSource / AudioListener / AudioMixer / AudioMixerGroup from
+  // UnityEngine.AudioModule) — ungated in the bridge, always compiled. Mutating
+  // members (audio_source_add / audio_source_modify / audio_mixer_set_parameter)
+  // run the full gate path; read-only members (audio_listener_get /
+  // audio_mixer_get_parameter) are gate-free.
+  unity_open_mcp_audio_source_add: "audio",
+  unity_open_mcp_audio_source_modify: "audio",
+  unity_open_mcp_audio_mixer_set_parameter: "audio",
+  unity_open_mcp_audio_listener_get: "audio",
+  unity_open_mcp_audio_mixer_get_parameter: "audio",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",

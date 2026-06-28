@@ -13,14 +13,14 @@ Unity Open MCP connects AI agents to Unity projects with a bridge + gate workflo
 
 Requires **Unity 2022.3 LTS or newer**.
 
-The MCP server consists of a total of **181** tools.
+The MCP server consists of a total of **186** tools.
 
 Current tool surface from `mcp-server/src/tools/index.ts`:
 
 - Core + gate + validation tools: **16**
 - Asset intelligence + senses + discovery + diagnostics + meta tools: **23**
 - Typed editor/project tools (core package): **97**
-- Optional extension-pack tools: **45**
+- Optional extension-pack tools: **50**
 
 ## Quick setup
 
@@ -41,7 +41,7 @@ Optional: install extension packs for domain-specific workflows: [Extensions](do
 - Asset intelligence tools including reserialize, structured asset read/search, and reference analysis.
 - Live + fallback routing (live Unity bridge, batch mode for supported tools, offline readers where possible).
 - Typed Unity tool surface for scenes, GameObjects, components, packages, build settings, profiler controls, and project settings.
-- Bundled domain tool groups for Navigation, Input System, ProBuilder, Particle System, Animation, Splines, and Lighting — embedded in the bridge, compiled in automatically when the matching Unity package is present (or unconditionally for built-in modules like Lighting), and surfaced per session via tool groups.
+- Bundled domain tool groups for Navigation, Input System, ProBuilder, Particle System, Animation, Splines, Lighting, and Audio — embedded in the bridge, compiled in automatically when the matching Unity package is present (or unconditionally for built-in modules like Lighting and Audio), and surfaced per session via tool groups.
 - Unity Hub Pro wizard for guided setup and maintainer workflows.
 
 For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-tools.md).

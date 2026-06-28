@@ -174,6 +174,14 @@ export const TOOL_GROUPS: ToolGroup[] = [
     defaultEnabled: false,
   },
   {
+    id: "audio",
+    description:
+      "Audio tools — AudioSource add/modify, AudioMixer exposed-parameter " +
+      "set/get, AudioListener read (duplicate warning). Built-in audio " +
+      "module — always compiled (no domain define).",
+    defaultEnabled: false,
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -466,6 +474,22 @@ assign(
     "reflection_probe_get",
     "skybox_set",
     "skybox_get",
+  ].map((suffix) => `unity_open_mcp_${suffix}`),
+);
+
+// --- audio (M20 Plan 3 / T20.3.1 — built-in audio module, ungated) --------
+// audio_source_* and audio_mixer_* use distinct domain prefixes but share one
+// tool group. audio_listener_get folds in the same group. Built-in audio types
+// (AudioSource / AudioListener / AudioMixer / AudioMixerGroup) are always
+// present, so this group carries no domainDefine.
+assign(
+  "audio",
+  [
+    "audio_source_add",
+    "audio_source_modify",
+    "audio_mixer_set_parameter",
+    "audio_listener_get",
+    "audio_mixer_get_parameter",
   ].map((suffix) => `unity_open_mcp_${suffix}`),
 );
 

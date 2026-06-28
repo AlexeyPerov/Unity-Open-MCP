@@ -15,12 +15,12 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 - **Asset intelligence**: reserialize, read/search/list assets.
 - **Agent senses**: tests, screenshots (scene/game/isolated, arbitrary camera pose, inline image, editor window), Frame Debugger (enable/disable/draw-call list), console read, profiler capture (per-frame + single-frame deep capture), memory/rendering snapshots, spatial queries, event pull.
 - **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers.
-- **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting.
+- **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio.
 - **Discovery utilities**: capabilities, rules list, skill generation, manage_tools.
 
 ## Tool groups and session visibility
 
-Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is 181 tools) and mirrors Coplay's session-visibility model.
+Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is 186 tools) and mirrors Coplay's session-visibility model.
 
 ### Groups
 
@@ -41,6 +41,7 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | `animation`          | off     | AnimationClip + AnimatorController tools — compile-gated on `com.unity.modules.animation`                                                                                       |
 | `splines`            | off     | Splines tools — compile-gated on `com.unity.splines`                                                                                                                            |
 | `lighting`           | off     | Lighting tools — per-Light manipulation (add/set/modify), reflection probe bake (EditorSettle), skybox assignment. Built-in lighting module (always compiled)                   |
+| `audio`              | off     | Audio tools — AudioSource add/modify, AudioMixer exposed-parameter set/get, AudioListener read (duplicate warning). Built-in audio module (always compiled)                      |
 | `agent-senses`       | off     | run_tests, screenshot, screenshot_camera, capture_inline, screenshot_window, frame_debugger, read_console, profiler capture/capture_frame/memory/rendering, spatial_query (live-only)                        |
 
 
