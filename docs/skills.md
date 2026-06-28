@@ -19,6 +19,7 @@ Skills are markdown playbooks (`SKILL.md`) that give an AI agent **project-speci
 | [`skills/extensions/audio/SKILL.md`](../skills/extensions/audio/SKILL.md) | Agents using AudioSource / AudioListener / AudioMixer tooling | `audio` tool group activated (built-in audio module — always compiled) |
 | [`skills/extensions/ui/SKILL.md`](../skills/extensions/ui/SKILL.md) | Agents using uGUI (Canvas / elements / layout groups / element modify) | `ui` tool group activated (built-in UI module — always compiled; TMP_Text optional) |
 | [`skills/extensions/constraints/SKILL.md`](../skills/extensions/constraints/SKILL.md) | Agents using animation constraints (Position/Rotation/Aim/Parent/Scale) and LODGroup | `constraints` tool group activated (built-in engine modules — always compiled) |
+| [`skills/extensions/terrain/SKILL.md`](../skills/extensions/terrain/SKILL.md) | Agents authoring Unity Terrain (heightmaps, splatmaps, trees, neighbor stitching) | `terrain` tool group activated (built-in Terrain module — always compiled) |
 
 ### Core playbook
 

@@ -17,9 +17,9 @@
  * 2. `EXTENSION_PACKS` — the third-party / community / planned pack
  *    mirror. Shipped first-party domains are deliberately absent here
  *    (they live in `EMBEDDED_DOMAINS`); this catalog advertises only
- *    planned placeholders (Splines, Terrain, Tilemap) and any future
- *    real third-party community pack. Mirrors the bridge's in-Editor
- *    `ExtensionCatalog.cs` (the "Community / planned packs" section).
+ *    planned placeholders (Tilemap) and any future real third-party
+ *    community pack. Mirrors the bridge's in-Editor `ExtensionCatalog.cs`
+ *    (the "Community / planned packs" section).
  *
  * Pure data — no runtime deps. Run with:
  *   node --test --experimental-strip-types --no-warnings src/lib/services/extensions.test.ts
@@ -296,24 +296,14 @@ export interface ExtensionPack {
  * narrowed this to third-party + planned packs only: the shipped
  * first-party domains are embedded in the bridge and tracked in
  * EMBEDDED_DOMAINS, so they are deliberately absent here. Planned
- * placeholders (Terrain, Tilemap) advertise coming-soon domains; Splines
- * graduated out of this list into EMBEDDED_DOMAINS in M18 Plan 7. A real
+ * placeholders (Tilemap) advertise coming-soon domains; Splines
+ * graduated out of this list into EMBEDDED_DOMAINS in M18 Plan 7, and
+ * Terrain shipped as an ungated embedded domain in M20 Plan 4. A real
  * third-party community pack is added here with `shipped: true` only when
  * its tools register from an external assembly. Mirrors
  * `ExtensionCatalog.cs` — keep both in sync.
  */
 export const EXTENSION_PACKS: readonly ExtensionPack[] = [
-  {
-    id: "com.alexeyperov.unity-open-mcp-ext-terrain",
-    domain: "terrain",
-    displayName: "Terrain",
-    description: "Terrain heightmaps, splatmaps, trees, and neighbor stitching.",
-    upmDependency: "",
-    localPath: "packages/extensions/terrain",
-    toolIds: [],
-    skillPath: "skills/extensions/terrain/SKILL.md",
-    shipped: false,
-  },
   {
     id: "com.alexeyperov.unity-open-mcp-ext-tilemap",
     domain: "tilemap",

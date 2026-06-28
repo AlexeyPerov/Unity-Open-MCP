@@ -286,6 +286,23 @@ import { uiElementModify } from "./ui-element-modify.js";
 import { constraintAdd } from "./constraint-add.js";
 import { lodGroupConfigure } from "./lod-group-configure.js";
 import { lodAddLevel } from "./lod-add-level.js";
+// M20 Plan 4 / T20.4 — Terrain domain tools. Built-in Terrain module (Terrain
+// / TerrainData / TreePrototype / TerrainLayer) — ungated in the bridge (no
+// UNITY_OPEN_MCP_EXT_TERRAIN define), always compiled. The `terrain` group is
+// hidden from ListTools until the session activates it via manage_tools. All
+// five members (terrain_create / terrain_set_heights / terrain_paint_layer /
+// terrain_place_trees / terrain_set_neighbors) are mutating and run the full
+// gate path with paths_hint scoped to the host scene path (+ the asset path
+// for terrain_create's TerrainData .asset and terrain_paint_layer's new
+// TerrainLayer .terrainlayer). Closes the Terrain parity gap with
+// AnkleBreaker's terrain category + Ivan's Unity-AI-Terrain pack; the
+// large-array cap + tiling hint and the gate + paths_hint contract on every
+// mutating member are the documented advantages.
+import { terrainCreate } from "./terrain-create.js";
+import { terrainSetHeights } from "./terrain-set-heights.js";
+import { terrainPaintLayer } from "./terrain-paint-layer.js";
+import { terrainPlaceTrees } from "./terrain-place-trees.js";
+import { terrainSetNeighbors } from "./terrain-set-neighbors.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -718,6 +735,27 @@ export const M20_PLAN3_CONSTRAINTS_TOOLS: Tool[] = [
   lodAddLevel,
 ];
 
+// M20 Plan 4 / T20.4 — Terrain domain tools. Built-in Terrain module —
+// ungated in the bridge (always compiled). Five mutating members
+// (terrain_create / terrain_set_heights / terrain_paint_layer /
+// terrain_place_trees / terrain_set_neighbors) run the full gate path with
+// paths_hint scoped to the host scene path (+ asset paths when
+// terrain_create / terrain_paint_layer write assets). terrain_create allocates
+// TerrainData + a Terrain GameObject; terrain_set_heights writes a heightmap
+// region (cap 513x513 per call); terrain_paint_layer paints a splat layer
+// (seeding a new TerrainLayer when the index is new); terrain_place_trees
+// places tree instances (seeding a prototype from a prefab when the index is
+// new); terrain_set_neighbors stitches neighbor terrains for LOD. Closes the
+// Terrain parity gap with AnkleBreaker's terrain category + Ivan's
+// Unity-AI-Terrain pack; absorbs backlog T6.6.7.
+export const M20_PLAN4_TERRAIN_TOOLS: Tool[] = [
+  terrainCreate,
+  terrainSetHeights,
+  terrainPaintLayer,
+  terrainPlaceTrees,
+  terrainSetNeighbors,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -751,4 +789,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M20_PLAN3_AUDIO_TOOLS,
   ...M20_PLAN3_UI_TOOLS,
   ...M20_PLAN3_CONSTRAINTS_TOOLS,
+  ...M20_PLAN4_TERRAIN_TOOLS,
 ];

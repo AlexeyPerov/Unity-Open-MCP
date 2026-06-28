@@ -75,16 +75,6 @@ namespace UnityOpenMcpBridge
         public static readonly ExtensionPack[] Packs =
         {
             new ExtensionPack(
-                id: "com.alexeyperov.unity-open-mcp-ext-terrain",
-                domain: "terrain",
-                displayName: "Terrain",
-                description: "Terrain heightmaps, splatmaps, trees, and neighbor stitching.",
-                upmDependency: "",
-                localPath: "packages/extensions/terrain",
-                toolIds: System.Array.Empty<string>(),
-                skillPath: "skills/extensions/terrain/SKILL.md",
-                shipped: false),
-            new ExtensionPack(
                 id: "com.alexeyperov.unity-open-mcp-ext-tilemap",
                 domain: "tilemap",
                 displayName: "Tilemap",

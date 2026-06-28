@@ -167,9 +167,10 @@ test("EXTENSION_PACKS does not double-list shipped embedded domains", () => {
 
 test("EXTENSION_PACKS advertises the planned placeholders", () => {
   const domains = EXTENSION_PACKS.map((p) => p.domain).sort();
-  // Splines graduated into EMBEDDED_DOMAINS in M18 Plan 7; Terrain + Tilemap
-  // remain planned placeholders.
-  assert.deepEqual(domains, ["terrain", "tilemap"]);
+  // Splines graduated into EMBEDDED_DOMAINS in M18 Plan 7; Terrain shipped as
+  // an ungated embedded domain in M20 Plan 4. Tilemap remains the sole
+  // planned placeholder.
+  assert.deepEqual(domains, ["tilemap"]);
   // All current entries are planned (no shipped community pack yet).
   for (const p of EXTENSION_PACKS) {
     assert.equal(p.shipped, false, `${p.domain} should be a planned placeholder`);
@@ -183,21 +184,23 @@ test("shippedPacks() is empty until a real community pack lands", () => {
 });
 
 test("findPack returns the planned pack and undefined for unknown ids", () => {
-  const terrain = findPack("com.alexeyperov.unity-open-mcp-ext-terrain");
-  assert.ok(terrain, "terrain planned pack should be in the catalog");
-  assert.equal(terrain?.shipped, false);
-  // Splines graduated into EMBEDDED_DOMAINS in M18 Plan 7 — it must no longer
-  // appear as a planned pack.
+  const tilemap = findPack("com.alexeyperov.unity-open-mcp-ext-tilemap");
+  assert.ok(tilemap, "tilemap planned pack should be in the catalog");
+  assert.equal(tilemap?.shipped, false);
+  // Splines graduated into EMBEDDED_DOMAINS in M18 Plan 7; Terrain shipped as
+  // an ungated embedded domain in M20 Plan 4 — both must no longer appear as
+  // planned packs.
   assert.equal(findPack("com.alexeyperov.unity-open-mcp-ext-splines"), undefined);
+  assert.equal(findPack("com.alexeyperov.unity-open-mcp-ext-terrain"), undefined);
   assert.equal(findPack("com.alexeyperov.unity-open-mcp-ext-navigation"), undefined);
   assert.equal(findPack("com.alexeyperov.no-such-pack"), undefined);
 });
 
 test("localPackageEntry produces a file: URL relative to Packages", () => {
-  const terrain = findPack("com.alexeyperov.unity-open-mcp-ext-terrain")!;
+  const tilemap = findPack("com.alexeyperov.unity-open-mcp-ext-tilemap")!;
   assert.equal(
-    localPackageEntry(terrain),
-    "file:../../packages/extensions/terrain",
+    localPackageEntry(tilemap),
+    "file:../../packages/extensions/tilemap",
   );
 });
 

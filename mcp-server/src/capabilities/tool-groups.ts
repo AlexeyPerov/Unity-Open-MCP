@@ -201,6 +201,15 @@ export const TOOL_GROUPS: ToolGroup[] = [
     defaultEnabled: false,
   },
   {
+    id: "terrain",
+    description:
+      "Terrain tools — create (TerrainData + GameObject), heightmap region write, " +
+      "splat layer paint, tree instance placement, neighbor stitching for LOD. " +
+      "Built-in Terrain module — always compiled (no domain define). Large-array " +
+      "cap (513x513) pushes agents toward tiled writes.",
+    defaultEnabled: false,
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -542,6 +551,22 @@ assign(
     "lod_group_configure",
     "lod_add_level",
   ].map((suffix) => `unity_open_mcp_${suffix}`),
+);
+
+// --- terrain (M20 Plan 4 / T20.4 — built-in Terrain module, ungated) ------
+// All five terrain_* tools share one domain prefix and one tool group. Built-in
+// Terrain types (Terrain / TerrainData / TreePrototype / TerrainLayer from
+// UnityEngine.TerrainModule + UnityEngine.CoreModule) are always present, so
+// this group carries no domainDefine.
+assign(
+  "terrain",
+  [
+    "create",
+    "set_heights",
+    "paint_layer",
+    "place_trees",
+    "set_neighbors",
+  ].map((suffix) => `unity_open_mcp_terrain_${suffix}`),
 );
 
 // --- agent-senses (live-only reads) ----------------------------------------

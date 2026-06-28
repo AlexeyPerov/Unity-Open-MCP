@@ -294,6 +294,18 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_constraint_add: "constraints",
   unity_open_mcp_lod_group_configure: "constraints",
   unity_open_mcp_lod_add_level: "constraints",
+  // M20 Plan 4 / T20.4 — Terrain domain tools. Built-in Terrain module
+  // (Terrain / TerrainData / TreePrototype / TerrainLayer) — ungated in the
+  // bridge, always compiled. All five members (terrain_create /
+  // terrain_set_heights / terrain_paint_layer / terrain_place_trees /
+  // terrain_set_neighbors) are mutating and run the full gate path. The
+  // large-array cap (513x513) pushes agents toward tiled heightmap / splat
+  // writes.
+  unity_open_mcp_terrain_create: "terrain",
+  unity_open_mcp_terrain_set_heights: "terrain",
+  unity_open_mcp_terrain_paint_layer: "terrain",
+  unity_open_mcp_terrain_place_trees: "terrain",
+  unity_open_mcp_terrain_set_neighbors: "terrain",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",

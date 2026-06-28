@@ -267,6 +267,31 @@ test("groupToTools constraints roster has all 3 constraints tools", () => {
   assert.ok(map.constraints.includes("unity_open_mcp_lod_add_level"));
 });
 
+test("groupFor assigns terrain tools to terrain", () => {
+  for (const name of [
+    "unity_open_mcp_terrain_create",
+    "unity_open_mcp_terrain_set_heights",
+    "unity_open_mcp_terrain_paint_layer",
+    "unity_open_mcp_terrain_place_trees",
+    "unity_open_mcp_terrain_set_neighbors",
+  ]) {
+    assert.equal(groupFor(name), "terrain", `${name} must map to terrain`);
+  }
+});
+
+test("groupToTools terrain roster has all 5 terrain tools", () => {
+  const map = groupToTools();
+  // 5 tools — terrain_create + terrain_set_heights + terrain_paint_layer +
+  // terrain_place_trees + terrain_set_neighbors (M20 Plan 4 / T20.4). Catalog
+  // minimum mirrored from Ivan's Unity-AI-Terrain pack.
+  assert.equal(map.terrain.length, 5);
+  assert.ok(map.terrain.includes("unity_open_mcp_terrain_create"));
+  assert.ok(map.terrain.includes("unity_open_mcp_terrain_set_heights"));
+  assert.ok(map.terrain.includes("unity_open_mcp_terrain_paint_layer"));
+  assert.ok(map.terrain.includes("unity_open_mcp_terrain_place_trees"));
+  assert.ok(map.terrain.includes("unity_open_mcp_terrain_set_neighbors"));
+});
+
 // ---------------------------------------------------------------------------
 // Session state — activate / deactivate / reset
 // ---------------------------------------------------------------------------
