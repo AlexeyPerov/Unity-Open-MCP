@@ -306,8 +306,7 @@ import { lodAddLevel } from "./lod-add-level.js";
 // terrain_place_trees / terrain_set_neighbors) are mutating and run the full
 // gate path with paths_hint scoped to the host scene path (+ the asset path
 // for terrain_create's TerrainData .asset and terrain_paint_layer's new
-// TerrainLayer .terrainlayer). Closes the Terrain parity gap with
-// AnkleBreaker's terrain category + Ivan's Unity-AI-Terrain pack; the
+// TerrainLayer .terrainlayer). Closes the Terrain parity gap; the
 // large-array cap + tiling hint and the gate + paths_hint contract on every
 // mutating member are the documented advantages.
 import { terrainCreate } from "./terrain-create.js";
@@ -324,9 +323,7 @@ import { terrainSetNeighbors } from "./terrain-set-neighbors.js";
 // members (create_camera / set_targets / set_lens / set_body / set_noise /
 // brain_ensure) run the full gate path with paths_hint scoped to the host
 // scene path (create_camera adds a new GameObject to the active scene). One
-// read-only member (camera_list) is gate-free. Closes the Cinemachine parity
-// gap with Ivan's Unity-AI-Cinemachine pack; the canonical reflection case
-// named in M18 Plan 1 T18.1.1 task 5 (version-split API trigger).
+// read-only member (camera_list) is gate-free.
 import { cinemachineCreateCamera } from "./cinemachine-create-camera.js";
 import { cinemachineSetTargets } from "./cinemachine-set-targets.js";
 import { cinemachineSetLens } from "./cinemachine-set-lens.js";

@@ -25,7 +25,6 @@
 //
 // Naming: `unity_open_mcp_tilemap_<action>` (snake_case domain prefix — mirrors
 // the kebab `tilemap-*` ids in the upstream Unity-AI-Tilemap reference pack).
-// Reference: IvanMurzak/Unity-AI-Tilemap (MIT).
 #if UNITY_OPEN_MCP_EXT_TILEMAP
 #pragma warning disable CS0618
 using System.Text;

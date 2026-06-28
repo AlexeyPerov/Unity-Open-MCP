@@ -165,7 +165,7 @@ export const EMBEDDED_DOMAINS: readonly EmbeddedDomain[] = [
       "unity_open_mcp_splines_modify",
     ],
   },
-  // M20 Plan 6 — Ivan-breadth compile-gated domains. Cinemachine is
+  // M20 Plan 6 — compile-gated domains. Cinemachine is
   // deliberately ABSENT here: it is reflection-gated (the assembly always
   // compiles), so it is not an installable compile-gated domain and the
   // wizard Step 3 / Optional Dependencies panel would mislead by suggesting

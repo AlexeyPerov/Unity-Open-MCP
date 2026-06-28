@@ -282,8 +282,7 @@ test("groupFor assigns terrain tools to terrain", () => {
 test("groupToTools terrain roster has all 5 terrain tools", () => {
   const map = groupToTools();
   // 5 tools — terrain_create + terrain_set_heights + terrain_paint_layer +
-  // terrain_place_trees + terrain_set_neighbors (M20 Plan 4 / T20.4). Catalog
-  // minimum mirrored from Ivan's Unity-AI-Terrain pack.
+  // terrain_place_trees + terrain_set_neighbors (M20 Plan 4 / T20.4).
   assert.equal(map.terrain.length, 5);
   assert.ok(map.terrain.includes("unity_open_mcp_terrain_create"));
   assert.ok(map.terrain.includes("unity_open_mcp_terrain_set_heights"));

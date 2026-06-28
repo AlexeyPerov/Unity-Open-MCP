@@ -30,7 +30,7 @@ namespace UnityOpenMcpBridge.Extensions.Animation
     //              SetCurve / RemoveCurve / ClearCurves / SetFrameRate /
     //              SetWrapMode / SetLegacy / AddEvent / ClearEvents.
     //
-    // The upstream reference pack (IvanMurzak/Unity-AI-Animation, Apache-2.0)
+    // The upstream reference pack
     // uses a strongly-typed `AnimationModification[]` discriminator array.
     // We accept the same JSON shape via `modifications_json` (a JSON array of
     // { type, ... } entries) and dispatch by `type`. Per-entry errors are

@@ -3,7 +3,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // M20 Plan 4 / T20.4 — Terrain domain tool. Paint one terrain layer's splat
 // from a 2D alphamap. Built-in Terrain module — ungated. Mutating: runs the
 // full gate path; paths_hint is the scene path (+ the layer asset path when a
-// new layer is created). Param shape mirrors Ivan's Terrain.PaintLayer.cs.
+// new layer is created)
 const targetSchema = {
   instance_id: {
     type: "integer",

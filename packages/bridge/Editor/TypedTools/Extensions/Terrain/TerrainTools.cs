@@ -1,9 +1,6 @@
 // M20 Plan 4 / T20.4 — Terrain embedded domain tools.
 //
 // Five typed tools covering the heightmap / splatmap / tree / neighbor
-// stitching layer the competitors ship as a full Terrain category
-// (AnkleBreaker ships 29 terrain tools; Ivan's Unity-AI-Terrain ships the
-// catalog minimum we mirror here).
 //
 //   terrain_create        — allocate TerrainData (+ optional .asset) and a
 //                           Terrain GameObject. Mirrors AnkleBreaker
@@ -40,9 +37,6 @@
 // tiling hint pointing the agent at x_offset / y_offset region writes.
 //
 // Naming: `unity_open_mcp_terrain_<action>` (snake_case domain prefix).
-//
-// Reference: IvanMurzak/Unity-AI-Terrain (Apache-2.0) + AnkleBreaker
-// editor-tools.js §terrain.
 #pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
