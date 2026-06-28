@@ -255,6 +255,24 @@ import { audioSourceModify } from "./audio-source-modify.js";
 import { audioMixerSetParameter } from "./audio-mixer-set-parameter.js";
 import { audioListenerGet } from "./audio-listener-get.js";
 import { audioMixerGetParameter } from "./audio-mixer-get-parameter.js";
+// M20 Plan 3 / T20.3.2 — UI (uGUI) domain tools. Built-in UI module (Canvas /
+// CanvasScaler / GraphicRaycaster / Image / Text / Button / Slider / Toggle /
+// InputField / layout groups / EventSystem from UnityEngine.UI +
+// UnityEngine.EventSystems) — ungated in the bridge (no UNITY_OPEN_MCP_EXT_UI
+// define), always compiled. TextMesh Pro (TMP_Text) is OPTIONAL and detected
+// at call time via reflection — when an agent requests element_type=TMP_Text
+// and TMP is absent, the tool returns `tmp_package_required` (no silent
+// legacy-Text fallback). The `ui` group is hidden from ListTools until the
+// session activates it via manage_tools. All four members (ui_canvas_add /
+// ui_element_add / ui_layout_group_add / ui_element_modify) run the full gate
+// path with paths_hint scoped to the host / new-root / parent scene path.
+// Closes the UI parity gap with AnkleBreaker's UI category; the
+// Canvas-companion ensure (CanvasScaler + GraphicRaycaster + EventSystem) is
+// the documented advantage — AnkleBreaker creates the Canvas alone.
+import { uiCanvasAdd } from "./ui-canvas-add.js";
+import { uiElementAdd } from "./ui-element-add.js";
+import { uiLayoutGroupAdd } from "./ui-layout-group-add.js";
+import { uiElementModify } from "./ui-element-modify.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -658,6 +676,21 @@ export const M20_PLAN3_AUDIO_TOOLS: Tool[] = [
   audioMixerGetParameter,
 ];
 
+// M20 Plan 3 / T20.3.2 — UI (uGUI) domain tools. Built-in UI module — ungated
+// in the bridge (always compiled). Four mutating members (ui_canvas_add /
+// ui_element_add / ui_layout_group_add / ui_element_modify) run the full gate
+// path with paths_hint scoped to the host / new-root / parent scene path.
+// TextMesh Pro (TMP_Text) is optional — when absent, ui_element_add returns
+// `tmp_package_required` (no silent legacy-Text fallback). Closes the UI parity
+// gap with AnkleBreaker's UI category; the Canvas-companion ensure (CanvasScaler
+// + GraphicRaycaster + EventSystem) is the documented advantage.
+export const M20_PLAN3_UI_TOOLS: Tool[] = [
+  uiCanvasAdd,
+  uiElementAdd,
+  uiLayoutGroupAdd,
+  uiElementModify,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -689,4 +722,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M18_PLAN7_SPLINES_TOOLS,
   ...M20_PLAN2_LIGHTING_TOOLS,
   ...M20_PLAN3_AUDIO_TOOLS,
+  ...M20_PLAN3_UI_TOOLS,
 ];

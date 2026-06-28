@@ -273,6 +273,16 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_audio_mixer_set_parameter: "audio",
   unity_open_mcp_audio_listener_get: "audio",
   unity_open_mcp_audio_mixer_get_parameter: "audio",
+  // M20 Plan 3 / T20.3.2 — UI (uGUI) domain tools. Built-in UI module (Canvas /
+  // CanvasScaler / GraphicRaycaster / Image / Text / Button / Slider / Toggle /
+  // InputField / layout groups / EventSystem) — ungated in the bridge, always
+  // compiled. All four members (ui_canvas_add / ui_element_add /
+  // ui_layout_group_add / ui_element_modify) are mutating and run the full gate
+  // path. TextMesh Pro (TMP_Text) is optional and detected at call time.
+  unity_open_mcp_ui_canvas_add: "ui",
+  unity_open_mcp_ui_element_add: "ui",
+  unity_open_mcp_ui_layout_group_add: "ui",
+  unity_open_mcp_ui_element_modify: "ui",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",

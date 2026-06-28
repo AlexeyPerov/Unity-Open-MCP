@@ -17,15 +17,19 @@ step.
 | Splines | `com.unity.splines` | `UNITY_OPEN_MCP_EXT_SPLINES` | `.../Extensions/Splines/` |
 | Lighting | built-in (`Light` / `ReflectionProbe` / `RenderSettings` / `Lightmapping`) | *(none — ungated)* | `.../Extensions/Lighting/` |
 | Audio | built-in (`AudioSource` / `AudioListener` / `AudioMixer` / `AudioMixerGroup`) | *(none — ungated)* | `.../Extensions/Audio/` |
+| UI (uGUI) | built-in (`Canvas` / `CanvasScaler` / `GraphicRaycaster` / `Image` / `Text` / `Button` / `Slider` / `Toggle` / `InputField` / layout groups / `EventSystem`) | *(none — ungated)* | `.../Extensions/UI/` |
 
 Navigation is the reference template; InputSystem, ProBuilder, ParticleSystem,
 and Animation share the same layout. Splines is the most recently added
 compile-gated domain — it proves the embedded + grouped model extends to
-additional Unity APIs. Lighting and Audio are **ungated** domains: their types
-are unconditionally present in every Unity install, so they ship without a
+additional Unity APIs. Lighting, Audio, and UI are **ungated** domains: their
+types are unconditionally present in every Unity install, so they ship without a
 `UNITY_OPEN_MCP_EXT_*` define and compile into every bridge build (their
-`lighting` / `audio` tool groups are still hidden from `ListTools` until the
-session activates them via `manage_tools`).
+`lighting` / `audio` / `ui` tool groups are still hidden from `ListTools` until
+the session activates them via `manage_tools`). UI's TextMesh Pro (`TMP_Text`)
+is optional and detected at call time via reflection — when absent,
+`ui_element_add` returns `tmp_package_required` (no silent legacy-`Text`
+fallback).
 
 ## Embedded domain model
 

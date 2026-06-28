@@ -225,6 +225,28 @@ test("groupToTools audio roster has all 5 audio tools", () => {
   assert.ok(map.audio.includes("unity_open_mcp_audio_listener_get"));
 });
 
+test("groupFor assigns ui tools to ui", () => {
+  for (const name of [
+    "unity_open_mcp_ui_canvas_add",
+    "unity_open_mcp_ui_element_add",
+    "unity_open_mcp_ui_layout_group_add",
+    "unity_open_mcp_ui_element_modify",
+  ]) {
+    assert.equal(groupFor(name), "ui", `${name} must map to ui`);
+  }
+});
+
+test("groupToTools ui roster has all 4 ui tools", () => {
+  const map = groupToTools();
+  // 4 tools — ui_canvas_add / ui_element_add / ui_layout_group_add /
+  // ui_element_modify (M20 Plan 3 / T20.3.2).
+  assert.equal(map.ui.length, 4);
+  assert.ok(map.ui.includes("unity_open_mcp_ui_canvas_add"));
+  assert.ok(map.ui.includes("unity_open_mcp_ui_element_add"));
+  assert.ok(map.ui.includes("unity_open_mcp_ui_layout_group_add"));
+  assert.ok(map.ui.includes("unity_open_mcp_ui_element_modify"));
+});
+
 // ---------------------------------------------------------------------------
 // Session state — activate / deactivate / reset
 // ---------------------------------------------------------------------------

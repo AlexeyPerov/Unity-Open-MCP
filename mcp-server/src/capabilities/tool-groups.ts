@@ -182,6 +182,16 @@ export const TOOL_GROUPS: ToolGroup[] = [
     defaultEnabled: false,
   },
   {
+    id: "ui",
+    description:
+      "UI (uGUI) tools — Canvas (+ CanvasScaler + GraphicRaycaster + EventSystem " +
+      "ensure), element add (Text / TMP_Text / Image / Button / Slider / Toggle / " +
+      "InputField), layout group add (Horizontal / Vertical / Grid), element modify " +
+      "(typed field patch). Built-in UI module — always compiled (no domain define). " +
+      "TextMesh Pro (TMP_Text) is optional and detected at call time.",
+    defaultEnabled: false,
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -491,6 +501,22 @@ assign(
     "audio_listener_get",
     "audio_mixer_get_parameter",
   ].map((suffix) => `unity_open_mcp_${suffix}`),
+);
+
+// --- ui (M20 Plan 3 / T20.3.2 — built-in UI module, ungated) --------------
+// All four ui_* tools share one domain prefix and one tool group. Built-in
+// uGUI types (Canvas / CanvasScaler / GraphicRaycaster / Image / Text / Button
+// / Slider / Toggle / InputField / layout groups / EventSystem) are always
+// present, so this group carries no domainDefine. TextMesh Pro (TMP_Text) is
+// optional and detected at call time, not at compile time.
+assign(
+  "ui",
+  [
+    "canvas_add",
+    "element_add",
+    "layout_group_add",
+    "element_modify",
+  ].map((suffix) => `unity_open_mcp_ui_${suffix}`),
 );
 
 // --- agent-senses (live-only reads) ----------------------------------------
