@@ -210,6 +210,36 @@ export const TOOL_GROUPS: ToolGroup[] = [
     defaultEnabled: false,
   },
   {
+    id: "cinemachine",
+    description:
+      "Cinemachine tools — create / configure virtual cameras, set targets / " +
+      "lens / Body / Noise, ensure Brain, list cameras. Reflection-gated in the " +
+      "bridge (the assembly always compiles; Cinemachine 3.x presence is detected " +
+      "at call time). Requires com.unity.cinemachine >= 3.x.",
+    defaultEnabled: false,
+  },
+  {
+    id: "timeline",
+    description:
+      "Timeline tools — create TimelineAsset, add tracks (Animation / Activation " +
+      "/ Audio / Signal / Control / Group / Playable), add clips, bind " +
+      "PlayableDirector, reflective modify. Compile-gated on com.unity.timeline.",
+    defaultEnabled: false,
+    domainDefine: "UNITY_OPEN_MCP_EXT_TIMELINE",
+    unityPackage: "com.unity.timeline",
+  },
+  {
+    id: "tilemap",
+    description:
+      "Tilemap tools — create Grid + Tilemap, paint single tiles, box-fill " +
+      "regions, create Tile assets, create RuleTile (requires tilemap.extras). " +
+      "Compile-gated on com.unity.2d.tilemap; RuleTile additionally gated on " +
+      "com.unity.2d.tilemap.extras at call time (two defines, two guards).",
+    defaultEnabled: false,
+    domainDefine: "UNITY_OPEN_MCP_EXT_TILEMAP",
+    unityPackage: "com.unity.2d.tilemap",
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -577,6 +607,64 @@ assign(
     "place_trees",
     "set_neighbors",
   ].map((suffix) => `unity_open_mcp_terrain_${suffix}`),
+);
+
+// --- cinemachine (M20 Plan 6 / T20.6.1 — reflection-gated) -----------------
+// The only reflection-gated domain pack. The bridge assembly ALWAYS compiles
+// (no UNITY_OPEN_MCP_EXT_CINEMACHINE compile gate) — so this group carries no
+// domainDefine and capabilities reports it as always-compiled-in. Cinemachine
+// 3.x presence is detected at call time via the CinemachineVersion reflection
+// layer; when 3.x is absent (package missing OR 2.x installed), the tools
+// return a clear install/upgrade error envelope. cinemachine_* use one domain
+// prefix and one tool group; six mutating members (create_camera / set_targets
+// / set_lens / set_body / set_noise / brain_ensure) run the full gate path; the
+// read-only member (camera_list) is gate-free.
+assign(
+  "cinemachine",
+  [
+    "create_camera",
+    "set_targets",
+    "set_lens",
+    "set_body",
+    "set_noise",
+    "brain_ensure",
+    "camera_list",
+  ].map((suffix) => `unity_open_mcp_cinemachine_${suffix}`),
+);
+
+// --- timeline (M20 Plan 6 / T20.6.2 — compile-gated) ----------------------
+// All five timeline_* tools share one domain prefix and one tool group.
+// Compile-gated on com.unity.timeline in the bridge (UNITY_OPEN_MCP_EXT_TIMELINE).
+// All five members are mutating and run the full gate path with paths_hint
+// scoped to the timeline asset path (+ the host scene path for director_bind).
+assign(
+  "timeline",
+  [
+    "create",
+    "track_add",
+    "clip_add",
+    "director_bind",
+    "modify",
+  ].map((suffix) => `unity_open_mcp_timeline_${suffix}`),
+);
+
+// --- tilemap (M20 Plan 6 / T20.6.3 — compile-gated + inner extras guard) --
+// All five tilemap_* tools share one domain prefix and one tool group.
+// Compile-gated on com.unity.2d.tilemap in the bridge (UNITY_OPEN_MCP_EXT_TILEMAP);
+// create_rule_tile additionally inner-guards on UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS
+// (com.unity.2d.tilemap.extras) — when extras is absent, the tool compiles in
+// (the outer gate passes) but returns a clear tilemap_extras_required install
+// error (two defines, two guards). All five members are mutating and run the
+// full gate path.
+assign(
+  "tilemap",
+  [
+    "create",
+    "set_tile",
+    "box_fill",
+    "create_tile_asset",
+    "create_rule_tile",
+  ].map((suffix) => `unity_open_mcp_tilemap_${suffix}`),
 );
 
 // --- agent-senses (live-only reads) ----------------------------------------

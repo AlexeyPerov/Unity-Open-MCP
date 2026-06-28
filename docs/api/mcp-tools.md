@@ -15,12 +15,12 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 - **Asset intelligence**: reserialize, read/search/list assets.
 - **Agent senses**: tests, screenshots (scene/game/isolated, arbitrary camera pose, inline image, editor window), Frame Debugger (enable/disable/draw-call list), console read, profiler capture (per-frame + single-frame deep capture), memory/rendering snapshots, spatial queries, event pull.
 - **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers, ScriptableObject create + list-by-type, Assembly Definition (asmdef) list/get/create/modify.
-- **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio, ui, constraints, terrain.
+- **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio, ui, constraints, terrain, cinemachine, timeline, tilemap.
 - **Discovery utilities**: capabilities, rules list, skill generation, manage_tools.
 
 ## Tool groups and session visibility
 
-Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is 204 tools) and mirrors Coplay's session-visibility model.
+Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is 221 tools) and mirrors Coplay's session-visibility model.
 
 ### Groups
 
@@ -45,6 +45,9 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | `ui`                 | off     | UI (uGUI) tools — Canvas (+ CanvasScaler + GraphicRaycaster + EventSystem ensure), element add (Text/TMP_Text/Image/Button/Slider/Toggle/InputField), layout group add, element modify. Built-in UI module (always compiled); TMP_Text optional   |
 | `constraints`        | off     | Constraints & LOD tools — animation constraints (Position/Rotation/Aim/Parent/Scale) add with source + weight + activation, LODGroup configure (fade mode / cross-fade / LOD array), LOD level add (per-index renderers). Built-in engine modules (always compiled)   |
 | `terrain`            | off     | Terrain tools — create (TerrainData + GameObject), heightmap region write, splat layer paint, tree instance placement, neighbor stitching. Built-in Terrain module (always compiled); heightmap/splat writes cap at 513×513 per call (tile large writes)   |
+| `cinemachine`        | off     | Cinemachine tools — create/configure virtual cameras, set targets/lens/Body/Noise, ensure Brain, list cameras. **Reflection-gated**: the assembly always compiles; Cinemachine 3.x presence is detected at call time (returns `cinemachine_3x_required` / `cinemachine_package_required` when absent)   |
+| `timeline`           | off     | Timeline tools — create TimelineAsset, add tracks (Animation/Activation/Audio/Signal/Control/Group/Playable), add clips, bind PlayableDirector, reflective modify. Compile-gated on `com.unity.timeline`   |
+| `tilemap`            | off     | Tilemap tools — create Grid + Tilemap, paint single tiles, box-fill regions, create Tile assets, create RuleTile (requires tilemap.extras). Compile-gated on `com.unity.2d.tilemap`; RuleTile additionally inner-guarded on `com.unity.2d.tilemap.extras` at call time (two defines, two guards)   |
 | `agent-senses`       | off     | run_tests, screenshot, screenshot_camera, capture_inline, screenshot_window, frame_debugger, read_console, profiler capture/capture_frame/memory/rendering, spatial_query (live-only)                        |
 
 

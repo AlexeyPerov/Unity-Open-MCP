@@ -315,6 +315,51 @@ import { terrainSetHeights } from "./terrain-set-heights.js";
 import { terrainPaintLayer } from "./terrain-paint-layer.js";
 import { terrainPlaceTrees } from "./terrain-place-trees.js";
 import { terrainSetNeighbors } from "./terrain-set-neighbors.js";
+// M20 Plan 6 / T20.6.1 — Cinemachine extension tools. The only
+// reflection-gated domain pack in the bridge: the assembly always compiles
+// (no UNITY_OPEN_MCP_EXT_CINEMACHINE compile gate), and Cinemachine 3.x
+// presence is detected at call time via the CinemachineVersion reflection
+// layer. When 3.x is absent (package missing OR Cinemachine 2.x installed),
+// the tools return a clear install/upgrade error envelope. Six mutating
+// members (create_camera / set_targets / set_lens / set_body / set_noise /
+// brain_ensure) run the full gate path with paths_hint scoped to the host
+// scene path (create_camera adds a new GameObject to the active scene). One
+// read-only member (camera_list) is gate-free. Closes the Cinemachine parity
+// gap with Ivan's Unity-AI-Cinemachine pack; the canonical reflection case
+// named in M18 Plan 1 T18.1.1 task 5 (version-split API trigger).
+import { cinemachineCreateCamera } from "./cinemachine-create-camera.js";
+import { cinemachineSetTargets } from "./cinemachine-set-targets.js";
+import { cinemachineSetLens } from "./cinemachine-set-lens.js";
+import { cinemachineSetBody } from "./cinemachine-set-body.js";
+import { cinemachineSetNoise } from "./cinemachine-set-noise.js";
+import { cinemachineBrainEnsure } from "./cinemachine-brain-ensure.js";
+import { cinemachineCameraList } from "./cinemachine-camera-list.js";
+// M20 Plan 6 / T20.6.2 — Timeline extension tools. Compile-gated in the
+// bridge (UNITY_OPEN_MCP_EXT_TIMELINE on com.unity.timeline). All five
+// members (create / track_add / clip_add / director_bind / modify) are
+// mutating and run the full gate path. create produces a .playable asset;
+// director_bind mutates a scene PlayableDirector; modify is a reflective
+// field-patch escape hatch. Closes the Timeline parity gap with Ivan's
+// Unity-AI-Timeline pack; the gate + paths_hint contract on every mutating
+// member is the documented advantage.
+import { timelineCreate } from "./timeline-create.js";
+import { timelineTrackAdd } from "./timeline-track-add.js";
+import { timelineClipAdd } from "./timeline-clip-add.js";
+import { timelineDirectorBind } from "./timeline-director-bind.js";
+import { timelineModify } from "./timeline-modify.js";
+// M20 Plan 6 / T20.6.3 — Tilemap extension tools. Compile-gated in the
+// bridge by UNITY_OPEN_MCP_EXT_TILEMAP (com.unity.2d.tilemap), with an inner
+// UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS guard around create_rule_tile's body —
+// when tilemap.extras is absent, the tool compiles in but returns a clear
+// tilemap_extras_required install error (two defines, two guards). All five
+// members (create / set_tile / box_fill / create_tile_asset /
+// create_rule_tile) are mutating and run the full gate path. Closes the
+// Tilemap parity gap with Ivan's Unity-AI-Tilemap pack.
+import { tilemapCreate } from "./tilemap-create.js";
+import { tilemapSetTile } from "./tilemap-set-tile.js";
+import { tilemapBoxFill } from "./tilemap-box-fill.js";
+import { tilemapCreateTileAsset } from "./tilemap-create-tile-asset.js";
+import { tilemapCreateRuleTile } from "./tilemap-create-rule-tile.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -789,6 +834,58 @@ export const M20_PLAN5_TOOLS: Tool[] = [
   asmdefModify,
 ];
 
+// M20 Plan 6 / T20.6.1 — Cinemachine extension tools. The only reflection-
+// gated domain pack in the bridge (the assembly always compiles; Cinemachine
+// 3.x presence is detected at call time). Six mutating members
+// (create_camera / set_targets / set_lens / set_body / set_noise /
+// brain_ensure) run the full gate path with paths_hint scoped to the host
+// scene path (create_camera adds a new GameObject to the active scene). One
+// read-only member (camera_list) is gate-free. The seven tools mirror the
+// kebab `cinemachine-*` ids in the upstream Unity-AI-Cinemachine reference
+// pack; the canonical reflection case named in M18 Plan 1 T18.1.1 task 5
+// (version-split API trigger).
+export const M20_PLAN6_CINEMACHINE_TOOLS: Tool[] = [
+  cinemachineCreateCamera,
+  cinemachineSetTargets,
+  cinemachineSetLens,
+  cinemachineSetBody,
+  cinemachineSetNoise,
+  cinemachineBrainEnsure,
+  cinemachineCameraList,
+];
+
+// M20 Plan 6 / T20.6.2 — Timeline extension tools. Compile-gated in the
+// bridge (UNITY_OPEN_MCP_EXT_TIMELINE on com.unity.timeline). All five
+// members (create / track_add / clip_add / director_bind / modify) are
+// mutating and run the full gate path. create produces a .playable asset;
+// director_bind mutates a scene PlayableDirector; modify is a reflective
+// field-patch escape hatch. The five tools mirror the kebab `timeline-*` ids
+// in the upstream Unity-AI-Timeline reference pack.
+export const M20_PLAN6_TIMELINE_TOOLS: Tool[] = [
+  timelineCreate,
+  timelineTrackAdd,
+  timelineClipAdd,
+  timelineDirectorBind,
+  timelineModify,
+];
+
+// M20 Plan 6 / T20.6.3 — Tilemap extension tools. Compile-gated in the
+// bridge by UNITY_OPEN_MCP_EXT_TILEMAP (com.unity.2d.tilemap), with an inner
+// UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS guard around create_rule_tile's body
+// (when tilemap.extras is absent, the tool compiles in but returns a clear
+// tilemap_extras_required install error — two defines, two guards). All five
+// members (create / set_tile / box_fill / create_tile_asset /
+// create_rule_tile) are mutating and run the full gate path. The five tools
+// mirror the kebab `tilemap-*` ids in the upstream Unity-AI-Tilemap reference
+// pack.
+export const M20_PLAN6_TILEMAP_TOOLS: Tool[] = [
+  tilemapCreate,
+  tilemapSetTile,
+  tilemapBoxFill,
+  tilemapCreateTileAsset,
+  tilemapCreateRuleTile,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -824,4 +921,7 @@ export const ALL_TOOLS: Tool[] = [
   ...M20_PLAN3_CONSTRAINTS_TOOLS,
   ...M20_PLAN4_TERRAIN_TOOLS,
   ...M20_PLAN5_TOOLS,
+  ...M20_PLAN6_CINEMACHINE_TOOLS,
+  ...M20_PLAN6_TIMELINE_TOOLS,
+  ...M20_PLAN6_TILEMAP_TOOLS,
 ];

@@ -20,10 +20,13 @@ step.
 | UI (uGUI) | built-in (`Canvas` / `CanvasScaler` / `GraphicRaycaster` / `Image` / `Text` / `Button` / `Slider` / `Toggle` / `InputField` / layout groups / `EventSystem`) | *(none — ungated)* | `.../Extensions/UI/` |
 | Constraints & LOD | built-in (`PositionConstraint` / `RotationConstraint` / `AimConstraint` / `ParentConstraint` / `ScaleConstraint` / `LODGroup`) | *(none — ungated)* | `.../Extensions/Constraints/` |
 | Terrain | built-in (`Terrain` / `TerrainData` / `TreePrototype` / `TerrainLayer`) | *(none — ungated)* | `.../Extensions/Terrain/` |
+| Cinemachine | `com.unity.cinemachine` ≥ 3.x | *(none — **reflection-gated**)* | `.../Extensions/Cinemachine/` |
+| Timeline | `com.unity.timeline` | `UNITY_OPEN_MCP_EXT_TIMELINE` | `.../Extensions/Timeline/` |
+| Tilemap | `com.unity.2d.tilemap` (+ `com.unity.2d.tilemap.extras` for RuleTile) | `UNITY_OPEN_MCP_EXT_TILEMAP` (+ `UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS` inner guard for `create_rule_tile`) | `.../Extensions/Tilemap/` |
 
 Navigation is the reference template; InputSystem, ProBuilder, ParticleSystem,
-and Animation share the same layout. Splines is the most recently added
-compile-gated domain — it proves the embedded + grouped model extends to
+Animation, and Timeline share the same layout. Splines is the most recently
+added compile-gated domain — it proves the embedded + grouped model extends to
 additional Unity APIs. Lighting, Audio, UI, Constraints & LOD, and Terrain are
 **ungated** domains: their types are unconditionally present in every Unity
 install, so they ship without a `UNITY_OPEN_MCP_EXT_*` define and compile into
@@ -34,6 +37,17 @@ activates them via `manage_tools`). Terrain's heightmap / splat writes cap at
 (`TMP_Text`) is optional and detected at call time via reflection — when absent,
 `ui_element_add` returns `tmp_package_required` (no silent legacy-`Text`
 fallback).
+
+**Cinemachine is the only reflection-gated pack** (the canonical version-split
+case): its 2.x→3.x split changed the camera class itself (`CinemachineVirtualCamera`
+→ `Unity.Cinemachine.CinemachineCamera`), so the assembly always compiles and
+the supported version is detected at call time. See §Reflection fallback
+policy below. **Tilemap's RuleTile** (`tilemap_create_rule_tile`) is the
+**two-defines-two-guards** case: the outer pack gate
+(`UNITY_OPEN_MCP_EXT_TILEMAP`) lets the tool compile in, but the RuleTile body
+is inner-guarded by `UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS`. When extras is absent,
+the tool returns a clean `tilemap_extras_required` install error — no broken
+reference.
 
 ## Embedded domain model
 
@@ -75,12 +89,15 @@ reflection domain must document:
 - the minimum version it targets, and
 - the clear error returned for unsupported versions.
 
-**None of the shipped extension domains** (Nav, Input, ProBuilder, Particles,
-Animation, Splines) qualifies — all use compile-gating only. Splines, the most
-recently added domain, deliberately uses the compile-gate path (a single stable
-API) rather than the reflection-recommended Cinemachine, so the model lands on
-the proven path first. Cinemachine remains the canonical reflection case
-(2.x/3.x split) and is tracked as a follow-up domain.
+**Only one shipped extension domain** — Cinemachine — uses reflection, because
+its 2.x `CinemachineVirtualCamera` vs 3.x `Unity.Cinemachine.CinemachineCamera`
+API split spans a class rename (no compile-time symbol can bridge both). The
+`CinemachineVersion` layer in `CinemachineJson.cs` detects the installed major
+at call time and returns `cinemachine_3x_required` (when 2.x is installed) or
+`cinemachine_package_required` (when the package is absent). All other shipped
+domains (Nav, Input, ProBuilder, Particles, Animation, Splines, Timeline,
+Tilemap, Lighting, Audio, UI, Constraints & LOD, Terrain) use compile-gating
+only.
 
 ### Wiring in a new embedded domain
 

@@ -72,18 +72,13 @@ namespace UnityOpenMcpBridge
         // shipped:true. A real third-party / community pack is added here
         // with shipped:true only when its tools register from an external
         // assembly.
+        //
+        // M20 Plan 6 — Tilemap graduated out of this list into
+        // EmbeddedDomainCatalog (compile-gated on com.unity.2d.tilemap with an
+        // inner com.unity.2d.tilemap.extras guard for RuleTile). The catalog is
+        // now empty; future planned placeholders or community packs land here.
         public static readonly ExtensionPack[] Packs =
         {
-            new ExtensionPack(
-                id: "com.alexeyperov.unity-open-mcp-ext-tilemap",
-                domain: "tilemap",
-                displayName: "Tilemap",
-                description: "2D tilemap hierarchy, tile assets, and RuleTile authoring.",
-                upmDependency: "com.unity.2d.tilemap",
-                localPath: "packages/extensions/tilemap",
-                toolIds: System.Array.Empty<string>(),
-                skillPath: "skills/extensions/tilemap/SKILL.md",
-                shipped: false),
         };
 
         /// <summary>

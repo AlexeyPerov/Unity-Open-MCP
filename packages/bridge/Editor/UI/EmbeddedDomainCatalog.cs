@@ -115,6 +115,27 @@ namespace UnityOpenMcpBridge
                 upmDependency: "com.unity.splines",
                 typeProbe: "UnityEngine.Splines.SplineContainer, Unity.Splines",
                 builtin: false),
+            // M20 Plan 6 — Ivan-breadth compile-gated domains. Cinemachine is
+            // deliberately ABSENT here: it is reflection-gated (the assembly
+            // always compiles), so it is not an installable compile-gated
+            // domain and the panel would mislead by suggesting a one-click
+            // install. Per-call detection surfaces the install/upgrade error.
+            new EmbeddedDomain(
+                group: "timeline",
+                domain: "timeline",
+                displayName: "Timeline",
+                description: "TimelineAsset authoring: tracks, clips, PlayableDirector binding.",
+                upmDependency: "com.unity.timeline",
+                typeProbe: "UnityEngine.Timeline.TimelineAsset, Unity.Timeline",
+                builtin: false),
+            new EmbeddedDomain(
+                group: "tilemap",
+                domain: "tilemap",
+                displayName: "Tilemap",
+                description: "2D Tilemap authoring: Grid, tiles, box fill, RuleTile (extras).",
+                upmDependency: "com.unity.2d.tilemap",
+                typeProbe: "UnityEngine.Tilemaps.Tilemap, UnityEngine.TilemapModule",
+                builtin: false),
         };
 
         /// <summary>Enumerate the installable (non-builtin) domains.</summary>

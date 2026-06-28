@@ -15,7 +15,6 @@ import {
   findEmbeddedDomainByUpmId,
   findPack,
   installableEmbeddedDomains,
-  localPackageEntry,
   shippedPacks,
 } from "./extensions.ts";
 
@@ -34,6 +33,8 @@ test("EMBEDDED_DOMAINS lists all shipped domains with stable tool-group ids", ()
       "particle_system",
       "probuilder",
       "splines",
+      "tilemap",
+      "timeline",
     ],
   );
   for (const d of EMBEDDED_DOMAINS) {
@@ -45,14 +46,17 @@ test("EMBEDDED_DOMAINS lists all shipped domains with stable tool-group ids", ()
 
 test("installableEmbeddedDomains excludes built-in module domains", () => {
   const installable = installableEmbeddedDomains();
-  // Nav + Input + ProBuilder + Splines are real UPM packages.
-  assert.equal(installable.length, 4);
+  // Nav + Input + ProBuilder + Splines + Timeline + Tilemap are real UPM
+  // packages. Cinemachine is reflection-gated and deliberately absent.
+  assert.equal(installable.length, 6);
   const upmIds = installable.map((d) => d.upmDependency).sort();
   assert.deepEqual(upmIds, [
+    "com.unity.2d.tilemap",
     "com.unity.ai.navigation",
     "com.unity.inputsystem",
     "com.unity.probuilder",
     "com.unity.splines",
+    "com.unity.timeline",
   ]);
   for (const d of installable) {
     assert.ok(!d.builtin);
@@ -143,8 +147,7 @@ test("buildEmbeddedDomainInstallRows tolerates a missing snapshot", () => {
 // Legacy extension-pack catalog (M18 Plan 5 — community / planned only).
 // ---------------------------------------------------------------------------
 
-test("EXTENSION_PACKS is non-empty and unique by id", () => {
-  assert.ok(EXTENSION_PACKS.length > 0);
+test("EXTENSION_PACKS is unique by id (may be empty after graduations)", () => {
   const ids = EXTENSION_PACKS.map((p) => p.id);
   assert.equal(new Set(ids).size, ids.length);
 });
@@ -165,16 +168,13 @@ test("EXTENSION_PACKS does not double-list shipped embedded domains", () => {
   }
 });
 
-test("EXTENSION_PACKS advertises the planned placeholders", () => {
-  const domains = EXTENSION_PACKS.map((p) => p.domain).sort();
+test("EXTENSION_PACKS no longer advertises any planned placeholders", () => {
   // Splines graduated into EMBEDDED_DOMAINS in M18 Plan 7; Terrain shipped as
-  // an ungated embedded domain in M20 Plan 4. Tilemap remains the sole
-  // planned placeholder.
-  assert.deepEqual(domains, ["tilemap"]);
-  // All current entries are planned (no shipped community pack yet).
-  for (const p of EXTENSION_PACKS) {
-    assert.equal(p.shipped, false, `${p.domain} should be a planned placeholder`);
-  }
+  // an ungated embedded domain in M20 Plan 4; Tilemap shipped as a compile-
+  // gated embedded domain in M20 Plan 6 (inner extras guard for RuleTile).
+  // The catalog is now empty — future planned placeholders or community
+  // packs land here.
+  assert.deepEqual(EXTENSION_PACKS, []);
 });
 
 test("shippedPacks() is empty until a real community pack lands", () => {
@@ -183,28 +183,17 @@ test("shippedPacks() is empty until a real community pack lands", () => {
   assert.equal(shippedPacks().length, 0);
 });
 
-test("findPack returns the planned pack and undefined for unknown ids", () => {
-  const tilemap = findPack("com.alexeyperov.unity-open-mcp-ext-tilemap");
-  assert.ok(tilemap, "tilemap planned pack should be in the catalog");
-  assert.equal(tilemap?.shipped, false);
-  // Splines graduated into EMBEDDED_DOMAINS in M18 Plan 7; Terrain shipped as
-  // an ungated embedded domain in M20 Plan 4 — both must no longer appear as
-  // planned packs.
+test("findPack returns undefined for graduated and unknown ids", () => {
+  // Splines / Terrain / Tilemap all graduated into EMBEDDED_DOMAINS — they
+  // must no longer appear as planned packs.
   assert.equal(findPack("com.alexeyperov.unity-open-mcp-ext-splines"), undefined);
   assert.equal(findPack("com.alexeyperov.unity-open-mcp-ext-terrain"), undefined);
+  assert.equal(findPack("com.alexeyperov.unity-open-mcp-ext-tilemap"), undefined);
   assert.equal(findPack("com.alexeyperov.unity-open-mcp-ext-navigation"), undefined);
   assert.equal(findPack("com.alexeyperov.no-such-pack"), undefined);
 });
 
-test("localPackageEntry produces a file: URL relative to Packages", () => {
-  const tilemap = findPack("com.alexeyperov.unity-open-mcp-ext-tilemap")!;
-  assert.equal(
-    localPackageEntry(tilemap),
-    "file:../../packages/extensions/tilemap",
-  );
-});
-
-test("every pack carries the minimum metadata", () => {
+test("every pack carries the minimum metadata (when any are present)", () => {
   for (const p of EXTENSION_PACKS) {
     assert.ok(p.id.startsWith("com.alexeyperov.unity-open-mcp-ext-"));
     assert.ok(p.domain.length > 0);

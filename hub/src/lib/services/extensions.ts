@@ -165,6 +165,42 @@ export const EMBEDDED_DOMAINS: readonly EmbeddedDomain[] = [
       "unity_open_mcp_splines_modify",
     ],
   },
+  // M20 Plan 6 — Ivan-breadth compile-gated domains. Cinemachine is
+  // deliberately ABSENT here: it is reflection-gated (the assembly always
+  // compiles), so it is not an installable compile-gated domain and the
+  // wizard Step 3 / Optional Dependencies panel would mislead by suggesting
+  // a one-click install. Per-call detection surfaces the install/upgrade
+  // error.
+  {
+    domain: "timeline",
+    displayName: "Timeline",
+    description: "TimelineAsset authoring: tracks, clips, PlayableDirector binding.",
+    upmDependency: "com.unity.timeline",
+    defaultVersion: "1.8.0",
+    builtin: false,
+    toolIds: [
+      "unity_open_mcp_timeline_create",
+      "unity_open_mcp_timeline_track_add",
+      "unity_open_mcp_timeline_clip_add",
+      "unity_open_mcp_timeline_director_bind",
+      "unity_open_mcp_timeline_modify",
+    ],
+  },
+  {
+    domain: "tilemap",
+    displayName: "Tilemap",
+    description: "2D Tilemap authoring: Grid, tiles, box fill, RuleTile (extras).",
+    upmDependency: "com.unity.2d.tilemap",
+    defaultVersion: "1.0.0",
+    builtin: false,
+    toolIds: [
+      "unity_open_mcp_tilemap_create",
+      "unity_open_mcp_tilemap_set_tile",
+      "unity_open_mcp_tilemap_box_fill",
+      "unity_open_mcp_tilemap_create_tile_asset",
+      "unity_open_mcp_tilemap_create_rule_tile",
+    ],
+  },
 ] as const;
 
 /**
@@ -296,26 +332,16 @@ export interface ExtensionPack {
  * narrowed this to third-party + planned packs only: the shipped
  * first-party domains are embedded in the bridge and tracked in
  * EMBEDDED_DOMAINS, so they are deliberately absent here. Planned
- * placeholders (Tilemap) advertise coming-soon domains; Splines
- * graduated out of this list into EMBEDDED_DOMAINS in M18 Plan 7, and
- * Terrain shipped as an ungated embedded domain in M20 Plan 4. A real
- * third-party community pack is added here with `shipped: true` only when
- * its tools register from an external assembly. Mirrors
- * `ExtensionCatalog.cs` — keep both in sync.
+ * placeholders (now empty) advertise coming-soon domains; Splines
+ * graduated out of this list into EMBEDDED_DOMAINS in M18 Plan 7, Terrain
+ * shipped as an ungated embedded domain in M20 Plan 4, and Tilemap shipped
+ * as a compile-gated embedded domain in M20 Plan 6 (with an inner
+ * com.unity.2d.tilemap.extras guard for RuleTile). A real third-party
+ * community pack is added here with `shipped: true` only when its tools
+ * register from an external assembly. Mirrors `ExtensionCatalog.cs` — keep
+ * both in sync.
  */
-export const EXTENSION_PACKS: readonly ExtensionPack[] = [
-  {
-    id: "com.alexeyperov.unity-open-mcp-ext-tilemap",
-    domain: "tilemap",
-    displayName: "Tilemap",
-    description: "2D tilemap hierarchy, tile assets, and RuleTile authoring.",
-    upmDependency: "com.unity.2d.tilemap",
-    localPath: "packages/extensions/tilemap",
-    toolIds: [],
-    skillPath: "skills/extensions/tilemap/SKILL.md",
-    shipped: false,
-  },
-] as const;
+export const EXTENSION_PACKS: readonly ExtensionPack[] = [] as const;
 
 /** Only shipped packs — planned placeholders are filtered out. */
 export function shippedPacks(): ExtensionPack[] {

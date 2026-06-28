@@ -20,6 +20,9 @@ Skills are markdown playbooks (`SKILL.md`) that give an AI agent **project-speci
 | [`skills/extensions/ui/SKILL.md`](../skills/extensions/ui/SKILL.md) | Agents using uGUI (Canvas / elements / layout groups / element modify) | `ui` tool group activated (built-in UI module — always compiled; TMP_Text optional) |
 | [`skills/extensions/constraints/SKILL.md`](../skills/extensions/constraints/SKILL.md) | Agents using animation constraints (Position/Rotation/Aim/Parent/Scale) and LODGroup | `constraints` tool group activated (built-in engine modules — always compiled) |
 | [`skills/extensions/terrain/SKILL.md`](../skills/extensions/terrain/SKILL.md) | Agents authoring Unity Terrain (heightmaps, splatmaps, trees, neighbor stitching) | `terrain` tool group activated (built-in Terrain module — always compiled) |
+| [`skills/extensions/cinemachine/SKILL.md`](../skills/extensions/cinemachine/SKILL.md) | Agents driving Cinemachine virtual cameras | `cinemachine` tool group activated **and** `com.unity.cinemachine` ≥ 3.x installed (reflection-gated) |
+| [`skills/extensions/timeline/SKILL.md`](../skills/extensions/timeline/SKILL.md) | Agents authoring Timeline cutscenes / sequences | `timeline` tool group activated **and** `com.unity.timeline` installed (embedded domain group) |
+| [`skills/extensions/tilemap/SKILL.md`](../skills/extensions/tilemap/SKILL.md) | Agents painting 2D Tilemaps (Grid, Tile assets, RuleTile) | `tilemap` tool group activated **and** `com.unity.2d.tilemap` installed (RuleTile additionally requires `com.unity.2d.tilemap.extras`) |
 
 ### Core playbook
 

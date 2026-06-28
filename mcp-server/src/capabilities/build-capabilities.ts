@@ -313,6 +313,36 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_terrain_paint_layer: "terrain",
   unity_open_mcp_terrain_place_trees: "terrain",
   unity_open_mcp_terrain_set_neighbors: "terrain",
+  // M20 Plan 6 / T20.6.1 — Cinemachine extension tools. The only reflection-
+  // gated domain pack in the bridge: the assembly always compiles, Cinemachine
+  // 3.x presence is detected at call time. Six mutating members
+  // (create_camera / set_targets / set_lens / set_body / set_noise /
+  // brain_ensure) run the full gate path; the read-only member (camera_list)
+  // is gate-free.
+  unity_open_mcp_cinemachine_create_camera: "cinemachine",
+  unity_open_mcp_cinemachine_set_targets: "cinemachine",
+  unity_open_mcp_cinemachine_set_lens: "cinemachine",
+  unity_open_mcp_cinemachine_set_body: "cinemachine",
+  unity_open_mcp_cinemachine_set_noise: "cinemachine",
+  unity_open_mcp_cinemachine_brain_ensure: "cinemachine",
+  unity_open_mcp_cinemachine_camera_list: "cinemachine",
+  // M20 Plan 6 / T20.6.2 — Timeline extension tools. Compile-gated on
+  // com.unity.timeline in the bridge (UNITY_OPEN_MCP_EXT_TIMELINE). All five
+  // members are mutating and run the full gate path.
+  unity_open_mcp_timeline_create: "timeline",
+  unity_open_mcp_timeline_track_add: "timeline",
+  unity_open_mcp_timeline_clip_add: "timeline",
+  unity_open_mcp_timeline_director_bind: "timeline",
+  unity_open_mcp_timeline_modify: "timeline",
+  // M20 Plan 6 / T20.6.3 — Tilemap extension tools. Compile-gated on
+  // com.unity.2d.tilemap (UNITY_OPEN_MCP_EXT_TILEMAP) with an inner guard on
+  // com.unity.2d.tilemap.extras (UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS) for
+  // create_rule_tile. All five members are mutating and run the full gate path.
+  unity_open_mcp_tilemap_create: "tilemap",
+  unity_open_mcp_tilemap_set_tile: "tilemap",
+  unity_open_mcp_tilemap_box_fill: "tilemap",
+  unity_open_mcp_tilemap_create_tile_asset: "tilemap",
+  unity_open_mcp_tilemap_create_rule_tile: "tilemap",
   // M20 Plan 5 / T20.5 — typed ScriptableObject + Assembly Definition tools.
   // Both sets are core (always-on) typed-editor tools with no Unity package
   // dependency. scriptableobject_create is mutating (EditorSettle);

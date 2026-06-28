@@ -1,0 +1,25 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.Timeline.Editor.Tests",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Timeline",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.Timeline.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor",
+    "Unity.Timeline",
+    "UnityEngine.PlayablesModule"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_OPEN_MCP_EXT_TIMELINE",
+    "UNITY_TEST_FRAMEWORK"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

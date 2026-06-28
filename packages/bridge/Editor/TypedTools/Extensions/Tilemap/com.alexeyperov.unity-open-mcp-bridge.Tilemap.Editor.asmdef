@@ -1,0 +1,21 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.Tilemap.Editor",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.Tilemap",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "UnityEngine.TileMapModule"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_OPEN_MCP_EXT_TILEMAP"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
