@@ -1,10 +1,13 @@
 import {
+  DEFAULT_WALK_UP_KINDS,
   loadSettings,
   saveSettings,
   type AiToolkitSettings,
+  type ProjectKind,
   type ProjectListSortBy,
   type Settings,
   type Theme,
+  type WalkUpKinds,
 } from "$lib/services/config";
 import { discoveryStore } from "$lib/state/discovery.svelte";
 import { runningUnityStore } from "$lib/state/running_unity.svelte";
@@ -344,6 +347,25 @@ class SettingsStore {
     if (this.current.unityDiscovery.walkUpKeepPartial === value) return;
     const next = this.clone();
     next.unityDiscovery.walkUpKeepPartial = value;
+    await this.persist(next);
+  }
+
+  /**
+   * Toggle a single project-kind filter for the walk-up scan. Persists
+   * the whole `walkUpKinds` object, initialising it from the default
+   * (Unity + Package) when a legacy settings file has no field yet.
+   * Drives the four type toggles in the "Add Multiple Projects" modal.
+   */
+  async setWalkUpKind(kind: ProjectKind, enabled: boolean): Promise<void> {
+    if (!this.current) return;
+    const current: WalkUpKinds = {
+      ...DEFAULT_WALK_UP_KINDS,
+      ...this.current.unityDiscovery.walkUpKinds,
+    };
+    if (current[kind] === enabled) return;
+    const next = this.clone();
+    const updated: WalkUpKinds = { ...current, [kind]: enabled };
+    next.unityDiscovery.walkUpKinds = updated;
     await this.persist(next);
   }
 

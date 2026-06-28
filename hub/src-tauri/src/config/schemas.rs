@@ -179,6 +179,11 @@ pub struct UnityDiscoverySettings {
     /// `#[serde(default = "default_true")]` keeps legacy files loadable.
     #[serde(default = "default_true")]
     pub walk_up_keep_partial: bool,
+    /// Which project kinds the walk-up scan should append. Defaults to
+    /// Unity + Package (see [`WalkUpKinds::default`]).
+    /// `#[serde(default)]` keeps legacy `settings.json` files loadable.
+    #[serde(default)]
+    pub walk_up_kinds: WalkUpKinds,
     /// M1.5-13: absolute paths to user-curated Unity project roots
     /// that can be used as a template when creating a new project
     /// ("Custom folder…" in the New Project modal). Each entry is
@@ -255,6 +260,7 @@ impl Default for Settings {
                 walk_up_max_depth: default_walk_up_max_depth(),
                 walk_up_follow_symlinks: false,
                 walk_up_keep_partial: true,
+                walk_up_kinds: WalkUpKinds::default(),
                 custom_template_folders: Vec::new(),
             },
             diagnostics: DiagnosticsSettings {
@@ -408,6 +414,55 @@ impl ProjectKind {
 
 fn default_project_kind() -> ProjectKind {
     ProjectKind::Unity
+}
+
+/// Per-kind toggle set controlling which project types the walk-up
+/// directory scan (`start_walk_up_scan`) appends to `projects.json`.
+///
+/// Defaults to `{ unity: true, package: true, open_mcp: false,
+/// custom: false }` so existing users see the same Unity+Package
+/// discovery behaviour they had before multi-type toggles were added,
+/// and opt in to Open-MCP / Custom scanning explicitly.
+///
+/// `Custom` is special: it is the fallback for any folder without a
+/// positive marker, so the scanner only treats a Custom folder as a
+/// project when it is also a *leaf* (contains no subdirectories) to
+/// avoid flooding the list with every visited directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WalkUpKinds {
+    pub unity: bool,
+    pub package: bool,
+    pub open_mcp: bool,
+    pub custom: bool,
+}
+
+impl Default for WalkUpKinds {
+    fn default() -> Self {
+        Self {
+            unity: true,
+            package: true,
+            open_mcp: false,
+            custom: false,
+        }
+    }
+}
+
+impl WalkUpKinds {
+    /// True when the given kind is enabled in this set.
+    pub fn matches(self, kind: ProjectKind) -> bool {
+        match kind {
+            ProjectKind::Unity => self.unity,
+            ProjectKind::Package => self.package,
+            ProjectKind::OpenMcp => self.open_mcp,
+            ProjectKind::Custom => self.custom,
+        }
+    }
+
+    /// True when no kind is enabled (the scan would add nothing).
+    pub fn is_empty(self) -> bool {
+        !self.unity && !self.package && !self.open_mcp && !self.custom
+    }
 }
 
 /// Cached line-counter result. The `details` string is the same

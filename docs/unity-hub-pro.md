@@ -60,6 +60,10 @@ For full setup steps, see [wizard-setup.md](wizard-setup.md).
 - Run `npm run build` and `npm test` from the `mcp-server/` workspace.
 - Bump package version.
 - Run publish dry-run and publish with confirmation.
+- Run the repo-wide version sync (`sync-version.mjs`): sync, drift-check,
+  bump, or set the version for either the shared trio (npm server + bridge
+  + verify) or the Hub app itself. This is the release/drift tool — distinct
+  from the package-only version bump above; the Hub never creates git tags.
 
 ## Installation
 

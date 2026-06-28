@@ -102,6 +102,7 @@ pub fn run() {
             config::command_runner::query_npm_registry,
             config::command_runner::stop_project_command,
             config::command_runner::project_command_running,
+            config::command_runner::run_project_sync_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

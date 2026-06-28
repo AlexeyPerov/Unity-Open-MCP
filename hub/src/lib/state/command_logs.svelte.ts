@@ -11,7 +11,8 @@
  *
  * Panels: build / test / custom predate the maintainer workflow; the
  * npm-maintainer panels (version / publishDryRun / publish) cover the
- * Open-MCP maintainer panel (npm version / publish dry-run / publish).
+ * Open-MCP maintainer panel (npm version / publish dry-run / publish);
+ * `sync` covers the repo-wide `scripts/sync-version.mjs` runner.
  */
 const MAX_LOG_LINES = 1000;
 
@@ -28,6 +29,7 @@ export interface ProjectPanels {
   version: PanelState;
   publishDryRun: PanelState;
   publish: PanelState;
+  sync: PanelState;
 }
 
 function emptyPanel(): PanelState {
@@ -49,6 +51,7 @@ export function emptyProjectPanels(): ProjectPanels {
     version: emptyPanel(),
     publishDryRun: emptyPanel(),
     publish: emptyPanel(),
+    sync: emptyPanel(),
   };
 }
 
@@ -65,6 +68,7 @@ class CommandLogsStore {
         version: emptyPanel(),
         publishDryRun: emptyPanel(),
         publish: emptyPanel(),
+        sync: emptyPanel(),
       };
     }
     return this.projects[projectId];

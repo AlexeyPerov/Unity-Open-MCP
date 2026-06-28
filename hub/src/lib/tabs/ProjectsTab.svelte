@@ -36,6 +36,7 @@
     gitStatus,
     countLinesCached,
     createPackage,
+    DEFAULT_WALK_UP_KINDS,
     type AddProjectError,
     type BundleStrategy,
     type CreatePackageError,
@@ -59,6 +60,7 @@
     type SetProjectFlagError,
     type TemplateRef,
     type UpgradeUnityError,
+    type WalkUpKinds,
   } from "$lib/services/config";
   import {
     compareFrecency,
@@ -1795,11 +1797,18 @@
       return;
     }
     addError = null;
+    const kinds = settings.unityDiscovery.walkUpKinds ?? DEFAULT_WALK_UP_KINDS;
+    if (!kinds.unity && !kinds.package && !kinds.openMcp && !kinds.custom) {
+      addError =
+        "no project types selected — enable at least one type toggle above";
+      return;
+    }
     const result = await walkUpScanStore.begin({
       roots,
       maxDepth: settings.unityDiscovery.walkUpMaxDepth,
       followSymlinks: settings.unityDiscovery.walkUpFollowSymlinks,
       keepPartial: settings.unityDiscovery.walkUpKeepPartial,
+      kinds,
     });
     if (result) {
       // Scan is running — modal stays open with the live progress.
@@ -2478,6 +2487,17 @@
   let popupProject = $derived(
     settingsPopupFor ? projectsStore.find(settingsPopupFor) ?? null : null
   );
+
+  /**
+   * Effective walk-up kind filter for the "Add Multiple Projects"
+   * modal, with defaults filled in for legacy settings files that have
+   * no `walkUpKinds` field. Defaults: Unity + Package on, Open-MCP +
+   * Custom off (see `DEFAULT_WALK_UP_KINDS`).
+   */
+  let walkUpKinds = $derived<WalkUpKinds>({
+    ...DEFAULT_WALK_UP_KINDS,
+    ...settingsStore.current?.unityDiscovery.walkUpKinds,
+  });
 
   // Multi-type: git popup state. Loaded on-demand when the branch chip
   // is clicked; the cheap `.git/HEAD` branch read still drives the
@@ -3221,10 +3241,75 @@
       <div class="walkup-body">
         <p class="walkup-desc">
           Hub will recurse into the selected folder and append every
-          folder that contains both <code>Assets/</code> and
-          <code>ProjectSettings/</code> to the project list as
-          <code>source: walk-up</code>.
+          folder that matches one of the enabled project types below to
+          the project list as <code>source: walk-up</code>.
         </p>
+
+        <section class="walkup-config">
+          <h3 class="walkup-section-title">Project types to scan</h3>
+          <div class="walkup-kinds">
+            <label class="walkup-kind-row" class:disabled={walkUpScanStore.scanning}>
+              <input
+                type="checkbox"
+                checked={walkUpKinds.unity}
+                disabled={walkUpScanStore.scanning}
+                onchange={(e) =>
+                  settingsStore.setWalkUpKind("unity", (e.currentTarget as HTMLInputElement).checked)}
+              />
+              <span class="walkup-kind-label">
+                <span class="walkup-kind-name">{kindLabel("unity")}</span>
+                <span class="walkup-kind-desc">
+                  Folders with <code>Assets/</code> and <code>ProjectSettings/</code>.
+                </span>
+              </span>
+            </label>
+            <label class="walkup-kind-row" class:disabled={walkUpScanStore.scanning}>
+              <input
+                type="checkbox"
+                checked={walkUpKinds.package}
+                disabled={walkUpScanStore.scanning}
+                onchange={(e) =>
+                  settingsStore.setWalkUpKind("package", (e.currentTarget as HTMLInputElement).checked)}
+              />
+              <span class="walkup-kind-label">
+                <span class="walkup-kind-name">{kindLabel("package")}</span>
+                <span class="walkup-kind-desc">
+                  Folders with a root <code>package.json</code> (UPM packages).
+                </span>
+              </span>
+            </label>
+            <label class="walkup-kind-row" class:disabled={walkUpScanStore.scanning}>
+              <input
+                type="checkbox"
+                checked={walkUpKinds.openMcp}
+                disabled={walkUpScanStore.scanning}
+                onchange={(e) =>
+                  settingsStore.setWalkUpKind("openMcp", (e.currentTarget as HTMLInputElement).checked)}
+              />
+              <span class="walkup-kind-label">
+                <span class="walkup-kind-name">{kindLabel("openMcp")}</span>
+                <span class="walkup-kind-desc">
+                  Repos with an <code>mcp-server/</code> directory and a root <code>package.json</code>.
+                </span>
+              </span>
+            </label>
+            <label class="walkup-kind-row" class:disabled={walkUpScanStore.scanning}>
+              <input
+                type="checkbox"
+                checked={walkUpKinds.custom}
+                disabled={walkUpScanStore.scanning}
+                onchange={(e) =>
+                  settingsStore.setWalkUpKind("custom", (e.currentTarget as HTMLInputElement).checked)}
+              />
+              <span class="walkup-kind-label">
+                <span class="walkup-kind-name">{kindLabel("custom")}</span>
+                <span class="walkup-kind-desc">
+                  Any other folder. Only leaf folders (no subdirectories) are added to avoid noise.
+                </span>
+              </span>
+            </label>
+          </div>
+        </section>
 
         <section class="walkup-config">
           <h3 class="walkup-section-title">Selected Folder</h3>
@@ -3335,7 +3420,11 @@
             onclick={startWalkUpFromModal}
             disabled={
               !settingsStore.current ||
-              settingsStore.current.unityDiscovery.walkUpRoots.length === 0
+              settingsStore.current.unityDiscovery.walkUpRoots.length === 0 ||
+              (!walkUpKinds.unity &&
+                !walkUpKinds.package &&
+                !walkUpKinds.openMcp &&
+                !walkUpKinds.custom)
             }
           >
             {walkUpScanStore.lastResult ? "Run again" : "Start scan"}
@@ -5987,6 +6076,59 @@
     font-size: 0.8rem;
     color: var(--hub-error-fg);
     line-height: 1.5;
+  }
+
+  .walkup-kinds {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  /* Toggle row for a single project-type filter. Matches the
+     `.check-row` idiom used across the app (e.g. SettingsTab) — a
+     native checkbox with `accent-color` inside a flex <label>. */
+  .walkup-kind-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.6rem;
+    font-size: 0.86rem;
+    color: var(--hub-text);
+    cursor: pointer;
+    line-height: 1.4;
+  }
+
+  .walkup-kind-row input {
+    margin-top: 0.2rem;
+    accent-color: var(--hub-accent);
+    flex-shrink: 0;
+  }
+
+  .walkup-kind-row.disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+
+  .walkup-kind-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .walkup-kind-name {
+    font-weight: 500;
+  }
+
+  .walkup-kind-desc {
+    color: var(--hub-text-muted);
+    font-size: 0.76rem;
+    line-height: 1.45;
+  }
+
+  .walkup-kind-desc code {
+    font-family: ui-monospace, SFMono-Regular, Menaco, Menlo, Consolas,
+      "Liberation Mono", monospace;
+    font-size: 0.72rem;
   }
 
   .walkup-config-list,

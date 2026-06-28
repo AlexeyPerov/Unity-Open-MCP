@@ -210,6 +210,10 @@ git push origin hub-v0.X.Y     # triggers the hub-release workflow
 
 The `hub-v*` tag triggers `.github/workflows/hub-release.yml`, which first verifies the tag matches `hub/version.json` and that all Hub targets are in sync, then builds the macOS/Windows installers and creates a GitHub Release.
 
+### From the Hub app (UI shortcut)
+
+Both bump flows are also drivable from the Unity Hub Pro app itself: open an Open-MCP checkout's project settings and use the **Repo version sync** panel. It runs the same `scripts/sync-version.mjs` with the same grammar — `sync`, `check` (the drift gate), `bump <level>`, or `set <X.Y.Z>`, for either the trio or the Hub line — and streams the script's output live. It writes the same files; it does **not** commit or tag (the Hub never creates git tags). The CLI examples above remain canonical.
+
 ## Setting an exact version
 
 `bump` only increments. To jump to a specific version (e.g. to align the trio and Hub after they diverged, or to land a deliberate number), use `set`:
@@ -250,7 +254,7 @@ node scripts/sync-version.mjs --check --hub
 
 | Tag pattern | What it releases | Workflow | Publishes to |
 |---|---|---|---|
-| `v*` (e.g. `v0.5.2`) | The shared trio (npm server is what gets pushed; bridge/verify move with it via git URL) | `npm-publish.yml` | npm registry |
+| `v*` (e.g. `v0.5.2`) | The shared trio (npm server is what gets pushed; bridge/verify move with it via git URL) | `npm-publish.yml` | npm registry **and** a GitHub Release (auto-generated notes) |
 | `hub-v*` (e.g. `hub-v0.3.0`) | The Unity Hub Pro desktop app | `hub-release.yml` | GitHub Release (installers) |
 | `bridge-v*` / `verify-v*` | (Convention) git-URL install pins for the Unity packages | — (no workflow) | n/a — users pin in their manifest |
 

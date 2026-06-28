@@ -628,6 +628,178 @@ pub fn project_command_running(
         .unwrap_or(false)
 }
 
+// ---- Repo-wide version sync (scripts/sync-version.mjs) --------------------
+//
+// The maintainer panel above runs *npm* commands against the publishable
+// `package.json`. This is a different concern: the repo-wide version sync
+// script that rewrites every generated version target (trio: 5 files from
+// `version.json`; hub: 3 files from `hub/version.json`) and powers the CI
+// drift gate. It is the release/drift tool, not a pre-publish package bump.
+//
+// Unlike the npm commands, this runner must execute at the **repo root**
+// (`scripts/` lives there, not under `mcp-server/`), so it deliberately
+// bypasses `resolve_npm_cwd`.
+
+/// Which version line to target. Mirrors the script's `--hub` flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncVersionLine {
+    /// Shared trio (npm server + bridge + verify). Default; no flag.
+    Trio,
+    /// Unity Hub Pro desktop app. Maps to `--hub`.
+    Hub,
+}
+
+/// Which sync-version action to run. Mirrors the script's subcommands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncVersionAction {
+    /// Bare run: rewrite all generated targets from the source file.
+    Sync,
+    /// `--check`: read-only drift gate. Exits 1 when any target drifted.
+    Check,
+    /// `bump <level>`: increment the source, then sync.
+    Bump,
+    /// `set <X.Y.Z>`: jump to an exact version, then sync.
+    Set,
+}
+
+/// Cross-platform `node` wrapper: `node` on Unix, `cmd /C node` on Windows
+/// (mirrors `npm_command` — Windows needs the shell to resolve `node.exe`
+/// off PATH the same way it resolves `npm.cmd`).
+fn node_command() -> Command {
+    if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg("node");
+        cmd
+    } else {
+        Command::new("node")
+    }
+}
+
+/// Validates the bump level / set-version operand using the same rules as
+/// `scripts/sync-version.mjs` (the script is the source of truth; this
+/// mirrors its regex so a bad value fails fast with a clear message
+/// instead of letting the script exit 2 after spawning).
+fn validate_sync_version_args(
+    action: SyncVersionAction,
+    bump_level: &Option<String>,
+    set_version: &Option<String>,
+) -> Result<(), CommandRunnerError> {
+    match action {
+        SyncVersionAction::Bump => {
+            let level = bump_level
+               .as_deref()
+                .map(|s| s.trim())
+                .unwrap_or("");
+            if !matches!(level, "patch" | "minor" | "major") {
+                return Err(CommandRunnerError::SpawnFailed {
+                    message: format!(
+                        "Invalid version bump level '{}': expected patch, minor, or major.",
+                        level
+                    ),
+                });
+            }
+        }
+        SyncVersionAction::Set => {
+            let raw = set_version
+                .as_deref()
+                .map(|s| s.trim())
+                .unwrap_or("");
+            // Same tolerance as the script: optional leading `v`, plain
+            // major.minor.patch, no pre-release/build metadata.
+            if !is_loose_semver(raw) {
+                return Err(CommandRunnerError::SpawnFailed {
+                    message: format!(
+                        "Invalid set version '{}': expected X.Y.Z (a leading 'v' is tolerated).",
+                        raw
+                    ),
+                });
+            }
+        }
+        SyncVersionAction::Sync | SyncVersionAction::Check => {}
+    }
+    Ok(())
+}
+
+/// Hand-rolled equivalent of the script's `/^v?\d+\.\d+\.\d+$/` — kept
+/// dependency-free (the rest of the runner avoids pulling in `regex`).
+/// Accepts an optional leading `v`, three digit groups, no
+/// pre-release/build metadata.
+fn is_loose_semver(s: &str) -> bool {
+    let s = s.strip_prefix('v').unwrap_or(s);
+    let mut parts = s.split('.');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(a), Some(b), Some(c), None) => {
+            !a.is_empty() && a.bytes().all(|b| b.is_ascii_digit())
+                && !b.is_empty() && b.bytes().all(|b| b.is_ascii_digit())
+                && !c.is_empty() && c.bytes().all(|b| b.is_ascii_digit())
+        }
+        _ => false,
+    }
+}
+
+/// Tauri command: run `node scripts/sync-version.mjs …` at the repo root
+/// for the chosen version line and action, streaming output to the
+/// `sync` panel exactly like the npm maintainer commands. The script's
+/// own exit code is forwarded (0 = ok / in-sync; 1 = drift detected by
+/// `--check`; 2 = usage error — though we pre-validate to avoid the
+/// latter). The Hub never creates git tags; tagging stays in the release
+/// runbook (CI publishes on a manually-pushed `v*` / `hub-v*` tag).
+#[tauri::command]
+pub fn run_project_sync_version(
+    app: AppHandle,
+    state: State<'_, CommandRunnerState>,
+    project_id: String,
+    project_path: String,
+    kind: ProjectKind,
+    line: SyncVersionLine,
+    action: SyncVersionAction,
+    bump_level: Option<String>,
+    set_version: Option<String>,
+) -> Result<(), CommandRunnerError> {
+    // Only Open-MCP repos carry `scripts/sync-version.mjs`; for every
+    // other kind the panel doesn't render, but defend in depth.
+    if kind != ProjectKind::OpenMcp {
+        return Err(CommandRunnerError::SpawnFailed {
+            message: format!(
+                "Version sync is only available for Open-MCP repositories (got kind = {:?}).",
+                kind
+            ),
+        });
+    }
+    validate_sync_version_args(action, &bump_level, &set_version)?;
+
+    // The script lives at the repo root, not under mcp-server/.
+    let cwd_str = project_path.clone();
+    let mut cmd = node_command();
+    cmd.arg("scripts/sync-version.mjs");
+
+    match action {
+        SyncVersionAction::Check => {
+            cmd.arg("--check");
+        }
+        SyncVersionAction::Sync => {
+            // Bare sync: no subcommand, just optional --hub below.
+        }
+        SyncVersionAction::Bump => {
+            cmd.arg("bump").arg(bump_level.as_deref().unwrap_or("").trim());
+        }
+        SyncVersionAction::Set => {
+            // Strip the optional leading `v` the script also tolerates,
+            // so the emitted log line is canonical either way.
+            let raw = set_version.as_deref().unwrap_or("").trim();
+            let clean = raw.strip_prefix('v').unwrap_or(raw);
+            cmd.arg("set").arg(clean);
+        }
+    }
+    if line == SyncVersionLine::Hub {
+        cmd.arg("--hub");
+    }
+
+    spawn_tracked(&app, &state, &project_id, "sync", &cwd_str, cmd)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -707,5 +879,82 @@ mod tests {
         std::fs::write(dir.path().join("package.json"), "{ not json").unwrap();
         let err = read_package_json_at(&dir.path().to_path_buf()).unwrap_err();
         assert!(matches!(err, McpPackageInfoError::ParseFailed { .. }));
+    }
+
+    // ---- sync-version validation ---------------------------------------
+
+    #[test]
+    fn is_loose_semver_accepts_plain_and_leading_v() {
+        assert!(is_loose_semver("0.1.2"));
+        assert!(is_loose_semver("v0.1.2"));
+        assert!(is_loose_semver("1.23.456"));
+    }
+
+    #[test]
+    fn is_loose_semver_rejects_prerelease_and_garbage() {
+        assert!(!is_loose_semver("0.1.2-alpha"));
+        assert!(!is_loose_semver("0.1")); // too few groups
+        assert!(!is_loose_semver("0.1.2.3")); // too many groups
+        assert!(!is_loose_semver(""));
+        assert!(!is_loose_semver("x.y.z"));
+        // The script's `\d+` is permissive about leading zeros; mirror it.
+        assert!(is_loose_semver("01.2.3"));
+    }
+
+    #[test]
+    fn validate_sync_version_accepts_valid_bump_and_set() {
+        assert!(validate_sync_version_args(
+            SyncVersionAction::Bump,
+            &Some("patch".into()),
+            &None
+        )
+        .is_ok());
+        assert!(validate_sync_version_args(
+            SyncVersionAction::Set,
+            &None,
+            &Some("0.2.0".into())
+        )
+        .is_ok());
+        assert!(validate_sync_version_args(
+            SyncVersionAction::Set,
+            &None,
+            &Some("v0.2.0".into())
+        )
+        .is_ok());
+        // Sync/Check ignore their operands.
+        assert!(validate_sync_version_args(
+            SyncVersionAction::Sync,
+            &None,
+            &None
+        )
+        .is_ok());
+        assert!(validate_sync_version_args(
+            SyncVersionAction::Check,
+            &None,
+            &None
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn validate_sync_version_rejects_bad_bump_level() {
+        let err = validate_sync_version_args(
+            SyncVersionAction::Bump,
+            &Some("mega".into()),
+            &None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CommandRunnerError::SpawnFailed { .. }));
+    }
+
+    #[test]
+    fn validate_sync_version_rejects_bad_set_version() {
+        let err = validate_sync_version_args(
+            SyncVersionAction::Set,
+            &None,
+            &Some("0.1".into()),
+        )
+        .unwrap_err();
+        assert!(matches!(err, CommandRunnerError::SpawnFailed { .. }));
     }
 }

@@ -2,17 +2,23 @@
 //!
 //! Adds a second, opt-in discovery source alongside the M1 Unity Hub
 //! seed: the user picks one or more folder roots and Hub recursively
-//! walks each one looking for Unity project roots (a folder that
-//! contains both `Assets/` and `ProjectSettings/`). Every match is
-//! appended to `projects.json` with `source = "walk-up"` and the same
+//! walks each one, classifying every folder by its markers
+//! (`project_kind::detect_kind`) and appending the ones whose kind is
+//! enabled in the scan filter (`WalkUpKinds`). Every match is appended
+//! to `projects.json` with `source = "walk-up"` and the same
 //! `id` / `path` shape `add_project` produces, so the deduplication
 //! and chip grammar on the Projects tab already cover the new rows.
 //!
 //! ## Behaviour
 //!
-//! - **Detection rule** — matches the M1 "Add Project" validation: a
-//!   folder is a Unity project root iff `<root>/Assets` and
-//!   `<root>/ProjectSettings` are both directories.
+//! - **Detection rule** — each visited folder is classified into one
+//!   of `Unity`, `OpenMcp`, `Package`, or `Custom` (see
+//!   `project_kind`). The scan appends a folder when its kind is
+//!   enabled in the filter. `Custom` is special: it is the fallback
+//!   for any folder without a marker, so a Custom folder is only
+//!   accepted when it is also a *leaf* (contains no subdirectories) —
+//!   otherwise every intermediate directory in the tree would become
+//!   an entry.
 //! - **Depth** — capped via `settings.discovery.walkUpMaxDepth`
 //!   (default 4, hard cap 8). Depth 0 means "do not descend into
 //!   children" so a root that *is* itself a project is still detected.
@@ -49,7 +55,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::config::commands::AppState;
 use crate::config::persistence;
-use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile};
+use crate::config::project_kind;
+use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile, WalkUpKinds};
 
 /// Hard upper bound on the configurable walk-up depth. The Settings
 /// UI can offer 1..=MAX_DEPTH, the user can also type a value via the
@@ -74,6 +81,9 @@ pub struct WalkUpStart {
     pub follow_symlinks: bool,
     pub keep_partial: bool,
     pub roots: Vec<String>,
+    /// Which project kinds the scan appended (echoed from the request
+    /// so the modal can show the effective filter).
+    pub kinds: WalkUpKinds,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,7 +114,13 @@ pub struct WalkUpDone {
     pub status: WalkUpStatus,
     pub added: Vec<ProjectEntry>,
     pub skipped_existing: Vec<String>,
-    pub skipped_not_unity: usize,
+    /// Directories that were visited but not added as a project —
+    /// either because their kind was not enabled in the scan filter,
+    /// or because they were not a project root at all. Renamed from
+    /// `skipped_not_unity` when the scan was generalised to multi-kind
+    /// discovery; the field now counts every visited directory that
+    /// did not become an entry.
+    pub skipped_unmatched: usize,
     pub skipped_invalid_root: Vec<String>,
     pub projects: ProjectsFile,
     /// `None` when the scan finished cleanly. `Some(message)` when
@@ -178,6 +194,83 @@ fn canonicalize_for_compare(path: &str) -> String {
         .unwrap_or_else(|_| path.to_string())
 }
 
+/// True when `dir` contains at least one subdirectory. Used by the
+/// Custom-kind branch of the walk: `Custom` is the fallback for any
+/// folder without a positive marker, so we only treat a Custom folder
+/// as a project when it is a *leaf* (no children) — otherwise every
+/// intermediate directory in the walked tree would become an entry.
+/// Respects the same symlink policy as the walker itself: when
+/// `follow_symlinks` is false, symlinked directories do not count.
+fn has_subdirectory(dir: &Path, follow_symlinks: bool) -> bool {
+    let read = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    for child in read.flatten() {
+        let path = child.path();
+        let is_dir = if follow_symlinks {
+            path.is_dir()
+        } else {
+            match std::fs::symlink_metadata(&path) {
+                Ok(md) => md.file_type().is_dir() && !md.file_type().is_symlink(),
+                Err(_) => false,
+            }
+        };
+        if is_dir {
+            return true;
+        }
+    }
+    false
+}
+
+/// Construct a `ProjectEntry` for a discovered folder of the given
+/// kind. Mirrors `add_project` (`projects.rs`) so walk-up rows have the
+/// same shape as rows added one-by-one: Unity entries are enriched with
+/// version / render-pipeline / build-target; Package and OpenMcp get a
+/// `package_manifest_path`; Custom gets the plain entry. `source` is
+/// always `"walk-up"`.
+fn build_entry(dir: &Path, kind: ProjectKind) -> ProjectEntry {
+    let (unity_version, render_pipeline, default_build_target) = match kind {
+        ProjectKind::Unity => {
+            let version = read_project_version(dir);
+            let rp = Some(
+                crate::config::render_pipeline::read_render_pipeline(dir)
+                    .label()
+                    .to_string(),
+            );
+            let bt = crate::config::build_target::read_default_build_target(dir).target;
+            (version, rp, bt)
+        }
+        ProjectKind::Package | ProjectKind::OpenMcp | ProjectKind::Custom => (None, None, None),
+    };
+    let package_manifest_path = project_kind::package_manifest_relative(kind).map(|s| s.to_string());
+
+    ProjectEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: derive_name(dir),
+        path: dir.to_string_lossy().to_string(),
+        unity_version,
+        last_opened_at: None,
+        last_modified_at: read_dir_mtime_iso(dir),
+        launch_args: None,
+        platform_intent: None,
+        last_launch_pid: None,
+        last_launch_at: None,
+        frecency: 0,
+        git_branch: None,
+        source: "walk-up".to_string(),
+        hidden: false,
+        stale: false,
+        env_vars: Default::default(),
+        render_pipeline,
+        default_build_target,
+        kind,
+        package_manifest_path,
+        migrate_source_folder: None,
+        line_count_stats: None,
+    }
+}
+
 /// In-process handle to a running scan. Keyed by `scan_id` so
 /// cancellation is targeted — pressing Cancel on scan A while scan B
 /// is queued must not abort B.
@@ -228,23 +321,31 @@ struct ScanContext {
     cancel: Arc<AtomicBool>,
     found: Vec<ProjectEntry>,
     skipped_existing: Vec<String>,
-    skipped_not_unity: usize,
+    skipped_unmatched: usize,
     visited_dirs: usize,
     max_depth: u32,
     follow_symlinks: bool,
+    kinds: WalkUpKinds,
     existing: HashSet<String>,
 }
 
 impl ScanContext {
-    fn new(cancel: Arc<AtomicBool>, max_depth: u32, follow_symlinks: bool, existing: HashSet<String>) -> Self {
+    fn new(
+        cancel: Arc<AtomicBool>,
+        max_depth: u32,
+        follow_symlinks: bool,
+        kinds: WalkUpKinds,
+        existing: HashSet<String>,
+    ) -> Self {
         Self {
             cancel,
             found: Vec::new(),
             skipped_existing: Vec::new(),
-            skipped_not_unity: 0,
+            skipped_unmatched: 0,
             visited_dirs: 0,
             max_depth,
             follow_symlinks,
+            kinds,
             existing,
         }
     }
@@ -277,83 +378,83 @@ fn walk_dir(
         return;
     }
 
-    if is_unity_project_root(dir) {
-        let version = read_project_version(dir);
-        let mtime = read_dir_mtime_iso(dir);
-        let entry = ProjectEntry {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: derive_name(dir),
-            path: dir.to_string_lossy().to_string(),
-            unity_version: version,
-            last_opened_at: None,
-            last_modified_at: mtime,
-            launch_args: None,
-            platform_intent: None,
-            last_launch_pid: None,
-            last_launch_at: None,
-            frecency: 0,
-            git_branch: None,
-            source: "walk-up".to_string(),
-            hidden: false,
-            stale: false,
-            env_vars: Default::default(),
-            // M15 T6.4: enrich walk-up discovered rows with the SRP +
-            // build-target labels so they show the same chips as rows
-            // added via the "Add Project" flow.
-            render_pipeline: Some(
-                crate::config::render_pipeline::read_render_pipeline(dir)
-                    .label()
-                    .to_string(),
-            ),
-            default_build_target: crate::config::build_target::read_default_build_target(dir)
-                .target,
-            kind: ProjectKind::Unity,
-            package_manifest_path: None,
-            migrate_source_folder: None,
-            line_count_stats: None,
-        };
-        ctx.found.push(entry.clone());
-        // Mark the canonical path as seen so nested project roots
-        // (a project *inside* another project's tree) are not
-        // re-detected as duplicates of the outer one.
-        ctx.existing.insert(canonical.clone());
-        emit_progress(app, scan_id, current_root, depth, ctx);
-        return;
-    }
-
-    if depth >= ctx.max_depth {
-        ctx.skipped_not_unity += 1;
-        return;
-    }
-
-    let read = match std::fs::read_dir(dir) {
-        Ok(r) => r,
-        Err(_) => {
-            ctx.skipped_not_unity += 1;
+    // Classify the folder by its markers. The kind drives both whether
+    // it becomes an entry (per the enabled filter) and whether we keep
+    // recursing: a folder that is itself a project is never descended
+    // into, matching the original Unity-only rule.
+    let kind = match classify_folder(dir, ctx.kinds, ctx.follow_symlinks) {
+        Some(k) => k,
+        None => {
+            if depth >= ctx.max_depth {
+                ctx.skipped_unmatched += 1;
+                return;
+            }
+            let read = match std::fs::read_dir(dir) {
+                Ok(r) => r,
+                Err(_) => {
+                    ctx.skipped_unmatched += 1;
+                    return;
+                }
+            };
+            for child in read.flatten() {
+                if ctx.cancelled() {
+                    break;
+                }
+                let path = child.path();
+                // Cheap directory probe: `is_dir` follows symlinks, so
+                // when the user has opted out of follow-symlinks we
+                // reject the link explicitly. `metadata` returns the
+                // link target metadata; `symlink_metadata` would return
+                // the link itself.
+                let is_dir = if ctx.follow_symlinks {
+                    path.is_dir()
+                } else {
+                    match std::fs::symlink_metadata(&path) {
+                        Ok(md) => md.file_type().is_dir() || md.file_type().is_symlink(),
+                        Err(_) => false,
+                    }
+                };
+                if !is_dir {
+                    continue;
+                }
+                walk_dir(&path, depth + 1, ctx, app, scan_id, current_root);
+            }
             return;
         }
     };
-    for child in read.flatten() {
-        if ctx.cancelled() {
-            break;
-        }
-        let path = child.path();
-        // Cheap directory probe: `is_dir` follows symlinks, so when
-        // the user has opted out of follow-symlinks we reject the
-        // link explicitly. `metadata` returns the link target
-        // metadata; `symlink_metadata` would return the link itself.
-        let is_dir = if ctx.follow_symlinks {
-            path.is_dir()
+
+    let entry = build_entry(dir, kind);
+    ctx.found.push(entry.clone());
+    // Mark the canonical path as seen so nested project roots
+    // (a project *inside* another project's tree) are not
+    // re-detected as duplicates of the outer one.
+    ctx.existing.insert(canonical.clone());
+    emit_progress(app, scan_id, current_root, depth, ctx);
+}
+
+/// Pure per-folder acceptance decision. Returns `Some(kind)` when the
+/// folder should be appended as a project of that kind under the given
+/// filter, or `None` when it should be skipped (and the walker should
+/// consider recursing into it).
+///
+/// Markered kinds (Unity / OpenMcp / Package) are accepted when their
+/// flag is on. `Custom` — the fallback for any folder without a marker
+/// — is only accepted when both the Custom flag is on *and* the folder
+/// is a leaf (contains no subdirectories), to avoid flooding the list
+/// with every visited directory. Extracted from `walk_dir` so the
+/// multi-kind logic is unit-testable without an `AppHandle`.
+fn classify_folder(dir: &Path, kinds: WalkUpKinds, follow_symlinks: bool) -> Option<ProjectKind> {
+    let kind = project_kind::detect_kind(dir);
+    if kind == ProjectKind::Custom {
+        if kinds.custom && !has_subdirectory(dir, follow_symlinks) {
+            Some(ProjectKind::Custom)
         } else {
-            match std::fs::symlink_metadata(&path) {
-                Ok(md) => md.file_type().is_dir() || md.file_type().is_symlink(),
-                Err(_) => false,
-            }
-        };
-        if !is_dir {
-            continue;
+            None
         }
-        walk_dir(&path, depth + 1, ctx, app, scan_id, current_root);
+    } else if kinds.matches(kind) {
+        Some(kind)
+    } else {
+        None
     }
 }
 
@@ -411,6 +512,8 @@ pub struct WalkUpStartParams {
     pub max_depth: u32,
     pub follow_symlinks: bool,
     pub keep_partial: bool,
+    #[serde(default)]
+    pub kinds: WalkUpKinds,
 }
 
 /// Kick off a walk-up scan on a background thread. Returns
@@ -446,6 +549,7 @@ pub fn start_walk_up_scan(
     let max_depth = clamp_depth(params.max_depth);
     let follow_symlinks = params.follow_symlinks;
     let keep_partial = params.keep_partial;
+    let kinds = params.kinds;
 
     let (scan_id, cancel) = state.walk_up_registry.lock().unwrap().register();
 
@@ -456,6 +560,7 @@ pub fn start_walk_up_scan(
         follow_symlinks,
         keep_partial,
         roots: valid_roots.clone(),
+        kinds,
     };
 
     std::thread::Builder::new()
@@ -474,7 +579,7 @@ pub fn start_walk_up_scan(
                     .iter()
                     .map(|p| canonicalize_for_compare(&p.path))
                     .collect();
-                ScanContext::new(cancel.clone(), max_depth, follow_symlinks, existing)
+                ScanContext::new(cancel.clone(), max_depth, follow_symlinks, kinds, existing)
             };
 
             for root in &valid_roots {
@@ -544,7 +649,7 @@ pub fn start_walk_up_scan(
                 },
                 added: final_added,
                 skipped_existing: ctx.skipped_existing,
-                skipped_not_unity: ctx.skipped_not_unity,
+                skipped_unmatched: ctx.skipped_unmatched,
                 skipped_invalid_root: Vec::new(),
                 projects,
                 error: persist_error,
@@ -716,5 +821,163 @@ mod tests {
     fn path_string_roundtrip() {
         let p: PathBuf = "/some/parent/MyProject".into();
         assert_eq!(derive_name(&p), "MyProject");
+    }
+
+    // --- Multi-kind classification tests ---------------------------------
+
+    fn make_package(dir: &Path) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join("package.json"), b"{}").unwrap();
+    }
+
+    fn make_open_mcp(dir: &Path) {
+        fs::create_dir_all(dir).unwrap();
+        fs::create_dir_all(dir.join("mcp-server")).unwrap();
+        fs::write(dir.join("package.json"), b"{}").unwrap();
+    }
+
+    /// A "custom" folder with no project markers. `leaf` controls
+    /// whether it contains a subdirectory (non-leaf) or is empty.
+    fn make_custom(dir: &Path, leaf: bool) {
+        fs::create_dir_all(dir).unwrap();
+        if !leaf {
+            fs::create_dir_all(dir.join("some-subdir")).unwrap();
+        }
+    }
+
+    #[test]
+    fn classify_accepts_enabled_markered_kinds() {
+        let tmp = tempdir().unwrap();
+        let unity = tmp.path().join("unity");
+        let package = tmp.path().join("package");
+        let mcp = tmp.path().join("mcp");
+        make_unity(&unity, None);
+        make_package(&package);
+        make_open_mcp(&mcp);
+
+        let all = WalkUpKinds {
+            unity: true,
+            package: true,
+            open_mcp: true,
+            custom: false,
+        };
+        assert_eq!(classify_folder(&unity, all, false), Some(ProjectKind::Unity));
+        assert_eq!(classify_folder(&package, all, false), Some(ProjectKind::Package));
+        assert_eq!(classify_folder(&mcp, all, false), Some(ProjectKind::OpenMcp));
+    }
+
+    #[test]
+    fn classify_skips_markered_kind_when_its_flag_is_off() {
+        let tmp = tempdir().unwrap();
+        let package = tmp.path().join("package");
+        make_package(&package);
+
+        let unity_only = WalkUpKinds {
+            unity: true,
+            package: false,
+            open_mcp: false,
+            custom: false,
+        };
+        assert_eq!(classify_folder(&package, unity_only, false), None);
+    }
+
+    #[test]
+    fn classify_custom_only_accepts_leaf_when_enabled() {
+        let tmp = tempdir().unwrap();
+        let leaf = tmp.path().join("leaf");
+        let nonleaf = tmp.path().join("nonleaf");
+        make_custom(&leaf, true);
+        make_custom(&nonleaf, false);
+
+        let with_custom = WalkUpKinds {
+            unity: false,
+            package: false,
+            open_mcp: false,
+            custom: true,
+        };
+        // Leaf custom folder is accepted.
+        assert_eq!(classify_folder(&leaf, with_custom, false), Some(ProjectKind::Custom));
+        // Non-leaf custom folder is rejected (would flood the list).
+        assert_eq!(classify_folder(&nonleaf, with_custom, false), None);
+    }
+
+    #[test]
+    fn classify_custom_rejected_when_flag_off_even_if_leaf() {
+        let tmp = tempdir().unwrap();
+        let leaf = tmp.path().join("leaf");
+        make_custom(&leaf, true);
+
+        let no_custom = WalkUpKinds::default(); // unity + package
+        assert_eq!(classify_folder(&leaf, no_custom, false), None);
+    }
+
+    #[test]
+    fn build_entry_sets_kind_and_source_for_each_kind() {
+        let tmp = tempdir().unwrap();
+
+        let unity = tmp.path().join("unity");
+        make_unity(&unity, Some("6000.0.1f1"));
+        let u = build_entry(&unity, ProjectKind::Unity);
+        assert_eq!(u.kind, ProjectKind::Unity);
+        assert_eq!(u.source, "walk-up");
+        assert_eq!(u.unity_version.as_deref(), Some("6000.0.1f1"));
+        assert!(u.render_pipeline.is_some());
+        assert!(u.package_manifest_path.is_none());
+
+        let package = tmp.path().join("package");
+        make_package(&package);
+        let p = build_entry(&package, ProjectKind::Package);
+        assert_eq!(p.kind, ProjectKind::Package);
+        assert_eq!(p.source, "walk-up");
+        assert_eq!(p.package_manifest_path.as_deref(), Some("package.json"));
+        assert!(p.unity_version.is_none());
+
+        let mcp = tmp.path().join("mcp");
+        make_open_mcp(&mcp);
+        let m = build_entry(&mcp, ProjectKind::OpenMcp);
+        assert_eq!(m.kind, ProjectKind::OpenMcp);
+        assert_eq!(m.package_manifest_path.as_deref(), Some("package.json"));
+
+        let custom = tmp.path().join("custom");
+        make_custom(&custom, true);
+        let c = build_entry(&custom, ProjectKind::Custom);
+        assert_eq!(c.kind, ProjectKind::Custom);
+        assert!(c.package_manifest_path.is_none());
+        assert!(c.unity_version.is_none());
+    }
+
+    #[test]
+    fn walk_up_kinds_default_is_unity_plus_package() {
+        let d = WalkUpKinds::default();
+        assert!(d.unity);
+        assert!(d.package);
+        assert!(!d.open_mcp);
+        assert!(!d.custom);
+        assert!(!d.is_empty());
+    }
+
+    #[test]
+    fn walk_up_kinds_is_empty_when_all_off() {
+        let d = WalkUpKinds {
+            unity: false,
+            package: false,
+            open_mcp: false,
+            custom: false,
+        };
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn walk_up_kinds_matches_each_kind_via_its_flag() {
+        let d = WalkUpKinds {
+            unity: true,
+            package: false,
+            open_mcp: true,
+            custom: false,
+        };
+        assert!(d.matches(ProjectKind::Unity));
+        assert!(!d.matches(ProjectKind::Package));
+        assert!(d.matches(ProjectKind::OpenMcp));
+        assert!(!d.matches(ProjectKind::Custom));
     }
 }

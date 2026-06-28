@@ -7,12 +7,15 @@
     runProjectNpmVersion,
     runProjectNpmPublishDryRun,
     runProjectNpmPublish,
+    runProjectSyncVersion,
     readMcpPackageInfo,
     queryNpmRegistry,
     stopProjectCommand,
     type CommandPanel,
     type McpPackageInfo,
     type NpmRegistryInfo,
+    type SyncVersionLine,
+    type SyncVersionAction,
   } from "$lib/services/config";
   import { commandLogsStore, emptyProjectPanels, type ProjectPanels } from "$lib/state/command_logs.svelte";
   import { S } from "$lib/state.svelte";
@@ -56,6 +59,45 @@
 
   // Version-bump level selector for the Version panel.
   let versionLevel = $state<"patch" | "minor" | "major">("patch");
+
+  // --- Repo version sync (scripts/sync-version.mjs) state ---------------
+
+  // The repo-wide sync panel drives a different tool than the npm "Version
+  // bump" above: it rewrites every generated version target (trio: 5 files
+  // from `version.json`; hub: 3 files from `hub/version.json`) and powers
+  // the CI drift gate. State mirrors the script's grammar: a line + an
+  // action, with an operand that depends on the action.
+  let syncLine = $state<SyncVersionLine>("trio");
+  let syncAction = $state<SyncVersionAction>("sync");
+  let syncBumpLevel = $state<"patch" | "minor" | "major">("patch");
+  let syncSetVersion = $state("");
+
+  // True when the current set-version input parses as plain X.Y.Z (a
+  // leading `v` is tolerated, matching the script). Gates the Run button
+  // so the user gets immediate feedback before spawning node.
+  let syncSetValid = $derived(/^[vV]?\d+\.\d+\.\d+$/.test(syncSetVersion.trim()));
+  let syncInputValid = $derived(syncAction !== "set" || syncSetValid);
+  // The exact argv the backend will spawn, for the console title and the
+  // Run button tooltip. Mirrors command_runner::run_project_sync_version.
+  let syncCommandPreview = $derived(buildSyncCommandPreview());
+
+  function buildSyncCommandPreview(): string {
+    const hub = syncLine === "hub" ? " --hub" : "";
+    const base = "node scripts/sync-version.mjs";
+    switch (syncAction) {
+      case "check":
+        return `${base} --check${hub}`;
+      case "bump":
+        return `${base} bump ${syncBumpLevel}${hub}`;
+      case "set": {
+        const v = syncSetVersion.trim().replace(/^[vV]/, "");
+        return `${base} set ${v || "<X.Y.Z>"}${hub}`;
+      }
+      case "sync":
+      default:
+        return `${base}${hub}`;
+    }
+  }
 
   // Publish confirmation. Real publish is mutating and irreversible, so
   // the panel gates it behind an explicit confirmation modal. Dry-run is
@@ -114,6 +156,20 @@
         await runProjectNpmPublishDryRun(project.id, project.path, kind);
       } else if (panel === "publish") {
         await runProjectNpmPublish(project.id, project.path, kind);
+      } else if (panel === "sync") {
+        // Repo-wide version sync. Only bump/set carry an operand.
+        const bumpLevel = syncAction === "bump" ? syncBumpLevel : undefined;
+        const setVersion =
+          syncAction === "set" ? syncSetVersion.trim().replace(/^[vV]/, "") : undefined;
+        await runProjectSyncVersion(
+          project.id,
+          project.path,
+          kind,
+          syncLine,
+          syncAction,
+          bumpLevel,
+          setVersion,
+        );
       } else {
         const args = customArgs.trim().split(/\s+/).filter((a) => a.length > 0);
         await runProjectCustom(project.id, project.path, kind, args);
@@ -364,6 +420,76 @@
 
   <div class="panel-row">
     <div class="panel-head">
+      <span class="panel-label">Repo version sync</span>
+      <span class={`status-badge ${badgeClass(panels.sync.running, panels.sync.lastExitCode)}`}>
+        {badgeLabel(panels.sync.running, panels.sync.lastExitCode)}
+      </span>
+      <div class="panel-actions">
+        <select
+          class="version-select"
+          bind:value={syncLine}
+          disabled={panels.sync.running}
+          title="Which version line to target"
+        >
+          <option value="trio">trio (server+bridge+verify)</option>
+          <option value="hub">hub (Unity Hub Pro app)</option>
+        </select>
+        <select
+          class="version-select"
+          bind:value={syncAction}
+          disabled={panels.sync.running}
+          title="Which sync-version action to run"
+        >
+          <option value="sync">sync</option>
+          <option value="check">check (drift gate)</option>
+          <option value="bump">bump</option>
+          <option value="set">set</option>
+        </select>
+        {#if syncAction === "bump"}
+          <select class="version-select" bind:value={syncBumpLevel} disabled={panels.sync.running}>
+            <option value="patch">patch</option>
+            <option value="minor">minor</option>
+            <option value="major">major</option>
+          </select>
+        {:else if syncAction === "set"}
+          <input
+            class="custom-input sync-set-input"
+            bind:value={syncSetVersion}
+            placeholder="0.2.0"
+            spellcheck="false"
+            disabled={panels.sync.running}
+            size="8"
+          />
+        {/if}
+        {#if panels.sync.running}
+          <Button variant="secondary" onclick={() => stop("sync")}>Stop</Button>
+        {:else}
+          <Button
+            variant="primary"
+            onclick={() => start("sync")}
+            disabled={!syncInputValid}
+            title={syncInputValid ? syncCommandPreview : "Enter a valid X.Y.Z version"}
+          >
+            Run
+          </Button>
+        {/if}
+        <button type="button" class="link-btn" onclick={() => commandLogsStore.clear(project.id, "sync")}>Clear</button>
+      </div>
+    </div>
+    <p class="panel-hint">
+      Runs <code>scripts/sync-version.mjs</code> at the repo root — the release/drift tool,
+      <strong>not</strong> the npm "Version bump" above (which only touches
+      <code>mcp-server/package.json</code>). <strong>sync</strong> rewrites every generated
+      target from the source file; <strong>check</strong> is the read-only CI drift gate
+      (exit 1 = drift); <strong>bump</strong>/<strong>set</strong> change the source then
+      sync. Trio source: <code>version.json</code>; Hub source: <code>hub/version.json</code>.
+      The Hub never creates git tags — commit and tag manually as the script prints.
+    </p>
+    <Console lines={panels.sync.lines} title={syncCommandPreview} />
+  </div>
+
+  <div class="panel-row">
+    <div class="panel-head">
       <span class="panel-label">Custom</span>
       <span class={`status-badge ${badgeClass(panels.custom.running, panels.custom.lastExitCode)}`}>
         {badgeLabel(panels.custom.running, panels.custom.lastExitCode)}
@@ -561,6 +687,9 @@
     color: var(--hub-text);
     font-size: 0.78rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .sync-set-input {
+    width: 6rem;
   }
   .link-btn {
     background: transparent;

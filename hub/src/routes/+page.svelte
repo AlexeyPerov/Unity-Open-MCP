@@ -111,6 +111,10 @@
     --hub-source-seed-fg: #b4b8c5;
     --hub-relink-fg: #c8d3ff;
     --hub-relink-hover-bg: #243056;
+    --hub-scrollbar-track: transparent;
+    --hub-scrollbar-thumb: #474957;
+    --hub-scrollbar-thumb-hover: #5d6072;
+    --hub-scrollbar-width: 10px;
   }
 
   :global([data-theme="light"]) {
@@ -147,6 +151,9 @@
     --hub-source-seed-fg: #5f636e;
     --hub-relink-fg: #3a5bdb;
     --hub-relink-hover-bg: #e6ecff;
+    --hub-scrollbar-track: transparent;
+    --hub-scrollbar-thumb: #c2c5cf;
+    --hub-scrollbar-thumb-hover: #a9adba;
   }
 
   :global(html),
@@ -170,6 +177,40 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+  }
+
+  /* Theme-aware scrollbars: dark in dark theme, light in light theme.
+   * Driven by the --hub-scrollbar-* tokens so they follow [data-theme].
+   * ::-webkit-scrollbar is the primary mechanism in Tauri's WebKit webview;
+   * scrollbar-width/color cover Firefox-grade engines as a fallback. */
+  :global(*) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--hub-scrollbar-thumb) var(--hub-scrollbar-track);
+  }
+
+  :global(*::-webkit-scrollbar) {
+    width: var(--hub-scrollbar-width);
+    height: var(--hub-scrollbar-width);
+  }
+
+  :global(*::-webkit-scrollbar-track) {
+    background: var(--hub-scrollbar-track);
+  }
+
+  :global(*::-webkit-scrollbar-thumb) {
+    background: var(--hub-scrollbar-thumb);
+    background-clip: content-box;
+    border: 2px solid transparent;
+    border-radius: 9999px;
+  }
+
+  :global(*::-webkit-scrollbar-thumb:hover) {
+    background: var(--hub-scrollbar-thumb-hover);
+    background-clip: content-box;
+  }
+
+  :global(*::-webkit-scrollbar-corner) {
+    background: transparent;
   }
 
   .shell {

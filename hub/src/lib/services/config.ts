@@ -79,6 +79,13 @@ export interface UnityDiscoverySettings {
    * Rust `#[serde(default)]` so legacy `settings.json` files load.
    */
   customTemplateFolders: string[];
+  /**
+   * Which project kinds the walk-up scan should append. Optional in
+   * TypeScript (and `#[serde(default)]` on the Rust side) so legacy
+   * `settings.json` files load; consumers should fall back to
+   * `DEFAULT_WALK_UP_KINDS` when undefined.
+   */
+  walkUpKinds?: WalkUpKinds;
 }
 
 export interface DiagnosticsSettings {
@@ -143,6 +150,32 @@ export interface Settings {
  * Legacy entries (no `kind` field on disk) load as `"unity"`.
  */
 export type ProjectKind = "unity" | "package" | "openMcp" | "custom";
+
+/**
+ * Per-kind toggle set controlling which project types the walk-up
+ * directory scan (`startWalkUpScan`) appends to `projects.json`.
+ * Defaults to `{ unity: true, package: true, openMcp: false,
+ * custom: false }`. `custom` only matches *leaf* folders (no
+ * subdirectories) to avoid flooding the list — see the Rust
+ * `walk_up_scan::classify_folder` helper.
+ *
+ * The Rust struct (`WalkUpKinds`) serialises with camelCase, so the
+ * Open-MCP field is `openMcp` (not `open_mcp` or `open-mcp`).
+ */
+export interface WalkUpKinds {
+  unity: boolean;
+  package: boolean;
+  openMcp: boolean;
+  custom: boolean;
+}
+
+/** Default walk-up kind filter: Unity + Package on, Open-MCP + Custom off. */
+export const DEFAULT_WALK_UP_KINDS: WalkUpKinds = {
+  unity: true,
+  package: true,
+  openMcp: false,
+  custom: false,
+};
 
 /**
  * Cached line-counter output (§7). `details` is the same 4-section
@@ -792,7 +825,8 @@ export type CommandPanel =
   | "custom"
   | "version"
   | "publishDryRun"
-  | "publish";
+  | "publish"
+  | "sync";
 
 /**
  * Read-only package identity for the maintainer panel. Mirrors the Rust
@@ -890,6 +924,46 @@ export async function runProjectNpmPublish(
     projectId,
     projectPath,
     kind,
+  });
+}
+
+// ---- Repo-wide version sync (scripts/sync-version.mjs) --------------------
+//
+// Distinct from `runProjectNpmVersion` (which bumps only the publishable
+// `package.json`): this drives the repo-wide release/drift script that
+// rewrites every generated version target — trio (5 files from the repo
+// root `version.json`) or hub (3 files from `hub/version.json`). The Hub
+// never creates git tags; tagging stays in the release runbook.
+
+/** Which version line to target. `trio` = default, `hub` = the `--hub` flag. */
+export type SyncVersionLine = "trio" | "hub";
+
+/** Which sync-version action to run. Mirrors the script's subcommands. */
+export type SyncVersionAction = "sync" | "check" | "bump" | "set";
+
+/**
+ * Run `node scripts/sync-version.mjs …` at the repo root for the chosen
+ * line + action. `bumpLevel` is required when `action === "bump"`;
+ * `setVersion` (plain `X.Y.Z`, an optional leading `v` is tolerated) is
+ * required when `action === "set"`. Output streams to the `sync` panel.
+ */
+export async function runProjectSyncVersion(
+  projectId: string,
+  projectPath: string,
+  kind: ProjectKind,
+  line: SyncVersionLine,
+  action: SyncVersionAction,
+  bumpLevel?: string,
+  setVersion?: string,
+): Promise<void> {
+  return invoke<void>("run_project_sync_version", {
+    projectId,
+    projectPath,
+    kind,
+    line,
+    action,
+    bumpLevel,
+    setVersion,
   });
 }
 
@@ -1006,6 +1080,11 @@ export interface WalkUpStartParams {
   maxDepth: number;
   followSymlinks: boolean;
   keepPartial: boolean;
+  /**
+   * Which project kinds to append. Defaults to Unity + Package when
+   * omitted (mirrors the Rust `#[serde(default)]`).
+   */
+  kinds?: WalkUpKinds;
 }
 
 export interface WalkUpStart {
@@ -1014,6 +1093,8 @@ export interface WalkUpStart {
   followSymlinks: boolean;
   keepPartial: boolean;
   roots: string[];
+  /** Effective kind filter echoed back from the backend. */
+  kinds: WalkUpKinds;
 }
 
 export type WalkUpStatus = "running" | "cancelled" | "completed" | "failed";
@@ -1033,7 +1114,8 @@ export interface WalkUpDone {
   status: WalkUpStatus;
   added: ProjectEntry[];
   skippedExisting: string[];
-  skippedNotUnity: number;
+  /** Directories visited but not added (wrong kind / not a project). */
+  skippedUnmatched: number;
   skippedInvalidRoot: string[];
   projects: ProjectsFile;
   error?: string | null;
