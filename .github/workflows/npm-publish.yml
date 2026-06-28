@@ -1,6 +1,8 @@
 # npm publish — publishes the `unity-open-mcp` MCP server to the public npm
-# registry when a `v*` tag is pushed. Mirrors the conventions of
-# typescript.yml (Node 22, working-directory: mcp-server).
+# registry when a `v*` tag is pushed, and creates a matching GitHub Release so
+# the trio release shows up in the repo's Releases section alongside the Unity
+# Hub Pro releases. Mirrors the conventions of typescript.yml (Node 22,
+# working-directory: mcp-server).
 #
 # The workflow runs the `prepublishOnly` script (`npm run build`) before
 # publishing, so `dist/` is always fresh even when the tag was cut from a
@@ -26,7 +28,10 @@ jobs:
     name: publish unity-open-mcp to npm
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # contents: write so the GitHub Release step below can create the
+      # release off the v* tag. (Hub release uses the same escalation in
+      # hub-release.yml.)
+      contents: write
     defaults:
       run:
         working-directory: mcp-server
@@ -82,3 +87,17 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub release
+        # Surface the npm release in the repo's Releases section (alongside the
+        # Unity Hub Pro releases from hub-release.yml). Purely cosmetic — npm is
+        # the source of truth; this just makes the trio release discoverable and
+        # gives it auto-generated release notes off the v* tag. The package itself
+        # is already published by the step above, so a release failure here does
+        # not unpublish it. Uses the same action as hub-release.yml.
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: unity-open-mcp ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
