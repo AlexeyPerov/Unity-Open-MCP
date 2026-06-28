@@ -602,6 +602,205 @@ namespace UnityOpenMcpBridge.TypedTools
             return ToolDispatchResult.Ok(BuildOpResult(modified, errors, "modified", null));
         }
 
+        // ===================== ScriptableObject create =====================
+
+        // M20 Plan 5 / T20.5.1 — typed ScriptableObject create. Mutating: runs
+        // the full gate path with paths_hint scoped to the asset path. Resolves
+        // the type via the same resolver used by type_schema / invoke_method,
+        // instantiates it via ScriptableObject.CreateInstance, applies optional
+        // initial field patches (same value shape + ConvertValue path as
+        // object_modify — no reimplementation), and writes the .asset via
+        // AssetDatabase.CreateAsset. Read/info access stays on object_get_data;
+        // arbitrary field edits stay on object_modify — this tool is the clean
+        // gate-integrated create path.
+        public static ToolDispatchResult ScriptableObjectCreate(string body)
+        {
+            var typeName = JsonBody.GetString(body, "type_name");
+            if (string.IsNullOrWhiteSpace(typeName))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'type_name' is required (full name preferred, class-name fallback). " +
+                    "Use unity_open_mcp_find_members / type_schema to discover available types.");
+
+            var assetPath = JsonBody.GetString(body, "asset_path");
+            if (string.IsNullOrWhiteSpace(assetPath))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'asset_path' is required and must start with 'Assets/' and end with '.asset'.");
+
+            var normalized = assetPath.Replace('\\', '/').Trim('/');
+            if (!normalized.StartsWith("Assets/"))
+                return ToolDispatchResult.Fail("invalid_paths",
+                    $"asset_path must start with 'Assets/': '{normalized}'.");
+            if (!normalized.EndsWith(".asset", StringComparison.OrdinalIgnoreCase))
+                return ToolDispatchResult.Fail("invalid_paths",
+                    $"asset_path must end with '.asset': '{normalized}'.");
+            if (normalized.Contains(".."))
+                return ToolDispatchResult.Fail("invalid_paths",
+                    $"asset_path must not contain '..': '{normalized}'.");
+
+            var assemblyName = JsonBody.GetString(body, "assembly_name");
+            var type = ResolveType(typeName, assemblyName);
+            if (type == null)
+                return ToolDispatchResult.Fail("type_not_found",
+                    $"Type '{typeName}' not found" + (assemblyName != null ? $" in assembly '{assemblyName}'" : "") +
+                    ". Use unity_open_mcp_find_members / type_schema to discover available types.");
+
+            // Must be a ScriptableObject (or a subclass). Refuse abstract types
+            // and non-instantiable definitions with a precise error.
+            if (!typeof(ScriptableObject).IsAssignableFrom(type))
+                return ToolDispatchResult.Fail("type_not_scriptableobject",
+                    $"Type '{type.FullName}' does not inherit from UnityEngine.ScriptableObject. " +
+                    "scriptableobject_create only accepts ScriptableObject subclasses.");
+            if (type.IsAbstract)
+                return ToolDispatchResult.Fail("type_abstract",
+                    $"Type '{type.FullName}' is abstract and cannot be instantiated.");
+
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(normalized) != null)
+                return ToolDispatchResult.Fail("asset_exists",
+                    $"An asset already exists at '{normalized}'. Use object_modify to edit it, " +
+                    "or choose a different asset_path.");
+
+            // Create intermediate folders if missing so the create never fails
+            // on a missing parent directory.
+            var lastSlash = normalized.LastIndexOf('/');
+            if (lastSlash > 0)
+            {
+                var dir = normalized.Substring(0, lastSlash);
+                MaterialTools.EnsureFolderRecursive(dir);
+            }
+
+            ScriptableObject instance;
+            try
+            {
+                instance = (ScriptableObject)Activator.CreateInstance(type);
+                instance.name = System.IO.Path.GetFileNameWithoutExtension(normalized);
+            }
+            catch (System.Exception e)
+            {
+                return ToolDispatchResult.Fail("instantiate_failed",
+                    $"Failed to instantiate '{type.FullName}': {e.Message}");
+            }
+
+            // Apply optional initial field patches (same value shape + conversion
+            // path as object_modify). Per-entry errors are accumulated and do NOT
+            // abort the create — the asset is still written with whatever fields
+            // succeeded. Static / init-only writes require allow_static, matching
+            // object_modify's safety contract.
+            var modified = new List<string>();
+            var fieldErrors = new List<string>();
+            var allowStatic = JsonBody.GetBool(body, "allow_static", false);
+            var entries = JsonBody.GetObjectArray(body, "fields");
+            if (entries != null && entries.Length > 0)
+            {
+                ApplyFieldPatches(instance, entries, allowStatic, modified, fieldErrors);
+            }
+
+            try
+            {
+                AssetDatabase.CreateAsset(instance, normalized);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.ImportAsset(normalized, ImportAssetOptions.ForceSynchronousImport);
+            }
+            catch (System.Exception e)
+            {
+                // The instance is not a tracked asset until CreateAsset succeeds;
+                // if it threw, destroy the orphan so we don't leak a runtime SO.
+                if (AssetDatabase.GetAssetPath(instance) == "")
+                    UnityEngine.Object.DestroyImmediate(instance);
+                return ToolDispatchResult.Fail("create_error",
+                    $"Failed to create ScriptableObject asset at '{normalized}': {e.Message}");
+            }
+
+            var sb = new StringBuilder(256);
+            sb.Append("{\"status\":\"ok\",\"assetPath\":\"").Append(OutputSerializer.EscapeJsonString(normalized));
+            sb.Append("\",\"name\":\"").Append(OutputSerializer.EscapeJsonString(instance.name));
+            sb.Append("\",\"type\":\"").Append(OutputSerializer.EscapeJsonString(type.FullName));
+            sb.Append("\",\"instanceId\":").Append(instance.GetInstanceID());
+            sb.Append(",\"fieldsApplied\":").Append(modified.Count);
+            sb.Append(",\"applied\":");
+            AppendStringArray(sb, modified);
+            if (fieldErrors.Count > 0)
+            {
+                sb.Append(",\"fieldErrors\":");
+                AppendStringArray(sb, fieldErrors);
+            }
+            sb.Append('}');
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
+        // ================ List assets of type (read-only) =================
+
+        // M20 Plan 5 / T20.5.1 — typed asset listing by type. Read-only and
+        // gate-free. Resolves the type via the same resolver used by
+        // type_schema, then enumerates AssetDatabase.FindAssets("t:<TypeName>")
+        // under `folder` (default Assets). Offline-routeable in principle — the
+        // offline YAML/GUID index can answer t:<Type> filter queries without a
+        // live Editor (noted in the tool description); the live path here is the
+        // authoritative implementation.
+        public static ToolDispatchResult ListAssetsOfType(string body)
+        {
+            var typeName = JsonBody.GetString(body, "type_name");
+            if (string.IsNullOrWhiteSpace(typeName))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'type_name' is required (full name preferred, class-name fallback). " +
+                    "Use unity_open_mcp_find_members / type_schema to discover available types.");
+
+            var folder = JsonBody.GetString(body, "folder");
+            if (string.IsNullOrWhiteSpace(folder)) folder = "Assets";
+
+            bool includeIndirect = JsonBody.GetBool(body, "include_indirect", false);
+            int maxResults = ClampPositive(JsonBody.GetInt(body, "max_results", 200));
+
+            // Resolve the type so we can do an IsAssignableFrom membership check.
+            // If the type can't be resolved we still fall back to a name-based
+            // t:<Name> filter — agents commonly list by the class name only.
+            var assemblyName = JsonBody.GetString(body, "assembly_name");
+            var type = ResolveType(typeName, assemblyName);
+
+            var searchType = type != null ? type.Name : typeName;
+            // FindAssets supports t:<Type> which matches the Unity asset-type
+            // label. We pass includeFolders:false so only files come back.
+            var guids = AssetDatabase.FindAssets("t:" + searchType, new[] { folder });
+            // When includeIndirect is false (default), FindAssets already returns
+            // only top-level results; the flag is a no-op here but kept for
+            // schema parity with list_assets.
+
+            var sb = new StringBuilder(2048);
+            sb.Append("{\"type\":\"").Append(OutputSerializer.EscapeJsonString(typeName));
+            sb.Append("\",\"resolvedType\":");
+            if (type != null)
+                sb.Append('"').Append(OutputSerializer.EscapeJsonString(type.FullName)).Append('"');
+            else
+                sb.Append("null");
+            sb.Append(",\"folder\":\"").Append(OutputSerializer.EscapeJsonString(folder));
+            sb.Append("\",\"assets\":[");
+
+            int emitted = 0;
+            int truncated = 0;
+            for (int i = 0; i < guids.Length; i++)
+            {
+                if (emitted >= maxResults) { truncated++; continue; }
+                var path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                if (string.IsNullOrEmpty(path)) continue;
+
+                var mainAsset = AssetDatabase.LoadMainAssetAtPath(path);
+                var assetType = mainAsset != null ? mainAsset.GetType().FullName : "";
+
+                if (emitted > 0) sb.Append(',');
+                sb.Append("{\"path\":\"").Append(OutputSerializer.EscapeJsonString(path));
+                sb.Append("\",\"name\":\"").Append(OutputSerializer.EscapeJsonString(
+                    System.IO.Path.GetFileNameWithoutExtension(path)));
+                sb.Append("\",\"type\":\"").Append(OutputSerializer.EscapeJsonString(assetType));
+                sb.Append("\",\"instanceId\":").Append(mainAsset != null ? mainAsset.GetInstanceID() : 0);
+                sb.Append('}');
+                emitted++;
+            }
+            sb.Append("],\"count\":").Append(emitted);
+            sb.Append(",\"truncated\":").Append(truncated);
+            sb.Append(",\"maxResults\":").Append(maxResults);
+            sb.Append('}');
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
         // ----------------------------- helpers -----------------------------
 
         // Resolve a UnityEngine.Object by instance_id (preferred) or
@@ -920,6 +1119,98 @@ namespace UnityOpenMcpBridge.TypedTools
             extra?.Invoke(sb);
             sb.Append('}');
             return sb.ToString();
+        }
+
+        // Apply a batch of {name, value} field patches to an object via the same
+        // reflection + ConvertValue path object_modify uses. Extracted so
+        // scriptableobject_create can apply initial fields without duplicating
+        // the field-write logic. Per-entry errors are accumulated in `errors`
+        // and do not abort the batch; successfully-written field names land in
+        // `modified`.
+        private static void ApplyFieldPatches(UnityEngine.Object target, string[] entries,
+            bool allowStatic, List<string> modified, List<string> errors)
+        {
+            var type = target.GetType();
+            const BindingFlags PublicInstanceStatic =
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static;
+
+            foreach (var entry in entries)
+            {
+                var name = JsonBody.GetString(entry, "name");
+                if (string.IsNullOrEmpty(name))
+                {
+                    errors.Add("Skipping entry with empty 'name'.");
+                    continue;
+                }
+
+                MemberInfo member = null;
+                Type memberType = null;
+                bool isStatic = false;
+                bool isInitOnly = false;
+
+                var field = type.GetField(name, PublicInstanceStatic);
+                if (field != null)
+                {
+                    member = field;
+                    memberType = field.FieldType;
+                    isStatic = field.IsStatic;
+                    isInitOnly = field.IsInitOnly;
+                }
+                else
+                {
+                    var prop = type.GetProperty(name, PublicInstanceStatic);
+                    if (prop != null && prop.GetSetMethod(nonPublic: true) == null && prop.GetSetMethod() == null)
+                    {
+                        errors.Add($"Property '{name}' on {type.Name} has no setter.");
+                        continue;
+                    }
+                    if (prop != null)
+                    {
+                        member = prop;
+                        memberType = prop.PropertyType;
+                        isStatic = prop.GetSetMethod() != null && prop.GetSetMethod().IsStatic;
+                    }
+                }
+
+                if (member == null)
+                {
+                    errors.Add($"No public field or property '{name}' on {type.Name}. Use type_schema to discover members.");
+                    continue;
+                }
+
+                if ((isStatic || isInitOnly) && !allowStatic)
+                {
+                    var reason = isStatic ? "static" : "init-only/readonly";
+                    errors.Add($"Refusing to write {reason} member '{name}' without allow_static:true.");
+                    continue;
+                }
+
+                var valueRaw = JsonBody.GetRawValue(entry, "value");
+                try
+                {
+                    var converted = ConvertValue(valueRaw, memberType);
+                    if (member is FieldInfo fi) fi.SetValue(target, converted);
+                    else if (member is PropertyInfo pi) pi.SetValue(target, converted);
+                    modified.Add(name);
+                }
+                catch (Exception e)
+                {
+                    errors.Add($"Set '{name}' failed: {e.Message}");
+                }
+            }
+        }
+
+        // Append a JSON string array with proper escaping. Used by the SO tools
+        // so field-applied / field-error lists render consistently.
+        private static void AppendStringArray(StringBuilder sb, List<string> items)
+        {
+            sb.Append('[');
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append('"').Append(OutputSerializer.EscapeJsonString(items[i])).Append('"');
+            }
+            sb.Append(']');
         }
     }
 }

@@ -34,6 +34,13 @@ const OFFLINE_FIRST_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_find_references",
   "unity_open_mcp_read_asset",
   "unity_open_mcp_search_assets",
+  // M20 Plan 5 / T20.5 — read-only typed reads that parse asset metadata / JSON
+  // and are offline-routeable in principle (the offline index can answer them
+  // without a live Editor). Listed offline-first so a disconnected client still
+  // gets a useful answer.
+  "unity_open_mcp_list_assets_of_type",
+  "unity_open_mcp_asmdef_list",
+  "unity_open_mcp_asmdef_get",
 ]);
 
 export type RoutePolicy = "live" | "offline" | "offline-first" | "compressible";
@@ -306,6 +313,19 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_terrain_paint_layer: "terrain",
   unity_open_mcp_terrain_place_trees: "terrain",
   unity_open_mcp_terrain_set_neighbors: "terrain",
+  // M20 Plan 5 / T20.5 — typed ScriptableObject + Assembly Definition tools.
+  // Both sets are core (always-on) typed-editor tools with no Unity package
+  // dependency. scriptableobject_create is mutating (EditorSettle);
+  // list_assets_of_type is read-only (offline-routeable in principle). The
+  // asmdef family parses .asmdef as JSON: list/get are read-only (offline-
+  // routeable); create/modify use RestartThenSettle (a recompile + domain
+  // reload follows).
+  unity_open_mcp_scriptableobject_create: "typed-editor",
+  unity_open_mcp_list_assets_of_type: "typed-editor",
+  unity_open_mcp_asmdef_list: "typed-editor",
+  unity_open_mcp_asmdef_get: "typed-editor",
+  unity_open_mcp_asmdef_create: "typed-editor",
+  unity_open_mcp_asmdef_modify: "typed-editor",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",

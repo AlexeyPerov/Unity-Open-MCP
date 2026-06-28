@@ -19,7 +19,7 @@ Current tool surface from `mcp-server/src/tools/index.ts`:
 
 - Core + gate + validation tools: **16**
 - Asset intelligence + senses + discovery + diagnostics + meta tools: **23**
-- Typed editor/project tools (core package): **97**
+- Typed editor/project tools (core package): **103**
 - Optional extension-pack tools: **55**
 
 ## Quick setup

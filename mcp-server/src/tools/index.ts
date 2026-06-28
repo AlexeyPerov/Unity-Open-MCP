@@ -127,6 +127,18 @@ import { scriptWrite } from "./script-write.js";
 import { scriptDelete } from "./script-delete.js";
 import { objectGetData } from "./object-get-data.js";
 import { objectModify } from "./object-modify.js";
+// M20 Plan 5 / T20.5 — typed ScriptableObject + Assembly Definition tools.
+// scriptableobject_create is a mutating create path (EditorSettle); the read/
+// info surface stays on object_get_data / object_modify. list_assets_of_type is
+// a read-only typed list-by-type. The asmdef family (list/get/create/modify)
+// closes the asmdef parity gap: list/get are read-only; create/modify use the
+// RestartThenSettle lifecycle (a recompile + domain reload follows).
+import { scriptableObjectCreate } from "./scriptableobject-create.js";
+import { listAssetsOfType } from "./list-assets-of-type.js";
+import { asmdefList } from "./asmdef-list.js";
+import { asmdefGet } from "./asmdef-get.js";
+import { asmdefCreate } from "./asmdef-create.js";
+import { asmdefModify } from "./asmdef-modify.js";
 // M16 Plan 7 — typed profiler session / diagnostics tools.
 import { profilerStart } from "./profiler-start.js";
 import { profilerStop } from "./profiler-stop.js";
@@ -756,6 +768,27 @@ export const M20_PLAN4_TERRAIN_TOOLS: Tool[] = [
   terrainSetNeighbors,
 ];
 
+// M20 Plan 5 / T20.5 — typed ScriptableObject + Assembly Definition tools. Two
+// core (always-on, no Unity package dependency) tool sets that close the
+// AnkleBreaker parity gaps for ScriptableObject CRUD (§B7) and Assembly
+// Definitions (§B8). scriptableobject_create is the gate-integrated create
+// path (the read/info surface stays on object_get_data / object_modify); it
+// applies optional initial field patches reusing object_modify's value
+// vocabulary. list_assets_of_type is a read-only typed list-by-type
+// (offline-routeable in principle). The asmdef family parses .asmdef as JSON
+// (hand-rolled reader/writer — no Newtonsoft, per the bridge AGENTS.md): list/
+// get are read-only (offline-routeable); create/modify use the
+// RestartThenSettle lifecycle so the gate waits for the recompile to settle
+// (the advantage over AnkleBreaker's ungated asmdef mutators).
+export const M20_PLAN5_TOOLS: Tool[] = [
+  scriptableObjectCreate,
+  listAssetsOfType,
+  asmdefList,
+  asmdefGet,
+  asmdefCreate,
+  asmdefModify,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -790,4 +823,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M20_PLAN3_UI_TOOLS,
   ...M20_PLAN3_CONSTRAINTS_TOOLS,
   ...M20_PLAN4_TERRAIN_TOOLS,
+  ...M20_PLAN5_TOOLS,
 ];

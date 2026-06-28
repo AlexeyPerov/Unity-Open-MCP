@@ -881,6 +881,19 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_script_delete" => ReflectionScriptsObjectsTools.ScriptDelete(body),
                 "unity_open_mcp_object_get_data" => ReflectionScriptsObjectsTools.ObjectGetData(body),
                 "unity_open_mcp_object_modify" => ReflectionScriptsObjectsTools.ObjectModify(body),
+                // M20 Plan 5 / T20.5.1 — typed ScriptableObject create + list-by-
+                // type. scriptableobject_create is a mutator (MutatingTools);
+                // list_assets_of_type is read-only (DirectResponseTools).
+                "unity_open_mcp_scriptableobject_create" => ReflectionScriptsObjectsTools.ScriptableObjectCreate(body),
+                "unity_open_mcp_list_assets_of_type" => ReflectionScriptsObjectsTools.ListAssetsOfType(body),
+                // M20 Plan 5 / T20.5.2 — typed Assembly Definition tools. asmdef_list
+                // / asmdef_get are read-only (DirectResponseTools); asmdef_create /
+                // asmdef_modify are mutators with RestartThenSettle (creating or
+                // editing an asmdef triggers a domain reload + recompile).
+                "unity_open_mcp_asmdef_list" => AssemblyDefinitionTools.List(body),
+                "unity_open_mcp_asmdef_get" => AssemblyDefinitionTools.Get(body),
+                "unity_open_mcp_asmdef_create" => AssemblyDefinitionTools.Create(body),
+                "unity_open_mcp_asmdef_modify" => AssemblyDefinitionTools.Modify(body),
                 // M16 Plan 7 — typed profiler session / diagnostics tools. All
                 // are gate-free direct-response tools except profiler_save_data
                 // (a mutator that writes a .json snapshot — MutatingTools).

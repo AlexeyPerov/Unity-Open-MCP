@@ -173,7 +173,19 @@ namespace UnityOpenMcpBridge
             "unity_senses_profiler_capture",
             "unity_senses_profiler_memory",
             "unity_senses_profiler_rendering",
-            "unity_senses_spatial_query"
+            "unity_senses_spatial_query",
+            // M20 Plan 5 / T20.5.1 — typed ScriptableObject create + list-by-
+            // type. scriptableobject_create is mutating; list_assets_of_type is
+            // read-only (DirectResponseTools).
+            "unity_open_mcp_scriptableobject_create",
+            "unity_open_mcp_list_assets_of_type",
+            // M20 Plan 5 / T20.5.2 — typed Assembly Definition tools. asmdef_list
+            // / asmdef_get are read-only; asmdef_create / asmdef_modify are
+            // mutating (MutatingTools).
+            "unity_open_mcp_asmdef_list",
+            "unity_open_mcp_asmdef_get",
+            "unity_open_mcp_asmdef_create",
+            "unity_open_mcp_asmdef_modify"
         };
 
         internal static readonly HashSet<string> DirectResponseTools = new()
@@ -292,7 +304,15 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_settings_get_player",
             "unity_open_mcp_settings_get_quality",
             "unity_open_mcp_settings_get_physics",
-            "unity_open_mcp_settings_get_lighting"
+            "unity_open_mcp_settings_get_lighting",
+            // M20 Plan 5 / T20.5.1 — read-only typed list-by-type (gate-free).
+            // Offline-routeable in principle (the offline YAML/GUID index can
+            // answer t:<Type> filter queries).
+            "unity_open_mcp_list_assets_of_type",
+            // M20 Plan 5 / T20.5.2 — read-only typed asmdef reads (gate-free).
+            // Both are offline-routeable (.asmdef is plain JSON).
+            "unity_open_mcp_asmdef_list",
+            "unity_open_mcp_asmdef_get"
         };
 
         internal static readonly HashSet<string> MutatingTools = new()
@@ -388,7 +408,17 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_settings_set_player",
             "unity_open_mcp_settings_set_quality",
             "unity_open_mcp_settings_set_physics",
-            "unity_open_mcp_settings_set_lighting"
+            "unity_open_mcp_settings_set_lighting",
+            // M20 Plan 5 / T20.5.1 — typed ScriptableObject create. Writes a
+            // .asset via AssetDatabase.CreateAsset; the caller scopes paths_hint
+            // to the new asset path.
+            "unity_open_mcp_scriptableobject_create",
+            // M20 Plan 5 / T20.5.2 — typed asmdef mutators. Each writes the
+            // .asmdef JSON + forces a reimport (recompile / domain reload). The
+            // caller scopes paths_hint to the asset path; RestartThenSettle
+            // covers the recompile settle window.
+            "unity_open_mcp_asmdef_create",
+            "unity_open_mcp_asmdef_modify"
         };
     }
 }

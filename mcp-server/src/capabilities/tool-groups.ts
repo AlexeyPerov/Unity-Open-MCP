@@ -360,6 +360,16 @@ assign(
     "script_delete",
     "object_get_data",
     "object_modify",
+    // M20 Plan 5 / T20.5 — typed ScriptableObject + Assembly Definition tools.
+    // Core (always-on) typed-editor tools. scriptableobject_create is mutating;
+    // list_assets_of_type is read-only. asmdef_list/get are read-only;
+    // asmdef_create/modify are mutating (RestartThenSettle).
+    "scriptableobject_create",
+    "list_assets_of_type",
+    "asmdef_list",
+    "asmdef_get",
+    "asmdef_create",
+    "asmdef_modify",
   ].map((suffix) => `unity_open_mcp_${suffix}`),
 );
 

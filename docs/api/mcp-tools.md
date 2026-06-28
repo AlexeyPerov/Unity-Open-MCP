@@ -14,13 +14,13 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 - **Gate and validation**: validate edit, checkpoints, deltas, reference scan, path scan, regression baseline/check, fixes.
 - **Asset intelligence**: reserialize, read/search/list assets.
 - **Agent senses**: tests, screenshots (scene/game/isolated, arbitrary camera pose, inline image, editor window), Frame Debugger (enable/disable/draw-call list), console read, profiler capture (per-frame + single-frame deep capture), memory/rendering snapshots, spatial queries, event pull.
-- **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers.
+- **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers, ScriptableObject create + list-by-type, Assembly Definition (asmdef) list/get/create/modify.
 - **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio, ui, constraints, terrain.
 - **Discovery utilities**: capabilities, rules list, skill generation, manage_tools.
 
 ## Tool groups and session visibility
 
-Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is 198 tools) and mirrors Coplay's session-visibility model.
+Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is 204 tools) and mirrors Coplay's session-visibility model.
 
 ### Groups
 
@@ -30,7 +30,7 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | `core`               | on      | ping, execute_csharp, invoke_method, find_members, execute_menu, editor_status                                                                                                  |
 | `gate-and-verify`    | on      | validate_edit, checkpoint_create, delta, find_references, scan_paths, apply_fix, scan_all, baseline_create, regression_check                                                    |
 | `asset-intelligence` | on      | reserialize, read_asset, search_assets, list_assets                                                                                                                             |
-| `typed-editor`       | on      | typed editor surface (assets, materials, shaders, prefabs, GameObjects, components, scenes, packages, console, selection, undo, tags, layers, reflection, scripts, object data) |
+| `typed-editor`       | on      | typed editor surface (assets, materials, shaders, prefabs, GameObjects, components, scenes, packages, console, selection, undo, tags, layers, reflection, scripts, object data, ScriptableObject create + list-by-type, Assembly Definition list/get/create/modify) |
 | `diagnostics`        | off     | Profiler session controls + per-frame capture/memory/rendering reads                                                                                                            |
 | `gate-intelligence`  | off     | impact_preview, gate_budget_estimate, mutation_explain                                                                                                                          |
 | `build-settings`     | off     | Build pipeline + ProjectSettings reads and mutators                                                                                                                             |

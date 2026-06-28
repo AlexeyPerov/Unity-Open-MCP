@@ -137,6 +137,23 @@ namespace UnityOpenMcpBridge
             // run_tests is async + domain-reload-safe via a file handoff the
             // MCP server polls; the dispatcher does NOT settle-wait on it.
             { "unity_senses_run_tests",           LifecyclePolicy.CustomConfirmation },
+
+            // M20 Plan 5 / T20.5.1 — ScriptableObject create writes a .asset
+            // via AssetDatabase.CreateAsset + SaveAssets + ImportAsset. It does
+            // NOT recompile editor scripts, so EditorSettle (wait for asset
+            // refresh) is enough — no domain-reload risk. list_assets_of_type
+            // is read-only and falls through to the None default below.
+            { "unity_open_mcp_scriptableobject_create", LifecyclePolicy.EditorSettle },
+
+            // M20 Plan 5 / T20.5.2 — asmdef create / modify write the .asmdef
+            // JSON + force a reimport, which triggers a domain reload +
+            // recompile (the same lifecycle as script_write / build_set_defines).
+            // RestartThenSettle so the dispatcher blocks until the editor
+            // finishes compiling; the dirty guard preflights it. asmdef_list /
+            // asmdef_get are read-only and fall through to the None default
+            // below.
+            { "unity_open_mcp_asmdef_create",     LifecyclePolicy.RestartThenSettle },
+            { "unity_open_mcp_asmdef_modify",     LifecyclePolicy.RestartThenSettle },
         };
 
         // Resolve the lifecycle policy for a dispatched tool.
