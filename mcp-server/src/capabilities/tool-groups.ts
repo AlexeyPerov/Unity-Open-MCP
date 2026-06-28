@@ -165,6 +165,15 @@ export const TOOL_GROUPS: ToolGroup[] = [
     unityPackage: "com.unity.splines",
   },
   {
+    id: "lighting",
+    description:
+      "Lighting tools — per-Light manipulation (add/set/modify), reflection " +
+      "probe bake (realtime/baked/custom), skybox assignment. Built-in " +
+      "lighting module — always compiled (no domain define). The bake tool " +
+      "routes through the gate with EditorSettle.",
+    defaultEnabled: false,
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -441,6 +450,23 @@ assign(
     "get_knots",
     "modify",
   ].map((suffix) => `unity_open_mcp_splines_${suffix}`),
+);
+
+// --- lighting (M20 Plan 2 / T20.2 — built-in lighting module, ungated) -----
+// light_* and reflection_probe_* use distinct domain prefixes but share one
+// tool group. skybox_* folds in the same group. Built-in lighting types are
+// always present, so this group carries no domainDefine.
+assign(
+  "lighting",
+  [
+    "light_add",
+    "light_set",
+    "light_modify",
+    "reflection_probe_bake",
+    "reflection_probe_get",
+    "skybox_set",
+    "skybox_get",
+  ].map((suffix) => `unity_open_mcp_${suffix}`),
 );
 
 // --- agent-senses (live-only reads) ----------------------------------------

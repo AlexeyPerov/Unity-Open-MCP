@@ -249,6 +249,19 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_splines_evaluate: "splines",
   unity_open_mcp_splines_get_knots: "splines",
   unity_open_mcp_splines_modify: "splines",
+  // M20 Plan 2 / T20.2 — Lighting domain tools. Built-in lighting module
+  // (Light / ReflectionProbe / RenderSettings / Lightmapping) — ungated in the
+  // bridge, always compiled. Mutating members (light_add / light_set /
+  // light_modify / reflection_probe_bake / skybox_set) run the full gate path;
+  // reflection_probe_bake is the long mutation (EditorSettle). Read-only
+  // members (reflection_probe_get / skybox_get) are gate-free.
+  unity_open_mcp_light_add: "lighting",
+  unity_open_mcp_light_set: "lighting",
+  unity_open_mcp_light_modify: "lighting",
+  unity_open_mcp_reflection_probe_bake: "lighting",
+  unity_open_mcp_reflection_probe_get: "lighting",
+  unity_open_mcp_skybox_set: "lighting",
+  unity_open_mcp_skybox_get: "lighting",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",

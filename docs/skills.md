@@ -15,6 +15,7 @@ Skills are markdown playbooks (`SKILL.md`) that give an AI agent **project-speci
 | [`skills/extensions/particlesystem/SKILL.md`](../skills/extensions/particlesystem/SKILL.md) | Agents using Particle Systems | Particle System extension pack installed (built-in Unity module) |
 | [`skills/extensions/animation/SKILL.md`](../skills/extensions/animation/SKILL.md) | Agents using AnimationClip / Animator | Animation extension pack installed (built-in Unity modules) |
 | [`skills/extensions/splines/SKILL.md`](../skills/extensions/splines/SKILL.md) | Agents using the Splines package | `com.unity.splines` installed (embedded domain group) |
+| [`skills/extensions/lighting/SKILL.md`](../skills/extensions/lighting/SKILL.md) | Agents using per-Light / ReflectionProbe / skybox tooling | `lighting` tool group activated (built-in lighting module — always compiled) |
 
 ### Core playbook
 

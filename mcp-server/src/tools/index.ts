@@ -221,6 +221,24 @@ import { splinesSetTangentMode } from "./splines-set-tangent-mode.js";
 import { splinesEvaluate } from "./splines-evaluate.js";
 import { splinesGetKnots } from "./splines-get-knots.js";
 import { splinesModify } from "./splines-modify.js";
+// M20 Plan 2 / T20.2 — Lighting domain tools. Built-in lighting module (Light /
+// ReflectionProbe / RenderSettings / Lightmapping) — ungated in the bridge (no
+// UNITY_OPEN_MCP_EXT_LIGHTING define), always compiled. The `lighting` group is
+// hidden from ListTools until the session activates it via manage_tools.
+// Mutating members (light_add / light_set / light_modify /
+// reflection_probe_bake / skybox_set) run the full gate path with paths_hint
+// scoped to the host scene path (skybox_set dirties the active scene).
+// reflection_probe_bake is the long mutation — EditorSettle so the dispatcher
+// waits for the bake + asset refresh before returning (the documented
+// advantage over AnkleBreaker's ungated bake). Read-only members
+// (reflection_probe_get / skybox_get) are gate-free.
+import { lightAdd } from "./light-add.js";
+import { lightSet } from "./light-set.js";
+import { lightModify } from "./light-modify.js";
+import { reflectionProbeBake } from "./reflection-probe-bake.js";
+import { reflectionProbeGet } from "./reflection-probe-get.js";
+import { skyboxSet } from "./skybox-set.js";
+import { skyboxGet } from "./skybox-get.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -592,6 +610,23 @@ export const M18_PLAN7_SPLINES_TOOLS: Tool[] = [
   splinesModify,
 ];
 
+// M20 Plan 2 / T20.2 — Lighting domain tools. Built-in lighting module —
+// ungated in the bridge (always compiled). Five mutating members (light_add /
+// light_set / light_modify / reflection_probe_bake / skybox_set) run the full
+// gate path with paths_hint scoped to the host scene path. The bake is the
+// long mutation (EditorSettle). Two read-only members (reflection_probe_get /
+// skybox_get) are gate-free. Closes the Lighting & environment parity gap with
+// AnkleBreaker's lighting category.
+export const M20_PLAN2_LIGHTING_TOOLS: Tool[] = [
+  lightAdd,
+  lightSet,
+  lightModify,
+  reflectionProbeBake,
+  reflectionProbeGet,
+  skyboxSet,
+  skyboxGet,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -621,4 +656,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M16_PLAN10_ANIMATION_TOOLS,
   ...M18_PLAN2_TOOLS,
   ...M18_PLAN7_SPLINES_TOOLS,
+  ...M20_PLAN2_LIGHTING_TOOLS,
 ];

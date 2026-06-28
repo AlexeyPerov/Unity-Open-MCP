@@ -232,6 +232,16 @@ namespace UnityOpenMcpBridge
         {
             if (raw == "null") return null;
 
+            // Unwrap Nullable<T> so a nullable value-type parameter (e.g.
+            // `float?`, `int?`) converts through its underlying type. Without
+            // this the typed checks below miss Nullable<float> entirely and the
+            // raw string leaks through as an unassignable value. M20 Plan 2
+            // (light_set) is the first registry tool to use nullable value-type
+            // parameters; the unwrapped value boxes back into Nullable<T>.
+            var underlying = Nullable.GetUnderlyingType(targetType);
+            if (underlying != null)
+                targetType = underlying;
+
             if (targetType == typeof(string))
             {
                 if (raw.StartsWith("\"") && raw.EndsWith("\""))

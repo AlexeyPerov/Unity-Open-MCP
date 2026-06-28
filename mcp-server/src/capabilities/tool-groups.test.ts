@@ -178,6 +178,30 @@ test("groupToTools navigation roster has all 11 navigation tools", () => {
   assert.ok(map.navigation.includes("unity_open_mcp_navigation_modify"));
 });
 
+test("groupFor assigns lighting tools to lighting", () => {
+  for (const name of [
+    "unity_open_mcp_light_add",
+    "unity_open_mcp_light_set",
+    "unity_open_mcp_light_modify",
+    "unity_open_mcp_reflection_probe_bake",
+    "unity_open_mcp_reflection_probe_get",
+    "unity_open_mcp_skybox_set",
+    "unity_open_mcp_skybox_get",
+  ]) {
+    assert.equal(groupFor(name), "lighting", `${name} must map to lighting`);
+  }
+});
+
+test("groupToTools lighting roster has all 7 lighting tools", () => {
+  const map = groupToTools();
+  // 7 tools — light_add / light_set / light_modify + reflection_probe_bake /
+  // reflection_probe_get + skybox_set / skybox_get (M20 Plan 2).
+  assert.equal(map.lighting.length, 7);
+  assert.ok(map.lighting.includes("unity_open_mcp_light_add"));
+  assert.ok(map.lighting.includes("unity_open_mcp_reflection_probe_bake"));
+  assert.ok(map.lighting.includes("unity_open_mcp_skybox_set"));
+});
+
 // ---------------------------------------------------------------------------
 // Session state — activate / deactivate / reset
 // ---------------------------------------------------------------------------

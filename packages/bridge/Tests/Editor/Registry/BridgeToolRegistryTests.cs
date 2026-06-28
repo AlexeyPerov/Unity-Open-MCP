@@ -169,6 +169,32 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsNull(BridgeToolRegistry.ConvertValue("null", typeof(string)));
         }
 
+        // --- nullable value types (M20 Plan 2 — light_set uses float?/int?) ---
+        // A nullable value-type parameter unwraps through its underlying type so
+        // the typed checks (int / float / bool / enum) still apply. The result
+        // boxes back into Nullable<T>.
+
+        [Test]
+        public static void ConvertValue_NullableFloat_ParsesThroughUnderlying()
+        {
+            var result = BridgeToolRegistry.ConvertValue("3.5", typeof(float?));
+            Assert.AreEqual(3.5f, result);
+        }
+
+        [Test]
+        public static void ConvertValue_NullableInt_ParsesThroughUnderlying()
+        {
+            var result = BridgeToolRegistry.ConvertValue("42", typeof(int?));
+            Assert.AreEqual(42, result);
+        }
+
+        [Test]
+        public static void ConvertValue_NullableBool_ParsesThroughUnderlying()
+        {
+            var result = BridgeToolRegistry.ConvertValue("true", typeof(bool?));
+            Assert.AreEqual(true, result);
+        }
+
         enum TestColor
         {
             Red,
