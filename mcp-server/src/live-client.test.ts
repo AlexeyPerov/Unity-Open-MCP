@@ -16,6 +16,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
   createServer,
   type Server as HttpServer,
@@ -354,7 +355,9 @@ test("LiveClient: returns bridge_offline (not bridge_compile_failed) when PID is
 
 test("LiveClient: no projectPath preserves original offline behavior on unreachable bridge", async () => {
   // Without projectPath threaded in, the dead-bridge check is skipped —
-  // existing callers that don't pass the arg keep working.
+  // existing callers that don't pass the arg keep working. T-fix-2 still runs
+  // the bounded retry loop, but with no lock to read it classifies "gone" each
+  // attempt and eventually returns bridge_offline.
   const client = new LiveClient(1, new PingCache());
   const result = await client.route("unity_open_mcp_validate_edit", {
     paths: ["Assets"],
@@ -362,4 +365,110 @@ test("LiveClient: no projectPath preserves original offline behavior on unreacha
   assert.equal(result.isError, true);
   const body = JSON.parse((result.content[0] as { text: string }).text);
   assert.equal(body.error.code, "bridge_offline");
+});
+
+// ----- T-fix-2: transient-connection recovery (M20 Plan 4-5) -----
+//
+// Two recovery paths were added for the domain-reload listener gap:
+//   1. lock classification "reloading" → waitForCompile then retry (the
+//      listener socket is torn down for the reload duration)
+//   2. transient refusal with no reload signal → bounded backoff retry
+// Both must RECOVER instead of returning bridge_offline on a blip. The dead-
+// bridge fast-path above must still fail fast.
+
+/**
+ * Handler that refuses every connection (ECONNREFUSED-equivalent: no listener).
+ * Used to simulate the reload window where the bridge socket is down.
+ */
+// (no handler — port with nothing listening produces ECONNREFUSED on connect)
+
+test("T-fix-2: transient refusal during a reloading lock window enters the wait path", async () => {
+  // Plant a lock with state="reloading" + live PID (our own pid) + fresh
+  // heartbeat → classifyInstance returns "reloading". The recovery helper must
+  // enter waitForCompile (NOT return bridge_offline instantly). We point the
+  // client at a port that never comes up and race against a guard: if the
+  // recovery path was entered, the call is still in waitForCompile at the
+  // guard cutoff → pass. If it returned instantly with bridge_offline, the
+  // recovery path was NOT taken → fail.
+  const s = makeSandbox();
+  const projectPath = "/test/ReloadRecoveryGame";
+  plantLock(s, projectPath, process.pid, 0, "reloading");
+  try {
+    const client = new LiveClient(1, new PingCache(), undefined, projectPath);
+
+    // Race the call against a 3s guard. waitForCompile caps at 120s; if the
+    // recovery path was entered we expect to still be waiting at 3s.
+    type Outcome =
+      | { kind: "result"; result: CallToolResult }
+      | { kind: "still-waiting" };
+    const stillWaiting = new Promise<Outcome>((resolve) => {
+      setTimeout(() => resolve({ kind: "still-waiting" }), 3000);
+    });
+    const outcome = await Promise.race<Outcome>([
+      client
+        .route("unity_open_mcp_validate_edit", { paths: ["Assets"] })
+        .then((r): Outcome => ({ kind: "result", result: r })),
+      stillWaiting,
+    ]);
+
+    if (outcome.kind === "still-waiting") {
+      // Recovery path entered (waitForCompile active) — the bug is fixed.
+      return;
+    }
+    // If it returned, it must NOT be the instant bridge_offline — only
+    // compile_timeout or bridge_compile_failed prove the wait/recovery path ran.
+    assert.equal(outcome.result.isError, true);
+    const body = JSON.parse((outcome.result.content[0] as { text: string }).text);
+    assert.ok(
+      body.error.code === "compile_timeout" || body.error.code === "bridge_compile_failed",
+      `Expected compile_timeout/bridge_compile_failed (recovery path entered), got ${body.error.code}`,
+    );
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("T-fix-2: transient refusal with no reload signal exhausts retries then offline", async () => {
+  // No lock file → classifyInstance "gone" every attempt → the bounded backoff
+  // retry path. With nothing ever coming up, the loop must exhaust its retries
+  // and return bridge_offline (proving the retry path runs and terminates,
+  // rather than hanging or instant-offline). The "after N retries" message
+  // suffix distinguishes this from the pre-fix instant offline.
+  const s = makeSandbox();
+  const projectPath = "/test/BackoffExhaustGame";
+  try {
+    // Port 1 — nothing listening, ECONNREFUSED every probe.
+    const client = new LiveClient(1, new PingCache(), undefined, projectPath);
+    const result = await client.route("unity_senses_read_console", {});
+    assert.equal(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_offline");
+    // The recovery helper's offline message names the retry count — proves the
+    // backoff loop ran instead of the pre-fix instant offline.
+    assert.ok(
+      body.error.message.includes("retries"),
+      `expected the retry-exhausted offline message, got: ${body.error.message}`,
+    );
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("T-fix-2: dead-bridge still fails fast despite recovery paths", async () => {
+  // Same as the existing fail-fast test but explicit: the recovery paths must
+  // NOT mask a dead bridge. Stale heartbeat + live PID → dead_bridge →
+  // bridge_compile_failed immediately, no waiting.
+  const s = makeSandbox();
+  try {
+    plantLock(s, DEAD_BRIDGE_PROJECT, process.pid, 60_000, "reloading");
+    const client = new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT);
+    const result = await client.route("unity_open_mcp_validate_edit", {
+      paths: ["Assets"],
+    });
+    assert.equal(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_compile_failed");
+  } finally {
+    disposeSandbox(s);
+  }
 });

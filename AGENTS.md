@@ -21,4 +21,17 @@
 - **Doc update scope rule.** Edit only docs that match the changed area; avoid unrelated rewrites. If a new docs domain is introduced, add it to `README.md`'s Documentation section in the same task.
 - **When docs updates can be skipped.** Typos, formatting-only edits, comments-only changes, and internal refactors that do not alter behavior or contracts.
 - **Agent reporting requirement.** If code changes but tracked docs are not updated, explicitly state why docs were not needed in the final handoff message.
+- **Agent MCP-experience feedback loop.** Any agent that uses MCP tools or senses (`unity_open_mcp_*`, `unity_senses_*`) during a session must, **before finishing its turn/task**, scan its own tool/sense usage for problems: errors, wrong/unexpected results, retries, friction, or improvement ideas. For each issue found, append a dated entry to `specs/feedback.md` (create the file if it does not exist). This makes transport bugs, tool contract gaps, and UX friction self-capture into a running backlog instead of only surfacing when a human happens to notice. A clean session with no issues writes nothing.
+  - `specs/feedback.md` is gitignored (a working artifact) — this is a process change in `AGENTS.md` only, no tracked-doc churn.
+  - **Do not duplicate:** before adding an entry, check whether `specs/feedback.md` already has an entry for the same tool/issue; if so, append a `+1 / reproduces on <date>` note to that entry instead of creating a new one.
+  - **Entry format:**
+    ```
+    - **Date:** YYYY-MM-DD
+    - **Tool/sense:** unity_open_mcp_<name> (or unity_senses_<name>)
+    - **What happened:** <observed behavior, with the error code / message if any>
+    - **Expected:** <correct behavior>
+    - **Severity:** bug | friction | suggestion
+    - **Suggested fix:** <idea, or "see specs/execution/M20/execution-plan-4-5-bug-fixes.md T-fix-N" if a fix is already tracked>
+    ```
+  - Only log genuine issues. Do not log expected/working behavior, successful calls, or personal preference rants. Keep entries concrete and reproducible (include the error code, the args that triggered it, the route taken).
 

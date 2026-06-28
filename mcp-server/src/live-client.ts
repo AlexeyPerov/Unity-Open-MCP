@@ -12,6 +12,7 @@ import {
   type PollAndDismissOptions,
 } from "./dialog-dismiss.js";
 import { readInstanceLock, classifyInstance, lockPath } from "./instance-discovery.js";
+import type { InstanceClassification } from "./instance-discovery.js";
 import { makeErrorResult } from "./results.js";
 import {
   checkBridgeCompat,
@@ -21,6 +22,13 @@ import {
 const MAX_COMPILE_WAIT_MS = 120_000;
 const COMPILE_POLL_INTERVAL_MS = 2_000;
 const PING_TIMEOUT_MS = 5_000;
+// M20 Plan 4-5 / T-fix-2 — transient-connection recovery. When /ping (or a
+// tool POST) throws on a connection failure during a domain reload, the client
+// now classifies the failure via the instance lock and either waits out the
+// reload window or retries with backoff before declaring bridge_offline. These
+// constants bound that recovery.
+const TRANSIENT_RETRY_ATTEMPTS = 3;
+const TRANSIENT_RETRY_BACKOFF_MS = 500;
 
 const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_validate_edit",
@@ -412,16 +420,13 @@ export class LiveClient implements Router {
         isError: deriveIsError(body),
       };
     } catch {
-      return makeErrorResult({
-        code: "bridge_offline",
-        message: `Failed to reach bridge at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
-        detail: {
-          error: {
-            code: "bridge_offline",
-            message: `Cannot connect to bridge at ${this.baseUrl}`,
-          },
-        },
-      });
+      // M20 Plan 4-5 / T-fix-2 — transient POST failure (ECONNREFUSED /
+      // timeout during a domain reload). Classify + recover before declaring
+      // offline. On recovery (`null`) retry the POST once (retryOn503 stays
+      // as-passed so a post-recovery 503 still triggers the compile-wait path).
+      const recovered = await this.handleTransientOffline("post");
+      if (recovered !== null) return recovered;
+      return this.postTool(toolName, args, retryOn503);
     }
   }
 
@@ -463,13 +468,14 @@ export class LiveClient implements Router {
       return null;
     } catch {
       // Bridge is unreachable (ECONNREFUSED / timeout). Before falling back to
-      // the generic offline error, check whether the instance lock indicates a
-      // DEAD bridge assembly — the Unity process is still alive but the bridge
-      // failed to reload after a compile error. That case is NOT recoverable
-      // by waiting; surface it immediately so the agent can fetch the compiler
-      // errors and fix them instead of hanging on /ping.
-      const deadBridge = this.deadBridgeResult();
-      if (deadBridge) return deadBridge;
+      // the generic offline error, classify the failure via the instance lock:
+      //   - dead_bridge    → bridge assembly failed to recompile (fail fast)
+      //   - reloading/compiling → a normal domain reload is in flight; wait it
+      //     out (the listener socket is torn down for the reload duration) then
+      //     re-probe once before declaring offline (T-fix-2)
+      //   - otherwise      → retry with backoff a few times, then offline
+      const recovered = await this.handleTransientOffline("ping");
+      if (recovered !== null) return recovered;
 
       return makeErrorResult({
         code: "bridge_offline",
@@ -481,6 +487,100 @@ export class LiveClient implements Router {
           },
         },
       });
+    }
+  }
+
+  /**
+   * M20 Plan 4-5 / T-fix-2 — classify a transient /ping or tool-POST failure
+   * (ECONNREFUSED / timeout / socket reset) via the instance lock and either
+   * recover or surface the right error.
+   *
+   * Returns:
+   *   - a structured `bridge_compile_failed` result when the lock shows a dead
+   *     bridge assembly (fail fast — preserves the pre-existing fast-path),
+   *   - `null` to signal "recovered — the caller should retry its operation"
+   *     after either waiting out a `reloading`/`compiling` lock window or
+   *     succeeding a bounded backoff retry,
+   *   - a `bridge_offline` result when the bridge is genuinely unreachable after
+   *     the recovery attempts (so the caller's outer `bridge_offline` fallback
+   *     is reached only via this returned result).
+   *
+   * `operation` is "ping" | "post" and only affects the log line — both paths
+   * share the same recovery logic.
+   */
+  private async handleTransientOffline(
+    operation: "ping" | "post",
+  ): Promise<CallToolResult | null> {
+    // Dead bridge assembly — not recoverable by waiting. Fail fast so the
+    // agent can fetch compile errors instead of hanging on /ping.
+    const deadBridge = this.deadBridgeResult();
+    if (deadBridge) return deadBridge;
+
+    const classification = this.classifyLockNow();
+
+    // A normal domain reload in flight: the listener socket is torn down for
+    // the reload duration (BridgeHttpServer.OnBeforeAssemblyReload →
+    // _listener.Stop()). classifyInstance folds both lock states
+    // "reloading" and "compiling" into the "reloading" classification
+    // (instance-discovery.ts) — so a single check covers the whole compile +
+    // reload window. Wait it out, then signal the caller to retry.
+    if (classification === "reloading") {
+      const waitError = await this.waitForCompile();
+      if (waitError) return waitError; // timed out or dead_bridge mid-wait
+      return null; // recovered — caller retries the original operation
+    }
+
+    // No reload signal but a transient refusal/reset/timeout. Retry a bounded
+    // number of times with backoff before declaring offline. Covers brief
+    // socket churn that isn't reflected in the lock yet.
+    for (let attempt = 1; attempt <= TRANSIENT_RETRY_ATTEMPTS; attempt++) {
+      await sleep(TRANSIENT_RETRY_BACKOFF_MS * attempt);
+      // Re-classify on each attempt: a reload may have begun between the
+      // first failure and now.
+      const reclass = this.classifyLockNow();
+      if (reclass === "dead_bridge") return this.deadBridgeResult();
+      if (reclass === "reloading") {
+        const waitError = await this.waitForCompile();
+        if (waitError) return waitError;
+        return null;
+      }
+      // Probe whether the listener is back up.
+      try {
+        const res = await this.fetchWithTimeout("/ping", { method: "GET" });
+        if (res.ok || res.status === 503) {
+          // Listener responded — recovered. Caller re-runs its readiness /
+          // POST. (503 still counts: it means compiling, handled on retry.)
+          return null;
+        }
+      } catch {
+        // Still down — loop and back off again.
+      }
+    }
+    void operation; // log-only parameter, reserved for future telemetry
+    const retryMsg = `Bridge is not reachable at ${this.baseUrl} after ${TRANSIENT_RETRY_ATTEMPTS} retries. ${buildOfflineHint(this.projectPath)}`;
+    return makeErrorResult({
+      code: "bridge_offline",
+      message: retryMsg,
+      detail: {
+        error: {
+          code: "bridge_offline",
+          message: retryMsg,
+        },
+      },
+    });
+  }
+
+  /**
+   * Read + classify the instance lock at the current moment, without throwing.
+   * Returns "gone" (treated as no-signal) when the lock can't be read or the
+   * project path is unknown. T-fix-2 helper.
+   */
+  private classifyLockNow(): InstanceClassification {
+    if (!this.projectPath) return "gone";
+    try {
+      return classifyInstance(readInstanceLock(this.projectPath));
+    } catch {
+      return "gone";
     }
   }
 

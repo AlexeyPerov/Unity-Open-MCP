@@ -4,11 +4,11 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // wrapper over the existing instance-lock classifier (classifyInstance in
 // instance-discovery.ts) and one /ping probe. It exists so the Validation
 // Suite app and operators have a single tool that returns a coarse
-// `status` token ("running" | "stopped" | "compiling" | "dead_bridge")
-// alongside the underlying signals (lock classification + ping body), used
-// to drive the manual bridge-offline scenario pattern (operator stops the
-// bridge via the Unity toolbar; this tool confirms it; on restart
-// `wait-for-ready` confirms readiness).
+// `status` token ("running" | "stopped" | "compiling" | "dead_bridge" |
+// "unreachable") alongside the underlying signals (lock classification +
+// ping body), used to drive the manual bridge-offline scenario pattern
+// (operator stops the bridge via the Unity toolbar; this tool confirms it;
+// on restart `wait-for-ready` confirms readiness).
 //
 // Deliberately **not** an agent-surface tool:
 //  - It carries no group assignment in `capabilities/tool-groups.ts`, so it
@@ -30,7 +30,9 @@ export const bridgeStatus: Tool = {
     "/ping probe and returns a coarse `status` token: " +
     "`running` (bridge connected, idle), `compiling` (bridge connected, " +
     "Unity compiling), `stopped` (Unity not running OR toolbar bridge " +
-    "toggle off — no live listener), or `dead_bridge` (Unity process " +
+    "toggle off — no live listener), `unreachable` (Unity process alive " +
+    "but the listener did not respond — usually a transient domain-reload " +
+    "window; retry shortly), or `dead_bridge` (Unity process " +
     "alive but the bridge assembly failed to recompile, so /ping will " +
     "never recover; call unity_open_mcp_read_compile_errors). " +
     "Designed for the Validation Suite's manual bridge-offline scenario " +

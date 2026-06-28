@@ -985,6 +985,69 @@ test("route: bridge_status returns dead_bridge when the lock classifies dead", a
   });
 });
 
+test("route: bridge_status returns unreachable when Unity is alive but listener is down (T-fix-3)", async () => {
+  // M20 Plan 4-5 / T-fix-3 — a lock with a live PID + fresh heartbeat +
+  // state="reloading" classifies as "reloading" (a normal domain reload in
+  // flight). With the ping unreachable, status must be "unreachable" — NOT
+  // the clean-looking "stopped" that masked the reload-window flakiness
+  // pre-fix.
+  await withTmp("router-bstatus-unreachable-", async (tmp) => {
+    await setupProject(tmp);
+    const sandboxDir = await mkdtemp(join(tmpdir(), "uomcp-bstatus-unreach-"));
+    const prevHome = process.env.HOME;
+    const prevUserProfile = process.env.USERPROFILE;
+    process.env.HOME = sandboxDir;
+    process.env.USERPROFILE = sandboxDir;
+    try {
+      const { projectHash } = await import("./instance-discovery.js");
+      const hash = projectHash(tmp);
+      const instancesDir = join(sandboxDir, ".unity-open-mcp", "instances");
+      await mkdir(instancesDir, { recursive: true });
+      // Fresh heartbeat (age 0) + live PID + state="reloading" → classifyInstance
+      // returns "reloading", NOT dead_bridge (which needs a stale heartbeat).
+      const fresh = new Date().toISOString();
+      const payload = {
+        pid: process.pid,
+        port: 24679,
+        projectPath: tmp,
+        projectHash: hash,
+        startedAt: fresh,
+        updatedAt: fresh,
+        heartbeatAt: fresh,
+        state: "reloading",
+        isPlaying: false,
+        isCompiling: false,
+        bridgeVersion: "0.0.0",
+        unityVersion: "6000.0.0",
+      };
+      await writeFile(join(instancesDir, `${hash}.json`), JSON.stringify(payload));
+
+      // Ping unreachable — the listener is torn down during the reload.
+      const live = makePingFakeLive({ pingBody: null, available: false });
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+      const result = await router.route("unity_open_mcp_bridge_status", {});
+      const body = parseBody(result);
+      assert.equal(result.isError, false, "unreachable is not an error");
+      assert.equal(body.status, "unreachable");
+      assert.equal(body.ready, false);
+      const instance = body.instance as { classification: string };
+      assert.equal(instance.classification, "reloading");
+      assert.ok(
+        typeof body.nextStep === "string" &&
+          body.nextStep.toLowerCase().includes("reload"),
+        "unreachable nextStep mentions the reload window so the operator retries",
+      );
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevUserProfile;
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test("route: bridge_status is registered in ALL_TOOLS and always-visible", async () => {
   const { ALL_TOOLS } = await import("./tools/index.js");
   const { filterVisibleTools } = await import("./tool-session-state.js");

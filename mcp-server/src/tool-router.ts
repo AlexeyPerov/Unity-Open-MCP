@@ -18,7 +18,7 @@ import { listRules } from "./capabilities/list-rules.js";
 import { generateSkill } from "./skill/generate-skill.js";
 import { knownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
-import { lockPath, readInstanceLock, classifyInstance, type InstanceLock } from "./instance-discovery.js";
+import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
 import { BATCH_TOOL_NAMES } from "./batch-spawn.js";
 import type { ToolSessionState } from "./tool-session-state.js";
 
@@ -119,7 +119,7 @@ function summarizeBridgeStatusLock(lock: InstanceLock) {
 // Operator-facing "what to do next" hint for each coarse status. Kept short
 // and action-oriented so the Validation Suite can render it inline.
 function bridgeStatusNextStep(
-  status: "running" | "compiling" | "stopped" | "dead_bridge",
+  status: "running" | "compiling" | "stopped" | "dead_bridge" | "unreachable",
 ): string {
   switch (status) {
     case "running":
@@ -128,6 +128,14 @@ function bridgeStatusNextStep(
       return "Unity is compiling. Wait for the bridge to return to idle, or poll unity_open_mcp_bridge_status again.";
     case "stopped":
       return "Bridge listener is not reachable. Open the bridge window (Unity menu: Tools/Unity Open MCP Bridge) and ensure it is started, or launch Unity if it is not running, then call unity_open_mcp_bridge_status again to confirm.";
+    case "unreachable":
+      // M20 Plan 4-5 / T-fix-3 — distinct from "stopped": the Unity process is
+      // alive (lock PID live) but the listener did not respond. Usually a
+      // transient domain-reload window (the bridge tears down its HTTP socket
+      // for the reload duration) — retry shortly rather than treating it as a
+      // clean stop. This makes the reload-window flakiness visible instead of
+      // being masked by a clean-looking "stopped".
+      return "Bridge listener is not responding but Unity is running — likely a transient domain-reload window (the bridge tears down its HTTP socket during compiles). Wait a moment and call unity_open_mcp_bridge_status again; if it persists, call unity_open_mcp_read_compile_errors to check for a failed recompile.";
     case "dead_bridge":
       return "The bridge assembly failed to recompile and Unity is in a bad state. Call unity_open_mcp_read_compile_errors to retrieve the compiler errors from Editor.log, fix the cited file/line, then trigger a recompile.";
   }
@@ -786,6 +794,7 @@ export class ToolRouter implements Router {
   //   lock="dead_bridge"                       → "dead_bridge"
   //   /ping reachable, compiling=true          → "compiling"
   //   /ping reachable, connected=true          → "running"
+  //   /ping UNreachable + Unity running        → "unreachable" (T-fix-3)
   //   otherwise (offline / toolbar off / gone) → "stopped"
   //
   // "stopped" intentionally folds two indistinguishable cases from the
@@ -794,6 +803,14 @@ export class ToolRouter implements Router {
   // lock summary in the response disambiguates them (`lock === null` → no
   // Unity; `lock.pid` alive but no listener → toolbar off). The tool never
   // errors on an offline bridge — `stopped` IS the answer in that case.
+  //
+  // M20 Plan 4-5 / T-fix-3 — "unreachable" splits out the case where Unity IS
+  // running (lock PID alive, often mid-reload) but the listener did not
+  // respond. Pre-fix this collapsed to "stopped", hiding transient reload-
+  // window flakiness behind a clean-looking status. "unreachable" makes it
+  // visible so agents retry instead of treating it as a clean stop. The
+  // `isError:false` contract is preserved — this is richer status, not an
+  // error path.
   private async routeBridgeStatus(
     _args: Record<string, unknown>,
   ): Promise<CallToolResult> {
@@ -818,13 +835,25 @@ export class ToolRouter implements Router {
     const compiling = pingReachable === true && pingBody?.compiling === true;
     const connected = pingReachable === true && pingBody?.connected === true;
 
-    let status: "running" | "compiling" | "stopped" | "dead_bridge";
+    // T-fix-3 — when the ping is unreachable, distinguish "Unity is running but
+    // the listener is momentarily down" (lock PID alive / reload window) from a
+    // genuine "nothing there" stop. classification "reloading" covers the
+    // domain-reload window; a live-PID "healthy"/"gone"-with-alive-pid lock
+    // also indicates Unity is up.
+    const lockPidAlive = lock !== null && isPidAlive(lock.pid);
+
+    let status: "running" | "compiling" | "stopped" | "dead_bridge" | "unreachable";
     if (classification === "dead_bridge") {
       status = "dead_bridge";
     } else if (compiling) {
       status = "compiling";
     } else if (connected) {
       status = "running";
+    } else if (!pingReachable && (classification === "reloading" || lockPidAlive)) {
+      // Unity is running but the listener didn't respond — transient (reload
+      // window) or toolbar-off. Surface as unreachable so it isn't masked by
+      // a clean "stopped".
+      status = "unreachable";
     } else {
       status = "stopped";
     }
