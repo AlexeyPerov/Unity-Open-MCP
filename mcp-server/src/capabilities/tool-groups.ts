@@ -192,6 +192,15 @@ export const TOOL_GROUPS: ToolGroup[] = [
     defaultEnabled: false,
   },
   {
+    id: "constraints",
+    description:
+      "Constraints & LOD tools — animation constraints (Position / Rotation / Aim / " +
+      "Parent / Scale) add with source + weight + activation, LODGroup configure " +
+      "(fade mode / cross-fade / LOD array), LOD level add (per-index renderers). " +
+      "Built-in engine modules — always compiled (no domain define).",
+    defaultEnabled: false,
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -517,6 +526,22 @@ assign(
     "layout_group_add",
     "element_modify",
   ].map((suffix) => `unity_open_mcp_ui_${suffix}`),
+);
+
+// --- constraints (M20 Plan 3 / T20.3.3 — built-in engine modules, ungated) -
+// constraint_add and lod_* use distinct domain prefixes but share one tool
+// group (Constraints & LOD are small and closely related). Built-in types
+// (PositionConstraint / RotationConstraint / AimConstraint / ParentConstraint /
+// ScaleConstraint from UnityEngine.AnimationModule + LODGroup from
+// UnityEngine.CoreModule) are always present, so this group carries no
+// domainDefine.
+assign(
+  "constraints",
+  [
+    "constraint_add",
+    "lod_group_configure",
+    "lod_add_level",
+  ].map((suffix) => `unity_open_mcp_${suffix}`),
 );
 
 // --- agent-senses (live-only reads) ----------------------------------------

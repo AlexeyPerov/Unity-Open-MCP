@@ -273,6 +273,19 @@ import { uiCanvasAdd } from "./ui-canvas-add.js";
 import { uiElementAdd } from "./ui-element-add.js";
 import { uiLayoutGroupAdd } from "./ui-layout-group-add.js";
 import { uiElementModify } from "./ui-element-modify.js";
+// M20 Plan 3 / T20.3.3 — Constraints & LOD domain tools. Built-in engine
+// modules (UnityEngine.AnimationModule for the constraint components,
+// UnityEngine.CoreModule for LODGroup) — ungated in the bridge (no
+// UNITY_OPEN_MCP_EXT_CONSTRAINTS define), always compiled. The `constraints`
+// group is hidden from ListTools until the session activates it via
+// manage_tools. All three members (constraint_add / lod_group_configure /
+// lod_add_level) are mutating and run the full gate path with paths_hint
+// scoped to the host scene path. Closes the Constraints & LOD parity gap with
+// AnkleBreaker's Constraints & LOD category; the gate + paths_hint contract
+// on every mutating member is the documented advantage.
+import { constraintAdd } from "./constraint-add.js";
+import { lodGroupConfigure } from "./lod-group-configure.js";
+import { lodAddLevel } from "./lod-add-level.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -691,6 +704,20 @@ export const M20_PLAN3_UI_TOOLS: Tool[] = [
   uiElementModify,
 ];
 
+// M20 Plan 3 / T20.3.3 — Constraints & LOD domain tools. Built-in engine
+// modules — ungated in the bridge (always compiled). Three mutating members
+// (constraint_add / lod_group_configure / lod_add_level) run the full gate
+// path with paths_hint scoped to the host scene path. constraint_add seeds an
+// optional source Transform + weight + activation; lod_group_configure
+// allocates the LOD array; lod_add_level wires renderers per level. Closes the
+// Constraints & LOD parity gap with AnkleBreaker's category; one `constraints`
+// group covers both concerns because they are small and closely related.
+export const M20_PLAN3_CONSTRAINTS_TOOLS: Tool[] = [
+  constraintAdd,
+  lodGroupConfigure,
+  lodAddLevel,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -723,4 +750,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M20_PLAN2_LIGHTING_TOOLS,
   ...M20_PLAN3_AUDIO_TOOLS,
   ...M20_PLAN3_UI_TOOLS,
+  ...M20_PLAN3_CONSTRAINTS_TOOLS,
 ];

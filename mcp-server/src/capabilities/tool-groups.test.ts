@@ -247,6 +247,26 @@ test("groupToTools ui roster has all 4 ui tools", () => {
   assert.ok(map.ui.includes("unity_open_mcp_ui_element_modify"));
 });
 
+test("groupFor assigns constraints tools to constraints", () => {
+  for (const name of [
+    "unity_open_mcp_constraint_add",
+    "unity_open_mcp_lod_group_configure",
+    "unity_open_mcp_lod_add_level",
+  ]) {
+    assert.equal(groupFor(name), "constraints", `${name} must map to constraints`);
+  }
+});
+
+test("groupToTools constraints roster has all 3 constraints tools", () => {
+  const map = groupToTools();
+  // 3 tools — constraint_add + lod_group_configure + lod_add_level (M20 Plan 3
+  // / T20.3.3). One `constraints` group covers both Constraints & LOD.
+  assert.equal(map.constraints.length, 3);
+  assert.ok(map.constraints.includes("unity_open_mcp_constraint_add"));
+  assert.ok(map.constraints.includes("unity_open_mcp_lod_group_configure"));
+  assert.ok(map.constraints.includes("unity_open_mcp_lod_add_level"));
+});
+
 // ---------------------------------------------------------------------------
 // Session state — activate / deactivate / reset
 // ---------------------------------------------------------------------------

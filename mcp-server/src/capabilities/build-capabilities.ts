@@ -283,6 +283,17 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_ui_element_add: "ui",
   unity_open_mcp_ui_layout_group_add: "ui",
   unity_open_mcp_ui_element_modify: "ui",
+  // M20 Plan 3 / T20.3.3 — Constraints & LOD domain tools. Built-in engine
+  // modules (PositionConstraint / RotationConstraint / AimConstraint /
+  // ParentConstraint / ScaleConstraint from UnityEngine.AnimationModule +
+  // LODGroup from UnityEngine.CoreModule) — ungated in the bridge, always
+  // compiled. All three members (constraint_add / lod_group_configure /
+  // lod_add_level) are mutating and run the full gate path. One `constraints`
+  // group covers both concerns (Constraints & LOD are small and closely
+  // related).
+  unity_open_mcp_constraint_add: "constraints",
+  unity_open_mcp_lod_group_configure: "constraints",
+  unity_open_mcp_lod_add_level: "constraints",
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",

@@ -18,6 +18,7 @@ Skills are markdown playbooks (`SKILL.md`) that give an AI agent **project-speci
 | [`skills/extensions/lighting/SKILL.md`](../skills/extensions/lighting/SKILL.md) | Agents using per-Light / ReflectionProbe / skybox tooling | `lighting` tool group activated (built-in lighting module — always compiled) |
 | [`skills/extensions/audio/SKILL.md`](../skills/extensions/audio/SKILL.md) | Agents using AudioSource / AudioListener / AudioMixer tooling | `audio` tool group activated (built-in audio module — always compiled) |
 | [`skills/extensions/ui/SKILL.md`](../skills/extensions/ui/SKILL.md) | Agents using uGUI (Canvas / elements / layout groups / element modify) | `ui` tool group activated (built-in UI module — always compiled; TMP_Text optional) |
+| [`skills/extensions/constraints/SKILL.md`](../skills/extensions/constraints/SKILL.md) | Agents using animation constraints (Position/Rotation/Aim/Parent/Scale) and LODGroup | `constraints` tool group activated (built-in engine modules — always compiled) |
 
 ### Core playbook
 
