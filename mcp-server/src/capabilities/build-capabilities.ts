@@ -261,6 +261,13 @@ const TOOL_CATEGORY: Record<string, string> = {
   // M20 Plan 1 / T20.1.2 — EditorWindow capture (Win-only full-fidelity,
   // cross-platform best-effort readback).
   unity_senses_screenshot_window: "agent-senses",
+  // M20 Plan 1 / T20.1.3 — Frame Debugger control + draw-call list
+  // (reflection over Unity's internal Frame Debugger API; non-mutating Editor
+  // state change, gate-free).
+  unity_senses_frame_debugger: "agent-senses",
+  // M20 Plan 1 / T20.1.4 — single-frame deep profiler capture. Returns one
+  // frame's full sample tree for the requested modules.
+  unity_senses_profiler_capture_frame: "agent-senses",
   unity_senses_read_console: "agent-senses",
   unity_senses_profiler_capture: "agent-senses",
   unity_senses_profiler_memory: "agent-senses",

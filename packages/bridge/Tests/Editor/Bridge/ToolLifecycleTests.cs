@@ -40,6 +40,10 @@ namespace UnityOpenMcpBridge.Tests
         [TestCase("unity_senses_screenshot_camera", ExpectedResult = LifecyclePolicy.None)]
         [TestCase("unity_senses_capture_inline", ExpectedResult = LifecyclePolicy.None)]
         [TestCase("unity_senses_screenshot_window", ExpectedResult = LifecyclePolicy.None)]
+        // M20 Plan 1 / T20.1.3–T20.1.4 — Frame Debugger + single-frame
+        // profiler capture are read-only registry tools; LifecyclePolicy.None.
+        [TestCase("unity_senses_frame_debugger", ExpectedResult = LifecyclePolicy.None)]
+        [TestCase("unity_senses_profiler_capture_frame", ExpectedResult = LifecyclePolicy.None)]
         public static LifecyclePolicy Resolve_ReadOnlyRegistryTools_None(string tool)
         {
             return ToolLifecycle.Resolve(tool);

@@ -167,8 +167,9 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "agent-senses",
     description:
-      "Agent senses surface (run_tests, screenshot, read_console, profiler " +
-      "capture / memory / rendering, spatial_query). Live-only.",
+      "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
+      "frame_debugger, read_console, profiler capture / capture_frame / memory " +
+      "/ rendering, spatial_query). Live-only.",
     defaultEnabled: false,
   },
 ];
@@ -452,6 +453,10 @@ assign("agent-senses", [
   "unity_senses_capture_inline",
   // M20 Plan 1 / T20.1.2 — EditorWindow capture.
   "unity_senses_screenshot_window",
+  // M20 Plan 1 / T20.1.3 — Frame Debugger control + draw-call list.
+  "unity_senses_frame_debugger",
+  // M20 Plan 1 / T20.1.4 — single-frame deep profiler capture.
+  "unity_senses_profiler_capture_frame",
   "unity_senses_read_console",
   "unity_senses_profiler_capture",
   "unity_senses_profiler_memory",

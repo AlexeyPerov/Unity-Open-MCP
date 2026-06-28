@@ -13,7 +13,7 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 - **Core runtime**: ping, C# execution, method invoke, menu calls, reflection, compile checks, editor status.
 - **Gate and validation**: validate edit, checkpoints, deltas, reference scan, path scan, regression baseline/check, fixes.
 - **Asset intelligence**: reserialize, read/search/list assets.
-- **Agent senses**: tests, screenshots (scene/game/isolated, arbitrary camera pose, inline image, editor window), console read, profiler capture, memory/rendering snapshots, spatial queries, event pull.
+- **Agent senses**: tests, screenshots (scene/game/isolated, arbitrary camera pose, inline image, editor window), Frame Debugger (enable/disable/draw-call list), console read, profiler capture (per-frame + single-frame deep capture), memory/rendering snapshots, spatial queries, event pull.
 - **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers.
 - **Extension domains**: navigation, input system, probuilder, particle system, animation, splines.
 - **Discovery utilities**: capabilities, rules list, skill generation, manage_tools.
@@ -40,7 +40,7 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | `particle-system`    | off     | Particle System tools — compile-gated on `UnityEngine.ParticleSystemModule`                                                                                                     |
 | `animation`          | off     | AnimationClip + AnimatorController tools — compile-gated on `com.unity.modules.animation`                                                                                       |
 | `splines`            | off     | Splines tools — compile-gated on `com.unity.splines`                                                                                                                            |
-| `agent-senses`       | off     | run_tests, screenshot, screenshot_camera, capture_inline, screenshot_window, read_console, profiler capture/memory/rendering, spatial_query (live-only)                        |
+| `agent-senses`       | off     | run_tests, screenshot, screenshot_camera, capture_inline, screenshot_window, frame_debugger, read_console, profiler capture/capture_frame/memory/rendering, spatial_query (live-only)                        |
 
 
 Always-visible meta-tools (no group assignment): `unity_open_mcp_capabilities`, `unity_open_mcp_list_rules`, `unity_open_mcp_generate_skill`, `unity_open_mcp_manage_tools`, `unity_open_mcp_pull_events` / `unity_senses_pull_events`, `unity_open_mcp_read_compile_errors`, `unity_open_mcp_bridge_status`.

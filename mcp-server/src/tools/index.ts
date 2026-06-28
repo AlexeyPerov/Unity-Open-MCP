@@ -29,6 +29,16 @@ import { captureInline } from "./capture-inline.js";
 // M20 Plan 1 / T20.1.2 — Editor window screenshot. Win-only full-fidelity via
 // PrintWindow; cross-platform best-effort readback with platformLimited flag.
 import { screenshotWindow } from "./screenshot-window.js";
+// M20 Plan 1 / T20.1.3 — Frame Debugger control + draw-call list. Wraps the
+// internal Frame Debugger API via reflection; enable/disable is a non-mutating
+// Editor state change (gate-free, read-only), list returns the draw calls of
+// the currently-debugged frame.
+import { frameDebugger } from "./frame-debugger.js";
+// M20 Plan 1 / T20.1.4 — single-frame deep profiler capture. Returns one
+// frame's full sample tree for the requested modules; deeper than the existing
+// per-module profiler_get_* stats. Read-only; pairs with the existing profiler
+// session family.
+import { profilerCaptureFrame } from "./profiler-capture-frame.js";
 import { readConsole } from "./read-console.js";
 import { profilerCapture } from "./profiler-capture.js";
 import { profilerMemory } from "./profiler-memory.js";
@@ -250,10 +260,19 @@ export const M10_TOOLS: Tool[] = [
 //
 // M20 Plan 1 / T20.1.2 adds screenshot_window (EditorWindow capture; Win-only
 // full-fidelity, cross-platform best-effort readback with platformLimited).
+//
+// M20 Plan 1 / T20.1.3 adds frame_debugger (reflection over Unity's internal
+// Frame Debugger — enable/disable/list draw calls; non-mutating Editor state,
+// gate-free).
+//
+// M20 Plan 1 / T20.1.4 adds profiler_capture_frame (single-frame deep profiler
+// capture; returns the sample tree for the requested modules).
 export const M20_PLAN1_TOOLS: Tool[] = [
   screenshotCamera,
   captureInline,
   screenshotWindow,
+  frameDebugger,
+  profilerCaptureFrame,
 ];
 
 export const M11_TOOLS: Tool[] = [agentCapabilities, generateSkill];
