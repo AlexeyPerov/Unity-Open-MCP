@@ -86,7 +86,11 @@ namespace UnityOpenMcpBridge.MetaTools
         private static AssetDependencyData ComputeForward(string assetPath)
         {
             var sink = new List<AssetDependencyData>();
-            Dependencies.Scanner.ScanPaths(new[] { assetPath }, sink);
+            // Fully-qualified: the `Dependencies` sub-namespace name is also a
+            // common identifier, and relying on the `using` import to resolve
+            // the prefix is fragile across Roslyn/Unity versions. The
+            // fully-qualified form removes any ambiguity.
+            UnityOpenMcpVerify.Rules.Dependencies.Scanner.ScanPaths(new[] { assetPath }, sink);
             return sink.Count > 0 ? sink[0] : new AssetDependencyData(assetPath);
         }
 
