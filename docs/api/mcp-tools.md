@@ -28,7 +28,7 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | Group                | Default | Description                                                                                                                                                                     |
 | -------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `core`               | on      | ping, execute_csharp, invoke_method, find_members, execute_menu, editor_status                                                                                                  |
-| `gate-and-verify`    | on      | validate_edit, checkpoint_create, delta, find_references, scan_paths, apply_fix, scan_all, baseline_create, regression_check                                                    |
+| `gate-and-verify`    | on      | validate_edit, checkpoint_create, delta, find_references, dependencies, scan_paths, apply_fix, scan_all, baseline_create, regression_check                                                    |
 | `asset-intelligence` | on      | reserialize, read_asset, search_assets, list_assets                                                                                                                             |
 | `typed-editor`       | on      | typed editor surface (assets, materials, shaders, prefabs, GameObjects, components, scenes, packages, console, selection, undo, tags, layers, reflection, scripts, object data, ScriptableObject create + list-by-type, Assembly Definition list/get/create/modify) |
 | `diagnostics`        | off     | Profiler session controls + per-frame capture/memory/rendering reads                                                                                                            |
@@ -191,6 +191,40 @@ Where it shows:
 - **Total** — the filters header reports `Active tokens: ~{N}` — the headline context-window cost of the enabled tool set.
 
 The active total is recomputed every frame from the live per-tool toggle state, so disabling a tool (or every tool in a group) drops its tokens from the total immediately. Note this reflects the **bridge toggle policy** (per-tool enable/disable in `.unity-open-mcp/settings.json`), not per-session `manage_tools` activation — session activation lives in the MCP server and is not tracked by the bridge window.
+
+## Asset dependency graph: `unity_open_mcp_dependencies`
+
+A typed tool that returns forward AND reverse dependency edges for a single asset in one call, plus the broken forward-edge GUIDs and dependency-cycle trails the `dependencies` verify rule computes. It reuses the same scanners as the verify rule and `find_references` — **no second dependency graph is built**:
+
+- **Forward edges** — `Dependencies.Scanner` (`packages/verify`), the same `AssetDatabase.GetDependencies` + `m_AssetGUID` walk the `dependencies` verify rule runs.
+- **Reverse edges** — `ReferenceGraph.Find` (`packages/verify`), the same reverse walker `unity_open_mcp_find_references` exposes.
+
+Use `find_references` for reverse-only lookups (it also works offline for text-serialized assets). Use `dependencies` when you need both directions, or the broken-edge / cycle view, in a single typed call. Live bridge only — the underlying scanners call AssetDatabase; there is no offline form.
+
+Parameters:
+
+- `asset_path` OR `guid` (one required) — the target asset.
+- `detail`: `summary` (counts only) | `normal` (default — full rosters).
+- `max_results`: caps the reverse-dependency roster (default 100); `reverseCount` reports the untruncated total.
+
+Response shape (normal detail, healthy asset):
+
+```json
+{
+  "queriedAssetPath": "Assets/Prefabs/Player.prefab",
+  "queriedAssetGuid": "<32-hex>",
+  "forwardDependencies": [{"assetPath": "...", "guid": "..."}],
+  "forwardCount": 7,
+  "brokenForwardGuids": [],
+  "cycles": [],
+  "reverseDependencies": [{"assetPath": "...", "guid": "..."}],
+  "reverseCount": 3,
+  "truncated": 0,
+  "detail": "normal"
+}
+```
+
+An input that does not resolve to a real asset returns `status: "asset_not_found"` with empty edge arrays (not an error) so an agent can branch cleanly.
 
 ## Output shaping
 

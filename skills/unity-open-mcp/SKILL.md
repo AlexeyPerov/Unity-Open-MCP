@@ -218,7 +218,7 @@ Typical sequence: `impact_preview` (size) → `gate_budget_estimate` `mode: "sam
 
 | Policy                | Meaning                                                                             | Tools                                                                                                                                                                                                                              |
 | --------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `none`                | Read-only, returns immediately                                                      | `ping`, `find_members`, `validate_edit`, `checkpoint_create`, `delta`, `find_references`, `scan_paths`, `read_asset`, `search_assets`, `list_assets`, `editor_status`, `read_console`, `screenshot`, `profiler_*`, `spatial_query` |
+| `none`                | Read-only, returns immediately                                                      | `ping`, `find_members`, `validate_edit`, `checkpoint_create`, `delta`, `find_references`, `dependencies`, `scan_paths`, `read_asset`, `search_assets`, `list_assets`, `editor_status`, `read_console`, `screenshot`, `profiler_*`, `spatial_query` |
 | `editor_settle`       | Mutating; bridge waits for asset refresh/serialization to finish                    | `apply_fix`, `reserialize`                                                                                                                                                                                                         |
 | `restart_then_settle` | Mutating; may trigger domain reload; bridge blocks until compile finishes (cap 60s) | `execute_csharp`, `invoke_method`, `execute_menu`, `compile_check`                                                                                                                                                                 |
 | `custom_confirmation` | Async; returns immediately, result via external completion signal you poll          | `run_tests`                                                                                                                                                                                                                        |
@@ -238,6 +238,7 @@ Treat `capabilities.routePolicy` + `batchCapable` as source of truth.
 - **Batch fallback** — spawns headless Unity (`-batchmode`) **only** for `batchCapable: true` tools when the live bridge is unavailable. Mutating meta-tools (`execute_csharp`, `invoke_method`, `execute_menu`) are blocked in batch — they need a live Editor.
 - **Senses are live-only** — `run_tests`, screenshots, profiler, console, spatial queries have no batch form.
 - **Offline reads** (`list_assets`, `find_references`, `read_asset`, `search_assets`) parse the project from disk and never need Unity.
+- `**dependencies` is live-only** — it reuses the verify `Dependencies.Scanner` (forward) + `ReferenceGraph` (reverse), both of which call AssetDatabase. No offline form.
 - `**compile_check` is always batch** — spawns a fresh headless Unity that recompiles from scratch, even when the live bridge is up.
 
 ## Typed tool catalog
@@ -353,6 +354,10 @@ Raw Unity data is large. Prefer the cheap, structured reads before reaching for 
 
 Before deleting or moving an asset, call `**find_references*`* to see who depends on it. Offline-first (no live bridge needed for text-serialized assets).
 
+### dependencies: both directions in one call
+
+When you need **both** directions (what this asset depends on AND what depends on it), or the broken-edge / cycle view, call `**dependencies*`*. It returns the forward + reverse edge sets plus the same `broken_dependency` GUIDs and `dependency_cycle` trails the `dependencies` verify rule computes — no second dependency graph is built (it reuses the verify scanner + the `find_references` reverse walker). Live bridge only (the scanners call AssetDatabase); pass `detail: "summary"` for counts only when you just need the magnitude.
+
 ### Return serialization (execute_csharp / invoke_method)
 
 Results are walked by a depth-limited reflective serializer before becoming `mutation.output`:
@@ -364,7 +369,7 @@ Results are walked by a depth-limited reflective serializer before becoming `mut
 
 ## Read-only tools (no gate)
 
-`capabilities` · `manage_tools` (per-session tool-group visibility) · `list_rules` (filter by `asset_kind`/`extension` before `scan_paths`) · `ping` · `find_members` · `validate_edit` (scoped health scan, pre-commit; `include_rules`/`exclude_rules` filter) · `find_references` · `scan_paths` (`fail_on_severity` defaults to `verify.severityThreshold`; override per call) · `read_asset` · `search_assets` · `list_assets` · `checkpoint_create` · `delta`.
+`capabilities` · `manage_tools` (per-session tool-group visibility) · `list_rules` (filter by `asset_kind`/`extension` before `scan_paths`) · `ping` · `find_members` · `validate_edit` (scoped health scan, pre-commit; `include_rules`/`exclude_rules` filter) · `find_references` · `dependencies` (forward + reverse edges, plus broken/cycle view; live-only) · `scan_paths` (`fail_on_severity` defaults to `verify.severityThreshold`; override per call) · `read_asset` · `search_assets` · `list_assets` · `checkpoint_create` · `delta`.
 
 ## Optional: project-specific skill
 

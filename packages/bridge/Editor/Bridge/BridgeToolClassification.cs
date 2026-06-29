@@ -37,6 +37,7 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_checkpoint_create",
             "unity_open_mcp_delta",
             "unity_open_mcp_find_references",
+            "unity_open_mcp_dependencies",
             "unity_open_mcp_scan_paths",
             "unity_open_mcp_apply_fix",
             "unity_open_mcp_reserialize",
@@ -194,6 +195,7 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_checkpoint_create",
             "unity_open_mcp_delta",
             "unity_open_mcp_find_references",
+            "unity_open_mcp_dependencies",
             "unity_open_mcp_scan_paths",
             // Compact drill-down reads: bridge returns the structured model JSON
             // directly; the MCP server applies the shared compression module.

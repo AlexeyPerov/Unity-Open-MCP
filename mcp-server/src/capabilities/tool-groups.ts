@@ -82,8 +82,8 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "gate-and-verify",
     description:
-      "Gate, checkpoint, delta, find_references, scan_paths, apply_fix, " +
-      "scan_all, baseline_create, regression_check — the verify surface.",
+      "Gate, checkpoint, delta, find_references, dependencies, scan_paths, " +
+      "apply_fix, scan_all, baseline_create, regression_check — the verify surface.",
     defaultEnabled: true,
   },
   {
@@ -390,6 +390,7 @@ assign("gate-and-verify", [
   "unity_open_mcp_checkpoint_create",
   "unity_open_mcp_delta",
   "unity_open_mcp_find_references",
+  "unity_open_mcp_dependencies",
   "unity_open_mcp_scan_paths",
   "unity_open_mcp_apply_fix",
   "unity_open_mcp_scan_all",

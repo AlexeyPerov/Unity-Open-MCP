@@ -788,6 +788,7 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_checkpoint_create" => CheckpointCreateTool.Execute(body),
                 "unity_open_mcp_delta" => DeltaTool.Execute(body),
                 "unity_open_mcp_find_references" => FindReferencesTool.Execute(body),
+                "unity_open_mcp_dependencies" => DependenciesTool.Execute(body),
                 "unity_open_mcp_scan_paths" => ScanPathsTool.Execute(body),
                 "unity_open_mcp_apply_fix" => ApplyFixTool.Execute(body),
                 "unity_open_mcp_reserialize" => ReserializeAssetsTool.Execute(body),
