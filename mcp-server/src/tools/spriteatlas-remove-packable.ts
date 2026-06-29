@@ -11,7 +11,7 @@ export const spriteatlasRemovePackable: Tool = {
     "Per-path errors are accumulated (a path that is not a packable of this " +
     "atlas is reported, not fatal). Mutating: runs the full gate path " +
     "(editor_settle); paths_hint is the .spriteatlas asset path. Built-in 2D " +
-    "module; the 2d group is hidden until manage_tools activates it.",
+    "module; the sprite2d group is hidden until manage_tools activates it.",
   inputSchema: {
     type: "object",
     required: ["asset_path", "packable_paths", "paths_hint"],

@@ -12,7 +12,7 @@ export const spriteatlasCreate: Tool = {
     "true (the atlas ships with the player build). Mutating: runs the full gate " +
     "path (editor_settle lifecycle — the .spriteatlas asset is written + " +
     "reimported); paths_hint is the new asset path. Built-in 2D module (no " +
-    "package dependency); the 2d group is hidden until manage_tools activates it.",
+    "package dependency); the sprite2d group is hidden until manage_tools activates it.",
   inputSchema: {
     type: "object",
     required: ["asset_path", "paths_hint"],

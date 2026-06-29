@@ -9,7 +9,7 @@ export const spriteatlasDelete: Tool = {
     "Delete a SpriteAtlas asset (.spriteatlas). Refuses when the path does " +
     "not point at a SpriteAtlas. Mutating (destructive): runs the full gate " +
     "path (editor_settle); paths_hint is the asset path. There is no undo " +
-    "across a Unity restart. Built-in 2D module; the 2d group is hidden until " +
+    "across a Unity restart. Built-in 2D module; the sprite2d group is hidden until " +
     "manage_tools activates it.",
   inputSchema: {
     type: "object",

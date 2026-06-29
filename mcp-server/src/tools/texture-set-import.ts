@@ -22,7 +22,7 @@ export const textureSetImport: Tool = {
     "omit to leave unchanged. Unknown keys are reported in `unknownFields`, " +
     "not fatal. The reimport runs through the gate (editor_settle) so the next " +
     "mutation sees the settled texture. Mutating: paths_hint is the asset path. " +
-    "Built-in 2D module; the 2d group is hidden until manage_tools activates it.",
+    "Built-in 2D module; the sprite2d group is hidden until manage_tools activates it.",
   inputSchema: {
     type: "object",
     required: ["asset_path", "settings_json", "paths_hint"],

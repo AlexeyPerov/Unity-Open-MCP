@@ -9,7 +9,7 @@ export const textureGet: Tool = {
     "Read-only: the runtime Texture info (width / height / format / " +
     "mipmapCount / filterMode / anisoLevel / wrapMode / isReadable) for a " +
     "loaded texture asset. Complementary to texture_get_importer (the import-" +
-    "pipeline config). Gate-free. Built-in 2D module; the 2d group is hidden " +
+    "pipeline config). Gate-free. Built-in 2D module; the sprite2d group is hidden " +
     "until manage_tools activates it.",
   inputSchema: {
     type: "object",

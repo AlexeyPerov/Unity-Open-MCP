@@ -10,7 +10,7 @@ export const textureReimport: Tool = {
     "settings. Useful after an external build pipeline overwrites the source " +
     "file. Runs through the gate (editor_settle — the reimport can take seconds " +
     "and may trigger a platform-switch domain reload). Mutating: paths_hint is " +
-    "the asset path. Built-in 2D module; the 2d group is hidden until " +
+    "the asset path. Built-in 2D module; the sprite2d group is hidden until " +
     "manage_tools activates it.",
   inputSchema: {
     type: "object",

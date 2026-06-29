@@ -71,7 +71,6 @@ reported back by path + type so you can round-trip without instance ids.
     "blockOffset": 0
   },
   "texture": {
-    "maxTextureSize": 2048,
     "anisoLevel": 1,
     "filterMode": "Bilinear",
     "generateMipMaps": false,
@@ -82,6 +81,16 @@ reported back by path + type so you can round-trip without instance ids.
 ```
 
 Unknown fields are reported in `unknownFields` and do not abort the patch.
+`texture.maxTextureSize` is not settable here (no setter on the settings
+struct; controlled via platform settings).
+
+> **Persistence note:** in this Unity version the packing and texture settings
+> are applied to the in-memory `SpriteAtlasAsset` (they take effect for the
+> next pack) but are **not** written to the `.spriteatlas` file's serialized
+> form — Unity manages them via the internal Sprite Atlas packing pipeline,
+> not the public `Save` path. `include_in_build` likewise does not round-trip
+> through the serialized file. The settings are session-scoped; for
+> permanent settings, use the Unity Editor's Sprite Atlas panel.
 
 ## Listing atlases
 
@@ -107,7 +116,7 @@ use `texture_set_import` to mark a texture as a Sprite (`sprite_mode:
 3. `spriteatlas_add_packable` with `packable_paths: ["Assets/Sprites/UI"]`
    (the folder).
 4. `spriteatlas_modify` with
-   `settings_json: '{"packing":{"padding":4},"texture":{"maxTextureSize":2048}}'`.
+   `settings_json: '{"packing":{"padding":4}}'`.
 5. `spriteatlas_get` to confirm.
 
 ### Swap an atlas's contents

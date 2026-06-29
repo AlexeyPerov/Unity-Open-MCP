@@ -126,10 +126,11 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
                         "unique path or omit asset_path for an in-scene-only terrain.");
             }
 
-            // Allocate the TerrainData. We use TerrainData.CreateInstance via
-            // ScriptableObject (the public ctor) and configure size +
-            // heightmap resolution before the GameObject is created.
-            var td = ScriptableObject.CreateInstance<TerrainData>();
+            // Allocate the TerrainData. TerrainData is a UnityEngine.Object
+            // (NOT a ScriptableObject), so it must be constructed with `new`
+            // rather than ScriptableObject.CreateInstance<T>(). Configure size
+            // + heightmap resolution before the GameObject is created.
+            var td = new TerrainData();
             try
             {
                 td.heightmapResolution = heightmap_resolution;
@@ -150,7 +151,7 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
 
             // Create the Terrain GameObject. Terrain.CreateTerrainGameObject
             // wires the collider + renderer + the TerrainData in one call.
-            var go = Terrain.CreateTerrainGameObject(td);
+            var go = UnityEngine.Terrain.CreateTerrainGameObject(td);
             if (go == null)
             {
                 Object.DestroyImmediate(td);
@@ -632,7 +633,7 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
             // Resolve each side. A null/empty side clears it; a populated side
             // must resolve to a Terrain (else neighbor_not_found). The host
             // cannot be its own neighbor.
-            Terrain top = null, bottom = null, left = null, right = null;
+            UnityEngine.Terrain top = null, bottom = null, left = null, right = null;
             string error;
             if ((error = ResolveNeighborSide(terrain, top_instance_id, top_path, "top", out top)) != null) return error;
             if ((error = ResolveNeighborSide(terrain, bottom_instance_id, bottom_path, "bottom", out bottom)) != null) return error;
@@ -655,7 +656,7 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
         // Resolve one neighbor side. Returns null on success (neighbor is set,
         // possibly to null for a clear); returns a non-null error envelope
         // string when resolution failed (the caller returns it directly).
-        private static string ResolveNeighborSide(Terrain host, int instanceId, string sidePath, string side, out Terrain neighbor)
+        private static string ResolveNeighborSide(UnityEngine.Terrain host, int instanceId, string sidePath, string side, out UnityEngine.Terrain neighbor)
         {
             neighbor = null;
             // No hint for this side → leave it null (clear).
@@ -669,7 +670,7 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
                 return TerrainJson.Error("neighbor_is_self",
                     $"Neighbor '{side}' resolves to the host terrain itself — a " +
                     "terrain cannot be its own neighbor.");
-            var t = go.GetComponent<Terrain>();
+            var t = go.GetComponent<UnityEngine.Terrain>();
             if (t == null)
                 return TerrainJson.Error("neighbor_not_terrain",
                     $"Neighbor '{side}' has no Terrain component. All neighbors " +
@@ -678,7 +679,7 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
             return null;
         }
 
-        private static string NeighborState(Terrain terrain)
+        private static string NeighborState(UnityEngine.Terrain terrain)
         {
             var sb = new StringBuilder(220);
             sb.Append("\"neighbors\":{");

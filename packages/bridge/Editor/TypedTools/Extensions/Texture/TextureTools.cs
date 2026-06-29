@@ -35,6 +35,10 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
+// The enclosing namespace `UnityOpenMcpBridge.Extensions.Texture` shadows the
+// `UnityEngine.Texture` type name, so bare `Texture` resolves to the
+// namespace. Alias the type so call sites read naturally.
+using Texture = UnityEngine.Texture;
 
 namespace UnityOpenMcpBridge.Extensions.Texture
 {
@@ -267,7 +271,7 @@ namespace UnityOpenMcpBridge.Extensions.Texture
 
         struct TextureResult
         {
-            public Texture Texture;
+            public UnityEngine.Texture Texture;
             public TextureImporter Importer;
             public string Path;
             public string Error;
@@ -292,7 +296,7 @@ namespace UnityOpenMcpBridge.Extensions.Texture
                 return new TextureResult { Importer = importer, Path = normalized };
             }
 
-            var tex = AssetDatabase.LoadAssetAtPath<Texture>(normalized);
+            var tex = AssetDatabase.LoadAssetAtPath<UnityEngine.Texture>(normalized);
             if (tex == null)
                 return new TextureResult { Error = TextureJson.Error("asset_not_found",
                     $"No Texture asset at '{normalized}'.") };

@@ -316,12 +316,17 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
         [System.ComponentModel.Description(
             "Patch SpriteAtlas settings: include_in_build (bool), packing " +
             "(blockOffset / padding / enableRotation / enableTightPacking / " +
-            "enableAlphaDilation), and texture (maxTextureSize / anisoLevel / " +
-            "filterMode / generateMipMaps / readable / sRGB). settings_json is a " +
-            "JSON object with three optional sub-objects: " +
+            "enableAlphaDilation), and texture (anisoLevel / filterMode / " +
+            "generateMipMaps / readable / sRGB). settings_json is a JSON object " +
+            "with three optional sub-objects: " +
             "{include_in_build, packing:{...}, texture:{...}}. Unknown fields " +
-            "are reported in `unknownFields`, not fatal. Mutating: runs the full " +
-            "gate path; paths_hint is the .spriteatlas asset path.")]
+            "are reported in `unknownFields`, not fatal. NOTE: in this Unity " +
+            "version the packing/texture settings are applied to the in-memory " +
+            "SpriteAtlasAsset (they take effect for the next pack) but are NOT " +
+            "written to the .spriteatlas file's serialized form — Unity manages " +
+            "them via the internal Sprite Atlas packing pipeline, not the public " +
+            "Save path. Mutating: runs the full gate path; paths_hint is the " +
+            ".spriteatlas asset path.")]
         public static string Modify(
             string asset_path,
             string settings_json = null,
@@ -369,14 +374,19 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
             if (!string.IsNullOrEmpty(packingJson))
             {
                 var packing = asset.Asset.GetPackingSettings();
-                foreach (var entry in PatchStruct(packingJson, packing, new Dictionary<string, string>
+                var (packingOutcomes, packingBoxed) = PatchStruct(packingJson, packing, new Dictionary<string, string>
                 {
                     { "blockOffset", "int" },
                     { "padding", "int" },
                     { "enableRotation", "bool" },
                     { "enableTightPacking", "bool" },
                     { "enableAlphaDilation", "bool" },
-                }))
+                });
+                // Unbox the (possibly mutated) struct back from the boxed copy
+                // PatchStruct reflected into. Without this, the original `packing`
+                // value-type variable keeps its pre-patch values.
+                packing = (UnityEditor.U2D.SpriteAtlasPackingSettings)packingBoxed;
+                foreach (var entry in packingOutcomes)
                 {
                     if (entry.Ok)
                     {
@@ -402,15 +412,20 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
             if (!string.IsNullOrEmpty(textureJson))
             {
                 var texture = asset.Asset.GetTextureSettings();
-                foreach (var entry in PatchStruct(textureJson, texture, new Dictionary<string, string>
+                var (textureOutcomes, textureBoxed) = PatchStruct(textureJson, texture, new Dictionary<string, string>
                 {
-                    { "maxTextureSize", "int" },
+                    // maxTextureSize is intentionally absent — it has no C#
+                    // setter on SpriteAtlasTextureSettings in this Unity version
+                    // (read-only property). It is controlled via the platform
+                    // settings (SetPlatformSettings), not the texture settings.
                     { "anisoLevel", "int" },
                     { "filterMode", "enum:FilterMode" },
                     { "generateMipMaps", "bool" },
                     { "readable", "bool" },
                     { "sRGB", "bool" },
-                }))
+                });
+                texture = (UnityEditor.U2D.SpriteAtlasTextureSettings)textureBoxed;
+                foreach (var entry in textureOutcomes)
                 {
                     if (entry.Ok)
                     {
@@ -802,7 +817,14 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
         // PatchOutcome per known key (success carries the raw value; failure
         // carries a reason). Unknown keys are skipped (the caller reports the
         // applied set; the JSON body may contain unrelated fields).
-        private static List<PatchOutcome> PatchStruct(string objectBody, object target,
+        //
+        // IMPORTANT: the settings structs (SpriteAtlasPackingSettings /
+        // SpriteAtlasTextureSettings) are VALUE TYPES. Passing one as `object`
+        // boxes it, and PropertyInfo.SetValue writes into the boxed copy — the
+        // caller's original struct variable is NOT updated. We therefore return
+        // the (possibly mutated) object so the caller can unbox it back.
+        private static (List<PatchOutcome> outcomes, object target) PatchStruct(
+            string objectBody, object target,
             Dictionary<string, string> knownFields)
         {
             var results = new List<PatchOutcome>();
@@ -879,7 +901,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
                     results.Add(new PatchOutcome { Ok = false, Field = kv.Key, Reason = e.Message });
                 }
             }
-            return results;
+            return (results, target);
         }
 
         private static bool HasAnyPackingEntry(string packingJson)
@@ -887,7 +909,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
                          "enableTightPacking", "enableAlphaDilation");
 
         private static bool HasAnyTextureEntry(string textureJson)
-            => HasAnyKey(textureJson, "maxTextureSize", "anisoLevel", "filterMode",
+            => HasAnyKey(textureJson, "anisoLevel", "filterMode",
                          "generateMipMaps", "readable", "sRGB");
 
         private static bool HasAnyKey(string json, params string[] keys)

@@ -11,7 +11,7 @@ export const textureGetImporter: Tool = {
     "isReadable / mipmapEnabled / filterMode / anisoLevel / wrapMode / " +
     "alphaIsTransparency / spriteImportMode / spritePixelsPerUnit / normalmap " +
     "/ crunchedCompression. Gate-free. Use texture_get for the runtime Texture " +
-    "info (width / height / format). Built-in 2D module; the 2d group is " +
+    "info (width / height / format). Built-in 2D module; the sprite2d group is " +
     "hidden until manage_tools activates it.",
   inputSchema: {
     type: "object",

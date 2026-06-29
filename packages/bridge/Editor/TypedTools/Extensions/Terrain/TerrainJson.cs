@@ -18,6 +18,10 @@ using UnityEngine;
 using UnityEditor;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+// The enclosing namespace `UnityOpenMcpBridge.Extensions.Terrain` shadows the
+// `UnityEngine.Terrain` type name, so bare `Terrain` resolves to the
+// namespace. Alias the type so call sites read naturally.
+using Terrain = UnityEngine.Terrain;
 
 namespace UnityOpenMcpBridge.Extensions.Terrain
 {
@@ -140,10 +144,10 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
         // Resolve a Terrain component from a host GameObject. Returns null when
         // the host has no Terrain (the caller surfaces a component_not_found
         // envelope). Terrain is the only component this domain reads/writes.
-        public static Terrain ResolveTerrain(int instanceId, string path, string name)
+        public static UnityEngine.Terrain ResolveTerrain(int instanceId, string path, string name)
         {
             var host = Resolve(instanceId, path, name);
-            return host != null ? host.GetComponent<Terrain>() : null;
+            return host != null ? host.GetComponent<UnityEngine.Terrain>() : null;
         }
     }
 

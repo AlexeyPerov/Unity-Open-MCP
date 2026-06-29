@@ -11,7 +11,7 @@ export const spriteatlasAddPackable: Tool = {
     "Object. Per-path errors are accumulated — a single bad path does not " +
     "abort the batch. Idempotent re-adds are tolerated by Unity. Mutating: " +
     "runs the full gate path (editor_settle); paths_hint is the .spriteatlas " +
-    "asset path. Built-in 2D module; the 2d group is hidden until " +
+    "asset path. Built-in 2D module; the sprite2d group is hidden until " +
     "manage_tools activates it.",
   inputSchema: {
     type: "object",
