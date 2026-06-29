@@ -174,6 +174,10 @@ Batch is intended for non-interactive scenarios and fallback operation.
   - `UNITY_PROJECT_PATH`
   - `UNITY_PATH` (when editor auto-discovery is unavailable)
 
+### In-Editor Batch tab
+
+The Unity Open MCP bridge window has a **Batch** tab — a read-only view of in-Editor batch runs. While a batch is running it shows live progress (entries pending / running / done / failed / skipped) and per-entry results (tool name, args summary, pass/fail, error text on failure); completed runs are retained in a session ring buffer for inspection. The panel observes batch state only — it does not start or stop batches (that stays with the MCP batch surface and the Hub). It re-renders automatically as entries transition, so no manual refresh is needed. In-memory only, cleared on domain reload.
+
 ## Output shaping
 
 Many tools support output controls to reduce token usage:

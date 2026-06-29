@@ -109,6 +109,8 @@ Use `**unity_open_mcp_compile_check**` only for a deliberate "does this build cl
 
 If Unity can't be found, batch tools return `unity_not_discovered`; only offline reads + `read_compile_errors` still work.
 
+> **In-Editor progress.** The Unity Open MCP bridge window has a **Batch** tab — a read-only view of in-Editor batch runs (live progress: pending / running / done / failed; per-entry tool name, args summary, pass/fail, error text). It observes batch state; it does not start batches. Useful when an operator wants to watch a batch run from inside Unity.
+
 ---
 
 ## Debug / contributor (skip if you use the released package)

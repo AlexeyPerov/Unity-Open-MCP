@@ -89,7 +89,7 @@ Rules for `packages/bridge/` — the Unity Editor HTTP bridge (`com.alexeyperov.
 
 ## UI
 
-- `Editor/UI/UnityOpenMcpBridgeWindow.cs` is the single EditorWindow (7 tabs: Status, Tools, Gate, Activity, Settings, Extensions, Info). Add new surfaces as tab sections, not separate windows, unless there is a strong reason.
+- `Editor/UI/UnityOpenMcpBridgeWindow.cs` is the single EditorWindow (8 tabs: Status, Tools, Gate, Activity, Batch, Settings, Extensions, Info). Add new surfaces as tab sections, not separate windows, unless there is a strong reason.
 - **Tooltips over help boxes.** Internal concepts surfaced in the UI (mutating/read-only, gate modes, registry/hardcoded source, gate-run fields like Delta/Durations/Categories, activity filters, extension pack status) carry hover tooltips via `GUIContent(text, tooltip)`. Add a tooltip for any new cell value or detail label that names a bridge-internal term. Do NOT duplicate a tooltip on a widget that already has a help box immediately next to it (the Settings tab sections are the reference for help-box-prefixed fields). Shared tooltip wording lives in `const string Tooltip*` fields at the top of the window — reuse them so the same term reads identically across tabs.
 - **Tools-tab pagination.** The Tools list paginates at `ToolsPageSize = 20` rows per page (mirrors Unity-Dependencies-Hunter's page selector). `BuildFilteredToolList` narrows by filter + search once per frame; `DrawToolPagination` renders numbered page buttons plus an "All" affordance when the filtered set is ≤ `ToolsShowAllThreshold` (150). When changing page-size semantics, update both constants together.
 - Settings persist in `.unity-open-mcp/settings.json` via `BridgeProjectSettings`. Follow the existing v1 schema; extend in place.

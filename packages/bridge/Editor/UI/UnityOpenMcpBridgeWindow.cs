@@ -16,6 +16,7 @@ namespace UnityOpenMcpBridge
         Tools,
         Gate,
         Activity,
+        Batch,
         Settings,
         Extensions,
         Info
@@ -150,6 +151,8 @@ namespace UnityOpenMcpBridge
             BridgeGateRunHistory.Changed += RepaintTick;
             BridgeActivityLog.Changed -= RepaintTick;
             BridgeActivityLog.Changed += RepaintTick;
+            BridgeBatchRunHistory.Changed -= RepaintTick;
+            BridgeBatchRunHistory.Changed += RepaintTick;
             BridgeProjectSettings.Changed -= RepaintTick;
             BridgeProjectSettings.Changed += RepaintTick;
         }
@@ -161,6 +164,7 @@ namespace UnityOpenMcpBridge
             BridgeGateDefaultPolicy.Changed -= RepaintTick;
             BridgeGateRunHistory.Changed -= RepaintTick;
             BridgeActivityLog.Changed -= RepaintTick;
+            BridgeBatchRunHistory.Changed -= RepaintTick;
             BridgeProjectSettings.Changed -= RepaintTick;
             EditorPrefs.SetInt(SelectedTabPref, (int)_currentTab);
         }
@@ -217,6 +221,7 @@ namespace UnityOpenMcpBridge
                 BridgeWindowTab.Tools => "Tools",
                 BridgeWindowTab.Gate => "Gate",
                 BridgeWindowTab.Activity => "Activity",
+                BridgeWindowTab.Batch => "Batch",
                 BridgeWindowTab.Settings => "Settings",
                 BridgeWindowTab.Extensions => "Extensions",
                 BridgeWindowTab.Info => "Info",
@@ -233,6 +238,7 @@ namespace UnityOpenMcpBridge
                 BridgeWindowTab.Tools => "Catalog of dispatchable tools; toggle or inspect each tool.",
                 BridgeWindowTab.Gate => "Gate policy: project default, latest result, manual validate.",
                 BridgeWindowTab.Activity => "Live log of HTTP events hitting the bridge.",
+                BridgeWindowTab.Batch => "In-Editor batch-run progress and per-entry results (read-only).",
                 BridgeWindowTab.Settings => "Project runtime settings persisted to settings.json.",
                 BridgeWindowTab.Extensions => "Optional Unity domain tools and community packs.",
                 BridgeWindowTab.Info => "Links to docs, repo, and quick references.",
@@ -256,6 +262,9 @@ namespace UnityOpenMcpBridge
                     break;
                 case BridgeWindowTab.Activity:
                     DrawActivityTab();
+                    break;
+                case BridgeWindowTab.Batch:
+                    DrawBatchTab();
                     break;
                 case BridgeWindowTab.Settings:
                     DrawSettingsTab();
@@ -1817,10 +1826,24 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.LabelField("Batch workflows", EditorStyles.miniBoldLabel);
             EditorGUILayout.HelpBox(
                 "Batch scan / baseline / regression workflows run via `unity-open-mcp` " +
-                "fallback (or headless Editor CLI). The full batch panel — entry points, filters, " +
-                "regression threshold controls — is not part of v1 and will land in a future update. " +
-                "Use the Gate tab's Manual validate for ad-hoc scoped scans in the meantime.",
+                "fallback (or headless Editor CLI). Live in-Editor batch-run progress and per-entry " +
+                "results are shown in the Batch tab. Use the Gate tab's Manual validate for ad-hoc " +
+                "scoped scans in the meantime.",
                 MessageType.None);
+        }
+
+        // ---------- Batch tab (T20.7.5.1) ----------
+
+        // The Batch tab is a thin host for BridgeBatchPanel — the panel owns its
+        // own scroll/foldout state (mirrors OptionalDependenciesPanel). The tab
+        // itself just scopes the content scroll and forwards to the panel.
+        [NonSerialized] private Vector2 _batchTabScroll;
+
+        private void DrawBatchTab()
+        {
+            _batchTabScroll = EditorGUILayout.BeginScrollView(_batchTabScroll);
+            BridgeBatchPanel.Draw();
+            EditorGUILayout.EndScrollView();
         }
 
         // ---------- Settings tab (M4.5-11) ----------
@@ -2166,9 +2189,10 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Batch workflows", EditorStyles.miniBoldLabel);
             EditorGUILayout.HelpBox(
-                "Batch scan / baseline / regression workflows will land " +
-                "in a dedicated batch panel in a future update. v1 ships a passive hint only " +
-                "— no batch execution controls are exposed in the bridge window.",
+                "Batch scan / baseline / regression workflows land their live progress and " +
+                "per-entry results in the Batch tab (read-only). Batch execution itself is driven " +
+                "from the MCP batch surface or the Hub — no batch execution controls are exposed " +
+                "in this window.",
                 MessageType.None);
         }
 
