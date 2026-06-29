@@ -31,13 +31,15 @@ Practical skill for AI agents driving a Unity project through the `unity-open-mc
 
 ## Tool groups and session visibility
 
-Sessions start with several main groups visible in `ListTools`. Every other group is hidden until you activate it — this keeps the prompt small (172 tools total). Call `unity_open_mcp_manage_tools` to toggle:
+Sessions start with several main groups visible in `ListTools`. Every other group is hidden until you activate it (or auto-activates when its Unity package is installed — see below) — this keeps the prompt small (230 tools in the full surface). Call `unity_open_mcp_manage_tools` to toggle:
 
 - `list_groups` — every group with active flag, compiled-state availability, and tool roster.
 - `activate` / `deactivate` — toggle one group for this session. When visibility actually changes, the MCP server emits `notifications/tools/list_changed`; clients that support `listChanged` refresh `ListTools` automatically (no reconnect required).
 - `reset` — restore `core`-only.
 
-Common groups: `gate-and-verify`, `asset-intelligence`, `typed-editor`, `diagnostics`, `gate-intelligence`, `build-settings`, `navigation`, `input-system`, `probuilder`, `particle-system`, `animation`, `splines`, `lighting`, `audio`, `ui`, `constraints`, `terrain`, `cinemachine`, `timeline`, `tilemap`, `shadergraph`, `agent-senses`. Compiled-state availability (`available: true/false/null`) reflects whether the Unity domain package compiled in (built-in modules like Lighting, Audio, UI, Constraints & LOD, and Terrain are always compiled — `available: true`; Cinemachine is reflection-gated — the assembly always compiles and per-call detection surfaces the install/upgrade error); the authoritative source is `unity_open_mcp_capabilities` → `toolGroups[].available`. **Auto-activation:** the `shadergraph` group activates automatically for the session when `com.unity.shadergraph` is installed (no manual `manage_tools` call) — `list_groups` reports it with `activationSource: "auto"`; other groups stay manual-activation only. State resets to `core`-only on MCP-server restart.
+Common groups: `gate-and-verify`, `asset-intelligence`, `typed-editor`, `diagnostics`, `gate-intelligence`, `build-settings`, `navigation`, `input-system`, `probuilder`, `particle-system`, `animation`, `splines`, `lighting`, `audio`, `ui`, `constraints`, `terrain`, `cinemachine`, `timeline`, `tilemap`, `shadergraph`, `vfx`, `memoryprofiler`, `agent-senses`. Compiled-state availability (`available: true/false/null`) reflects whether the Unity domain package compiled in (built-in modules like Lighting, Audio, UI, Constraints & LOD, and Terrain are always compiled — `available: true`; Cinemachine is reflection-gated — the assembly always compiles and per-call detection surfaces the install/upgrade error); the authoritative source is `unity_open_mcp_capabilities` → `toolGroups[].available`. **Auto-activation:** the `shadergraph`, `vfx`, and `memoryprofiler` groups activate automatically for the session when their Unity package (`com.unity.shadergraph`, `com.unity.visualeffectgraph`, `com.unity.memoryprofiler`) is installed (no manual `manage_tools` call) — `list_groups` reports them with `activationSource: "auto"`; all other groups stay manual-activation only. State resets to `core`-only on MCP-server restart.
+
+Each domain group also has a deeper playbook under `skills/extensions/<domain>/SKILL.md` (lighting, audio, ui, constraints, terrain, cinemachine, timeline, tilemap, shadergraph, vfx, memoryprofiler, + the M18 packs) — consult the matching one for domain-specific tool contracts, gate/lifecycle hints, and round-trip workflows.
 
 ## Unity state triage (before edits/tests, and on `bridge_offline`)
 
@@ -336,7 +338,7 @@ Use `**search_assets`** to locate prefabs/components/GUIDs; each result tags *wh
 Raw Unity data is large. Prefer the cheap, structured reads before reaching for verbose output:
 
 - **`read_asset`** returns a folded `tree` + `cmp` table + counts, not raw YAML. Drill into a subtree with `component` / `path` + `field_limit` instead of re-reading the whole asset; the parsed model is session-cached (`_cache: "hit"`). `field_limit: 0` (default) returns field names only — bump it only for a `component` drill-down where you need values.
-- **`manage_tools(action="list_groups")`** — sessions start `core`-only; activate only the group you need so 172 tools stay out of the prompt.
+- **`manage_tools(action="list_groups")`** — sessions start `core`-only; activate only the group you need so the full 230-tool surface stays out of the prompt.
 - **`read_console`** with `detail: "summary"` returns messages only; reserve `detail: "verbose"` for when you need Unity-internal stack frames.
 - **`search_assets`** tags *why* each result matched, so you skip broad reads and go straight to the right drill-down.
 - **`capabilities`** before assuming tool names/schemas/route policy — cheaper than discovering a tool's real signature by trial and error.
