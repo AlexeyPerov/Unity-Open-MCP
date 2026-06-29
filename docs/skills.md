@@ -24,6 +24,8 @@ Skills are markdown playbooks (`SKILL.md`) that give an AI agent **project-speci
 | [`skills/extensions/timeline/SKILL.md`](../skills/extensions/timeline/SKILL.md) | Agents authoring Timeline cutscenes / sequences | `timeline` tool group activated **and** `com.unity.timeline` installed (embedded domain group) |
 | [`skills/extensions/tilemap/SKILL.md`](../skills/extensions/tilemap/SKILL.md) | Agents painting 2D Tilemaps (Grid, Tile assets, RuleTile) | `tilemap` tool group activated **and** `com.unity.2d.tilemap` installed (RuleTile additionally requires `com.unity.2d.tilemap.extras`) |
 | [`skills/extensions/shadergraph/SKILL.md`](../skills/extensions/shadergraph/SKILL.md) | Agents authoring Shader Graphs (create, open, add nodes, connect ports) | `com.unity.shadergraph` installed — the `shadergraph` group **auto-activates** when the package is present (no manual opt-in) |
+| [`skills/extensions/vfx/SKILL.md`](../skills/extensions/vfx/SKILL.md) | Agents authoring Visual Effect Graphs (list, open, block property patch) | `com.unity.visualeffectgraph` installed — the `vfx` group **auto-activates** when the package is present (no manual opt-in) |
+| [`skills/extensions/memoryprofiler/SKILL.md`](../skills/extensions/memoryprofiler/SKILL.md) | Agents capturing Memory Profiler snapshots (`.snap` files) | `com.unity.memoryprofiler` installed — the `memoryprofiler` group **auto-activates** when the package is present (no manual opt-in) |
 
 ### Core playbook
 

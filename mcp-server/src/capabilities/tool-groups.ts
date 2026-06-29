@@ -271,6 +271,46 @@ export const TOOL_GROUPS: ToolGroup[] = [
     autoActivate: true,
   },
   {
+    id: "vfx",
+    description:
+      "VFX Graph tools — list VisualEffectGraph assets, open a .vfx in the " +
+      "VFX Graph editor (with a structured context/block/property summary), " +
+      "and patch a single block property. Compile-gated on " +
+      "com.unity.visualeffectgraph (UNITY_OPEN_MCP_EXT_VFX). list / open are " +
+      "read-only (Gate = Off); block_edit runs the gate path with " +
+      "EditorSettle. VFX Graph's editor graph model is internal/unstable — " +
+      "list/open work over the public runtime VisualEffectAsset type " +
+      "(version-stable); block_edit requires the VFX Graph window to be open " +
+      "and degrades to a structured vfx_block_edit_requires_editor_window " +
+      "error otherwise. Auto-activates for the session when " +
+      "com.unity.visualeffectgraph is installed (M20 Plan 7 / T20.7.0) — no " +
+      "manual manage_tools call required.",
+    defaultEnabled: false,
+    domainDefine: "UNITY_OPEN_MCP_EXT_VFX",
+    unityPackage: "com.unity.visualeffectgraph",
+    autoActivate: true,
+  },
+  {
+    id: "memoryprofiler",
+    description:
+      "Memory Profiler tool — capture a Memory Profiler snapshot to a .snap " +
+      "file via the com.unity.memoryprofiler package API. Sense-prefixed " +
+      "(unity_senses_*) because it pairs with the existing senses profiler " +
+      "family (profiler_get_script_stats / profiler_capture_frame) for a " +
+      "fuller performance picture than a standalone memory tool. Compile-gated " +
+      "on com.unity.memoryprofiler (UNITY_OPEN_MCP_EXT_MEMORYPROFILER). " +
+      "Read-only re: game/project state but produces a file — Gate = Off, " +
+      "ReadOnlyHint = true, Lifecycle = EditorSettle (capture can take " +
+      "seconds). The capture is callback-based (async); the bridge blocks " +
+      "until the callback fires. Auto-activates for the session when " +
+      "com.unity.memoryprofiler is installed (M20 Plan 7 / T20.7.0) — no " +
+      "manual manage_tools call required.",
+    defaultEnabled: false,
+    domainDefine: "UNITY_OPEN_MCP_EXT_MEMORYPROFILER",
+    unityPackage: "com.unity.memoryprofiler",
+    autoActivate: true,
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -733,6 +773,43 @@ assign(
     "node_add",
     "node_connect",
   ].map((suffix) => `unity_open_mcp_shader_graph_${suffix}`),
+);
+
+// --- vfx (M20 Plan 7 / T20.7.2 — compile-gated + auto-activating) ----------
+// The SECOND domain under the package-detection auto-activation model
+// (T20.7.0): the `vfx` group activates automatically for the session when
+// com.unity.visualeffectgraph is installed (no manual manage_tools call).
+// All three vfx_* tools share one domain prefix and one tool group.
+// Compile-gated on com.unity.visualeffectgraph in the bridge
+// (UNITY_OPEN_MCP_EXT_VFX). list / open are read-only (Gate = Off);
+// block_edit is mutating and runs the full gate path with paths_hint scoped to
+// the .vfx asset path. VFX Graph's editor graph model is internal/unstable —
+// list/open work over the public runtime VisualEffectAsset type (version-
+// stable); block_edit requires the VFX Graph window to be open and degrades to
+// a structured vfx_block_edit_requires_editor_window error otherwise.
+assign(
+  "vfx",
+  [
+    "list",
+    "open",
+    "block_edit",
+  ].map((suffix) => `unity_open_mcp_vfx_${suffix}`),
+);
+
+// --- memoryprofiler (M20 Plan 7 / T20.7.3 — compile-gated + auto-activating) -
+// The THIRD domain under the package-detection auto-activation model
+// (T20.7.0): the `memoryprofiler` group activates automatically for the
+// session when com.unity.memoryprofiler is installed (no manual manage_tools
+// call). Compile-gated on com.unity.memoryprofiler in the bridge
+// (UNITY_OPEN_MCP_EXT_MEMORYPROFILER). The capture tool is sense-prefixed
+// (unity_senses_*) because it pairs with the existing senses profiler family
+// rather than the typed-editor surface. Read-only re: game/project state but
+// produces a file — Gate = Off, ReadOnlyHint = true, Lifecycle = EditorSettle
+// (capture can take seconds). The capture is callback-based (async); the bridge
+// blocks until the callback fires.
+assign(
+  "memoryprofiler",
+  ["unity_senses_memory_snapshot_capture"],
 );
 
 // --- agent-senses (live-only reads) ----------------------------------------

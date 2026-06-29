@@ -13,11 +13,26 @@ namespace UnityOpenMcpBridge.Tests
     public static class EmbeddedDomainCatalogTests
     {
         [Test]
-        public static void Catalog_ListsFiveShippedDomains()
+        public static void Catalog_ListsShippedDomains()
         {
+            // The shipped embedded domains. Adding/removing a domain means
+            // updating this list alongside the bridge asmdef versionDefines and
+            // the TS mirror (hub/src/lib/services/extensions.ts EMBEDDED_DOMAINS).
             var domains = EmbeddedDomainCatalog.Domains.Select(d => d.Domain).OrderBy(x => x).ToArray();
             Assert.AreEqual(
-                new[] { "animation", "inputsystem", "navigation", "particle_system", "probuilder" },
+                new[]
+                {
+                    "animation",
+                    "inputsystem",
+                    "navigation",
+                    "particle_system",
+                    "probuilder",
+                    "shadergraph",
+                    "splines",
+                    "tilemap",
+                    "timeline",
+                    "vfx",
+                },
                 domains);
         }
 
@@ -44,6 +59,11 @@ namespace UnityOpenMcpBridge.Tests
                 "probuilder",
                 "particle-system",
                 "animation",
+                "splines",
+                "timeline",
+                "tilemap",
+                "shadergraph",
+                "vfx",
             };
             var actual = EmbeddedDomainCatalog.Domains.Select(d => d.Group);
             Assert.IsTrue(actual.All(g => expected.Contains(g)),
@@ -53,11 +73,21 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public static void Catalog_InstallableDomainsCarryUpmIds()
         {
-            var installable = EmbeddedDomainCatalog.Installable().ToArray();
+            var installable = EmbeddedDomainCatalog.Installable().Select(d => d.Domain).OrderBy(x => x).ToArray();
             CollectionAssert.AreEquivalent(
-                new[] { "navigation", "inputsystem", "probuilder" },
-                installable.Select(d => d.Domain));
-            foreach (var d in installable)
+                new[]
+                {
+                    "inputsystem",
+                    "navigation",
+                    "probuilder",
+                    "shadergraph",
+                    "splines",
+                    "tilemap",
+                    "timeline",
+                    "vfx",
+                },
+                installable);
+            foreach (var d in EmbeddedDomainCatalog.Installable())
             {
                 Assert.IsFalse(d.Builtin);
                 Assert.IsTrue(d.UpmDependency.StartsWith("com.unity."),

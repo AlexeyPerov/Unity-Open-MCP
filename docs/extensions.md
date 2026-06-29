@@ -24,6 +24,8 @@ step.
 | Timeline | `com.unity.timeline` | `UNITY_OPEN_MCP_EXT_TIMELINE` | `.../Extensions/Timeline/` |
 | Tilemap | `com.unity.2d.tilemap` (+ `com.unity.2d.tilemap.extras` for RuleTile) | `UNITY_OPEN_MCP_EXT_TILEMAP` (+ `UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS` inner guard for `create_rule_tile`) | `.../Extensions/Tilemap/` |
 | Shader Graph | `com.unity.shadergraph` | `UNITY_OPEN_MCP_EXT_SHADERGRAPH` | `.../Extensions/ShaderGraph/` (**auto-activating**) |
+| VFX Graph | `com.unity.visualeffectgraph` | `UNITY_OPEN_MCP_EXT_VFX` | `.../Extensions/VFX/` (**auto-activating**) |
+| Memory Profiler | `com.unity.memoryprofiler` | `UNITY_OPEN_MCP_EXT_MEMORYPROFILER` | `.../Extensions/MemoryProfiler/` (**auto-activating**, sense-prefixed tool) |
 
 Navigation is the reference template; InputSystem, ProBuilder, ParticleSystem,
 Animation, and Timeline share the same layout. Splines is the most recently
@@ -64,6 +66,36 @@ different surface; `shader_graph_open` parses the `.shadergraph` JSON directly
 and is always stable. The graph tools are complementary to the inspect surface
 (`shader_get_data` / `shader_list_all`), which reads **compiled shader
 properties** rather than the authored graph.
+
+**VFX Graph** (`com.unity.visualeffectgraph`) is the second auto-activating
+pack: the `vfx` group activates automatically when the package is installed. Its
+editor graph model (`UnityEditor.VFX`: `VFXGraph`, `VFXContext`, `VFXBlock`,
+`VFXSlot`) is **more internal/unstable** than Shader Graph's — even the
+competitor ships only list/open for the same reason. The read paths (`vfx_list` /
+`vfx_open`) work over the public **runtime** `UnityEngine.VFX.VisualEffectAsset`
+type and the serialized file format (version-stable); the mutating path
+(`vfx_block_edit`) reflects over the editor graph model and **requires the VFX
+Graph window to be open** (no stable public headless entry point), degrading to
+a structured `vfx_block_edit_requires_editor_window` error otherwise.
+
+**Memory Profiler** (`com.unity.memoryprofiler`) is the third auto-activating
+pack: the `memoryprofiler` group activates automatically when the package is
+installed. It ships a single **sense-prefixed** tool
+(`unity_senses_memory_snapshot_capture`) because it pairs with the existing
+senses profiler family (`profiler_get_script_stats` /
+`profiler_capture_frame`) rather than the typed-editor authoring surface —
+capture a memory snapshot, then read CPU/frame context from the profiler tools
+for a fuller performance picture than a standalone memory tool. The capture is
+**read-only re: game/project state but produces a `.snap` file** (`Gate = Off`,
+`ReadOnlyHint = true`, `Lifecycle = EditorSettle` — capture can take seconds).
+The capture surface moved namespaces across Unity versions
+(`Unity.Profiling.Memory.MemoryProfiler` new vs `UnityEditor.MemoryProfiler` /
+`Profiling.Memory.Experimental.MemoryProfiler` legacy) and is **callback-based
+(async)** — the tool reflects over whichever surface is present, invokes
+`TakeSnapshot` with a delegate, and blocks (bounded by a timeout, pumping editor
+updates so the callback can fire) until the callback reports completion. When
+the API cannot be reached, the tool returns a structured
+`memoryprofiler_api_unavailable` error.
 
 ## Embedded domain model
 
@@ -170,9 +202,11 @@ ecosystem, additive to the manual-activation model:
   operator deliberately deactivated, and a package that goes away only drops a
   group that was auto-activated (not one the agent re-activated by hand).
 
-Shader Graph (`shadergraph` on `com.unity.shadergraph`) is the first shipped
-auto-activating domain. Existing domain groups keep their manual-activation
-behavior unless they explicitly opt in.
+Shader Graph (`shadergraph` on `com.unity.shadergraph`), VFX Graph (`vfx` on
+`com.unity.visualeffectgraph`), and Memory Profiler (`memoryprofiler` on
+`com.unity.memoryprofiler`) are the shipped auto-activating domains. Existing
+domain groups keep their manual-activation behavior unless they explicitly opt
+in.
 
 ## Tool naming
 

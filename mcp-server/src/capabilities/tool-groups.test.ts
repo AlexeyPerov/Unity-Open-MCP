@@ -325,20 +325,90 @@ test("groupFor assigns shader_graph tools to shadergraph", () => {
 
 test("AUTO_ACTIVATE_GROUPS lists shadergraph with its package", () => {
   // T20.7.0: the auto-activation index is derived from the catalog. shadergraph
-  // is the first (and currently only) entry.
+  // is the first entry.
   assert.ok(AUTO_ACTIVATE_GROUPS.length >= 1);
   const sg = AUTO_ACTIVATE_GROUPS.find((e) => e.groupId === "shadergraph");
   assert.ok(sg, "shadergraph must be in AUTO_ACTIVATE_GROUPS");
   assert.equal(sg!.packageId, "com.unity.shadergraph");
 });
 
+// ---------------------------------------------------------------------------
+// M20 Plan 7 / T20.7.2 — vfx catalog + auto-activation
+// ---------------------------------------------------------------------------
+
+test("vfx group is registered, gated, and auto-activating", () => {
+  const vfx = getGroup("vfx");
+  assert.ok(vfx, "vfx group must exist");
+  assert.equal(vfx!.defaultEnabled, false);
+  assert.equal(vfx!.domainDefine, "UNITY_OPEN_MCP_EXT_VFX");
+  assert.equal(vfx!.unityPackage, "com.unity.visualeffectgraph");
+  // T20.7.0: the second auto-activating domain.
+  assert.equal(vfx!.autoActivate, true);
+});
+
+test("vfx roster has all 3 vfx tools", () => {
+  const map = groupToTools();
+  assert.equal(map.vfx.length, 3);
+  assert.ok(map.vfx.includes("unity_open_mcp_vfx_list"));
+  assert.ok(map.vfx.includes("unity_open_mcp_vfx_open"));
+  assert.ok(map.vfx.includes("unity_open_mcp_vfx_block_edit"));
+});
+
+test("groupFor assigns vfx tools to vfx", () => {
+  assert.equal(groupFor("unity_open_mcp_vfx_list"), "vfx");
+  assert.equal(groupFor("unity_open_mcp_vfx_open"), "vfx");
+  assert.equal(groupFor("unity_open_mcp_vfx_block_edit"), "vfx");
+});
+
+test("AUTO_ACTIVATE_GROUPS lists vfx with its package", () => {
+  const vfx = AUTO_ACTIVATE_GROUPS.find((e) => e.groupId === "vfx");
+  assert.ok(vfx, "vfx must be in AUTO_ACTIVATE_GROUPS");
+  assert.equal(vfx!.packageId, "com.unity.visualeffectgraph");
+});
+
+// ---------------------------------------------------------------------------
+// M20 Plan 7 / T20.7.3 — memoryprofiler catalog + auto-activation
+// ---------------------------------------------------------------------------
+
+test("memoryprofiler group is registered, gated, and auto-activating", () => {
+  const mp = getGroup("memoryprofiler");
+  assert.ok(mp, "memoryprofiler group must exist");
+  assert.equal(mp!.defaultEnabled, false);
+  assert.equal(mp!.domainDefine, "UNITY_OPEN_MCP_EXT_MEMORYPROFILER");
+  assert.equal(mp!.unityPackage, "com.unity.memoryprofiler");
+  // T20.7.0: the third auto-activating domain.
+  assert.equal(mp!.autoActivate, true);
+});
+
+test("memoryprofiler roster has the single capture tool", () => {
+  const map = groupToTools();
+  assert.equal(map.memoryprofiler.length, 1);
+  assert.ok(map.memoryprofiler.includes("unity_senses_memory_snapshot_capture"));
+});
+
+test("groupFor assigns the memory snapshot capture tool to memoryprofiler", () => {
+  // Sense-prefixed (unity_senses_*) but belongs to the memoryprofiler group,
+  // not agent-senses, because it pairs with the profiler family and is gated
+  // on com.unity.memoryprofiler.
+  assert.equal(
+    groupFor("unity_senses_memory_snapshot_capture"),
+    "memoryprofiler",
+  );
+});
+
+test("AUTO_ACTIVATE_GROUPS lists memoryprofiler with its package", () => {
+  const mp = AUTO_ACTIVATE_GROUPS.find((e) => e.groupId === "memoryprofiler");
+  assert.ok(mp, "memoryprofiler must be in AUTO_ACTIVATE_GROUPS");
+  assert.equal(mp!.packageId, "com.unity.memoryprofiler");
+});
+
 test("every other shipped domain is NOT auto-activating (manual only)", () => {
   // T20.7.0 regression guard: auto-activation is additive — existing domains
   // keep manual activation unless they explicitly opt in. Today only
-  // shadergraph opts in.
+  // shadergraph + vfx + memoryprofiler opt in.
   const autoIds = new Set(AUTO_ACTIVATE_GROUPS.map((e) => e.groupId));
   for (const g of TOOL_GROUPS) {
-    if (g.id === "shadergraph") continue;
+    if (g.id === "shadergraph" || g.id === "vfx" || g.id === "memoryprofiler") continue;
     assert.ok(
       !autoIds.has(g.id),
       `${g.id} must not be auto-activating (additive invariant)`,

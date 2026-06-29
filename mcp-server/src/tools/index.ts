@@ -369,6 +369,34 @@ import { shaderGraphCreate } from "./shader-graph-create.js";
 import { shaderGraphOpen } from "./shader-graph-open.js";
 import { shaderGraphNodeAdd } from "./shader-graph-node-add.js";
 import { shaderGraphNodeConnect } from "./shader-graph-node-connect.js";
+// M20 Plan 7 / T20.7.2 — VFX Graph extension tools. Compile-gated in the
+// bridge (UNITY_OPEN_MCP_EXT_VFX on com.unity.visualeffectgraph) AND auto-
+// activating — the second domain under the package-detection auto-activation
+// model (M20 Plan 7 / T20.7.0): the `vfx` group activates for the session
+// automatically when com.unity.visualeffectgraph is installed, no manual
+// manage_tools call. list / open are read-only (Gate = Off) returning a
+// structured context/block/property summary; block_edit is the lone mutating
+// member (Gate = Enforce, paths_hint = .vfx asset path). VFX Graph's editor
+// graph model is internal/unstable — the read paths work over the public
+// runtime VisualEffectAsset type and the serialized file format (version-
+// stable); block_edit reflects over the editor graph and requires the VFX
+// Graph window to be open, degrading to a structured
+// vfx_block_edit_requires_editor_window error otherwise.
+import { vfxList } from "./vfx-list.js";
+import { vfxOpen } from "./vfx-open.js";
+import { vfxBlockEdit } from "./vfx-block-edit.js";
+// M20 Plan 7 / T20.7.3 — Memory Profiler snapshot capture. Compile-gated in
+// the bridge (UNITY_OPEN_MCP_EXT_MEMORYPROFILER on com.unity.memoryprofiler) +
+// auto-activating — the third domain under the package-detection auto-activation
+// model (M20 Plan 7 / T20.7.0): the `memoryprofiler` group activates for the
+// session automatically when com.unity.memoryprofiler is installed. Sense-
+// prefixed (unity_senses_*) because it pairs with the existing senses profiler
+// family rather than the typed-editor surface. Read-only re: game/project state
+// but produces a .snap file — Gate = Off, ReadOnlyHint = true, Lifecycle =
+// EditorSettle. The capture is callback-based; the bridge blocks until the
+// callback fires. Pairs with profiler_get_script_stats / profiler_capture_frame
+// for a fuller performance picture than a standalone memory tool.
+import { memorySnapshotCapture } from "./memory-snapshot-capture.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -897,6 +925,39 @@ export const M20_PLAN7_SHADERGRAPH_TOOLS: Tool[] = [
   shaderGraphNodeConnect,
 ];
 
+// M20 Plan 7 / T20.7.2 — VFX Graph extension tools. Compile-gated in the
+// bridge (UNITY_OPEN_MCP_EXT_VFX on com.unity.visualeffectgraph) AND auto-
+// activating — the second domain under the package-detection auto-activation
+// model (M20 Plan 7 / T20.7.0). list / open are read-only (Gate = Off) returning
+// a structured context/block/property summary; block_edit is the lone mutating
+// member (Gate = Enforce, paths_hint = .vfx asset path). VFX Graph's editor
+// graph model is internal/unstable — list/open work over the public runtime
+// VisualEffectAsset type (version-stable); block_edit reflects over the editor
+// graph and requires the VFX Graph window to be open, degrading to a structured
+// vfx_block_edit_requires_editor_window error otherwise.
+export const M20_PLAN7_VFX_TOOLS: Tool[] = [
+  vfxList,
+  vfxOpen,
+  vfxBlockEdit,
+];
+
+// M20 Plan 7 / T20.7.3 — Memory Profiler snapshot capture. Compile-gated in
+// the bridge (UNITY_OPEN_MCP_EXT_MEMORYPROFILER on com.unity.memoryprofiler) +
+// auto-activating — the third domain under the package-detection auto-activation
+// model (M20 Plan 7 / T20.7.0). Sense-prefixed (unity_senses_*) because it
+// pairs with the existing senses profiler family rather than the typed-editor
+// surface. Read-only re: game/project state but produces a .snap file —
+// Gate = Off, ReadOnlyHint = true, Lifecycle = EditorSettle. The capture is
+// callback-based (async); the bridge reflects over whichever capture surface
+// the installed version exposes (Unity.Profiling.Memory.MemoryProfiler or
+// UnityEditor.MemoryProfiler) and blocks until the callback fires, so the tool
+// returns a definitive path/result. Pairs with profiler_get_script_stats /
+// profiler_capture_frame for a fuller performance picture than a standalone
+// memory tool.
+export const M20_PLAN7_MEMORYPROFILER_TOOLS: Tool[] = [
+  memorySnapshotCapture,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -936,4 +997,6 @@ export const ALL_TOOLS: Tool[] = [
   ...M20_PLAN6_TIMELINE_TOOLS,
   ...M20_PLAN6_TILEMAP_TOOLS,
   ...M20_PLAN7_SHADERGRAPH_TOOLS,
+  ...M20_PLAN7_VFX_TOOLS,
+  ...M20_PLAN7_MEMORYPROFILER_TOOLS,
 ];

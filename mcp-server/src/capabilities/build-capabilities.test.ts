@@ -457,6 +457,52 @@ test("auto-activating group surfaces packageDependency and a distinct usageHint"
   assert.match(sg!.usageHint, /unity_open_mcp_manage_tools/);
 });
 
+test("vfx + memoryprofiler groups surface auto-activation metadata", () => {
+  // T20.7.2 / T20.7.3 — the vfx and memoryprofiler groups are also
+  // auto-activating. Build with their tools present so each has a non-empty
+  // roster.
+  const depsWithDomains: BuildCapabilitiesDeps = {
+    tools: [
+      ...FIXTURE_TOOLS,
+      {
+        name: "unity_open_mcp_vfx_list",
+        description: "VFX list (fixture).",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "unity_senses_memory_snapshot_capture",
+        description: "Memory snapshot capture (fixture).",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    batchToolNames: FIXTURE_BATCH_NAMES,
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+  };
+  const caps = buildCapabilities(depsWithDomains);
+
+  const vfx = caps.toolGroups.find((g) => g.id === "vfx");
+  assert.ok(vfx, "vfx group must appear in capabilities");
+  assert.equal(vfx!.autoActivate, true);
+  assert.equal(vfx!.packageDependency, "com.unity.visualeffectgraph");
+  assert.match(vfx!.usageHint, /com\.unity\.visualeffectgraph/);
+  assert.match(vfx!.usageHint, /Auto-activates/);
+
+  const mp = caps.toolGroups.find((g) => g.id === "memoryprofiler");
+  assert.ok(mp, "memoryprofiler group must appear in capabilities");
+  assert.equal(mp!.autoActivate, true);
+  assert.equal(mp!.packageDependency, "com.unity.memoryprofiler");
+  assert.match(mp!.usageHint, /com\.unity\.memoryprofiler/);
+  assert.match(mp!.usageHint, /Auto-activates/);
+
+  // The memory snapshot capture tool is sense-prefixed (unity_senses_*) but
+  // belongs to the memoryprofiler group/category, NOT agent-senses.
+  const tool = caps.tools.find((t) => t.name === "unity_senses_memory_snapshot_capture");
+  assert.ok(tool, "memory snapshot capture tool must appear in tools");
+  assert.equal(tool!.category, "memoryprofiler");
+  assert.equal(tool!.group, "memoryprofiler");
+});
+
 test("non-default-enabled groups carry a usageHint pointing at manage_tools", () => {
   const caps = buildCapabilities(DEPS);
   for (const g of caps.toolGroups) {

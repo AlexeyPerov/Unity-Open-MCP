@@ -355,6 +355,28 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_shader_graph_open: "shadergraph",
   unity_open_mcp_shader_graph_node_add: "shadergraph",
   unity_open_mcp_shader_graph_node_connect: "shadergraph",
+  // M20 Plan 7 / T20.7.2 — VFX Graph extension tools. Compile-gated on
+  // com.unity.visualeffectgraph (UNITY_OPEN_MCP_EXT_VFX) + auto-activating
+  // (the second domain under the package-detection auto-activation model).
+  // list / open are read-only (Gate = Off) returning a structured
+  // context/block/property summary; block_edit is the lone mutating member
+  // (Gate = Enforce, paths_hint = .vfx asset path). VFX Graph's editor graph
+  // model is internal/unstable — list/open work over the public runtime
+  // VisualEffectAsset type (version-stable); block_edit requires the VFX Graph
+  // window to be open and degrades to a structured
+  // vfx_block_edit_requires_editor_window error otherwise.
+  unity_open_mcp_vfx_list: "vfx",
+  unity_open_mcp_vfx_open: "vfx",
+  unity_open_mcp_vfx_block_edit: "vfx",
+  // M20 Plan 7 / T20.7.3 — Memory Profiler snapshot capture. Compile-gated on
+  // com.unity.memoryprofiler (UNITY_OPEN_MCP_EXT_MEMORYPROFILER) + auto-
+  // activating (the third domain under the package-detection auto-activation
+  // model). Sense-prefixed (unity_senses_*) because it pairs with the existing
+  // senses profiler family rather than the typed-editor surface. Read-only re:
+  // game/project state but produces a file — Gate = Off, ReadOnlyHint = true,
+  // Lifecycle = EditorSettle. The capture is callback-based (async); the bridge
+  // blocks until the callback fires.
+  unity_senses_memory_snapshot_capture: "memoryprofiler",
   // M20 Plan 5 / T20.5 — typed ScriptableObject + Assembly Definition tools.
   // Both sets are core (always-on) typed-editor tools with no Unity package
   // dependency. scriptableobject_create is mutating (EditorSettle);

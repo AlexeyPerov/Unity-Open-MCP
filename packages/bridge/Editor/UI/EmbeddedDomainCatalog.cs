@@ -136,6 +136,26 @@ namespace UnityOpenMcpBridge
                 upmDependency: "com.unity.2d.tilemap",
                 typeProbe: "UnityEngine.Tilemaps.Tilemap, UnityEngine.TilemapModule",
                 builtin: false),
+            // M20 Plan 7 — package-gated specialties with auto-activation.
+            // These domains are installable compile-gated domains AND auto-
+            // activating (the group activates for the session when the package
+            // is present — see tool-groups.ts autoActivate).
+            new EmbeddedDomain(
+                group: "shadergraph",
+                domain: "shadergraph",
+                displayName: "Shader Graph",
+                description: "Shader Graph authoring: create, open, add nodes, connect ports.",
+                upmDependency: "com.unity.shadergraph",
+                typeProbe: "UnityEditor.ShaderGraph.GraphData, Unity.ShaderGraph.Editor",
+                builtin: false),
+            new EmbeddedDomain(
+                group: "vfx",
+                domain: "vfx",
+                displayName: "VFX Graph",
+                description: "Visual Effect Graph authoring: list, open, block property patch.",
+                upmDependency: "com.unity.visualeffectgraph",
+                typeProbe: "UnityEngine.VFX.VisualEffectAsset, Unity.VisualEffectGraph.Runtime",
+                builtin: false),
         };
 
         /// <summary>Enumerate the installable (non-builtin) domains.</summary>

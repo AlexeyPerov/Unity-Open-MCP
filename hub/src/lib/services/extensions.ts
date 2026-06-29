@@ -201,6 +201,36 @@ export const EMBEDDED_DOMAINS: readonly EmbeddedDomain[] = [
       "unity_open_mcp_tilemap_create_rule_tile",
     ],
   },
+  // M20 Plan 7 — package-gated specialties with auto-activation. Installable
+  // compile-gated domains AND auto-activating (the group activates for the
+  // session when the package is present — see tool-groups.ts autoActivate).
+  {
+    domain: "shadergraph",
+    displayName: "Shader Graph",
+    description: "Shader Graph authoring: create, open, add nodes, connect ports.",
+    upmDependency: "com.unity.shadergraph",
+    defaultVersion: "17.0.0",
+    builtin: false,
+    toolIds: [
+      "unity_open_mcp_shader_graph_create",
+      "unity_open_mcp_shader_graph_open",
+      "unity_open_mcp_shader_graph_node_add",
+      "unity_open_mcp_shader_graph_node_connect",
+    ],
+  },
+  {
+    domain: "vfx",
+    displayName: "VFX Graph",
+    description: "Visual Effect Graph authoring: list, open, block property patch.",
+    upmDependency: "com.unity.visualeffectgraph",
+    defaultVersion: "17.0.0",
+    builtin: false,
+    toolIds: [
+      "unity_open_mcp_vfx_list",
+      "unity_open_mcp_vfx_open",
+      "unity_open_mcp_vfx_block_edit",
+    ],
+  },
 ] as const;
 
 /**

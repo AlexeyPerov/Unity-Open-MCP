@@ -11,14 +11,14 @@
 
 Unity Open MCP connects AI agents to Unity projects with a bridge + gate workflow: make changes, run validation, inspect results, and iterate safely.
 
-The MCP server consists of a total of **208** tools.
+The MCP server consists of a total of **229** tools.
 
 Current tool surface from `mcp-server/src/tools/index.ts`:
 
 - Core + gate + validation tools: **16**
-- Asset intelligence + senses + discovery + diagnostics + meta tools: **23**
-- Typed editor/project tools (core package): **103**
-- Optional extension-pack tools: **76**
+- Asset intelligence + senses + discovery + diagnostics + meta tools: **40**
+- Typed editor/project tools (core package): **92**
+- Optional extension-pack tools: **81**
 
 ## Key features
 
@@ -26,7 +26,7 @@ Current tool surface from `mcp-server/src/tools/index.ts`:
 - Asset intelligence tools including **reserialize, structured asset read/search, and reference analysis**.
 - Live + fallback routing (live Unity bridge, batch mode for supported tools, offline readers where possible).
 - Typed Unity tool surface for scenes, GameObjects, components, packages, build settings, profiler controls, and project settings.
-- Bundled domain tool groups for **Navigation, Input System, ProBuilder, Particle System, Animation, Splines, Lighting, Audio, UI, Constraints & LOD, Terrain, Cinemachine, Timeline, Tilemap, and Shader Graph** — embedded in the bridge, compiled in automatically when the matching Unity package is present (or unconditionally for built-in modules like Lighting, Audio, UI, Constraints & LOD, and Terrain; Cinemachine is reflection-gated — its assembly always compiles and detects the supported version at call time), and surfaced per session via tool groups. Shader Graph **auto-activates** — its tool group appears automatically when `com.unity.shadergraph` is installed, no manual opt-in.
+- Bundled domain tool groups for **Navigation, Input System, ProBuilder, Particle System, Animation, Splines, Lighting, Audio, UI, Constraints & LOD, Terrain, Cinemachine, Timeline, Tilemap, Shader Graph, VFX Graph, and Memory Profiler** — embedded in the bridge, compiled in automatically when the matching Unity package is present (or unconditionally for built-in modules like Lighting, Audio, UI, Constraints & LOD, and Terrain; Cinemachine is reflection-gated — its assembly always compiles and detects the supported version at call time), and surfaced per session via tool groups. Shader Graph, VFX Graph, and Memory Profiler **auto-activate** — their tool groups appear automatically when the matching package is installed, no manual opt-in.
 - Unity Hub Pro wizard for guided setup and maintainer workflows.
 
 For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-tools.md).

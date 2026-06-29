@@ -13,9 +13,9 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 - **Core runtime**: ping, C# execution, method invoke, menu calls, reflection, compile checks, editor status.
 - **Gate and validation**: validate edit, checkpoints, deltas, reference scan, path scan, regression baseline/check, fixes.
 - **Asset intelligence**: reserialize, read/search/list assets.
-- **Agent senses**: tests, screenshots (scene/game/isolated, arbitrary camera pose, inline image, editor window), Frame Debugger (enable/disable/draw-call list), console read, profiler capture (per-frame + single-frame deep capture), memory/rendering snapshots, spatial queries, event pull.
+- **Agent senses**: tests, screenshots (scene/game/isolated, arbitrary camera pose, inline image, editor window), Frame Debugger (enable/disable/draw-call list), console read, profiler capture (per-frame + single-frame deep capture), memory/rendering snapshots, Memory Profiler `.snap` capture (com.unity.memoryprofiler), spatial queries, event pull.
 - **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers, ScriptableObject create + list-by-type, Assembly Definition (asmdef) list/get/create/modify.
-- **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio, ui, constraints, terrain, cinemachine, timeline, tilemap, shader graph.
+- **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio, ui, constraints, terrain, cinemachine, timeline, tilemap, shader graph, vfx graph.
 - **Discovery utilities**: capabilities, rules list, skill generation, manage_tools.
 
 ## Tool groups and session visibility
@@ -49,6 +49,8 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | `timeline`           | off     | Timeline tools — create TimelineAsset, add tracks (Animation/Activation/Audio/Signal/Control/Group/Playable), add clips, bind PlayableDirector, reflective modify. Compile-gated on `com.unity.timeline`   |
 | `tilemap`            | off     | Tilemap tools — create Grid + Tilemap, paint single tiles, box-fill regions, create Tile assets, create RuleTile (requires tilemap.extras). Compile-gated on `com.unity.2d.tilemap`; RuleTile additionally inner-guarded on `com.unity.2d.tilemap.extras` at call time (two defines, two guards)   |
 | `shadergraph`        | off†    | Shader Graph tools — create a Shader Graph asset, open it in the graph editor (returns a structured node/edge summary), add a node, connect two node ports. Compile-gated on `com.unity.shadergraph`. **Auto-activating** (†): activates automatically when `com.unity.shadergraph` is installed — no manual manage_tools call. The editing API is wrapped behind a reflection helper; mutating tools degrade to a structured `shadergraph_api_unavailable` error when the installed version exposes a different surface. Complementary to `shader_get_data` / `shader_list_all` (compiled-shader inspect).   |
+| `vfx`                | off†    | VFX Graph tools — list VisualEffectGraph assets, open a `.vfx` in the VFX Graph editor (returns a structured context/block/property summary), patch a single block property. Compile-gated on `com.unity.visualeffectgraph`. **Auto-activating** (†): activates automatically when `com.unity.visualeffectgraph` is installed — no manual manage_tools call. The read paths (`list`/`open`) work over the public runtime `VisualEffectAsset` type (version-stable); the mutating `block_edit` requires the VFX Graph window to be open and degrades to a structured `vfx_block_edit_requires_editor_window` error otherwise.   |
+| `memoryprofiler`     | off†    | Memory Profiler tool — capture a Memory Profiler snapshot to a `.snap` file via the com.unity.memoryprofiler package API. Sense-prefixed (`unity_senses_*`) because it pairs with the existing profiler family (profiler_get_script_stats / profiler_capture_frame). **Auto-activating** (†): activates automatically when `com.unity.memoryprofiler` is installed — no manual manage_tools call. Read-only re: game/project state but produces a file — Gate = Off, ReadOnlyHint = true, Lifecycle = EditorSettle (capture can take seconds). The capture is callback-based; the bridge blocks until the snapshot file is written.   |
 | `agent-senses`       | off     | run_tests, screenshot, screenshot_camera, capture_inline, screenshot_window, frame_debugger, read_console, profiler capture/capture_frame/memory/rendering, spatial_query (live-only)                        |
 
 
@@ -96,7 +98,9 @@ A domain group may additionally opt into **package-detection auto-activation**
 (`autoActivate: true` + `unityPackage` in the catalog): when the project has
 the group's Unity package installed, the group activates **automatically** for
 the session — no manual call required. Shader Graph (`shadergraph` on
-`com.unity.shadergraph`) is the first auto-activating domain.
+`com.unity.shadergraph`), VFX Graph (`vfx` on `com.unity.visualeffectgraph`),
+and Memory Profiler (`memoryprofiler` on `com.unity.memoryprofiler`) are the
+shipped auto-activating domains.
 
 Auto-activation is:
 
