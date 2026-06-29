@@ -4,8 +4,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // entry on a LODGroup at an index, resolving renderers from GameObject paths.
 // Built-in engine module. Mutating: runs the full gate path; paths_hint is the
 // host scene path. The host must already carry a LODGroup (use
-// lod_group_configure first). Mirrors the per-level wiring AnkleBreaker's
-// unity_lod_create leaves to the agent.
+// lod_group_configure first).
 const targetSchema = {
   instance_id: {
     type: "integer",

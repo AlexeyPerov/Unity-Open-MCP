@@ -16,7 +16,6 @@ namespace UnityOpenMcpBridge
     // gray when stopped. Clicking toggles the bridge listener.
     // Unity 6 uses the native MainToolbarElement API; legacy versions fall back
     // to injecting a UIElements button into the toolbar zone.
-    // Reference: references/UnifiedUnityMCP-main/.../McpToolbarToggle.cs (adapted).
     [InitializeOnLoad]
     public static class BridgeToolbarToggle
     {

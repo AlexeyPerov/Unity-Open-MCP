@@ -3,26 +3,19 @@
 // Five typed tools covering the heightmap / splatmap / tree / neighbor
 //
 //   terrain_create        — allocate TerrainData (+ optional .asset) and a
-//                           Terrain GameObject. Mirrors AnkleBreaker
-//                           unity_terrain_create (width / length / height /
-//                           heightmapResolution / position / dataPath) +
-//                           Ivan Terrain.Create.cs.
+//                           Terrain GameObject (width / length / height /
+//                           heightmapResolution / position / dataPath).
 //   terrain_set_heights   — set a heightmap region from a 2D array of
-//                           normalized 0-1 values. Mirrors AnkleBreaker
-//                           unity_terrain_set_heights_region (xBase / yBase +
-//                           2D heights) + Ivan Terrain.SetHeights.cs.
+//                           normalized 0-1 values (xBase / yBase + 2D heights).
 //   terrain_paint_layer   — paint one layer's splat from a 2D alphamap. When
 //                           the layer index is new, optionally seed a new
-//                           TerrainLayer asset (or load one by path). Mirrors
-//                           Ivan Terrain.PaintLayer.cs.
+//                           TerrainLayer asset (or load one by path).
 //   terrain_place_trees   — place tree instances (position + scale + rotation)
 //                           against a prototype index. When the prototype
 //                           index is new, optionally seed a prototype from a
-//                           prefab path. Mirrors Ivan Terrain.PlaceTrees.cs.
+//                           prefab path.
 //   terrain_set_neighbors — set the top / bottom / left / right neighbor
-//                           Terrains for LOD stitching. Mirrors AnkleBreaker
-//                           unity_terrain_set_neighbors + Ivan
-//                           Terrain.SetNeighbors.cs.
+//                           Terrains for LOD stitching.
 //
 // The Terrain / TerrainData / TreePrototype / TerrainLayer types live in the
 // built-in engine modules (UnityEngine.TerrainModule + UnityEngine.CoreModule)
@@ -64,9 +57,8 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
         // Allocate a TerrainData (optionally saved as a .asset) and a Terrain
         // GameObject carrying it. When asset_path is provided, the TerrainData
         // is written under Assets/... and added to paths_hint so the gate
-        // validates both the asset and the scene mutation. Mirrors
-        // AnkleBreaker unity_terrain_create (width / length / height /
-        // heightmapResolution / position / dataPath).
+        // validates both the asset and the scene mutation (width / length /
+        // height / heightmapResolution / position / dataPath).
         [BridgeTool("unity_open_mcp_terrain_create",
             Title = "Terrain: Create Terrain",
             IsMutating = true,
@@ -214,7 +206,6 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
         // x_offset / y_offset position the region inside the heightmap; the
         // array shape defines the region size. Arrays larger than 513x513 are
         // refused with a tiling hint (write in tiles via repeated calls).
-        // Mirrors AnkleBreaker unity_terrain_set_heights_region.
         [BridgeTool("unity_open_mcp_terrain_set_heights",
             Title = "Terrain: Set Heightmap Region",
             IsMutating = true,
@@ -603,8 +594,7 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
 
         // Set the top / bottom / left / right neighbor Terrains for LOD
         // stitching. Each neighbor is resolved by hierarchy path / instance id
-        // / name; pass null (or omit) to clear a side. Mirrors AnkleBreaker
-        // unity_terrain_set_neighbors + Ivan Terrain.SetNeighbors.cs.
+        // / name; pass null (or omit) to clear a side.
         [BridgeTool("unity_open_mcp_terrain_set_neighbors",
             Title = "Terrain: Set Neighbors",
             IsMutating = true,

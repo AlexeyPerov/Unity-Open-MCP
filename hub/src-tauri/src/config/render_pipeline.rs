@@ -12,10 +12,9 @@
 //! `m_ScriptingClassIdentifier` recorded against the pipeline asset
 //! (`UniversalRenderPipelineAsset` / `HDRenderPipelineAsset`), but that
 //! requires the `ScriptObjects` GUID table; in practice scanning the
-//! asset for the canonical class-name strings (the UnityLauncherPro
-//! `Tools.GetSRP` heuristic) is robust across hand-edited, machine
-//! written, and newer-mapped files and avoids touching the binary
-//! Library folder.
+//! asset for the canonical class-name strings is robust across
+//! hand-edited, machine written, and newer-mapped files and avoids
+//! touching the binary Library folder.
 //!
 //! The reader is intentionally pure and side-effect-free: it returns
 //! `RenderPipeline::BuiltIn` for missing/empty/unrecognised files so the
@@ -74,8 +73,7 @@ impl Default for RenderPipeline {
 }
 
 /// Reads the project's render pipeline from
-/// `ProjectSettings/GraphicsSettings.asset`. Mirrors the
-/// UnityLauncherPro `Tools.GetSRP` heuristic: the file's
+/// `ProjectSettings/GraphicsSettings.asset`. Heuristic: the file's
 /// `m_SRPDefaultSettings` / `m_RenderPipelineGlobalSettingsMap` section
 /// is followed by per-pipeline asset references, and the first
 /// `UniversalRenderPipeline` / `HDRenderPipeline` substring after the

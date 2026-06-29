@@ -5,8 +5,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // for LODGroup) — no extra UPM; the `constraints` group is hidden until
 // manage_tools activates it. Mutating: runs the full gate path; paths_hint is
 // the host scene path. Address the host by instance_id > path > name (same
-// model as gameobject_* / component_*). Param shape mirrors AnkleBreaker's
-// unity_constraint_add (type + source + activate).
+// model as gameobject_* / component_*). Param shape: type + source + activate.
 const targetSchema = {
   instance_id: {
     type: "integer",

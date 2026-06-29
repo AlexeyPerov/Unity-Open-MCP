@@ -5,8 +5,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // path; paths_hint is the parent scene path. The parent MUST exist — every
 // uGUI element lives under a Canvas in the hierarchy. TMP_Text requires the
 // TextMesh Pro package; when absent, returns `tmp_package_required` (no silent
-// legacy-Text fallback). Param shape mirrors AnkleBreaker's
-// unity_ui_create_element (element types + parent + common fields).
+// legacy-Text fallback). Param shape: element types + parent + common fields.
 export const uiElementAdd: Tool = {
   name: "unity_open_mcp_ui_element_add",
   description:

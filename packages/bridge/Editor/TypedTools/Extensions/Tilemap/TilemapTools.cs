@@ -23,8 +23,7 @@
 // in and the capability surface reports the domain as `available: false
 // (dependency missing: com.unity.2d.tilemap)`.
 //
-// Naming: `unity_open_mcp_tilemap_<action>` (snake_case domain prefix — mirrors
-// the kebab `tilemap-*` ids in the upstream Unity-AI-Tilemap reference pack).
+// Naming: `unity_open_mcp_tilemap_<action>` (snake_case domain prefix).
 #if UNITY_OPEN_MCP_EXT_TILEMAP
 #pragma warning disable CS0618
 using System.Text;

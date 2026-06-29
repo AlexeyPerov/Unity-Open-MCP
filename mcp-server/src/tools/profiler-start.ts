@@ -3,10 +3,10 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // M16 Plan 7 — typed profiler session start. Mutating editor state but writes
 // NO assets, so the gate (which validates asset-reference fallout) has nothing
 // to validate — gate-free direct-response tool. Idempotent: calling when
-// already enabled returns the current enabled state. Folds UMCP `profiler-start`
-// and UCP `profiler/session/start` (UCP's deep-profile / allocation-callstacks /
-// binary-log options are intentionally NOT folded in — they require a richer
-// session state than this surface exposes; use profiler_set_config for those).
+// already enabled returns the current enabled state. Deep-profile /
+// allocation-callstacks / binary-log options are intentionally NOT folded in —
+// they require a richer session state than this surface exposes; use
+// profiler_set_config for those.
 export const profilerStart: Tool = {
   name: "unity_open_mcp_profiler_start",
   description:

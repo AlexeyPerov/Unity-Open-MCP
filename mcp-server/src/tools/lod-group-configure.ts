@@ -3,8 +3,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // M20 Plan 3 / T20.3.3 — Constraints & LOD domain tool. Configure a LODGroup
 // on a host GameObject. Built-in engine module. Mutating: runs the full gate
 // path; paths_hint is the host scene path. Idempotent — re-using an existing
-// LODGroup reports added:false (configuration still applied). Param shape
-// mirrors AnkleBreaker's unity_lod_create (number of LOD levels).
+// LODGroup reports added:false (configuration still applied).
 const targetSchema = {
   instance_id: {
     type: "integer",

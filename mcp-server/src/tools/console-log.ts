@@ -3,8 +3,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // M16 Plan 5 — typed console log. Writes a log/warning/error to the Editor
 // console from the agent. Gate-free direct-response tool: it emits a message
 // to the console but writes no assets, so no gate validation is meaningful.
-// Folds UUMCP console_log. The emitted entry surfaces in the next
-// unity_senses_read_console / unity_senses_pull_events call.
+// The emitted entry surfaces in the next unity_senses_read_console /
+// unity_senses_pull_events call.
 export const consoleLog: Tool = {
   name: "unity_open_mcp_console_log",
   description:

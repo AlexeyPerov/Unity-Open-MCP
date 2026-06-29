@@ -198,7 +198,7 @@ namespace UnityOpenMcpBridge.Screenshot
             // as a follow-up. On Windows we currently route through the same
             // readback path and set platformLimited: true so agents know the
             // fidelity limit; the PrintWindow full-fidelity integration is the
-            // documented Windows-only enhancement vs AnkleBreaker's model.
+            // documented Windows-only fidelity limit in the current model.
             var png = CaptureViaScreenReadback(window, width, height);
             return (png, true);
 #else

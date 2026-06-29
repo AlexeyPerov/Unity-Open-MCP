@@ -4,9 +4,6 @@ Timeline typed tools (`unity_open_mcp_timeline_*`), embedded inside the bridge.
 Five tools for in-editor cutscene / sequence authoring: create asset, add
 track, add clip, bind director, modify fields.
 
-Third Ivan-breadth domain shipped under M20 Plan 6 — closes the "Ivan has it,
-we don't" parity gap for the Timeline row of the competitive matrix.
-
 ## Compile gate
 
 Two-layer gate (see `docs/extensions.md` §Embedded domain model):

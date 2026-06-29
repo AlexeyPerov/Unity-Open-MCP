@@ -5,9 +5,9 @@
 // `defineConstraints: ["UNITY_OPEN_MCP_EXT_SPLINES"]` and references
 // Unity.Splines; the bridge root asmdef sets the define via `versionDefines`
 // when the package resolves. This is the first backlog domain shipped under
-// M18 Plan 7 — proof that the embedded + grouped model extends to Ivan-breadth
-// domains. (Cinemachine, the recommended first domain, was swapped for Splines
-// per the plan's fallback path — see the M18 changelog.)
+// M18 Plan 7 — proof that the embedded + grouped model extends to compile-
+// gated domain packs. (Cinemachine, the recommended first domain, was swapped
+// for Splines per the plan's fallback path — see the M18 changelog.)
 //
 // Splines is compile-gate-only (single stable API across com.unity.splines
 // 1.x and 2.x). No reflection probing for version detection — reflection is
@@ -33,8 +33,7 @@ namespace UnityOpenMcpBridge.Extensions.Splines
     // consistently.
     //
     // Naming: tool ids follow `unity_open_mcp_splines_<action>` (snake_case
-    // domain prefix), mirroring the kebab `splines-*` ids in the upstream
-    // Unity-AI-Splines reference pack.
+    // domain prefix).
     static class SplinesJson
     {
         public static string Ok(string body)

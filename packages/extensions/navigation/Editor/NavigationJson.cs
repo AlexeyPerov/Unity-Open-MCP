@@ -13,8 +13,7 @@ namespace UnityOpenMcpExtensions.Navigation
     // helpers every NavMesh tool composes.
     //
     // Naming: tool ids follow `unity_open_mcp_navigation_<action>` (snake_case
-    // domain prefix), mirroring the kebab `navigation-*` ids from the upstream
-    // Unity-MCP reference pack.
+    // domain prefix).
     static class NavigationJson
     {
         public static string Ok(string body)

@@ -4,11 +4,9 @@ Cinemachine typed tools (`unity_open_mcp_cinemachine_*`), embedded inside the
 bridge. Seven tools for in-editor virtual-camera authoring: create camera,
 set targets, set lens, set body, set noise, ensure brain, list cameras.
 
-Second Ivan-breadth domain shipped under M20 Plan 6 — closes the "Ivan has it,
-we don't" parity gap for the Cinemachine row of the competitive matrix. This is
-the **canonical reflection-gated** case named in M18 Plan 1 T18.1.1 task 5
-(version-split API trigger): the only domain pack in the bridge that does NOT
-compile-gate on its Unity dependency.
+This is the **canonical reflection-gated** case named in M18 Plan 1 T18.1.1
+task 5 (version-split API trigger): the only domain pack in the bridge that
+does NOT compile-gate on its Unity dependency.
 
 ## Compile gate (reflection, not compile-gate)
 

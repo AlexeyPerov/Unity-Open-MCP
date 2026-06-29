@@ -1,6 +1,6 @@
 // M18 Plan 2 / T18.2 — canonical tool-group catalog.
 //
-// Single source of truth for the Coplay-style tool-group visibility system.
+// Single source of truth for the per-session tool-group visibility system.
 // Drives two surfaces:
 //
 //  - `unity_open_mcp_manage_tools` meta-tool (session activation state).
@@ -12,9 +12,7 @@
 //
 // Groups are stable lowercase identifiers. The DEFAULT_ENABLED set is
 // `{ "core" }` only — every other group is hidden from ListTools until the
-// connected MCP session activates it via manage_tools. This matches Coplay's
-// model (see references/unity-mcp-beta-codev/Server/src/services/registry/
-// tool_registry.py: DEFAULT_ENABLED_GROUPS = {"core"}).
+// connected MCP session activates it via manage_tools.
 //
 // Domain groups (navigation, input, probuilder, particle-system, animation)
 // carry a `domainDefine` so capabilities can report compiled-state

@@ -1,6 +1,5 @@
 // Offline asset reader — parses text-serialized Unity assets (.prefab/.unity/
-// .asset) from disk without a running Editor. Ported from unity-scanner
-// internal/unityasset (yaml.go, scan.go, kind.go, project.go).
+// .asset) from disk without a running Editor.
 //
 // Single runtime module (so it loads cleanly under node --experimental-strip-
 // types in tests: no cross-file runtime imports). Type-only contract lives in
@@ -26,7 +25,7 @@ import type {
 } from "./compression/asset-model.js";
 
 // ===========================================================================
-// Native Unity class IDs → names (from unity-scanner yaml.go).
+// Native Unity class IDs → names.
 // ===========================================================================
 
 const nativeClassNames: Record<number, string> = {
@@ -61,7 +60,7 @@ function nativeClassName(classID: number): string {
 }
 
 // ===========================================================================
-// Kind / extension utilities (from unity-scanner kind.go).
+// Kind / extension utilities.
 // ===========================================================================
 
 const extToKind: Record<string, string> = {
@@ -163,7 +162,6 @@ type GUIDIndex = Map<string, string>;
 
 // ===========================================================================
 // YAML parser — split YAML into documents, extract key fields per object.
-// (Ported from unity-scanner yaml.go ParseAssetWithOptions.)
 // ===========================================================================
 
 function parseAsset(data: string): ParsedAsset {
@@ -966,7 +964,7 @@ function shortGUID(guid: string): string {
 }
 
 // ===========================================================================
-// GUID index builder — reads .meta files (from unity-scanner yaml.go).
+// GUID index builder — reads .meta files.
 // ===========================================================================
 
 function readMetaGUID(data: string): string {

@@ -31,10 +31,6 @@ namespace UnityOpenMcpBridge.Spatial
     // only binds primitive params). Physics transforms are synced first so
     // queries observe the latest scene edits.
     //
-    // Logic is adapted from UCP's SpatialController/ObjectLocator (references/),
-    // translated from MiniJson dictionaries to hand-rolled StringBuilder JSON
-    // and from the UCP command router to the bridge [BridgeTool] convention.
-    //
     // Read-only (Gate = Off, ReadOnlyHint = true) and token-bounded via max /
     // max_distance to protect the agent's context budget.
     [BridgeToolType]

@@ -2,10 +2,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed Render/Lighting settings read. Read-only: the
 // RenderSettings knobs for the currently-active scene (ambient mode/intensity/
-// color, fog + fog mode/density/color/distances, skybox, sun source). Folds
-// UCP settings/lighting. RenderSettings is scene-scoped in the live Editor —
-// the read reflects the active scene's lighting setup. Gate-free direct-
-// response tool.
+// color, fog + fog mode/density/color/distances, skybox, sun source).
+// RenderSettings is scene-scoped in the live Editor — the read reflects the
+// active scene's lighting setup. Gate-free direct-response tool.
 export const settingsGetLighting: Tool = {
   name: "unity_open_mcp_settings_get_lighting",
   description:

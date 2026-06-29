@@ -13,8 +13,7 @@ animation-constraint + LODGroup layer:
 - `lod_add_level` — add or replace a `LOD` entry on a `LODGroup` at an
   index, resolving the renderers from an array of GameObject paths.
 
-Added in M20 Plan 3 to close the Constraints & LOD parity gap with the
-competitor (AnkleBreaker ships a Constraints & LOD category).
+Added in M20 Plan 3 to cover the animation-constraint + LODGroup layer.
 
 ## Compile gate
 

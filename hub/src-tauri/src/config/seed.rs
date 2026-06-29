@@ -256,9 +256,8 @@ pub struct HubCandidatesResult {
     pub error: Option<String>,
 }
 
-/// Live, read-only scan of Unity Hub's recent-projects list. Mirrors
-/// the UnityLauncherPro `GetProjects.VisitProjectsInUnityHubJson` flow:
-/// the `projects-v1.json` file under Hub's data directory is the
+/// Live, read-only scan of Unity Hub's recent-projects list. The
+/// `projects-v1.json` file under Hub's data directory is the
 /// authoritative source for "what Unity Hub thinks the user has been
 /// working on". Unlike `seed_from_unity_hub`, this command does **not**
 /// mutate `projects.json` — it returns the candidate list so the UI can

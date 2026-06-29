@@ -5,8 +5,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // bridge (no UNITY_OPEN_MCP_EXT_TERRAIN define), always compiled. The
 // `terrain` group is hidden until manage_tools activates it. Mutating: runs
 // the full gate path; paths_hint is the new terrain's scene path + the asset
-// path (when provided). Param shape mirrors AnkleBreaker's unity_terrain_create
-// (width / length / height / heightmapResolution / position / dataPath).
+// path (when provided). Param shape: width / length / height /
+// heightmapResolution / position / dataPath.
 const HEIGHTMAP_RESOLUTIONS =
   "Power-of-two plus one (33 | 65 | 129 | 257 | 513 | 1025 | 2049 | 4097).";
 

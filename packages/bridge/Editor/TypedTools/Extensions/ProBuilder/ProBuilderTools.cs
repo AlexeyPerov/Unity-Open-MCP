@@ -37,9 +37,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilder
     // a semantic direction (Up / Down / Left / Right / Forward / Back) is
     // accepted as a friendlier alternative to indices.
     //
-    // Naming: `unity_open_mcp_probuilder_<action>` (snake_case domain prefix —
-    // mirrors the kebab `probuilder-*` ids in the upstream Unity-MCP reference
-    // pack). Reference: IvanMurzak/Unity-AI-ProBuilder (Apache-2.0).
+    // Naming: `unity_open_mcp_probuilder_<action>` (snake_case domain prefix).
     [BridgeToolType]
     public static class ProBuilderTools
     {
@@ -100,8 +98,8 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilder
             }
 
             // Apply transform. position/rotation are world space unless a parent
-            // exists (then they're local — matches the reference pack's
-            // isLocalSpace:false-with-parent behavior).
+            // exists (then they're local: isLocalSpace:false-with-parent
+            // behavior).
             if (!string.IsNullOrEmpty(position))
             {
                 var p = ParseVector3(position, Vector3.zero);

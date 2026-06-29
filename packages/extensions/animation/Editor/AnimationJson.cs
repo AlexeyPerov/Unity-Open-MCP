@@ -15,9 +15,7 @@ namespace UnityOpenMcpExtensions.Animation
     // gate path with paths_hint scoped to the asset path.
     //
     // Naming: tool ids follow `unity_open_mcp_animation_<action>` and
-    // `unity_open_mcp_animator_<action>` (snake_case domain prefix), mirroring
-    // the kebab `animation-*` / `animator-*` ids from the upstream Unity-MCP
-    // reference pack.
+    // `unity_open_mcp_animator_<action>` (snake_case domain prefix).
     static class AnimationJson
     {
         public const string ClipExtension = ".anim";
@@ -87,7 +85,7 @@ namespace UnityOpenMcpExtensions.Animation
 
         // Ensure all intermediate folders under Assets/ exist. Creates them
         // via Directory.CreateDirectory + AssetDatabase.Refresh so the next
-        // AssetDatabase.CreateAsset call succeeds. Mirrors the upstream pack.
+        // AssetDatabase.CreateAsset call succeeds.
         public static void EnsureFolders(string assetPath)
         {
             var directory = Path.GetDirectoryName(assetPath);

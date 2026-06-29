@@ -15,8 +15,7 @@
 // (dependency missing: com.unity.2d.tilemap)`.
 //
 // Naming: tool ids follow `unity_open_mcp_tilemap_<action>` (snake_case
-// domain prefix), mirroring the kebab `tilemap-*` ids in the upstream
-// Unity-AI-Tilemap reference pack.
+// domain prefix).
 #if UNITY_OPEN_MCP_EXT_TILEMAP
 #pragma warning disable CS0618
 using System.Text;

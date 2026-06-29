@@ -1,11 +1,11 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed Render/Lighting settings mutator. Mutating: set
-// RenderSettings knobs by key/value patches. Folds UCP settings/lighting-set.
-// RenderSettings is scene-scoped — writes only persist when the active scene
-// is marked dirty (the tool does that automatically). paths_hint must scope to
-// the active scene path (and/or the lighting/render settings asset) so the
-// gate covers the scene-side fallout.
+// RenderSettings knobs by key/value patches. RenderSettings is scene-scoped —
+// writes only persist when the active scene is marked dirty (the tool does
+// that automatically). paths_hint must scope to the active scene path (and/or
+// the lighting/render settings asset) so the gate covers the scene-side
+// fallout.
 export const settingsSetLighting: Tool = {
   name: "unity_open_mcp_settings_set_lighting",
   description:

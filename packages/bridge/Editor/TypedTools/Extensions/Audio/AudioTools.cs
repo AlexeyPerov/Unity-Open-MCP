@@ -1,7 +1,7 @@
 // M20 Plan 3 / T20.3.1 — Audio embedded domain tools.
 //
-// Five typed tools covering the AudioSource / AudioListener / AudioMixer layer
-// the competitor (AnkleBreaker) ships as its audio category.
+// Five typed tools covering the AudioSource / AudioListener / AudioMixer
+// layer.
 //
 //   audio_source_add              — add an AudioSource to a GameObject.
 //   audio_source_modify           — typed patch on an AudioSource (volume /
@@ -49,8 +49,7 @@ namespace UnityOpenMcpBridge.Extensions.Audio
         // =====================================================================
 
         // Add an AudioSource component to a target GameObject and configure
-        // the common fields. Mirrors AnkleBreaker's unity_audio_create_source
-        // param shape (clipPath / volume / pitch / loop / playOnAwake /
+        // the common fields (clipPath / volume / pitch / loop / playOnAwake /
         // spatialBlend) + adds min/max distance. Idempotent: re-using an
         // existing AudioSource is reported with added:false.
         [BridgeTool("unity_open_mcp_audio_source_add",

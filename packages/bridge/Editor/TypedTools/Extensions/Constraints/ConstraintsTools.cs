@@ -1,7 +1,6 @@
 // M20 Plan 3 / T20.3.3 — Constraints & LOD embedded domain tools.
 //
-// Three typed tools covering the animation-constraint + LODGroup layer the
-// competitor (AnkleBreaker) ships as its Constraints & LOD category.
+// Three typed tools covering the animation-constraint + LODGroup layer.
 //
 //   constraint_add        — add a constraint component (PositionConstraint /
 //                           RotationConstraint / AimConstraint /
@@ -51,10 +50,10 @@ namespace UnityOpenMcpBridge.Extensions.Constraints
         // =====================================================================
 
         // Add a constraint component to a host GameObject and optionally seed a
-        // source Transform + weight + activation state. Mirrors AnkleBreaker's
-        // unity_constraint_add param shape (type + source + activate). Idempotent
-        // — re-using an existing constraint of the same type reports added:false
-        // (the source / weight / activation are still applied).
+        // source Transform + weight + activation state (type + source +
+        // activate). Idempotent — re-using an existing constraint of the same
+        // type reports added:false (the source / weight / activation are still
+        // applied).
         [BridgeTool("unity_open_mcp_constraint_add",
             Title = "Constraints: Add Constraint",
             IsMutating = true,
@@ -196,9 +195,8 @@ namespace UnityOpenMcpBridge.Extensions.Constraints
 
         // Configure a LODGroup on a host GameObject. Idempotent — re-using an
         // existing LODGroup reports added:false (the fade mode / cross-fade /
-        // LOD array are still applied). Mirrors AnkleBreaker's unity_lod_create
-        // param shape (number of LOD levels). When lod_count is provided, the
-        // LOD array is (re)allocated with placeholder LOD entries whose renderers
+        // LOD array are still applied). When lod_count is provided, the LOD
+        // array is (re)allocated with placeholder LOD entries whose renderers
         // are empty — agents wire the renderers per level via lod_add_level.
         [BridgeTool("unity_open_mcp_lod_group_configure",
             Title = "Constraints: Configure LOD Group",
@@ -324,8 +322,7 @@ namespace UnityOpenMcpBridge.Extensions.Constraints
         // from an array of GameObject paths (each GameObject must carry a
         // Renderer — usually a MeshRenderer on a child mesh). When the index is
         // within the existing LOD array, the entry is replaced in place; when it
-        // equals the array length, a new level is appended. Mirrors the
-        // per-level wiring AnkleBreaker's unity_lod_create leaves to the agent.
+        // equals the array length, a new level is appended.
         [BridgeTool("unity_open_mcp_lod_add_level",
             Title = "Constraints: Add LOD Level",
             IsMutating = true,

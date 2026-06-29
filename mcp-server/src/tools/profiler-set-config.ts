@@ -1,11 +1,11 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 7 — typed profiler config mutator. Mutates editor state but writes
-// NO assets; gate-free direct-response tool. Folds UCP `profiler/config/set`.
-// Only the knobs Unity's runtime API exposes for in-place writes are honored;
-// the rest are reported as warnings (the request is recorded, the value is
-// not applied). Returns the post-write config (same shape as
-// profiler_get_config) plus a warnings[] list of any non-applicable knobs.
+// NO assets; gate-free direct-response tool. Only the knobs Unity's runtime
+// API exposes for in-place writes are honored; the rest are reported as
+// warnings (the request is recorded, the value is not applied). Returns the
+// post-write config (same shape as profiler_get_config) plus a warnings[]
+// list of any non-applicable knobs.
 export const profilerSetConfig: Tool = {
   name: "unity_open_mcp_profiler_set_config",
   description:

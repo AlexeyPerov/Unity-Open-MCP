@@ -141,9 +141,9 @@ export class LiveClient implements Router {
     this.projectPath = projectPath;
     // M13 T4.5 — launch-errors / Safe Mode dialog auto-dismissal. Resolved
     // once at construction; the env vars do not change mid-process. The
-    // feature is enabled by default (Unity-MCP parity) and runs concurrently
-    // with every compile/bridge readiness wait so it ticks on the same stall
-    // points agents hit, not only at process spawn.
+    // feature is enabled by default and runs concurrently with every
+    // compile/bridge readiness wait so it ticks on the same stall points
+    // agents hit, not only at process spawn.
     const dismissCfg = readDismissConfig();
     this.dismissEnabled = dismissCfg.enabled;
     this.dismissTimeoutMs = dismissCfg.timeoutMs;
@@ -378,10 +378,9 @@ export class LiveClient implements Router {
 
         // M20 Plan 1 / T20.1.1 — capture_inline returns an `inlineImage` base64
         // PNG field. Unwrap it into an MCP image content block alongside a text
-        // metadata block (matching the AnkleBreaker unity_graphics_*_capture
-        // contract: [{type: image}, {type: text}]). The image carries the same
-        // viewable payload a file-path screenshot would; the metadata keeps the
-        // view / resolution / byteLength fields without the base64 blob.
+        // metadata block ([{type: image}, {type: text}]). The image carries the
+        // same viewable payload a file-path screenshot would; the metadata keeps
+        // the view / resolution / byteLength fields without the base64 blob.
         const inlineImage = directBody?.inlineImage;
         if (
           directBody != null &&
@@ -630,11 +629,11 @@ export class LiveClient implements Router {
 
     // M13 T4.5 — run the launch-errors / Safe Mode dialog auto-dismiss loop
     // CONCURRENTLY with the compile poll. The dismiss loop ticks on the same
-    // stall point this method represents (UCP bridge-wait pattern): if a
-    // native modal is blocking the Editor, the compile poll below will spin
-    // until timeout with no recovery. The dismiss loop clicks Ignore on that
-    // modal; the moment compile resolves (compiling → idle), we abort the
-    // loop — there is no launch dialog left to dismiss once Unity is idle.
+    // stall point this method represents: if a native modal is blocking the
+    // Editor, the compile poll below will spin until timeout with no recovery.
+    // The dismiss loop clicks Ignore on that modal; the moment compile
+    // resolves (compiling → idle), we abort the loop — there is no launch
+    // dialog left to dismiss once Unity is idle.
     //
     // When auto-dismiss is opted out (UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1),
     // `dismissEnabled` is false and this branch is skipped entirely,

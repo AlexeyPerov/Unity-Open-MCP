@@ -10,9 +10,8 @@ use crate::config::commands::AppState;
 use crate::config::schemas::Settings;
 
 /// Mapping from a Unity `Data/PlaybackEngines/<folder>` name to the
-/// friendly build-target label the Unity Versions tab renders. Ports
-/// UnityLauncherPro `GetUnityInstallations.platformNames`
-/// (Windows-flavoured keys, used by Hub itself) plus the macOS / Linux
+/// friendly build-target label the Unity Versions tab renders. Covers
+/// the Windows-flavoured keys (used by Hub itself) plus the macOS / Linux
 /// equivalents Hub sees on those hosts. Unknown folders fall back to
 /// the lowercased folder name so a new platform Unity ships is not
 /// silently dropped — the user sees *something* even before Hub knows
@@ -34,10 +33,10 @@ fn friendly_playback_engine_name(folder: &str) -> String {
     }
 }
 
-/// Release stream inferred from the Unity version suffix. Mirrors the
-/// UnityLauncherPro `Tools.IsAlpha / IsBeta` heuristics (`a`/`b`/`f`).
-/// Used by the Unity Versions tab to render an LTS / TECH / BETA / ALPHA
-/// chip per installed editor in addition to the OS source chip.
+/// Release stream inferred from the Unity version suffix. Uses the
+/// `a`/`b`/`f` stream heuristics. Used by the Unity Versions tab to
+/// render an LTS / TECH / BETA / ALPHA chip per installed editor in
+/// addition to the OS source chip.
 fn release_type_for(version: &str) -> String {
     // Unity versions follow `MAJOR.MINOR.PATCH<kind><seq>` where
     // `<kind>` is `a` (alpha), `b` (beta), `f` (final), `p` (patch),
@@ -103,9 +102,8 @@ fn version_kind_marker(version: &str) -> char {
 /// return the friendly platform names of every build target Unity
 /// shipped modules for. The list always includes the host editor's own
 /// platform (the standalone player is not a PlaybackEngines folder — it
-/// ships with the Editor binary itself — so we add it explicitly to
-/// match the UnityLauncherPro `GetPlatforms` behaviour of "desktop
-/// versions are always present").
+/// ships with the Editor binary itself — so we add it explicitly so
+/// desktop versions are always present).
 ///
 /// Returns an empty `Vec` when the editor install is missing the
 /// `Data/PlaybackEngines/` directory (a minimal / custom build). The
@@ -191,10 +189,10 @@ pub struct UnityInstallation {
     pub platforms: Vec<String>,
     /// M15 T6.4: release stream inferred from the version suffix —
     /// `"LTS"`, `"TECH"`, `"Beta"`, `"Alpha"`, or `""` for unknown.
-    /// Mirrors the UnityLauncherPro `IsAlpha / IsBeta` heuristic so the
-    /// Unity Versions tab can render the same stream chip it already
-    /// renders on the Releases sub-section. `#[serde(default)]` keeps
-    /// the cache payload loadable from older Hub builds.
+    /// Mirrors the `IsAlpha / IsBeta` stream heuristic so the Unity
+    /// Versions tab can render the same stream chip it already renders
+    /// on the Releases sub-section. `#[serde(default)]` keeps the cache
+    /// payload loadable from older Hub builds.
     #[serde(default)]
     pub release_type: String,
 }
@@ -238,9 +236,8 @@ fn is_unity_editor_dir(dir: &Path) -> bool {
         if dir.join("Editor").join("Unity.exe").is_file() {
             return true;
         }
-        // Source-build fallback (UnityLauncherPro
-        // `GetUnityInstallations.cs`): a Unity fork built from source
-        // lays out the binary at
+        // Source-build fallback: a Unity fork built from source lays
+        // out the binary at
         // `<dir>/build/WindowsEditor/x64/Release/Unity.exe` instead of
         // `<dir>/Editor/Unity.exe`. We accept the source-build path so
         // teams iterating on a custom Unity still appear in the

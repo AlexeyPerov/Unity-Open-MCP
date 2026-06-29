@@ -1,9 +1,9 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 5 — typed editor layers read. Read-only: lists every non-empty
-// layer slot (index 0–31) from the TagManager. Gate-free. Folds UUMCP
-// editor_get_layers + UCP settings/tags-layers. Pair with editor_add_layer
-// for the mutating side, and gameobject_modify (layer) for consumers.
+// layer slot (index 0–31) from the TagManager. Gate-free. Pair with
+// editor_add_layer for the mutating side, and gameobject_modify (layer) for
+// consumers.
 export const editorGetLayers: Tool = {
   name: "unity_open_mcp_editor_get_layers",
   description:

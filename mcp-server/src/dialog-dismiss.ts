@@ -6,12 +6,12 @@
 // compile-wait loops with no way to recover. This module probes the OS
 // desktop for that dialog and clicks **Ignore** while the LiveClient's
 // compile/bridge readiness wait is ticking — the same stall point agents hit
-// today (UCP bridge-wait pattern).
+// today.
 //
-// Design (porting Unity-MCP's `launch-error-dismiss` approach):
-//   - Default: ENABLED (Unity-MCP parity — auto-dismiss unless turned off).
+// Design (auto-dismiss launch-error dialogs):
+//   - Default: ENABLED (auto-dismiss unless turned off).
 //   - Opt out via UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1.
-//   - Tunable timeout (30s) / interval (1.5s) — Unity-MCP defaults.
+//   - Tunable timeout (30s) / interval (1.5s) defaults.
 //   - Each successful dismissal is logged once to stderr (title + button +
 //     platform) for auditability.
 //   - Cross-platform: Windows (Win32/PowerShell), macOS (AppleScript),
@@ -500,9 +500,9 @@ export function parseDismissOutput(stdout: string): DismissOutcome {
 // Polling loop + config
 // ===========================================================================
 
-/** Default dismiss probe timeout — Unity-MCP parity (30s overall budget). */
+/** Default dismiss probe timeout (30s overall budget). */
 export const DEFAULT_DISMISS_TIMEOUT_MS = 30_000;
-/** Default dismiss probe poll interval — Unity-MCP parity (1.5s tick). */
+/** Default dismiss probe poll interval (1.5s tick). */
 export const DEFAULT_DISMISS_INTERVAL_MS = 1_500;
 
 /**
@@ -612,10 +612,10 @@ export interface PollAndDismissOptions {
  * occurrence so the helper does not spawn doomed tool invocations on a fixed
  * budget.
  *
- * The loop keeps polling until aborted even when no dialog appears — unlike
- * Unity-MCP's standalone `open` CLI, this loop runs CONCURRENTLY with the
- * LiveClient compile wait. The compile wait's resolution (compiling → idle)
- * is the authoritative "no more launch dialog" signal and aborts this loop.
+ * The loop keeps polling until aborted even when no dialog appears — this
+ * loop runs CONCURRENTLY with the LiveClient compile wait. The compile wait's
+ * resolution (compiling → idle) is the authoritative "no more launch dialog"
+ * signal and aborts this loop.
  */
 export async function pollAndDismissLaunchErrors(
   opts: PollAndDismissOptions,

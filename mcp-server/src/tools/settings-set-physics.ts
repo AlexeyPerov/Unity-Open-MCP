@@ -1,8 +1,8 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed Physics / Physics2D mutator. Mutating: set Physics knobs
-// by key/value patches. Folds UCP settings/physics-set. paths_hint must be
-// scoped to ProjectSettings/DynamicsManager.asset.
+// by key/value patches. paths_hint must be scoped to
+// ProjectSettings/DynamicsManager.asset.
 export const settingsSetPhysics: Tool = {
   name: "unity_open_mcp_settings_set_physics",
   description:

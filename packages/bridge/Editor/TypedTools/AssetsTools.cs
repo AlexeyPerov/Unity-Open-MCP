@@ -20,7 +20,8 @@ namespace UnityOpenMcpBridge.TypedTools
     {
         // Cross-platform invalid file-name characters. Path.GetInvalidFileNameChars
         // is OS-dependent (Linux/Mac returns only '/' and '\0'); Unity projects
-        // must be portable across all platforms. Mirrors Unity-MCP's list.
+        // must be portable across all platforms, so this list unions every
+        // platform's banned chars.
         public static readonly char[] InvalidFileNameChars =
         {
             '/', '\\', '<', '>', ':', '"', '|', '?', '*',

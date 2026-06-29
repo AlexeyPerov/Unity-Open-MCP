@@ -16,10 +16,10 @@ AudioSource / AudioListener / AudioMixer layer:
   enabled listeners as a warning — Unity errors on multiple active listeners at
   runtime.
 
-Added in M20 Plan 3 to close the Audio parity gap with the competitor
-(AnkleBreaker ships a full audio category). The mixer-parameter round-trip
-(set then read-back) is the documented advantage — AnkleBreaker's audio tool
-touches per-source settings only.
+Added in M20 Plan 3 to cover the AudioSource / AudioListener / AudioMixer
+layer. The mixer-parameter round-trip (set then read-back) is the documented
+advantage — a source-only audio tool touches per-source settings only, while
+this pack also reads/writes exposed `AudioMixer` float parameters.
 
 ## Compile gate
 

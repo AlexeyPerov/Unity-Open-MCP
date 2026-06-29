@@ -1,11 +1,10 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-// M16 Plan 7 — typed profiler status read. Read-only, gate-free. Folds UMCP
-// `profiler-get-status` and UCP `profiler/status`. Does NOT duplicate M10 —
-// unity_senses_profiler_memory / profiler_rendering / profiler_capture are the
-// per-frame / allocator / GPU reads; this tool returns the runtime flag, max
-// used memory high-water mark, platform support, and the local module
-// bookkeeping set.
+// M16 Plan 7 — typed profiler status read. Read-only, gate-free. Does NOT
+// duplicate M10 — unity_senses_profiler_memory / profiler_rendering /
+// profiler_capture are the per-frame / allocator / GPU reads; this tool
+// returns the runtime flag, max used memory high-water mark, platform support,
+// and the local module bookkeeping set.
 export const profilerGetStatus: Tool = {
   name: "unity_open_mcp_profiler_get_status",
   description:

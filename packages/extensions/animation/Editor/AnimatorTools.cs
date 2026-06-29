@@ -26,8 +26,7 @@ namespace UnityOpenMcpExtensions.Animation
     //
     // Per-entry errors are accumulated in the response's `errors` array (no
     // thrown exceptions to MCP). Naming: `unity_open_mcp_animator_<action>`
-    // (snake_case domain prefix — mirrors the kebab `animator-*` ids in the
-    // upstream Unity-MCP reference pack).
+    // (snake_case domain prefix).
     [BridgeToolType]
     public static class AnimatorTools
     {

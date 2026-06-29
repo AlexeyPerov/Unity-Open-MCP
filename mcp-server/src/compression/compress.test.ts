@@ -27,7 +27,7 @@ import type {
 } from "./asset-model.js";
 
 // ---------------------------------------------------------------------------
-// compressNames — port parity with unity-scanner CompressNames.
+// compressNames — folds numbered runs.
 // ---------------------------------------------------------------------------
 
 test("compressNames folds numbered runs of 3+", () => {

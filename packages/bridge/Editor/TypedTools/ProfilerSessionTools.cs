@@ -49,7 +49,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Canonical Profiler window module names this surface understands.
         // Kept as a constant list so the wrapper is independent of the optional
         // com.unity.profiling.core package — the core tool relies on built-in
-        // Unity APIs only. Mirrors the UMCP AvailableModules list.
+        // Unity APIs only.
         private static readonly string[] AvailableModules =
         {
             "CPU", "GPU", "Rendering", "Memory", "Audio", "Video",
@@ -57,9 +57,9 @@ namespace UnityOpenMcpBridge.TypedTools
             "UI", "UIDetails", "GlobalIllumination", "VirtualTexturing"
         };
 
-        // Default-enabled subset (mirrors the UMCP defaults). Unity's runtime
-        // Profiler API does not expose per-module enable/disable, so this is
-        // purely local bookkeeping consumed by GetStatus / ListModules /
+        // Default-enabled subset. Unity's runtime Profiler API does not expose
+        // per-module enable/disable, so this is purely local bookkeeping
+        // consumed by GetStatus / ListModules /
         // EnableModule; actual module visibility is controlled from the
         // Profiler window.
         private static readonly HashSet<string> EnabledModules = new HashSet<string>
@@ -69,9 +69,8 @@ namespace UnityOpenMcpBridge.TypedTools
         };
 
         // Editor-version reflection cache for ProfilerDriver knobs that are
-        // not part of the public API surface on every Unity version. Mirrors
-        // the UCP ProfilerController approach: try once at first use, cache
-        // null when unavailable.
+        // not part of the public API surface on every Unity version. Try once
+        // at first use, cache null when unavailable.
         private static readonly Type ProfilerDriverType =
             Type.GetType("UnityEditorInternal.ProfilerDriver, UnityEditor");
         private static readonly PropertyInfo DriverEnabledProperty =
@@ -657,9 +656,8 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Apply a memory-budget clamp that prevents editor memory bloat.
-        // Mirrors UCP's ApplySafeMemoryBudget: heavy-capture (deep profiling
-        // or allocation callstacks) gets a tighter cap. Returns warnings for
-        // any clamping that happened.
+        // Heavy-capture (deep profiling or allocation callstacks) gets a
+        // tighter cap. Returns warnings for any clamping that happened.
         private static List<string> ApplySafeMemoryBudget(long? requestedBytes,
             bool deepProfile, bool allocationCallstacks)
         {

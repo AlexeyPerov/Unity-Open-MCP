@@ -18,8 +18,8 @@ Four tools cover the Canvas / element / layout-group / element-modify layer:
   color / raycastTarget, LayoutElement preferred sizes, Text/TMP_Text text).
   Mirrors `component_modify` shape, typed to uGUI types.
 
-Added in M20 Plan 3 to close the UI parity gap with the competitor (AnkleBreaker
-ships a full UI category).
+Added in M20 Plan 3 to cover the Canvas / element / layout-group / element-modify
+layer.
 
 ## Compile gate
 

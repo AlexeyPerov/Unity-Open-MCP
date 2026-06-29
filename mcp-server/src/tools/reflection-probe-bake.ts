@@ -3,8 +3,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // M20 Plan 2 / T20.2.2 — Lighting domain tool. Reflection probe bake is the
 // long mutation with a settle window — routed through the gate
 // (EditorSettle lifecycle, Gate = Enforce) so agents wait for the bake to
-// complete before the next mutation. The documented advantage over
-// AnkleBreaker's ungated bake. Built-in lighting module.
+// complete before the next mutation. Built-in lighting module.
 export const reflectionProbeBake: Tool = {
   name: "unity_open_mcp_reflection_probe_bake",
   description:

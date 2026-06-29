@@ -7,9 +7,8 @@
 //   - director_bind: bind a TimelineAsset to a scene PlayableDirector
 //   - modify: reflective field-patch escape hatch for niche Timeline fields
 //
-// Track-type enum handling mirrors the upstream Unity-AI-Timeline reference
-// pack's Helpers.cs (Animation / Activation / Audio / Signal / Control + Group
-// / Playable).
+// Track-type enum set: Animation / Activation / Audio / Signal / Control +
+// Group / Playable.
 //
 // Tools that mutate a scene GameObject (director_bind) run the gate path with
 // paths_hint scoped to the host's scene path. timeline_create produces a
@@ -17,14 +16,11 @@
 // touches either an asset or a scene object depending on what it targets.
 //
 // Compile-gate-only: com.unity.timeline has a single stable public API across
-// 1.x (the reference pack wraps 1.8.12), so there is no reflection / version-
-// detection layer. When the package is absent the tools are not compiled in
-// and the capability surface reports the domain as `available: false
-// (dependency missing: com.unity.timeline)`.
+// 1.x, so there is no reflection / version-detection layer. When the package is
+// absent the tools are not compiled in and the capability surface reports the
+// domain as `available: false (dependency missing: com.unity.timeline)`.
 //
-// Naming: `unity_open_mcp_timeline_<action>` (snake_case domain prefix — mirrors
-// the kebab `timeline-*` ids in the upstream Unity-AI-Timeline reference pack).
-// Reference: IvanMurzak/Unity-AI-Timeline (MIT).
+// Naming: `unity_open_mcp_timeline_<action>` (snake_case domain prefix).
 #if UNITY_OPEN_MCP_EXT_TIMELINE
 #pragma warning disable CS0618
 using System.Text;

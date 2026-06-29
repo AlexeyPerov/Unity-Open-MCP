@@ -25,10 +25,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSystem
     // All tools target a `.inputactions` asset path (not a scene GameObject)
     // — every mutator runs the gate path with `paths_hint` scoped to the asset
     // so the verify checkpoint can detect broken asset references. Naming:
-    // `unity_open_mcp_inputsystem_<action>` (snake_case domain prefix — mirrors
-    // the kebab `inputsystem-*` ids in the upstream Unity-MCP reference pack).
-    //
-    // Reference: IvanMurzak/Unity-AI-InputSystem (MIT).
+    // `unity_open_mcp_inputsystem_<action>` (snake_case domain prefix).
     [BridgeToolType]
     public static class InputSystemTools
     {

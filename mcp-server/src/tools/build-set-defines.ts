@@ -2,8 +2,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed scripting-define setter. Mutating:
 // PlayerSettings.SetScriptingDefineSymbols for the active build target group.
-// Triggers a recompile (lifecycle: restart_then_settle). Folds UCP
-// build/set-defines + UUMCP set_defines.
+// Triggers a recompile (lifecycle: restart_then_settle).
 //
 // paths_hint: the defines block lives in ProjectSettings/ProjectSettings.asset.
 // Scope paths_hint to that asset.

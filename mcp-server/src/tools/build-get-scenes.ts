@@ -1,8 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed build-scenes read. Read-only: the EditorBuildSettings
-// scene list (path / enabled / guid). Folds UCP build/scenes. Gate-free
-// direct-response tool.
+// scene list (path / enabled / guid). Gate-free direct-response tool.
 export const buildGetScenes: Tool = {
   name: "unity_open_mcp_build_get_scenes",
   description:

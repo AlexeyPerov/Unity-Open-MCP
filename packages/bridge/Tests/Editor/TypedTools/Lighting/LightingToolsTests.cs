@@ -67,8 +67,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
             Assert.IsTrue(mod.IsMutating);
             Assert.AreEqual(LifecyclePolicy.EditorSettle, mod.Lifecycle);
 
-            // The bake tool is the long-mutation advantage over AnkleBreaker —
-            // it MUST be EditorSettle so the dispatcher waits for the bake.
+            // The bake tool is a long mutation — it MUST be EditorSettle so the
+            // dispatcher waits for the bake.
             Assert.IsTrue(BridgeToolRegistry.TryGet(
                 "unity_open_mcp_reflection_probe_bake", out var bake));
             Assert.IsTrue(bake.IsMutating);

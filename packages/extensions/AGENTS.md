@@ -29,7 +29,7 @@ The five **shipped** domains (navigation, inputsystem, probuilder, particlesyste
 ## Tool registration
 
 - Tools are discovered via `[BridgeToolType]` on a class + `[BridgeTool]` on methods — the bridge registry scans every loaded assembly. **No core bridge edits per pack.** This is the whole point of the extension boundary.
-- Tool ids follow `unity_open_mcp_<domain>_<action>` (snake_case, domain prefix). Mirrors the kebab `<domain>-*` ids in the upstream Unity-MCP reference packs.
+- Tool ids follow `unity_open_mcp_<domain>_<action>` (snake_case, domain prefix).
 - Mutating tools declare `IsMutating = true`, accept a `string[] paths_hint` parameter (snake_case `paths_hint` bound by name), and set `Lifecycle = EditorSettle` (or `RestartThenSettle` if the op can domain-reload).
 - Read-only tools set `ReadOnlyHint = true`, `Gate = GateMode.Off`, `Lifecycle = LifecyclePolicy.None`.
 - The `paths_hint` contract is mandatory for mutating tools — refuse with `paths_hint_required` when empty. No whole-project fallback (root bridge rule).

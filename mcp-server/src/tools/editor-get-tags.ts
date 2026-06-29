@@ -1,8 +1,8 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 5 — typed editor tags read. Read-only: lists every configured tag
-// from the TagManager. Gate-free. Folds UUMCP editor_get_tags + UCP
-// settings/tags-layers. Pair with editor_add_tag for the mutating side.
+// from the TagManager. Gate-free. Pair with editor_add_tag for the mutating
+// side.
 export const editorGetTags: Tool = {
   name: "unity_open_mcp_editor_get_tags",
   description:

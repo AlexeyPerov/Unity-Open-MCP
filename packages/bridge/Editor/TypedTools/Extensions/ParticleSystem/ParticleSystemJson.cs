@@ -17,8 +17,7 @@ namespace UnityOpenMcpBridge.Extensions.ParticleSystem
     // mutating tools is scoped to the host's scene path (mirrors ProBuilder).
     //
     // Naming: tool ids follow `unity_open_mcp_particle_system_<action>`
-    // (snake_case domain prefix), mirroring the kebab `particle-system-*` ids
-    // from the upstream Unity-MCP reference pack.
+    // (snake_case domain prefix).
     static class ParticleSystemJson
     {
         public static string Ok(string body)

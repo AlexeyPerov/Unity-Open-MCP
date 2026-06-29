@@ -2,7 +2,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed build-target switch. Mutating: EditorUserBuildSettings
 // .SwitchActiveBuildTarget. May trigger a recompile + domain reload (the
-// lifecycle is restart_then_settle). Folds UCP build/set-target.
+// lifecycle is restart_then_settle).
 //
 // paths_hint: ProjectSettings files are rewritten when the active target
 // changes (ProjectSettings/ProjectSettings.asset + the build-target-specific

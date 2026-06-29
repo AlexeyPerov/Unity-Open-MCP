@@ -18,9 +18,7 @@
 // scoped to the host scene path (create_camera adds a new GameObject to the
 // active scene).
 //
-// Naming: `unity_open_mcp_cinemachine_<action>` (snake_case domain prefix —
-// mirrors the kebab `cinemachine-*` ids in the upstream Unity-AI-Cinemachine
-// reference pack, which wraps com.unity.cinemachine 3.1.x).
+// Naming: `unity_open_mcp_cinemachine_<action>` (snake_case domain prefix).
 using System.Text;
 using UnityEngine;
 using UnityEditor;

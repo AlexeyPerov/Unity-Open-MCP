@@ -22,10 +22,10 @@ namespace UnityOpenMcpBridge.FrameDebugger
     // behind a single reflection helper (FrameDebuggerApi) so future Unity API
     // drift only touches one place.
     //
-    // Advantage framing vs AnkleBreaker: enable/disable is a non-mutating
-    // Editor state change, so the tool routes read-only (Gate = Off). The
-    // response still records `windowOpened` so agents know they left Editor UI
-    // in a changed state. No assets/scenes are modified.
+    // enable/disable is a non-mutating Editor state change, so the tool routes
+    // read-only (Gate = Off). The response still records `windowOpened` so
+    // agents know they left Editor UI in a changed state. No assets/scenes are
+    // modified.
     [BridgeToolType]
     public class Tool_FrameDebugger
     {

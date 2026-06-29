@@ -108,9 +108,9 @@ export function createServer(
     authToken,
   );
   // M18 Plan 2 / T18.2.2 — per-session tool-group visibility state. Lives in
-  // the MCP server (matches the Coplay model and the resolved decision in
-  // M18 execution-plan.md). Resets to `core`-only on every server restart;
-  // mutated only by unity_open_mcp_manage_tools and consulted by ListTools.
+  // the MCP server (the resolved decision in M18 execution-plan.md). Resets to
+  // `core`-only on every server restart; mutated only by
+  // unity_open_mcp_manage_tools and consulted by ListTools.
   const sessionState = new ToolSessionState();
   const notifyToolListChanged = async (): Promise<void> => {
     try {

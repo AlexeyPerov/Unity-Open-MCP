@@ -147,7 +147,7 @@ Notes:
 | 8.3 | No arbitrary Unity.exe path parser — discovery is limited to configured parent folders | Confirmed via the Unity Versions tab and `discovery.rs` | ☐ |
 | 8.4 | No Linux-only code paths exposed; Linux is allowed to render but the manual test matrix is Windows + macOS only | Confirmed by the v1 done criteria | ☐ |
 | 8.5 | No `template-based new project creation` flow | Confirmed by the Add Project button opening a folder picker only | ☐ |
-| 8.6 | No advanced ecosystem adapters (UCP, unity-cli, Unity official MCP) wired into the Hub UI | Confirmed by `grep -ri` searches in the source | ☐ |
+| 8.6 | No third-party ecosystem adapters wired into the Hub UI | Confirmed by `grep -ri` searches in the source | ☐ |
 | 8.7 | Deferred items are tracked in the project backlog | Each deferred item appears with a priority bucket | ☐ |
 
 Notes:

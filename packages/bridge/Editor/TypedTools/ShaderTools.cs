@@ -8,8 +8,8 @@ namespace UnityOpenMcpBridge.TypedTools
 {
     // M16 Plan 1 — read-only shader tools. shader_list_all enumerates shader
     // assets via AssetDatabase.FindAssets("t:Shader"); shader_get_data reads
-    // shader properties + compile errors (folding UCP shader/errors into a
-    // single tool). Both are gate-free (read-only).
+    // shader properties + compile errors (in a single tool). Both are gate-free
+    // (read-only).
     public static class ShaderTools
     {
         public static ToolDispatchResult ListAll(string body)
@@ -115,9 +115,10 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append("],\"propertiesEmitted\":").Append(emitted);
             sb.Append(",\"propertiesTruncated\":").Append(truncated);
 
-            // Fold UCP shader/errors into an `errors` field. A shader can carry
-            // ShaderMessage entries when it failed to compile. Shader.messages
-            // and UnityEditor.ShaderUtil.GetShaderMessages are internal — we
+            // Surface shader compile errors in an `errors` field. A shader can
+            // carry ShaderMessage entries when it failed to compile.
+            // Shader.messages and UnityEditor.ShaderUtil.GetShaderMessages are
+            // internal — we
             // resolve them via reflection so this compiles against any Unity
             // version without InternalsVisibleTo.
             sb.Append(",\"errors\":");

@@ -15,8 +15,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 //     filtered by tool_name) into a narrative using the delta captured at
 //     mutation time.
 //
-// Read-only and gate-free. No Unity-MCP / UCP / UUMCP equivalent; composed
-// from existing checkpoint/delta/run-history foundations.
+// Read-only and gate-free. Composed from existing checkpoint/delta/run-history
+// foundations; no equivalent in the broader tool landscape.
 export const mutationExplain: Tool = {
   name: "unity_open_mcp_mutation_explain",
   description:

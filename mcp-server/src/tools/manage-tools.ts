@@ -1,6 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-// M18 Plan 2 / T18.2.2 — Coplay-style manage_tools meta-tool.
+// M18 Plan 2 / T18.2.2 — manage_tools meta-tool (per-session tool-group
+// visibility).
 //
 // Server-only meta-tool for per-session tool-group visibility. The MCP server
 // holds the session state (ToolSessionState); the bridge does not track it.
@@ -10,9 +11,6 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // The tool definition ships with every MCP-server build (always visible — it
 // is in the ALWAYS_VISIBLE_TOOLS allow-list in tool-session-state.ts) so an
 // agent can always reach it before any other group is active.
-//
-// Reference: references/unity-mcp-beta-codev/Server/src/services/tools/
-// manage_tools.py (the Coplay model this matches).
 export const manageTools: Tool = {
   name: "unity_open_mcp_manage_tools",
   description:

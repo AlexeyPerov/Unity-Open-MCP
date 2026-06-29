@@ -13,8 +13,7 @@ namespace UnityOpenMcpExtensions.ProBuilder
     // and the semantic face-direction matcher every ProBuilder tool composes.
     //
     // Naming: tool ids follow `unity_open_mcp_probuilder_<action>` (snake_case
-    // domain prefix), mirroring the kebab `probuilder-*` ids from the upstream
-    // Unity-MCP reference pack.
+    // domain prefix).
     static class ProBuilderJson
     {
         public static string Ok(string body)
@@ -123,10 +122,8 @@ namespace UnityOpenMcpExtensions.ProBuilder
         }
     }
 
-    // Semantic face selection by direction — port of FaceSelectionHelper from
-    // the upstream Unity-AI-ProBuilder pack. Index-based selection (not
-    // SceneView mouse picking) so agents can target faces without an
-    // interactive editor.
+    // Semantic face selection by direction — index-based (not SceneView mouse
+    // picking) so agents can target faces without an interactive editor.
     static class FaceSelection
     {
         // Dot-product threshold for face-normal matching (~45 degree tolerance).

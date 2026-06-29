@@ -15,7 +15,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 //
 // Heuristic only — checkpoint-mode is lighter than full validation, so the
 // duration estimate is a lower bound. Run validate_edit to measure actuals.
-// No Unity-MCP / UCP / UUMCP equivalent; composed from existing foundations.
+// Composed from existing foundations; no equivalent in the broader tool
+// landscape.
 export const gateBudgetEstimate: Tool = {
   name: "unity_open_mcp_gate_budget_estimate",
   description:

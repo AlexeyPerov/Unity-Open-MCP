@@ -4,9 +4,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // to disk (composed from the read surfaces already in this tool family —
 // status / memory / rendering / script / frame — so the shape stays in sync).
 // Runs the full gate path with paths_hint scoped to the destination path.
-// Folds UMCP `profiler-save-data` and UCP `profiler/capture/save` (the .json
-// structured-snapshot path; UCP's binary-log path is editor-runtime-gated and
-// folds into profiler_set_config's binary_log warning surface instead).
+// Saves the .json structured-snapshot path (the binary-log path is editor-
+// runtime-gated and folds into profiler_set_config's binary_log warning
+// surface instead).
 export const profilerSaveData: Tool = {
   name: "unity_open_mcp_profiler_save_data",
   description:

@@ -2,11 +2,10 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 7 — typed profiler snapshot read-back. Read-only (reads a file
 // previously written by profiler_save_data); gate-free direct-response tool.
-// Folds UMCP `profiler-load-data` and UCP `profiler/capture/load`. UCP also
-// calls Profiler.AddFramesFromFile to load the capture back into the Editor
-// Profiler; this tool surfaces BOTH the raw JSON text (caller parses) and an
-// `addedToProfiler` boolean so the agent knows whether the frames are now
-// browsable in the Profiler window.
+// Optionally calls Profiler.AddFramesFromFile to load the capture back into
+// the Editor Profiler; this tool surfaces BOTH the raw JSON text (caller
+// parses) and an `addedToProfiler` boolean so the agent knows whether the
+// frames are now browsable in the Profiler window.
 export const profilerLoadData: Tool = {
   name: "unity_open_mcp_profiler_load_data",
   description:

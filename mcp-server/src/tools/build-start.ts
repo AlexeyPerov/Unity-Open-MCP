@@ -6,7 +6,6 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // destructive-menu pattern: it refuses UNLESS the request passes
 // gate: "off" + confirm_bypass: true. When bypassed, the full gate path
 // still runs so the response carries any post-build asset-reference fallout.
-// Folds UCP build/start + UUMCP build_player.
 //
 // paths_hint: the build writes a binary player outside Assets/ and may touch
 // ProjectSettings assets. Agents typically scope paths_hint to the build

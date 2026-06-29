@@ -27,9 +27,8 @@ namespace UnityOpenMcpBridge.ObjectRefs
     ///   5. component fallback       — find parent GameObject, then GetComponent.
     ///   6. name (GameObject)        — ambiguous under duplicates; last resort.
     ///
-    /// Inspired by Unity-MCP's ObjectRef/GameObjectRef/ComponentRef and UCP's
-    /// polymorphic ObjectLocator, translated to the bridge's hand-rolled JSON
-    /// conventions (no Newtonsoft dependency).
+    /// Translated to the bridge's hand-rolled JSON conventions (no Newtonsoft
+    /// dependency).
     /// </summary>
     static class ObjectHandle
     {

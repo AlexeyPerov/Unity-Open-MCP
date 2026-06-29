@@ -1,8 +1,8 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed QualitySettings mutator. Mutating: set QualitySettings
-// knobs by key/value patches. Folds UCP settings/quality-set. paths_hint must
-// be scoped to ProjectSettings/QualitySettings.asset.
+// knobs by key/value patches. paths_hint must be scoped to
+// ProjectSettings/QualitySettings.asset.
 export const settingsSetQuality: Tool = {
   name: "unity_open_mcp_settings_set_quality",
   description:

@@ -4,9 +4,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // UPM); the `audio` group is hidden until manage_tools activates it. Mutating:
 // runs the full gate path; paths_hint is the scene path containing the host.
 // Address the host by instance_id > path > name (same model as gameobject_* /
-// component_*). Param shape mirrors AnkleBreaker's unity_audio_create_source
-// (clipPath / volume / pitch / loop / playOnAwake / spatialBlend) + adds
-// spatialize and 3D min/max distance.
+// component_*). Param shape: clipPath / volume / pitch / loop / playOnAwake /
+// spatialBlend + adds spatialize and 3D min/max distance.
 const targetSchema = {
   instance_id: {
     type: "integer",

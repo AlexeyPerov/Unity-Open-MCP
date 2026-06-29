@@ -12,7 +12,7 @@ using UnityEngine;
 namespace UnityOpenMcpBridge.TypedTools
 {
     // M20 Plan 5 / T20.5.2 — typed Assembly Definition (.asmdef) tools. Four
-    // tools close the asmdef parity gap with AnkleBreaker's asmdef category:
+    // tools cover the .asmdef lifecycle:
     //
     //   - asmdef_list    (read-only)  enumerate .asmdef assets under a folder.
     //   - asmdef_get     (read-only)  parse one .asmdef into a full model.
@@ -23,8 +23,8 @@ namespace UnityOpenMcpBridge.TypedTools
     // Advantage: create / modify use the RestartThenSettle lifecycle (creating
     // or editing an asmdef triggers a domain reload + recompile — the gate
     // waits for the settle window before the next mutation, and a verify
-    // scan_paths can run after to catch broken references). AnkleBreaker
-    // triggers the recompile ungated.
+    // scan_paths can run after to catch broken references). An ungated asmdef
+    // mutator triggers the recompile without that settle wait.
     //
     // JSON handling: .asmdef is JSON, but JsonUtility cannot parse it (nested
     // arrays), and the bridge has no Newtonsoft dependency (see AGENTS.md
@@ -220,8 +220,7 @@ namespace UnityOpenMcpBridge.TypedTools
             var setRefs = JsonBody.GetStringArray(body, "references");
             if (setRefs != null) model.References = new List<string>(setRefs);
 
-            // Platforms — setting include clears exclude and vice versa (mirrors
-            // AnkleBreaker unity_asmdef_set_platforms semantics).
+            // Platforms — setting include clears exclude and vice versa.
             var includePlatforms = JsonBody.GetStringArray(body, "include_platforms");
             var excludePlatforms = JsonBody.GetStringArray(body, "exclude_platforms");
             if (includePlatforms != null)

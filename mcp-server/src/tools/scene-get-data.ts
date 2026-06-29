@@ -1,14 +1,14 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 3 — read-only scene get data. Gate-free. The structured scene
-// hierarchy read that supersedes the standalone M10 scene snapshot (T3.8)
-// and folds UUMCP summarize / hierarchy_describe into `detail`/`summary`
-// modes. Bounded output drives see-edit-verify loops.
+// hierarchy read that supersedes the standalone M10 scene snapshot (T3.8),
+// unifying summarize + hierarchy_describe into `detail`/`summary` modes.
+// Bounded output drives see-edit-verify loops.
 export const sceneGetData: Tool = {
   name: "unity_open_mcp_scene_get_data",
   description:
     "Read the hierarchy of an opened scene as compact, drill-down structured data. Read-only " +
-    "(gate-free). Supersedes the standalone M10 scene snapshot and folds UUMCP summarize / " +
+    "(gate-free). Supersedes the standalone M10 scene snapshot, unifying summarize + " +
     "hierarchy_describe into the `detail` modes below. Default (`detail: 'summary'`) returns a " +
     "cheap overview — scene name/path/isDirty/isLoaded/rootCount/buildIndex + a root-GameObject " +
     "roster with name + childCount + components (no nested children). `detail: 'normal'` adds " +

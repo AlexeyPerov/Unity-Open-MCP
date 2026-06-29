@@ -1,8 +1,8 @@
 // M20 Plan 2 — Lighting embedded domain tools.
 //
-// Seven typed tools covering the per-light / per-probe / skybox layer the
-// competitor (AnkleBreaker) ships, on top of the existing project-settings
-// settings_get_lighting / settings_set_lighting surface.
+// Seven typed tools covering the per-light / per-probe / skybox layer, on top
+// of the existing project-settings settings_get_lighting /
+// settings_set_lighting surface.
 //
 //   light_add                  — add a Light component to a GameObject.
 //   light_set                   — set typed Light fields (color / intensity /
@@ -15,8 +15,7 @@
 //   reflection_probe_bake       — bake a ReflectionProbe (realtime / baked /
 //                                 custom). Long mutation: EditorSettle so the
 //                                 dispatcher waits for the bake before the next
-//                                 call. This is the documented advantage over
-//                                 AnkleBreaker's ungated bake.
+//                                 call.
 //   reflection_probe_get        — read probe settings (read-only).
 //   skybox_set                  — assign RenderSettings.skybox from a material
 //                                 asset path (or null to clear).
@@ -109,8 +108,7 @@ namespace UnityOpenMcpBridge.Extensions.Lighting
         // Light — set typed fields
         // =====================================================================
 
-        // Set the common Light fields in one typed call. Mirrors the param
-        // shape of AnkleBreaker's unity_lighting_create (lightType / color /
+        // Set the common Light fields in one typed call (lightType / color /
         // intensity / range / spotAngle / shadows). Each field is optional —
         // omit a field to leave it unchanged.
         [BridgeTool("unity_open_mcp_light_set",
@@ -265,8 +263,7 @@ namespace UnityOpenMcpBridge.Extensions.Lighting
         //   custom   — Lightmapping.BakeReflectionProbeSnapshot into the named
         //              cubemap asset path (created if absent).
         // The bake can take seconds; EditorSettle makes the dispatcher wait for
-        // the bake + asset refresh before returning — the documented advantage
-        // over AnkleBreaker's ungated bake.
+        // the bake + asset refresh before returning.
         [BridgeTool("unity_open_mcp_reflection_probe_bake",
             Title = "Lighting: Bake Reflection Probe",
             IsMutating = true,

@@ -1,8 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed active build-target read. Read-only: returns the active
-// BuildTarget + its BuildTargetGroup. Folds UCP build/active-target. Gate-free
-// direct-response tool.
+// BuildTarget + its BuildTargetGroup. Gate-free direct-response tool.
 export const buildGetActiveTarget: Tool = {
   name: "unity_open_mcp_build_get_active_target",
   description:

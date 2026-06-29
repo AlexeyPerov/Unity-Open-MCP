@@ -18,10 +18,8 @@ namespace UnityOpenMcpBridge.Profiler
     //   unity_senses_profiler_memory    — live memory allocator stats
     //   unity_senses_profiler_rendering — rendering environment stats batch
     //
-    // Hierarchy logic is ported from unity-cli's ManageProfiler.cs (references/),
-    // translated from Newtonsoft JObject to hand-rolled StringBuilder JSON and
-    // from the unity-cli [ToolParameter] system to the bridge [BridgeTool]
-    // method-parameter convention.
+    // Hierarchy logic emits hand-rolled StringBuilder JSON (no Newtonsoft
+    // dependency) and uses the bridge [BridgeTool] method-parameter convention.
     //
     // All tools are read-only (Gate = Off, ReadOnlyHint = true) and
     // token-bounded via max_items / depth / min_ms to protect the agent's

@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 3 — typed scene focus. Mutating: moves the SceneView camera onto
-// a GameObject (folds UCP scene/focus). Runs the full gate path.
+// a GameObject. Runs the full gate path.
 export const sceneFocus: Tool = {
   name: "unity_open_mcp_scene_focus",
   description:

@@ -20,7 +20,7 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 
 ## Tool groups and session visibility
 
-Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is 221 tools) and mirrors Coplay's session-visibility model.
+Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is 221 tools) — a per-session group-visibility model so only the relevant tools are advertised.
 
 ### Groups
 

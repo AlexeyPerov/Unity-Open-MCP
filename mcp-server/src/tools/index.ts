@@ -50,9 +50,9 @@ import { listRules } from "./list-rules.js";
 import { pullEvents } from "./pull-events.js";
 import { readCompileErrors } from "./read-compile-errors.js";
 import { bridgeStatus } from "./bridge-status.js";
-// M18 Plan 2 / T18.2.2 — Coplay-style manage_tools meta-tool (session
-// tool-group visibility). Server-only meta-tool; routes local, always
-// visible regardless of which groups the current session has activated.
+// M18 Plan 2 / T18.2.2 — manage_tools meta-tool (per-session tool-group
+// visibility). Server-only meta-tool; routes local, always visible regardless
+// of which groups the current session has activated.
 import { manageTools } from "./manage-tools.js";
 // M16 Plan 1 — typed project & asset management tools.
 import { assetsCreateFolder } from "./assets-create-folder.js";
@@ -241,8 +241,7 @@ import { splinesModify } from "./splines-modify.js";
 // reflection_probe_bake / skybox_set) run the full gate path with paths_hint
 // scoped to the host scene path (skybox_set dirties the active scene).
 // reflection_probe_bake is the long mutation — EditorSettle so the dispatcher
-// waits for the bake + asset refresh before returning (the documented
-// advantage over AnkleBreaker's ungated bake). Read-only members
+// waits for the bake + asset refresh before returning. Read-only members
 // (reflection_probe_get / skybox_get) are gate-free.
 import { lightAdd } from "./light-add.js";
 import { lightSet } from "./light-set.js";
@@ -259,9 +258,9 @@ import { skyboxGet } from "./skybox-get.js";
 // audio_mixer_set_parameter) run the full gate path with paths_hint scoped to
 // the host scene path (or the mixer asset path for audio_mixer_set_parameter).
 // Read-only members (audio_listener_get / audio_mixer_get_parameter) are
-// gate-free. Closes the Audio parity gap with AnkleBreaker's audio category;
-// the mixer-parameter round-trip (set then read-back) is the documented
-// advantage.
+// gate-free. The mixer-parameter round-trip (set then read-back) is the
+// documented advantage — a source-only audio tool touches per-source settings
+// only, while this set also reads/writes exposed AudioMixer float parameters.
 import { audioSourceAdd } from "./audio-source-add.js";
 import { audioSourceModify } from "./audio-source-modify.js";
 import { audioMixerSetParameter } from "./audio-mixer-set-parameter.js";
@@ -277,10 +276,9 @@ import { audioMixerGetParameter } from "./audio-mixer-get-parameter.js";
 // legacy-Text fallback). The `ui` group is hidden from ListTools until the
 // session activates it via manage_tools. All four members (ui_canvas_add /
 // ui_element_add / ui_layout_group_add / ui_element_modify) run the full gate
-// path with paths_hint scoped to the host / new-root / parent scene path.
-// Closes the UI parity gap with AnkleBreaker's UI category; the
+// path with paths_hint scoped to the host / new-root / parent scene path. The
 // Canvas-companion ensure (CanvasScaler + GraphicRaycaster + EventSystem) is
-// the documented advantage — AnkleBreaker creates the Canvas alone.
+// the documented advantage — a canvas-only tool creates the Canvas alone.
 import { uiCanvasAdd } from "./ui-canvas-add.js";
 import { uiElementAdd } from "./ui-element-add.js";
 import { uiLayoutGroupAdd } from "./ui-layout-group-add.js";
@@ -292,9 +290,8 @@ import { uiElementModify } from "./ui-element-modify.js";
 // group is hidden from ListTools until the session activates it via
 // manage_tools. All three members (constraint_add / lod_group_configure /
 // lod_add_level) are mutating and run the full gate path with paths_hint
-// scoped to the host scene path. Closes the Constraints & LOD parity gap with
-// AnkleBreaker's Constraints & LOD category; the gate + paths_hint contract
-// on every mutating member is the documented advantage.
+// scoped to the host scene path. The gate + paths_hint contract on every
+// mutating member is the documented advantage.
 import { constraintAdd } from "./constraint-add.js";
 import { lodGroupConfigure } from "./lod-group-configure.js";
 import { lodAddLevel } from "./lod-add-level.js";
@@ -336,8 +333,7 @@ import { cinemachineCameraList } from "./cinemachine-camera-list.js";
 // members (create / track_add / clip_add / director_bind / modify) are
 // mutating and run the full gate path. create produces a .playable asset;
 // director_bind mutates a scene PlayableDirector; modify is a reflective
-// field-patch escape hatch. Closes the Timeline parity gap with Ivan's
-// Unity-AI-Timeline pack; the gate + paths_hint contract on every mutating
+// field-patch escape hatch. The gate + paths_hint contract on every mutating
 // member is the documented advantage.
 import { timelineCreate } from "./timeline-create.js";
 import { timelineTrackAdd } from "./timeline-track-add.js";
@@ -350,8 +346,7 @@ import { timelineModify } from "./timeline-modify.js";
 // when tilemap.extras is absent, the tool compiles in but returns a clear
 // tilemap_extras_required install error (two defines, two guards). All five
 // members (create / set_tile / box_fill / create_tile_asset /
-// create_rule_tile) are mutating and run the full gate path. Closes the
-// Tilemap parity gap with Ivan's Unity-AI-Tilemap pack.
+// create_rule_tile) are mutating and run the full gate path.
 import { tilemapCreate } from "./tilemap-create.js";
 import { tilemapSetTile } from "./tilemap-set-tile.js";
 import { tilemapBoxFill } from "./tilemap-box-fill.js";
@@ -431,9 +426,9 @@ export const M14_TOOLS: Tool[] = [readCompileErrors];
 // document them in mutate/gate sections). See docs/api/mcp-tools.md.
 export const BRIDGE_ADMIN_TOOLS: Tool[] = [bridgeStatus];
 
-// M18 Plan 2 / T18.2.2 — Coplay-style manage_tools meta-tool. Server-only,
-// local-routed, and always visible regardless of which groups the current
-// session has activated (see ALWAYS_VISIBLE_TOOLS in tool-session-state.ts).
+// M18 Plan 2 / T18.2.2 — manage_tools meta-tool. Server-only, local-routed,
+// and always visible regardless of which groups the current session has
+// activated (see ALWAYS_VISIBLE_TOOLS in tool-session-state.ts).
 export const M18_PLAN2_TOOLS: Tool[] = [manageTools];
 
 // M16 Plan 1 — Project & Asset Management typed tools. Mutating members run
@@ -627,8 +622,7 @@ export const M16_PLAN9_TOOLS: Tool[] = [
 // modifier_add / modifier_volume_add / link_add / agent_add /
 // agent_set_destination / modify) run the full gate path with paths_hint
 // scoped to the host scene path; surface_bake is the heavy op (EditorSettle).
-// Read-only members (list / get) are gate-free. The eleven tools mirror the
-// kebab `navigation-*` ids in the upstream Unity-MCP reference pack.
+// Read-only members (list / get) are gate-free.
 export const M16_PLAN10_TOOLS: Tool[] = [
   navigationSurfaceAdd,
   navigationSetBakeSettings,
@@ -650,8 +644,7 @@ export const M16_PLAN10_TOOLS: Tool[] = [
 // mutating members (asset_create / actionmap_add / action_add / binding_add /
 // binding_composite_add / controlscheme_add) run the full gate path with
 // paths_hint scoped to the .inputactions asset; the read-only member (get) is
-// gate-free. The seven tools mirror the kebab `inputsystem-*` ids in the
-// upstream Unity-MCP reference pack.
+// gate-free.
 export const M16_PLAN10_INPUTSYSTEM_TOOLS: Tool[] = [
   inputsystemAssetCreate,
   inputsystemActionmapAdd,
@@ -668,8 +661,7 @@ export const M16_PLAN10_INPUTSYSTEM_TOOLS: Tool[] = [
 // new GameObject to the active scene); delete_faces is the lone DESTRUCTIVE
 // tool. The read-only member (get_mesh_info) is gate-free. Face selection is
 // index-based or semantic (Up / Down / Left / Right / Forward / Back) — never
-// SceneView mouse picking. The five tools mirror the kebab `probuilder-*` ids
-// in the upstream Unity-MCP reference pack.
+// SceneView mouse picking.
 export const M16_PLAN10_PROBUILDER_TOOLS: Tool[] = [
   probuilderCreateShape,
   probuilderGetMeshInfo,
@@ -681,11 +673,10 @@ export const M16_PLAN10_PROBUILDER_TOOLS: Tool[] = [
 // M16 Plan 10 / T6.6.9 — Particle System extension tools. The lone mutator
 // (particle_system_modify) runs the full gate path with paths_hint scoped to
 // the host scene path; the read-only member (particle_system_get) is gate-free.
-// The two tools mirror the kebab `particle-system-*` ids in the upstream
-// Unity-MCP reference pack. modify uses a per-module field-patch surface
-// (module discriminator + fields_json) instead of the opaque ReflectorNet
-// SerializedMember payload — agents get up-front field-name validation and a
-// structured unknownFields report instead of guessing.
+// modify uses a per-module field-patch surface (module discriminator +
+// fields_json) instead of an opaque reflective SerializedMember payload —
+// agents get up-front field-name validation and a structured unknownFields
+// report instead of guessing.
 export const M16_PLAN10_PARTICLESYSTEM_TOOLS: Tool[] = [
   particleSystemGet,
   particleSystemModify,
@@ -696,10 +687,9 @@ export const M16_PLAN10_PARTICLESYSTEM_TOOLS: Tool[] = [
 // animator_create / animator_modify) run the full gate path with paths_hint
 // scoped to the asset path (.anim or .controller); the two modify tools are
 // DESTRUCTIVE — some modification types are irreversible without undo. Read-
-// only members (animation_get_data / animator_get_data) are gate-free. The six
-// tools mirror the kebab `animation-*` / `animator-*` ids in the upstream
-// Unity-MCP reference pack. modify accepts a JSON array of modification
-// entries dispatched by `type`; per-entry errors are accumulated, not thrown.
+// only members (animation_get_data / animator_get_data) are gate-free. modify
+// accepts a JSON array of modification entries dispatched by `type`; per-entry
+// errors are accumulated, not thrown.
 export const M16_PLAN10_ANIMATION_TOOLS: Tool[] = [
   animationCreate,
   animationGetData,
@@ -716,8 +706,6 @@ export const M16_PLAN10_ANIMATION_TOOLS: Tool[] = [
 // set_knot / set_tangent_mode / modify) run the full gate path with paths_hint
 // scoped to the host scene path (container_create adds a new GameObject to the
 // active scene). Two read-only members (evaluate / get_knots) are gate-free.
-// The seven tools mirror the kebab `splines-*` ids in the upstream
-// Unity-AI-Splines reference pack.
 export const M18_PLAN7_SPLINES_TOOLS: Tool[] = [
   splinesContainerCreate,
   splinesAddKnot,
@@ -733,8 +721,7 @@ export const M18_PLAN7_SPLINES_TOOLS: Tool[] = [
 // light_set / light_modify / reflection_probe_bake / skybox_set) run the full
 // gate path with paths_hint scoped to the host scene path. The bake is the
 // long mutation (EditorSettle). Two read-only members (reflection_probe_get /
-// skybox_get) are gate-free. Closes the Lighting & environment parity gap with
-// AnkleBreaker's lighting category.
+// skybox_get) are gate-free.
 export const M20_PLAN2_LIGHTING_TOOLS: Tool[] = [
   lightAdd,
   lightSet,
@@ -750,8 +737,7 @@ export const M20_PLAN2_LIGHTING_TOOLS: Tool[] = [
 // audio_source_modify / audio_mixer_set_parameter) run the full gate path with
 // paths_hint scoped to the host scene path (audio_source_*) or the mixer asset
 // path (audio_mixer_set_parameter). Two read-only members (audio_listener_get /
-// audio_mixer_get_parameter) are gate-free. Closes the Audio parity gap with
-// AnkleBreaker's audio category.
+// audio_mixer_get_parameter) are gate-free.
 export const M20_PLAN3_AUDIO_TOOLS: Tool[] = [
   audioSourceAdd,
   audioSourceModify,
@@ -765,9 +751,9 @@ export const M20_PLAN3_AUDIO_TOOLS: Tool[] = [
 // ui_element_add / ui_layout_group_add / ui_element_modify) run the full gate
 // path with paths_hint scoped to the host / new-root / parent scene path.
 // TextMesh Pro (TMP_Text) is optional — when absent, ui_element_add returns
-// `tmp_package_required` (no silent legacy-Text fallback). Closes the UI parity
-// gap with AnkleBreaker's UI category; the Canvas-companion ensure (CanvasScaler
-// + GraphicRaycaster + EventSystem) is the documented advantage.
+// `tmp_package_required` (no silent legacy-Text fallback). The Canvas-companion
+// ensure (CanvasScaler + GraphicRaycaster + EventSystem) is the documented
+// advantage — a canvas-only tool creates the Canvas alone.
 export const M20_PLAN3_UI_TOOLS: Tool[] = [
   uiCanvasAdd,
   uiElementAdd,
@@ -780,9 +766,9 @@ export const M20_PLAN3_UI_TOOLS: Tool[] = [
 // (constraint_add / lod_group_configure / lod_add_level) run the full gate
 // path with paths_hint scoped to the host scene path. constraint_add seeds an
 // optional source Transform + weight + activation; lod_group_configure
-// allocates the LOD array; lod_add_level wires renderers per level. Closes the
-// Constraints & LOD parity gap with AnkleBreaker's category; one `constraints`
-// group covers both concerns because they are small and closely related.
+// allocates the LOD array; lod_add_level wires renderers per level. One
+// `constraints` group covers both concerns because they are small and closely
+// related.
 export const M20_PLAN3_CONSTRAINTS_TOOLS: Tool[] = [
   constraintAdd,
   lodGroupConfigure,
@@ -799,9 +785,8 @@ export const M20_PLAN3_CONSTRAINTS_TOOLS: Tool[] = [
 // region (cap 513x513 per call); terrain_paint_layer paints a splat layer
 // (seeding a new TerrainLayer when the index is new); terrain_place_trees
 // places tree instances (seeding a prototype from a prefab when the index is
-// new); terrain_set_neighbors stitches neighbor terrains for LOD. Closes the
-// Terrain parity gap with AnkleBreaker's terrain category + Ivan's
-// Unity-AI-Terrain pack; absorbs backlog T6.6.7.
+// new); terrain_set_neighbors stitches neighbor terrains for LOD. Absorbs
+// backlog T6.6.7.
 export const M20_PLAN4_TERRAIN_TOOLS: Tool[] = [
   terrainCreate,
   terrainSetHeights,
@@ -811,17 +796,16 @@ export const M20_PLAN4_TERRAIN_TOOLS: Tool[] = [
 ];
 
 // M20 Plan 5 / T20.5 — typed ScriptableObject + Assembly Definition tools. Two
-// core (always-on, no Unity package dependency) tool sets that close the
-// AnkleBreaker parity gaps for ScriptableObject CRUD (§B7) and Assembly
-// Definitions (§B8). scriptableobject_create is the gate-integrated create
-// path (the read/info surface stays on object_get_data / object_modify); it
-// applies optional initial field patches reusing object_modify's value
-// vocabulary. list_assets_of_type is a read-only typed list-by-type
-// (offline-routeable in principle). The asmdef family parses .asmdef as JSON
-// (hand-rolled reader/writer — no Newtonsoft, per the bridge AGENTS.md): list/
-// get are read-only (offline-routeable); create/modify use the
-// RestartThenSettle lifecycle so the gate waits for the recompile to settle
-// (the advantage over AnkleBreaker's ungated asmdef mutators).
+// core (always-on, no Unity package dependency) tool sets for ScriptableObject
+// CRUD (§B7) and Assembly Definitions (§B8). scriptableobject_create is the
+// gate-integrated create path (the read/info surface stays on object_get_data /
+// object_modify); it applies optional initial field patches reusing
+// object_modify's value vocabulary. list_assets_of_type is a read-only typed
+// list-by-type (offline-routeable in principle). The asmdef family parses
+// .asmdef as JSON (hand-rolled reader/writer — no Newtonsoft, per the bridge
+// AGENTS.md): list/get are read-only (offline-routeable); create/modify use
+// the RestartThenSettle lifecycle so the gate waits for the recompile to
+// settle (the advantage over an ungated asmdef mutator).
 export const M20_PLAN5_TOOLS: Tool[] = [
   scriptableObjectCreate,
   listAssetsOfType,
@@ -837,10 +821,8 @@ export const M20_PLAN5_TOOLS: Tool[] = [
 // (create_camera / set_targets / set_lens / set_body / set_noise /
 // brain_ensure) run the full gate path with paths_hint scoped to the host
 // scene path (create_camera adds a new GameObject to the active scene). One
-// read-only member (camera_list) is gate-free. The seven tools mirror the
-// kebab `cinemachine-*` ids in the upstream Unity-AI-Cinemachine reference
-// pack; the canonical reflection case named in M18 Plan 1 T18.1.1 task 5
-// (version-split API trigger).
+// read-only member (camera_list) is gate-free. The canonical reflection case
+// named in M18 Plan 1 T18.1.1 task 5 (version-split API trigger).
 export const M20_PLAN6_CINEMACHINE_TOOLS: Tool[] = [
   cinemachineCreateCamera,
   cinemachineSetTargets,
@@ -856,8 +838,7 @@ export const M20_PLAN6_CINEMACHINE_TOOLS: Tool[] = [
 // members (create / track_add / clip_add / director_bind / modify) are
 // mutating and run the full gate path. create produces a .playable asset;
 // director_bind mutates a scene PlayableDirector; modify is a reflective
-// field-patch escape hatch. The five tools mirror the kebab `timeline-*` ids
-// in the upstream Unity-AI-Timeline reference pack.
+// field-patch escape hatch.
 export const M20_PLAN6_TIMELINE_TOOLS: Tool[] = [
   timelineCreate,
   timelineTrackAdd,
@@ -872,9 +853,7 @@ export const M20_PLAN6_TIMELINE_TOOLS: Tool[] = [
 // (when tilemap.extras is absent, the tool compiles in but returns a clear
 // tilemap_extras_required install error — two defines, two guards). All five
 // members (create / set_tile / box_fill / create_tile_asset /
-// create_rule_tile) are mutating and run the full gate path. The five tools
-// mirror the kebab `tilemap-*` ids in the upstream Unity-AI-Tilemap reference
-// pack.
+// create_rule_tile) are mutating and run the full gate path.
 export const M20_PLAN6_TILEMAP_TOOLS: Tool[] = [
   tilemapCreate,
   tilemapSetTile,

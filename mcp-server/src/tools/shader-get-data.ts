@@ -1,8 +1,8 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-// M16 Plan 1 — read-only shader data. Fold UCP `shader/errors` into an `errors`
-// field per the plan. Read-only: gate-free. Token-bounded by `max_results` for
-// the property list.
+// M16 Plan 1 — read-only shader data. Includes an `errors` field carrying
+// shader compile errors. Read-only: gate-free. Token-bounded by `max_results`
+// for the property list.
 export const shaderGetData: Tool = {
   name: "unity_open_mcp_shader_get_data",
   description:

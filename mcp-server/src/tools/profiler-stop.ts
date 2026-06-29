@@ -1,10 +1,9 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 7 — typed profiler session stop. Mutating editor state but writes
-// NO assets; gate-free direct-response tool. Idempotent. Folds UMCP
-// `profiler-stop` and UCP `profiler/session/stop` (UCP's session-state restore
+// NO assets; gate-free direct-response tool. Idempotent. Session-state restore
 // is intentionally NOT folded — Unity's profiler keeps buffered frames across a
-// stop, so call profiler_clear_data to discard them).
+// stop, so call profiler_clear_data to discard them.
 export const profilerStop: Tool = {
   name: "unity_open_mcp_profiler_stop",
   description:

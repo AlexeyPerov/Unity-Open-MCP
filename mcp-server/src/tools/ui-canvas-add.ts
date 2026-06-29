@@ -5,9 +5,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // runs the full gate path; paths_hint is the host / new-root scene path.
 // Address the host by instance_id > path > name (same model as gameobject_* /
 // component_*). When no host is addressed, a new scene root is created
-// (new_root_name controls its name; defaults to "Canvas"). Param shape mirrors
-// AnkleBreaker's unity_ui_create_canvas (renderMode overlay/camera/world +
-// EventSystem).
+// (new_root_name controls its name; defaults to "Canvas"). Param shape:
+// renderMode overlay/camera/world + EventSystem.
 const targetSchema = {
   instance_id: {
     type: "integer",

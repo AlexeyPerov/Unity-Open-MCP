@@ -8,9 +8,9 @@ using UnityEngine.Rendering;
 
 namespace UnityOpenMcpBridge.TypedTools
 {
-    // M16 Plan 1 — typed material tools. Mirrors the surface UCP and Unity-MCP
-    // expose (material create / get-properties / set-property / get-keywords /
-    // set-keyword / set-shader). Materials are resolved by `asset_path` (.mat)
+    // M16 Plan 1 — typed material tools (material create / get-properties /
+    // set-property / get-keywords / set-keyword / set-shader). Materials are
+    // resolved by `asset_path` (.mat)
     // or by `instance_id` of a scene GameObject whose Renderer.sharedMaterial
     // is read, or the Material instance directly. Set operations record an
     // Undo before mutating and mark the asset dirty.

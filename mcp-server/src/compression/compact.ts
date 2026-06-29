@@ -5,15 +5,14 @@
 // asset-model.ts (stripped at test time).
 //
 // Two responsibilities, both authoritative here:
-//  1. unity-scanner-style compression primitives (compressNames, component-set
-//     declarations, render-only leaf folding, omission counts).
+//  1. compression primitives (compressNames, component-set declarations,
+//     render-only leaf folding, omission counts).
 //  2. the drill-down renderer that turns an AssetModel / SearchModel into the
 //     compact wire response (default = MAP; drill-down flags expand detail).
 //
-// Ported from references/unity-scanner-master/internal/format/compress.go and
-// the folding logic in cmd/read.go, adapted to operate on AssetModel. Both the
-// live path (bridge -> AssetModel JSON -> MCP server compresses) and the future
-// offline path (M9 Plan 3 parser -> AssetModel -> same code) flow through here.
+// Adapted to operate on AssetModel. Both the live path (bridge -> AssetModel
+// JSON -> MCP server compresses) and the future offline path (M9 Plan 3 parser
+// -> AssetModel -> same code) flow through here.
 
 import type {
   AssetModel,
@@ -31,8 +30,7 @@ import type {
 
 /**
  * Fold stable numbered sequences such as Recipe_001..018. Runs of fewer than
- * three stay explicit. Names without a trailing number pass through. Ported
- * from unity-scanner CompressNames (compress.go).
+ * three stay explicit. Names without a trailing number pass through.
  */
 export function compressNames(names: string[]): string[] {
   if (names.length === 0) return [];
@@ -118,7 +116,7 @@ function splitTrailingNumber(name: string): NumberedName | null {
 }
 
 // ===========================================================================
-// Component classification (mirrors unity-scanner read.go).
+// Component classification.
 // ===========================================================================
 
 export function isTrivialComponent(name: string): boolean {
@@ -247,7 +245,7 @@ export interface FoldResult {
  * collapsed into a single folded row whose names run through compressNames.
  * Depth and limit caps produce omission counts instead of silent truncation.
  *
- * Mirrors unity-scanner printTreeRows / collapsibleRunEnd (read.go). Full-tree
+ * Mirrors the renderer's printTreeRows / collapsibleRunEnd logic. Full-tree
  * mode (no folding) is selected by `fold = false`.
  */
 export function foldHierarchy(

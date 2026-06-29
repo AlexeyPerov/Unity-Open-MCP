@@ -11,9 +11,9 @@ using UnityEngine.Rendering;
 
 namespace UnityOpenMcpBridge.TypedTools
 {
-    // M16 Plan 9 — typed build pipeline + project-settings tools. Parity with
-    // UCP `build/*` and `settings/*` so agents drive CI build prep, define-
-    // symbol management, and settings audits without ad-hoc execute_csharp.
+    // M16 Plan 9 — typed build pipeline + project-settings tools so agents
+    // drive CI build prep, define-symbol management, and settings audits
+    // without ad-hoc execute_csharp.
     //
     // Tool map:
     //   - build_get_targets       (read-only)
@@ -58,7 +58,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // ============================ Build reads =========================
 
         // Read-only: enumerate BuildTarget values that resolve to a known group
-        // (Unknown is skipped). Folds UCP build/targets. Gate-free.
+        // (Unknown is skipped). Gate-free.
         public static ToolDispatchResult GetTargets(string body)
         {
             try
@@ -154,7 +154,7 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Read-only: scripting define symbols for the active build target
-        // group. Folds UCP build/defines. Gate-free.
+        // group. Gate-free.
         public static ToolDispatchResult GetDefines(string body)
         {
             try
@@ -187,8 +187,8 @@ namespace UnityOpenMcpBridge.TypedTools
         // ============================ Build mutators ======================
 
         // Mutating: switch the active build target. May trigger a recompile +
-        // domain reload. Folds UCP build/set-target. paths_hint scope is the
-        // ProjectSettings folder (target switch rewrites ProjectSettings/*.asset
+        // domain reload. paths_hint scope is the ProjectSettings folder (target
+        // switch rewrites ProjectSettings/*.asset
         // files — Library/BuildPlayerAsset is not an asset).
         public static ToolDispatchResult SetTarget(string body)
         {
@@ -358,8 +358,8 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Mutating: set scripting define symbols for the active build target
-        // group. Folds UCP build/set-defines. Accepts an array (joined with ';')
-        // or a pre-joined ';' string. An empty array (or "") CLEARS the defines.
+        // group. Accepts an array (joined with ';') or a pre-joined ';' string.
+        // An empty array (or "") CLEARS the defines.
         // paths_hint scope is ProjectSettings (ProjectSettings/ProjectSettings.asset
         // holds the defines block).
         public static ToolDispatchResult SetDefines(string body)
@@ -481,7 +481,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // ============================ Settings reads ======================
 
         // Read-only: PlayerSettings snapshot for the active build target.
-        // Gate-free. Folds UCP settings/player.
+        // Gate-free.
         public static ToolDispatchResult SettingsGetPlayer(string body)
         {
             try
@@ -991,8 +991,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Read an int field off the PlayerSettings serialized object. Some
         // PlayerSettings knobs (e.g. activeInputHandler) are not exposed as
-        // public properties and have to go through SerializedObject. Mirrors
-        // UCP EditorSettingsController.ReadPlayerSettingInt.
+        // public properties and have to go through SerializedObject.
         private static int ReadSerializedPlayerInt(string propertyName)
         {
             var so = new SerializedObject(GetPlayerSettingsAsset());

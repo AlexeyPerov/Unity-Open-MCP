@@ -2,8 +2,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M20 Plan 4 / T20.4 — Terrain domain tool. Place tree instances on a terrain.
 // Built-in Terrain module — ungated. Mutating: runs the full gate path;
-// paths_hint is the host scene path. Param shape mirrors Ivan's
-// Terrain.PlaceTrees.cs.
+// paths_hint is the host scene path.
 const targetSchema = {
   instance_id: {
     type: "integer",

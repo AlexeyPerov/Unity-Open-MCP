@@ -19,12 +19,10 @@ namespace UnityOpenMcpBridge.Extensions.InputSystem
     // Asset load / save + JSON envelope builders. The Input System serializes
     // InputActionAsset as JSON inside a `.inputactions` file — every mutator
     // ends with File.WriteAllText(asset.ToJson()) + AssetDatabase.ImportAsset
-    // so the on-disk file reflects the in-memory state (mirrors the upstream
-    // Unity-AI-InputSystem pack's SaveAsset pattern).
+    // so the on-disk file reflects the in-memory state (SaveAsset pattern).
     //
     // Naming: tool ids follow `unity_open_mcp_inputsystem_<action>` (snake_case
-    // domain prefix), mirroring the kebab `inputsystem-*` ids from the upstream
-    // Unity-MCP reference pack.
+    // domain prefix).
     static class InputSystemJson
     {
         public const string AssetExtension = ".inputactions";
@@ -130,7 +128,7 @@ namespace UnityOpenMcpBridge.Extensions.InputSystem
         // Serialize an InputActionAsset to JSON, guarding the InputSystem 1.x
         // bug where ToJson() throws inside WriteFileJson.FromMaps when the asset
         // has no ActionMaps (its internal map array is null). Emits minimal
-        // valid JSON in that case. Mirrors the upstream pack.
+        // valid JSON in that case.
         //
         // Note: actionMaps is a ReadOnlyArray<InputActionMap> (a struct), so it
         // cannot be compared to null with == — check Count instead. The wrapper

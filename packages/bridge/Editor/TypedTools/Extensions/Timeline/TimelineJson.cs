@@ -6,15 +6,13 @@
 // Unity.Timeline; the bridge root asmdef sets the define via `versionDefines`
 // when the package resolves.
 //
-// Timeline has a single stable public API across com.unity.timeline 1.x (the
-// reference pack wraps 1.8.12) — compile-gate-only, no reflection probing.
-// When the package is absent the tools are not compiled in and the capability
-// surface reports the domain as `available: false (dependency missing:
-// com.unity.timeline)`.
+// Timeline has a single stable public API across com.unity.timeline 1.x —
+// compile-gate-only, no reflection probing. When the package is absent the
+// tools are not compiled in and the capability surface reports the domain as
+// `available: false (dependency missing: com.unity.timeline)`.
 //
 // Naming: tool ids follow `unity_open_mcp_timeline_<action>` (snake_case
-// domain prefix), mirroring the kebab `timeline-*` ids in the upstream
-// Unity-AI-Timeline reference pack.
+// domain prefix).
 #if UNITY_OPEN_MCP_EXT_TIMELINE
 #pragma warning disable CS0618
 using System.Text;

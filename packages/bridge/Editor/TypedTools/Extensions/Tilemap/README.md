@@ -4,9 +4,6 @@ Tilemap typed tools (`unity_open_mcp_tilemap_*`), embedded inside the bridge.
 Five tools for in-editor 2D level design: create grid + tilemap, set tile,
 box-fill, create tile asset, create rule tile.
 
-Fourth Ivan-breadth domain shipped under M20 Plan 6 — closes the "Ivan has it,
-we don't" parity gap for the Tilemap row of the competitive matrix.
-
 ## Compile gate (two layers + an inner guard)
 
 Three layers (see `docs/extensions.md` §Embedded domain model):

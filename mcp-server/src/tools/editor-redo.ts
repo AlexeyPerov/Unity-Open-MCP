@@ -1,9 +1,8 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 5 — typed editor redo. Mutates editor undo state but writes no
-// assets — routes as a gate-free direct-response tool. Folds UUMCP editor_redo
-// (Undo.PerformRedo). Pair with editor_undo and the undo-recorded typed
-// mutators.
+// assets — routes as a gate-free direct-response tool (Undo.PerformRedo).
+// Pair with editor_undo and the undo-recorded typed mutators.
 export const editorRedo: Tool = {
   name: "unity_open_mcp_editor_redo",
   description:

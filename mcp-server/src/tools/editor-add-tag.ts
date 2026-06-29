@@ -2,9 +2,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 5 — typed editor add tag. Mutating: appends a user tag to the
 // TagManager (ProjectSettings/TagManager.asset) and saves it. Runs the full
-// gate path with paths_hint scoped to that asset. Folds UCP settings/add-tag.
-// Idempotent: a tag that already exists is a no-op (saved:false). Built-in tag
-// names are reserved.
+// gate path with paths_hint scoped to that asset. Idempotent: a tag that
+// already exists is a no-op (saved:false). Built-in tag names are reserved.
 export const editorAddTag: Tool = {
   name: "unity_open_mcp_editor_add_tag",
   description:

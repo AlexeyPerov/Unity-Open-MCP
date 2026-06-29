@@ -68,10 +68,9 @@ path — the gate has no whole-project fallback.
 | `ParentConstraint` | position + rotation | Parents to the source (no actual reparent). |
 | `ScaleConstraint` | local scale | Scales toward the source's scale. |
 
-`ScaleConstraint` (and `LookAtConstraint`) are listed in AnkleBreaker's surface
-but only the five `IConstraint`-derived types above are supported — `LookAt`
-is the legacy non-`IConstraint` variant and is intentionally omitted. The tool
-returns `invalid_constraint_type` for any other name.
+`LookAtConstraint` is the legacy non-`IConstraint` variant and is intentionally
+omitted — only the five `IConstraint`-derived types above are supported. The
+tool returns `invalid_constraint_type` for any other name.
 
 ## Source + weight + activation
 

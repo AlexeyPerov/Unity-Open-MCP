@@ -3,13 +3,13 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // M20 Plan 5 / T20.5.2 — typed Assembly Definition create. Mutating:
 // RestartThenSettle lifecycle — creating an asmdef forces a domain reload +
 // recompile, and the gate waits for the settle window before the next
-// mutation. The advantage over AnkleBreaker's ungated asmdef_create is the
-// gate-integrated recompile: the active-scene dirty guard preflights it (a
-// recompile can trigger Unity's native save modal) and a verify scan_paths can
-// run after to catch broken references. Builds the .asmdef JSON from the typed
-// params (name, references, platforms, define constraints, root namespace,
-// unsafe / auto-ref / no-engine-ref flags) and writes it via File.WriteAllText +
-// a forced AssetDatabase.ImportAsset so Unity recompiles immediately. `name`
+// mutation. The advantage over an ungated asmdef_create is the gate-integrated
+// recompile: the active-scene dirty guard preflights it (a recompile can
+// trigger Unity's native save modal) and a verify scan_paths can run after to
+// catch broken references. Builds the .asmdef JSON from the typed params
+// (name, references, platforms, define constraints, root namespace, unsafe /
+// auto-ref / no-engine-ref flags) and writes it via File.WriteAllText + a
+// forced AssetDatabase.ImportAsset so Unity recompiles immediately. `name`
 // defaults to the filename when omitted.
 export const asmdefCreate: Tool = {
   name: "unity_open_mcp_asmdef_create",

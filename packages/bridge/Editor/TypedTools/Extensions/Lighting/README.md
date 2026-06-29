@@ -16,10 +16,9 @@ project-settings `settings_get_lighting` / `settings_set_lighting` surface:
 - `skybox_set` — assign `RenderSettings.skybox` from a material asset path.
 - `skybox_get` — read the current skybox material path (read-only).
 
-Added in M20 Plan 2 to close the Lighting & environment parity gap with the
-competitor (AnkleBreaker ships a full lighting category). The bake trigger is
-the documented advantage — AnkleBreaker's reflection-probe tool sets `mode:
-Baked` but triggers no gate; ours routes the bake through the gate
+Added in M20 Plan 2 to cover the per-light / per-probe / skybox layer. The
+bake trigger is the documented advantage — a reflection-probe tool can set
+`mode: Baked` without triggering a gate; ours routes the bake through the gate
 (`EditorSettle` lifecycle, `Gate = Enforce`) so agents wait for the bake to
 complete before the next mutation.
 

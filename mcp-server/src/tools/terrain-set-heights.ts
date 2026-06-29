@@ -2,9 +2,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M20 Plan 4 / T20.4 — Terrain domain tool. Set a heightmap region from a 2D
 // array of normalized 0-1 values. Built-in Terrain module — ungated. Mutating:
-// runs the full gate path; paths_hint is the host scene path. Param shape
-// mirrors AnkleBreaker's unity_terrain_set_heights_region (xBase / yBase + 2D
-// heights). The 2D array is row-major [[r0c0,r0c1,...],[r1c0,...],...].
+// runs the full gate path; paths_hint is the host scene path. Param shape:
+// xBase / yBase + 2D heights. The 2D array is row-major
+// [[r0c0,r0c1,...],[r1c0,...],...].
 const targetSchema = {
   instance_id: {
     type: "integer",

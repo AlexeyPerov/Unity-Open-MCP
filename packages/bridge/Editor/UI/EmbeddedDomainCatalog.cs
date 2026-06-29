@@ -115,7 +115,7 @@ namespace UnityOpenMcpBridge
                 upmDependency: "com.unity.splines",
                 typeProbe: "UnityEngine.Splines.SplineContainer, Unity.Splines",
                 builtin: false),
-            // M20 Plan 6 — Ivan-breadth compile-gated domains. Cinemachine is
+            // M20 Plan 6 — additional compile-gated domains. Cinemachine is
             // deliberately ABSENT here: it is reflection-gated (the assembly
             // always compiles), so it is not an installable compile-gated
             // domain and the panel would mislead by suggesting a one-click

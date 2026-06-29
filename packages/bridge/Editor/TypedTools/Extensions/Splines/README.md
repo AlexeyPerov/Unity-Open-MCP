@@ -5,11 +5,11 @@ Seven tools for in-editor spline authoring: create container, add/set knots,
 set tangent mode, evaluate, get knots, and a reflective modify escape hatch.
 
 First backlog domain shipped under M18 Plan 7 — proof that the embedded +
-grouped model extends to Ivan-breadth domains. Cinemachine (the recommended
-first domain) was swapped for Splines per the plan's fallback path: Splines is
-compile-gate-only with a single stable API across `com.unity.splines` 1.x/2.x,
-so it avoids the Cinemachine 2.x/3.x reflection layer. See the M18 changelog
-for the swap record.
+grouped model extends to compile-gated domain packs. Cinemachine (the
+recommended first domain) was swapped for Splines per the plan's fallback
+path: Splines is compile-gate-only with a single stable API across
+`com.unity.splines` 1.x/2.x, so it avoids the Cinemachine 2.x/3.x reflection
+layer. See the M18 changelog for the swap record.
 
 ## Compile gate
 

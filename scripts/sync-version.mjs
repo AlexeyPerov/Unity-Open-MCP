@@ -29,9 +29,8 @@
 //   <X.Y.Z> = plain major.minor.patch (a leading "v" is tolerated and stripped);
 //             pre-release/build metadata are not supported.
 //
-// Modeled on the approach used by reference projects (UCP's sync-version.mjs,
-// Unity-MCP-main's bump-version.ps1): one bespoke script is the proven minimal
-// pattern; we deliberately avoid changesets/lerna/nx for a repo this size.
+// One bespoke script is the proven minimal pattern; we deliberately avoid
+// changesets/lerna/nx for a repo this size.
 //
 // Requires Node 18+ (uses no runtime dependencies, only node: builtins).
 

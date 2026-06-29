@@ -20,9 +20,7 @@
 // compiled in and the capability surface reports the domain as
 // `available: false (dependency missing: com.unity.splines)`.
 //
-// Naming: `unity_open_mcp_splines_<action>` (snake_case domain prefix — mirrors
-// the kebab `splines-*` ids in the upstream Unity-AI-Splines reference pack).
-// Reference: IvanMurzak/Unity-AI-Splines (Apache-2.0).
+// Naming: `unity_open_mcp_splines_<action>` (snake_case domain prefix).
 #if UNITY_OPEN_MCP_EXT_SPLINES
 #pragma warning disable CS0618
 using System.Text;

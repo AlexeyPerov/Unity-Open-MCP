@@ -9,8 +9,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // so an agent can size risk before paying for a checkpoint.
 //
 // Heuristic only — confidence bounds are surfaced in the response so an agent
-// treats the risk band as guidance, not ground truth. No Unity-MCP / UCP /
-// UUMCP equivalent; composed from existing gate/verify foundations.
+// treats the risk band as guidance, not ground truth. Composed from existing
+// gate/verify foundations; no equivalent in the broader tool landscape.
 export const impactPreview: Tool = {
   name: "unity_open_mcp_impact_preview",
   description:

@@ -16,10 +16,8 @@ namespace UnityOpenMcpBridge.FrameDebugger
     // here keeps the version drift in one place; the tool above (and any future
     // consumer) talks to a stable surface.
     //
-    // Adapted from the unity-mcp-beta-codev reference (references/unity-mcp-
-    // beta-codev/MCPForUnity/Editor/Tools/Profiler/Operations/FrameDebuggerOps.cs)
-    // but translated to this bridge's conventions: no Newtonsoft, no dynamic,
-    // hand-rolled field extraction returning a plain Dictionary<string,object>.
+    // Implementation notes: no Newtonsoft, no dynamic — hand-rolled field
+    // extraction returning a plain Dictionary<string,object>.
     internal static class FrameDebuggerApi
     {
         private static readonly Type UtilType;

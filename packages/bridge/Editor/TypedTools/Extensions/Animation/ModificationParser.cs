@@ -14,13 +14,12 @@ namespace UnityOpenMcpBridge.Extensions.Animation
     // Modification DTOs + JSON parser shared by AnimationClipTools.Modify and
     // AnimatorTools.Modify.
     //
-    // The upstream Unity-AI-Animation pack ships strongly-typed C# classes for
-    // each modification kind; we accept the same JSON shape via a flat
-    // `Modification` record dispatched by `Type`. The parser is a hand-rolled
-    // shallow JSON reader (the bridge's JsonBody helpers are not visible
-    // outside the bridge assembly). Nested arrays (keyframes, conditions) are
-    // handled, but nested objects are flattened to {field: value} so the agent
-    // surface stays simple and predictable.
+    // Each modification kind is dispatched by `Type` against a flat
+    // `Modification` record. The parser is a hand-rolled shallow JSON reader
+    // (the bridge's JsonBody helpers are not visible outside the bridge
+    // assembly). Nested arrays (keyframes, conditions) are handled, but nested
+    // objects are flattened to {field: value} so the agent surface stays
+    // simple and predictable.
     //
     // Used by:
     //   - AnimationClipTools.Modify   (SetCurve / RemoveCurve / ClearCurves /

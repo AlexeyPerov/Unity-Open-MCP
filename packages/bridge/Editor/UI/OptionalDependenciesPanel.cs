@@ -13,27 +13,23 @@ namespace UnityOpenMcpBridge
     /// <summary>
     /// M18 Plan 4 T18.4.2 — the in-Editor "Optional Unity dependencies" panel.
     ///
-    /// Mirrors the Coplay optional-dependencies pattern
-    /// (<c>MCPForUnityEditorWindow.cs</c> <c>BuildDependenciesSection</c>):
-    /// one row per embedded Unity domain showing installed / missing status,
+    /// One row per embedded Unity domain showing installed / missing status,
     /// with a one-click UPM install / remove for installable domains and an
     /// "always-on" badge for built-in module domains.
     ///
     /// Status detection has two paths:
     ///  - Installable domains (NavMesh, Input System, ProBuilder) read
-    ///    <c>Packages/manifest.json</c> directly — same fast path as Coplay's
-    ///    <c>IsUpmPackageInstalled</c>. No async UPM list round-trip.
+    ///    <c>Packages/manifest.json</c> directly. No async UPM list round-trip.
     ///  - Built-in module domains (Particle System, Animation) probe
-    ///    <see cref="Type.GetType"/> on a domain type, mirroring how Coplay
-    ///    detects ProBuilder / Cinemachine.
+    ///    <see cref="Type.GetType"/> on a domain type.
     ///
     /// Install / remove run <c>UnityEditor.PackageManager.Client.Add</c> /
     /// <c>Client.Remove</c> and poll completion on <c>EditorApplication.update</c>
     /// with a progress bar (the dispatcher cannot block on the package-manager
-    /// worker thread from the GUI thread; the Coplay poll pattern is the
-    /// established idiom). On completion Unity re-imports the manifest and the
-    /// bridge asmdef <c>versionDefines</c> flip the embedded tools on/off at the
-    /// next domain reload — this panel does NOT write scripting defines.
+    /// worker thread from the GUI thread). On completion Unity re-imports the
+    /// manifest and the bridge asmdef <c>versionDefines</c> flip the embedded
+    /// tools on/off at the next domain reload — this panel does NOT write
+    /// scripting defines.
     /// </summary>
     public static class OptionalDependenciesPanel
     {
@@ -249,7 +245,7 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        // ---- manifest presence check (fast path, mirrors Coplay) ---------------
+        // ---- manifest presence check (fast path) -------------------------------
 
         private static string ManifestPath
         {
@@ -263,8 +259,8 @@ namespace UnityOpenMcpBridge
         // Reads manifest.json and answers "is this package id present in the
         // dependencies block". Caches by lastWriteTime so repeated repaints do
         // not re-read the file. The check is intentionally naive ("contains
-        // \"<id>\"") to match the Coplay reference — the manifest dependencies
-        // block is flat and the keys are package ids.
+        // \"<id>\"") — the manifest dependencies block is flat and the keys are
+        // package ids.
         public static bool IsUpmPackageInstalled(string packageId)
         {
             if (string.IsNullOrEmpty(packageId)) return false;
@@ -356,8 +352,8 @@ namespace UnityOpenMcpBridge
         }
 
         // Add the package (latest compatible version when the id carries no
-        // @version, mirroring the Coplay install path). The request is polled
-        // on EditorApplication.update; a progress bar shows while it runs.
+        // @version). The request is polled on EditorApplication.update; a
+        // progress bar shows while it runs.
         private static void InstallUpmPackage(string packageId)
         {
             _pending[packageId] = "Installing…";
@@ -395,8 +391,7 @@ namespace UnityOpenMcpBridge
         // Poll the PackageManager request on the Editor update loop and clear
         // the progress bar + pending entry when it completes. The request
         // advances on a package-manager worker thread; we must not block the
-        // GUI thread, so we register a one-shot update callback (same idiom
-        // as the Coplay PollUpmRequest).
+        // GUI thread, so we register a one-shot update callback.
         private static void PollRequest<T>(T request, string packageId, string verb) where T : Request
         {
             EditorUtility.DisplayProgressBar(

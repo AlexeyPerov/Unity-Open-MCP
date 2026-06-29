@@ -1,8 +1,8 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed PlayerSettings mutator. Mutating: set one or more
-// PlayerSettings knobs by key/value patches. Folds UCP settings/player-set.
-// paths_hint must be scoped to ProjectSettings/ProjectSettings.asset.
+// PlayerSettings knobs by key/value patches. paths_hint must be scoped to
+// ProjectSettings/ProjectSettings.asset.
 export const settingsSetPlayer: Tool = {
   name: "unity_open_mcp_settings_set_player",
   description:

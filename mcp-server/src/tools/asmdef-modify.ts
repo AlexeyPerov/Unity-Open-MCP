@@ -8,9 +8,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // supplied params mutate — omitted params keep their current value. References
 // are additive by default (add_references / remove_references); pass
 // `references` for a full replacement. Setting include_platforms clears
-// exclude_platforms and vice versa (mirrors AnkleBreaker set_platforms
-// semantics). The advantage over AnkleBreaker's ungated asmdef mutators is the
-// gate-integrated recompile + the active-scene dirty guard preflight.
+// exclude_platforms and vice versa. The advantage over an ungated asmdef
+// mutator is the gate-integrated recompile + the active-scene dirty guard
+// preflight.
 export const asmdefModify: Tool = {
   name: "unity_open_mcp_asmdef_modify",
   description:

@@ -19,12 +19,11 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
     //             struct on the ParticleSystem — assignments back to the
     //             component are required for the change to persist.
     //
-    // The upstream reference pack (IvanMurzak/Unity-AI-ParticleSystem, MIT)
-    // uses an opaque ReflectorNet SerializedMember payload per module. That is
-    // too unstructured for an agent that has to guess field names; we instead
-    // expose a fixed, documented field surface per module so the modify tool
-    // can validate field names up front and reject typos with a structured
-    // error (no thrown exceptions to MCP).
+    // Rather than an opaque reflective SerializedMember payload per module
+    // (too unstructured for an agent that has to guess field names), we expose
+    // a fixed, documented field surface per module so the modify tool can
+    // validate field names up front and reject typos with a structured error
+    // (no thrown exceptions to MCP).
     //
     // Mutating tool runs the gate path with paths_hint scoped to the host's
     // scene path (same model as ProBuilder). Naming:

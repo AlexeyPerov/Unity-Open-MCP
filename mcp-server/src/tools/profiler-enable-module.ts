@@ -1,11 +1,10 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 7 — typed profiler module toggle. Mutates local bookkeeping only
-// (no Unity state, no asset writes); gate-free direct-response tool. Folds
-// UMCP `profiler-enable-module`. Unity's runtime Profiler API does not expose
-// per-module enable/disable, so this is purely a bookkeeping helper reflected
-// back by profiler_get_status / profiler_list_modules; for actual module
-// visibility use the Profiler window.
+// (no Unity state, no asset writes); gate-free direct-response tool. Unity's
+// runtime Profiler API does not expose per-module enable/disable, so this is
+// purely a bookkeeping helper reflected back by profiler_get_status /
+// profiler_list_modules; for actual module visibility use the Profiler window.
 export const profilerEnableModule: Tool = {
   name: "unity_open_mcp_profiler_enable_module",
   description:

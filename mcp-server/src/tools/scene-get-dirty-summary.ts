@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 3 — read-only dirty summary. Gate-free. Per-scene summary of
-// unsaved changes (folds UCP scene/dirty-summary).
+// unsaved changes.
 export const sceneGetDirtySummary: Tool = {
   name: "unity_open_mcp_scene_get_dirty_summary",
   description:

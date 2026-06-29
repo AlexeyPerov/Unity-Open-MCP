@@ -2,8 +2,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 6 — typed script write. Mutating: creates or overwrites a .cs file
 // under the project, after Roslyn pre-write validation. Runs the full gate path
-// with paths_hint scoped to the .cs path. Folds UMCP script-update-or-create
-// with the validation exposed as a return field rather than a separate tool.
+// with paths_hint scoped to the .cs path. The validation is exposed as a
+// return field rather than a separate tool.
 export const scriptWrite: Tool = {
   name: "unity_open_mcp_script_write",
   description:

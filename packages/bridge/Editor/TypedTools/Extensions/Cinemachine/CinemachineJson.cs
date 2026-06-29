@@ -33,8 +33,7 @@ namespace UnityOpenMcpBridge.Extensions.Cinemachine
     // the packs read consistently.
     //
     // Naming: tool ids follow `unity_open_mcp_cinemachine_<action>`
-    // (snake_case domain prefix), mirroring the kebab `cinemachine-*` ids in
-    // the upstream Unity-AI-Cinemachine reference pack.
+    // (snake_case domain prefix).
     internal static class CinemachineJson
     {
         public static string Ok(string body)

@@ -24,15 +24,12 @@ namespace UnityOpenMcpExtensions.Navigation
     //
     // Eleven typed tools, all registry-discovered via [BridgeToolType] +
     // [BridgeTool]. Naming: `unity_open_mcp_navigation_<action>` (snake_case
-    // domain prefix — mirrors the kebab `navigation-*` ids in the upstream
-    // Unity-MCP reference pack).
+    // domain prefix).
     //
     // Mutating tools declare IsMutating = true and accept a snake_case
     // `paths_hint` (bound to the C# `pathsHint` parameter by name) so the gate
     // can scope the verify checkpoint. Bake is the heavy op — it runs
     // EditorSettle so the dispatcher waits for asset refresh before returning.
-    //
-    // Reference: IvanMurzak/Unity-AI-Navigation (Apache-2.0).
     [BridgeToolType]
     public static class NavigationTools
     {

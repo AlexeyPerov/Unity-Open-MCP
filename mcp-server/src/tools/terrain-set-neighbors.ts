@@ -2,9 +2,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M20 Plan 4 / T20.4 — Terrain domain tool. Set neighbor Terrains for LOD
 // stitching. Built-in Terrain module — ungated. Mutating: runs the full gate
-// path; paths_hint is the host scene path. Param shape mirrors AnkleBreaker's
-// unity_terrain_set_neighbors (left / top / right / bottom neighbors) + Ivan's
-// Terrain.SetNeighbors.cs.
+// path; paths_hint is the host scene path. Param shape: left / top / right /
+// bottom neighbors.
 const targetSchema = {
   instance_id: {
     type: "integer",

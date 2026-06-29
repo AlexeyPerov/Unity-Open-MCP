@@ -15,7 +15,7 @@ namespace UnityOpenMcpBridge.TypedTools
     // list_opened / get_data / get_dirty_summary are gate-free reads.
     //
     // `scene_get_data` is the structured scene hierarchy read that supersedes
-    // the standalone M10 scene snapshot (T3.8) and folds UUMCP summarize /
+    // the standalone M10 scene snapshot (T3.8), unifying summarize +
     // hierarchy_describe into the `detail` modes (summary / normal / verbose).
     // It reflects unsaved editor state (unlike read_asset on the .unity file,
     // which only shows the last-saved YAML).
@@ -151,9 +151,8 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("invalid_parameter",
                     $"'path' must end with '.unity': '{destPath}'.");
 
-            // Idempotent: a clean scene is reported as saved:false with a note
-            // (matches UCP scene/save-active). Only the asset-backed write
-            // counts as a mutation.
+            // Idempotent: a clean scene is reported as saved:false with a note.
+            // Only the asset-backed write counts as a mutation.
             if (!scene.isDirty && savePath == scene.path && !string.IsNullOrEmpty(scene.path))
             {
                 var noop = new StringBuilder(96);
@@ -271,7 +270,7 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // GetDirtySummary reports the dirty flag + rootCount for every opened
-        // scene, highlighting dirty ones. Gate-free. Folds UCP scene/dirty-summary.
+        // scene, highlighting dirty ones. Gate-free.
         public static ToolDispatchResult GetDirtySummary(string body)
         {
             var sb = new StringBuilder(128);
@@ -361,7 +360,6 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Focus frames a GameObject in the SceneView and optionally sets the
         // view axis. Mutating (it moves the editor camera + sets Selection).
-        // Folds UCP scene/focus.
         public static ToolDispatchResult Focus(string body)
         {
             var instanceId = JsonBody.GetInt(body, "instance_id", 0);

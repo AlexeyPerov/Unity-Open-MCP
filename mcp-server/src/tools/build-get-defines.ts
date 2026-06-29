@@ -2,7 +2,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed scripting-define read. Read-only: the scripting define
 // symbols for the active build target group, as a raw ';' string AND a parsed
-// list. Folds UCP build/defines. Gate-free direct-response tool.
+// list. Gate-free direct-response tool.
 export const buildGetDefines: Tool = {
   name: "unity_open_mcp_build_get_defines",
   description:

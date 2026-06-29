@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 9 — typed build-scenes setter. Mutating: replaces
-// EditorBuildSettings.scenes with the supplied list. Folds UCP build/set-scenes.
+// EditorBuildSettings.scenes with the supplied list.
 //
 // paths_hint: EditorBuildSettings.asset lives under ProjectSettings/. Scope
 // paths_hint to "ProjectSettings" (or "ProjectSettings/EditorBuildSettings.asset").

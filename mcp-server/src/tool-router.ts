@@ -579,8 +579,8 @@ export class ToolRouter implements Router {
   // M18 Plan 2 / T18.2.2 — manage_tools routes local. Mutates the per-
   // session tool-group visibility state (ToolSessionState) that ListTools
   // consults to filter tools. The bridge does not see these calls — it is
-  // session-state the MCP server owns (matches the Coplay model and the
-  // resolved decision in M18 execution-plan.md).
+  // session-state the MCP server owns (the resolved decision in M18
+  // execution-plan.md).
   //
   // Compiled-state availability (whether the bridge compiled the domain in)
   // is reported in the `available` + `availableReason` fields per group. The

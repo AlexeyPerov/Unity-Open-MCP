@@ -57,9 +57,9 @@ namespace UnityOpenMcpBridge.TypedTools
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
-        // Write a log/warning/error to the console from the agent. Folds UUMCP
-        // console_log. Optional context (instance_id or asset_path) attaches a
-        // UnityEngine.Object so the Console pings it on click.
+        // Write a log/warning/error to the console from the agent. Optional
+        // context (instance_id or asset_path) attaches a UnityEngine.Object so
+        // the Console pings it on click.
         public static ToolDispatchResult ConsoleLog(string body)
         {
             var message = JsonBody.GetString(body, "message");
@@ -265,7 +265,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // ========================= Undo / Redo ===========================
 
-        // Perform N undo steps. Folds UUMCP editor_undo.
+        // Perform N undo steps.
         public static ToolDispatchResult EditorUndo(string body)
         {
             int steps = JsonBody.GetInt(body, "steps", 1);
@@ -277,7 +277,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return ToolDispatchResult.Ok(BuildUndoResult("undo", steps));
         }
 
-        // Perform N redo steps. Folds UUMCP editor_redo.
+        // Perform N redo steps.
         public static ToolDispatchResult EditorRedo(string body)
         {
             int steps = JsonBody.GetInt(body, "steps", 1);
@@ -386,7 +386,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // Add a user layer to the TagManager and save the asset. Mutating: runs
         // through the gate envelope with paths_hint scoped to TagManager.asset.
         // By default picks the first empty slot (8–31); pass `slot` to assign a
-        // specific index. Folds UCP settings/add-layer.
+        // specific index.
         public static ToolDispatchResult EditorAddLayer(string body)
         {
             var layerRaw = JsonBody.GetString(body, "layer");
@@ -646,7 +646,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // =================== TagManager helpers =========================
 
-        // Load the TagManager as a SerializedObject. UCP / unity-cli both use
+        // Load the TagManager as a SerializedObject. Uses
         // AssetDatabase.LoadMainAssetAtPath on the well-known ProjectSettings
         // path; this returns the live TagManager asset Unity keeps loaded.
         private static SerializedObject LoadTagManagerSerialized()

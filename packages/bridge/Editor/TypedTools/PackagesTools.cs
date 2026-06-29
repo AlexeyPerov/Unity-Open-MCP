@@ -8,8 +8,7 @@ using UnityEditor.PackageManager.Requests;
 // PackageManager.PackageInfo references below ambiguous (CS0104). This file
 // uses only UnityEditor.PackageManager (+ .Requests) types plus
 // UnityEngine.Application.dataPath, all of which resolve unambiguously
-// without the root UnityEditor import. Mirrors UCP PackagesController's
-// import set.
+// without the root UnityEditor import.
 
 namespace UnityOpenMcpBridge.TypedTools
 {
@@ -25,9 +24,8 @@ namespace UnityOpenMcpBridge.TypedTools
     // UPM requests (Client.List / Client.Add / Client.Search) are async — the
     // Request<T>.IsCompleted flag flips on a package-manager worker thread.
     // The dispatcher runs each tool body synchronously on the main thread, so
-    // we poll IsCompleted with a short sleep up to a deadline. This mirrors
-    // UCP's WaitForRequest pattern; PackageInfo can be read from any thread
-    // once IsCompleted is true.
+    // we poll IsCompleted with a short sleep up to a deadline;
+    // PackageInfo can be read from any thread once IsCompleted is true.
     //
     // These tools are NOT registry-discovered: they are wired into
     // BridgeHttpServer.DispatchTool alongside the other M16 typed tools so
@@ -50,8 +48,8 @@ namespace UnityOpenMcpBridge.TypedTools
         // --------------------------- reads --------------------------------
 
         // List installed UPM packages. Gate-free. Token-bounded by max_results.
-        // Folds UMCP package-list + UCP packages/list. Supports offline mode
-        // (cached resolution only) and an indirect-dependency toggle.
+        // Supports offline mode (cached resolution only) and an indirect-
+        // dependency toggle.
         public static ToolDispatchResult List(string body)
         {
             bool offline = JsonBody.GetBool(body, "offline", true);
@@ -61,8 +59,8 @@ namespace UnityOpenMcpBridge.TypedTools
 
             var sourceFilter = ParseSourceFilter(JsonBody.GetString(body, "source"));
             var nameFilter = JsonBody.GetString(body, "name_filter");
-            // direct_dependencies_only mirrors UCP includeIndirect=false and
-            // UMCP directDependenciesOnly — only entries from manifest.json.
+            // direct_dependencies_only — when false, only entries from
+            // manifest.json are returned (no transitive deps).
             bool directOnly = JsonBody.GetBool(body, "direct_dependencies_only", false);
 
             ListRequest request;
@@ -132,7 +130,7 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Search UPM registry + cached packages. Gate-free. Token-bounded by
-        // max_results. Folds UMCP package-search + UCP packages/search.
+        // max_results.
         public static ToolDispatchResult Search(string body)
         {
             var query = JsonBody.GetString(body, "query");
@@ -264,7 +262,6 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Inspect one package by name (installed or registry). Gate-free.
-        // Folds UCP packages/info.
         public static ToolDispatchResult GetInfo(string body)
         {
             var name = JsonBody.GetString(body, "name");
@@ -366,7 +363,7 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Presence + version check for a packageId against manifest.json.
-        // Gate-free. Folds UUMCP package_check.
+        // Gate-free.
         public static ToolDispatchResult Check(string body)
         {
             var packageId = JsonBody.GetString(body, "package_id");
@@ -409,8 +406,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // --------------------------- mutators -----------------------------
 
         // Install a UPM package. Mutating: writes Packages/manifest.json and
-        // triggers package resolution (may domain-reload). Folds UMCP
-        // package-add + UCP packages/add.
+        // triggers package resolution (may domain-reload).
         public static ToolDispatchResult Add(string body)
         {
             var packageId = JsonBody.GetString(body, "package_id");
@@ -448,7 +444,6 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Remove a UPM package. Mutating: writes Packages/manifest.json and
         // triggers resolution. Refuses packages that are not installed.
-        // Folds UMCP package-remove + UCP packages/remove.
         public static ToolDispatchResult Remove(string body)
         {
             var packageIdRaw = JsonBody.GetString(body, "package_id");
@@ -541,7 +536,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Match priority: 5 exact name, 4 exact displayName, 3 name substring,
         // 2 displayName substring, 1 description substring, 0 no match.
-        // Higher = better. Mirrors UMCP GetSearchPriority.
+        // Higher = better.
         private static int MatchPriority(PackageInfo pkg, string filter)
         {
             if (string.IsNullOrEmpty(filter)) return 0;

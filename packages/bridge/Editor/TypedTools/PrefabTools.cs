@@ -166,8 +166,7 @@ namespace UnityOpenMcpBridge.TypedTools
                     PrefabUtility.SaveAsPrefabAsset(prefabContentsRoot, assetPath);
                 // ClearDirtiness + GoBackToPreviousStage are the supported way
                 // to exit a prefab stage. PrefabStage.Save()/Close() exist but
-                // are protected/internal (CS0122) — this pattern matches the
-                // Unity-MCP reference implementation.
+                // are protected/internal (CS0122).
                 stage.ClearDirtiness();
                 StageUtility.GoBackToPreviousStage();
             }
@@ -197,8 +196,8 @@ namespace UnityOpenMcpBridge.TypedTools
 
             try
             {
-                // SaveAsPrefabAsset + ClearDirtiness mirrors the Unity-MCP
-                // reference; PrefabStage.Save() is protected (CS0122).
+                // SaveAsPrefabAsset + ClearDirtiness; PrefabStage.Save() is
+                // protected (CS0122).
                 PrefabUtility.SaveAsPrefabAsset(prefabContentsRoot, assetPath);
                 stage.ClearDirtiness();
             }

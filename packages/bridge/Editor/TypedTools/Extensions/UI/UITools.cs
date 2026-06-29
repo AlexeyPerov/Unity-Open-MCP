@@ -1,7 +1,7 @@
 // M20 Plan 3 / T20.3.2 — UI (uGUI) embedded domain tools.
 //
 // Four typed tools covering the Canvas / element / layout-group / element-modify
-// layer the competitor (AnkleBreaker) ships as its UI category.
+// layer.
 //
 //   ui_canvas_add           — add a Canvas (+ CanvasScaler + GraphicRaycaster)
 //                             to a host GameObject or as a new scene root, and
@@ -55,10 +55,9 @@ namespace UnityOpenMcpBridge.Extensions.UI
         // Add a Canvas to a host GameObject (or as a new scene root when no host
         // is addressed) and ensure the canvas has a CanvasScaler +
         // GraphicRaycaster, plus an EventSystem somewhere in the open scene(s).
-        // Mirrors AnkleBreaker's unity_ui_create_canvas param shape (renderMode
-        // overlay/camera/world + EventSystem). Idempotent: re-using an existing
-        // Canvas is reported with added:false (the scaler / raycaster /
-        // EventSystem are still ensured).
+        // renderMode overlay/camera/world + EventSystem. Idempotent: re-using
+        // an existing Canvas is reported with added:false (the scaler /
+        // raycaster / EventSystem are still ensured).
         [BridgeTool("unity_open_mcp_ui_canvas_add",
             Title = "UI: Add Canvas",
             IsMutating = true,
@@ -159,8 +158,7 @@ namespace UnityOpenMcpBridge.Extensions.UI
 
         // Add a uGUI element as a child of a parent RectTransform. The parent
         // MUST exist — every uGUI element lives under a Canvas in the hierarchy,
-        // so this tool does not create a new root. Mirrors AnkleBreaker's
-        // unity_ui_create_element param shape (element types + parent +
+        // so this tool does not create a new root (element types + parent +
         // anchoredPosition + sizeDelta). When element_type=TMP_Text and TMP is
         // absent, returns `tmp_package_required` — no silent Text fallback.
         [BridgeTool("unity_open_mcp_ui_element_add",
@@ -270,9 +268,8 @@ namespace UnityOpenMcpBridge.Extensions.UI
         // =====================================================================
 
         // Add a layout group to a parent RectTransform. The parent must exist.
-        // Mirrors AnkleBreaker's layout surface (the element types it ships
-        // include layout groups). padding defaults to 0 on all sides; spacing
-        // defaults to 0; child alignment defaults to UpperLeft.
+        // padding defaults to 0 on all sides; spacing defaults to 0; child
+        // alignment defaults to UpperLeft.
         [BridgeTool("unity_open_mcp_ui_layout_group_add",
             Title = "UI: Add Layout Group",
             IsMutating = true,

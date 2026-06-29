@@ -30,13 +30,10 @@ namespace UnityOpenMcpBridge.Extensions.Animation
     //              SetCurve / RemoveCurve / ClearCurves / SetFrameRate /
     //              SetWrapMode / SetLegacy / AddEvent / ClearEvents.
     //
-    // The upstream reference pack
-    // uses a strongly-typed `AnimationModification[]` discriminator array.
-    // We accept the same JSON shape via `modifications_json` (a JSON array of
-    // { type, ... } entries) and dispatch by `type`. Per-entry errors are
-    // accumulated in the response's `errors` array (no thrown exceptions to
-    // MCP). Naming: `unity_open_mcp_animation_<action>` (snake_case domain
-    // prefix).
+    // Each modification is dispatched by `type` from `modifications_json` (a
+    // JSON array of { type, ... } entries). Per-entry errors are accumulated in
+    // the response's `errors` array (no thrown exceptions to MCP). Naming:
+    // `unity_open_mcp_animation_<action>` (snake_case domain prefix).
     [BridgeToolType]
     public static class AnimationClipTools
     {
@@ -380,8 +377,8 @@ namespace UnityOpenMcpBridge.Extensions.Animation
             var relativePath = mod.RelativePath ?? string.Empty;
 
             // EditorCurveBinding does not have a public Remove API; re-add all
-            // bindings except the one to drop (same pattern as the upstream
-            // pack). Object-reference curves are preserved too.
+            // bindings except the one to drop. Object-reference curves are
+            // preserved too.
             var bindings = AnimationUtility.GetCurveBindings(clip);
             var preserved = new List<KeyValuePair<EditorCurveBinding, AnimationCurve>>();
             foreach (var binding in bindings)
