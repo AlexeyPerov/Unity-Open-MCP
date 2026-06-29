@@ -311,6 +311,24 @@ export const TOOL_GROUPS: ToolGroup[] = [
     autoActivate: true,
   },
   {
+    id: "sprite2d",
+    description:
+      "2D art pipeline tools — SpriteAtlas (create / get / add_packable / " +
+      "remove_packable / modify / delete / list) + Texture import (get_importer " +
+      "/ set_import / reimport / get). Two prefixes share one group so the " +
+      "whole 2D art pipeline activates together. Built-in 2D module " +
+      "(SpriteAtlas / SpriteAtlasAsset / SpriteAtlasPackingSettings / " +
+      "SpriteAtlasTextureSettings in UnityEngine.U2D / UnityEditor.U2D + " +
+      "TextureImporter in UnityEditor) — always compiled (no domain define). " +
+      "Mutating members run the full gate path with EditorSettle (the " +
+      ".spriteatlas asset is written/reimported; texture reimports can take " +
+      "seconds and may trigger a platform-switch domain reload); read-only " +
+      "members (spriteatlas_get / list + texture_get_importer / get) are " +
+      "gate-free. texture_set_import folds sprite + normal-map presets into " +
+      "one structured settings_json patch instead of separate tools.",
+    defaultEnabled: false,
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -813,6 +831,43 @@ assign(
 assign(
   "memoryprofiler",
   ["unity_senses_memory_snapshot_capture"],
+);
+
+// --- 2d (M20 Plan 9 / T20.9.1 — built-in 2D module, ungated) ---------------
+// spriteatlas_* and texture_* use distinct domain prefixes but share one tool
+// group so the whole 2D art pipeline (atlas packing + texture import) activates
+// together. Built-in 2D types (SpriteAtlas / SpriteAtlasAsset / packing /
+// texture settings structs from UnityEngine.U2D / UnityEditor.U2D +
+// TextureImporter from UnityEditor) are always present, so this group carries
+// no domainDefine. Five mutating spriteatlas members (create / add_packable /
+// remove_packable / modify / delete) run the full gate path with EditorSettle
+// and paths_hint scoped to the .spriteatlas asset path (delete is destructive);
+// two read-only spriteatlas members (get / list) are gate-free. Two mutating
+// texture members (set_import / reimport) run the full gate path with
+// EditorSettle (reimport can take seconds / trigger a platform-switch domain
+// reload); set_import folds sprite + normal-map presets into one structured
+// settings_json patch instead of separate tools. Two read-only texture members
+// (get_importer / get) are gate-free.
+assign(
+  "sprite2d",
+  [
+    "create",
+    "get",
+    "add_packable",
+    "remove_packable",
+    "modify",
+    "delete",
+    "list",
+  ].map((suffix) => `unity_open_mcp_spriteatlas_${suffix}`),
+);
+assign(
+  "sprite2d",
+  [
+    "get_importer",
+    "set_import",
+    "reimport",
+    "get",
+  ].map((suffix) => `unity_open_mcp_texture_${suffix}`),
 );
 
 // --- agent-senses (live-only reads) ----------------------------------------

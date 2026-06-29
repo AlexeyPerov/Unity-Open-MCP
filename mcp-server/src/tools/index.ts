@@ -398,6 +398,33 @@ import { vfxBlockEdit } from "./vfx-block-edit.js";
 // callback fires. Pairs with profiler_get_script_stats / profiler_capture_frame
 // for a fuller performance picture than a standalone memory tool.
 import { memorySnapshotCapture } from "./memory-snapshot-capture.js";
+// M20 Plan 9 / T20.9.1 — 2D art pipeline: SpriteAtlas + Texture import domain
+// tools. Built-in 2D module (SpriteAtlas / SpriteAtlasAsset /
+// SpriteAtlasPackingSettings / SpriteAtlasTextureSettings in UnityEngine.U2D /
+// UnityEditor.U2D + TextureImporter in UnityEditor) — ungated in the bridge
+// (no UNITY_OPEN_MCP_EXT_2D define), always compiled. The `2d` group is hidden
+// from ListTools until the session activates it via manage_tools. Two prefixes
+// share one group: spriteatlas_* (create/get/add_packable/remove_packable/
+// modify/delete/list) and texture_* (get_importer/set_import/reimport/get).
+// Mutating members (spriteatlas_create/add_packable/remove_packable/modify/
+// delete + texture_set_import/reimport) run the full gate path with
+// EditorSettle (the .spriteatlas asset is written/reimported; texture
+// reimports can take seconds and may trigger a platform-switch domain reload)
+// and paths_hint scoped to the asset path. Read-only members (spriteatlas_get/
+// list + texture_get_importer/get) are gate-free. spriteatlas_set_import folds
+// sprite + normal-map presets into one structured settings_json patch instead
+// of separate set_sprite / set_normalmap tools (cleaner, fewer IDs).
+import { spriteatlasCreate } from "./spriteatlas-create.js";
+import { spriteatlasGet } from "./spriteatlas-get.js";
+import { spriteatlasAddPackable } from "./spriteatlas-add-packable.js";
+import { spriteatlasRemovePackable } from "./spriteatlas-remove-packable.js";
+import { spriteatlasModify } from "./spriteatlas-modify.js";
+import { spriteatlasDelete } from "./spriteatlas-delete.js";
+import { spriteatlasList } from "./spriteatlas-list.js";
+import { textureGetImporter } from "./texture-get-importer.js";
+import { textureSetImport } from "./texture-set-import.js";
+import { textureReimport } from "./texture-reimport.js";
+import { textureGet } from "./texture-get.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -959,6 +986,31 @@ export const M20_PLAN7_MEMORYPROFILER_TOOLS: Tool[] = [
   memorySnapshotCapture,
 ];
 
+// M20 Plan 9 / T20.9.1 — 2D art pipeline (SpriteAtlas + Texture import) domain
+// tools. Built-in 2D module — ungated in the bridge (always compiled). Seven
+// spriteatlas_* members + four texture_* members share one `2d` group. Five
+// mutating spriteatlas members (create / add_packable / remove_packable /
+// modify / delete) run the full gate path with EditorSettle and paths_hint
+// scoped to the .spriteatlas asset path; spriteatlas_delete is destructive.
+// Two mutating texture members (set_import / reimport) run the full gate path
+// with EditorSettle (reimport can take seconds / trigger a platform-switch
+// domain reload); set_import folds sprite + normal-map presets into one
+// structured settings_json patch. Two read-only spriteatlas members (get /
+// list) and two read-only texture members (get_importer / get) are gate-free.
+export const M20_PLAN9_2D_TOOLS: Tool[] = [
+  spriteatlasCreate,
+  spriteatlasGet,
+  spriteatlasAddPackable,
+  spriteatlasRemovePackable,
+  spriteatlasModify,
+  spriteatlasDelete,
+  spriteatlasList,
+  textureGetImporter,
+  textureSetImport,
+  textureReimport,
+  textureGet,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -1000,4 +1052,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M20_PLAN7_SHADERGRAPH_TOOLS,
   ...M20_PLAN7_VFX_TOOLS,
   ...M20_PLAN7_MEMORYPROFILER_TOOLS,
+  ...M20_PLAN9_2D_TOOLS,
 ];

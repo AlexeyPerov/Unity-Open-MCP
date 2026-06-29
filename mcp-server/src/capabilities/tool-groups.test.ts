@@ -320,6 +320,45 @@ test("groupToTools terrain roster has all 5 terrain tools", () => {
 });
 
 // ---------------------------------------------------------------------------
+// M20 Plan 9 / T20.9.1 — sprite2d catalog (SpriteAtlas + Texture import)
+// ---------------------------------------------------------------------------
+
+test("sprite2d group is registered and ungated (built-in 2D module)", () => {
+  const g = getGroup("sprite2d");
+  assert.ok(g, "sprite2d group must exist");
+  assert.equal(g!.defaultEnabled, false);
+  // Built-in 2D module — no domainDefine, no unityPackage.
+  assert.equal(g!.domainDefine, undefined);
+  assert.equal(g!.unityPackage, undefined);
+});
+
+test("groupFor assigns spriteatlas + texture tools to sprite2d", () => {
+  for (const name of [
+    "unity_open_mcp_spriteatlas_create",
+    "unity_open_mcp_spriteatlas_get",
+    "unity_open_mcp_spriteatlas_add_packable",
+    "unity_open_mcp_spriteatlas_remove_packable",
+    "unity_open_mcp_spriteatlas_modify",
+    "unity_open_mcp_spriteatlas_delete",
+    "unity_open_mcp_spriteatlas_list",
+    "unity_open_mcp_texture_get_importer",
+    "unity_open_mcp_texture_set_import",
+    "unity_open_mcp_texture_reimport",
+    "unity_open_mcp_texture_get",
+  ]) {
+    assert.equal(groupFor(name), "sprite2d", `${name} must map to sprite2d`);
+  }
+});
+
+test("groupToTools sprite2d roster has all 11 2D-art-pipeline tools", () => {
+  const map = groupToTools();
+  // 11 tools — 7 spriteatlas_* + 4 texture_* (M20 Plan 9 / T20.9.1).
+  assert.equal(map.sprite2d.length, 11);
+  assert.ok(map.sprite2d.includes("unity_open_mcp_spriteatlas_create"));
+  assert.ok(map.sprite2d.includes("unity_open_mcp_texture_set_import"));
+});
+
+// ---------------------------------------------------------------------------
 // M20 Plan 7 / T20.7.0 + T20.7.1 — shadergraph catalog + auto-activation
 // ---------------------------------------------------------------------------
 

@@ -377,6 +377,29 @@ const TOOL_CATEGORY: Record<string, string> = {
   // Lifecycle = EditorSettle. The capture is callback-based (async); the bridge
   // blocks until the callback fires.
   unity_senses_memory_snapshot_capture: "memoryprofiler",
+  // M20 Plan 9 / T20.9.1 — 2D art pipeline (SpriteAtlas + Texture import)
+  // domain tools. Built-in 2D module (SpriteAtlas / SpriteAtlasAsset /
+  // SpriteAtlasPackingSettings / SpriteAtlasTextureSettings in UnityEngine.U2D
+  // / UnityEditor.U2D + TextureImporter in UnityEditor) — ungated in the
+  // bridge, always compiled. Five mutating spriteatlas members (create /
+  // add_packable / remove_packable / modify / delete) run the full gate path
+  // with EditorSettle and paths_hint scoped to the .spriteatlas asset path
+  // (delete is destructive); two read-only spriteatlas members (get / list)
+  // are gate-free. Two mutating texture members (set_import / reimport) run
+  // the full gate path with EditorSettle (reimport can take seconds / trigger
+  // a platform-switch domain reload); two read-only texture members
+  // (get_importer / get) are gate-free.
+  unity_open_mcp_spriteatlas_create: "sprite2d",
+  unity_open_mcp_spriteatlas_get: "sprite2d",
+  unity_open_mcp_spriteatlas_add_packable: "sprite2d",
+  unity_open_mcp_spriteatlas_remove_packable: "sprite2d",
+  unity_open_mcp_spriteatlas_modify: "sprite2d",
+  unity_open_mcp_spriteatlas_delete: "sprite2d",
+  unity_open_mcp_spriteatlas_list: "sprite2d",
+  unity_open_mcp_texture_get_importer: "sprite2d",
+  unity_open_mcp_texture_set_import: "sprite2d",
+  unity_open_mcp_texture_reimport: "sprite2d",
+  unity_open_mcp_texture_get: "sprite2d",
   // M20 Plan 5 / T20.5 — typed ScriptableObject + Assembly Definition tools.
   // Both sets are core (always-on) typed-editor tools with no Unity package
   // dependency. scriptableobject_create is mutating (EditorSettle);

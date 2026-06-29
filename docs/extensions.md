@@ -20,6 +20,8 @@ step.
 | UI (uGUI) | built-in (`Canvas` / `CanvasScaler` / `GraphicRaycaster` / `Image` / `Text` / `Button` / `Slider` / `Toggle` / `InputField` / layout groups / `EventSystem`) | *(none — ungated)* | `.../Extensions/UI/` |
 | Constraints & LOD | built-in (`PositionConstraint` / `RotationConstraint` / `AimConstraint` / `ParentConstraint` / `ScaleConstraint` / `LODGroup`) | *(none — ungated)* | `.../Extensions/Constraints/` |
 | Terrain | built-in (`Terrain` / `TerrainData` / `TreePrototype` / `TerrainLayer`) | *(none — ungated)* | `.../Extensions/Terrain/` |
+| SpriteAtlas | built-in (`SpriteAtlas` / `SpriteAtlasAsset` / `SpriteAtlasPackingSettings` / `SpriteAtlasTextureSettings` in `UnityEngine.U2D` / `UnityEditor.U2D`) | *(none — ungated)* | `.../Extensions/SpriteAtlas/` |
+| Texture | built-in (`TextureImporter` in `UnityEditor`) | *(none — ungated)* | `.../Extensions/Texture/` |
 | Cinemachine | `com.unity.cinemachine` ≥ 3.x | *(none — **reflection-gated**)* | `.../Extensions/Cinemachine/` |
 | Timeline | `com.unity.timeline` | `UNITY_OPEN_MCP_EXT_TIMELINE` | `.../Extensions/Timeline/` |
 | Tilemap | `com.unity.2d.tilemap` (+ `com.unity.2d.tilemap.extras` for RuleTile) | `UNITY_OPEN_MCP_EXT_TILEMAP` (+ `UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS` inner guard for `create_rule_tile`) | `.../Extensions/Tilemap/` |
@@ -30,12 +32,14 @@ step.
 Navigation is the reference template; InputSystem, ProBuilder, ParticleSystem,
 Animation, and Timeline share the same layout. Splines is the most recently
 added compile-gated domain — it proves the embedded + grouped model extends to
-additional Unity APIs. Lighting, Audio, UI, Constraints & LOD, and Terrain are
-**ungated** domains: their types are unconditionally present in every Unity
-install, so they ship without a `UNITY_OPEN_MCP_EXT_*` define and compile into
-every bridge build (their `lighting` / `audio` / `ui` / `constraints` /
-`terrain` tool groups are still hidden from `ListTools` until the session
-activates them via `manage_tools`). Terrain's heightmap / splat writes cap at
+additional Unity APIs. Lighting, Audio, UI, Constraints & LOD, Terrain,
+SpriteAtlas, and Texture are **ungated** domains: their types are
+unconditionally present in every Unity install, so they ship without a
+`UNITY_OPEN_MCP_EXT_*` define and compile into every bridge build (their
+`lighting` / `audio` / `ui` / `constraints` / `terrain` / `sprite2d` tool
+groups are still hidden from `ListTools` until the session activates them via
+`manage_tools`). SpriteAtlas + Texture share the `sprite2d` group (the 2D art
+pipeline activates together). Terrain's heightmap / splat writes cap at
 513×513 per call to push agents toward tiled region writes. UI's TextMesh Pro
 (`TMP_Text`) is optional and detected at call time via reflection — when absent,
 `ui_element_add` returns `tmp_package_required` (no silent legacy-`Text`
