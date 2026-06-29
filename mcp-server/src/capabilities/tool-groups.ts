@@ -20,6 +20,14 @@
 // (the matching `UNITY_OPEN_MCP_EXT_<DOMAIN>` symbol was defined), `false`
 // when the Unity domain package is absent. Availability is compiled-state
 // only; it does not change per session.
+//
+// M20 Plan 7 / T20.7.0 — a domain group may additionally carry
+// `autoActivate: true` to opt into package-detection auto-activation: when
+// the project has the group's `unityPackage` installed, the group is auto-
+// activated for the session (no manual manage_tools call). This is additive
+// to the manual-activation model — existing groups keep their manual-only
+// behavior unless they explicitly opt in. The activation is ephemeral (same
+// session store as manual activation) and resets on server restart.
 
 /**
  * Catalog entry for one tool group.
@@ -47,6 +55,16 @@ export interface ToolGroup {
    * install to make the group's tools compile in.
    */
   unityPackage?: string;
+  /**
+   * M20 Plan 7 / T20.7.0 — when true, the group auto-activates for the
+   * session when its {@link unityPackage} dependency is detected as
+   * installed in the project (no manual manage_tools call required). This
+   * mirrors the competitor's "package installed → tools appear" UX, additive
+   * to the manual-activation model. Only meaningful when {@link unityPackage}
+   * is also set; ignored otherwise. The activation is ephemeral per session
+   * (same store as manual activation) — NOT persisted across server restarts.
+   */
+  autoActivate?: boolean;
 }
 
 /**
@@ -238,6 +256,21 @@ export const TOOL_GROUPS: ToolGroup[] = [
     unityPackage: "com.unity.2d.tilemap",
   },
   {
+    id: "shadergraph",
+    description:
+      "Shader Graph tools — create a Shader Graph asset, open it in the graph " +
+      "editor, add nodes, and connect node ports. Compile-gated on " +
+      "com.unity.shadergraph (UNITY_OPEN_MCP_EXT_SHADERGRAPH). Mutating graph " +
+      "edits (create / node_add / node_connect) run the gate path with " +
+      "EditorSettle; open is a non-mutating window bring-up (Gate = Off). " +
+      "Auto-activates for the session when com.unity.shadergraph is installed " +
+      "(M20 Plan 7 / T20.7.0) — no manual manage_tools call required.",
+    defaultEnabled: false,
+    domainDefine: "UNITY_OPEN_MCP_EXT_SHADERGRAPH",
+    unityPackage: "com.unity.shadergraph",
+    autoActivate: true,
+  },
+  {
     id: "agent-senses",
     description:
       "Agent senses surface (run_tests, screenshot variants, capture_inline, " +
@@ -259,6 +292,21 @@ export const DEFAULT_ENABLED_GROUPS: ReadonlySet<string> = new Set(
 export const GROUP_IDS: ReadonlySet<string> = new Set(
   TOOL_GROUPS.map((g) => g.id),
 );
+
+/**
+ * M20 Plan 7 / T20.7.0 — groups that auto-activate for the session when
+ * their Unity package dependency is detected as installed. The set is
+ * computed once from the catalog; the per-session activation still flows
+ * through {@link ToolSessionState.activate} so it shares the same ephemeral
+ * store as manual activation (and resets on server restart).
+ */
+export const AUTO_ACTIVATE_GROUPS: readonly {
+  groupId: string;
+  packageId: string;
+}[] = TOOL_GROUPS.filter((g) => g.autoActivate && g.unityPackage).map((g) => ({
+  groupId: g.id,
+  packageId: g.unityPackage!,
+}));
 
 const GROUP_BY_ID: ReadonlyMap<string, ToolGroup> = new Map(
   TOOL_GROUPS.map((g) => [g.id, g]),
@@ -663,6 +711,28 @@ assign(
     "create_tile_asset",
     "create_rule_tile",
   ].map((suffix) => `unity_open_mcp_tilemap_${suffix}`),
+);
+
+// --- shadergraph (M20 Plan 7 / T20.7.1 — compile-gated + auto-activating) --
+// The FIRST domain under the package-detection auto-activation model
+// (T20.7.0): the `shadergraph` group activates automatically for the session
+// when com.unity.shadergraph is installed (no manual manage_tools call).
+// All four shader_graph_* tools share one domain prefix and one tool group.
+// Compile-gated on com.unity.shadergraph in the bridge
+// (UNITY_OPEN_MCP_EXT_SHADERGRAPH). create / node_add / node_connect are
+// mutating and run the full gate path with paths_hint scoped to the
+// .shadergraph asset path; open is read-only (Gate = Off). The editing API
+// is wrapped behind a reflection helper; when the installed package version
+// exposes a different surface, mutating tools return a structured
+// shadergraph_api_unavailable error instead of throwing.
+assign(
+  "shadergraph",
+  [
+    "create",
+    "open",
+    "node_add",
+    "node_connect",
+  ].map((suffix) => `unity_open_mcp_shader_graph_${suffix}`),
 );
 
 // --- agent-senses (live-only reads) ----------------------------------------

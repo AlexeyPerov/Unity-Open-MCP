@@ -12,14 +12,33 @@
 // The store is intentionally not keyed by session id — the stdio MCP server
 // has exactly one client per process. HTTP/SSE MCP transports would need a
 // per-client map; that is a Phase-2 concern (see M18 spec §Out of scope).
+//
+// M20 Plan 7 / T20.7.0 — auto-activation. In addition to the manual activate
+// path, the store records WHY each active group is active (manual vs auto),
+// so capabilities / manage_tools can surface `autoActivated: true` with the
+// driving package dependency. Auto-activation is driven from the live bridge's
+// compiled-tool inventory: when a group with `autoActivate: true` has its
+// tools compiled in (i.e. its Unity package is present), the router calls
+// `activateAuto`. The store itself never probes packages — it only records
+// the outcome. Auto-activation is ephemeral and idempotent within a session.
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   DEFAULT_ENABLED_GROUPS,
   GROUP_IDS,
+  AUTO_ACTIVATE_GROUPS,
   getGroup,
   groupFor,
 } from "./capabilities/tool-groups.js";
+
+/**
+ * Why a group is active in the current session.
+ * - `"default"`  — default-on group (in {@link DEFAULT_ENABLED_GROUPS}).
+ * - `"manual"`   — activated via `unity_open_mcp_manage_tools(action=activate)`.
+ * - `"auto"`     — M20 Plan 7 / T20.7.0 auto-activated because the group's
+ *                  Unity package dependency is detected as installed.
+ */
+export type ActivationSource = "default" | "manual" | "auto";
 
 /**
  * Names of always-visible tools (meta-tools with no group assignment). These
@@ -53,6 +72,18 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
  */
 export class ToolSessionState {
   private active = new Set<string>(DEFAULT_ENABLED_GROUPS);
+  /**
+   * Per-active-group source tracking. Default-on groups map to `"default"`;
+   * manually-activated groups map to `"manual"`; auto-activated groups map to
+   * `"auto"`. A group that was auto-activated and then manually re-activated
+   * flips to `"manual"` (manual intent wins). Absent from the map ⇒ the group
+   * is not active.
+   */
+  private source = new Map<string, ActivationSource>();
+
+  constructor() {
+    for (const id of DEFAULT_ENABLED_GROUPS) this.source.set(id, "default");
+  }
 
   /** Snapshot of currently-active group ids. */
   activeGroups(): string[] {
@@ -64,6 +95,11 @@ export class ToolSessionState {
     return this.active.has(groupId);
   }
 
+  /** Why the group is active, or `null` when it is not active. */
+  activationSource(groupId: string): ActivationSource | null {
+    return this.source.get(groupId) ?? null;
+  }
+
   /**
    * Activate a group. Returns true if state changed (group was not active).
    * Unknown groups are rejected with `false` — callers should validate via
@@ -73,6 +109,22 @@ export class ToolSessionState {
     if (!GROUP_IDS.has(groupId)) return false;
     if (this.active.has(groupId)) return false;
     this.active.add(groupId);
+    this.source.set(groupId, "manual");
+    return true;
+  }
+
+  /**
+   * M20 Plan 7 / T20.7.0 — auto-activate a group because its Unity package
+   * dependency is detected as installed. Idempotent: a no-op when the group
+   * is already active. Manual activation wins: a group that was manually
+   * activated or deactivated is NOT silently flipped back to `"auto"`.
+   * Returns true if state changed (group was not active).
+   */
+  activateAuto(groupId: string): boolean {
+    if (!GROUP_IDS.has(groupId)) return false;
+    if (this.active.has(groupId)) return false;
+    this.active.add(groupId);
+    this.source.set(groupId, "auto");
     return true;
   }
 
@@ -87,12 +139,46 @@ export class ToolSessionState {
     if (!GROUP_IDS.has(groupId)) return false;
     if (!this.active.has(groupId)) return false;
     this.active.delete(groupId);
+    this.source.delete(groupId);
     return true;
+  }
+
+  /**
+   * M20 Plan 7 / T20.7.0 — reconcile the auto-activated set against the
+   * currently-satisfied package dependencies. Groups that auto-activate and
+   * whose package is present are activated (if not already); auto-activated
+   * groups whose package is no longer present are dropped (only when they
+   * were auto-activated — a manual activation is preserved). Returns the
+   * list of group ids whose active state changed (added or removed), so the
+   * router can fire the listChanged notification exactly once.
+   */
+  reconcileAutoActivation(satisfiedGroupIds: ReadonlySet<string>): string[] {
+    const changed: string[] = [];
+    for (const entry of AUTO_ACTIVATE_GROUPS) {
+      const { groupId } = entry;
+      const satisfied = satisfiedGroupIds.has(groupId);
+      const active = this.active.has(groupId);
+      const src = this.source.get(groupId);
+      if (satisfied && !active) {
+        this.active.add(groupId);
+        this.source.set(groupId, "auto");
+        changed.push(groupId);
+      } else if (!satisfied && active && src === "auto") {
+        // Package removed and the group was only auto-activated (not manually
+        // re-activated) → drop it so the "install X" UX surfaces again.
+        this.active.delete(groupId);
+        this.source.delete(groupId);
+        changed.push(groupId);
+      }
+    }
+    return changed;
   }
 
   /** Restore the default active set (see {@link DEFAULT_ENABLED_GROUPS}). Always returns true. */
   reset(): boolean {
     this.active = new Set(DEFAULT_ENABLED_GROUPS);
+    this.source = new Map();
+    for (const id of DEFAULT_ENABLED_GROUPS) this.source.set(id, "default");
     return true;
   }
 }

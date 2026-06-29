@@ -343,6 +343,18 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_tilemap_box_fill: "tilemap",
   unity_open_mcp_tilemap_create_tile_asset: "tilemap",
   unity_open_mcp_tilemap_create_rule_tile: "tilemap",
+  // M20 Plan 7 / T20.7.1 — Shader Graph extension tools. Compile-gated on
+  // com.unity.shadergraph (UNITY_OPEN_MCP_EXT_SHADERGRAPH) + auto-activating
+  // (the first domain under the package-detection auto-activation model). The
+  // first two members are create/open; node_add / node_connect mutate the
+  // graph. open is read-only (Gate = Off); create / node_add / node_connect
+  // run the full gate path with paths_hint scoped to the .shadergraph asset
+  // path. The editing API is wrapped behind a reflection helper so the tools
+  // degrade gracefully (shadergraph_api_unavailable) across package versions.
+  unity_open_mcp_shader_graph_create: "shadergraph",
+  unity_open_mcp_shader_graph_open: "shadergraph",
+  unity_open_mcp_shader_graph_node_add: "shadergraph",
+  unity_open_mcp_shader_graph_node_connect: "shadergraph",
   // M20 Plan 5 / T20.5 — typed ScriptableObject + Assembly Definition tools.
   // Both sets are core (always-on) typed-editor tools with no Unity package
   // dependency. scriptableobject_create is mutating (EditorSettle);
@@ -539,6 +551,19 @@ export interface ToolGroupCapability {
   unityPackage: string | null;
   /** Bridge compile define that gates this group (null when not gated). */
   domainDefine: string | null;
+  /**
+   * M20 Plan 7 / T20.7.0 — when true, the group opts into package-detection
+   * auto-activation: it appears in a fresh session's ListTools automatically
+   * when its `unityPackage` is installed, no manual manage_tools call
+   * required. False (or absent) for manual-activation-only groups.
+   */
+  autoActivate: boolean;
+  /**
+   * M20 Plan 7 / T20.7.0 — the package id that gates this group's auto-
+   * activation (mirrors `unityPackage` when `autoActivate` is true, null
+   * otherwise). Surfaced so an agent can understand WHY a group is visible.
+   */
+  packageDependency: string | null;
   /**
    * Usage hint surfaced to the agent. Always points at manage_tools so the
    * agent knows to activate the group before invoking its tools.
@@ -739,6 +764,11 @@ function buildOneGroup(
   tools: string[],
   availableBridgeTools: ReadonlySet<string> | undefined,
 ): ToolGroupCapability {
+  // M20 Plan 7 / T20.7.0 — auto-activation metadata is the same across all
+  // three availability branches, so compute it once.
+  const autoActivate = group.autoActivate === true && !!group.unityPackage;
+  const packageDependency = autoActivate ? group.unityPackage! : null;
+
   // No domainDefine → the group is always compiled in (core, gate-and-verify,
   // typed-editor, etc.).
   if (!group.domainDefine) {
@@ -752,6 +782,8 @@ function buildOneGroup(
       availableReason: null,
       unityPackage: null,
       domainDefine: null,
+      autoActivate: false,
+      packageDependency: null,
       usageHint: buildUsageHint(group),
     };
   }
@@ -775,6 +807,8 @@ function buildOneGroup(
         "install the Unity package to make the group compile in.",
       unityPackage: group.unityPackage ?? null,
       domainDefine: group.domainDefine,
+      autoActivate,
+      packageDependency,
       usageHint: buildUsageHint(group),
     };
   }
@@ -799,6 +833,8 @@ function buildOneGroup(
         `package to make the group's tools available.`,
     unityPackage: group.unityPackage ?? null,
     domainDefine: group.domainDefine,
+    autoActivate,
+    packageDependency,
     usageHint: buildUsageHint(group),
   };
 }
@@ -808,6 +844,18 @@ function buildUsageHint(group: ToolGroup): string {
     return (
       "Default-on group. Its tools are visible in a fresh session without " +
       "calling manage_tools."
+    );
+  }
+  // M20 Plan 7 / T20.7.0 — auto-activating groups surface their tools when
+  // the package is installed without a manual manage_tools call.
+  if (group.autoActivate && group.unityPackage) {
+    return (
+      `Auto-activates when Unity package '${group.unityPackage}' is ` +
+      "installed — its tools appear in a fresh session's ListTools without " +
+      "calling unity_open_mcp_manage_tools. Use " +
+      "unity_open_mcp_manage_tools(action=\"deactivate\", group=\"" +
+      `${group.id}\`) to hide them, or action=\"activate\" to re-enable ` +
+      "after a manual deactivate."
     );
   }
   return (

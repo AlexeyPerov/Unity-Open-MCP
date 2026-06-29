@@ -15,12 +15,12 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 - **Asset intelligence**: reserialize, read/search/list assets.
 - **Agent senses**: tests, screenshots (scene/game/isolated, arbitrary camera pose, inline image, editor window), Frame Debugger (enable/disable/draw-call list), console read, profiler capture (per-frame + single-frame deep capture), memory/rendering snapshots, spatial queries, event pull.
 - **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers, ScriptableObject create + list-by-type, Assembly Definition (asmdef) list/get/create/modify.
-- **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio, ui, constraints, terrain, cinemachine, timeline, tilemap.
+- **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio, ui, constraints, terrain, cinemachine, timeline, tilemap, shader graph.
 - **Discovery utilities**: capabilities, rules list, skill generation, manage_tools.
 
 ## Tool groups and session visibility
 
-Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools`. This keeps the prompt surface small (the full tool set is 221 tools) — a per-session group-visibility model so only the relevant tools are advertised.
+Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools` — **except auto-activating groups**, which activate automatically when their Unity package is installed (see §Auto-activation below). This keeps the prompt surface small (the full tool set is 225 tools) — a per-session group-visibility model so only the relevant tools are advertised.
 
 ### Groups
 
@@ -48,6 +48,7 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | `cinemachine`        | off     | Cinemachine tools — create/configure virtual cameras, set targets/lens/Body/Noise, ensure Brain, list cameras. **Reflection-gated**: the assembly always compiles; Cinemachine 3.x presence is detected at call time (returns `cinemachine_3x_required` / `cinemachine_package_required` when absent)   |
 | `timeline`           | off     | Timeline tools — create TimelineAsset, add tracks (Animation/Activation/Audio/Signal/Control/Group/Playable), add clips, bind PlayableDirector, reflective modify. Compile-gated on `com.unity.timeline`   |
 | `tilemap`            | off     | Tilemap tools — create Grid + Tilemap, paint single tiles, box-fill regions, create Tile assets, create RuleTile (requires tilemap.extras). Compile-gated on `com.unity.2d.tilemap`; RuleTile additionally inner-guarded on `com.unity.2d.tilemap.extras` at call time (two defines, two guards)   |
+| `shadergraph`        | off†    | Shader Graph tools — create a Shader Graph asset, open it in the graph editor (returns a structured node/edge summary), add a node, connect two node ports. Compile-gated on `com.unity.shadergraph`. **Auto-activating** (†): activates automatically when `com.unity.shadergraph` is installed — no manual manage_tools call. The editing API is wrapped behind a reflection helper; mutating tools degrade to a structured `shadergraph_api_unavailable` error when the installed version exposes a different surface. Complementary to `shader_get_data` / `shader_list_all` (compiled-shader inspect).   |
 | `agent-senses`       | off     | run_tests, screenshot, screenshot_camera, capture_inline, screenshot_window, frame_debugger, read_console, profiler capture/capture_frame/memory/rendering, spatial_query (live-only)                        |
 
 
@@ -86,6 +87,36 @@ Two distinct concerns, intentionally not conflated:
 - **Session activation** — whether the current session has activated the group (managed by manage_tools). Reported in `manage_tools(list_groups)` → `groups[].active`.
 
 An agent can activate a group whose dependency is missing; its tools will appear in `ListTools` but error at call time. `capabilities` is the authoritative compiled-state source.
+
+### Auto-activation
+
+Most groups are **manual-activation** — the agent must call
+`manage_tools(action="activate", group="<id>")` before the group's tools appear.
+A domain group may additionally opt into **package-detection auto-activation**
+(`autoActivate: true` + `unityPackage` in the catalog): when the project has
+the group's Unity package installed, the group activates **automatically** for
+the session — no manual call required. Shader Graph (`shadergraph` on
+`com.unity.shadergraph`) is the first auto-activating domain.
+
+Auto-activation is:
+
+- **Ephemeral** — same in-memory session store as manual activation; resets on
+  MCP-server restart.
+- **Reconciled lazily** from the live bridge's compiled-tool inventory
+  (`GET /tools`): a group is package-present when any of its compiled-in tool
+  names appears in that set. The reconciliation runs on `capabilities` and
+  `manage_tools(list_groups)` calls, so an agent that calls either sees a
+  fresh snapshot (and a `tools/list_changed` notification fires when the
+  active set changes).
+- **Reported** in `manage_tools(list_groups)` and `capabilities` per group as
+  `activationSource: "auto"` (with `autoActivated: true`) plus
+  `packageDependency`, so an agent can tell *why* a group is visible.
+- **Overridable** — manual activation wins: auto-activation never flips a
+  group the operator deliberately deactivated, and a package that goes away
+  only drops a group that was auto-activated (not one re-activated by hand).
+
+Existing domain groups keep their manual-activation behavior unless they
+explicitly opt in.
 
 ## Discover tools programmatically
 

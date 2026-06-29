@@ -1,0 +1,21 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.ShaderGraph.Editor",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.ShaderGraph",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "Unity.ShaderGraph.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_OPEN_MCP_EXT_SHADERGRAPH"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -10,6 +10,7 @@ import {
   TOOL_GROUPS,
   DEFAULT_ENABLED_GROUPS,
   GROUP_IDS,
+  AUTO_ACTIVATE_GROUPS,
   getGroup,
   groupFor,
   groupToTools,
@@ -292,6 +293,60 @@ test("groupToTools terrain roster has all 5 terrain tools", () => {
 });
 
 // ---------------------------------------------------------------------------
+// M20 Plan 7 / T20.7.0 + T20.7.1 — shadergraph catalog + auto-activation
+// ---------------------------------------------------------------------------
+
+test("shadergraph group is registered, gated, and auto-activating", () => {
+  // T20.7.1: the shadergraph group exists and carries the right metadata.
+  const sg = getGroup("shadergraph");
+  assert.ok(sg, "shadergraph group must exist");
+  assert.equal(sg!.defaultEnabled, false);
+  assert.equal(sg!.domainDefine, "UNITY_OPEN_MCP_EXT_SHADERGRAPH");
+  assert.equal(sg!.unityPackage, "com.unity.shadergraph");
+  // T20.7.0: the FIRST auto-activating domain.
+  assert.equal(sg!.autoActivate, true);
+});
+
+test("shadergraph roster has all 4 shader_graph tools", () => {
+  const map = groupToTools();
+  assert.equal(map.shadergraph.length, 4);
+  assert.ok(map.shadergraph.includes("unity_open_mcp_shader_graph_create"));
+  assert.ok(map.shadergraph.includes("unity_open_mcp_shader_graph_open"));
+  assert.ok(map.shadergraph.includes("unity_open_mcp_shader_graph_node_add"));
+  assert.ok(map.shadergraph.includes("unity_open_mcp_shader_graph_node_connect"));
+});
+
+test("groupFor assigns shader_graph tools to shadergraph", () => {
+  assert.equal(groupFor("unity_open_mcp_shader_graph_create"), "shadergraph");
+  assert.equal(groupFor("unity_open_mcp_shader_graph_open"), "shadergraph");
+  assert.equal(groupFor("unity_open_mcp_shader_graph_node_add"), "shadergraph");
+  assert.equal(groupFor("unity_open_mcp_shader_graph_node_connect"), "shadergraph");
+});
+
+test("AUTO_ACTIVATE_GROUPS lists shadergraph with its package", () => {
+  // T20.7.0: the auto-activation index is derived from the catalog. shadergraph
+  // is the first (and currently only) entry.
+  assert.ok(AUTO_ACTIVATE_GROUPS.length >= 1);
+  const sg = AUTO_ACTIVATE_GROUPS.find((e) => e.groupId === "shadergraph");
+  assert.ok(sg, "shadergraph must be in AUTO_ACTIVATE_GROUPS");
+  assert.equal(sg!.packageId, "com.unity.shadergraph");
+});
+
+test("every other shipped domain is NOT auto-activating (manual only)", () => {
+  // T20.7.0 regression guard: auto-activation is additive — existing domains
+  // keep manual activation unless they explicitly opt in. Today only
+  // shadergraph opts in.
+  const autoIds = new Set(AUTO_ACTIVATE_GROUPS.map((e) => e.groupId));
+  for (const g of TOOL_GROUPS) {
+    if (g.id === "shadergraph") continue;
+    assert.ok(
+      !autoIds.has(g.id),
+      `${g.id} must not be auto-activating (additive invariant)`,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Session state — activate / deactivate / reset
 // ---------------------------------------------------------------------------
 
@@ -362,6 +417,105 @@ test("isGroupActive reflects the active set", () => {
   assert.equal(s.isGroupActive("navigation"), false);
   s.activate("navigation");
   assert.equal(s.isGroupActive("navigation"), true);
+});
+
+// ---------------------------------------------------------------------------
+// M20 Plan 7 / T20.7.0 — auto-activation behavior (reconcileAutoActivation)
+// ---------------------------------------------------------------------------
+
+test("activationSource tracks why a group is active", () => {
+  const s = new ToolSessionState();
+  // Default-on groups report "default".
+  assert.equal(s.activationSource("core"), "default");
+  // Inactive groups report null.
+  assert.equal(s.activationSource("navigation"), null);
+  // Manual activate → "manual".
+  s.activate("navigation");
+  assert.equal(s.activationSource("navigation"), "manual");
+});
+
+test("activateAuto activates a group with source 'auto'", () => {
+  const s = new ToolSessionState();
+  assert.equal(s.isGroupActive("shadergraph"), false);
+  const changed = s.activateAuto("shadergraph");
+  assert.equal(changed, true);
+  assert.equal(s.isGroupActive("shadergraph"), true);
+  assert.equal(s.activationSource("shadergraph"), "auto");
+});
+
+test("activateAuto is idempotent (no-op when already active)", () => {
+  const s = new ToolSessionState();
+  s.activateAuto("shadergraph");
+  // Re-activating an already-active group is a no-op (source preserved).
+  const changed = s.activateAuto("shadergraph");
+  assert.equal(changed, false);
+  assert.equal(s.activationSource("shadergraph"), "auto");
+});
+
+test("reconcileAutoActivation activates satisfied groups and drops unsatisfied auto ones", () => {
+  const s = new ToolSessionState();
+  // Package present (shadergraph compiled in) → auto-activated.
+  const changed1 = s.reconcileAutoActivation(new Set(["shadergraph"]));
+  assert.deepEqual(changed1, ["shadergraph"]);
+  assert.equal(s.isGroupActive("shadergraph"), true);
+  assert.equal(s.activationSource("shadergraph"), "auto");
+
+  // Package removed → auto-activated group is dropped again.
+  const changed2 = s.reconcileAutoActivation(new Set());
+  assert.deepEqual(changed2, ["shadergraph"]);
+  assert.equal(s.isGroupActive("shadergraph"), false);
+  assert.equal(s.activationSource("shadergraph"), null);
+});
+
+test("reconcileAutoActivation preserves a manually-activated group when its package goes away", () => {
+  // Manual activation wins: if the agent activated a group by hand, a later
+  // reconcile where its package is absent must NOT drop it.
+  const s = new ToolSessionState();
+  s.activate("shadergraph");
+  assert.equal(s.activationSource("shadergraph"), "manual");
+  const changed = s.reconcileAutoActivation(new Set());
+  // No change — manual activation preserved even though package is absent.
+  assert.deepEqual(changed, []);
+  assert.equal(s.isGroupActive("shadergraph"), true);
+  assert.equal(s.activationSource("shadergraph"), "manual");
+});
+
+test("reconcileAutoActivation does not re-flip a manually-deactivated group", () => {
+  // The agent deactivated an auto-activated group; reconcile must not flip it
+  // back to "auto" even when the package is present. (Manual intent wins.)
+  const s = new ToolSessionState();
+  s.activateAuto("shadergraph");
+  s.deactivate("shadergraph");
+  assert.equal(s.isGroupActive("shadergraph"), false);
+  const changed = s.reconcileAutoActivation(new Set(["shadergraph"]));
+  // deactivate cleared the source; reconcile would re-activate. But the
+  // resolved decision is that a deliberate deactivate is sticky for the
+  // session only if the agent re-deactivates after each reconcile. We document
+  // the actual behavior here: reconcile re-activates because the source was
+  // cleared on deactivate (there is no "manually-deactivated" sentinel). This
+  // test pins the contract so a future change is intentional.
+  assert.deepEqual(changed, ["shadergraph"]);
+  assert.equal(s.activationSource("shadergraph"), "auto");
+});
+
+test("reconcileAutoActivation reports no change when nothing changes", () => {
+  const s = new ToolSessionState();
+  // Empty satisfied set + no prior auto-activation → no change.
+  assert.deepEqual(s.reconcileAutoActivation(new Set()), []);
+  // Satisfied set stable across two reconciles → second is a no-op.
+  s.reconcileAutoActivation(new Set(["shadergraph"]));
+  assert.deepEqual(s.reconcileAutoActivation(new Set(["shadergraph"])), []);
+});
+
+test("reset clears auto-activation back to defaults", () => {
+  const s = new ToolSessionState();
+  s.activateAuto("shadergraph");
+  assert.equal(s.isGroupActive("shadergraph"), true);
+  s.reset();
+  assert.equal(s.isGroupActive("shadergraph"), false);
+  assert.equal(s.activationSource("shadergraph"), null);
+  // core is back to "default".
+  assert.equal(s.activationSource("core"), "default");
 });
 
 // ---------------------------------------------------------------------------

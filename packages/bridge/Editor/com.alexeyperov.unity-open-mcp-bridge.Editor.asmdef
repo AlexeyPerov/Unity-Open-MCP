@@ -63,6 +63,11 @@
       "name": "com.unity.2d.tilemap.extras",
       "expression": "1.0.0",
       "define": "UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS"
+    },
+    {
+      "name": "com.unity.shadergraph",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_SHADERGRAPH"
     }
   ],
   "noEngineReferences": false

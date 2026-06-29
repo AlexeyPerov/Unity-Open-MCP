@@ -352,6 +352,23 @@ import { tilemapSetTile } from "./tilemap-set-tile.js";
 import { tilemapBoxFill } from "./tilemap-box-fill.js";
 import { tilemapCreateTileAsset } from "./tilemap-create-tile-asset.js";
 import { tilemapCreateRuleTile } from "./tilemap-create-rule-tile.js";
+// M20 Plan 7 / T20.7.1 — Shader Graph extension tools. Compile-gated in the
+// bridge (UNITY_OPEN_MCP_EXT_SHADERGRAPH on com.unity.shadergraph) AND
+// auto-activating — the first domain to ship with package-detection auto-
+// activation (M20 Plan 7 / T20.7.0): the `shadergraph` group activates for
+// the session automatically when com.unity.shadergraph is installed, no
+// manual manage_tools call. Three mutating members (create / node_add /
+// node_connect) run the full gate path with paths_hint scoped to the
+// .shadergraph asset path; open is a read-only window bring-up (Gate = Off)
+// that returns a structured node/edge summary. The editing API is wrapped
+// behind a reflection helper (ShaderGraphApi) — when the installed package
+// version exposes a different surface, mutating tools return a structured
+// shadergraph_api_unavailable error instead of throwing. Complementary to
+// the inspect surface (shader_get_data / shader_list_all).
+import { shaderGraphCreate } from "./shader-graph-create.js";
+import { shaderGraphOpen } from "./shader-graph-open.js";
+import { shaderGraphNodeAdd } from "./shader-graph-node-add.js";
+import { shaderGraphNodeConnect } from "./shader-graph-node-connect.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -862,6 +879,24 @@ export const M20_PLAN6_TILEMAP_TOOLS: Tool[] = [
   tilemapCreateRuleTile,
 ];
 
+// M20 Plan 7 / T20.7.1 — Shader Graph extension tools. Compile-gated in the
+// bridge (UNITY_OPEN_MCP_EXT_SHADERGRAPH on com.unity.shadergraph) AND auto-
+// activating — the first domain under the package-detection auto-activation
+// model (M20 Plan 7 / T20.7.0). Three mutating members (create / node_add /
+// node_connect) run the full gate path with paths_hint scoped to the
+// .shadergraph asset path; open is a read-only window bring-up (Gate = Off)
+// returning a structured node/edge summary. The editing API is wrapped behind
+// a reflection helper; when the installed package version exposes a different
+// surface, mutating tools return a structured shadergraph_api_unavailable
+// error instead of throwing. Complementary to shader_get_data / shader_list_all
+// (which read compiled shader properties, not the graph).
+export const M20_PLAN7_SHADERGRAPH_TOOLS: Tool[] = [
+  shaderGraphCreate,
+  shaderGraphOpen,
+  shaderGraphNodeAdd,
+  shaderGraphNodeConnect,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -900,4 +935,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M20_PLAN6_CINEMACHINE_TOOLS,
   ...M20_PLAN6_TIMELINE_TOOLS,
   ...M20_PLAN6_TILEMAP_TOOLS,
+  ...M20_PLAN7_SHADERGRAPH_TOOLS,
 ];

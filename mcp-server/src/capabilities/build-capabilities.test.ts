@@ -393,6 +393,70 @@ test("domain-gated group reports available=false when bridge inventory omits its
   assert.match(nav!.availableReason!, /com\.unity\.ai\.navigation/);
 });
 
+// ---------------------------------------------------------------------------
+// M20 Plan 7 / T20.7.0 — auto-activation metadata on group capabilities
+// ---------------------------------------------------------------------------
+
+test("every group carries autoActivate + packageDependency fields", () => {
+  const caps = buildCapabilities(DEPS);
+  for (const g of caps.toolGroups) {
+    assert.equal(
+      typeof g.autoActivate,
+      "boolean",
+      `${g.id} autoActivate must be a boolean`,
+    );
+    // packageDependency is non-null only when autoActivate is true.
+    if (g.autoActivate) {
+      assert.ok(
+        typeof g.packageDependency === "string" && g.packageDependency.length > 0,
+        `${g.id} autoActivate=true must carry a non-empty packageDependency`,
+      );
+    } else {
+      assert.equal(
+        g.packageDependency,
+        null,
+        `${g.id} autoActivate=false must have packageDependency=null`,
+      );
+    }
+  }
+});
+
+test("navigation is NOT auto-activating (manual only — additive invariant)", () => {
+  const caps = buildCapabilities(DEPS);
+  const nav = caps.toolGroups.find((g) => g.id === "navigation");
+  assert.ok(nav);
+  assert.equal(nav!.autoActivate, false);
+  assert.equal(nav!.packageDependency, null);
+});
+
+test("auto-activating group surfaces packageDependency and a distinct usageHint", () => {
+  // Build with the shadergraph group present in the tool list so it has a
+  // non-empty roster to report against.
+  const depsWithSg: BuildCapabilitiesDeps = {
+    tools: [
+      ...FIXTURE_TOOLS,
+      {
+        name: "unity_open_mcp_shader_graph_create",
+        description: "Shader Graph create (fixture).",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    batchToolNames: FIXTURE_BATCH_NAMES,
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+  };
+  const caps = buildCapabilities(depsWithSg);
+  const sg = caps.toolGroups.find((g) => g.id === "shadergraph");
+  assert.ok(sg, "shadergraph group must appear in capabilities");
+  assert.equal(sg!.autoActivate, true);
+  assert.equal(sg!.packageDependency, "com.unity.shadergraph");
+  // The auto-activation usageHint mentions the package + that no manual call
+  // is required, and still references manage_tools (for deactivate).
+  assert.match(sg!.usageHint, /com\.unity\.shadergraph/);
+  assert.match(sg!.usageHint, /Auto-activates/);
+  assert.match(sg!.usageHint, /unity_open_mcp_manage_tools/);
+});
+
 test("non-default-enabled groups carry a usageHint pointing at manage_tools", () => {
   const caps = buildCapabilities(DEPS);
   for (const g of caps.toolGroups) {

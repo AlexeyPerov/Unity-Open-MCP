@@ -25,7 +25,11 @@ export const manageTools: Tool = {
     "defaults). Always call `list_groups` first to discover group ids. " +
     "Group availability also depends on the Unity domain dependency being " +
     "compiled in — see `unity_open_mcp_capabilities` for compiled-state " +
-    "availability per group.",
+    "availability per group. Some groups **auto-activate** when their Unity " +
+    "package is installed (e.g. `shadergraph` when `com.unity.shadergraph` " +
+    "is present) — these surface in `list_groups` with " +
+    "`activationSource: \"auto\"` and require no manual call; deactivate to " +
+    "hide them.",
   inputSchema: {
     type: "object",
     required: ["action"],

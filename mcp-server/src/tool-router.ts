@@ -12,6 +12,7 @@ import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
 import {
   GROUP_IDS,
   TOOL_GROUPS,
+  AUTO_ACTIVATE_GROUPS,
   groupToTools,
 } from "./capabilities/tool-groups.js";
 import { listRules } from "./capabilities/list-rules.js";
@@ -480,6 +481,15 @@ export class ToolRouter implements Router {
       if (inventory) availableBridgeTools = inventory.tools;
     }
 
+    // M20 Plan 7 / T20.7.0 — reconcile auto-activation before reporting the
+    // group catalog so the capability output reflects packages that came
+    // online since the last call. Auto-activated groups surface with
+    // `autoActivated: true` + `packageDependency` (see build-capabilities).
+    // Reuse the inventory already fetched above (no second GET /tools hop).
+    await this.reconcileAutoActivation(
+      availableBridgeTools ? { tools: availableBridgeTools } : null,
+    );
+
     const result = buildCapabilities(
       {
         tools: ALL_TOOLS,
@@ -656,8 +666,24 @@ export class ToolRouter implements Router {
   }
 
   private async manageToolsListGroups(): Promise<CallToolResult> {
+    // M20 Plan 7 / T20.7.0 — fetch the compiled-state inventory once and
+    // reuse it for both auto-activation reconciliation and compiled-state
+    // availability (two GET /tools hops → one). When the bridge is offline
+    // both paths degrade gracefully (no auto-activation; availability=null).
+    const liveAvailable = await this.live.isLiveAvailable();
+    const inventory = liveAvailable
+      ? await this.live.listBridgeTools()
+      : null;
+    // Reconcile auto-activation first so the listed active set reflects
+    // packages that came online since the last call.
+    await this.reconcileAutoActivation(
+      inventory ? { tools: inventory.tools } : null,
+    );
     const groupsList = groupToTools();
-    const compiledAvailability = await this.resolveCompiledAvailability();
+    const compiledAvailability = this.computeCompiledAvailability(
+      inventory,
+      groupsList,
+    );
 
     const groups = TOOL_GROUPS.map((g) => {
       const tools = groupsList[g.id] ?? [];
@@ -666,6 +692,12 @@ export class ToolRouter implements Router {
         id: g.id,
         description: g.description,
         active: this.sessionState.isGroupActive(g.id),
+        // M20 Plan 7 / T20.7.0 — why the group is active (default / manual /
+        // auto). `null` when the group is not active. Lets an agent learn
+        // that a group is visible because its package is installed, not
+        // because the operator opted in.
+        activationSource: this.sessionState.activationSource(g.id),
+        autoActivated: this.sessionState.activationSource(g.id) === "auto",
         defaultEnabled: g.defaultEnabled,
         // Compiled-state availability of the domain dependency. `true` for
         // groups without a domainDefine (always compiled in); `false` /
@@ -676,6 +708,7 @@ export class ToolRouter implements Router {
         available: availability?.available ?? null,
         availableReason: availability?.reason ?? null,
         unityPackage: g.unityPackage ?? null,
+        packageDependency: g.unityPackage ?? null,
         toolCount: tools.length,
         tools,
       };
@@ -717,18 +750,79 @@ export class ToolRouter implements Router {
     await this.onToolListChanged();
   }
 
+  // M20 Plan 7 / T20.7.0 — reconcile the auto-activated set against the
+  // currently-compiled-in bridge inventory. A group with `autoActivate: true`
+  // is considered package-present when any of its compiled-in tool names
+  // appears in the bridge's `GET /tools` inventory — the same signal
+  // `resolveCompiledAvailability` uses, so no extra package_list round-trip.
+  // The session store records the outcome; we fire the listChanged
+  // notification exactly once when the active set changed. Returns true when
+  // the active set changed (so callers like capabilities / list_groups can
+  // report a fresh snapshot).
+  //
+  // Callers that have ALREADY fetched the bridge inventory (capabilities,
+  // list_groups) pass it via `prefetchedInventory` to avoid a second
+  // `GET /tools` round-trip on the same call.
+  private async reconcileAutoActivation(
+    prefetchedInventory?: {
+      tools: ReadonlySet<string>;
+    } | null,
+  ): Promise<boolean> {
+    if (AUTO_ACTIVATE_GROUPS.length === 0) return false;
+    let inventory = prefetchedInventory ?? null;
+    if (!inventory) {
+      const liveAvailable = await this.live.isLiveAvailable();
+      if (!liveAvailable) return false;
+      inventory = await this.live.listBridgeTools();
+      if (!inventory) return false;
+    }
+    const groupsList = groupToTools();
+
+    const satisfied = new Set<string>();
+    for (const entry of AUTO_ACTIVATE_GROUPS) {
+      const groupTools = groupsList[entry.groupId] ?? [];
+      const anyCompiledIn =
+        groupTools.length > 0 &&
+        groupTools.some((t) => inventory!.tools.has(t));
+      if (anyCompiledIn) satisfied.add(entry.groupId);
+    }
+
+    const before = this.sessionState.activeGroups();
+    const changed = this.sessionState.reconcileAutoActivation(satisfied);
+    if (changed.length > 0) {
+      await this.maybeNotifyToolListChanged(before);
+      return true;
+    }
+    return false;
+  }
+
   // Resolve compiled-state availability per group from the live bridge. The
   // bridge reports which tools it compiled in via `GET /tools`; a domain-
   // gated group is `available: true` when any of its compiled-in tool names
   // appears in that set, `false` when none do (Unity domain package not
   // installed), and `null` (unknown) when the bridge is offline.
+  //
+  // Thin async wrapper over {@link computeCompiledAvailability}: fetches the
+  // inventory (or null when the bridge is offline) and delegates. Kept for
+  // the few call sites that don't already have an inventory in hand.
   private async resolveCompiledAvailability(): Promise<
     Map<string, { available: boolean | null; reason: string | null }>
   > {
-    const out = new Map<string, { available: boolean | null; reason: string | null }>();
     const liveAvailable = await this.live.isLiveAvailable();
-    const inventory = liveAvailable ? await this.live.listBridgeTools() : null;
-    const groupsList = groupToTools();
+    const inventory = liveAvailable
+      ? await this.live.listBridgeTools()
+      : null;
+    return this.computeCompiledAvailability(inventory, groupToTools());
+  }
+
+  // Pure per-group availability computation given a (possibly null) bridge
+  // tool inventory. Extracted so callers that already fetched the inventory
+  // (capabilities, list_groups) can avoid a second GET /tools hop.
+  private computeCompiledAvailability(
+    inventory: { tools: ReadonlySet<string> } | null,
+    groupsList: Record<string, string[]>,
+  ): Map<string, { available: boolean | null; reason: string | null }> {
+    const out = new Map<string, { available: boolean | null; reason: string | null }>();
 
     for (const g of TOOL_GROUPS) {
       if (!g.domainDefine) {

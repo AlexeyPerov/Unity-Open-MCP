@@ -23,6 +23,7 @@ step.
 | Cinemachine | `com.unity.cinemachine` ≥ 3.x | *(none — **reflection-gated**)* | `.../Extensions/Cinemachine/` |
 | Timeline | `com.unity.timeline` | `UNITY_OPEN_MCP_EXT_TIMELINE` | `.../Extensions/Timeline/` |
 | Tilemap | `com.unity.2d.tilemap` (+ `com.unity.2d.tilemap.extras` for RuleTile) | `UNITY_OPEN_MCP_EXT_TILEMAP` (+ `UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS` inner guard for `create_rule_tile`) | `.../Extensions/Tilemap/` |
+| Shader Graph | `com.unity.shadergraph` | `UNITY_OPEN_MCP_EXT_SHADERGRAPH` | `.../Extensions/ShaderGraph/` (**auto-activating**) |
 
 Navigation is the reference template; InputSystem, ProBuilder, ParticleSystem,
 Animation, and Timeline share the same layout. Splines is the most recently
@@ -48,6 +49,21 @@ policy below. **Tilemap's RuleTile** (`tilemap_create_rule_tile`) is the
 is inner-guarded by `UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS`. When extras is absent,
 the tool returns a clean `tilemap_extras_required` install error — no broken
 reference.
+
+**Shader Graph is the first auto-activating pack**: the `shadergraph` group
+activates automatically for the session when `com.unity.shadergraph` is
+installed — its tools appear in `ListTools` with no manual `manage_tools`
+call. This is the package-detection auto-activation model (additive to the
+manual-activation model the other groups use); see §Package-detection
+auto-activation below. Shader Graph's editing API (`UnityEditor.ShaderGraph`:
+`GraphData`, `AbstractMaterialNode`, slots) is partially internal, so the
+mutating tools (`create` / `node_add` / `node_connect`) wrap it behind a
+single reflection helper and degrade to a structured
+`shadergraph_api_unavailable` error when the installed version exposes a
+different surface; `shader_graph_open` parses the `.shadergraph` JSON directly
+and is always stable. The graph tools are complementary to the inspect surface
+(`shader_get_data` / `shader_list_all`), which reads **compiled shader
+properties** rather than the authored graph.
 
 ## Embedded domain model
 
@@ -119,6 +135,44 @@ only.
 
 Use Navigation (`TypedTools/Extensions/Navigation/`) as the reference
 template.
+
+### Package-detection auto-activation
+
+Most domain groups are **manual-activation**: a fresh session starts with only
+`core` (and the always-on `gate-and-verify` / `asset-intelligence` /
+`typed-editor` / `diagnostics` groups) visible, and the agent must call
+`unity_open_mcp_manage_tools(action="activate", group="<domain>")` before the
+domain's tools appear in `ListTools`.
+
+A domain group may additionally opt into **package-detection auto-activation**
+by setting `autoActivate: true` (with a matching `unityPackage`) in the
+canonical tool-group catalog
+(`mcp-server/src/capabilities/tool-groups.ts`). When the project has the
+group's `unityPackage` installed, the group **activates automatically** for the
+session — its tools appear in `ListTools` with no manual `manage_tools` call.
+This mirrors the "package installed → tools appear" UX of the broader tooling
+ecosystem, additive to the manual-activation model:
+
+- Auto-activation is **ephemeral** — same in-memory session store as manual
+  activation, resets to defaults on MCP-server restart.
+- Auto-activation is **reconciled lazily** from the live bridge's compiled-tool
+  inventory (`GET /tools`): a group is package-present when any of its
+  compiled-in tool names appears in that set. The reconciliation runs on
+  `capabilities` and `manage_tools(list_groups)` calls, so an agent that calls
+  either sees a fresh snapshot.
+- `manage_tools(list_groups)` and `capabilities` report each auto-activated
+  group with `activationSource: "auto"` (and `autoActivated: true`) plus its
+  `packageDependency`, so an agent can tell **why** a group is visible.
+- When the package is absent, the group stays hidden and the capability output
+  shows the "install X" reason (`available: false (dependency missing:
+  com.unity.shadergraph)`).
+- A manually-activated group wins: auto-activation never flips a group the
+  operator deliberately deactivated, and a package that goes away only drops a
+  group that was auto-activated (not one the agent re-activated by hand).
+
+Shader Graph (`shadergraph` on `com.unity.shadergraph`) is the first shipped
+auto-activating domain. Existing domain groups keep their manual-activation
+behavior unless they explicitly opt in.
 
 ## Tool naming
 
