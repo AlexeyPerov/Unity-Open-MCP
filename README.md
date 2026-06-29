@@ -16,9 +16,9 @@ The MCP server consists of a total of **229** tools.
 Current tool surface from `mcp-server/src/tools/index.ts`:
 
 - Core + gate + validation tools: **16**
-- Asset intelligence + senses + discovery + diagnostics + meta tools: **40**
+- Asset intelligence + senses + discovery + diagnostics + meta tools: **34**
 - Typed editor/project tools (core package): **92**
-- Optional extension-pack tools: **81**
+- Optional extension-pack tools: **87**
 
 ## Key features
 

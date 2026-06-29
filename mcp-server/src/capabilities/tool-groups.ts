@@ -588,15 +588,17 @@ assign(
 );
 
 // --- animation --------------------------------------------------------------
+// Two domain prefixes (animation_* + animator_*) share one tool group, so the
+// entries are fully-qualified tool names rather than a single-prefix .map().
 assign(
   "animation",
   [
-    "animation_create",
-    "animation_get_data",
-    "animation_modify",
-    "animator_create",
-    "animator_get_data",
-    "animator_modify",
+    "unity_open_mcp_animation_create",
+    "unity_open_mcp_animation_get_data",
+    "unity_open_mcp_animation_modify",
+    "unity_open_mcp_animator_create",
+    "unity_open_mcp_animator_get_data",
+    "unity_open_mcp_animator_modify",
   ],
 );
 

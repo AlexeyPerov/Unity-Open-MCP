@@ -179,6 +179,33 @@ test("groupToTools navigation roster has all 11 navigation tools", () => {
   assert.ok(map.navigation.includes("unity_open_mcp_navigation_modify"));
 });
 
+test("groupFor assigns animation tools to animation (two-prefix group)", () => {
+  // Regression: the animation assign() block spans two domain prefixes
+  // (animation_* + animator_*), so it lists fully-qualified tool names rather
+  // than a single-prefix .map(). An earlier revision passed bare suffixes
+  // (animation_create, …) without the unity_open_mcp_ prefix, which silently
+  // left all six tools unassigned (falling through to the always-visible
+  // meta/null bucket instead of the animation group). Pin the contract.
+  for (const name of [
+    "unity_open_mcp_animation_create",
+    "unity_open_mcp_animation_get_data",
+    "unity_open_mcp_animation_modify",
+    "unity_open_mcp_animator_create",
+    "unity_open_mcp_animator_get_data",
+    "unity_open_mcp_animator_modify",
+  ]) {
+    assert.equal(groupFor(name), "animation", `${name} must map to animation`);
+  }
+});
+
+test("groupToTools animation roster has all 6 animation tools", () => {
+  const map = groupToTools();
+  // 6 tools — three animation_* + three animator_* (M16 Plan 10 / T6.6.10).
+  assert.equal(map.animation.length, 6);
+  assert.ok(map.animation.includes("unity_open_mcp_animation_create"));
+  assert.ok(map.animation.includes("unity_open_mcp_animator_modify"));
+});
+
 test("groupFor assigns lighting tools to lighting", () => {
   for (const name of [
     "unity_open_mcp_light_add",
