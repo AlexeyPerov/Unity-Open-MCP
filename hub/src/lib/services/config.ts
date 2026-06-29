@@ -784,22 +784,34 @@ export interface MigrateEntry {
 
 export interface MigrateResult {
   entries: MigrateEntry[];
-  copied: number;
+  /** Files that existed on both sides and were overwritten. */
   replaced: number;
+  /** Matched `.meta` files left untouched because `skipMeta` was on. */
+  skippedMeta: number;
+  /** Files present only in the source (not copied — replace-only mode). */
+  skippedNew: number;
+  /** Files present only in the package (untouched, informational). */
+  untouched: number;
   savedSourceFolder: string;
+  /** Echo of the flag the migration ran with. */
+  skipMeta: boolean;
 }
 
 export type MigrateError =
   | { type: "projectNotFound"; projectId: string }
   | { type: "sourceNotADirectory"; path: string }
-  | { type: "persistFailed"; message: string }
-  | { type: "ioFailed"; message: string };
+  | { type: "persistFailed"; message: string };
 
 export async function migratePackageFiles(
   projectId: string,
-  sourceFolder: string
+  sourceFolder: string,
+  skipMeta: boolean
 ): Promise<MigrateResult> {
-  return invoke<MigrateResult>("migrate_package_files", { projectId, sourceFolder });
+  return invoke<MigrateResult>("migrate_package_files", {
+    projectId,
+    sourceFolder,
+    skipMeta,
+  });
 }
 
 /**

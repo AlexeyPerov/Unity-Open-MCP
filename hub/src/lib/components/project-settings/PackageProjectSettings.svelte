@@ -136,11 +136,28 @@
   let migrateBusy = $state(false);
   let migrateResult = $state<MigrateResult | null>(null);
   let migrateError = $state<string | null>(null);
+  // Skip .meta files even when they match by name. Off by default.
+  let migrateSkipMeta = $state(false);
   // Sync the saved source folder from the project entry (pre-fills
   // when the popup opens on a package with a saved source).
   $effect(() => {
     migrateSource = project.migrateSourceFolder ?? "";
   });
+
+  // Grouped buckets of the last result, derived so the template can
+  // render each section only when non-empty.
+  let replacedEntries = $derived(
+    migrateResult?.entries.filter((e) => e.action === "replaced") ?? []
+  );
+  let skippedMetaEntries = $derived(
+    migrateResult?.entries.filter((e) => e.action === "skipped-meta") ?? []
+  );
+  let skippedNewEntries = $derived(
+    migrateResult?.entries.filter((e) => e.action === "skipped-new") ?? []
+  );
+  let untouchedEntries = $derived(
+    migrateResult?.entries.filter((e) => e.action === "untouched") ?? []
+  );
 
   async function pickSource() {
     const selected = await openDialog({
@@ -172,10 +189,15 @@
     migrateError = null;
     migrateResult = null;
     try {
-      migrateResult = await migratePackageFiles(project.id, migrateSource);
+      migrateResult = await migratePackageFiles(
+        project.id,
+        migrateSource,
+        migrateSkipMeta
+      );
       S.appendDrawerLog(
-        `migrated ${migrateResult.copied + migrateResult.replaced} files for ${project.name} ` +
-          `(${migrateResult.copied} copied, ${migrateResult.replaced} replaced)`
+        `migrated ${migrateResult.replaced} files for ${project.name} ` +
+          `(${migrateResult.replaced} replaced, ${migrateResult.skippedNew} new in source, ` +
+          `${migrateResult.skippedMeta} .meta skipped, ${migrateResult.untouched} untouched)`
       );
       // Reflect the persisted source folder + mtime back into the store.
       const updated: ProjectEntry = { ...project, migrateSourceFolder: migrateResult.savedSourceFolder };
@@ -323,10 +345,11 @@
   {:else if activeTab === "migrate"}
     <section class="pkg-panel">
       <p class="hint">
-        Copy files from a source folder into this package. Mode is
-        <strong>append and replace</strong> — existing files are overwritten,
-        files present only in the package are kept. The source folder is saved
-        per-package for next time.
+        Overwrite files in this package from a source folder. Only files that
+        already exist in the package (matched by name) are replaced — files
+        present only in the source are not copied, and files present only in the
+        package are left untouched. The source folder is saved per-package for
+        next time.
       </p>
       <div class="migrate-source">
         <input
@@ -338,6 +361,10 @@
         <Button variant="secondary" onclick={pickSource}>Browse…</Button>
         <Button variant="secondary" onclick={saveSource}>Save source</Button>
       </div>
+      <label class="checkbox-row">
+        <input type="checkbox" bind:checked={migrateSkipMeta} />
+        <span>Skip .meta files (leave matched .meta files untouched)</span>
+      </label>
       <div class="meta-actions">
         <Button variant="primary" disabled={migrateBusy || !migrateSource} onclick={runMigrate}>
           {migrateBusy ? "Migrating…" : "Migrate"}
@@ -346,16 +373,62 @@
       {#if migrateError}<p class="error-text">{migrateError}</p>{/if}
       {#if migrateResult}
         <p class="ok-text">
-          Copied {migrateResult.copied}, replaced {migrateResult.replaced}.
+          Replaced {migrateResult.replaced}
+          {#if migrateResult.skippedMeta}
+            , .meta skipped {migrateResult.skippedMeta}{/if}
+          {#if migrateResult.skippedNew}
+            , new in source {migrateResult.skippedNew}{/if}
+          {#if migrateResult.untouched}
+            , untouched {migrateResult.untouched}{/if}.
         </p>
-        <ul class="notes-list migrate-log">
-          {#each migrateResult.entries as entry}
-            <li>
-              <span class="migrate-action migrate-{entry.action}">{entry.action}</span>
-              <span class="migrate-path">{entry.relPath}</span>
-            </li>
-          {/each}
-        </ul>
+        {#if replacedEntries.length}
+          <p class="migrate-group-title">Replaced ({replacedEntries.length})</p>
+          <ul class="notes-list migrate-log">
+            {#each replacedEntries as entry}
+              <li>
+                <span class="migrate-action migrate-replaced">replaced</span>
+                <span class="migrate-path">{entry.relPath}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if skippedMetaEntries.length}
+          <p class="migrate-group-title">Skipped .meta ({skippedMetaEntries.length})</p>
+          <ul class="notes-list migrate-log">
+            {#each skippedMetaEntries as entry}
+              <li>
+                <span class="migrate-action migrate-skipped-meta">skipped-meta</span>
+                <span class="migrate-path">{entry.relPath}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if skippedNewEntries.length}
+          <p class="migrate-group-title">
+            New in source — not copied ({skippedNewEntries.length})
+          </p>
+          <ul class="notes-list migrate-log">
+            {#each skippedNewEntries as entry}
+              <li>
+                <span class="migrate-action migrate-skipped-new">skipped-new</span>
+                <span class="migrate-path">{entry.relPath}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if untouchedEntries.length}
+          <p class="migrate-group-title">
+            Only in package — untouched ({untouchedEntries.length})
+          </p>
+          <ul class="notes-list migrate-log">
+            {#each untouchedEntries as entry}
+              <li>
+                <span class="migrate-action migrate-untouched">untouched</span>
+                <span class="migrate-path">{entry.relPath}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
     </section>
   {/if}
@@ -495,8 +568,16 @@
     text-transform: uppercase;
     min-width: 4rem;
   }
-  .migrate-copied { color: #56b482; }
   .migrate-replaced { color: #e0a230; }
+  .migrate-skipped-meta { color: #8a8f98; }
+  .migrate-skipped-new { color: #5c7cfa; }
+  .migrate-untouched { color: #8a8f98; }
+  .migrate-group-title {
+    margin: 0.6rem 0 0.25rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--hub-text-dim);
+  }
   .migrate-path {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
