@@ -11,8 +11,6 @@
 
 Unity Open MCP connects AI agents to Unity projects with a bridge + gate workflow: make changes, run validation, inspect results, and iterate safely.
 
-Requires **Unity 2022.3 LTS or newer**.
-
 The MCP server consists of a total of **208** tools.
 
 Current tool surface from `mcp-server/src/tools/index.ts`:
@@ -21,6 +19,19 @@ Current tool surface from `mcp-server/src/tools/index.ts`:
 - Asset intelligence + senses + discovery + diagnostics + meta tools: **23**
 - Typed editor/project tools (core package): **103**
 - Optional extension-pack tools: **72**
+
+## Key features
+
+- Safe mutation workflow with **automatic validation, checkpoints, deltas, regression checks, and targeted fixes**.
+- Asset intelligence tools including **reserialize, structured asset read/search, and reference analysis**.
+- Live + fallback routing (live Unity bridge, batch mode for supported tools, offline readers where possible).
+- Typed Unity tool surface for scenes, GameObjects, components, packages, build settings, profiler controls, and project settings.
+- Bundled domain tool groups for **Navigation, Input System, ProBuilder, Particle System, Animation, Splines, Lighting, Audio, UI, Constraints & LOD, Terrain, Cinemachine, Timeline, and Tilemap** — embedded in the bridge, compiled in automatically when the matching Unity package is present (or unconditionally for built-in modules like Lighting, Audio, UI, Constraints & LOD, and Terrain; Cinemachine is reflection-gated — its assembly always compiles and detects the supported version at call time), and surfaced per session via tool groups.
+- Unity Hub Pro wizard for guided setup and maintainer workflows.
+
+For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-tools.md).
+
+Requires **Unity 2022.3 LTS or newer**.
 
 ## Quick setup
 
@@ -35,19 +46,6 @@ Use any of this options:
 
 Optional: install extension packs for domain-specific workflows: [Extensions](docs/extensions.md).
 
-## Key features
-
-- Safe mutation workflow with gate validation, checkpoints, deltas, regression checks, and targeted fixes.
-- Asset intelligence tools including reserialize, structured asset read/search, and reference analysis.
-- Live + fallback routing (live Unity bridge, batch mode for supported tools, offline readers where possible).
-- Typed Unity tool surface for scenes, GameObjects, components, packages, build settings, profiler controls, and project settings.
-- Bundled domain tool groups for Navigation, Input System, ProBuilder, Particle System, Animation, Splines, Lighting, Audio, UI, Constraints & LOD, Terrain, Cinemachine, Timeline, and Tilemap — embedded in the bridge, compiled in automatically when the matching Unity package is present (or unconditionally for built-in modules like Lighting, Audio, UI, Constraints & LOD, and Terrain; Cinemachine is reflection-gated — its assembly always compiles and detects the supported version at call time), and surfaced per session via tool groups.
-- Unity Hub Pro wizard for guided setup and maintainer workflows.
-
-For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-tools.md).
-
-> Would like to see other MCP options? See the [MCP tools for Unity comparison](docs/mcp-tools-comparison.md) — a side-by-side feature matrix of Unity Open MCP and the other MCP tools / AI assistants in the space.
-
 ## Documentation
 
 - [Architecture](docs/architecture.md) — repository boundaries and runtime flow.
@@ -57,6 +55,8 @@ For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-too
 - [MCP resources API](docs/api/resources.md) — resource URIs and payloads.
 - [Code conventions](docs/code-conventions.md) — non-obvious C# decisions (instance IDs, namespace aliasing).
 - [Versioning](docs/versioning.md) — how the shared server/bridge/verify version and the Hub app version are managed, bumped, and kept in sync; the runtime compatibility check.
+
+> Would like to see other MCP options? See the [MCP tools for Unity comparison](docs/mcp-tools-comparison.md) — a side-by-side feature matrix of Unity Open MCP and the other MCP tools / AI assistants in the space.
 
 ## Unity Hub Pro
 
