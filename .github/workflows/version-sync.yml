@@ -29,6 +29,13 @@ on:
       - hub/package.json
       - scripts/sync-version.mjs
       - .github/workflows/version-sync.yml
+      # Token-estimate codegen drift gate — fires when the MCP-server tool
+      # schemas or the codegen script change, so the generated
+      # BridgeToolTokenEstimates.cs cannot silently drift from its source.
+      - mcp-server/src/tools/**
+      - mcp-server/src/capabilities/tool-groups.ts
+      - scripts/generate-token-estimates.mjs
+      - packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs
   push:
     branches: [main, master]
     paths:
@@ -78,3 +85,25 @@ jobs:
         # Read-only: --check --hub exits non-zero if tauri.conf.json,
         # Cargo.toml, or hub/package.json disagree with hub/version.json.
         run: node scripts/sync-version.mjs --check --hub
+
+  check-token-estimates:
+    name: Check token-estimate table sync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify generated token-estimate table matches the tool schemas
+        # Read-only: --check imports the live MCP-server tool schemas
+        # (mcp-server/src/tools/* + tool-groups.ts) via --experimental-strip-types
+        # and exits non-zero if the checked-in
+        # packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs disagrees. The
+        # table is the single source the bridge Tools tab reads for per-tool /
+        # per-group / total token estimates; drift would desync the UI from the
+        # real catalog.
+        run: node --experimental-strip-types scripts/generate-token-estimates.mjs --check

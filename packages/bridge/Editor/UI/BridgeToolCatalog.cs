@@ -54,6 +54,17 @@ namespace UnityOpenMcpBridge
         public LifecyclePolicy Lifecycle; // M13 T4.1 — settle/retry policy
         public string DeclaringTypeName; // for registry tools
         public List<BridgeToolParameterSummary> Parameters = new List<BridgeToolParameterSummary>();
+        // Per-tool token estimate (chars/4 over the tool's MCP wire JSON),
+        // sourced from the generated BridgeToolTokenEstimates table. Null when
+        // the catalog surfaced a tool the codegen did not see (defensive —
+        // renders "~?" in the UI). See scripts/generate-token-estimates.mjs.
+        public int? TokenEstimate;
+        // The tool's group id from the canonical MCP catalog
+        // (mcp-server/src/capabilities/tool-groups.ts). Null for always-visible
+        // meta-tools (capabilities, ping, manage_tools, …). Mirrored into the
+        // generated table so the Tools tab can render per-group token subtotals
+        // without a second hand-maintained mapping.
+        public string Group;
     }
 
     public static class BridgeToolCatalog
@@ -94,7 +105,9 @@ namespace UnityOpenMcpBridge
                         DestructiveHint = false,
                         Lifecycle = ToolLifecycle.Resolve(hc.Name),
                         DeclaringTypeName = null,
-                        Parameters = HardcodedParameterSummary(hc.Name)
+                        Parameters = HardcodedParameterSummary(hc.Name),
+                        TokenEstimate = BridgeToolTokenEstimates.EstimateFor(hc.Name),
+                        Group = BridgeToolTokenEstimates.GroupFor(hc.Name),
                     });
                     seen.Add(hc.Name);
             }
@@ -118,7 +131,9 @@ namespace UnityOpenMcpBridge
                         DestructiveHint = entry.DestructiveHint,
                         Lifecycle = entry.Lifecycle,
                         DeclaringTypeName = entry.DeclaringType?.FullName,
-                        Parameters = RegistryParameterSummary(entry)
+                        Parameters = RegistryParameterSummary(entry),
+                        TokenEstimate = BridgeToolTokenEstimates.EstimateFor(entry.Name),
+                        Group = BridgeToolTokenEstimates.GroupFor(entry.Name),
                     });
                 }
             }
@@ -161,7 +176,9 @@ namespace UnityOpenMcpBridge
                         DestructiveHint = false,
                         Lifecycle = ToolLifecycle.Resolve(name),
                         DeclaringTypeName = null,
-                        Parameters = HardcodedParameterSummary(name)
+                        Parameters = HardcodedParameterSummary(name),
+                        TokenEstimate = BridgeToolTokenEstimates.EstimateFor(name),
+                        Group = BridgeToolTokenEstimates.GroupFor(name),
                     });
                 }
             }
@@ -182,10 +199,71 @@ namespace UnityOpenMcpBridge
             var n = 0;
             foreach (var t in items)
             {
-                if (!BridgeToolTogglePolicy.IsDisabled(t.Name)) 
+                if (!BridgeToolTogglePolicy.IsDisabled(t.Name))
                     n++;
             }
             return n;
+        }
+
+        // Sum the token estimates of every ENABLED tool. This is the headline
+        // "active tokens" number the Tools tab renders in its header — it is
+        // recomputed each frame from the live toggle policy, so disabling a
+        // tool or group drops its tokens from the total immediately. Tools with
+        // no estimate (TokenEstimate == null — a tool the codegen table did not
+        // cover) contribute 0 so the total never goes negative.
+        public static int SumEnabledTokens(IReadOnlyList<BridgeToolCatalogItem> items)
+        {
+            if (items == null) return 0;
+            var total = 0;
+            foreach (var t in items)
+            {
+                if (BridgeToolTogglePolicy.IsDisabled(t.Name)) continue;
+                if (t.TokenEstimate.HasValue) total += t.TokenEstimate.Value;
+            }
+            return total;
+        }
+
+        // One row of the per-group token summary. `ActiveTokens` counts only
+        // enabled tools in the group; `TotalTokens` counts every tool in the
+        // group regardless of toggle state (so the operator can see the full
+        // group cost vs what is currently active).
+        public struct GroupTokenSummary
+        {
+            public string Group;
+            public int ToolCount;
+            public int ActiveToolCount;
+            public int ActiveTokens;
+            public int TotalTokens;
+        }
+
+        // Build the per-group token summary, ordered by group id for a stable
+        // render. Tools with a null Group (always-visible meta-tools) collapse
+        // into a synthetic "(always visible)" bucket so they still surface in
+        // the summary — their tokens are part of the catalog total.
+        public static List<GroupTokenSummary> GroupTokenSummaries(IReadOnlyList<BridgeToolCatalogItem> items)
+        {
+            var byGroup = new Dictionary<string, GroupTokenSummary>(StringComparer.Ordinal);
+            if (items != null)
+            {
+                foreach (var t in items)
+                {
+                    var g = t.Group ?? "(always visible)";
+                    if (!byGroup.TryGetValue(g, out var s))
+                    {
+                        s = new GroupTokenSummary { Group = g };
+                    }
+                    s.ToolCount++;
+                    var enabled = !BridgeToolTogglePolicy.IsDisabled(t.Name);
+                    if (enabled) s.ActiveToolCount++;
+                    var tokens = t.TokenEstimate ?? 0;
+                    if (enabled) s.ActiveTokens += tokens;
+                    s.TotalTokens += tokens;
+                    byGroup[g] = s;
+                }
+            }
+            var list = new List<GroupTokenSummary>(byGroup.Values);
+            list.Sort((a, b) => string.CompareOrdinal(a.Group, b.Group));
+            return list;
         }
 
         public static string FormatParameterList(BridgeToolCatalogItem item)

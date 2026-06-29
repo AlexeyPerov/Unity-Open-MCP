@@ -178,6 +178,20 @@ Batch is intended for non-interactive scenarios and fallback operation.
 
 The Unity Open MCP bridge window has a **Batch** tab — a read-only view of in-Editor batch runs. While a batch is running it shows live progress (entries pending / running / done / failed / skipped) and per-entry results (tool name, args summary, pass/fail, error text on failure); completed runs are retained in a session ring buffer for inspection. The panel observes batch state only — it does not start or stop batches (that stays with the MCP batch surface and the Hub). It re-renders automatically as entries transition, so no manual refresh is needed. In-memory only, cleared on domain reload.
 
+### In-Editor Tools tab token estimate
+
+The bridge window's **Tools** tab surfaces a per-tool token estimate so operators can reason about the context-window cost of an active tool set *before* an agent connects. With ~290 tools across the always-on + grouped + auto-activated domains, the cost of an active set is otherwise invisible until an agent sees the tool list.
+
+The estimate is **regenerated from the same source as the tool catalog** — the MCP-server tool schemas (`mcp-server/src/tools/*`) — by `scripts/generate-token-estimates.mjs`, which serializes each tool's `{ name, description, inputSchema }` to its MCP wire JSON and estimates tokens via a `chars / 4` heuristic (dependency-free; a real BPE tokenizer is out of scope — the value is for *relative* cost, not exact counts). The generated `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs` is checked in and read by the bridge at runtime; there is no second hand-maintained list, and a CI drift gate (`.github/workflows/version-sync.yml`) fails any PR where the table disagrees with the schemas.
+
+Where it shows:
+
+- **Per tool** — each catalog row renders `~{N} tokens` (K-formatted above 1000, e.g. `~1.2K`) as a chip alongside the mutability / gate / source chips.
+- **Per group** — a collapsible "Per-group token estimate" breakdown lists every group with its active vs total token cost (e.g. `core: ~2K active / ~2K total (6/6 tools)`), so the operator can see which groups dominate the budget.
+- **Total** — the filters header reports `Active tokens: ~{N}` — the headline context-window cost of the enabled tool set.
+
+The active total is recomputed every frame from the live per-tool toggle state, so disabling a tool (or every tool in a group) drops its tokens from the total immediately. Note this reflects the **bridge toggle policy** (per-tool enable/disable in `.unity-open-mcp/settings.json`), not per-session `manage_tools` activation — session activation lives in the MCP server and is not tracked by the bridge window.
+
 ## Output shaping
 
 Many tools support output controls to reduce token usage:

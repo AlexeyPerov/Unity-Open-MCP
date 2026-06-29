@@ -719,7 +719,23 @@ namespace UnityOpenMcpBridge
 
         // ---------- Tools tab (M4.5-4/5/6) ----------
 
-        private const string TokenEstimateNote = "Token estimate deferred in v1 (no fake heuristic surfaced).";
+        // Token-estimate tooltip — shared across the header total, the per-group
+        // summary, and the per-tool chip so the figure reads consistently. The
+        // estimate is regenerated from the MCP-server tool schemas by
+        // scripts/generate-token-estimates.mjs (no hand-maintained list).
+        private const string TooltipTokenEstimate =
+            "Estimated tokens this tool contributes to the AI context window. " +
+            "Computed from the tool's MCP wire JSON (name + description + input schema) " +
+            "via a chars/4 heuristic — the value is an estimate for relative cost, not an exact count. " +
+            "Disable a tool (or its group) to drop its tokens from the active total.";
+        private const string TooltipTokenTotal =
+            "Estimated tokens contributed by all ENABLED tools combined — the headline context-window cost " +
+            "of the active tool set an agent will see when it connects. Recomputed live as you toggle tools/groups.";
+
+        // Per-group token summary foldout (collapsed by default — the headline
+        // number lives in the filters header; this is the breakdown).
+        [NonSerialized] private bool _toolGroupTokensFoldout = false;
+        [NonSerialized] private Vector2 _toolGroupTokensScroll;
 
         private void DrawToolsTab()
         {
@@ -728,15 +744,52 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.HelpBox(
                 "Unified list of dispatchable tools in this Editor session. " +
                 "Untoggle a tool to block its HTTP dispatch path with an explicit `tool_disabled` error. " +
-                "Disable state persists in `.unity-open-mcp/settings.json` and survives domain reload.\n" +
-                TokenEstimateNote,
+                "Disable state persists in `.unity-open-mcp/settings.json` and survives domain reload. " +
+                "Each row shows an estimated token cost (chars/4 over the tool's MCP schema); " +
+                "the header reports the active-set total.",
                 MessageType.None);
 
             var items = BridgeToolCatalog.Build();
             var filtered = BuildFilteredToolList(items);
             DrawToolFilters(items, filtered);
             BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawToolGroupTokenSummary(items);
+            BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawToolList(filtered);
+        }
+
+        // Per-group token breakdown. Collapsed by default (the headline active
+        // total lives in DrawToolFilters); expanding shows one row per group
+        // with its active vs total token cost so the operator can see which
+        // groups dominate the context budget.
+        private void DrawToolGroupTokenSummary(List<BridgeToolCatalogItem> items)
+        {
+            var summaries = BridgeToolCatalog.GroupTokenSummaries(items);
+            if (summaries == null || summaries.Count == 0) return;
+
+            _toolGroupTokensFoldout = EditorGUILayout.Foldout(
+                _toolGroupTokensFoldout,
+                $"Per-group token estimate ({summaries.Count} groups)",
+                true);
+            if (!_toolGroupTokensFoldout) return;
+
+            _toolGroupTokensScroll = EditorGUILayout.BeginScrollView(
+                _toolGroupTokensScroll, GUILayout.MaxHeight(160));
+            foreach (var s in summaries)
+            {
+                EditorGUILayout.BeginHorizontal();
+                BridgeGUIUtilities.FieldLabel(s.Group, null, 150);
+                var activeFormatted = BridgeToolTokenEstimates.Format(s.ActiveTokens);
+                var totalFormatted = BridgeToolTokenEstimates.Format(s.TotalTokens);
+                GUILayout.Label(
+                    new GUIContent(
+                        $"~{activeFormatted} active  /  ~{totalFormatted} total  ({s.ActiveToolCount}/{s.ToolCount} tools)",
+                        TooltipTokenEstimate),
+                    EditorStyles.miniLabel);
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+            }
+            EditorGUILayout.EndScrollView();
         }
 
         // Apply the current filter + search once per frame and return the
@@ -764,10 +817,21 @@ namespace UnityOpenMcpBridge
             int total = allItems?.Count ?? 0;
             int enabled = BridgeToolCatalog.CountEnabled(allItems);
             int disabled = total - enabled;
+            int activeTokens = BridgeToolCatalog.SumEnabledTokens(allItems);
+            var activeTokensLabel = BridgeToolTokenEstimates.Format(activeTokens);
 
             EditorGUILayout.Space(4);
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField($"Total: {total}    Enabled: {enabled}    Disabled: {disabled}", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(
+                $"Total: {total}    Enabled: {enabled}    Disabled: {disabled}",
+                EditorStyles.miniBoldLabel);
+            GUILayout.FlexibleSpace();
+            // Headline active-token total — the number an operator acts on. It
+            // is recomputed every frame from the live toggle policy, so toggling
+            // a tool or group updates it immediately.
+            EditorGUILayout.LabelField(
+                new GUIContent($"Active tokens: ~{activeTokensLabel}", TooltipTokenTotal),
+                EditorStyles.miniBoldLabel);
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(2);
@@ -1003,6 +1067,15 @@ namespace UnityOpenMcpBridge
             var sourceTooltip = item.Source == BridgeToolSource.Registry ? TooltipSourceRegistry : TooltipSourceHardcoded;
             BridgeGUIUtilities.DrawColoredLabel(sourceLabel, new Color(0.7f, 0.85f, 1f), 70, sourceTooltip);
 
+            // Per-tool token estimate chip. Null estimate (a tool the codegen
+            // table did not cover) renders "~? tokens" so the gap is visible
+            // rather than silently absent; every catalog tool should resolve.
+            var tokenText = item.TokenEstimate.HasValue
+                ? $"~{BridgeToolTokenEstimates.Format(item.TokenEstimate.Value)} tokens"
+                : "~? tokens";
+            BridgeGUIUtilities.DrawColoredLabel(
+                tokenText, new Color(0.8f, 0.8f, 0.85f), 110, TooltipTokenEstimate);
+
             var expandLabel = expanded ? "Hide" : "Details";
             var expandTooltip = expanded
                 ? "Collapse the parameter / metadata panel for this tool."
@@ -1033,6 +1106,14 @@ namespace UnityOpenMcpBridge
                     item.Mutability == BridgeToolMutability.Mutating ? "mutating (gate-routed)" : "read-only");
                 if (item.Source == BridgeToolSource.Registry && !string.IsNullOrEmpty(item.DeclaringTypeName))
                     BridgeGUIUtilities.RowLabel("Declaring type", TooltipSourceRegistry, item.DeclaringTypeName);
+                if (!string.IsNullOrEmpty(item.Group))
+                    BridgeGUIUtilities.RowLabel("Group",
+                        "Tool-group id from the canonical MCP catalog (mcp-server/src/capabilities/tool-groups.ts). " +
+                        "Hidden from ListTools until the session activates the group via manage_tools.",
+                        item.Group);
+                if (item.TokenEstimate.HasValue)
+                    BridgeGUIUtilities.RowLabel("Token estimate", TooltipTokenEstimate,
+                        $"~{BridgeToolTokenEstimates.Format(item.TokenEstimate.Value)} tokens");
 
                 var hints = BuildHintSummary(item);
                 if (!string.IsNullOrEmpty(hints))
