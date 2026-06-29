@@ -1,0 +1,24 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.MemoryProfiler.Editor.Tests",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.MemoryProfiler",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.MemoryProfiler.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor",
+    "Unity.MemoryProfiler.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_OPEN_MCP_EXT_MEMORYPROFILER",
+    "UNITY_TEST_FRAMEWORK"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
