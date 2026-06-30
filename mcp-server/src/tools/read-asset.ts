@@ -10,8 +10,8 @@ export const readAsset: Tool = {
   name: "unity_open_mcp_read_asset",
   description:
     "Read a Unity asset as a compact, token-budgeted summary (hierarchy + components + counts). " +
-    "Default returns a map: ASSET/PATH/GUID/OBJECTS/COMPONENTS counts, CMP component-set declarations, and a folded TREE with 'more: N hidden' omission counts. " +
-    "Drill down with component/path/id/detail instead of re-reading raw YAML. " +
+    "Default (`profile: 'compact'`) returns a map: ASSET/PATH/GUID/OBJECTS/COMPONENTS counts, CMP component-set declarations, and a folded TREE with 'more: N hidden' omission counts. " +
+    "Drill down with component/path/id, or raise the budget with profile=balanced|full. Page large trees with page_size/cursor. " +
     "Achieves >=70% size reduction vs raw YAML on typical prefabs. Offline-first: text-serialized assets parse from disk (no Editor needed); binary formats fall back to the live bridge.",
   inputSchema: {
     type: "object",
@@ -22,11 +22,32 @@ export const readAsset: Tool = {
         description:
           "Asset path to read (e.g. \"Assets/Prefabs/Player.prefab\"). Text-serialized YAML assets only (.prefab/.unity/.asset/.mat/.controller/.anim).",
       },
+      profile: {
+        enum: ["compact", "balanced", "full"],
+        default: "compact",
+        description:
+          "Token-budget output profile (M22). 'compact' (default) = folded tree + component-set codes + omission counts. " +
+          "'balanced' = inline component names per node. 'full' = full tree without render-only folding. " +
+          "An explicit profile wins over the legacy `detail` param; the two map onto the same axis.",
+      },
+      page_size: {
+        type: "integer",
+        minimum: 1,
+        description:
+          "Page the TREE rows (M22 uniform paging). When set, the response carries a `pagination` block with a `next_cursor` " +
+          "to resume. Omit to receive the whole (profile-shaped) tree in one response.",
+      },
+      cursor: {
+        type: "string",
+        description:
+          "Opaque continuation token from a previous response's `pagination.next_cursor`. Page the TREE rows.",
+      },
       detail: {
         enum: ["summary", "normal", "verbose"],
         default: "summary",
         description:
-          "Compression level. 'summary' (default): folded tree, component-set codes, omission counts. 'normal': inline component names per node. 'verbose': full tree without render-only folding.",
+          "Legacy compression level (alias for `profile`: summary=compact, normal=balanced, verbose=full). " +
+          "Prefer `profile`; ignored when `profile` is set.",
       },
       component: {
         type: "string",

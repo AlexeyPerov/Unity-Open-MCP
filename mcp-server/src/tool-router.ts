@@ -22,6 +22,15 @@ import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
 import { BATCH_TOOL_NAMES } from "./batch-spawn.js";
 import type { ToolSessionState } from "./tool-session-state.js";
+import {
+  readProfileAndDetail,
+  applyPaging,
+  attachPagination,
+  foldVerifyResult,
+  parseResultBody,
+  withResultBody,
+  type OutputProfile,
+} from "./output-profile.js";
 
 export interface RouteMeta {
   route: "live" | "batch";
@@ -115,6 +124,81 @@ function summarizeBridgeStatusLock(lock: InstanceLock) {
     bridgeVersion: lock.bridgeVersion,
     unityVersion: lock.unityVersion,
   };
+}
+
+// ===========================================================================
+// M22 — heavy-tool result post-processors (find_references + verify tools).
+//
+// These run after the live/batch/offline hop returns. The bridge emits the full
+// result regardless of profile; we fold + page server-side so the wire shape
+// matches the profile/paging contract without a bridge change. Each returns a
+// new CallToolResult (never mutates the input); injectRouteMeta runs after to
+// append `_route`.
+// ===========================================================================
+
+/** Page the offline find_references `referencedBy` list and attach pagination. */
+function pageFindReferencesResult<T extends { referencedBy?: unknown }>(
+  result: T,
+  pageSize: number,
+  cursor: string | undefined,
+): T & { pagination: import("./output-profile.js").PaginationBlock } {
+  const referencedBy = Array.isArray(result.referencedBy) ? result.referencedBy : [];
+  const { page, block } = applyPaging(referencedBy, "find_references", { page_size: pageSize, cursor });
+  return attachPagination({ ...result, referencedBy: page }, block);
+}
+
+/**
+ * Fold + page the LIVE find_references result. The bridge returns a flat
+ * `referencedBy` path list (no byKind/byFolder groupings, no locations); we
+ * derive the compact grouping server-side and page when requested.
+ */
+function foldFindReferencesLive(
+  result: CallToolResult,
+  profile: OutputProfile | undefined,
+  wantPaging: boolean,
+  args: Record<string, unknown>,
+): CallToolResult {
+  const body = parseResultBody(result);
+  if (body === null) return result;
+  if (body.error) return result;
+
+  // Bridge shape: { referencedBy: string[], totalCount, ... } (flat paths).
+  const rawList = Array.isArray(body.referencedBy) ? body.referencedBy : [];
+  const pageSize = typeof args.page_size === "number" && args.page_size > 0 ? (args.page_size as number) : 0;
+  const cursor = typeof args.cursor === "string" ? (args.cursor as string) : undefined;
+
+  if (profile === "compact") {
+    // compact: counts + byKind grouping only — drop the per-asset list.
+    const { referencedBy: _dropped, ...rest } = body;
+    void _dropped;
+    const byKind = groupLiveRefsByKind(rawList as string[]);
+    return withResultBody(result, {
+      ...rest,
+      totalCount: rawList.length,
+      byKind,
+      referencedBy: [],
+    });
+  }
+
+  // balanced / full: keep the path list (paged when requested).
+  if (pageSize > 0) {
+    const { page, block } = applyPaging(rawList as string[], "find_references", { page_size: pageSize, cursor });
+    const withPage = attachPagination({ ...body, referencedBy: page, totalCount: rawList.length }, block);
+    return withResultBody(result, withPage);
+  }
+
+  return withResultBody(result, { ...body, totalCount: rawList.length });
+}
+
+/** Derive a byKind grouping from flat referenced paths for the live compact view. */
+function groupLiveRefsByKind(paths: string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const path of paths) {
+    const dot = path.lastIndexOf(".");
+    const kind = dot > 0 ? path.slice(dot + 1).toLowerCase() : "other";
+    counts[kind] = (counts[kind] ?? 0) + 1;
+  }
+  return counts;
 }
 
 // Operator-facing "what to do next" hint for each coarse status. Kept short
@@ -219,6 +303,19 @@ export class ToolRouter implements Router {
     // ReferenceGraph remains available when the bridge is up.
     if (toolName === "unity_open_mcp_find_references") {
       return this.routeFindReferences(args);
+    }
+
+    // M22 — verify tools. The bridge returns the full issues[] list; we fold +
+    // page server-side per the output profile (compact = counts only).
+    if (toolName === "unity_open_mcp_validate_edit" || toolName === "unity_open_mcp_scan_paths") {
+      return this.routeVerifyResult(toolName, args);
+    }
+
+    // M22 — scene_get_data. Resolves the output profile (onto detail) and pages
+    // the node stream server-side; the bridge detail/max_nodes params keep
+    // working as back-compat aliases.
+    if (toolName === "unity_open_mcp_scene_get_data") {
+      return this.routeSceneGetData(args);
     }
 
     // Compact drill-down reads: offline-first for text-serialized assets, fall
@@ -991,10 +1088,24 @@ export class ToolRouter implements Router {
   private async routeFindReferences(
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
-    const liveAvailable = await this.live.isLiveAvailable();    if (liveAvailable) {
+    // M22 — resolve profile -> detail. compact (default) maps to summary
+    // (counts/byKind/byFolder only); balanced -> normal; full -> verbose.
+    const { detail, profile } = readProfileAndDetail(args, "summary");
+    const wantPaging = typeof args.page_size === "number" && args.page_size > 0;
+
+    const liveAvailable = await this.live.isLiveAvailable();
+    if (liveAvailable) {
       console.error("[unity-open-mcp] Route: find_references -> live");
-      const result = await this.live.route("unity_open_mcp_find_references", args);
-      return injectRouteMeta(result, { route: "live" });
+      // The live bridge only honors max_results (no detail/per-file/threshold).
+      // Ask for the full set when paging so the cursor can walk it; otherwise
+      // honor the legacy max_results cap.
+      const liveArgs: Record<string, unknown> = {
+        ...args,
+        max_results: wantPaging ? 0 : (typeof args.max_results === "number" ? args.max_results : 100),
+      };
+      const result = await this.live.route("unity_open_mcp_find_references", liveArgs);
+      const folded = foldFindReferencesLive(result, profile, wantPaging, args);
+      return injectRouteMeta(folded, { route: "live" });
     }
 
     console.error(
@@ -1025,15 +1136,21 @@ export class ToolRouter implements Router {
       const result = await findReferencesOffline({
         assetPath,
         guid,
-        detail: typeof args.detail === "string" ? args.detail : "normal",
-        maxResults: typeof args.max_results === "number" ? args.max_results : 100,
+        detail,
+        // When paging, fetch the full set; otherwise honor the legacy cap.
+        maxResults: wantPaging ? 0 : (typeof args.max_results === "number" ? args.max_results : 100),
         maxPerFile: typeof args.max_per_file === "number" ? args.max_per_file : 5,
         patternThreshold: typeof args.pattern_threshold === "number" ? args.pattern_threshold : 0,
         projectRoot: this.projectPath,
       });
+      // M22 — page the referencedBy list when requested (balanced/full only;
+      // compact returns an empty list by design).
+      const withPaging = wantPaging
+        ? pageFindReferencesResult(result, args.page_size as number, typeof args.cursor === "string" ? (args.cursor as string) : undefined)
+        : result;
       return {
         content: [
-          { type: "text", text: JSON.stringify({ ...result, _source: "offline" }) },
+          { type: "text", text: JSON.stringify({ ...withPaging, _source: "offline" }) },
         ],
         isError: false,
       };
@@ -1052,4 +1169,148 @@ export class ToolRouter implements Router {
       };
     }
   }
+
+  // M22 — verify tools (validate_edit / scan_paths). The bridge always returns
+  // the full issues[] list; we fold + page server-side per the output profile
+  // (compact = counts only, balanced/full keep + page issues).
+  private async routeVerifyResult(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const { profile } = readProfileAndDetail(args, "summary");
+    const pageSize = typeof args.page_size === "number" && args.page_size > 0 ? (args.page_size as number) : 0;
+    const cursor = typeof args.cursor === "string" ? (args.cursor as string) : undefined;
+
+    // Forward to live/batch exactly as the generic path would. The bridge
+    // ignores the unknown profile/page_size/cursor keys (JsonBody substring-
+    // searches only for keys it asks for), so they pass through harmlessly.
+    const canBatch = this.batch.isBatchTool(toolName);
+    let raw: CallToolResult;
+    if (!canBatch) {
+      raw = await this.live.route(toolName, args);
+      raw = injectRouteMeta(raw, { route: "live" });
+    } else {
+      const liveAvailable = await this.live.isLiveAvailable();
+      if (liveAvailable) {
+        raw = await this.live.route(toolName, args);
+        raw = injectRouteMeta(raw, { route: "live" });
+      } else {
+        raw = await this.batch.route(toolName, args);
+        raw = injectRouteMeta(raw, { route: "batch", fallbackReason: "live_unavailable" });
+      }
+    }
+
+    const body = parseResultBody(raw);
+    if (body === null) return raw;
+    if (body.error) return raw;
+
+    const folded = foldVerifyResult(body, toolName, profile, { page_size: pageSize, cursor });
+    return withResultBody(raw, folded);
+  }
+
+  // M22 — scene_get_data. Resolves the output profile (onto detail) and pages
+  // the node stream server-side. The bridge detail/max_nodes params keep
+  // working as back-compat aliases; profile wins when both are present.
+  private async routeSceneGetData(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const { detail } = readProfileAndDetail(args, "summary");
+    const wantPaging = typeof args.page_size === "number" && args.page_size > 0;
+
+    // Build the args the bridge sees: profile resolved to detail (the bridge's
+    // real knob), legacy max_nodes honored, paging keys stripped (the bridge
+    // would ignore them anyway, but keep the call clean).
+    const bridgeArgs: Record<string, unknown> = { ...args };
+    delete bridgeArgs.profile;
+    delete bridgeArgs.page_size;
+    delete bridgeArgs.cursor;
+    bridgeArgs.detail = detail;
+
+    const canBatch = this.batch.isBatchTool("unity_open_mcp_scene_get_data");
+    let raw: CallToolResult;
+    if (!canBatch) {
+      raw = await this.live.route("unity_open_mcp_scene_get_data", bridgeArgs);
+      raw = injectRouteMeta(raw, { route: "live" });
+    } else {
+      const liveAvailable = await this.live.isLiveAvailable();
+      if (liveAvailable) {
+        raw = await this.live.route("unity_open_mcp_scene_get_data", bridgeArgs);
+        raw = injectRouteMeta(raw, { route: "live" });
+      } else {
+        raw = await this.batch.route("unity_open_mcp_scene_get_data", bridgeArgs);
+        raw = injectRouteMeta(raw, { route: "batch", fallbackReason: "live_unavailable" });
+      }
+    }
+
+    if (!wantPaging) return raw;
+
+    const body = parseResultBody(raw);
+    if (body === null) return raw;
+    if (body.error) return raw;
+
+    const pageSize = args.page_size as number;
+    const cursor = typeof args.cursor === "string" ? (args.cursor as string) : undefined;
+    const paged = pageSceneNodes(body, pageSize, cursor);
+    return withResultBody(raw, paged);
+  }
+}
+
+/**
+ * Page the scene_get_data node stream. The bridge emits a per-root `roots`
+ * array (summary: root roster) or a nested hierarchy (normal/verbose). We page
+ * the FLATTENED node stream so the cursor is a stable position regardless of
+ * the detail mode, then re-hang the page as a flat `nodes` array with the
+ * original scene metadata preserved.
+ */
+function pageSceneNodes(
+  body: Record<string, unknown>,
+  pageSize: number,
+  cursor: string | undefined,
+): Record<string, unknown> {
+  const flat = flattenSceneBody(body);
+  const { page, block } = applyPaging(flat, "scene_get_data", { page_size: pageSize, cursor });
+
+  // Preserve scene-level metadata; replace the structural root/hierarchy fields
+  // with the flat paged node list + a note explaining the page shape.
+  const { roots, rootGameObjects, nodes, truncated, pagination: _existing, ...meta } = body;
+  void roots;
+  void rootGameObjects;
+  void nodes;
+  void truncated;
+  void _existing;
+
+  return attachPagination(
+    {
+      ...meta,
+      nodes: page,
+      pagingNote: "page_size returns a flattened node stream; re-read without page_size for the structural root/hierarchy view",
+    },
+    block,
+  );
+}
+
+/**
+ * Flatten the scene body into a node stream for paging. Handles both the
+ * summary root roster (array of root objects) and the nested normal/verbose
+ * hierarchy (objects with `children`).
+ */
+function flattenSceneBody(body: Record<string, unknown>): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const walk = (node: unknown) => {
+    if (!node || typeof node !== "object") return;
+    const obj = node as Record<string, unknown>;
+    out.push(obj);
+    const children = obj.children;
+    if (Array.isArray(children)) {
+      for (const child of children) walk(child);
+    }
+  };
+
+  // The bridge emits `roots` (summary) or `rootGameObjects` (normal/verbose);
+  // accept either.
+  const rootField = Array.isArray(body.roots) ? body.roots : body.rootGameObjects;
+  if (Array.isArray(rootField)) {
+    for (const root of rootField) walk(root);
+  }
+  return out;
 }

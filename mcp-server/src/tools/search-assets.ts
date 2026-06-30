@@ -8,8 +8,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 export const searchAssets: Tool = {
   name: "unity_open_mcp_search_assets",
   description:
-    "Search the project for assets by file/GameObject/component/script/GUID. Returns compact, grouped, reason-tagged matches with omission counts. " +
+    "Search the project for assets by file/GameObject/component/script/GUID. Returns grouped, reason-tagged matches with omission counts. " +
     "Each result tags why it matched (file-name / gameobject / component / guid) so the agent knows which drill-down to run next. " +
+    "Default `profile: 'compact'`; page large result sets with page_size/cursor. " +
     "Offline-first: scans Assets/ on disk (no Editor needed).",
   inputSchema: {
     type: "object",
@@ -35,15 +36,36 @@ export const searchAssets: Tool = {
         default: "Assets",
         description: "Folder to search under (default: Assets).",
       },
+      profile: {
+        enum: ["compact", "balanced", "full"],
+        default: "compact",
+        description:
+          "Token-budget output profile (M22). 'compact' (default) = per-file object listings capped at object_limit with a moreObjectsHidden count. " +
+          "'balanced'/'full' raise the object_limit default. Maps onto the legacy `object_limit` axis.",
+      },
+      page_size: {
+        type: "integer",
+        minimum: 1,
+        description:
+          "Page the result-file matches (M22 uniform paging). When set, the response carries a `pagination` block with a `next_cursor` " +
+          "to resume. Omit to receive up to `max_results` matches in one response.",
+      },
+      cursor: {
+        type: "string",
+        description:
+          "Opaque continuation token from a previous response's `pagination.next_cursor`. Page the result-file matches.",
+      },
       object_limit: {
         type: "integer",
         default: 12,
-        description: "Max objects listed per result file; extras counted in 'moreObjectsHidden'.",
+        description:
+          "Max objects listed per result file; extras counted in 'moreObjectsHidden'. Legacy alias (overrides the profile default when set explicitly).",
       },
       max_results: {
         type: "integer",
         default: 50,
-        description: "Max result files returned; extras counted in 'truncated'.",
+        description:
+          "Max result files returned when page_size is omitted; extras counted in 'truncated'. Legacy alias of the single-page cap.",
       },
     },
     additionalProperties: false,

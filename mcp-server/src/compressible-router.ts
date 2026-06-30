@@ -22,6 +22,12 @@ import {
 import { readAssetOffline, isOfflineAsset } from "./offline.js";
 import { searchAssetsOffline } from "./offline.js";
 import { makeErrorResult } from "./results.js";
+import {
+  readProfileAndDetail,
+  applyPaging,
+  attachPagination,
+  isOutputProfile,
+} from "./output-profile.js";
 
 const COMPRESSIBLE = new Set([
   "unity_open_mcp_read_asset",
@@ -165,8 +171,13 @@ async function routeReadAsset(
     }
   }
 
+  // M22 — resolve the output profile onto the existing detail axis. `profile`
+  // is the documented public param; `detail` is the back-compat alias. Profile
+  // wins when both are present.
+  const { detail } = readProfileAndDetail(args, "summary");
+
   const opts: RenderOptions = {
-    detail: typeof args.detail === "string" ? (args.detail as RenderOptions["detail"]) : "summary",
+    detail,
     component: typeof args.component === "string" ? args.component : undefined,
     path: typeof args.path === "string" ? args.path : undefined,
     id: typeof args.id === "string" ? args.id : undefined,
@@ -176,7 +187,33 @@ async function routeReadAsset(
   };
 
   const compact = renderAssetSummary(model, opts);
-  return makeResult(compact, cacheHit, source);
+
+  // M22 — page the TREE rows when page_size is requested. Drill-down responses
+  // (component/id/override) and non-hierarchical assets have no TREE to page,
+  // so paging only applies when a tree was rendered.
+  const result =
+    compact.tree && Array.isArray(compact.tree) && typeof args.page_size === "number" && args.page_size > 0
+      ? pageTree(compact, args.page_size as number, typeof args.cursor === "string" ? (args.cursor as string) : undefined)
+      : compact;
+
+  return makeResult(result, cacheHit, source);
+}
+
+/** Page the rendered TREE rows and attach a pagination block. */
+function pageTree(
+  compact: ReturnType<typeof renderAssetSummary>,
+  pageSize: number,
+  cursor: string | undefined,
+): ReturnType<typeof renderAssetSummary> {
+  const tree = compact.tree ?? [];
+  const { page, block } = applyPaging(tree, "read_asset", { page_size: pageSize, cursor });
+  const withPage: ReturnType<typeof renderAssetSummary> = { ...compact, tree: page };
+  // When paging, the per-page omission story is the pagination block; clear the
+  // legacy whole-tree hint so it does not mislead.
+  if (withPage.hint && withPage.moreHidden === undefined) {
+    delete withPage.hint;
+  }
+  return attachPagination(withPage, block);
 }
 
 async function routeSearchAssets(
@@ -184,7 +221,19 @@ async function routeSearchAssets(
   live: LiveClient,
   projectPath: string,
 ): Promise<CallToolResult> {
+  // M22 — profile drives the object_limit default (compact = tight per-file
+  // cap; balanced/full raise it). An explicit object_limit always wins.
+  const profile = isOutputProfile(args.profile) ? args.profile : undefined;
+  const objectLimitDefault = profile === "compact" || profile === undefined
+    ? 12
+    : 50;
+  const objectLimit = typeof args.object_limit === "number" ? args.object_limit : objectLimitDefault;
+  const wantPaging = typeof args.page_size === "number" && args.page_size > 0;
+
   try {
+    // When paging, ask the source for the full match set (no matchLimit cap)
+    // so the cursor can walk it; otherwise honor the legacy max_results cap.
+    const sourceMax = wantPaging ? 0 : (typeof args.max_results === "number" ? args.max_results : 50);
     const model = await searchAssetsOffline({
       name: typeof args.name === "string" ? args.name : undefined,
       component: typeof args.component === "string" ? args.component : undefined,
@@ -192,13 +241,14 @@ async function routeSearchAssets(
       type: typeof args.type === "string" ? args.type : undefined,
       folder: typeof args.folder === "string" ? args.folder : "Assets",
       projectRoot: projectPath,
-      maxResults: typeof args.max_results === "number" ? args.max_results : 50,
+      maxResults: sourceMax,
     });
 
-    const objectLimit = typeof args.object_limit === "number" ? args.object_limit : 12;
-    const matchLimit = typeof args.max_results === "number" ? args.max_results : 50;
-    const compact = renderSearchSummary(model, { objectLimit, matchLimit });
-    return makeResult(compact, false, "offline");
+    const compact = renderSearchSummary(model, { objectLimit, matchLimit: sourceMax });
+    const result = wantPaging
+      ? pageSearch(compact, args.page_size as number, typeof args.cursor === "string" ? (args.cursor as string) : undefined)
+      : compact;
+    return makeResult(result, false, "offline");
   } catch {
     // Fall back to live bridge.
   }
@@ -214,10 +264,33 @@ async function routeSearchAssets(
     return { ...raw, isError: true };
   }
 
-  const objectLimit = typeof args.object_limit === "number" ? args.object_limit : 12;
-  const matchLimit = typeof args.max_results === "number" ? args.max_results : 50;
-  const compact = renderSearchSummary(parsed as unknown as SearchModel, { objectLimit, matchLimit });
-  return makeResult(compact, false, "live");
+  const liveMax = wantPaging ? 0 : (typeof args.max_results === "number" ? args.max_results : 50);
+  const compact = renderSearchSummary(parsed as unknown as SearchModel, { objectLimit, matchLimit: liveMax });
+  const result = wantPaging
+    ? pageSearch(compact, args.page_size as number, typeof args.cursor === "string" ? (args.cursor as string) : undefined)
+    : compact;
+  return makeResult(result, false, "live");
+}
+
+/**
+ * Page the rendered `matches` array and attach a pagination block. The legacy
+ * `truncated` count (matches hidden by the source cap) is preserved; the
+ * pagination block's `truncated` is the resumable tail within the current page
+ * window.
+ */
+function pageSearch(
+  compact: ReturnType<typeof renderSearchSummary>,
+  pageSize: number,
+  cursor: string | undefined,
+): ReturnType<typeof renderSearchSummary> {
+  const matches = compact.matches ?? [];
+  const { page, block } = applyPaging(matches, "search_assets", { page_size: pageSize, cursor });
+  const withPage: ReturnType<typeof renderSearchSummary> = {
+    ...compact,
+    matches: page,
+    shown: page.length,
+  };
+  return attachPagination(withPage, block);
 }
 
 function parseContentJson(result: CallToolResult): Record<string, unknown> | null {

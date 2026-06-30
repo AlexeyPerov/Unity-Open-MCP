@@ -235,6 +235,60 @@ Many tools support output controls to reduce token usage:
 - pagination and limits (`max_results`, `max_entries`, `max_items`, `max_nodes`, etc.)
 - explicit truncation indicators in the response
 
+### Output profiles (`compact` / `balanced` / `full`) + uniform paging
+
+The heavy tools (the ones that return variable-size payloads) share a uniform
+token-budget knob and a resumable paging convention:
+
+- **`profile`**: `compact` (default) | `balanced` | `full`. This is the public,
+  documented knob. It maps onto each tool's existing `detail` axis
+  (`compact`→`summary`, `balanced`→`normal`, `full`→`verbose`) so the M9
+  compression module does the folding — the profile is just its public name.
+  An explicit `profile` wins over a legacy `detail`; the two are otherwise
+  interchangeable (`detail` is a backwards-compatible alias).
+- **`page_size` / `cursor` / `next_cursor`**: uniform paging. When `page_size`
+  is set, the response carries a `pagination` block with a `next_cursor` to
+  resume. Omit `page_size` to receive the whole (profile-shaped) payload in one
+  response. `cursor` is the opaque continuation token from a previous
+  `pagination.next_cursor`.
+
+Every paginated response includes a `pagination` block:
+
+```json
+"pagination": {
+  "page_size": 40,
+  "cursor": null,          // the cursor this page was requested with (null = first page)
+  "next_cursor": "read_asset:40",  // null when this is the last page
+  "truncated": 120         // items remaining after this page (the resumable tail)
+}
+```
+
+Profile- and paging-aware tools, and what each axis controls:
+
+| Tool | `profile` controls | `page_size` pages |
+| --- | --- | --- |
+| `read_asset` | TREE folding (compact = CMP codes + omission counts) | TREE rows |
+| `search_assets` | per-file object cap (compact tight; balanced/full larger) | result-file matches |
+| `scene_get_data` | scene overview vs nested children vs transforms | flattened node stream |
+| `find_references` | counts/groupings (compact) vs per-asset list vs field locations | referencing-assets list |
+| `validate_edit` | counts by severity (compact) vs full issues list | issues list |
+| `scan_paths` | counts by severity (compact) vs full issues list | issues list |
+
+**Back-compat / deprecation path.** The legacy caps (`detail`, `max_results`,
+`max_nodes`, `object_limit`, `max_per_folder`) remain as aliases. They still
+work unchanged when `page_size` is omitted: `detail` selects the same level as
+`profile`, and the legacy caps request a single bounded page. Migrate callers
+to `profile` + `page_size`/`cursor` over time; the aliases are not removed in
+this milestone. The compact default means `find_references` /
+`validate_edit` / `scan_paths` now return counts/groupings by default — pass
+`profile: "balanced"` (or `detail: "normal"`/`"verbose"`) to get the
+per-asset / per-issue lists those tools previously returned by default.
+
+**`compact` is the default for all heavy tools.** It is a no-op for
+`read_asset` / `scene_get_data` / `search_assets` (whose previous default was
+already the summary/folded shape) but changes the default output of
+`find_references` / `validate_edit` / `scan_paths` to counts/groupings only.
+
 ## Error contract
 
 Errors are returned as JSON with:
