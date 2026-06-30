@@ -613,6 +613,132 @@ test("costHints block is returned even with a kind filter", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Lifecycle policy block (5-class taxonomy + per-tool declarations)
+// ---------------------------------------------------------------------------
+
+// A fixture that includes a tool from each lifecycle class so the per-tool
+// `lifecycle` field can be asserted without importing the full ALL_TOOLS list.
+const LIFECYCLE_FIXTURE_TOOLS: Tool[] = [
+  ...FIXTURE_TOOLS,
+  {
+    name: "unity_open_mcp_execute_csharp",
+    description: "Execute C# (fixture).",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "unity_open_mcp_compile_check",
+    description: "Compile check (fixture).",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "unity_open_mcp_gameobject_modify",
+    description: "GameObject modify (fixture).",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "unity_open_mcp_build_start",
+    description: "Build start (fixture).",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "unity_senses_run_tests",
+    description: "Run tests (fixture).",
+    inputSchema: { type: "object", properties: {} },
+  },
+];
+const LIFECYCLE_DEPS = {
+  tools: LIFECYCLE_FIXTURE_TOOLS,
+  batchToolNames: FIXTURE_BATCH_NAMES,
+  rules: RULE_CATALOG,
+  fixes: FIX_CATALOG,
+};
+
+test("capabilities include a lifecycleBlock with the 5-class taxonomy", () => {
+  const caps = buildCapabilities(LIFECYCLE_DEPS);
+  assert.ok(caps.lifecycleBlock, "lifecycleBlock must be present");
+  assert.equal(caps.lifecycleBlock.classes.length, 5);
+  const ids = caps.lifecycleBlock.classes.map((c) => c.class);
+  assert.deepEqual(ids, [
+    "none",
+    "compile-reload",
+    "modal-dialog",
+    "scene-dirty",
+    "process-stale",
+  ]);
+  assert.ok(
+    typeof caps.lifecycleBlock.guidance === "string" &&
+      caps.lifecycleBlock.guidance.length > 0,
+  );
+});
+
+test("every implemented tool carries a lifecycle class + lifecycleNote field", () => {
+  const caps = buildCapabilities(LIFECYCLE_DEPS);
+  for (const t of caps.tools.filter((t) => t.implemented)) {
+    assert.equal(typeof t.lifecycle, "string", `${t.name} lifecycle missing`);
+    assert.ok(
+      t.lifecycleNote === null || typeof t.lifecycleNote === "string",
+      `${t.name} lifecycleNote must be null or string`,
+    );
+  }
+});
+
+test("lifecycle class is assigned per tool from the taxonomy", () => {
+  const caps = buildCapabilities(LIFECYCLE_DEPS);
+  const byName = new Map(caps.tools.map((t) => [t.name, t]));
+
+  assert.equal(byName.get("unity_open_mcp_ping")!.lifecycle, "none");
+  assert.equal(
+    byName.get("unity_open_mcp_execute_csharp")!.lifecycle,
+    "compile-reload",
+  );
+  assert.equal(
+    byName.get("unity_open_mcp_compile_check")!.lifecycle,
+    "compile-reload",
+  );
+  assert.equal(
+    byName.get("unity_open_mcp_gameobject_modify")!.lifecycle,
+    "scene-dirty",
+  );
+  assert.equal(
+    byName.get("unity_open_mcp_build_start")!.lifecycle,
+    "modal-dialog",
+  );
+  assert.equal(
+    byName.get("unity_senses_run_tests")!.lifecycle,
+    "process-stale",
+  );
+});
+
+test("compile_check carries its batch-only lifecycleNote in capabilities", () => {
+  const caps = buildCapabilities(LIFECYCLE_DEPS);
+  const compileCheck = caps.tools.find(
+    (t) => t.name === "unity_open_mcp_compile_check",
+  );
+  assert.ok(compileCheck);
+  assert.match(
+    compileCheck!.lifecycleNote!,
+    /editor_instance_locked/,
+    "compile_check lifecycleNote must mention editor_instance_locked",
+  );
+});
+
+test("lifecycleBlock is returned even with a kind filter", () => {
+  // Independent of the kind filter — agents asking for rules/fixes still
+  // benefit from the recovery narrative (same rationale as routing/costHints).
+  const caps = buildCapabilities(LIFECYCLE_DEPS, { kind: "rules" });
+  assert.ok(caps.lifecycleBlock);
+  assert.equal(caps.lifecycleBlock.classes.length, 5);
+});
+
+test("planned tools default to lifecycle none with null note", () => {
+  const caps = buildCapabilities(DEPS);
+  for (const t of caps.tools.filter((t) => !t.implemented)) {
+    assert.equal(t.lifecycle, "none", `${t.name} planned should default to none`);
+    assert.equal(t.lifecycleNote, null);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // buildCapabilities — filters
 // ---------------------------------------------------------------------------
 

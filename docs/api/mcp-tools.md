@@ -143,10 +143,13 @@ Use the response fields:
 - `tools[].group` — tool-group id (or null for always-visible meta-tools)
 - `tools[].routePolicy`
 - `tools[].batchCapable`
+- `tools[].lifecycle` — lifecycle class describing the recovery concern (`none` / `compile-reload` / `modal-dialog` / `scene-dirty` / `process-stale`); see [Lifecycle policy](#lifecycle-policy)
+- `tools[].lifecycleNote` — optional tool-specific constraint (e.g. `compile_check` notes its batch-only lock); null when the class is self-describing
 - `tools[].inputSchema`
 - `toolGroups[]` — per-group catalog (compiled-state availability, default-enabled flag, tool roster, usage hint)
 - `routing` — one-shot routing narrative (live default, batch fallback, blocked meta-tools, live-only categories)
 - `costHints` — per-tool profile cost bands + recommended page sizes + recommended tool chains (see [Cost hints](#cost-hints-capabilitiescosthints--server-instructions))
+- `lifecycleBlock` — the 5-class lifecycle taxonomy (meaning / bridge behaviour / recovery per class) + guidance (see [Lifecycle policy](#lifecycle-policy))
 
 ## Route policy
 
@@ -166,6 +169,34 @@ Common route behavior:
   - `unity_open_mcp_read_compile_errors` always uses offline.
   - `unity_open_mcp_capabilities`, `unity_open_mcp_generate_skill`, and `unity_open_mcp_manage_tools` are local.
   - `unity_open_mcp_bridge_status` is local (server-resolved from the instance lock + one `/ping` probe).
+
+## Lifecycle policy
+
+Every tool declares a **lifecycle class** that describes the recovery concern an agent must reason about when the call fails or the bridge becomes unresponsive. It is exposed per tool as `capabilities.tools[].lifecycle` (+ an optional `lifecycleNote` for tool-specific constraints), and the full taxonomy is attached as `capabilities.lifecycleBlock`. Read it *before* the call to pick a recovery strategy.
+
+The 5 classes:
+
+| Class           | Meaning                                                       | What the bridge does                                                                                              | Recovery                                                                                                                                                              |
+| --------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `none`          | Read-only / side-effect-free.                                 | Returns immediately; no settle wait, no dirty guard.                                                              | Retry on the next call. A failure is a real error, not a settle/reload artifact.                                                                                      |
+| `compile-reload`| Triggers or observes a domain reload (script / asmdef / package edit). | Blocks up to 60s for the compile to settle; the active-scene dirty guard preflights.                              | After the call, poll `editor_status` / `read_compile_errors` before assuming success. `compile_check` is batch-only and returns `editor_instance_locked` when a live Editor holds the project lock — do not retry blindly. |
+| `modal-dialog`  | May raise an OS modal (build, project upgrade, version mismatch). | No first-class dismiss yet; the call can hang on the modal until dismissed.                                       | Have an operator dismiss the dialog, or avoid the call in headless contexts. Detect/classify/dismiss policy is forthcoming.                                           |
+| `scene-dirty`   | Mutates scene / prefab / hierarchy / asset state.             | Runs the gate (checkpoint → mutate → validate → delta); blocks up to 5s for asset refresh. Requires non-empty `paths_hint`. | Read `gate.delta` + `agentNextSteps` from the response. On a `scene_dirty` refusal, save or discard first, or pass `ignore_scene_dirty: true` to accept the risk.    |
+| `process-stale` | Long-running / async op where the bridge may become unresponsive. | Blocks until the op finishes; the heartbeat may stop advancing during the wait.                                   | Treat stale-heartbeat + live-PID as "still running", not crashed. Wait, then re-probe with `ping` / `editor_status` before concluding the bridge died.                |
+
+This lifecycle axis is the **recovery** view agents reason about. It is distinct from the bridge's internal settle-timing axis (which drives how long the dispatcher blocks and whether the dirty guard preflights); agents only see the 5-class recovery view via `capabilities`.
+
+### `compile-reload` agent limits
+
+Three constraints apply specifically to the `compile-reload` class — internalize them before relying on the compile-verify loop:
+
+1. **`compile_check` is batch-only by design.** It spawns a fresh headless Unity that recompiles from scratch and cannot share the project with a live Editor. When a live Editor already holds the project lock it returns `editor_instance_locked` — do **not** retry blindly. Either close the live Editor and retry, or verify compile state via the live bridge (`execute_csharp` + a `Library/ScriptAssemblies/*.dll` mtime check, or `read_compile_errors`).
+
+2. **Local `packages/` source lives outside Unity's `Assets/` watch root.** When you develop against local package source, `assets_refresh` and `RequestScriptCompilation` (via `execute_csharp`) are **not reliable** for forcing a rebuild in a long-running live session — the editor can keep serving stale assemblies. Recovery branches: a no-op `package_add` / `package_remove` to nudge UPM resolution, operator refocus of the Editor window, or `Library/ScriptAssemblies/*.dll` mtime verification. There is no code-level fix for Unity's incremental-compile no-ops; this is a platform limit.
+
+3. **Tools that trigger a domain reload declare `compile-reload`; read-only introspection stays `none`.** `execute_csharp`, `invoke_method`, `execute_menu`, `asmdef_create` / `asmdef_modify`, `script_write` / `script_delete`, `package_add` / `package_remove`, `build_set_target`, `build_set_defines`, `settings_set_player`, `scene_open`, and `compile_check` are all `compile-reload`. `find_members`, `read_asset`, `editor_status`, the senses, etc. are `none`.
+
+A tool can carry a secondary concern in `lifecycleNote` (e.g. `build_start` is `modal-dialog` and notes its secondary `scene-dirty` concern; `package_add` is `compile-reload` and notes the rare project-upgrade modal). Read the note when present.
 
 ## Batch support notes
 

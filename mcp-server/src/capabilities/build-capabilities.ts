@@ -27,6 +27,12 @@ import {
   buildCostHints,
   type CostHintsBlock,
 } from "./cost-hints.js";
+import {
+  lifecycleFor,
+  buildLifecycle,
+  type LifecycleClass,
+  type LifecycleBlock,
+} from "./lifecycle.js";
 
 // ---------------------------------------------------------------------------
 // Route metadata — mirrors tool-router.ts / compressible-router.ts decisions
@@ -593,6 +599,19 @@ export interface ToolCapability {
    * which manage_tools group to activate to surface a planned tool.
    */
   group: string | null;
+  /**
+   * Lifecycle class describing the recovery concern an agent must reason
+   * about when this call fails / stalls: none | compile-reload | modal-dialog
+   * | scene-dirty | process-stale. Read it before the call to pick a recovery
+   * strategy (see `lifecycleBlock` for the taxonomy).
+   */
+  lifecycle: LifecycleClass;
+  /**
+   * Optional tool-specific constraint or secondary recovery concern (e.g.
+   * compile_check notes its batch-only lock; build_start notes the secondary
+   * scene-dirty concern). Null when the class is self-describing.
+   */
+  lifecycleNote: string | null;
 }
 
 /**
@@ -685,6 +704,15 @@ export interface CapabilitiesResult {
    * for rules/fixes still benefit from the cost narrative.
    */
   costHints: CostHintsBlock;
+  /**
+   * Lifecycle policy taxonomy (5 classes) + the per-tool `lifecycle` field on
+   * each ToolCapability. Lets an agent reason about recovery before a call:
+   * read the class to learn what the bridge does (settle / dirty guard /
+   * heartbeat) and how to recover when the call fails or stalls. Independent
+   * of the kind filter — agents asking for rules/fixes still benefit from the
+   * recovery narrative.
+   */
+  lifecycleBlock: LifecycleBlock;
 }
 
 /**
@@ -746,17 +774,22 @@ export function buildCapabilities(
 ): CapabilitiesResult {
   const includePlanned = filter.includePlanned !== false;
 
-  const implementedTools: ToolCapability[] = deps.tools.map((tool) => ({
-    name: tool.name,
-    implemented: true,
-    status: "implemented",
-    category: categoryFor(tool.name),
-    description: tool.description ?? "",
-    routePolicy: routePolicyFor(tool.name),
-    batchCapable: deps.batchToolNames.has(tool.name),
-    inputSchema: tool.inputSchema,
-    group: groupFor(tool.name),
-  }));
+  const implementedTools: ToolCapability[] = deps.tools.map((tool) => {
+    const lifecycle = lifecycleFor(tool.name);
+    return {
+      name: tool.name,
+      implemented: true,
+      status: "implemented",
+      category: categoryFor(tool.name),
+      description: tool.description ?? "",
+      routePolicy: routePolicyFor(tool.name),
+      batchCapable: deps.batchToolNames.has(tool.name),
+      inputSchema: tool.inputSchema,
+      group: groupFor(tool.name),
+      lifecycle: lifecycle.class,
+      lifecycleNote: lifecycle.note ?? null,
+    };
+  });
 
   const plannedTools: ToolCapability[] = includePlanned
     ? PLANNED_TOOLS.map((p) => ({
@@ -770,6 +803,10 @@ export function buildCapabilities(
         inputSchema: { type: "object" as const, properties: {} },
         guidance: p.guidance,
         group: groupFor(p.name),
+        // Planned tools have no lifecycle declaration yet — `none` is the safe
+        // default until the tool ships and is classified.
+        lifecycle: "none" as LifecycleClass,
+        lifecycleNote: null,
       }))
     : [];
 
@@ -818,6 +855,10 @@ export function buildCapabilities(
     // to know how to budget its next heavy-tool call. Constant, so no per-call
     // computation.
     costHints: buildCostHints(),
+    // Lifecycle taxonomy is independent of the kind filter for the same
+    // reason: an agent asking for rules/fixes still benefits from the recovery
+    // narrative. Constant, so no per-call computation.
+    lifecycleBlock: buildLifecycle(),
   };
 }
 
