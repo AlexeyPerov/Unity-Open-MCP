@@ -3091,13 +3091,7 @@
                       >{kindLabel(kind)}</span
                       >
                     {/if}
-                    {#if project.source === "walk-up"}
-                      <span
-                        class="source-tag source-walkup"
-                        title="Added by walk-up directory scan"
-                        >walk-up</span
-                      >
-                    {:else if project.source === "hub-seed"}
+                    {#if project.source === "hub-seed"}
                       <span
                         class="source-tag source-hubseed"
                         title="Imported from Unity Hub on first run"
@@ -5219,12 +5213,6 @@
        name, `flex-wrap` on `.name-text` moves the whole chip to the
        next line instead of splitting it across lines. */
     white-space: nowrap;
-  }
-
-  .source-walkup {
-    background: rgba(92, 124, 250, 0.18);
-    color: var(--hub-source-walkup-fg);
-    border-color: rgba(92, 124, 250, 0.45);
   }
 
   .source-hubseed {
