@@ -784,7 +784,7 @@ export interface MigrateEntry {
 
 export interface MigrateResult {
   entries: MigrateEntry[];
-  /** Files that existed on both sides and were overwritten. */
+  /** Files that had a 1:1 basename match and were overwritten. */
   replaced: number;
   /** Matched `.meta` files left untouched because `skipMeta` was on. */
   skippedMeta: number;
@@ -792,6 +792,9 @@ export interface MigrateResult {
   skippedNew: number;
   /** Files present only in the package (untouched, informational). */
   untouched: number;
+  /** Occurrences of basenames that appeared 2+ times on either side —
+   *  ambiguous, so skipped (each occurrence counts once). */
+  skippedDuplicate: number;
   savedSourceFolder: string;
   /** Echo of the flag the migration ran with. */
   skipMeta: boolean;

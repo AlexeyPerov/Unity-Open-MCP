@@ -158,6 +158,9 @@
   let untouchedEntries = $derived(
     migrateResult?.entries.filter((e) => e.action === "untouched") ?? []
   );
+  let skippedDuplicateEntries = $derived(
+    migrateResult?.entries.filter((e) => e.action === "skipped-duplicate") ?? []
+  );
 
   async function pickSource() {
     const selected = await openDialog({
@@ -197,7 +200,8 @@
       S.appendDrawerLog(
         `migrated ${migrateResult.replaced} files for ${project.name} ` +
           `(${migrateResult.replaced} replaced, ${migrateResult.skippedNew} new in source, ` +
-          `${migrateResult.skippedMeta} .meta skipped, ${migrateResult.untouched} untouched)`
+          `${migrateResult.skippedMeta} .meta skipped, ${migrateResult.skippedDuplicate} duplicate, ` +
+          `${migrateResult.untouched} untouched)`
       );
       // Reflect the persisted source folder + mtime back into the store.
       const updated: ProjectEntry = { ...project, migrateSourceFolder: migrateResult.savedSourceFolder };
@@ -345,11 +349,13 @@
   {:else if activeTab === "migrate"}
     <section class="pkg-panel">
       <p class="hint">
-        Overwrite files in this package from a source folder. Only files that
-        already exist in the package (matched by name) are replaced — files
-        present only in the source are not copied, and files present only in the
-        package are left untouched. The source folder is saved per-package for
-        next time.
+        Overwrite files in this package from a source folder. Matching is by
+        <strong>file name</strong> (folder is ignored) — a source <code>Foo.cs</code>
+        overwrites any package file named <code>Foo.cs</code>. If the same name
+        appears more than once on either side it is skipped as ambiguous (shown
+        in the report). Files only in the source are not copied, and files only
+        in the package are left untouched. The source folder is saved
+        per-package for next time.
       </p>
       <div class="migrate-source">
         <input
@@ -376,6 +382,8 @@
           Replaced {migrateResult.replaced}
           {#if migrateResult.skippedMeta}
             , .meta skipped {migrateResult.skippedMeta}{/if}
+          {#if migrateResult.skippedDuplicate}
+            , duplicates skipped {migrateResult.skippedDuplicate}{/if}
           {#if migrateResult.skippedNew}
             , new in source {migrateResult.skippedNew}{/if}
           {#if migrateResult.untouched}
@@ -398,6 +406,19 @@
             {#each skippedMetaEntries as entry}
               <li>
                 <span class="migrate-action migrate-skipped-meta">skipped-meta</span>
+                <span class="migrate-path">{entry.relPath}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if skippedDuplicateEntries.length}
+          <p class="migrate-group-title">
+            Duplicates — name not unique, skipped ({skippedDuplicateEntries.length})
+          </p>
+          <ul class="notes-list migrate-log">
+            {#each skippedDuplicateEntries as entry}
+              <li>
+                <span class="migrate-action migrate-skipped-duplicate">duplicate</span>
                 <span class="migrate-path">{entry.relPath}</span>
               </li>
             {/each}
@@ -571,6 +592,7 @@
   .migrate-replaced { color: #e0a230; }
   .migrate-skipped-meta { color: #8a8f98; }
   .migrate-skipped-new { color: #5c7cfa; }
+  .migrate-skipped-duplicate { color: var(--hub-danger); }
   .migrate-untouched { color: #8a8f98; }
   .migrate-group-title {
     margin: 0.6rem 0 0.25rem;
