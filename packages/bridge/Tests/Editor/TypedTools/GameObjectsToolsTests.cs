@@ -263,6 +263,135 @@ namespace UnityOpenMcpBridge.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        // ---- T22.1.4 — three-surface RFC 7396 form -------------------------
+
+        [Test]
+        public void Modify_GameObjectDiffs_RenamesTarget()
+        {
+            var go = new GameObject("__MCPTest_GO_DiffRename");
+            try
+            {
+                var result = GameObjectsTools.Modify(
+                    "{\"instance_id\":" + go.GetInstanceID() +
+                    ",\"gameObjectDiffs\":{\"name\":\"__MCPTest_GO_DiffRenameDone\"}}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.AreEqual("__MCPTest_GO_DiffRenameDone", go.name);
+                // Root-only call keeps the legacy compact shape (no surfaces block).
+                StringAssert.DoesNotContain("\"surfaces\":", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Modify_JsonPatches_UpdatesComponentFields()
+        {
+            var go = new GameObject("__MCPTest_GO_JsonPatch");
+            var rb = go.AddComponent<Rigidbody>();
+            try
+            {
+                rb.mass = 1f;
+                var result = GameObjectsTools.Modify(
+                    "{\"instance_id\":" + go.GetInstanceID() +
+                    ",\"jsonPatchesPerGameObject\":{\"Rigidbody\":{\"mass\":2.5}}}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.AreEqual(2.5f, rb.mass, 0.0001f, "jsonPatch should update Rigidbody.mass via reflection.");
+                // A json surface present → extended shape with a surfaces summary.
+                StringAssert.Contains("\"surfaces\":", result.Output);
+                StringAssert.Contains("\"jsonPatches\"", result.Output);
+                StringAssert.Contains("Rigidbody.mass", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Modify_PathPatches_UpdatesChild()
+        {
+            var go = new GameObject("__MCPTest_GO_PathRoot");
+            var child = new GameObject("__MCPTest_GO_PathChild");
+            child.transform.SetParent(go.transform, false);
+            try
+            {
+                var result = GameObjectsTools.Modify(
+                    "{\"instance_id\":" + go.GetInstanceID() +
+                    ",\"pathPatchesPerGameObject\":{\"__MCPTest_GO_PathChild\":{\"active\":false}}}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsFalse(child.activeSelf, "pathPatch should deactivate the child.");
+                StringAssert.Contains("\"surfaces\":", result.Output);
+                StringAssert.Contains("\"pathPatches\"", result.Output);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void Modify_ThreeSurface_AppliesInOrder()
+        {
+            var go = new GameObject("__MCPTest_GO_Three");
+            var rb = go.AddComponent<Rigidbody>();
+            var child = new GameObject("__MCPTest_GO_ThreeChild");
+            child.transform.SetParent(go.transform, false);
+            try
+            {
+                rb.mass = 1f;
+                var result = GameObjectsTools.Modify(
+                    "{\"instance_id\":" + go.GetInstanceID() +
+                    ",\"jsonPatchesPerGameObject\":{\"Rigidbody\":{\"mass\":3.0}}" +
+                    ",\"pathPatchesPerGameObject\":{\"__MCPTest_GO_ThreeChild\":{\"active\":false}}" +
+                    ",\"gameObjectDiffs\":{\"layer\":2}}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                // jsonPatch applied.
+                Assert.AreEqual(3.0f, rb.mass, 0.0001f);
+                // pathPatch applied.
+                Assert.IsFalse(child.activeSelf);
+                // root diff applied.
+                Assert.AreEqual(2, go.layer);
+                // Extended shape surfaces all three.
+                StringAssert.Contains("\"jsonPatches\"", result.Output);
+                StringAssert.Contains("\"pathPatches\"", result.Output);
+                StringAssert.Contains("\"diffs\":{\"applied\":true", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Modify_JsonPatches_BadField_ReportsErrorContinuesBatch()
+        {
+            var go = new GameObject("__MCPTest_GO_JsonBad");
+            go.AddComponent<Rigidbody>();
+            try
+            {
+                var result = GameObjectsTools.Modify(
+                    "{\"instance_id\":" + go.GetInstanceID() +
+                    ",\"jsonPatchesPerGameObject\":{\"Rigidbody\":{\"mass\":4.0,\"__NopeField__\":1}}}");
+                // mass applied → status ok; bad field recorded in errors[], not fatal.
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"errorCount\":1", result.Output);
+                StringAssert.Contains("__NopeField__", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Modify_JsonPatches_ComponentNotFound_ReportsFailure()
+        {
+            var go = new GameObject("__MCPTest_GO_NoComp");
+            try
+            {
+                var result = GameObjectsTools.Modify(
+                    "{\"instance_id\":" + go.GetInstanceID() +
+                    ",\"jsonPatchesPerGameObject\":{\"Rigidbody\":{\"mass\":1.0}}}");
+                // No Rigidbody on the GO → recorded in jsonPatches.failed. Nothing
+                // else applied, so status in the output JSON is "error", but the
+                // dispatch itself succeeds (the failure is surfaced, not thrown).
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"status\":\"error\"", result.Output);
+                StringAssert.Contains("not found", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         [Test]
         public void SetParent_NoParentArg_ReturnsMissingParameter()
         {

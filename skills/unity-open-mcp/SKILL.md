@@ -177,6 +177,9 @@ After editing `packages/` source, before tests:
       "newIssues": ["missing_references|Error|Assets/Prefabs/Player.prefab|MISSING_SCRIPT"]
     }
   },
+  "logs": [
+    { "severity": "warning", "message": "...", "source": "unity" }
+  ],
   "agentNextSteps": [
     "New error: missing_references MISSING_SCRIPT on Assets/Prefabs/Player.prefab",
     "Fix available: use unity_open_mcp_apply_fix with fix_id=\"remove_missing_script\""
@@ -184,7 +187,7 @@ After editing `packages/` source, before tests:
 }
 ```
 
-Issue keys in `gate.delta.newIssues` are `ruleId|severity|assetPath|issueCode` (severity is `ERROR` / `WARN`). On success, `validation.passed: true`, empty `issues`, `agentNextSteps: []`.
+Issue keys in `gate.delta.newIssues` are `ruleId|severity|assetPath|issueCode` (severity is `ERROR` / `WARN`). On success, `validation.passed: true`, empty `issues`, `agentNextSteps: []`. The `logs` array carries Unity console entries emitted *during this call* (always present, `[]` when none) — read it inline instead of polling `read_console` after a mutation. Stacks are omitted here; `read_console` stays the verbose path.
 
 ### Verify rules and issue codes
 
@@ -253,7 +256,7 @@ Prefer these over `execute_csharp` for routine workflows — explicit schemas, s
 
 **Shaders (gate-free)** — `shader_list_all` / `shader_get_data` (folds compile errors into `errors[]`).
 
-**GameObjects** (`paths_hint` = active scene path) — `gameobject_create` / `gameobject_destroy` / `gameobject_duplicate` / `gameobject_modify` (note: target name is `name_target` so `name` stays free for the new value; supports name/tag/layer/active + transform) / `gameobject_set_parent` (cycle-safe). Address by `instance_id` > `path` > `name`. Every mutator is undo-recorded.
+**GameObjects** (`paths_hint` = active scene path) — `gameobject_create` / `gameobject_destroy` / `gameobject_duplicate` / `gameobject_modify` (note: target name is `name_target` so `name` stays free for the new value; supports name/tag/layer/active + transform, plus a three-surface form: `gameObjectDiffs` for grouped root patches, `pathPatchesPerGameObject` for descendants, `jsonPatchesPerGameObject` for per-component reflection patches) / `gameobject_set_parent` (cycle-safe). Address by `instance_id` > `path` > `name`. Every mutator is undo-recorded.
 
 **Components** (`paths_hint` = scene path containing host) — `component_add` (by `component_types[]`, full name preferred) / `component_destroy` / `component_modify` (per-path serialized patches via `fields: [{path, value, type?}]`; for enums `type: "name"` sets by enum name). Resolve by `component_instance_id` (specific) or `type_name` (full name preferred). Use `component_list_all` to discover attachable types before `add`; `component_get` to discover serialized paths before `modify`.
 

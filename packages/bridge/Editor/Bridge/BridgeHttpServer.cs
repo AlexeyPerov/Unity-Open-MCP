@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using UnityEditor;
 using UnityEngine;
+using UnityOpenMcpBridge.Console;
 using UnityOpenMcpBridge.MetaTools;
 using UnityOpenMcpBridge.TypedTools;
 
@@ -733,6 +734,23 @@ namespace UnityOpenMcpBridge
 
         private static GateDispatchResult DispatchWithGate(string toolName, string body, string gateMode, string[] pathsHint)
         {
+            // M22 T22.1.3 — capture console entries emitted during this dispatch
+            // (scene-dirty guard + checkpoint + validate + mutate) as a before/
+            // after delta. Must run on the main thread (this whole method is
+            // dispatched via MainThreadDispatcher) — LogEntries is main-thread-
+            // only. Captured entries are attached to the result so
+            // BuildGateEnvelope can surface them as the `logs` array.
+            int captureStart = LogEntriesReader.StartCapture();
+            // No try/catch: if DispatchWithGateCore throws, the exception propagates
+            // before this line is reached, so `result` is always assigned before use.
+            // StopCapture returns empty when unavailable (older Unity).
+            var result = DispatchWithGateCore(toolName, body, gateMode, pathsHint);
+            result.Logs = LogEntriesReader.StopCapture(captureStart);
+            return result;
+        }
+
+        private static GateDispatchResult DispatchWithGateCore(string toolName, string body, string gateMode, string[] pathsHint)
+        {
             bool isMutating = MutatingTools.Contains(toolName)
                 || (BridgeToolRegistry.TryGet(toolName, out var regEntry) && regEntry.IsMutating);
 
@@ -1028,33 +1046,53 @@ namespace UnityOpenMcpBridge
 
         private static void HandleDirectResponseTool(HttpListenerContext context, string toolName, string body, int timeoutMs)
         {
+            // M22 T22.1.3 — direct-response tools bypass the gate envelope, so
+            // capture happens inside the main-thread callback (alongside
+            // DispatchTool) and the captured logs are spliced into the flat
+            // tool JSON before it is returned. Read-only tools rarely emit
+            // warnings, so this is usually an empty `logs` sibling; it still
+            // keeps the field present on every response per the T22.1.3 contract.
+            List<LogEntryInfo> capturedLogs = null;
             try
             {
-                var task = MainThreadDispatcher.EnqueueAsync(
-                    () => DispatchTool(toolName, body), timeoutMs);
+                var task = MainThreadDispatcher.EnqueueAsync(() =>
+                {
+                    int captureStart = LogEntriesReader.StartCapture();
+                    ToolDispatchResult r;
+                    try { r = DispatchTool(toolName, body); }
+                    finally { capturedLogs = LogEntriesReader.StopCapture(captureStart); }
+                    return r;
+                }, timeoutMs);
 
                 var result = task.Result;
 
                 if (result.Success && result.Output != null)
-                    BridgeHttpResponse.SendJson(context, 200, result.Output);
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.SpliceLogsField(result.Output, capturedLogs));
                 else if (!result.Success)
-                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildDirectToolErrorJson(result));
+                    BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError(BridgeJson.BuildDirectToolErrorJson(result), capturedLogs));
                 else
-                    BridgeHttpResponse.SendJson(context, 200, "{\"error\":{\"code\":\"empty_output\",\"message\":\"Tool returned empty output\"}}");
+                    BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError("{\"error\":{\"code\":\"empty_output\",\"message\":\"Tool returned empty output\"}}", capturedLogs));
             }
             catch (AggregateException ae)
             {
                 var inner = ae.InnerException;
                 if (inner is TimeoutException)
-                    BridgeHttpResponse.SendJson(context, 200, $"{{\"error\":{{\"code\":\"timeout\",\"message\":\"Tool '{BridgeJson.EscapeStringContent(toolName)}' timed out after {timeoutMs}ms\"}}}}");
+                    BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError($"{{\"error\":{{\"code\":\"timeout\",\"message\":\"Tool '{BridgeJson.EscapeStringContent(toolName)}' timed out after {timeoutMs}ms\"}}}}", capturedLogs));
                 else
-                    BridgeHttpResponse.SendJson(context, 200, $"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{BridgeJson.EscapeStringContent(inner?.Message ?? ae.Message)}\"}}}}");
+                    BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError($"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{BridgeJson.EscapeStringContent(inner?.Message ?? ae.Message)}\"}}}}", capturedLogs));
             }
             catch (System.Exception e)
             {
-                BridgeHttpResponse.SendJson(context, 200, $"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{BridgeJson.EscapeStringContent(e.Message)}\"}}}}");
+                BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError($"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{BridgeJson.EscapeStringContent(e.Message)}\"}}}}", capturedLogs));
             }
         }
+
+        // Splice captured logs into a flat direct-response error body. Reuses
+        // the same JSON-balanced injection as SpliceLogsField (which targets
+        // tool success JSON); the error bodies are also single top-level
+        // objects, so the same primitive applies. Null/empty logs pass through.
+        private static string SpliceLogsIntoFlatError(string json, List<LogEntryInfo> logs)
+            => BridgeJson.SpliceLogsField(json, logs);
 
         private static void HandleResourceList(HttpListenerContext context)
         {

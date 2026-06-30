@@ -191,5 +191,40 @@ namespace UnityOpenMcpBridge.Tests
                     Assert.IsTrue(body.Contains("\"skipped\":true"), $"Gate should be skipped on paths_hint error: {body}");
                 });
         }
+
+        // M22 T22.1.3 — per-call `logs` field. Every gate envelope carries a
+        // `logs` array (empty [] when nothing was emitted). This is the shape
+        // contract; the populated case is covered by the logs-acceptance test.
+        [UnityTest]
+        public static IEnumerator GateEnvelope_AlwaysCarriesLogsField()
+        {
+            return PostAndWait("/tools/unity_open_mcp_execute_csharp",
+                "{\"code\":\"return 1;\",\"paths_hint\":[]}",
+                body =>
+                {
+                    Assert.IsTrue(body.Contains("\"logs\":"),
+                        $"Every gate envelope must carry a `logs` field. Got: {body}");
+                });
+        }
+
+        // T22.1.3 acceptance: a mutation that emits a Unity warning surfaces it
+        // inline in `logs` with the right severity + message. Uses gate:off so
+        // the snippet runs without checkpoint/validation overhead; the warning
+        // is captured regardless of gate mode (capture wraps the whole dispatch).
+        [UnityTest]
+        public static IEnumerator Logs_PopulatedWhenMutationEmitsWarning()
+        {
+            return PostAndWait("/tools/unity_open_mcp_execute_csharp",
+                "{\"code\":\"Debug.LogWarning(\\\"MCP_TEST_WARNING_MARKER\\\"); return 1;\",\"paths_hint\":[\"Assets\"],\"gate\":\"off\"}",
+                body =>
+                {
+                    Assert.IsTrue(body.Contains("\"logs\":"),
+                        $"Missing logs field in: {body}");
+                    Assert.IsTrue(body.Contains("\"severity\":\"warning\""),
+                        $"Warning severity should appear in logs. Got: {body}");
+                    Assert.IsTrue(body.Contains("MCP_TEST_WARNING_MARKER"),
+                        $"The warning marker should appear in logs. Got: {body}");
+                });
+        }
     }
 }

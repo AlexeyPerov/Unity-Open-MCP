@@ -289,6 +289,56 @@ per-asset / per-issue lists those tools previously returned by default.
 already the summary/folded shape) but changes the default output of
 `find_references` / `validate_edit` / `scan_paths` to counts/groupings only.
 
+### Per-call `logs` (inline console capture)
+
+Every mutating-tool response carries a `logs` array — Unity console
+entries emitted *during that specific call* (checkpoint + validate + mutate),
+captured as a before/after delta by the bridge:
+
+```json
+"logs": [
+  { "severity": "warning", "message": "...", "source": "unity" }
+]
+```
+
+- `severity`: `info` | `warning` | `error`
+- `source`: the origin. Currently always `"unity"` for console-captured
+  entries (reserved for future `gate` / `bridge` sources).
+- Stacks are omitted from inline logs (compact). Use `unity_senses_read_console`
+  for the global console buffer with stack traces.
+
+This surfaces warnings/errors inline so an agent does not have to poll
+`read_console` after every mutation to learn what happened. The field is always
+present (empty `[]` when nothing was emitted); it does not replace
+`read_console`, which reads the whole console. Read-only (direct-response)
+tools also carry a `logs` sibling (usually empty), spliced into their flat
+output object.
+
+### Three-surface `gameobject_modify` (RFC 7396 JSON Merge Patch)
+
+`unity_open_mcp_gameobject_modify` accepts three additive surfaces on top of
+its legacy flat fields, so several kinds of change ship in one call:
+
+- **`gameObjectDiffs`** — root-target patches grouped in one object (`name`,
+  `tag`, `layer`, `active`, `position`, `rotation`, `scale`, `local_space`).
+  Same field shape as the legacy flat fields; takes precedence over them when
+  present.
+- **`pathPatchesPerGameObject`** — `{childPath: diffs}` applied to descendants
+  of the target. Each key is a slash-delimited path relative to the target
+  (e.g. `"Body/Arm"`); the value is the same diffs shape as `gameObjectDiffs`.
+- **`jsonPatchesPerGameObject`** — `{componentTypeName: mergePatch}` applied to
+  the target's components via reflection. The key names a component type on the
+  target (class name first, then full name); the value is a RFC 7396 merge patch
+  `{field: value}` reusing `object_modify`'s value shape (scalars, `[x,y,z]`
+  vectors, `{"path":...}` refs).
+
+Apply order: **jsonPatches → pathPatches → gameObjectDiffs/flat**. Per-entry
+errors accumulate and never abort the batch (matches `object_modify` /
+`component_modify`). When any path or json surface is present the response
+carries a `surfaces` breakdown (`diffs` / `pathPatches` / `jsonPatches`, each
+with `applied` and `failed`); a legacy (root-only) call keeps the original
+compact result shape.
+
 ## Error contract
 
 Errors are returned as JSON with:

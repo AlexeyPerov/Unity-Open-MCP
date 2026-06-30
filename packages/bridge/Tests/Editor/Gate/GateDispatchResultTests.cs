@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.Console;
 
 namespace UnityOpenMcpBridge.Tests
 {
@@ -41,6 +42,32 @@ namespace UnityOpenMcpBridge.Tests
             };
             Assert.AreEqual(1234, result.SettleMs);
             Assert.AreEqual(new[] { "Assets/Scenes/Main.unity" }, result.DirtyScenePaths);
+        }
+
+        // M22 T22.1.3 — per-call `logs` field. Default null (not captured / old
+        // surface); the dispatcher sets it to the captured delta (possibly empty)
+        // before the envelope is built.
+        [Test]
+        public static void GateDispatchResult_Logs_DefaultNull()
+        {
+            var result = new GateDispatchResult();
+            Assert.IsNull(result.Logs,
+                "Logs defaults to null before the dispatcher attaches a capture.");
+        }
+
+        [Test]
+        public static void GateDispatchResult_Logs_RoundTrip()
+        {
+            var result = new GateDispatchResult
+            {
+                Logs = new System.Collections.Generic.List<LogEntryInfo>
+                {
+                    new LogEntryInfo { Mode = 4, Message = "warn" } // bit 4 = warning
+                }
+            };
+            Assert.IsNotNull(result.Logs);
+            Assert.AreEqual(1, result.Logs.Count);
+            Assert.AreEqual("warning", LogEntriesReader.Classify(result.Logs[0].Mode));
         }
 
         [Test]

@@ -221,6 +221,18 @@ namespace UnityOpenMcpBridge.TypedTools
         //
         // The target is resolved via instance_id > path > name_target (note:
         // `name_target`, not `name`, because `name` is the new value here).
+        //
+        // M22 T22.1.4 — three-surface RFC 7396 form (additive, backwards-
+        // compatible). In addition to the legacy flat fields, the caller may
+        // provide three grouped surfaces:
+        //   - gameObjectDiffs          : top-level patches for the root target.
+        //   - pathPatchesPerGameObject : {childPath: diffs} applied to descendants.
+        //   - jsonPatchesPerGameObject : {componentTypeName: mergePatch} applied to
+        //                                the root target's components via reflection.
+        // Apply order (matches the established three-surface convention):
+        // jsonPatches → pathPatches → gameObjectDiffs/flat. When any of the path
+        // or json surfaces is present the response carries a `surfaces` summary;
+        // a legacy (root-only) call keeps the original compact result shape.
         public static ToolDispatchResult Modify(string body)
         {
             // Resolve the target with name_target so `name` stays free for
@@ -237,24 +249,88 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("gameobject_not_found",
                     $"GameObject not found (instance_id={instanceId}, path='{path}', name_target='{nameTarget}').");
 
-            var name = JsonBody.GetString(body, "name");
-            var tag = JsonBody.GetString(body, "tag");
-            var layerStr = JsonBody.GetRawValue(body, "layer");
-            var activeStr = JsonBody.GetRawValue(body, "active");
-            var positionStr = JsonBody.GetString(body, "position");
-            var rotationStr = JsonBody.GetString(body, "rotation");
-            var scaleStr = JsonBody.GetString(body, "scale");
-            var localSpace = JsonBody.GetBool(body, "local_space", false);
+            // ---- surface detection (T22.1.4) ----
+            var pathPatchesRaw = JsonBody.GetRawValue(body, "pathPatchesPerGameObject");
+            var jsonPatchesRaw = JsonBody.GetRawValue(body, "jsonPatchesPerGameObject");
+            bool hasPathPatches = !string.IsNullOrEmpty(pathPatchesRaw) && pathPatchesRaw.Trim() != "{}";
+            bool hasJsonPatches = !string.IsNullOrEmpty(jsonPatchesRaw) && jsonPatchesRaw.Trim() != "{}";
+
+            // Root diff source: gameObjectDiffs wins when present, else the
+            // legacy flat fields on the body. Read fields once from whichever
+            // source applies.
+            var diffsSource = JsonBody.GetRawValue(body, "gameObjectDiffs");
+            bool hasGameObjectDiffs = !string.IsNullOrEmpty(diffsSource) && diffsSource.Trim() != "{}";
+            string rootSource = hasGameObjectDiffs ? diffsSource : body;
+
+            // ---- surface 3: root diffs / legacy flat fields (fail-fast) ----
+            var name = JsonBody.GetString(rootSource, "name");
+            var tag = JsonBody.GetString(rootSource, "tag");
+            var layerStr = JsonBody.GetRawValue(rootSource, "layer");
+            var activeStr = JsonBody.GetRawValue(rootSource, "active");
+            var positionStr = JsonBody.GetString(rootSource, "position");
+            var rotationStr = JsonBody.GetString(rootSource, "rotation");
+            var scaleStr = JsonBody.GetString(rootSource, "scale");
+            var localSpace = JsonBody.GetBool(rootSource, "local_space", false);
 
             var hasName = !string.IsNullOrEmpty(name);
             var hasTag = !string.IsNullOrEmpty(tag);
             var hasLayer = layerStr != null;
             var hasActive = activeStr != null;
             var hasTransform = positionStr != null || rotationStr != null || scaleStr != null;
-            if (!hasName && !hasTag && !hasLayer && !hasActive && !hasTransform)
-                return ToolDispatchResult.Fail("missing_parameter",
-                    "Provide at least one of: name, tag, layer, active, position, rotation, scale.");
+            bool hasRootDiff = hasName || hasTag || hasLayer || hasActive || hasTransform;
 
+            if (!hasRootDiff && !hasGameObjectDiffs && !hasPathPatches && !hasJsonPatches)
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "Provide at least one of: gameObjectDiffs, pathPatchesPerGameObject, " +
+                    "jsonPatchesPerGameObject, or the legacy flat fields " +
+                    "(name, tag, layer, active, position, rotation, scale).");
+
+            // ---- surface 1: jsonPatchesPerGameObject (RFC 7396 merge patch) ----
+            // Applied FIRST so top-level renames in the root diff don't race the
+            // component lookup. Per-component errors accumulate; nothing aborts
+            // the batch. `applied`/`failed` mirror the diff-surface vocabulary.
+            var jsonApplied = new List<string>();
+            var jsonFailed = new List<string>();
+            if (hasJsonPatches)
+                ApplyJsonPatchesPerGameObject(go, jsonPatchesRaw, jsonApplied, jsonFailed);
+
+            // ---- surface 2: pathPatchesPerGameObject ----
+            var pathApplied = new List<string>();
+            var pathFailed = new List<string>();
+            if (hasPathPatches)
+                ApplyPathPatchesPerGameObject(go, pathPatchesRaw, pathApplied, pathFailed);
+
+            // ---- surface 3: root diffs (fail-fast, keeps legacy error codes) ----
+            if (hasRootDiff)
+            {
+                var rootErr = ApplyRootDiff(go, hasName, name, hasTag, tag, hasLayer, layerStr,
+                    hasActive, activeStr, hasTransform, positionStr, rotationStr, scaleStr, localSpace);
+                if (rootErr != null) return rootErr;
+            }
+
+            EditorUtility.SetDirty(go);
+            MarkActiveSceneDirty();
+
+            // ---- response shape ----
+            // Legacy (root-only) call → original compact shape so existing
+            // parsers are unaffected. Any path/json surface → extended shape
+            // with a `surfaces` summary.
+            if (!hasPathPatches && !hasJsonPatches)
+                return ToolDispatchResult.Ok(BuildGameObjectResult(go, "modified"));
+
+            return ToolDispatchResult.Ok(BuildThreeSurfaceResult(go,
+                hasRootDiff, jsonApplied, jsonFailed, pathApplied, pathFailed));
+        }
+
+        // Apply the root-target diff (name/tag/layer/active/transform). Mirrors
+        // the pre-T22.1.4 behavior exactly, including the fail-fast validation
+        // (invalid_tag / invalid_layer) so the legacy error codes are preserved.
+        // Returns a ToolDispatchResult on validation failure, null on success.
+        private static ToolDispatchResult ApplyRootDiff(GameObject go,
+            bool hasName, string name, bool hasTag, string tag,
+            bool hasLayer, string layerStr, bool hasActive, string activeStr,
+            bool hasTransform, string positionStr, string rotationStr, string scaleStr, bool localSpace)
+        {
             Undo.RecordObject(go.transform, "MCP Modify GameObject");
             if (hasName) Undo.RecordObject(go, "MCP Modify GameObject");
 
@@ -296,11 +372,216 @@ namespace UnityOpenMcpBridge.TypedTools
                     : go.transform.localScale;
                 ApplyTransform(go.transform, pos, rot, scl, localSpace);
             }
+            return null;
+        }
 
-            EditorUtility.SetDirty(go);
-            MarkActiveSceneDirty();
+        // Apply per-component RFC 7396 merge patches to the root target. Each
+        // top-level key names a component type (class name first, then full
+        // name); the value is a {field: value} object applied via the same
+        // reflection + ConvertValue path object_modify uses. Reuses
+        // ReflectionScriptsObjectsTools.ApplyFieldPatches. Per-entry errors
+        // accumulate and never abort the batch.
+        private static void ApplyJsonPatchesPerGameObject(GameObject go, string patchesRaw,
+            List<string> applied, List<string> failed)
+        {
+            var keys = JsonBody.GetObjectKeys(patchesRaw);
+            if (keys == null) return;
+            var components = go.GetComponents<Component>();
 
-            return ToolDispatchResult.Ok(BuildGameObjectResult(go, "modified"));
+            foreach (var typeName in keys)
+            {
+                // Resolve the component on this GameObject by class name, then
+                // full name (mirrors component_get's resolver vocabulary).
+                Component comp = null;
+                foreach (var c in components)
+                {
+                    if (c == null) continue;
+                    var t = c.GetType();
+                    if (t.Name == typeName || t.FullName == typeName) { comp = c; break; }
+                }
+                if (comp == null)
+                {
+                    failed.Add($"{typeName}: component not found on '{go.name}'.");
+                    continue;
+                }
+
+                var mergePatchRaw = JsonBody.GetRawValue(patchesRaw, typeName);
+                var fieldNames = JsonBody.GetObjectKeys(mergePatchRaw);
+                if (fieldNames == null || fieldNames.Count == 0)
+                {
+                    failed.Add($"{typeName}: empty merge patch.");
+                    continue;
+                }
+
+                // Build the {name, value} entries ApplyFieldPatches consumes.
+                var entries = new string[fieldNames.Count];
+                for (int i = 0; i < fieldNames.Count; i++)
+                {
+                    var fn = fieldNames[i];
+                    var fv = JsonBody.GetRawValue(mergePatchRaw, fn);
+                    entries[i] = "{\"name\":\"" + fn + "\",\"value\":" + (fv ?? "null") + "}";
+                }
+
+                var modified = new List<string>();
+                var errors = new List<string>();
+                ReflectionScriptsObjectsTools.ApplyFieldPatches(comp, entries, false, modified, errors);
+
+                foreach (var m in modified) applied.Add(typeName + "." + m);
+                foreach (var e in errors) failed.Add(typeName + ": " + e);
+            }
+        }
+
+        // Apply per-child-path diffs to descendants of the root target. Each
+        // key is a slash-delimited path resolved via transform.Find (relative to
+        // the root); the value is the same diffs shape the root surface accepts.
+        // Per-entry errors accumulate.
+        private static void ApplyPathPatchesPerGameObject(GameObject root, string patchesRaw,
+            List<string> applied, List<string> failed)
+        {
+            var keys = JsonBody.GetObjectKeys(patchesRaw);
+            if (keys == null) return;
+
+            foreach (var childPath in keys)
+            {
+                var child = root.transform.Find(childPath);
+                if (child == null)
+                {
+                    failed.Add($"{childPath}: child not found under '{root.name}'.");
+                    continue;
+                }
+                var childGo = child.gameObject;
+                var diffsRaw = JsonBody.GetRawValue(patchesRaw, childPath);
+                if (string.IsNullOrEmpty(diffsRaw) || diffsRaw.Trim() == "{}")
+                {
+                    failed.Add($"{childPath}: empty diff.");
+                    continue;
+                }
+
+                var tag = JsonBody.GetString(diffsRaw, "tag");
+                var layerStr = JsonBody.GetRawValue(diffsRaw, "layer");
+                var activeStr = JsonBody.GetRawValue(diffsRaw, "active");
+                var positionStr = JsonBody.GetString(diffsRaw, "position");
+                var rotationStr = JsonBody.GetString(diffsRaw, "rotation");
+                var scaleStr = JsonBody.GetString(diffsRaw, "scale");
+                var localSpace = JsonBody.GetBool(diffsRaw, "local_space", false);
+                var childName = JsonBody.GetString(diffsRaw, "name");
+
+                Undo.RecordObject(child, "MCP Modify GameObject (path patch)");
+
+                if (!string.IsNullOrEmpty(tag))
+                {
+                    if (IsTagValid(tag)) childGo.tag = tag;
+                    else failed.Add($"{childPath}: tag '{tag}' is not defined.");
+                }
+                if (layerStr != null)
+                {
+                    if (int.TryParse(StripQuotes(layerStr), NumberStyles.Integer,
+                            CultureInfo.InvariantCulture, out var layer) && layer >= 0 && layer <= 31)
+                        childGo.layer = layer;
+                    else
+                        failed.Add($"{childPath}: layer must be 0-31, got '{layerStr}'.");
+                }
+                if (activeStr != null)
+                {
+                    childGo.SetActive(activeStr.Trim() == "true");
+                }
+                if (!string.IsNullOrEmpty(childName)) childGo.name = childName;
+
+                if (positionStr != null || rotationStr != null || scaleStr != null)
+                {
+                    var pos = positionStr != null
+                        ? PrefabTools.ParseVector(positionStr, localSpace ? child.localPosition : child.position)
+                        : (localSpace ? child.localPosition : child.position);
+                    var rot = rotationStr != null
+                        ? PrefabTools.ParseVector(rotationStr, localSpace ? child.localEulerAngles : child.eulerAngles)
+                        : (localSpace ? child.localEulerAngles : child.eulerAngles);
+                    var scl = scaleStr != null
+                        ? PrefabTools.ParseVector(scaleStr, child.localScale)
+                        : child.localScale;
+                    ApplyTransform(child, pos, rot, scl, localSpace);
+                }
+
+                EditorUtility.SetDirty(childGo);
+                applied.Add(childPath);
+            }
+        }
+
+        // Build the extended three-surface result: root GO summary + a
+        // `surfaces` breakdown + a flattened per-entry `errors[]` so callers
+        // can scan failures in one pass. status is "ok" when at least one
+        // surface applied, else "error" (the call resolved the target but
+        // nothing changed — e.g. every patch failed validation).
+        private static string BuildThreeSurfaceResult(GameObject go, bool rootDiffApplied,
+            List<string> jsonApplied, List<string> jsonFailed,
+            List<string> pathApplied, List<string> pathFailed)
+        {
+            var summary = BuildGameObjectSummary(go);
+            var sb = new StringBuilder(256 + summary.Length);
+            sb.Append("{\"status\":");
+            bool anyApplied = rootDiffApplied || jsonApplied.Count > 0 || pathApplied.Count > 0;
+            sb.Append(anyApplied ? "\"ok\"" : "\"error\"");
+            sb.Append(",\"action\":\"modified\",");
+            // Splice the root GO summary fields in (strip leading '{').
+            sb.Append(summary.Substring(1));
+            sb.Append(",\"surfaces\":{");
+            sb.Append("\"diffs\":{\"applied\":").Append(rootDiffApplied ? "true" : "false");
+            sb.Append("},\"pathPatches\":{\"applied\":");
+            AppendStringArray(sb, pathApplied);
+            sb.Append(",\"failed\":");
+            AppendStringArray(sb, pathFailed);
+            sb.Append("},\"jsonPatches\":{\"applied\":");
+            AppendStringArray(sb, jsonApplied);
+            sb.Append(",\"failed\":");
+            AppendStringArray(sb, jsonFailed);
+            sb.Append("}}");
+
+            // Flattened errors across surfaces (non-fatal failures only).
+            int errCount = jsonFailed.Count + pathFailed.Count;
+            if (errCount > 0)
+            {
+                sb.Append(",\"errors\":[");
+                int i = 0;
+                foreach (var e in jsonFailed) { if (i++ > 0) sb.Append(','); sb.Append(StringQuote(e)); }
+                foreach (var e in pathFailed) { if (i++ > 0) sb.Append(','); sb.Append(StringQuote(e)); }
+                sb.Append("],\"errorCount\":").Append(errCount);
+            }
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static void AppendStringArray(StringBuilder sb, List<string> items)
+        {
+            sb.Append('[');
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(StringQuote(items[i]));
+            }
+            sb.Append(']');
+        }
+
+        private static string StringQuote(string s)
+        {
+            if (s == null) return "\"\"";
+            var sb = new StringBuilder(s.Length + 8);
+            sb.Append('"');
+            foreach (var c in s)
+            {
+                switch (c)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        if (c < 32) sb.Append($"\\u{(int)c:X4}");
+                        else sb.Append(c);
+                        break;
+                }
+            }
+            sb.Append('"');
+            return sb.ToString();
         }
 
         public static ToolDispatchResult SetParent(string body)

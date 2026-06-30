@@ -249,6 +249,89 @@ namespace UnityOpenMcpBridge
             return json.Substring(start, end - start);
         }
 
+        /// <summary>
+        /// Enumerate the top-level keys of a JSON object value. Used by the
+        /// three-surface gameobject_modify form (T22.1.4) to turn a RFC 7396
+        /// merge-patch object like <c>{"mass": 2.0, "useGravity": false}</c> into
+        /// the per-field <c>{name, value}</c> entries ApplyFieldPatches consumes.
+        /// Returns null when <paramref name="json"/> is not a non-empty object.
+        /// Keys are read unescaped (mirrors ReadQuotedString); duplicate keys are
+        /// preserved in encounter order.
+        /// </summary>
+        public static List<string> GetObjectKeys(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return null;
+            var i = 0;
+            while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+            if (i >= json.Length || json[i] != '{') return null;
+            // Empty object "{}".
+            var afterOpen = i + 1;
+            var j = afterOpen;
+            while (j < json.Length && char.IsWhiteSpace(json[j])) j++;
+            if (j < json.Length && json[j] == '}') return new List<string>(0);
+
+            var keys = new List<string>();
+            i = afterOpen;
+            while (i < json.Length)
+            {
+                while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+                if (i >= json.Length || json[i] == '}') break;
+                if (json[i] != '"') { i++; continue; }
+                i++;
+                var key = ReadQuotedString(json, ref i);
+                keys.Add(key);
+
+                // Skip the value: ':' + a balanced JSON value token.
+                while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+                if (i < json.Length && json[i] == ':') i++;
+                while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+                if (i >= json.Length) break;
+
+                // Consume one value (string / array / object / scalar).
+                if (json[i] == '"')
+                {
+                    i++;
+                    while (i < json.Length)
+                    {
+                        if (json[i] == '\\') { i += 2; continue; }
+                        if (json[i] == '"') { i++; break; }
+                        i++;
+                    }
+                }
+                else if (json[i] == '[' || json[i] == '{')
+                {
+                    var open = json[i];
+                    var close = open == '[' ? ']' : '}';
+                    var depth = 1;
+                    i++;
+                    while (i < json.Length && depth > 0)
+                    {
+                        if (json[i] == '"')
+                        {
+                            i++;
+                            while (i < json.Length)
+                            {
+                                if (json[i] == '\\') { i += 2; continue; }
+                                if (json[i] == '"') { i++; break; }
+                                i++;
+                            }
+                            continue;
+                        }
+                        if (json[i] == open) depth++;
+                        else if (json[i] == close) depth--;
+                        i++;
+                    }
+                }
+                else
+                {
+                    while (i < json.Length && json[i] != ',' && json[i] != '}') i++;
+                }
+
+                while (i < json.Length && (json[i] == ',' || char.IsWhiteSpace(json[i]))) i++;
+            }
+            return keys.Count == 0 ? null : keys;
+        }
+
         public static List<object> ParseArgsArray(string json, string key)
         {
             var raw = GetRawValue(json, key);

@@ -127,18 +127,7 @@ namespace UnityOpenMcpBridge.Console
             return result;
         }
 
-        private static string Classify(int mode)
-        {
-            // Exception/Fatal/Error/Assert bits
-            if ((mode & 1) != 0) return "error";       // Error
-            if ((mode & 2) != 0) return "error";       // Assert (treat as error)
-            if ((mode & 4) != 0) return "warning";      // Warning
-            if ((mode & 8) != 0) return "log";          // Log
-            if ((mode & 16) != 0) return "error";       // Fatal
-            if ((mode & 32) != 0) return "error";       // Exception
-            if ((mode & 64) != 0) return "error";       // scripting error variant
-            return "log";
-        }
+        private static string Classify(int mode) => LogEntriesReader.Classify(mode);
 
         // M13 T4.6 — keep the most recent entries (console is chronological; the
         // tail matters most) and report how many were dropped so the caller can
@@ -288,7 +277,9 @@ namespace UnityOpenMcpBridge.Console
 
     // ---- reflection reader ----
 
-    struct LogEntryInfo
+    // M22 T22.1.3 — made public so it can surface as the type of
+    // GateDispatchResult.Logs (a public field on a public class).
+    public struct LogEntryInfo
     {
         public int Mode;
         public string Message;
@@ -302,6 +293,8 @@ namespace UnityOpenMcpBridge.Console
         private static Type _logEntryType;
         private static MethodInfo _getEntriesMethod;
         private static MethodInfo _clearMethod;
+        private static MethodInfo _getEntryCountMethod;
+        private static MethodInfo _getEntryInternalMethod;
         private static FieldInfo _messageField;
         private static FieldInfo _stackField;
         private static FieldInfo _modeField;
@@ -326,6 +319,17 @@ namespace UnityOpenMcpBridge.Console
                 // Clear() — clears console
                 _clearMethod = _logEntriesType.GetMethod("Clear",
                     BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+
+                // M22 T22.1.3 — GetEntryCount() / GetEntryInternal(int, LogEntry):
+                // the delta-capture surface used to populate the per-call `logs`
+                // envelope field. Same internal API the Console window relies on;
+                // resolved by reflection so the reader degrades gracefully when a
+                // Unity version changes the signature.
+                _getEntryCountMethod = _logEntriesType.GetMethod("GetEntryCount",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+
+                _getEntryInternalMethod = _logEntriesType.GetMethod("GetEntryInternal",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
             }
 
             if (_logEntryType != null)
@@ -346,6 +350,37 @@ namespace UnityOpenMcpBridge.Console
                 Init();
                 return _logEntriesType != null && _getEntriesMethod != null && _logEntryType != null;
             }
+        }
+
+        // M22 T22.1.3 — delta-capture availability. StartCapture/StopCapture
+        // need GetEntryCount + GetEntryInternal; GetEntries (the full-drain path
+        // read_console uses) is a separate, older surface. Kept distinct so a
+        // Unity version that drops one of these still leaves read_console working.
+        public static bool IsCaptureAvailable
+        {
+            get
+            {
+                Init();
+                return _logEntriesType != null && _getEntryCountMethod != null
+                    && _getEntryInternalMethod != null && _logEntryType != null;
+            }
+        }
+
+        // Classify a LogEntry mode bitmask into the wire severity used by both
+        // read_console and the per-call `logs` envelope field. Factored out of
+        // Tool_ReadConsole so the two surfaces agree on the error/warning/log
+        // vocabulary.
+        public static string Classify(int mode)
+        {
+            // Exception/Fatal/Error/Assert bits
+            if ((mode & 1) != 0) return "error";       // Error
+            if ((mode & 2) != 0) return "error";       // Assert (treat as error)
+            if ((mode & 4) != 0) return "warning";      // Warning
+            if ((mode & 8) != 0) return "log";          // Log
+            if ((mode & 16) != 0) return "error";       // Fatal
+            if ((mode & 32) != 0) return "error";       // Exception
+            if ((mode & 64) != 0) return "error";       // scripting error variant
+            return "log";
         }
 
         public static List<LogEntryInfo> GetEntries()
@@ -387,6 +422,64 @@ namespace UnityOpenMcpBridge.Console
             if (_clearMethod == null) return false;
             _clearMethod.Invoke(null, null);
             return true;
+        }
+
+        // M22 T22.1.3 — per-call `logs` capture. StartCapture records the
+        // current console entry count as a baseline; StopCapture returns the
+        // LogEntryInfo list appended since the baseline. The caller wraps a
+        // tool dispatch with this pair so warnings/errors emitted *during this
+        // call* surface inline in the response envelope (no need to poll
+        // read_console afterwards). MUST run on the main thread (LogEntries is
+        // main-thread-only). Returns -1 when capture is unavailable; callers
+        // treat that as "no capture" and emit an empty logs array.
+        public static int StartCapture()
+        {
+            Init();
+            if (_getEntryCountMethod == null) return -1;
+            try { return (int)_getEntryCountMethod.Invoke(null, null); }
+            catch { return -1; }
+        }
+
+        public static List<LogEntryInfo> StopCapture(int startIndex)
+        {
+            var empty = new List<LogEntryInfo>(0);
+            if (startIndex < 0) return empty;
+            Init();
+            if (_getEntryCountMethod == null || _getEntryInternalMethod == null || _logEntryType == null)
+                return empty;
+
+            int endIndex;
+            try { endIndex = (int)_getEntryCountMethod.Invoke(null, null); }
+            catch { return empty; }
+            if (endIndex <= startIndex) return empty;
+
+            var result = new List<LogEntryInfo>(endIndex - startIndex);
+            // GetEntryInternal(int index, LogEntry entry) fills a single reused
+            // LogEntry instance by reference. Allocate once and reuse.
+            object entryInstance;
+            try { entryInstance = Activator.CreateInstance(_logEntryType); }
+            catch { return empty; }
+
+            for (int i = startIndex; i < endIndex; i++)
+            {
+                try
+                {
+                    _getEntryInternalMethod.Invoke(null, new[] { (object)i, entryInstance });
+                }
+                catch
+                {
+                    // Skip entries that fail to read rather than aborting capture.
+                    continue;
+                }
+
+                result.Add(new LogEntryInfo
+                {
+                    Mode = _modeField != null ? Convert.ToInt32(_modeField.GetValue(entryInstance)) : 0,
+                    Message = _messageField != null ? (string)_messageField.GetValue(entryInstance) : "",
+                    StackRaw = _stackField != null ? (string)_stackField.GetValue(entryInstance) : "",
+                });
+            }
+            return result;
         }
     }
 }

@@ -1124,10 +1124,11 @@ namespace UnityOpenMcpBridge.TypedTools
         // Apply a batch of {name, value} field patches to an object via the same
         // reflection + ConvertValue path object_modify uses. Extracted so
         // scriptableobject_create can apply initial fields without duplicating
-        // the field-write logic. Per-entry errors are accumulated in `errors`
-        // and do not abort the batch; successfully-written field names land in
-        // `modified`.
-        private static void ApplyFieldPatches(UnityEngine.Object target, string[] entries,
+        // the field-write logic, and reused by the three-surface
+        // gameobject_modify jsonPatches surface (T22.1.4). Per-entry errors are
+        // accumulated in `errors` and do not abort the batch; successfully-
+        // written field names land in `modified`.
+        internal static void ApplyFieldPatches(UnityEngine.Object target, string[] entries,
             bool allowStatic, List<string> modified, List<string> errors)
         {
             var type = target.GetType();

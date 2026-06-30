@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using UnityOpenMcpVerify;
 using UnityOpenMcpVerify.Cache;
+using UnityOpenMcpBridge.Console;
 
 namespace UnityOpenMcpBridge
 {
@@ -52,6 +53,12 @@ namespace UnityOpenMcpBridge
         // M13 T4.2 — dirty-scene paths collected by SceneDirtyGuard when the
         // op was refused because of unsaved scene changes. Null when allowed.
         public string[] DirtyScenePaths;
+        // M22 T22.1.3 — per-call `logs`: console warnings/errors emitted
+        // *during this dispatch* (checkpoint + validate + mutate). Captured as a
+        // before/after delta by LogEntriesReader around DispatchWithGate. Null
+        // means "not captured" (older surface); an empty list means "captured,
+        // nothing new". Emitted into the envelope as the `logs` array.
+        public List<LogEntryInfo> Logs;
     }
 
     public static class GatePolicy
