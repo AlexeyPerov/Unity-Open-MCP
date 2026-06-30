@@ -31,7 +31,7 @@ Practical skill for AI agents driving a Unity project through the `unity-open-mc
 
 ## Tool groups and session visibility
 
-Sessions start with several main groups visible in `ListTools`. Every other group is hidden until you activate it (or auto-activates when its Unity package is installed — see below) — this keeps the prompt small (251 tools in the full surface). Call `unity_open_mcp_manage_tools` to toggle:
+Sessions start with several main groups visible in `ListTools`. Every other group is hidden until you activate it (or auto-activates when its Unity package is installed — see below) — this keeps the prompt small (255 tools in the full surface). Call `unity_open_mcp_manage_tools` to toggle:
 
 - `list_groups` — every group with active flag, compiled-state availability, and tool roster.
 - `activate` / `deactivate` — toggle one group for this session. When visibility actually changes, the MCP server emits `notifications/tools/list_changed`; clients that support `listChanged` refresh `ListTools` automatically (no reconnect required).
@@ -228,7 +228,7 @@ Typical sequence: `impact_preview` (size) → `gate_budget_estimate` `mode: "sam
 
 **Active-scene dirty guard.** Before any `restart_then_settle` op, the bridge preflights loaded scenes. If any scene has unsaved changes, the call refuses with `error.code = "scene_dirty"` + `dirtyScenes[]` + `agentNextSteps` so Unity's native save modal never interrupts. Recover by: saving first (`scene_save`), discarding (`EditorSceneManager.RestoreSavedSceneState()`), or passing `ignore_scene_dirty: true` on `execute_csharp` / `invoke_method` / `execute_menu` / `scene_open` / `editor_set_state` / `build_set_target` / `build_set_defines` / `settings_set_player`.
 
-`apply_fix`, `reserialize`, and the non-`scene_open` scene mutators (`scene_create` / `scene_save` / `scene_unload` / `scene_set_active` / `scene_focus`) are **not** guarded.
+`apply_fix`, `reserialize`, and the non-`scene_open` scene mutators (`scene_create` / `scene_save` / `scene_unload` / `scene_set_active` / `scene_focus` / `sceneview_set_camera`) are **not** guarded.
 
 **Power-tool deny heuristic.** `execute_csharp` / `execute_menu` are blocked from destructive patterns by default (`EditorApplication.Exit`, `Application.Quit`, `AssetDatabase.DeleteAsset`, `BuildPipeline.BuildPlayer`, `File/Quit`). Refused calls return `error.code = "denied_by_policy"` (csharp) or `"menu_blocked"` (menu) with the matched pattern + alternative. If you genuinely need one, set **both** `gate: "off"` and `confirm_bypass: true` — the bypass is audited.
 
@@ -259,7 +259,7 @@ Prefer these over `execute_csharp` for routine workflows — explicit schemas, s
 
 **Prefabs** — `prefab_instantiate` / `prefab_create` / `prefab_open` / `prefab_close` / `prefab_save` / `prefab_apply` / `prefab_revert` / `prefab_unpack`. Read-only: `prefab_get_overrides` / `prefab_status`. Address scene instances by `instance_id` > `path` > `name`.
 
-**Scenes** (`paths_hint` = scene asset path) — `scene_create` (`setup: empty|default`, `mode: single|additive`) / `scene_open` (Single is `restart_then_settle` — dirty guard preflights; `ignore_scene_dirty: true` skips) / `scene_save` (active scene when `name` omitted; idempotent on clean) / `scene_unload` (refuses last opened scene) / `scene_set_active`. Read-only: `scene_list_opened` / `scene_get_data` (`detail: summary|normal|verbose`, `depth`, `max_nodes` — reflects unsaved editor state, unlike `read_asset` on the `.unity`) / `scene_get_dirty_summary`. `scene_focus` — frame a GameObject in SceneView; optional `axis: top|bottom|front|back|left|right`.
+**Scenes** (`paths_hint` = scene asset path) — `scene_create` (`setup: empty|default`, `mode: single|additive`) / `scene_open` (Single is `restart_then_settle` — dirty guard preflights; `ignore_scene_dirty: true` skips) / `scene_save` (active scene when `name` omitted; idempotent on clean) / `scene_unload` (refuses last opened scene) / `scene_set_active`. Read-only: `scene_list_opened` / `scene_get_data` (`detail: summary|normal|verbose`, `depth`, `max_nodes` — reflects unsaved editor state, unlike `read_asset` on the `.unity`) / `scene_get_dirty_summary`. SceneView tools: `scene_focus` frames a GameObject (`axis: top|bottom|front|back|left|right`), `sceneview_get_camera` reads the current SceneView pose (position/rotation/pivot/projection/size/fov), and `sceneview_set_camera` sets pose-level camera state (position required, optional rotation/orthographic/size) and returns `windowMoved: true`.
 
 Workflow: `scene_list_opened` → `scene_get_data` → mutate → `scene_get_dirty_summary` → `scene_save`. Before opening a new scene in Single mode, check `scene_get_dirty_summary` and save first.
 
@@ -273,6 +273,7 @@ Workflow: `package_check` → `package_search` if not installed → `package_add
 - Editor state: `editor_set_state` (`state: play|pause|stop`) — writes no assets but runs dirty guard inline; pass `ignore_scene_dirty: true` to accept. Poll `editor_status` after.
 - Selection: `selection_get` / `selection_set` (single target by `instance_id`/`asset_path`/`path`/`name`, or `targets[]` for multi; `clear: true`).
 - Undo/redo: `editor_undo` / `editor_redo` (`steps`, default 1).
+- Undo history/reset: `editor_undo_history` (read recent stack entries; `max_entries`, hard cap 50; returns `truncated`) / `editor_clear_history` (mutating, irreversible stack reset; gate-aware, `paths_hint` = active scene path).
 - Tags/layers (gate-free): `editor_get_tags` / `editor_get_layers` (layers include slot indices). Mutators (gate-aware, `paths_hint = ["ProjectSettings/TagManager.asset"]`): `editor_add_tag` (idempotent; refuses reserved names) / `editor_add_layer` (first empty slot 8–31, or explicit `slot`; refuses reserved names + occupied slots).
 
 **Reflection / scripts / object data** — `type_schema` (read-only; structured member schema for one type; use to plan `invoke_method`/`object_modify`) / `script_read` (read-only, line slicing) / `script_write` (Roslyn pre-validated; `validate: true` default refuses non-compiling code with `validation_failed`) / `script_delete` (mutating; removes `.cs` + `.meta`) / `object_get_data` (read-only reflective walk) / `object_modify` (sets public fields/properties by name; safe by default — refuses static/init-only unless `allow_static: true`). Core reflection enhanced: `find_members` lists every overload separately; `invoke_method` accepts `generic_arg_types` (e.g. `GetComponent<Rigidbody>`) and `arg_type_names` (disambiguate overloads). Prefer `component_get`/`component_modify` for one Component's Inspector fields; use these for ScriptableObjects, Materials, or any non-Component Object.

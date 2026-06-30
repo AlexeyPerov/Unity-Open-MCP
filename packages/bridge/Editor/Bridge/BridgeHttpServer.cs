@@ -840,6 +840,12 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_scene_get_data" => ScenesTools.GetData(body),
                 "unity_open_mcp_scene_get_dirty_summary" => ScenesTools.GetDirtySummary(body),
                 "unity_open_mcp_scene_focus" => ScenesTools.Focus(body),
+                // M20 Plan 9 / T20.9.4 — SceneView camera pose tools.
+                // sceneview_get_camera is read-only (gate-free direct-response).
+                // sceneview_set_camera mutates editor UI camera state and runs the
+                // full gate path with paths_hint scoped to the active scene.
+                "unity_open_mcp_sceneview_get_camera" => ScenesTools.SceneViewGetCamera(body),
+                "unity_open_mcp_sceneview_set_camera" => ScenesTools.SceneViewSetCamera(body),
                 // M16 Plan 4 — typed Package Manager tools. list / search /
                 // get_info hit UPM async requests; get_dependencies / check
                 // read Packages/manifest.json directly. add / remove write
@@ -866,6 +872,9 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_selection_set" => EditorConsoleSelectionTools.SelectionSet(body),
                 "unity_open_mcp_editor_undo" => EditorConsoleSelectionTools.EditorUndo(body),
                 "unity_open_mcp_editor_redo" => EditorConsoleSelectionTools.EditorRedo(body),
+                // M20 Plan 9 / T20.9.4 — undo stack read/reset tools.
+                "unity_open_mcp_editor_undo_history" => EditorConsoleSelectionTools.EditorUndoHistory(body),
+                "unity_open_mcp_editor_clear_history" => EditorConsoleSelectionTools.EditorClearHistory(body),
                 "unity_open_mcp_editor_get_tags" => EditorConsoleSelectionTools.EditorGetTags(body),
                 "unity_open_mcp_editor_get_layers" => EditorConsoleSelectionTools.EditorGetLayers(body),
                 "unity_open_mcp_editor_add_tag" => EditorConsoleSelectionTools.EditorAddTag(body),

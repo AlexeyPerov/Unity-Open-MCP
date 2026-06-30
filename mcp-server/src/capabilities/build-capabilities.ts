@@ -122,6 +122,8 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_scene_get_data: "typed-editor",
   unity_open_mcp_scene_get_dirty_summary: "typed-editor",
   unity_open_mcp_scene_focus: "typed-editor",
+  unity_open_mcp_sceneview_get_camera: "typed-editor",
+  unity_open_mcp_sceneview_set_camera: "typed-editor",
   // M16 Plan 4 — typed Package Manager tools.
   unity_open_mcp_package_list: "typed-editor",
   unity_open_mcp_package_search: "typed-editor",
@@ -138,6 +140,8 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_selection_set: "typed-editor",
   unity_open_mcp_editor_undo: "typed-editor",
   unity_open_mcp_editor_redo: "typed-editor",
+  unity_open_mcp_editor_undo_history: "typed-editor",
+  unity_open_mcp_editor_clear_history: "typed-editor",
   unity_open_mcp_editor_get_tags: "typed-editor",
   unity_open_mcp_editor_get_layers: "typed-editor",
   unity_open_mcp_editor_add_tag: "typed-editor",

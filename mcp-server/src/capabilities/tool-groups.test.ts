@@ -141,6 +141,8 @@ test("groupFor assigns every typed-editor tool to typed-editor", () => {
   assert.equal(groupFor("unity_open_mcp_gameobject_create"), "typed-editor");
   assert.equal(groupFor("unity_open_mcp_scene_open"), "typed-editor");
   assert.equal(groupFor("unity_open_mcp_prefab_instantiate"), "typed-editor");
+  assert.equal(groupFor("unity_open_mcp_sceneview_get_camera"), "typed-editor");
+  assert.equal(groupFor("unity_open_mcp_editor_undo_history"), "typed-editor");
 });
 
 test("groupFor returns null for unknown tool names", () => {
@@ -317,6 +319,29 @@ test("groupToTools terrain roster has all 5 terrain tools", () => {
   assert.ok(map.terrain.includes("unity_open_mcp_terrain_paint_layer"));
   assert.ok(map.terrain.includes("unity_open_mcp_terrain_place_trees"));
   assert.ok(map.terrain.includes("unity_open_mcp_terrain_set_neighbors"));
+});
+
+// ---------------------------------------------------------------------------
+// M20 Plan 9 / T20.9.4 — SceneView camera + Undo history map to typed-editor.
+// ---------------------------------------------------------------------------
+
+test("groupFor assigns sceneview + undo-history tools to typed-editor", () => {
+  for (const name of [
+    "unity_open_mcp_sceneview_get_camera",
+    "unity_open_mcp_sceneview_set_camera",
+    "unity_open_mcp_editor_undo_history",
+    "unity_open_mcp_editor_clear_history",
+  ]) {
+    assert.equal(groupFor(name), "typed-editor", `${name} must map to typed-editor`);
+  }
+});
+
+test("groupToTools typed-editor roster includes the 4 T20.9.4 tools", () => {
+  const map = groupToTools();
+  assert.ok(map["typed-editor"].includes("unity_open_mcp_sceneview_get_camera"));
+  assert.ok(map["typed-editor"].includes("unity_open_mcp_sceneview_set_camera"));
+  assert.ok(map["typed-editor"].includes("unity_open_mcp_editor_undo_history"));
+  assert.ok(map["typed-editor"].includes("unity_open_mcp_editor_clear_history"));
 });
 
 // ---------------------------------------------------------------------------

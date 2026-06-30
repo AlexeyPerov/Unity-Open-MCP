@@ -101,6 +101,8 @@ import { sceneListOpened } from "./scene-list-opened.js";
 import { sceneGetData } from "./scene-get-data.js";
 import { sceneGetDirtySummary } from "./scene-get-dirty-summary.js";
 import { sceneFocus } from "./scene-focus.js";
+import { sceneviewGetCamera } from "./sceneview-get-camera.js";
+import { sceneviewSetCamera } from "./sceneview-set-camera.js";
 // M16 Plan 4 — typed Package Manager tools.
 import { packageList } from "./package-list.js";
 import { packageSearch } from "./package-search.js";
@@ -117,6 +119,8 @@ import { selectionGet } from "./selection-get.js";
 import { selectionSet } from "./selection-set.js";
 import { editorUndo } from "./editor-undo.js";
 import { editorRedo } from "./editor-redo.js";
+import { editorUndoHistory } from "./editor-undo-history.js";
+import { editorClearHistory } from "./editor-clear-history.js";
 import { editorGetTags } from "./editor-get-tags.js";
 import { editorGetLayers } from "./editor-get-layers.js";
 import { editorAddTag } from "./editor-add-tag.js";
@@ -586,6 +590,9 @@ export const M16_PLAN3_TOOLS: Tool[] = [
   sceneGetData,
   sceneGetDirtySummary,
   sceneFocus,
+  // M20 Plan 9 / T20.9.4 — SceneView camera pose-level tools.
+  sceneviewGetCamera,
+  sceneviewSetCamera,
 ];
 
 // M16 Plan 4 — Package Manager typed tools. Mutating members (add / remove)
@@ -620,6 +627,9 @@ export const M16_PLAN5_TOOLS: Tool[] = [
   selectionSet,
   editorUndo,
   editorRedo,
+  // M20 Plan 9 / T20.9.4 — undo stack read/reset tools.
+  editorUndoHistory,
+  editorClearHistory,
   editorGetTags,
   editorGetLayers,
   editorAddTag,

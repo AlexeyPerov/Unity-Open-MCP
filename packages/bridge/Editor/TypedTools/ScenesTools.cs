@@ -440,6 +440,69 @@ namespace UnityOpenMcpBridge.TypedTools
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
+        // SceneView pose-level read. Distinct from Focus(): this reports the
+        // current editor camera pose/pivot so the agent can reason about what
+        // the human is looking at before taking action.
+        public static ToolDispatchResult SceneViewGetCamera(string body)
+        {
+            var sceneView = ResolveSceneView();
+            if (sceneView == null)
+                return ToolDispatchResult.Fail("sceneview_unavailable",
+                    "No SceneView available. Open the Scene window in the editor and retry.");
+
+            return ToolDispatchResult.Ok(BuildSceneViewCameraEnvelope(sceneView, moved: false));
+        }
+
+        // SceneView pose-level mutation. This is an editor-UI state mutation
+        // (camera/window move), not a project-asset write.
+        public static ToolDispatchResult SceneViewSetCamera(string body)
+        {
+            if (!TryParseVector3Object(body, "position", out var position))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'position' is required and must be an object with numeric x/y/z fields.");
+
+            var sceneView = ResolveSceneView();
+            if (sceneView == null)
+                return ToolDispatchResult.Fail("sceneview_unavailable",
+                    "No SceneView available. Open the Scene window in the editor and retry.");
+
+            var rotation = sceneView.rotation;
+            if (TryParseVector3Object(body, "rotation", out var rotationEuler))
+                rotation = Quaternion.Euler(rotationEuler);
+
+            // Keep the current zoom unless the caller sets an explicit size.
+            float size = sceneView.size;
+            var rawSize = JsonBody.GetRawValue(body, "size");
+            if (!string.IsNullOrEmpty(rawSize))
+            {
+                var requested = JsonBody.GetFloat(body, "size", size);
+                if (requested > 0f)
+                    size = requested;
+            }
+
+            var rawOrtho = JsonBody.GetRawValue(body, "orthographic");
+            if (!string.IsNullOrEmpty(rawOrtho))
+                sceneView.orthographic = JsonBody.GetBool(body, "orthographic", sceneView.orthographic);
+
+            // SceneView.LookAtDirect is pivot-centric; derive pivot from desired
+            // camera position + forward vector + distance(size).
+            var pivot = position + (rotation * Vector3.forward * size);
+
+            try
+            {
+                sceneView.Show();
+                sceneView.Focus();
+                sceneView.LookAtDirect(pivot, rotation, size);
+                sceneView.Repaint();
+            }
+            catch (System.Exception e)
+            {
+                return ToolDispatchResult.Fail("sceneview_set_camera_failed", e.Message);
+            }
+
+            return ToolDispatchResult.Ok(BuildSceneViewCameraEnvelope(sceneView, moved: true));
+        }
+
         // ----------------------------- helpers -----------------------------
 
         enum DetailLevel { Summary, Normal, Verbose }
@@ -588,6 +651,63 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(',').Append(v.y.ToString("R", CultureInfo.InvariantCulture));
             sb.Append(',').Append(v.z.ToString("R", CultureInfo.InvariantCulture));
             sb.Append(']');
+        }
+
+        private static SceneView ResolveSceneView()
+        {
+            var sceneView = SceneView.lastActiveSceneView;
+            if (sceneView == null)
+            {
+                try
+                {
+                    sceneView = EditorWindow.GetWindow<SceneView>();
+                }
+                catch
+                {
+                    sceneView = null;
+                }
+            }
+
+            return sceneView;
+        }
+
+        private static string BuildSceneViewCameraEnvelope(SceneView sceneView, bool moved)
+        {
+            var sb = new StringBuilder(256);
+            sb.Append("{\"status\":\"ok\"");
+            sb.Append(",\"windowMoved\":").Append(moved ? "true" : "false");
+            sb.Append(",\"camera\":{");
+            sb.Append("\"position\":");
+            AppendVector(sb, sceneView.camera.transform.position);
+            sb.Append(",\"rotationEuler\":");
+            AppendVector(sb, sceneView.camera.transform.rotation.eulerAngles);
+            sb.Append(",\"pivot\":");
+            AppendVector(sb, sceneView.pivot);
+            sb.Append(",\"orthographic\":").Append(sceneView.orthographic ? "true" : "false");
+            sb.Append(",\"size\":").Append(sceneView.size.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append(",\"fieldOfView\":").Append(sceneView.camera.fieldOfView.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append("}}");
+            return sb.ToString();
+        }
+
+        private static bool TryParseVector3Object(string body, string key, out Vector3 value)
+        {
+            value = default;
+            var raw = JsonBody.GetRawValue(body, key);
+            if (string.IsNullOrWhiteSpace(raw) || !raw.TrimStart().StartsWith("{"))
+                return false;
+
+            var xRaw = JsonBody.GetRawValue(raw, "x");
+            var yRaw = JsonBody.GetRawValue(raw, "y");
+            var zRaw = JsonBody.GetRawValue(raw, "z");
+            if (xRaw == null || yRaw == null || zRaw == null)
+                return false;
+
+            value = new Vector3(
+                JsonBody.GetFloat(raw, "x", 0f),
+                JsonBody.GetFloat(raw, "y", 0f),
+                JsonBody.GetFloat(raw, "z", 0f));
+            return true;
         }
 
         private static Bounds CalculateFocusBounds(GameObject target)

@@ -79,6 +79,12 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_scene_unload",        LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_scene_set_active",    LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_scene_focus",         LifecyclePolicy.EditorSettle },
+            // M20 Plan 9 / T20.9.4 — SceneView pose-level tools. get_camera is
+            // read-only and falls through to None by default; set_camera mutates
+            // editor UI state only (no asset writes / no reload) and therefore
+            // remains None while still being recorded as mutating via
+            // BridgeToolClassification.MutatingTools.
+            { "unity_open_mcp_sceneview_set_camera", LifecyclePolicy.None },
             // M16 Plan 4 — typed Package Manager mutators. add / remove
             // rewrite Packages/manifest.json and trigger UPM resolution,
             // which can install/remove assemblies and force a domain reload.
@@ -93,13 +99,15 @@ namespace UnityOpenMcpBridge
             // is enough — no domain-reload risk. The other Plan 5 tools
             // (console_clear / console_log / editor_set_state /
             // selection_get / selection_set / editor_undo / editor_redo /
-            // editor_get_tags / editor_get_layers) mutate editor state but
+            // editor_get_tags / editor_get_layers / editor_undo_history /
+            // editor_clear_history) mutate editor state but
             // write NO assets — they route as gate-free direct-response tools
             // and fall through to the None default below. editor_set_state
             // runs its own inline dirty guard (entering play mode can trigger
             // the native save modal) since it is NOT in the lifecycle table.
             { "unity_open_mcp_editor_add_tag",      LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_editor_add_layer",    LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_editor_clear_history",LifecyclePolicy.None },
             // M16 Plan 7 — typed profiler mutator. profiler_save_data writes a
             // .json snapshot (no script recompile) — EditorSettle. The other
             // Plan 7 tools mutate editor state / bookkeeping but write no

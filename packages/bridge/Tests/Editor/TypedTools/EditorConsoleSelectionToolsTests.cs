@@ -315,6 +315,46 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"steps\":1", result.Output);
         }
 
+        [Test]
+        public void EditorUndoHistory_ReturnsRecentEntriesAndTruncationFields()
+        {
+            // Create at least one undo record to make history non-empty.
+            var go = new GameObject("__MCPTest_UndoHistory");
+            Undo.RegisterCreatedObjectUndo(go, "Create __MCPTest_UndoHistory");
+            try
+            {
+                var result = EditorConsoleSelectionTools.EditorUndoHistory("{\"max_entries\":1}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"status\":\"ok\"", result.Output);
+                StringAssert.Contains("\"entries\":[", result.Output);
+                StringAssert.Contains("\"requested\":1", result.Output);
+                StringAssert.Contains("\"cap\":50", result.Output);
+                StringAssert.Contains("\"truncated\":", result.Output);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void EditorClearHistory_ClearsThenHistoryReportsEmpty()
+        {
+            // Seed one record so clear has something to remove.
+            var go = new GameObject("__MCPTest_ClearHistory");
+            Undo.RegisterCreatedObjectUndo(go, "Create __MCPTest_ClearHistory");
+            Object.DestroyImmediate(go);
+
+            var clear = EditorConsoleSelectionTools.EditorClearHistory("{}");
+            Assert.IsTrue(clear.Success, clear.ErrorMessage);
+            StringAssert.Contains("\"cleared\":true", clear.Output);
+
+            var history = EditorConsoleSelectionTools.EditorUndoHistory("{\"max_entries\":5}");
+            Assert.IsTrue(history.Success, history.ErrorMessage);
+            StringAssert.Contains("\"count\":0", history.Output);
+            StringAssert.Contains("\"total\":0", history.Output);
+        }
+
         // ----------------------- editor_get_tags / layers ----------------
 
         [Test]
@@ -499,6 +539,10 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(LifecyclePolicy.None,
                 ToolLifecycle.Resolve("unity_open_mcp_editor_redo"));
             Assert.AreEqual(LifecyclePolicy.None,
+                ToolLifecycle.Resolve("unity_open_mcp_editor_undo_history"));
+            Assert.AreEqual(LifecyclePolicy.None,
+                ToolLifecycle.Resolve("unity_open_mcp_editor_clear_history"));
+            Assert.AreEqual(LifecyclePolicy.None,
                 ToolLifecycle.Resolve("unity_open_mcp_editor_get_tags"));
             Assert.AreEqual(LifecyclePolicy.None,
                 ToolLifecycle.Resolve("unity_open_mcp_editor_get_layers"));
@@ -516,6 +560,19 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_console_clear", "{}"));
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_editor_set_state", "{}"));
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_selection_set", "{}"));
+        }
+
+        [Test]
+        public void Classification_UndoHistoryTools_AreWiredAsExpected()
+        {
+            Assert.IsTrue(BridgeToolClassification.KnownTools.Contains("unity_open_mcp_editor_undo_history"));
+            Assert.IsTrue(BridgeToolClassification.KnownTools.Contains("unity_open_mcp_editor_clear_history"));
+
+            Assert.IsTrue(BridgeToolClassification.DirectResponseTools.Contains("unity_open_mcp_editor_undo_history"));
+            Assert.IsFalse(BridgeToolClassification.DirectResponseTools.Contains("unity_open_mcp_editor_clear_history"));
+
+            Assert.IsTrue(BridgeToolClassification.MutatingTools.Contains("unity_open_mcp_editor_clear_history"));
+            Assert.IsFalse(BridgeToolClassification.MutatingTools.Contains("unity_open_mcp_editor_undo_history"));
         }
 
         // ----------------------- helpers ---------------------------------

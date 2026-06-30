@@ -89,6 +89,8 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_scene_get_data",
             "unity_open_mcp_scene_get_dirty_summary",
             "unity_open_mcp_scene_focus",
+            "unity_open_mcp_sceneview_get_camera",
+            "unity_open_mcp_sceneview_set_camera",
             // M16 Plan 4 — typed Package Manager tools.
             "unity_open_mcp_package_list",
             "unity_open_mcp_package_search",
@@ -106,6 +108,8 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_selection_set",
             "unity_open_mcp_editor_undo",
             "unity_open_mcp_editor_redo",
+            "unity_open_mcp_editor_undo_history",
+            "unity_open_mcp_editor_clear_history",
             "unity_open_mcp_editor_get_tags",
             "unity_open_mcp_editor_get_layers",
             "unity_open_mcp_editor_add_tag",
@@ -255,6 +259,10 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_scene_list_opened",
             "unity_open_mcp_scene_get_data",
             "unity_open_mcp_scene_get_dirty_summary",
+            // M20 Plan 9 / T20.9.4 — sceneview_get_camera is read-only and
+            // gate-free. sceneview_set_camera mutates editor UI state and runs
+            // the full gate path (MutatingTools).
+            "unity_open_mcp_sceneview_get_camera",
             // M16 Plan 4 — read-only typed Package Manager tools (gate-free).
             // list / search / get_info hit UPM async requests;
             // get_dependencies / check read Packages/manifest.json directly.
@@ -278,6 +286,10 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_selection_set",
             "unity_open_mcp_editor_undo",
             "unity_open_mcp_editor_redo",
+            // M20 Plan 9 / T20.9.4 — undo_history is read-only and gate-free.
+            // clear_history is an irreversible reset and runs the full gate path
+            // (MutatingTools).
+            "unity_open_mcp_editor_undo_history",
             "unity_open_mcp_editor_get_tags",
             "unity_open_mcp_editor_get_layers",
             // M16 Plan 6 — read-only typed reflection / object tools (gate-
@@ -400,6 +412,12 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_scene_unload",
             "unity_open_mcp_scene_set_active",
             "unity_open_mcp_scene_focus",
+            // M20 Plan 9 / T20.9.4 — SceneView camera and Undo-history mutators.
+            // set_camera mutates SceneView pose; clear_history irreversibly resets
+            // the editor undo/redo stacks. Both require paths_hint and run the
+            // full gate path even though they do not write project assets.
+            "unity_open_mcp_sceneview_set_camera",
+            "unity_open_mcp_editor_clear_history",
             // M16 Plan 4 — typed Package Manager mutators. Each writes
             // Packages/manifest.json and triggers package resolution; the
             // caller must scope paths_hint to "Packages/manifest.json"

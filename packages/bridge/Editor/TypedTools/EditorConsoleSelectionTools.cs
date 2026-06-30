@@ -289,6 +289,56 @@ namespace UnityOpenMcpBridge.TypedTools
             return ToolDispatchResult.Ok(BuildUndoResult("redo", steps));
         }
 
+        // Read the recent undo/redo stack entries. Uses reflection so we can
+        // consume Unity's internal record surface without locking to one exact
+        // Editor version API shape.
+        public static ToolDispatchResult EditorUndoHistory(string body)
+        {
+            int requested = JsonBody.GetInt(body, "max_entries", 50);
+            if (requested < 1) requested = 1;
+            const int hardCap = 50;
+            int limit = requested > hardCap ? hardCap : requested;
+
+            var entries = ReadUndoRecordNames();
+            int total = entries.Count;
+            int count = total > limit ? limit : total;
+            int truncated = total > count ? total - count : 0;
+
+            var sb = new StringBuilder(256);
+            sb.Append("{\"status\":\"ok\"");
+            sb.Append(",\"requested\":").Append(requested);
+            sb.Append(",\"cap\":").Append(hardCap);
+            sb.Append(",\"count\":").Append(count);
+            sb.Append(",\"total\":").Append(total);
+            sb.Append(",\"truncated\":").Append(truncated);
+            sb.Append(",\"entries\":[");
+            for (int i = 0; i < count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"index\":").Append(i);
+                sb.Append(",\"name\":\"").Append(Esc(entries[i])).Append("\"}");
+            }
+            sb.Append("]}");
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
+        // Clear Undo/Redo history. Irreversible editor-state reset.
+        public static ToolDispatchResult EditorClearHistory(string body)
+        {
+            if (!TryClearUndoHistory())
+            {
+                return ToolDispatchResult.Fail("undo_clear_unavailable",
+                    "Could not clear the Undo history in this Unity version.");
+            }
+
+            var remaining = ReadUndoRecordNames().Count;
+            var sb = new StringBuilder(96);
+            sb.Append("{\"status\":\"ok\",\"cleared\":true");
+            sb.Append(",\"remaining\":").Append(remaining);
+            sb.Append(",\"note\":\"Undo/redo history was cleared and cannot be restored.\"}");
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
         // ========================= Tags / Layers =========================
 
         // List every configured tag (built-in + user). Gate-free read.
@@ -626,6 +676,103 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(",\"activeSelection\":").Append(SerializeSelectionEntry(active));
             sb.Append('}');
             return sb.ToString();
+        }
+
+        private static List<string> ReadUndoRecordNames()
+        {
+            var names = new List<string>();
+
+            try
+            {
+                var method = typeof(Undo).GetMethod("GetRecords",
+                    System.Reflection.BindingFlags.Static |
+                    System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic);
+                if (method != null)
+                {
+                    var raw = method.GetParameters().Length switch
+                    {
+                        0 => method.Invoke(null, null),
+                        1 => method.Invoke(null, new object[] { 50 }),
+                        _ => null,
+                    };
+                    AppendUndoRecordNames(raw, names);
+                }
+            }
+            catch
+            {
+                // Fall through to the current-group fallback.
+            }
+
+            if (names.Count == 0)
+            {
+                var current = Undo.GetCurrentGroupName();
+                if (!string.IsNullOrWhiteSpace(current))
+                    names.Add(current);
+            }
+
+            return names;
+        }
+
+        private static void AppendUndoRecordNames(object raw, List<string> names)
+        {
+            if (raw == null) return;
+            if (raw is IEnumerable<string> stringEnumerable)
+            {
+                foreach (var s in stringEnumerable)
+                    if (!string.IsNullOrWhiteSpace(s)) names.Add(s);
+                return;
+            }
+            if (raw is System.Collections.IEnumerable enumerable)
+            {
+                foreach (var item in enumerable)
+                {
+                    if (item == null) continue;
+                    if (item is string s)
+                    {
+                        if (!string.IsNullOrWhiteSpace(s)) names.Add(s);
+                        continue;
+                    }
+
+                    var t = item.GetType();
+                    var nameProp = t.GetProperty("name")
+                                   ?? t.GetProperty("Name")
+                                   ?? t.GetProperty("groupName")
+                                   ?? t.GetProperty("GroupName");
+                    var name = nameProp?.GetValue(item, null) as string;
+                    if (!string.IsNullOrWhiteSpace(name)) names.Add(name);
+                }
+            }
+        }
+
+        private static bool TryClearUndoHistory()
+        {
+            // Preferred API shape in newer editors.
+            var clearAll = typeof(Undo).GetMethod("ClearAll",
+                System.Reflection.BindingFlags.Static |
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic);
+            if (clearAll != null && clearAll.GetParameters().Length == 0)
+            {
+                clearAll.Invoke(null, null);
+                return true;
+            }
+
+            // Older/internal fallback.
+            var clearUndo = typeof(Undo).GetMethod("ClearUndo",
+                System.Reflection.BindingFlags.Static |
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic,
+                null,
+                new[] { typeof(Object) },
+                null);
+            if (clearUndo != null)
+            {
+                clearUndo.Invoke(null, new object[] { null });
+                return true;
+            }
+
+            return false;
         }
 
         // Reflect UnityEditor.LogEntries.Clear() — the type is internal, so we

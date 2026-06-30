@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -298,6 +299,51 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual("gameobject_not_found", result.ErrorCode);
         }
 
+        // ----------------------- SceneView camera ------------------------
+
+        [Test]
+        public void SceneViewGetCamera_ReturnsPoseEnvelope()
+        {
+            var result = ScenesTools.SceneViewGetCamera("{}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("\"status\":\"ok\"", result.Output);
+            StringAssert.Contains("\"camera\":{", result.Output);
+            StringAssert.Contains("\"position\":", result.Output);
+            StringAssert.Contains("\"rotationEuler\":", result.Output);
+            StringAssert.Contains("\"pivot\":", result.Output);
+            StringAssert.Contains("\"orthographic\":", result.Output);
+            StringAssert.Contains("\"size\":", result.Output);
+            StringAssert.Contains("\"fieldOfView\":", result.Output);
+            StringAssert.Contains("\"windowMoved\":false", result.Output);
+        }
+
+        [Test]
+        public void SceneViewSetCamera_SetThenGet_RoundTripsPoseAndDoesNotDirtyScene()
+        {
+            var sceneView = SceneView.lastActiveSceneView ?? EditorWindow.GetWindow<SceneView>();
+            Assert.IsNotNull(sceneView);
+
+            var active = EditorSceneManager.GetActiveScene();
+            var wasDirty = active.isDirty;
+
+            var setResult = ScenesTools.SceneViewSetCamera(
+                "{\"position\":{\"x\":3.25,\"y\":4.5,\"z\":-6.75}," +
+                "\"rotation\":{\"x\":15,\"y\":30,\"z\":0}," +
+                "\"orthographic\":true,\"size\":9.5}");
+            Assert.IsTrue(setResult.Success, setResult.ErrorMessage);
+            StringAssert.Contains("\"windowMoved\":true", setResult.Output);
+            StringAssert.Contains("\"orthographic\":true", setResult.Output);
+            StringAssert.Contains("\"size\":9.5", setResult.Output);
+
+            var getResult = ScenesTools.SceneViewGetCamera("{}");
+            Assert.IsTrue(getResult.Success, getResult.ErrorMessage);
+            StringAssert.Contains("\"orthographic\":true", getResult.Output);
+            StringAssert.Contains("\"camera\":{", getResult.Output);
+
+            Assert.AreEqual(wasDirty, EditorSceneManager.GetActiveScene().isDirty,
+                "sceneview_set_camera should not dirty the active scene");
+        }
+
         // ----------------------- Dispatch wiring -------------------------
         //
         // The dispatch switch lives in BridgeHttpServer; the KnownTools /
@@ -319,10 +365,12 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_unload", "{}"));
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_set_active", "{}"));
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_focus", "{}"));
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_sceneview_set_camera", "{}"));
             // Read-only scene tools are never guarded.
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_list_opened", "{}"));
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_get_data", "{}"));
             Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_get_dirty_summary", "{}"));
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_sceneview_get_camera", "{}"));
         }
 
         [Test]
@@ -349,6 +397,8 @@ namespace UnityOpenMcpBridge.Tests
                 ToolLifecycle.Resolve("unity_open_mcp_scene_set_active"));
             Assert.AreEqual(LifecyclePolicy.EditorSettle,
                 ToolLifecycle.Resolve("unity_open_mcp_scene_focus"));
+            Assert.AreEqual(LifecyclePolicy.None,
+                ToolLifecycle.Resolve("unity_open_mcp_sceneview_set_camera"));
             // Read-only tools resolve to None (safe default).
             Assert.AreEqual(LifecyclePolicy.None,
                 ToolLifecycle.Resolve("unity_open_mcp_scene_list_opened"));
@@ -356,6 +406,21 @@ namespace UnityOpenMcpBridge.Tests
                 ToolLifecycle.Resolve("unity_open_mcp_scene_get_data"));
             Assert.AreEqual(LifecyclePolicy.None,
                 ToolLifecycle.Resolve("unity_open_mcp_scene_get_dirty_summary"));
+            Assert.AreEqual(LifecyclePolicy.None,
+                ToolLifecycle.Resolve("unity_open_mcp_sceneview_get_camera"));
+        }
+
+        [Test]
+        public void Classification_SceneViewCameraTools_AreWiredAsExpected()
+        {
+            Assert.IsTrue(BridgeToolClassification.KnownTools.Contains("unity_open_mcp_sceneview_get_camera"));
+            Assert.IsTrue(BridgeToolClassification.KnownTools.Contains("unity_open_mcp_sceneview_set_camera"));
+
+            Assert.IsTrue(BridgeToolClassification.DirectResponseTools.Contains("unity_open_mcp_sceneview_get_camera"));
+            Assert.IsFalse(BridgeToolClassification.DirectResponseTools.Contains("unity_open_mcp_sceneview_set_camera"));
+
+            Assert.IsTrue(BridgeToolClassification.MutatingTools.Contains("unity_open_mcp_sceneview_set_camera"));
+            Assert.IsFalse(BridgeToolClassification.MutatingTools.Contains("unity_open_mcp_sceneview_get_camera"));
         }
     }
 }
