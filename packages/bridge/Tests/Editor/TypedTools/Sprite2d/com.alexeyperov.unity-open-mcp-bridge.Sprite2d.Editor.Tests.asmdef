@@ -1,0 +1,23 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.Sprite2d.Editor.Tests",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Sprite2d",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.SpriteAtlas.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.Texture.Editor",
+    "com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "UNITY_TEST_FRAMEWORK"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

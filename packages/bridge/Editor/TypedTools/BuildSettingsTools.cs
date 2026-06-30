@@ -931,17 +931,6 @@ namespace UnityOpenMcpBridge.TypedTools
                     sbp.Append(",\"note\":\"Per-platform active-level setter is not exposed in the public API; the global level was set. Use execute_csharp for precise per-platform control.\"}");
                 }
                 return ToolDispatchResult.Ok(sbp.ToString());
-
-                var after = QualitySettings.GetQualityLevel();
-                var sb2 = new StringBuilder(128);
-                sb2.Append("{\"status\":\"ok\",\"action\":\"set_quality_level\"");
-                sb2.Append(",\"requestedLevel\":").Append(level);
-                sb2.Append(",\"requestedName\":").Append(Q(level < names.Length ? names[level] : ""));
-                sb2.Append(",\"activeLevel\":").Append(after);
-                sb2.Append(",\"activeName\":").Append(Q(names.Length > 0 && after >= 0 && after < names.Length ? names[after] : ""));
-                sb2.Append(",\"platform\":").Append(string.IsNullOrWhiteSpace(platform) ? "null" : Q(platform));
-                sb2.Append('}');
-                return ToolDispatchResult.Ok(sb2.ToString());
             }
             catch (Exception e)
             {

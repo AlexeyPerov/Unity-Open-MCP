@@ -79,11 +79,43 @@ namespace UnityOpenMcpBridge.Extensions.Cinemachine
     // addressing convention (instance_id > path > name).
     internal static class CinemachineTargets
     {
+        // Unity 6 renamed Object.GetInstanceID() → GetEntityId() and
+        // EditorUtility.InstanceIDToObject → EntityIdToObject (both marked
+        // [Obsolete]). GetEntityId() returns the new EntityId struct, whose
+        // implicit int casts are *also* deprecated — so use GetRawData()
+        // (ulong) / FromULong(ulong) for the round-trip, casting through uint
+        // so a negative instance id sign-extends to the original ulong (instance
+        // ids are negative; e.g. -3072 ↔ 0xFFFFF400). This reflection-gated
+        // assembly must compile across Unity versions, so route the ID read/
+        // write through one version-guarded pair.
+        public static int EntityId(Object obj)
+        {
+#if UNITY_6000_0_OR_NEWER
+            return (int)obj.GetEntityId().GetRawData();
+#else
+            return obj.GetInstanceID();
+#endif
+        }
+
+        public static Object ObjectForId(int id)
+        {
+#if UNITY_6000_0_OR_NEWER
+            return EditorUtility.EntityIdToObject(EntityIdStruct(id));
+#else
+            return EditorUtility.InstanceIDToObject(id);
+#endif
+        }
+
+        // Build an EntityId from the int wire value (negative ids preserved).
+#if UNITY_6000_0_OR_NEWER
+        private static EntityId EntityIdStruct(int id) => EntityId.FromULong((uint)id);
+#endif
+
         public static GameObject Resolve(int instanceId, string path, string name)
         {
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = ObjectForId(instanceId);
                 if (obj is GameObject go) return go;
             }
 

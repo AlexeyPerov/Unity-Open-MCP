@@ -129,7 +129,7 @@ namespace UnityOpenMcpBridge.Extensions.Cinemachine
 
             var sb = new StringBuilder(160);
             sb.Append("\"camera\":{");
-            sb.Append("\"instanceId\":").Append(go.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(CinemachineTargets.EntityId(go)).Append(',');
             sb.Append("\"path\":").Append(CinemachineJson.Esc(CinemachineTargets.BuildPath(go))).Append(',');
             sb.Append("\"priority\":").Append(priority);
             sb.Append('}');
@@ -426,7 +426,7 @@ namespace UnityOpenMcpBridge.Extensions.Cinemachine
             var sb = new StringBuilder(140);
             sb.Append($"\"{pipelineSlot.ToLower()}\":{{");
             sb.Append("\"component\":").Append(CinemachineJson.Esc(componentType.Name)).Append(',');
-            sb.Append("\"instanceId\":").Append(current.GetInstanceID());
+            sb.Append("\"instanceId\":").Append(CinemachineTargets.EntityId(current));
             sb.Append('}');
             return CinemachineJson.Ok(sb.ToString());
         }
@@ -486,7 +486,7 @@ namespace UnityOpenMcpBridge.Extensions.Cinemachine
                 var sbAlready = new StringBuilder(120);
                 sbAlready.Append("\"brain\":{");
                 sbAlready.Append("\"alreadyPresent\":true,");
-                sbAlready.Append("\"instanceId\":").Append(existing.GetInstanceID());
+                sbAlready.Append("\"instanceId\":").Append(CinemachineTargets.EntityId(existing));
                 sbAlready.Append('}');
                 return CinemachineJson.Ok(sbAlready.ToString());
             }
@@ -498,7 +498,7 @@ namespace UnityOpenMcpBridge.Extensions.Cinemachine
             var sb = new StringBuilder(120);
             sb.Append("\"brain\":{");
             sb.Append("\"added\":true,");
-            sb.Append("\"instanceId\":").Append(brain.GetInstanceID());
+            sb.Append("\"instanceId\":").Append(CinemachineTargets.EntityId(brain));
             sb.Append('}');
             return CinemachineJson.Ok(sb.ToString());
         }
@@ -537,7 +537,7 @@ namespace UnityOpenMcpBridge.Extensions.Cinemachine
                 if (!first) sb.Append(',');
                 first = false;
                 sb.Append('{');
-                sb.Append("\"instanceId\":").Append(mb.GetInstanceID()).Append(',');
+                sb.Append("\"instanceId\":").Append(CinemachineTargets.EntityId(mb)).Append(',');
                 sb.Append("\"path\":").Append(CinemachineJson.Esc(CinemachineTargets.BuildPath(mb.gameObject))).Append(',');
                 sb.Append("\"priority\":").Append(GetPriorityValue(mb)).Append(',');
                 sb.Append("\"follow\":").Append(CinemachineJson.Esc(GetTransformPath(GetObjectFieldOrProperty(mb, "Follow") as Transform))).Append(',');
@@ -559,7 +559,7 @@ namespace UnityOpenMcpBridge.Extensions.Cinemachine
         {
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = CinemachineTargets.ObjectForId(instanceId);
                 if (obj is GameObject go) return go;
             }
             if (!string.IsNullOrEmpty(path)) return CinemachineTargets.FindByPath(path);
