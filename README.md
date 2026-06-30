@@ -9,15 +9,12 @@
 
 # Unity Open MCP
 
-Unity Open MCP connects AI agents to Unity projects with a bridge + gate workflow: make changes, run validation, inspect results, and iterate safely.
+Unity Open MCP is a comprehensive set of tools to use AI agents with Unity projects.
 
-The MCP server consists of a total of **229** tools.
-
-Current tool surface from `mcp-server/src/tools/index.ts`:
-
-- Core + gate + validation tools: **16**
-- Asset intelligence + senses + discovery + diagnostics + meta tools: **34**
+The MCP server consists of a total of **229** tools:
 - Typed editor/project tools (core package): **92**
+- Core + validation tools: **16**
+- Asset intelligence + senses + discovery + diagnostics + meta tools: **34**
 - Optional extension-pack tools: **87**
 
 ## Key features
@@ -31,9 +28,17 @@ Current tool surface from `mcp-server/src/tools/index.ts`:
 
 For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-tools.md).
 
-Requires **Unity 2022.3 LTS or newer**.
+| Typical Unity MCP issue | How Unity Open MCP solves it |
+|---|---|
+| AI can mutate project state unsafely | Gate-based workflow with validation, checkpoints, deltas, regression checks, and targeted fixes |
+| Weak asset visibility and cross-reference context | Asset intelligence tools for structured read/search, reserialize flows, and reference analysis |
+| Tooling breaks when Unity/editor runtime is unavailable | Live bridge + batch fallback + offline readers where possible |
+| Generic tools miss Unity-specific workflows | Typed tool surface for scenes, GameObjects, components, packages, build settings, profiler, and project settings |
+| Domain workflows require custom setup | Extension packs load by package presence and surface as per-session tool groups |
 
 ## Quick setup
+
+Requires **Unity 2022.3 LTS or newer**.
 
 Use any of this options:
 
