@@ -283,7 +283,7 @@ Either way, call **`unity_open_mcp_read_compile_errors`** — it reads the tail 
 
 > **Note:** if no Unity Editor is open, `Editor.log` is stale from the previous session and will not reflect your latest edits — recompile verification needs Unity running. The stale log is still useful to see what the last session reported.
 
-**Project compiles but you want a clean-from-scratch check — `compile_check`.** When the live bridge is up but you want to verify the project compiles independently of the current Editor state, call **`unity_open_mcp_compile_check`**. It spawns a fresh headless Unity, recompiles from scratch, and returns structured compiler errors. It always routes to batch, so it works even when the live bridge reports compiling. Use it for a deliberate "does this build clean?" check, **not** as the recovery path for a broken bridge assembly.
+**Project compiles but you want a clean-from-scratch check — `compile_check`.** When the live bridge is up but you want to verify the project compiles independently of the current Editor state, call **`unity_open_mcp_compile_check`**. It spawns a fresh headless Unity, recompiles from scratch, and returns structured compiler errors. It always routes to batch, so it works even when the live bridge reports compiling. Use it for a deliberate "does this build clean?" check, **not** as the recovery path for a broken bridge assembly. When a live Editor already has the project open, the headless spawn cannot acquire Unity's one-Editor-per-project lock and returns `editor_instance_locked` — either close the live Editor and retry, or verify compile state via the live bridge instead (`execute_csharp` + `Library/ScriptAssemblies/*.dll` mtime check, or `read_compile_errors`).
 
 ## Agent senses (live-only)
 

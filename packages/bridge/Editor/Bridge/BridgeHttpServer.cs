@@ -806,7 +806,9 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_checkpoint_create" => CheckpointCreateTool.Execute(body),
                 "unity_open_mcp_delta" => DeltaTool.Execute(body),
                 "unity_open_mcp_find_references" => FindReferencesTool.Execute(body),
-                "unity_open_mcp_dependencies" => DependenciesTool.Execute(body),
+                // unity_open_mcp_dependencies is registry-discovered (M22 Plan 3 /
+                // T-fix-1): it lives in the Dependencies sub-asmdef and dispatches
+                // via BridgeToolRegistry.TryDispatch (the switch fallback below).
                 "unity_open_mcp_scan_paths" => ScanPathsTool.Execute(body),
                 "unity_open_mcp_apply_fix" => ApplyFixTool.Execute(body),
                 "unity_open_mcp_reserialize" => ReserializeAssetsTool.Execute(body),

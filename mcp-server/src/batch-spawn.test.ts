@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs, buildVerifyArgs, extractCompilerErrors } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, BatchClassificationError } from "./batch-spawn.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 function parseBody(result: CallToolResult): Record<string, unknown> {
@@ -306,4 +306,102 @@ test("buildVerifyArgs drops negative or non-finite per-category values", () => {
     "--baseline-path", "b.json",
     "--per-category-threshold", "scene_prefab_health=0",
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// M22 Plan 3 / T-fix-2 — editor_instance_locked classification
+// ---------------------------------------------------------------------------
+
+test("classifyBatchFailure detects Unity's project-lock signature", () => {
+  // The verbatim tail from the 2026-06-28 feedback entry.
+  const tail = "Batch output did not contain JSON markers... another Unity instance is running with this project open";
+  assert.equal(classifyBatchFailure(tail), "editor_instance_locked");
+});
+
+test("classifyBatchFailure detects 'already open' variant case-insensitively", () => {
+  assert.equal(
+    classifyBatchFailure("Project is ALREADY OPEN in another editor"),
+    "editor_instance_locked",
+  );
+  assert.equal(
+    classifyBatchFailure("Another Unity instance detected"),
+    "editor_instance_locked",
+  );
+});
+
+test("classifyBatchFailure returns null for genuine failures (no lock)", () => {
+  // CS compiler errors, timeout, missing markers without the lock phrase.
+  assert.equal(
+    classifyBatchFailure("Assets/Foo.cs(10,14): error CS0246: type not found"),
+    null,
+  );
+  assert.equal(
+    classifyBatchFailure("Batch Unity process timed out after 600s."),
+    null,
+  );
+  assert.equal(classifyBatchFailure(""), null);
+  assert.equal(classifyBatchFailure("all good"), null);
+});
+
+test("BatchClassificationError carries a targeted code for route()", () => {
+  const err = new BatchClassificationError(
+    "editor_instance_locked",
+    "live Editor holds the lock",
+  );
+  assert.equal(err instanceof Error, true);
+  assert.equal(err.code, "editor_instance_locked");
+  assert.equal(err.name, "BatchClassificationError");
+  assert.ok(err.message.includes("live Editor"));
+});
+
+test("compile_check with a live Editor open surfaces editor_instance_locked, not batch_spawn_failed", async () => {
+  // Regression for the 2026-06-28 feedback entry: route() must emit
+  // editor_instance_locked when the batch tail matches the project-lock
+  // signature. We drive it through a fake Unity that echoes the lock phrase
+  // to stderr and exits non-zero without JSON markers, so the spawn hits the
+  // classifyBatchFailure branch.
+  const savedPath = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  try {
+    const tmp = mkdtempSync(join(tmpdir(), "batch-lock-"));
+    try {
+      const installDir = join(tmp, "6000.0.0f1");
+      const exeRel = process.platform === "win32"
+        ? ["Editor", "Unity.exe"]
+        : process.platform === "darwin"
+          ? ["Unity.app", "Contents", "MacOS", "Unity"]
+          : ["Editor", "Unity"];
+      const exe = join(installDir, ...exeRel);
+      mkdirSync(dirname(exe), { recursive: true });
+      // Fake binary prints the lock signature to stderr, then exits 1 without
+      // emitting JSON markers — exactly the shape Unity's project-lock refusal
+      // produces.
+      if (process.platform === "win32") {
+        writeFileSync(exe, "fake");
+      } else {
+        writeFileSync(
+          exe,
+          "#!/bin/sh\n" +
+            'echo "another Unity instance is running with this project open" 1>&2\n' +
+            "exit 1\n",
+        );
+        chmodSync(exe, 0o755);
+      }
+
+      const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
+      const result = await batch.route("unity_open_mcp_compile_check", {});
+      const body = parseBody(result);
+      const error = body.error as Record<string, string>;
+      assert.equal(error.code, "editor_instance_locked");
+      assert.ok(
+        error.message.includes("live Unity Editor"),
+        "message should explain the live-Editor lock",
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  } finally {
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+  }
 });

@@ -100,7 +100,7 @@ Two distinct failure shapes:
 
 Either way: call `**unity_open_mcp_read_compile_errors`** → fix `errors[].file`/`line`/`code` → trigger recompile. (If no Editor is open, `Editor.log` is stale from the previous session and won't reflect your latest edits — recompile verification needs Unity running.)
 
-Use `**unity_open_mcp_compile_check**` only for a deliberate "does this build clean from scratch?" check — it spawns a fresh headless Unity and **always** routes to batch. It is not first-line recovery for a broken bridge assembly.
+Use `**unity_open_mcp_compile_check**` only for a deliberate "does this build clean from scratch?" check — it spawns a fresh headless Unity and **always** routes to batch. It is not first-line recovery for a broken bridge assembly. When a live Editor already has the project open, the headless spawn cannot acquire Unity's one-Editor-per-project lock and returns `editor_instance_locked` — either close the live Editor and retry, or verify compile state via the live bridge instead (`execute_csharp` + `Library/ScriptAssemblies/*.dll` mtime check, or `read_compile_errors`).
 
 ## Batch fallback / Unity discovery
 
@@ -137,7 +137,9 @@ After editing `packages/` source, before tests:
   ```
    Compare mtime to your last edit; do not run tests until DLL mtime > edit mtime.
 
-> **Stale-DLL trap:** if tests fail identically to before your fix, suspect the DLL never recompiled before concluding the fix is wrong.
+> **Stale-DLL trap:** if tests fail identically to before your fix, suspect the DLL never recompiled before concluding the fix is wrong. Two further pitfalls when the DLL mtime refuses to advance:
+> - **Distrust `read_compile_errors` after a `compile_check` / batch attempt.** The headless batch spawn *overwrites* `~/Library/Logs/Unity/Editor.log`, so a subsequent `read_compile_errors` reads the batch process's log, not the live editor's — a "no errors" result there proves nothing about the live build. Cross-check by reading the log's content (does it mention the live PID / `BeeDriver`?) before trusting it.
+> - **Stale DLL + `isCompiling:false` can be a crash, not a no-op.** If `RequestScriptCompilation` returns success but the `Library/ScriptAssemblies/*.dll` mtime never advances *and* `read_compile_errors` is clean, do **not** conclude "incremental no-op" — grep the live editor log for `Unhandled exception during build` / `Bee.BeeDriver` / `NotSupportedException` / `file descriptor`. A Bee build-backend crash (fd/socket exhaustion) aborts before emitting the DLL and leaves the editor idle with a stale DLL; it needs an editor restart to clear the broken state. `editor_status` does not distinguish "completed-ok" from "crashed."
 
 ## Core loop: mutate → gate → fix
 

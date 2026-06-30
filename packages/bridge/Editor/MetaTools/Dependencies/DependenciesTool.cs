@@ -15,8 +15,55 @@ namespace UnityOpenMcpBridge.MetaTools
     //     AssetDatabase.GetDependencies walk the verify rule uses internally.
     //   - Reverse edges: ReferenceGraph.Find (packages/verify) — the same
     //     reverse-lookup surface unity_open_mcp_find_references exposes.
+    //
+    // M22 Plan 3 / T-fix-1 — this tool lives in its own sub-asmdef
+    // (com.alexeyperov.unity-open-mcp-bridge.Dependencies.Editor) that
+    // references com.alexeyperov.unity-open-mcp-verify.Editor. The bridge
+    // ROOT assembly no longer holds a compile-time reference to
+    // UnityOpenMcpVerify.Rules.Dependencies — this was the sole root consumer.
+    // When Unity enters Safe Mode and verify's Rules.* types cannot bind, the
+    // whole sub-asmdef is simply absent rather than producing a CS0103 inside
+    // the root bridge assembly (which previously kept the [InitializeOnLoad]
+    // listener from ever recovering). Dispatch is via the [BridgeTool]
+    // reflection registry (BridgeToolRegistry), mirroring every other
+    // sub-asmdef (Cinemachine, Texture, ...).
+    [BridgeToolType]
     public static class DependenciesTool
     {
+        // Registry-discovered entry point. Typed parameters mirror the MCP
+        // tool schema; the bridge reflection registry invokes this via
+        // BridgeToolRegistry.TryDispatch. Delegates to Execute(body) so the
+        // body-parsing + result-building path stays single-sourced and the
+        // existing EditMode tests (which call Execute directly) keep passing.
+        [BridgeTool("unity_open_mcp_dependencies",
+            Title = "Dependencies",
+            IsMutating = false,
+            Gate = GateMode.Off,
+            ReadOnlyHint = true,
+            Lifecycle = LifecyclePolicy.None,
+            Group = null)]
+        [System.ComponentModel.Description(
+            "Forward AND reverse dependency edges for a single asset in one " +
+            "call, plus broken forward-edge GUIDs and dependency-cycle trails. " +
+            "Reuses the same scanners as the `dependencies` verify rule and " +
+            "find_references — no second dependency graph is built. Read-only, " +
+            "gate-free. Live bridge only (the scanners call AssetDatabase).")]
+        public static string Run(
+            string asset_path = null,
+            string guid = null,
+            string detail = "normal",
+            int max_results = 100)
+        {
+            var body = BuildBody(asset_path, guid, detail, max_results);
+            var result = Execute(body);
+            if (result.Success) return result.Output;
+            // Flat error envelope matching the direct-response tool contract
+            // (BuildDirectToolErrorJson shape): { "error": { "code", "message" } }.
+            return "{\"error\":{\"code\":\"" + Escape(result.ErrorCode) +
+                   "\",\"message\":\"" + Escape(result.ErrorMessage) + "\"}}";
+        }
+
+        // Body-driven entry point retained for EditMode tests + internal reuse.
         public static ToolDispatchResult Execute(string body)
         {
             var assetPath = JsonBody.GetString(body, "asset_path");
@@ -244,6 +291,39 @@ namespace UnityOpenMcpBridge.MetaTools
         {
             sb.Append("\"queriedAssetPath\":").Append(EscapeString(path));
             sb.Append(",\"queriedAssetGuid\":").Append(EscapeString(guid));
+        }
+
+        private static string BuildBody(string assetPath, string guid, string detail, int maxResults)
+        {
+            var sb = new StringBuilder(96);
+            sb.Append('{');
+            bool needComma = false;
+            if (assetPath != null)
+            {
+                sb.Append("\"asset_path\":").Append(EscapeString(assetPath));
+                needComma = true;
+            }
+            if (guid != null)
+            {
+                if (needComma) sb.Append(',');
+                sb.Append("\"guid\":").Append(EscapeString(guid));
+                needComma = true;
+            }
+            if (detail != null)
+            {
+                if (needComma) sb.Append(',');
+                sb.Append("\"detail\":").Append(EscapeString(detail));
+                needComma = true;
+            }
+            if (needComma) sb.Append(',');
+            sb.Append("\"max_results\":").Append(maxResults);
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string Escape(string s)
+        {
+            return EscapeString(s);
         }
 
         private static string EscapeString(string s)

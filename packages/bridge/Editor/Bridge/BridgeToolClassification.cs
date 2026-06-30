@@ -37,7 +37,9 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_checkpoint_create",
             "unity_open_mcp_delta",
             "unity_open_mcp_find_references",
-            "unity_open_mcp_dependencies",
+            // unity_open_mcp_dependencies is registry-discovered (M22 Plan 3 /
+            // T-fix-1) — it carries its own IsMutating/Gate metadata via the
+            // [BridgeTool] attribute and is NOT listed in any of these sets.
             "unity_open_mcp_scan_paths",
             "unity_open_mcp_apply_fix",
             "unity_open_mcp_reserialize",
@@ -216,6 +218,10 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_checkpoint_create",
             "unity_open_mcp_delta",
             "unity_open_mcp_find_references",
+            // unity_open_mcp_dependencies is registry-discovered (M22 Plan 3 /
+            // T-fix-1) but stays in DirectResponseTools so it keeps returning
+            // flat tool JSON (no gate envelope) — DispatchTool's switch falls
+            // through to BridgeToolRegistry.TryDispatch for it.
             "unity_open_mcp_dependencies",
             "unity_open_mcp_scan_paths",
             // Compact drill-down reads: bridge returns the structured model JSON

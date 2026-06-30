@@ -1,0 +1,19 @@
+{
+  "name": "com.alexeyperov.unity-open-mcp-bridge.Dependencies.Editor",
+  "rootNamespace": "UnityOpenMcpBridge.MetaTools",
+  "references": [
+    "com.alexeyperov.unity-open-mcp-bridge.Editor",
+    "com.alexeyperov.unity-open-mcp-verify.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

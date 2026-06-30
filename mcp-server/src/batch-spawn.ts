@@ -135,6 +135,34 @@ const LIMITED_META_MESSAGES: Record<string, string> = {
     "Only find_members is available in batch mode.",
 };
 
+// M22 Plan 3 / T-fix-2 — classify a batch failure tail before falling back
+// to the generic `batch_spawn_failed`. Unity's one-Editor-per-project lock
+// produces a recognizable signature when a live Editor already holds the
+// project open; surfacing `editor_instance_locked` lets an agent tell that
+// situation apart from a genuine compile/spawn failure and act on it (close
+// the live Editor, or use live introspection instead of a headless spawn).
+//
+// Returns the error code to emit, or null when the tail does not match a
+// known classification (caller falls back to batch_spawn_failed).
+const PROJECT_LOCK_PATTERN = /another unity instance|already open/i;
+export function classifyBatchFailure(combined: string): string | null {
+  if (typeof combined !== "string" || combined.length === 0) return null;
+  if (PROJECT_LOCK_PATTERN.test(combined)) return "editor_instance_locked";
+  return null;
+}
+
+// Error carrying a classified code so route()'s catch can emit a targeted
+// error result instead of the generic batch_spawn_failed. Thrown by the
+// spawn close-handler when classifyBatchFailure matches the tail.
+export class BatchClassificationError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "BatchClassificationError";
+    this.code = code;
+  }
+}
+
 export interface BatchSpawnOptions {
   /**
    * Optional override for the Unity-install discovery roots (test hook).
@@ -242,7 +270,14 @@ export class BatchSpawn implements Router {
       parsed = await this.spawnUnity(operation, args, executeMethod, argBuilder);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return makeErrorResult({ code: "batch_spawn_failed", message });
+      // M22 Plan 3 / T-fix-2 — a classified failure (e.g.
+      // editor_instance_locked) carries a targeted code; only fall back to the
+      // generic batch_spawn_failed for unclassified errors so genuine spawn /
+      // compile failures keep their existing behavior.
+      const code = err instanceof BatchClassificationError
+        ? err.code
+        : "batch_spawn_failed";
+      return makeErrorResult({ code, message });
     }
 
     const body = parsed.json;
@@ -388,6 +423,25 @@ export class BatchSpawn implements Router {
               `Batch output did not contain JSON markers (exit ${exitCode}). ` +
                 `The bridge assembly likely failed to compile:\n` +
                 csErrors.join("\n"),
+            ));
+            return;
+          }
+          // M22 Plan 3 / T-fix-2 — before the generic no-markers reject,
+          // classify the tail. Unity's one-Editor-per-project lock surfaces a
+          // recognizable signature when a live Editor already holds the
+          // project; emit editor_instance_locked so an agent can act (close
+          // the live Editor or use live introspection) instead of seeing an
+          // opaque batch_spawn_failed.
+          const classified = classifyBatchFailure(combined);
+          if (classified === "editor_instance_locked") {
+            reject(new BatchClassificationError(
+              "editor_instance_locked",
+              "A live Unity Editor holds the project lock, so the headless " +
+                "compile_check spawn could not open the project. Unity allows " +
+                "only one Editor per project. Either close the live Editor and " +
+                "retry compile_check, or verify compile state via the live " +
+                "bridge instead (execute_csharp + Library/ScriptAssemblies DLL " +
+                "mtime check, or read_compile_errors).",
             ));
             return;
           }

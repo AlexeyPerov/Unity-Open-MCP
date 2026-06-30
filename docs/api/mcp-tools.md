@@ -162,7 +162,7 @@ Common route behavior:
 - Prefer `live` when available.
 - Use `batch` only for tools marked `batchCapable`.
 - Keep some tools route-pinned:
-  - `unity_open_mcp_compile_check` always uses batch.
+  - `unity_open_mcp_compile_check` always uses batch. When a live Editor already holds the project lock, the headless spawn returns `editor_instance_locked` (close the live Editor, or verify compile state via the live bridge).
   - `unity_open_mcp_read_compile_errors` always uses offline.
   - `unity_open_mcp_capabilities`, `unity_open_mcp_generate_skill`, and `unity_open_mcp_manage_tools` are local.
   - `unity_open_mcp_bridge_status` is local (server-resolved from the instance lock + one `/ping` probe).
