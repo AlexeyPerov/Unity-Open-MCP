@@ -82,16 +82,23 @@ namespace UnityOpenMcpBridge.Extensions.Cinemachine
         // Unity 6 renamed Object.GetInstanceID() → GetEntityId() and
         // EditorUtility.InstanceIDToObject → EntityIdToObject (both marked
         // [Obsolete]). GetEntityId() returns the new EntityId struct, whose
-        // implicit int casts are *also* deprecated — so use GetRawData()
-        // (ulong) / FromULong(ulong) for the round-trip, casting through uint
-        // so a negative instance id sign-extends to the original ulong (instance
-        // ids are negative; e.g. -3072 ↔ 0xFFFFF400). This reflection-gated
+        // implicit int casts are *also* deprecated, and whose GetRawData() is
+        // obsolete in favor of EntityId.ToULong(EntityId). Use ToULong /
+        // FromULong (ulong) for the round-trip, casting through uint so a
+        // negative instance id sign-extends to the original ulong (instance ids
+        // are negative; e.g. -3072 ↔ 0xFFFFF400). This reflection-gated
         // assembly must compile across Unity versions, so route the ID read/
         // write through one version-guarded pair.
+        //
+        // NOTE: the Unity 6 struct type is UnityEngine.EntityId. It is fully
+        // qualified below because this class ALSO declares a method named
+        // EntityId(Object) — an unqualified `EntityId` would bind to the method
+        // (CS0119 "is a method, which is not valid in the given context")
+        // rather than the struct type.
         public static int EntityId(Object obj)
         {
 #if UNITY_6000_0_OR_NEWER
-            return (int)obj.GetEntityId().GetRawData();
+            return (int)UnityEngine.EntityId.ToULong(obj.GetEntityId());
 #else
             return obj.GetInstanceID();
 #endif
@@ -108,7 +115,8 @@ namespace UnityOpenMcpBridge.Extensions.Cinemachine
 
         // Build an EntityId from the int wire value (negative ids preserved).
 #if UNITY_6000_0_OR_NEWER
-        private static EntityId EntityIdStruct(int id) => EntityId.FromULong((uint)id);
+        private static UnityEngine.EntityId EntityIdStruct(int id)
+            => UnityEngine.EntityId.FromULong((uint)id);
 #endif
 
         public static GameObject Resolve(int instanceId, string path, string name)
