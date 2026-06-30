@@ -336,5 +336,172 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(SceneDirtyGuard.AppliesTo(
                 "unity_open_mcp_settings_set_player", "{\"ignore_scene_dirty\":true}"));
         }
+
+        // ----------------------- T20.9.3 settings remainder ----------------
+
+        [Test]
+        public void SettingsGetTime_ReturnsOkEnvelope()
+        {
+            var result = BuildSettingsTools.SettingsGetTime("{}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("\"status\":\"ok\"", result.Output);
+            // Runtime Time reads are always present.
+            StringAssert.Contains("\"timeScale\":", result.Output);
+            StringAssert.Contains("\"fixedDeltaTime\":", result.Output);
+            StringAssert.Contains("\"maximumDeltaTime\":", result.Output);
+            StringAssert.Contains("\"captureFramerate\":", result.Output);
+        }
+
+        [Test]
+        public void SettingsSetTime_MissingFields_ReturnsMissingParameter()
+        {
+            var result = BuildSettingsTools.SettingsSetTime("{}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("missing_parameter", result.ErrorCode);
+        }
+
+        [Test]
+        public void SettingsSetTime_PatchesTimeScale_AndRoundTrips()
+        {
+            // Capture the original value so we can restore it.
+            float original = UnityEngine.Time.timeScale;
+            try
+            {
+                var setResult = BuildSettingsTools.SettingsSetTime(
+                    "{\"fields\":[{\"key\":\"timeScale\",\"value\":0.5}]}");
+                Assert.IsTrue(setResult.Success, setResult.ErrorMessage);
+                StringAssert.Contains("\"status\":\"ok\"", setResult.Output);
+                StringAssert.Contains("\"action\":\"set_time\"", setResult.Output);
+                StringAssert.Contains("\"applied\":[\"timeScale\"]", setResult.Output);
+
+                // Round-trip: get reports the new on-disk setting.
+                var getResult = BuildSettingsTools.SettingsGetTime("{}");
+                Assert.IsTrue(getResult.Success, getResult.ErrorMessage);
+                StringAssert.Contains("\"timeScaleSetting\":0.5", getResult.Output);
+            }
+            finally
+            {
+                // Restore the original value so the test leaves no trace.
+                BuildSettingsTools.SettingsSetTime(
+                    $"{{\"fields\":[{{\"key\":\"timeScale\",\"value\":{original}}}]}}");
+            }
+        }
+
+        [Test]
+        public void SettingsSetTime_UnknownKey_ReportsNoApplicableKeys()
+        {
+            var result = BuildSettingsTools.SettingsSetTime(
+                "{\"fields\":[{\"key\":\"__not_a_time_key\",\"value\":1}]}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("no_applicable_keys", result.ErrorCode);
+        }
+
+        [Test]
+        public void SettingsGetRenderPipeline_ReportsPipeline_Readonly()
+        {
+            var result = BuildSettingsTools.SettingsGetRenderPipeline("{}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("\"status\":\"ok\"", result.Output);
+            StringAssert.Contains("\"pipeline\":", result.Output);
+            // The read-only contract: hasSetter is always false.
+            StringAssert.Contains("\"hasSetter\":false", result.Output);
+            // The note explains why there is no setter.
+            StringAssert.Contains("\"note\":", result.Output);
+        }
+
+        [Test]
+        public void SettingsSetQualityLevel_MissingLevel_ReturnsMissingParameter()
+        {
+            var result = BuildSettingsTools.SettingsSetQualityLevel("{}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("missing_parameter", result.ErrorCode);
+        }
+
+        [Test]
+        public void SettingsSetQualityLevel_ByIndex_SwitchesActiveLevel()
+        {
+            // Capture the original level so we can restore it.
+            int original = UnityEngine.QualitySettings.GetQualityLevel();
+            try
+            {
+                // Pick a target index different from the current one (clamp to
+                // the available level count).
+                var names = UnityEngine.QualitySettings.names;
+                int target = names.Length > 1 && original != 0 ? 0 : (names.Length > 1 ? 1 : 0);
+
+                var setResult = BuildSettingsTools.SettingsSetQualityLevel(
+                    $"{{\"quality_level\":{target}}}");
+                Assert.IsTrue(setResult.Success, setResult.ErrorMessage);
+                StringAssert.Contains("\"status\":\"ok\"", setResult.Output);
+                StringAssert.Contains("\"action\":\"set_quality_level\"", setResult.Output);
+                StringAssert.Contains($"\"requestedLevel\":{target}", setResult.Output);
+
+                var after = UnityEngine.QualitySettings.GetQualityLevel();
+                Assert.AreEqual(target, after);
+            }
+            finally
+            {
+                UnityEngine.QualitySettings.SetQualityLevel(original);
+            }
+        }
+
+        [Test]
+        public void SettingsSetQualityLevel_InvalidName_ReturnsInvalidQualityLevel()
+        {
+            var result = BuildSettingsTools.SettingsSetQualityLevel(
+                "{\"quality_level\":\"__no_such_level__\"}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("invalid_quality_level", result.ErrorCode);
+        }
+
+        // ----------------------- T20.9.3 dispatch wiring -------------------
+
+        [Test]
+        public void KnownTools_ContainsSettingsRemainderTools()
+        {
+            Assert.IsTrue(BridgeToolClassification.KnownTools.Contains("unity_open_mcp_settings_get_time"));
+            Assert.IsTrue(BridgeToolClassification.KnownTools.Contains("unity_open_mcp_settings_set_time"));
+            Assert.IsTrue(BridgeToolClassification.KnownTools.Contains("unity_open_mcp_settings_get_render_pipeline"));
+            Assert.IsTrue(BridgeToolClassification.KnownTools.Contains("unity_open_mcp_settings_set_quality_level"));
+        }
+
+        [Test]
+        public void DirectResponseTools_ContainsSettingsRemainderReads()
+        {
+            Assert.IsTrue(BridgeToolClassification.DirectResponseTools.Contains("unity_open_mcp_settings_get_time"));
+            Assert.IsTrue(BridgeToolClassification.DirectResponseTools.Contains("unity_open_mcp_settings_get_render_pipeline"));
+        }
+
+        [Test]
+        public void MutatingTools_ContainsSettingsRemainderMutators()
+        {
+            Assert.IsTrue(BridgeToolClassification.MutatingTools.Contains("unity_open_mcp_settings_set_time"));
+            Assert.IsTrue(BridgeToolClassification.MutatingTools.Contains("unity_open_mcp_settings_set_quality_level"));
+        }
+
+        [Test]
+        public void Lifecycle_SettingsRemainderMutatorsResolveToEditorSettle()
+        {
+            // set_time + set_quality_level write ProjectSettings/*.asset without
+            // recompiling → EditorSettle. Reads default to None.
+            Assert.AreEqual(LifecyclePolicy.EditorSettle,
+                ToolLifecycle.Resolve("unity_open_mcp_settings_set_time"));
+            Assert.AreEqual(LifecyclePolicy.EditorSettle,
+                ToolLifecycle.Resolve("unity_open_mcp_settings_set_quality_level"));
+            Assert.AreEqual(LifecyclePolicy.None,
+                ToolLifecycle.Resolve("unity_open_mcp_settings_get_time"));
+            Assert.AreEqual(LifecyclePolicy.None,
+                ToolLifecycle.Resolve("unity_open_mcp_settings_get_render_pipeline"));
+        }
+
+        [Test]
+        public void DirtyGuard_NeverPreflightsSettingsRemainderTools()
+        {
+            // EditorSettle (not RestartThenSettle) → no dirty guard preflight.
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_settings_set_time", "{}"));
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_settings_set_quality_level", "{}"));
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_settings_get_time", "{}"));
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo("unity_open_mcp_settings_get_render_pipeline", "{}"));
+        }
     }
 }

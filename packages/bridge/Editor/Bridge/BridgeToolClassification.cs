@@ -186,7 +186,24 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_asmdef_list",
             "unity_open_mcp_asmdef_get",
             "unity_open_mcp_asmdef_create",
-            "unity_open_mcp_asmdef_modify"
+            "unity_open_mcp_asmdef_modify",
+            // M20 Plan 9 / T20.9.2 — KV preferences. PlayerPrefs + EditorPrefs
+            // write to the registry / Library/PlayerPreferences (NOT project
+            // assets), so they are mutating editor state but route as gate-free
+            // direct-response tools (mirrors editor_undo / editor_redo).
+            "unity_open_mcp_playerprefs_get",
+            "unity_open_mcp_playerprefs_set",
+            "unity_open_mcp_playerprefs_delete",
+            "unity_open_mcp_editorprefs_get",
+            "unity_open_mcp_editorprefs_set",
+            "unity_open_mcp_editorprefs_delete",
+            // M20 Plan 9 / T20.9.3 — Project Settings remainder. set_time +
+            // set_quality_level write ProjectSettings/*.asset (MutatingTools);
+            // get_time + get_render_pipeline are read-only (DirectResponseTools).
+            "unity_open_mcp_settings_get_time",
+            "unity_open_mcp_settings_set_time",
+            "unity_open_mcp_settings_get_render_pipeline",
+            "unity_open_mcp_settings_set_quality_level"
         };
 
         internal static readonly HashSet<string> DirectResponseTools = new()
@@ -314,7 +331,25 @@ namespace UnityOpenMcpBridge
             // M20 Plan 5 / T20.5.2 — read-only typed asmdef reads (gate-free).
             // Both are offline-routeable (.asmdef is plain JSON).
             "unity_open_mcp_asmdef_list",
-            "unity_open_mcp_asmdef_get"
+            "unity_open_mcp_asmdef_get",
+            // M20 Plan 9 / T20.9.2 — KV preferences. PlayerPrefs + EditorPrefs
+            // mutate editor state but write NO project assets (they target the
+            // registry / Library/PlayerPreferences). Like editor_undo /
+            // editor_set_state, the gate (asset-reference validation) has nothing
+            // to validate, so all six members (get/set/delete × 2) route as
+            // gate-free direct-response tools. The mutating nature is still
+            // visible in the catalog/toggle (they are in KnownTools).
+            "unity_open_mcp_playerprefs_get",
+            "unity_open_mcp_playerprefs_set",
+            "unity_open_mcp_playerprefs_delete",
+            "unity_open_mcp_editorprefs_get",
+            "unity_open_mcp_editorprefs_set",
+            "unity_open_mcp_editorprefs_delete",
+            // M20 Plan 9 / T20.9.3 — read-only ProjectSettings remainder.
+            // get_time reads TimeManager (in-memory Time values); get_render_
+            // pipeline probes GraphicsSettings. Neither writes a project asset.
+            "unity_open_mcp_settings_get_time",
+            "unity_open_mcp_settings_get_render_pipeline"
         };
 
         internal static readonly HashSet<string> MutatingTools = new()
@@ -420,7 +455,14 @@ namespace UnityOpenMcpBridge
             // caller scopes paths_hint to the asset path; RestartThenSettle
             // covers the recompile settle window.
             "unity_open_mcp_asmdef_create",
-            "unity_open_mcp_asmdef_modify"
+            "unity_open_mcp_asmdef_modify",
+            // M20 Plan 9 / T20.9.3 — Project Settings remainder mutators.
+            // set_time writes ProjectSettings/TimeManager.asset; set_quality_level
+            // writes ProjectSettings/Quality.asset. Each runs the full gate path
+            // with paths_hint scoped to the touched asset (see each tool's
+            // description).
+            "unity_open_mcp_settings_set_time",
+            "unity_open_mcp_settings_set_quality_level"
         };
     }
 }

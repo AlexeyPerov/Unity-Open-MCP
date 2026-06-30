@@ -700,6 +700,324 @@ namespace UnityOpenMcpBridge.TypedTools
             return ApplyKeyedSettings(body, "set_lighting", ApplyLightingSetting);
         }
 
+        // ============================ Settings remainder (T20.9.3) ===========
+        //
+        // Time, Render Pipeline (read-only), Quality level. These close the
+        // last Project Settings parity gap. Time + quality-level write
+        // ProjectSettings assets (full gate path); render_pipeline is a
+        // read-only probe (no setter — switching SRP is a package operation).
+
+        // Read-only: TimeManager snapshot (fixedDeltaTime / timeScale /
+        // maximumDeltaTime / captureFramerate via Time + the TimeManager
+        // singleton). Gate-free. The runtime Time values reflect the editor's
+        // current TimeManager.asset.
+        public static ToolDispatchResult SettingsGetTime(string body)
+        {
+            try
+            {
+                var sb = new StringBuilder(192);
+                sb.Append("{\"status\":\"ok\",\"timeScale\":").Append(Num(Time.timeScale));
+                sb.Append(",\"fixedDeltaTime\":").Append(Num(Time.fixedDeltaTime));
+                sb.Append(",\"maximumDeltaTime\":").Append(Num(Time.maximumDeltaTime));
+                sb.Append(",\"smoothDeltaTime\":").Append(Num(Time.smoothDeltaTime));
+                sb.Append(",\"captureFramerate\":").Append(Time.captureFramerate);
+                // TimeManager.asset-backed fields are surfaced via the
+                // SerializedObject so the on-disk values are reported (the
+                // runtime Time.* reads above are the live mirror).
+                var tm = LoadTimeManager();
+                if (tm != null)
+                {
+                    using (var so = new SerializedObject(tm))
+                    {
+                        sb.Append(",\"fixedDeltaTimeSetting\":").Append(Num(so.FindProperty("Fixed Timestep")?.floatValue ?? Time.fixedDeltaTime));
+                        sb.Append(",\"timeScaleSetting\":").Append(Num(so.FindProperty("Time Scale")?.floatValue ?? Time.timeScale));
+                        sb.Append(",\"maximumDeltaTimeSetting\":").Append(Num(so.FindProperty("Maximum Allowed Timestep")?.floatValue ?? Time.maximumDeltaTime));
+                    }
+                }
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Mutating: patch the TimeManager fields. paths_hint scope:
+        // ProjectSettings/TimeManager.asset. Writes the asset then reloads the
+        // singleton so Time.* reflects the change in-editor.
+        public static ToolDispatchResult SettingsSetTime(string body)
+        {
+            var patches = JsonBody.GetObjectArray(body, "fields");
+            if (patches == null || patches.Length == 0)
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'fields' is required and must be a non-empty array of " +
+                    "{key, value} patches. Supported keys: fixedDeltaTime, " +
+                    "timeScale, maximumDeltaTime, captureFramerate.");
+
+            try
+            {
+                var tm = LoadTimeManager();
+                if (tm == null)
+                    return ToolDispatchResult.Fail("asset_not_found",
+                        "ProjectSettings/TimeManager.asset not found.");
+
+                var applied = new List<string>();
+                var warnings = new List<string>();
+                using (var so = new SerializedObject(tm))
+                {
+                    foreach (var raw in patches)
+                    {
+                        if (string.IsNullOrEmpty(raw)) continue;
+                        var key = JsonBody.GetString(raw, "key");
+                        if (string.IsNullOrWhiteSpace(key))
+                        {
+                            warnings.Add("Skipped a patch with no 'key'.");
+                            continue;
+                        }
+                        var valueRaw = JsonBody.GetRawValue(raw, "value");
+                        var warn = ApplyTimeSetting(so, key, valueRaw);
+                        if (warn != null) warnings.Add(warn);
+                        else applied.Add(key);
+                    }
+                    if (applied.Count > 0) so.ApplyModifiedProperties();
+                }
+
+                if (applied.Count == 0)
+                    return ToolDispatchResult.Fail("no_applicable_keys",
+                        "No TimeManager keys were applied. " +
+                        (warnings.Count > 0 ? string.Join(" ", warnings) : ""));
+
+                AssetDatabase.SaveAssets();
+
+                var sb = new StringBuilder(96 + applied.Count * 24 + warnings.Count * 64);
+                sb.Append("{\"status\":\"ok\",\"action\":\"set_time\"");
+                sb.Append(",\"applied\":[");
+                for (int i = 0; i < applied.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(EscName(applied[i])).Append('"');
+                }
+                sb.Append(']');
+                AppendWarnings(sb, warnings);
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Read-only: detect the active Scriptable Render Pipeline (Built-in /
+        // URP / HDRP) by inspecting GraphicsSettings.currentRenderPipeline +
+        // the default pipeline asset type. Gate-free. No setter — switching
+        // SRP is a package-level operation (package_add / package_remove); an
+        // agent that needs it should install/swap the render pipeline package,
+        // not tweak a settings asset.
+        public static ToolDispatchResult SettingsGetRenderPipeline(string body)
+        {
+            try
+            {
+                string pipeline;
+                string assetPath;
+                string shaderName;
+                var current = GraphicsSettings.currentRenderPipeline;
+                if (current != null)
+                {
+                    var t = current.GetType().FullName ?? current.GetType().Name;
+                    if (t.Contains("HD") || t.Contains("HighDefinition"))
+                    {
+                        pipeline = "HDRP";
+                        shaderName = "HDRP/Lit";
+                    }
+                    else if (t.Contains("Universal") || t.Contains("URP"))
+                    {
+                        pipeline = "URP";
+                        shaderName = "Universal Render Pipeline/Lit";
+                    }
+                    else
+                    {
+                        pipeline = t;
+                        shaderName = t;
+                    }
+                    assetPath = AssetDatabase.GetAssetPath(current);
+                }
+                else
+                {
+                    pipeline = "Built-in";
+                    shaderName = "Standard";
+                    assetPath = "";
+                }
+
+                var sb = new StringBuilder(160);
+                sb.Append("{\"status\":\"ok\",\"pipeline\":").Append(Q(pipeline));
+                sb.Append(",\"defaultShader\":").Append(Q(shaderName));
+                sb.Append(",\"renderPipelineAsset\":").Append(string.IsNullOrEmpty(assetPath) ? "null" : Q(assetPath));
+                sb.Append(",\"hasSetter\":false");
+                sb.Append(",\"note\":\"Switching SRP is a package-level operation — use package_add / package_remove to install or swap the render pipeline package (com.unity.render-pipelines.universal / com.unity.render-pipelines.high-definition).\"");
+                sb.Append('}');
+                return ToolDispatchResult.Ok(sb.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        // Mutating: set the active quality level (optionally per-platform).
+        // paths_hint scope: ProjectSettings/Quality.asset. quality_level may be
+        // a name or an index; platform (omit = all platforms) is a build-target
+        // name.
+        public static ToolDispatchResult SettingsSetQualityLevel(string body)
+        {
+            var levelRaw = JsonBody.GetRawValue(body, "quality_level");
+            if (string.IsNullOrWhiteSpace(levelRaw))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'quality_level' is required (a level name or index).");
+            var platform = JsonBody.GetString(body, "platform");
+
+            try
+            {
+                var names = QualitySettings.names;
+                int level = ResolveQualityLevel(levelRaw, names);
+                if (level < 0)
+                    return ToolDispatchResult.Fail("invalid_quality_level",
+                        $"quality_level '{AsString(levelRaw)}' did not match a level name or index. " +
+                        $"Available: {string.Join(", ", names)}.");
+
+                if (string.IsNullOrWhiteSpace(platform))
+                {
+                    // No platform → switch the active level globally.
+                    QualitySettings.SetQualityLevel(level, applyExpensiveChanges: true);
+                    AssetDatabase.SaveAssets();
+                    var after = QualitySettings.GetQualityLevel();
+                    var sbg = new StringBuilder(128);
+                    sbg.Append("{\"status\":\"ok\",\"action\":\"set_quality_level\"");
+                    sbg.Append(",\"requestedLevel\":").Append(level);
+                    sbg.Append(",\"requestedName\":").Append(Q(level < names.Length ? names[level] : ""));
+                    sbg.Append(",\"activeLevel\":").Append(after);
+                    sbg.Append(",\"activeName\":").Append(Q(names.Length > 0 && after >= 0 && after < names.Length ? names[after] : ""));
+                    sbg.Append(",\"platform\":null}");
+                    return ToolDispatchResult.Ok(sbg.ToString());
+                }
+
+                // Per-platform. Unity's public QualitySettings API does not
+                // expose a per-platform active-level setter (the per-platform
+                // quality is encoded in Quality.asset and toggled via the
+                // editor UI). We validate the platform name, set the global
+                // level, and report the requested platform scope so the agent
+                // knows the intent — an unrecognized platform surfaces a
+                // warning. For precise per-platform control, agents should use
+                // execute_csharp against the internal QualitySettings API.
+                bool recognized = Enum.TryParse(platform, true, out BuildTarget _);
+                QualitySettings.SetQualityLevel(level, applyExpensiveChanges: true);
+                AssetDatabase.SaveAssets();
+                var active = QualitySettings.GetQualityLevel();
+                var sbp = new StringBuilder(192);
+                sbp.Append("{\"status\":\"ok\",\"action\":\"set_quality_level\"");
+                sbp.Append(",\"requestedLevel\":").Append(level);
+                sbp.Append(",\"requestedName\":").Append(Q(level < names.Length ? names[level] : ""));
+                sbp.Append(",\"activeLevel\":").Append(active);
+                sbp.Append(",\"activeName\":").Append(Q(names.Length > 0 && active >= 0 && active < names.Length ? names[active] : ""));
+                sbp.Append(",\"platform\":").Append(Q(platform));
+                if (!recognized)
+                {
+                    sbp.Append(",\"warnings\":[\"Unrecognized platform '").Append(EscName(platform));
+                    sbp.Append("'; applied the level globally.\"]}");
+                }
+                else
+                {
+                    sbp.Append(",\"note\":\"Per-platform active-level setter is not exposed in the public API; the global level was set. Use execute_csharp for precise per-platform control.\"}");
+                }
+                return ToolDispatchResult.Ok(sbp.ToString());
+
+                var after = QualitySettings.GetQualityLevel();
+                var sb2 = new StringBuilder(128);
+                sb2.Append("{\"status\":\"ok\",\"action\":\"set_quality_level\"");
+                sb2.Append(",\"requestedLevel\":").Append(level);
+                sb2.Append(",\"requestedName\":").Append(Q(level < names.Length ? names[level] : ""));
+                sb2.Append(",\"activeLevel\":").Append(after);
+                sb2.Append(",\"activeName\":").Append(Q(names.Length > 0 && after >= 0 && after < names.Length ? names[after] : ""));
+                sb2.Append(",\"platform\":").Append(string.IsNullOrWhiteSpace(platform) ? "null" : Q(platform));
+                sb2.Append('}');
+                return ToolDispatchResult.Ok(sb2.ToString());
+            }
+            catch (Exception e)
+            {
+                return ToolDispatchResult.Fail("execution_error", e.Message);
+            }
+        }
+
+        private static int ResolveQualityLevel(string levelRaw, string[] names)
+        {
+            var s = AsString(levelRaw).Trim();
+            if (int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var idx))
+            {
+                if (idx >= 0 && idx < names.Length) return idx;
+            }
+            for (int i = 0; i < names.Length; i++)
+            {
+                if (string.Equals(names[i], s, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+            return -1;
+        }
+
+        // Apply one TimeManager patch to the SerializedObject. Returns null on
+        // success, a warning string on failure. captureFramerate is a runtime-
+        // only Time value (not serialized in TimeManager.asset) — it is applied
+        // via the Time static API directly.
+        private static string ApplyTimeSetting(SerializedObject so, string key, string valueRaw)
+        {
+            // captureFramerate is a runtime Time value, not a TimeManager.asset
+            // field — apply it via the static API and return.
+            if (key == "captureFramerate")
+            {
+                try { Time.captureFramerate = AsInt(valueRaw); return null; }
+                catch (Exception e) { return $"Could not apply time setting '{key}': {e.Message}"; }
+            }
+
+            // TimeManager.asset uses friendly property names matching the
+            // Project Settings > Time panel.
+            string propName;
+            switch (key)
+            {
+                case "fixedDeltaTime":
+                case "Fixed Timestep":
+                    propName = "Fixed Timestep"; break;
+                case "timeScale":
+                case "Time Scale":
+                    propName = "Time Scale"; break;
+                case "maximumDeltaTime":
+                case "Maximum Allowed Timestep":
+                    propName = "Maximum Allowed Timestep"; break;
+                default:
+                    return $"Unknown time setting key: '{key}'. Supported: fixedDeltaTime, timeScale, maximumDeltaTime, captureFramerate.";
+            }
+            try
+            {
+                var prop = so.FindProperty(propName);
+                if (prop == null) return $"TimeManager property '{propName}' not found on this Unity version.";
+                prop.floatValue = AsFloat(valueRaw);
+                return null;
+            }
+            catch (Exception e)
+            {
+                return $"Could not apply time setting '{key}': {e.Message}";
+            }
+        }
+
+        // Load the TimeManager.asset (ProjectSettings). Returns null when absent.
+        private static UnityEngine.Object LoadTimeManager()
+        {
+            const string path = "ProjectSettings/TimeManager.asset";
+            var asset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
+            if (asset != null) return asset;
+            // Fallback: some installs only expose it via the internal API.
+            return null;
+        }
+
         // ----------------------- keyed settings helper -------------------
 
         // Shared body for the settings_set_* mutators: parse the fields[] array,

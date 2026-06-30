@@ -124,6 +124,15 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_settings_set_quality",  LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_settings_set_physics", LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_settings_set_lighting",LifecyclePolicy.EditorSettle },
+            // M20 Plan 9 / T20.9.3 — Project Settings remainder mutators.
+            // set_time writes TimeManager.asset (no recompile); set_quality_level
+            // writes Quality.asset (no recompile). Both EditorSettle. The read-
+            // only get_time / get_render_pipeline route as direct-response tools
+            // and fall through to the None default below. KV preferences
+            // (T20.9.2) write no project assets and route as direct-response
+            // tools (None default) — see BridgeToolClassification.
+            { "unity_open_mcp_settings_set_time",        LifecyclePolicy.EditorSettle },
+            { "unity_open_mcp_settings_set_quality_level", LifecyclePolicy.EditorSettle },
 
             // ----- RestartThenSettle: may trigger a domain reload -----
             // execute_csharp / invoke_method can recompile; execute_menu can

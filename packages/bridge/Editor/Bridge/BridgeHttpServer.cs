@@ -945,6 +945,22 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_settings_set_physics" => BuildSettingsTools.SettingsSetPhysics(body),
                 "unity_open_mcp_settings_get_lighting" => BuildSettingsTools.SettingsGetLighting(body),
                 "unity_open_mcp_settings_set_lighting" => BuildSettingsTools.SettingsSetLighting(body),
+                // M20 Plan 9 / T20.9.3 — Project Settings remainder. Time +
+                // quality-level mutators write ProjectSettings/*.asset (full
+                // gate path); render_pipeline is a read-only probe (gate-free).
+                "unity_open_mcp_settings_get_time" => BuildSettingsTools.SettingsGetTime(body),
+                "unity_open_mcp_settings_set_time" => BuildSettingsTools.SettingsSetTime(body),
+                "unity_open_mcp_settings_get_render_pipeline" => BuildSettingsTools.SettingsGetRenderPipeline(body),
+                "unity_open_mcp_settings_set_quality_level" => BuildSettingsTools.SettingsSetQualityLevel(body),
+                // M20 Plan 9 / T20.9.2 — KV preferences. PlayerPrefs + EditorPrefs
+                // write to the registry / Library (not project assets), so they
+                // route as direct-response mutators like editor_undo (gate-free).
+                "unity_open_mcp_playerprefs_get" => PlayerPrefsTools.PlayerPrefsGet(body),
+                "unity_open_mcp_playerprefs_set" => PlayerPrefsTools.PlayerPrefsSet(body),
+                "unity_open_mcp_playerprefs_delete" => PlayerPrefsTools.PlayerPrefsDelete(body),
+                "unity_open_mcp_editorprefs_get" => PlayerPrefsTools.EditorPrefsGet(body),
+                "unity_open_mcp_editorprefs_set" => PlayerPrefsTools.EditorPrefsSet(body),
+                "unity_open_mcp_editorprefs_delete" => PlayerPrefsTools.EditorPrefsDelete(body),
                 _ => BridgeToolRegistry.TryDispatch(toolName, body)
                      ?? ToolDispatchResult.Fail("tool_not_found", $"Unknown tool: {toolName}")
             };

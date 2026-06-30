@@ -173,6 +173,27 @@ import { settingsGetPhysics } from "./settings-get-physics.js";
 import { settingsSetPhysics } from "./settings-set-physics.js";
 import { settingsGetLighting } from "./settings-get-lighting.js";
 import { settingsSetLighting } from "./settings-set-lighting.js";
+// M20 Plan 9 / T20.9.2 — KV preferences (PlayerPrefs + EditorPrefs). Mutating
+// members (set / delete) write to the registry / Library/PlayerPreferences, NOT
+// to project assets — they route as gate-free direct-response tools like
+// editor_undo (the catalog/toggle still marks them mutating). playerprefs_set
+// calls PlayerPrefs.Save(); EditorPrefs writes through immediately.
+// playerprefs_delete_all is deliberately omitted (irreversible wipe — route
+// through execute_csharp with an explicit confirm).
+import { playerprefsGet } from "./playerprefs-get.js";
+import { playerprefsSet } from "./playerprefs-set.js";
+import { playerprefsDelete } from "./playerprefs-delete.js";
+import { editorprefsGet } from "./editorprefs-get.js";
+import { editorprefsSet } from "./editorprefs-set.js";
+import { editorprefsDelete } from "./editorprefs-delete.js";
+// M20 Plan 9 / T20.9.3 — Project Settings remainder. set_time +
+// set_quality_level write ProjectSettings/*.asset (full gate path); get_time +
+// get_render_pipeline are read-only. get_render_pipeline has no setter —
+// switching SRP is a package-level operation.
+import { settingsGetTime } from "./settings-get-time.js";
+import { settingsSetTime } from "./settings-set-time.js";
+import { settingsGetRenderPipeline } from "./settings-get-render-pipeline.js";
+import { settingsSetQualityLevel } from "./settings-set-quality-level.js";
 // M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tools. Each tool is
 // gated on the `com.alexeyperov.unity-open-mcp-ext-navigation` extension pack
 // being installed in the target project; the tool definitions live in core so
@@ -685,6 +706,22 @@ export const M16_PLAN9_TOOLS: Tool[] = [
   settingsSetPhysics,
   settingsGetLighting,
   settingsSetLighting,
+  // M20 Plan 9 / T20.9.2 — KV preferences. PlayerPrefs + EditorPrefs share the
+  // build-settings group (project configuration surface). set / delete are
+  // mutating but gate-free (registry writes — no asset scope).
+  playerprefsGet,
+  playerprefsSet,
+  playerprefsDelete,
+  editorprefsGet,
+  editorprefsSet,
+  editorprefsDelete,
+  // M20 Plan 9 / T20.9.3 — Project Settings remainder. set_time /
+  // set_quality_level run the gate (ProjectSettings asset writes);
+  // get_time / get_render_pipeline are gate-free.
+  settingsGetTime,
+  settingsSetTime,
+  settingsGetRenderPipeline,
+  settingsSetQualityLevel,
 ];
 
 // M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tools. Extension pack

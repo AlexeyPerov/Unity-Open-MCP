@@ -553,6 +553,22 @@ assign(
     "settings_set_physics",
     "settings_get_lighting",
     "settings_set_lighting",
+    // M20 Plan 9 / T20.9.2 — KV preferences ride the build-settings group
+    // (project configuration surface). Mutating members are gate-free (registry
+    // writes — no asset scope); playerprefs_delete_all is deliberately absent.
+    "playerprefs_get",
+    "playerprefs_set",
+    "playerprefs_delete",
+    "editorprefs_get",
+    "editorprefs_set",
+    "editorprefs_delete",
+    // M20 Plan 9 / T20.9.3 — Project Settings remainder. set_time +
+    // set_quality_level run the gate (ProjectSettings asset writes);
+    // get_time + get_render_pipeline are gate-free reads.
+    "settings_get_time",
+    "settings_set_time",
+    "settings_get_render_pipeline",
+    "settings_set_quality_level",
   ].map((suffix) => `unity_open_mcp_${suffix}`),
 );
 

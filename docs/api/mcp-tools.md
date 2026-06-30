@@ -20,7 +20,7 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 
 ## Tool groups and session visibility
 
-Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools` — **except auto-activating groups**, which activate automatically when their Unity package is installed (see §Auto-activation below). This keeps the prompt surface small (the full tool set is 230 tools) — a per-session group-visibility model so only the relevant tools are advertised.
+Sessions start with few main groups enabled. Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools` — **except auto-activating groups**, which activate automatically when their Unity package is installed (see §Auto-activation below). This keeps the prompt surface small (the full tool set is 251 tools) — a per-session group-visibility model so only the relevant tools are advertised.
 
 ### Groups
 
@@ -33,7 +33,7 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | `typed-editor`       | on      | typed editor surface (assets, materials, shaders, prefabs, GameObjects, components, scenes, packages, console, selection, undo, tags, layers, reflection, scripts, object data, ScriptableObject create + list-by-type, Assembly Definition list/get/create/modify) |
 | `diagnostics`        | off     | Profiler session controls + per-frame capture/memory/rendering reads                                                                                                            |
 | `gate-intelligence`  | off     | impact_preview, gate_budget_estimate, mutation_explain                                                                                                                          |
-| `build-settings`     | off     | Build pipeline + ProjectSettings reads and mutators                                                                                                                             |
+| `build-settings`     | off     | Build pipeline + ProjectSettings reads and mutators (player/quality/physics/lighting + time/render-pipeline/quality-level), plus KV preferences (PlayerPrefs + EditorPrefs)      |
 | `navigation`         | off     | NavMesh tools — compile-gated on `com.unity.ai.navigation`                                                                                                                      |
 | `input-system`       | off     | Input System tools — compile-gated on `com.unity.inputsystem`                                                                                                                   |
 | `probuilder`         | off     | ProBuilder modeling tools — compile-gated on `com.unity.probuilder`                                                                                                             |
@@ -181,7 +181,7 @@ The Unity Open MCP bridge window has a **Batch** tab — a read-only view of in-
 
 ### In-Editor Tools tab token estimate
 
-The bridge window's **Tools** tab surfaces a per-tool token estimate so operators can reason about the context-window cost of an active tool set *before* an agent connects. With 230 tools across the always-on + grouped + auto-activated domains, the cost of an active set is otherwise invisible until an agent sees the tool list.
+The bridge window's **Tools** tab surfaces a per-tool token estimate so operators can reason about the context-window cost of an active tool set *before* an agent connects. With 251 tools across the always-on + grouped + auto-activated domains, the cost of an active set is otherwise invisible until an agent sees the tool list.
 
 The estimate is **regenerated from the same source as the tool catalog** — the MCP-server tool schemas (`mcp-server/src/tools/*`) — by `scripts/generate-token-estimates.mjs`, which serializes each tool's `{ name, description, inputSchema }` to its MCP wire JSON and estimates tokens via a `chars / 4` heuristic (dependency-free; a real BPE tokenizer is out of scope — the value is for *relative* cost, not exact counts). The generated `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs` is checked in and read by the bridge at runtime; there is no second hand-maintained list, and a CI drift gate (`.github/workflows/version-sync.yml`) fails any PR where the table disagrees with the schemas.
 

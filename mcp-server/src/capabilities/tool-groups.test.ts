@@ -359,6 +359,43 @@ test("groupToTools sprite2d roster has all 11 2D-art-pipeline tools", () => {
 });
 
 // ---------------------------------------------------------------------------
+// M20 Plan 9 / T20.9.2 + T20.9.3 — KV preferences + Project Settings remainder
+// ride the build-settings group (project configuration surface).
+// ---------------------------------------------------------------------------
+
+test("groupFor assigns prefs + settings-remainder tools to build-settings", () => {
+  for (const name of [
+    // T20.9.2 — KV preferences (gate-free mutators; registry writes).
+    "unity_open_mcp_playerprefs_get",
+    "unity_open_mcp_playerprefs_set",
+    "unity_open_mcp_playerprefs_delete",
+    "unity_open_mcp_editorprefs_get",
+    "unity_open_mcp_editorprefs_set",
+    "unity_open_mcp_editorprefs_delete",
+    // T20.9.3 — Project Settings remainder.
+    "unity_open_mcp_settings_get_time",
+    "unity_open_mcp_settings_set_time",
+    "unity_open_mcp_settings_get_render_pipeline",
+    "unity_open_mcp_settings_set_quality_level",
+  ]) {
+    assert.equal(groupFor(name), "build-settings", `${name} must map to build-settings`);
+  }
+});
+
+test("groupToTools build-settings roster includes the 10 new prefs + remainder tools", () => {
+  const map = groupToTools();
+  // The build-settings group already carried the 16 M16 Plan 9 build/settings
+  // tools; T20.9.2 adds 6 prefs tools and T20.9.3 adds 4 settings-remainder
+  // tools → 26 total.
+  assert.ok(map["build-settings"].length >= 26, "build-settings must include the new tools");
+  assert.ok(map["build-settings"].includes("unity_open_mcp_playerprefs_set"));
+  assert.ok(map["build-settings"].includes("unity_open_mcp_editorprefs_delete"));
+  assert.ok(map["build-settings"].includes("unity_open_mcp_settings_set_time"));
+  assert.ok(map["build-settings"].includes("unity_open_mcp_settings_set_quality_level"));
+  assert.ok(map["build-settings"].includes("unity_open_mcp_settings_get_render_pipeline"));
+});
+
+// ---------------------------------------------------------------------------
 // M20 Plan 7 / T20.7.0 + T20.7.1 — shadergraph catalog + auto-activation
 // ---------------------------------------------------------------------------
 

@@ -193,6 +193,29 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_settings_set_physics: "build-settings",
   unity_open_mcp_settings_get_lighting: "build-settings",
   unity_open_mcp_settings_set_lighting: "build-settings",
+  // M20 Plan 9 / T20.9.2 — KV preferences. PlayerPrefs + EditorPrefs are
+  // mutating editor-state writes to the registry / Library/PlayerPreferences
+  // (NOT project assets), so they route as gate-free direct-response tools like
+  // editor_undo. set / delete are mutating in catalog terms (the toggle / Tools
+  // tab reflect it) even though the asset gate has nothing to validate.
+  // playerprefs_set calls PlayerPrefs.Save(); EditorPrefs writes through
+  // immediately. playerprefs_delete_all is deliberately omitted (irreversible
+  // project-wide wipe — route through execute_csharp with an explicit confirm).
+  unity_open_mcp_playerprefs_get: "build-settings",
+  unity_open_mcp_playerprefs_set: "build-settings",
+  unity_open_mcp_playerprefs_delete: "build-settings",
+  unity_open_mcp_editorprefs_get: "build-settings",
+  unity_open_mcp_editorprefs_set: "build-settings",
+  unity_open_mcp_editorprefs_delete: "build-settings",
+  // M20 Plan 9 / T20.9.3 — Project Settings remainder. set_time +
+  // set_quality_level write ProjectSettings/*.asset (full gate path,
+  // EditorSettle); get_time + get_render_pipeline are gate-free reads.
+  // get_render_pipeline has no setter — switching SRP is a package-level
+  // operation (package_add / package_remove).
+  unity_open_mcp_settings_get_time: "build-settings",
+  unity_open_mcp_settings_set_time: "build-settings",
+  unity_open_mcp_settings_get_render_pipeline: "build-settings",
+  unity_open_mcp_settings_set_quality_level: "build-settings",
   // M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tools. Extension
   // pack tools ship tool definitions in the core MCP server (so capabilities
   // advertises the surface) but require the matching extension UPM package
