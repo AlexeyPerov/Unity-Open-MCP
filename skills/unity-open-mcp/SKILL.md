@@ -18,6 +18,7 @@ Practical skill for AI agents driving a Unity project through the `unity-open-mc
 4. **One test run at a time** — never start a second `unity_senses_run_tests` before the first resolves (no concurrency guard; results cross-contaminate).
 5. **Mutation success ≠ project safe** — always read gate output (`gate.delta`, `agentNextSteps`).
 6. **Never launch a second Unity instance** for the same project — Unity holds a per-project lock (`<project>/Temp/UnityLockfile`); diagnose the wedged instance instead.
+7. **Start compact, expand on demand** — the heavy tools (`read_asset` / `search_assets` / `scene_get_data` / `find_references` / `validate_edit` / `scan_paths`) default to `profile: "compact"` + a `pagination` block. Drill down (`component` / `path` / `id` flags) or escalate to `balanced` / `full` only for the slice you need; set `page_size` to bound any profile. See `capabilities.costHints` for per-tool profile cost bands + recommended page sizes.
 
 ## Fast start sequence
 

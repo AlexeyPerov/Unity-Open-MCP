@@ -571,6 +571,48 @@ test("routing summary is returned even with a kind filter", () => {
 });
 
 // ---------------------------------------------------------------------------
+// M22 Plan 1 / T22.1.5 — cost hints block
+// ---------------------------------------------------------------------------
+
+test("capabilities include a costHints block", () => {
+  const caps = buildCapabilities(DEPS);
+  assert.ok(caps.costHints, "costHints block must be present");
+  assert.ok(Array.isArray(caps.costHints.tools));
+  assert.ok(caps.costHints.tools.length > 0, "costHints.tools must be non-empty");
+  assert.ok(
+    typeof caps.costHints.recommendedPageSize === "object" &&
+      caps.costHints.recommendedPageSize !== null,
+  );
+  assert.ok(Array.isArray(caps.costHints.recommendedToolChains));
+  assert.ok(
+    typeof caps.costHints.guidance === "string" && caps.costHints.guidance.length > 0,
+  );
+});
+
+test("costHints block covers the documented heavy-tool roster", () => {
+  const caps = buildCapabilities(DEPS);
+  const hinted = new Set(caps.costHints.tools.map((h) => h.tool));
+  for (const tool of [
+    "unity_open_mcp_read_asset",
+    "unity_open_mcp_search_assets",
+    "unity_open_mcp_scene_get_data",
+    "unity_open_mcp_find_references",
+    "unity_open_mcp_validate_edit",
+    "unity_open_mcp_scan_paths",
+  ]) {
+    assert.ok(hinted.has(tool), `${tool} must appear in costHints`);
+  }
+});
+
+test("costHints block is returned even with a kind filter", () => {
+  // Independent of the kind filter — agents asking for rules/fixes still
+  // benefit from the cost narrative (same rationale as routing).
+  const caps = buildCapabilities(DEPS, { kind: "rules" });
+  assert.ok(caps.costHints);
+  assert.ok(caps.costHints.tools.length > 0);
+});
+
+// ---------------------------------------------------------------------------
 // buildCapabilities — filters
 // ---------------------------------------------------------------------------
 

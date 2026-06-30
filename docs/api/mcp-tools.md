@@ -145,6 +145,8 @@ Use the response fields:
 - `tools[].batchCapable`
 - `tools[].inputSchema`
 - `toolGroups[]` — per-group catalog (compiled-state availability, default-enabled flag, tool roster, usage hint)
+- `routing` — one-shot routing narrative (live default, batch fallback, blocked meta-tools, live-only categories)
+- `costHints` — per-tool profile cost bands + recommended page sizes + recommended tool chains (see [Cost hints](#cost-hints-capabilitiescosthints--server-instructions))
 
 ## Route policy
 
@@ -288,6 +290,61 @@ per-asset / per-issue lists those tools previously returned by default.
 `read_asset` / `scene_get_data` / `search_assets` (whose previous default was
 already the summary/folded shape) but changes the default output of
 `find_references` / `validate_edit` / `scan_paths` to counts/groupings only.
+
+### Cost hints (`capabilities.costHints`) + server instructions
+
+`unity_open_mcp_capabilities` carries a `costHints` block so an agent can
+reason about prompt cost *before* choosing a profile, and learn the
+budget-aware way to accomplish common tasks:
+
+```json
+"costHints": {
+  "tools": [
+    {
+      "tool": "unity_open_mcp_read_asset",
+      "profileControls": "TREE folding (compact = CMP codes + omission counts; full = verbose tree).",
+      "pageSizePages": "TREE rows.",
+      "profiles": {
+        "compact":  { "band": "small",  "approxTokens": "~0.3–0.8k tokens" },
+        "balanced": { "band": "medium", "approxTokens": "~1–4k tokens" },
+        "full":     { "band": "large",  "approxTokens": "large — unbounded; set page_size to bound it" }
+      }
+    }
+    // …one entry per heavy tool
+  ],
+  "recommendedPageSize": {
+    "unity_open_mcp_read_asset": 40,
+    "unity_open_mcp_search_assets": 25,
+    "unity_open_mcp_scene_get_data": 50,
+    "unity_open_mcp_find_references": 50,
+    "unity_open_mcp_validate_edit": 25,
+    "unity_open_mcp_scan_paths": 25
+  },
+  "recommendedToolChains": [ /* discover, asset-inspect, find-references, mutate-then-verify, verify-api-before-coding */ ],
+  "guidance": "Start with the default compact profile on every heavy tool, then expand (profile=\"balanced\" / \"full\") or drill down (component / path / id flags) only for the slice you need. Set page_size to bound any profile; follow pagination.next_cursor to resume. compact is the documented default for all heavy tools."
+}
+```
+
+- `band` is one of `small` (~0.3–0.8k tokens) / `medium` (~1–4k) / `large`
+  (unbounded — set `page_size`). Bands are monotonic across profiles
+  (`compact ≤ balanced ≤ full`) and full is never `small` on the heavy tools.
+- `approxTokens` is the same range as a display string, so an agent can show
+  it inline without mapping the band back to a range.
+- `recommendedPageSize` is a starting point, not a hard cap — an agent may
+  choose a different `page_size`.
+- `recommendedToolChains` names the canonical sequence for common tasks
+  (discover, asset-inspect, find-references, mutate-then-verify,
+  verify-api-before-coding).
+
+The bands are *planning hints*, not measurements — real payloads can fall
+outside the range on very large or very small inputs; `page_size` is the
+mechanism that enforces an actual cap.
+
+The MCP `initialize` response also carries a rich `instructions` string
+(client-injected into the system prompt where supported) covering payload
+sizing + paging, the Unity-API verification workflow (`search_assets` →
+`find_members` → `type_schema` → `execute_csharp`), the mutate→gate→fix loop
+with inline `logs`, and offline / bridge-offline recovery.
 
 ### Per-call `logs` (inline console capture)
 

@@ -23,6 +23,10 @@ import {
   groupFor,
   type ToolGroup,
 } from "./tool-groups.js";
+import {
+  buildCostHints,
+  type CostHintsBlock,
+} from "./cost-hints.js";
 
 // ---------------------------------------------------------------------------
 // Route metadata — mirrors tool-router.ts / compressible-router.ts decisions
@@ -673,6 +677,14 @@ export interface CapabilitiesResult {
    * {@link ToolCapability} entry, not here.
    */
   routing: RoutingSummary;
+  /**
+   * M22 Plan 1 / T22.1.5 — per-tool cost hints (approximate token cost per
+   * output profile) + recommended tool chains. Lets an agent reason about
+   * prompt cost before choosing a profile, and learn the budget-aware way to
+   * accomplish common tasks. Independent of the kind filter — agents asking
+   * for rules/fixes still benefit from the cost narrative.
+   */
+  costHints: CostHintsBlock;
 }
 
 /**
@@ -801,6 +813,11 @@ export function buildCapabilities(
     // that ask for `kind: "rules"` still benefit from the routing
     // narrative. It is constant, so no per-call computation.
     routing: ROUTING_SUMMARY,
+    // M22 Plan 1 / T22.1.5 — cost hints are independent of the kind filter for
+    // the same reason as routing: an agent asking for rules/fixes still wants
+    // to know how to budget its next heavy-tool call. Constant, so no per-call
+    // computation.
+    costHints: buildCostHints(),
   };
 }
 

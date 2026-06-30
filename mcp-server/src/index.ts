@@ -22,6 +22,7 @@ import { KNOWN_COMMANDS } from "./cli/args.js";
 import { runCli } from "./cli/cli.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { readPackageVersion } from "./package-version.js";
+import { getServerInstructions } from "./server-instructions.js";
 import {
   ToolSessionState,
   filterVisibleTools,
@@ -92,7 +93,15 @@ export function createServer(
 ): Server {
   const server = new Server(
     { name: "unity-open-mcp", version: PACKAGE_VERSION },
-    { capabilities: { tools: { listChanged: true }, resources: {} } },
+    {
+      capabilities: { tools: { listChanged: true }, resources: {} },
+      // M22 Plan 1 / T22.1.5 — rich server instructions surfaced via the MCP
+      // `initialize` response. Clients may inject this into the system prompt;
+      // it covers payload sizing + paging, Unity-API verification workflow,
+      // and the mutate→gate→fix loop. Kept clean of internal IDs (no
+      // milestone / specs / reference-project handles).
+      instructions: getServerInstructions(),
+    },
   );
 
   const pingCache = new PingCache();
