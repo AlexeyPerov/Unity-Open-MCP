@@ -6,8 +6,11 @@ export const applyFix: Tool = {
     "Apply a verify rule fix action. Supports dry_run (default true) to preview the fix before applying. " +
     "Returns gate envelope when dry_run is false (dry_run short-circuits the gate entirely). " +
     "Implemented fixes: remove_missing_script (safe), relink_broken_guid (unsafe — needs target_guid), " +
-    "remove_orphan_meta (safe), fix_duplicate_guid (unsafe). " +
-    "Planned fixes: reassign_missing_texture, reassign_missing_shader.",
+    "remove_orphan_meta (safe), fix_duplicate_guid (unsafe), " +
+    "reassign_missing_texture (unsafe — needs target_texture), reassign_missing_shader (unsafe — needs target_shader). " +
+    "Safe auto-fix rollback: a non-dry-run apply that fails or introduces new errors under enforce is " +
+    "restored to its pre-fix state and the response carries a top-level `rollback` block " +
+    "({rolledBack, reason, restoredPaths}).",
   inputSchema: {
     type: "object",
     required: ["issue_id"],
@@ -27,6 +30,18 @@ export const applyFix: Tool = {
         description:
           "Optional. Replacement GUID for relink_broken_guid — the chosen target out of the " +
           "candidates the dry_run preview advertises. Ignored by other fixes.",
+      },
+      target_texture: {
+        type: "string",
+        description:
+          "Optional. The chosen texture for reassign_missing_texture — an asset path or 32-hex GUID " +
+          "out of the candidates the dry_run preview advertises. Ignored by other fixes.",
+      },
+      target_shader: {
+        type: "string",
+        description:
+          "Optional. The chosen shader for reassign_missing_shader — a shader name (e.g. 'Standard') " +
+          "or asset path, out of the candidates the dry_run preview advertises. Ignored by other fixes.",
       },
       dry_run: {
         type: "boolean",

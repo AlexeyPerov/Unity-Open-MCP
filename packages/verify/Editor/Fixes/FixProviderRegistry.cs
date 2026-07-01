@@ -38,6 +38,15 @@ namespace UnityOpenMcpVerify.Fixes
             {
                 _providers.Add(new RemoveMissingScriptFix());
                 _providers.Add(new RelinkBrokenGuidFix());
+                // M25 Plan 2 — fix-providers remainder. remove_orphan_meta +
+                // fix_duplicate_guid now have real C# providers (previously
+                // catalog-only; the offline TS scanner emitted the codes but
+                // apply_fix routed to a bridge with no provider). The two
+                // materials fixes link to the Plan 1 materials rule.
+                _providers.Add(new RemoveOrphanMetaFix());
+                _providers.Add(new FixDuplicateGuidFix());
+                _providers.Add(new ReassignMissingTextureFix());
+                _providers.Add(new ReassignMissingShaderFix());
             }
         }
 

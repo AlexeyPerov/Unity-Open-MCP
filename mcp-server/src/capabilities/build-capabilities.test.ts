@@ -243,26 +243,38 @@ test("relink_broken_guid fix is registered and unsafe", () => {
   assert.ok(fix!.issueCodes.includes("broken_dependency"));
 });
 
-test("planned fixes deferred from M12 are advertised with guidance", () => {
-  // T2.4 deferred: material texture/shader reassignment (depend on the
-  // `materials` rule, deferred to M17). remove_orphan_meta + fix_duplicate_guid
-  // were promoted to implemented in M24 Plan 2 (the offline_integrity rule now
-  // emits their codes) — see the dedicated test below.
-  const plannedIds = FIX_CATALOG.filter((f) => !f.implemented).map((f) => f.id);
-  const expected = [
-    "reassign_missing_texture",
-    "reassign_missing_shader",
-  ];
-  for (const id of expected) {
-    assert.ok(plannedIds.includes(id), `planned fix ${id} must be advertised`);
-    const fix = FIX_CATALOG.find((f) => f.id === id);
-    assert.equal(fix!.implemented, false);
-    assert.equal(fix!.status, "planned");
-    assert.ok(
-      typeof fix!.guidance === "string" && fix!.guidance.length > 0,
-      `${id} planned fix must carry guidance`,
-    );
-  }
+test("no fix providers remain in the planned state", () => {
+  // M25 Plan 2 — the last two planned fix providers (reassign_missing_texture
+  // / reassign_missing_shader) shipped as real C# IFixProviders. Every catalog
+  // fix is now implemented; if a planned fix is re-introduced, this guard
+  // forces the author to update it deliberately.
+  const plannedFixes = FIX_CATALOG.filter((f) => !f.implemented);
+  assert.equal(
+    plannedFixes.length,
+    0,
+    `expected zero planned fixes; found: ${plannedFixes.map((f) => f.id).join(", ")}`,
+  );
+});
+
+// M25 Plan 2 — the two materials fix providers shipped (registered in the
+// verify package's FixProviderRegistry, linked to the materials rule).
+
+test("reassign_missing_texture fix is implemented and linked to materials", () => {
+  const fix = implementedFixes().find((f) => f.id === "reassign_missing_texture");
+  assert.ok(fix, "reassign_missing_texture must be in the implemented fix surface");
+  assert.equal(fix!.implemented, true);
+  assert.equal(fix!.safe, false, "a wrong texture silently changes the material's look");
+  assert.ok(fix!.rules.includes("materials"));
+  assert.ok(fix!.issueCodes.includes("missing_texture"));
+});
+
+test("reassign_missing_shader fix is implemented and linked to materials", () => {
+  const fix = implementedFixes().find((f) => f.id === "reassign_missing_shader");
+  assert.ok(fix, "reassign_missing_shader must be in the implemented fix surface");
+  assert.equal(fix!.implemented, true);
+  assert.equal(fix!.safe, false, "a wrong shader silently changes rendering");
+  assert.ok(fix!.rules.includes("materials"));
+  assert.ok(fix!.issueCodes.includes("missing_shader"));
 });
 
 // M24 Plan 2 / T24.2 — orphan_meta + duplicate_guid fixes now have an emitting

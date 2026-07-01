@@ -212,11 +212,15 @@ Authoritative via `capabilities` (call for the live list). Implemented:
 `apply_fix` defaults to `dry_run: true` (the dry-run short-circuits the gate entirely — returns description/candidates without checkpoint+validate):
 
 - `**remove_missing_script**` (safe) — strips `MonoBehaviour` whose script GUID no longer resolves. Works on `.prefab` / `.unity`.
+- `**remove_orphan_meta**` (safe) — deletes a `.meta` whose companion asset was deleted. Producer: `project_health` (live) / `offline_integrity` (offline). No asset data lost.
 - `**relink_broken_guid**` (unsafe) — rewrites a broken external GUID reference. Dry-run advertises candidate targets; apply requires `target_guid`. Never auto-applied.
-
-Planned (capabilities advertises with guidance): `reassign_missing_texture` (the `materials` rule now emits `missing_texture`; the fix ships in a later milestone), `reassign_missing_shader` (same — `materials` emits `missing_shader`). Implemented but not auto-suggested here: `remove_orphan_meta` (safe — deletes orphaned `.meta`), `fix_duplicate_guid` (unsafe — re-GUIDs an asset).
+- `**fix_duplicate_guid**` (unsafe) — regenerates the GUID of one colliding asset. Re-GUIDing silently rewires the asset graph, so pick the less-referenced asset deliberately; apply on that asset's issue id. Producer: `project_health` / `offline_integrity`. Never auto-applied.
+- `**reassign_missing_texture**` (unsafe) — assigns a texture to the material's null texture slot(s). Dry-run advertises candidate textures; apply requires `target_texture` (asset path or GUID). Producer: `materials`. Never auto-applied.
+- `**reassign_missing_shader**` (unsafe) — assigns a shader to a material whose shader is null / the error shader. Dry-run advertises candidate shaders; apply requires `target_shader` (shader name e.g. `Standard`, or asset path). Producer: `materials`. Never auto-applied.
 
 If `fix_id` omitted, the response lists every fix that can resolve the given `issue_id`.
+
+**Safe auto-fix rollback.** A non-dry-run `apply_fix` runs checkpoint → apply → validate → delta, and if the fix fails to apply **or** introduces new errors under `enforce`, the touched files are restored to their pre-fix state and the response carries a top-level `rollback` block: `{rolledBack: true, reason, restoredPaths[]}`. Read `gate.delta.newErrors` + `rollback` together — a rolled-back fix left no project change, so inspect the issue manually before retrying. Rollback is **not** triggered by new warnings (informational) or under `warn`/`off` gate modes (report-only).
 
 ## Gate intelligence: plan before, explain after
 

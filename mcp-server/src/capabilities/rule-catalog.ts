@@ -704,14 +704,20 @@ export const RULE_CATALOG: RuleCapability[] = [
 // ---------------------------------------------------------------------------
 // Fix capability entries.
 //
-// remove_orphan_meta + fix_duplicate_guid were promoted from planned to
-// implemented in M24 Plan 2 / T24.2 — the offline_integrity rule (the offline
-// scanIntegrityOffline scanner) now emits orphan_meta / duplicate_guid, so the
-// fixes have an emitting rule + issue-code linkage. M25 Plan 1 added the
-// project_health rule as a second producer of those codes (the live Editor
-// counterpart). reassign_missing_texture / reassign_missing_shader now have an
-// emitting rule (the M25 Plan 1 `materials` rule emits missing_texture /
-// missing_shader); the fix providers themselves ship in M25 Plan 2.
+// All four remainder fix providers shipped in M25 Plan 2 as real C#
+// IFixProvider implementations (registered in the verify package's
+// FixProviderRegistry, which apply_fix — bridge-routed — dispatches to):
+//   - remove_orphan_meta (safe): deletes a detached .meta. Producers:
+//     offline_integrity + project_health (orphan_meta).
+//   - fix_duplicate_guid (unsafe): regenerates a colliding GUID. Producers:
+//     offline_integrity + project_health (duplicate_guid).
+//   - reassign_missing_texture (unsafe, judgment): requires target_texture.
+//     Producer: materials (missing_texture).
+//   - reassign_missing_shader (unsafe, judgment): requires target_shader.
+//     Producer: materials (missing_shader).
+// M25 Plan 2 also added safe auto-fix rollback: a non-dry-run apply_fix that
+// fails or introduces new errors under enforce is restored to its pre-fix
+// state and the response carries a top-level `rollback` block.
 // ---------------------------------------------------------------------------
 
 const PLANNED_FIXES: FixCapability[] = [
@@ -739,29 +745,25 @@ const PLANNED_FIXES: FixCapability[] = [
   },
   {
     id: "reassign_missing_texture",
-    implemented: false,
-    status: "planned",
+    implemented: true,
+    status: "implemented",
     rules: ["materials"],
     issueCodes: ["missing_texture"],
+    // Reassigns a texture to the material's null texture slot(s). A wrong
+    // texture silently changes the material's appearance; never auto-applied.
+    // Apply via apply_fix with target_texture (asset path or GUID).
     safe: false,
-    guidance:
-      "Not yet ported — the `materials` rule now emits `missing_texture`, " +
-      "but the fix provider ships in M25 Plan 2. Use read_asset on the .mat " +
-      "file and execute_csharp to reassign the _MainTex / texture properties " +
-      "in the meantime.",
   },
   {
     id: "reassign_missing_shader",
-    implemented: false,
-    status: "planned",
+    implemented: true,
+    status: "implemented",
     rules: ["materials"],
     issueCodes: ["missing_shader"],
+    // Reassigns a shader to a material whose shader is null / the error
+    // shader. A wrong shader silently changes rendering; never auto-applied.
+    // Apply via apply_fix with target_shader (shader name or asset path).
     safe: false,
-    guidance:
-      "Not yet ported — the `materials` rule now emits `missing_shader`, " +
-      "but the fix provider ships in M25 Plan 2. Use find_references to " +
-      "locate the intended shader and execute_csharp to reassign m_Shader " +
-      "on the material in the meantime.",
   },
 ];
 

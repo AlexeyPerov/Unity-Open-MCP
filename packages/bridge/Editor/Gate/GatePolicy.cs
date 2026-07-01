@@ -59,6 +59,15 @@ namespace UnityOpenMcpBridge
         // means "not captured" (older surface); an empty list means "captured,
         // nothing new". Emitted into the envelope as the `logs` array.
         public List<LogEntryInfo> Logs;
+        // M25 Plan 2 — safe auto-fix rollback. Set by ApplyFixGateRunner when a
+        // non-dry-run apply_fix either failed outright or, under enforce,
+        // introduced new errors (delta.NewErrors > 0). The fix's touched files
+        // are restored from the FixRollback snapshot and the envelope surfaces
+        // a top-level `rollback` block. False/null on every non-apply_fix tool
+        // and on apply_fix runs that did not need rolling back.
+        public bool RolledBack;
+        public string RollbackReason;
+        public string[] RestoredPaths;
     }
 
     public static class GatePolicy

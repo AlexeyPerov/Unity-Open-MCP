@@ -166,6 +166,27 @@ namespace UnityOpenMcpBridge
             sb.Append(",\"logs\":");
             sb.Append(BuildLogsJson(result.Logs));
 
+            // M25 Plan 2 — safe auto-fix rollback. Only emitted when a non-
+            // dry-run apply_fix was rolled back (fix failed or introduced new
+            // errors under enforce). Omitted on every other dispatch and on
+            // apply_fix runs that did not need rolling back, so existing
+            // consumers see no change.
+            if (result.RolledBack)
+            {
+                sb.Append(",\"rollback\":{\"rolledBack\":true");
+                sb.Append(",\"reason\":\"").Append(EscapeStringContent(result.RollbackReason ?? "")).Append("\"");
+                sb.Append(",\"restoredPaths\":[");
+                if (result.RestoredPaths != null)
+                {
+                    for (int i = 0; i < result.RestoredPaths.Length; i++)
+                    {
+                        if (i > 0) sb.Append(',');
+                        sb.Append('"').Append(EscapeStringContent(result.RestoredPaths[i])).Append('"');
+                    }
+                }
+                sb.Append("]}");
+            }
+
             sb.Append(",\"agentNextSteps\":[");
             var steps = result.AgentNextSteps;
             if (steps != null)

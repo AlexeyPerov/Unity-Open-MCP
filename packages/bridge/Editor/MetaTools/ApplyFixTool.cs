@@ -47,11 +47,23 @@ namespace UnityOpenMcpBridge.MetaTools
             try
             {
                 // relink_broken_guid needs a chosen target GUID to actually
-                // rewrite the reference. Other providers ignore the param.
+                // rewrite the reference. The materials fixes need a chosen
+                // target texture / shader (judgment calls). Other providers
+                // ignore the params.
                 if (provider is RelinkBrokenGuidFix relink)
                 {
                     var targetGuid = JsonBody.GetString(body, "target_guid");
                     result = relink.Apply(issueId, targetGuid);
+                }
+                else if (provider is ReassignMissingTextureFix textureFix)
+                {
+                    var targetTexture = JsonBody.GetString(body, "target_texture");
+                    result = textureFix.Apply(issueId, targetTexture);
+                }
+                else if (provider is ReassignMissingShaderFix shaderFix)
+                {
+                    var targetShader = JsonBody.GetString(body, "target_shader");
+                    result = shaderFix.Apply(issueId, targetShader);
                 }
                 else
                 {

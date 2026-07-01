@@ -848,6 +848,13 @@ namespace UnityOpenMcpBridge
                 };
             }
 
+            // M25 Plan 2 — non-dry-run apply_fix runs through the rollback
+            // runner so a fix that fails or introduces new errors under enforce
+            // is restored to its pre-fix state. Reuses GatePolicy internally;
+            // dry-run apply_fix is short-circuited earlier (HandleDryRunApplyFix).
+            if (toolName == "unity_open_mcp_apply_fix")
+                return ApplyFixGateRunner.Execute(body, gateMode, pathsHint);
+
             return GatePolicy.Execute(mode, pathsHint, () => DispatchTool(toolName, body));
         }
 
