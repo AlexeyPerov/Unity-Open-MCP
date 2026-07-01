@@ -10,9 +10,19 @@ namespace UnityOpenMcpVerify.Rules
         {
             if (scope.Paths == null || scope.Paths.Length == 0) return;
 
-            var data = new List<ShaderAnalysis.ShaderData>();
-            ShaderAnalysis.Scanner.ScanPaths(scope.Paths, data);
-            ShaderAnalysis.IssueMapper.MapToIssues(data, sink);
+            // Desktop profile is the gate default (matches scan_paths'
+            // platform_profile: "desktop"). A future profile param can switch
+            // this to mobile for the mobile-expensive-keyword detection.
+            var settings = ShaderAnalysis.ShaderAnalysisScanSettings.Default();
+            const string platformProfileId = "desktop";
+
+            var shaders = new List<ShaderAnalysis.ShaderData>();
+            var materialKeywordSets = new List<ShaderAnalysis.MaterialKeywordSet>();
+            // Duplicate-keyword-profile detection needs the cross-asset material
+            // set — full-scan only. Per-shader detections run in every mode.
+            var fullScan = mode == VerifyRunMode.Full;
+            ShaderAnalysis.Scanner.ScanPaths(scope.Paths, settings, platformProfileId, shaders, materialKeywordSets, fullScan);
+            ShaderAnalysis.IssueMapper.MapToIssues(shaders, materialKeywordSets, settings, platformProfileId, sink);
         }
     }
 }

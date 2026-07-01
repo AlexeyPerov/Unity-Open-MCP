@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine.SceneManagement;
 
 namespace UnityOpenMcpVerify.Rules.ProjectHealth
 {
     public static class Scanner
     {
-        // ProjectSettings files whose presence + minimal shape we validate.
-        // Missing any of these is a strong signal of a corrupt checkout.
         private static readonly string[] RequiredProjectSettings =
         {
             "ProjectSettings/ProjectSettings.asset",
@@ -17,27 +17,29 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
             "ProjectSettings/TagManager.asset",
         };
 
-        public static ProjectHealthData Scan(string[] paths, bool fullScan)
+        public static ProjectHealthData Scan(string[] paths, ProjectHealthScanSettings settings, bool fullScan)
         {
             var data = new ProjectHealthData();
 
-            // Orphan .meta + duplicate GUID are whole-project checks. Under
-            // paths_hint scope we narrow to the supplied paths only (an agent
-            // editing one folder does not want a full-tree walk), but the
-            // duplicate-GUID check still needs the global index to detect
-            // collisions with assets outside scope — so we always build the
-            // GUID index and only emit scoped hits.
+            // Orphan meta + duplicate GUID + folder checks narrow to the scoped
+            // paths; broken-asset + empty-scene + ProjectSettings are whole-tree
+            // checks run only in full-scan mode (mirrors the source scanner,
+            // which always walks the whole tree, and the verify gate's Full
+            // mode).
             var scopedPaths = ResolveScope(paths);
-            DetectOrphanMetas(scopedPaths, data);
-            DetectDuplicateGuids(scopedPaths, fullScan, data);
 
-            // ProjectSettings integrity is always a full-project check; it is
-            // only emitted in full-scan mode so a scoped validate_edit on a
-            // single asset does not surface unrelated settings warnings.
-            if (fullScan)
-            {
+            if (settings.CheckOrphanedMeta)
+                DetectOrphanMetas(scopedPaths, data);
+            if (fullScan && settings.CheckDuplicateGuid)
+                DetectDuplicateGuids(scopedPaths, fullScan, data);
+            if (settings.CheckEmptyFolders || settings.CheckMetaOnlyFolders || settings.CheckDeepNesting || settings.CheckLargeFolders)
+                ScanFolders(scopedPaths, settings, data);
+            if (fullScan && settings.CheckBrokenAssets)
+                ScanBrokenAssets(scopedPaths, data);
+            if (fullScan && settings.CheckEmptyScenes)
+                ScanEmptyScenes(data);
+            if (fullScan && settings.CheckProjectSettings)
                 ScanProjectSettingsIntegrity(data);
-            }
 
             return data;
         }
@@ -46,15 +48,11 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
         // Scope resolution
         // -------------------------------------------------------------------
 
-        // When paths_hint is empty/missing we walk the whole Assets tree
-        // (full-scan mode). Otherwise we narrow to the supplied folders/files
-        // plus their companion .meta files.
         private static List<string> ResolveScope(string[] paths)
         {
             var result = new List<string>();
             if (paths == null || paths.Length == 0)
             {
-                // Full-tree walk: every asset path under Assets/.
                 foreach (var p in AssetDatabase.GetAllAssetPaths())
                 {
                     if (p.StartsWith("Assets/", StringComparison.Ordinal))
@@ -66,8 +64,7 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
             foreach (var raw in paths)
             {
                 if (string.IsNullOrEmpty(raw)) continue;
-                var p = raw.Replace('\\', '/');
-                result.Add(p);
+                result.Add(raw.Replace('\\', '/'));
             }
             return result;
         }
@@ -81,9 +78,6 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var path in scopedPaths)
             {
-                // The AssetDatabase only returns non-meta asset paths, so a
-                // missing companion shows up as a stray .meta on disk. We walk
-                // the filesystem directly to catch them.
                 string dir;
                 if (AssetDatabase.IsValidFolder(path))
                 {
@@ -111,7 +105,6 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                     if (File.Exists(companion)) continue;
                     if (AssetDatabase.IsValidFolder(companion)) continue;
 
-                    // Skip Library/Packages meta noise — not Assets-scoped.
                     if (!companion.StartsWith("Assets/", StringComparison.Ordinal) &&
                         !IsUnderAny(companion, scopedPaths)) continue;
 
@@ -126,9 +119,6 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
 
         private static void DetectDuplicateGuids(List<string> scopedPaths, bool fullScan, ProjectHealthData data)
         {
-            // Build the full GUID -> paths index across the project. Duplicate
-            // detection requires the global view: a scoped-only index would
-            // miss collisions with assets outside the hint set.
             var byGuid = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             foreach (var assetPath in AssetDatabase.GetAllAssetPaths())
             {
@@ -150,9 +140,6 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
             {
                 if (kvp.Value.Count < 2) continue;
 
-                // In scoped mode only emit a duplicate when at least one of the
-                // colliding assets is in scope — otherwise every scan would
-                // surface the same project-wide collisions.
                 if (scopedSet != null)
                 {
                     var anyInScope = kvp.Value.Any(p => scopedSet.Contains(p));
@@ -164,7 +151,188 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
         }
 
         // -------------------------------------------------------------------
-        // ProjectSettings integrity
+        // Folder structure detection (ported verbatim from the source scanner)
+        // -------------------------------------------------------------------
+
+        private static void ScanFolders(List<string> scopedPaths, ProjectHealthScanSettings settings, ProjectHealthData data)
+        {
+            // Enumerate every directory under each scoped root (folder or the
+            // parent of a scoped file). Mirrors the source: Directory.EnumerateDirectories
+            // with AllDirectories over the Assets root(s).
+            var roots = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var path in scopedPaths)
+            {
+                string dir;
+                if (AssetDatabase.IsValidFolder(path)) dir = path;
+                else
+                {
+                    var parent = Path.GetDirectoryName(path);
+                    if (string.IsNullOrEmpty(parent)) continue;
+                    dir = parent;
+                }
+                if (Directory.Exists(dir)) roots.Add(dir.Replace('\\', '/'));
+            }
+
+            foreach (var root in roots)
+            {
+                IEnumerable<string> dirs;
+                try { dirs = Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories); }
+                catch { continue; }
+
+                foreach (var dir in dirs)
+                {
+                    var dirNorm = dir.Replace('\\', '/');
+                    CheckFolder(dirNorm, settings, data);
+                }
+                // Also check the root itself.
+                CheckFolder(root, settings, data);
+            }
+        }
+
+        private static void CheckFolder(string dir, ProjectHealthScanSettings settings, ProjectHealthData data)
+        {
+            // Empty / meta-only folder detection. Ported quirk: a truly empty
+            // folder is reported as meta-only (the hasOnlyMeta default never
+            // flips when there are zero files).
+            if (settings.CheckEmptyFolders || settings.CheckMetaOnlyFolders)
+            {
+                var hasFiles = false;
+                var hasOnlyMeta = true;
+                try
+                {
+                    foreach (var f in Directory.EnumerateFiles(dir))
+                    {
+                        if (!f.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasFiles = true;
+                            hasOnlyMeta = false;
+                            break;
+                        }
+                    }
+                }
+                catch { continue; }
+
+                if (!hasFiles)
+                {
+                    bool hasSubDirs;
+                    try { hasSubDirs = Directory.EnumerateDirectories(dir).Any(); }
+                    catch { hasSubDirs = false; }
+
+                    if (!hasSubDirs)
+                    {
+                        // Ported quirk: hasOnlyMeta stays true for the zero-file
+                        // case, so truly-empty folders report as meta-only.
+                        if (hasOnlyMeta && settings.CheckMetaOnlyFolders)
+                        {
+                            data.FolderIssues.Add(new FolderIssue(dir, "project_meta_only_folder",
+                                "Folder contains only .meta files with no actual assets"));
+                        }
+                        else if (!hasOnlyMeta && settings.CheckEmptyFolders)
+                        {
+                            data.FolderIssues.Add(new FolderIssue(dir, "project_empty_folder",
+                                "Empty folder with no files or subdirectories"));
+                        }
+                    }
+                }
+            }
+
+            if (settings.CheckDeepNesting)
+            {
+                var depth = CountPathDepth(dir);
+                if (depth > settings.MaxFolderNestingDepth)
+                {
+                    data.FolderIssues.Add(new FolderIssue(dir, "project_deep_nesting",
+                        $"Folder nesting depth {depth} exceeds threshold {settings.MaxFolderNestingDepth}"));
+                }
+            }
+
+            if (settings.CheckLargeFolders)
+            {
+                int fileCount;
+                try { fileCount = Directory.GetFiles(dir, "*", SearchOption.TopDirectoryOnly).Length; }
+                catch { fileCount = 0; }
+                if (fileCount > settings.MaxFilesPerFolder)
+                {
+                    data.FolderIssues.Add(new FolderIssue(dir, "project_large_folder",
+                        $"{fileCount} files in single folder (threshold: {settings.MaxFilesPerFolder})"));
+                }
+            }
+        }
+
+        private static int CountPathDepth(string relativePath)
+        {
+            var depth = 0;
+            foreach (var c in relativePath)
+                if (c == '/' || c == '\\') depth++;
+            return depth;
+        }
+
+        // -------------------------------------------------------------------
+        // Broken asset detection (ported verbatim)
+        // -------------------------------------------------------------------
+
+        private static void ScanBrokenAssets(List<string> scopedPaths, ProjectHealthData data)
+        {
+            var scopedSet = new HashSet<string>(scopedPaths, StringComparer.Ordinal);
+            foreach (var assetPath in AssetDatabase.GetAllAssetPaths())
+            {
+                if (!assetPath.StartsWith("Assets/", StringComparison.Ordinal)) continue;
+                if (scopedSet.Count > 0 && !scopedSet.Contains(assetPath)) continue;
+                if (assetPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)) continue;
+                if (AssetDatabase.IsValidFolder(assetPath)) continue;
+                if (!File.Exists(assetPath)) continue;
+
+                try
+                {
+                    var obj = AssetDatabase.LoadMainAssetAtPath(assetPath);
+                    if (obj == null)
+                    {
+                        data.BrokenAssets.Add(new BrokenAssetEntry(assetPath,
+                            "Asset could not be loaded — possibly corrupted or missing importer"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    data.BrokenAssets.Add(new BrokenAssetEntry(assetPath,
+                        "Asset threw exception on load: " + ex.Message));
+                }
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Empty scene detection (ported verbatim)
+        // -------------------------------------------------------------------
+
+        private static void ScanEmptyScenes(ProjectHealthData data)
+        {
+            var sceneGuids = AssetDatabase.FindAssets("t:Scene");
+            foreach (var guid in sceneGuids)
+            {
+                var scenePath = AssetDatabase.GUIDToAssetPath(guid);
+                if (scenePath.StartsWith("Packages/", StringComparison.Ordinal)) continue;
+                if (scenePath.StartsWith("Library/", StringComparison.Ordinal)) continue;
+
+                Scene scene;
+                try { scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive); }
+                catch { continue; }
+
+                try
+                {
+                    if (scene.rootCount == 0)
+                    {
+                        data.EmptyScenes.Add(new EmptySceneEntry(scenePath));
+                    }
+                }
+                finally
+                {
+                    if (SceneManager.sceneCount > 1)
+                        EditorSceneManager.CloseScene(scene, true);
+                }
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // ProjectSettings integrity (verify-package addition; source has none)
         // -------------------------------------------------------------------
 
         private static void ScanProjectSettingsIntegrity(ProjectHealthData data)
@@ -177,12 +345,11 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                 var abs = Path.Combine(projectRoot, rel).Replace('\\', '/');
                 if (!File.Exists(abs))
                 {
-                    data.SettingIssues.Add(new ProjectSettingIssue(rel, "<file>", "required ProjectSettings file is missing"));
+                    data.SettingIssues.Add(new ProjectSettingIssue(rel, "<file>",
+                        "required ProjectSettings file is missing"));
                 }
             }
 
-            // ProjectVersion.txt must name a Unity version — a missing or empty
-            // m_EditorVersion is a corrupt-checkout signal.
             var versionFile = Path.Combine(projectRoot, "ProjectSettings/ProjectVersion.txt").Replace('\\', '/');
             if (File.Exists(versionFile))
             {
@@ -209,9 +376,6 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
 
         private static string TryGetProjectRoot()
         {
-            // The ProjectSettings folder lives at the project root. Walk up
-            // from the data path (Application.dataPath == .../Assets) until we
-            // find a ProjectSettings sibling.
             try
             {
                 var dataPath = UnityEngine.Application.dataPath.Replace('\\', '/');
@@ -232,8 +396,8 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
         {
             foreach (var root in roots)
             {
-                if (candidate.StartsWith(root + "/", StringComparison.Ordinal) ||
-                    candidate == root) return true;
+                if (candidate.StartsWith(root + "/", StringComparison.Ordinal) || candidate == root)
+                    return true;
             }
             return false;
         }

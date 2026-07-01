@@ -8,16 +8,17 @@ namespace UnityOpenMcpVerify.Rules
 
         public void Scan(VerifyScope scope, VerifyRunMode mode, List<VerifyIssue> sink)
         {
-            // project_health is a whole-project rule by nature (duplicate GUID
-            // + orphan meta + ProjectSettings integrity all need the full
-            // tree). We only run it in Full mode so a scoped checkpoint /
-            // validate_edit does not pay the whole-tree walk cost or surface
+            // project_health is a whole-project rule by nature (duplicate GUID,
+            // broken-asset, empty-scene, ProjectSettings integrity all need the
+            // full tree). Only run in Full mode so a scoped checkpoint /
+            // validate_edit does not pay the whole-tree cost or surface
             // unrelated project-wide issues as gate deltas.
             if (mode != VerifyRunMode.Full) return;
 
             var paths = scope.Paths ?? new string[0];
-            var data = ProjectHealth.Scanner.Scan(paths, fullScan: true);
-            ProjectHealth.IssueMapper.MapToIssues(data, sink);
+            var settings = ProjectHealth.ProjectHealthScanSettings.Default();
+            var data = ProjectHealth.Scanner.Scan(paths, settings, fullScan: true);
+            ProjectHealth.IssueMapper.MapToIssues(data, settings, sink);
         }
     }
 }

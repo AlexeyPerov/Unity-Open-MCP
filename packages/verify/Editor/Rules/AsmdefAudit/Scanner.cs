@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using UnityEditor;
 using UnityOpenMcpVerify.Internals.RegexPatterns;
 
@@ -9,13 +8,14 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
 {
     public static class Scanner
     {
-        public static void ScanPaths(string[] paths, List<AsmdefData> sink)
+        public static void ScanPaths(string[] paths, AsmdefScanSettings settings, List<AsmdefData> sink)
         {
             if (paths == null || paths.Length == 0) return;
 
-            // Lazy-built resolution caches — built once per scan over the
-            // current compilation assembly set + precompiled DLLs. Bare-name
-            // references resolve when a matching compiled assembly exists.
+            // Lazy-built resolution caches for the broken-reference check (the
+            // source scanner does not resolve refs; this is a verify-package
+            // addition). Bare-name references resolve when a matching compiled
+            // assembly exists.
             HashSet<string> compiledNames = null;
             HashSet<string> compiledSimpleNames = null;
 
@@ -24,150 +24,226 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                 if (string.IsNullOrEmpty(path)) continue;
                 if (!IsAsmdefPath(path)) continue;
                 if (!File.Exists(path)) continue;
+                // Packages/ asmdefs are excluded — they are not agent-editable.
+                if (path.StartsWith("Packages/", StringComparison.Ordinal)) continue;
 
-                var data = new AsmdefData(path);
                 string json;
                 try { json = File.ReadAllText(path); }
                 catch (Exception e)
                 {
-                    data.ParseFailed = true;
-                    data.ParseError = e.Message;
-                    sink.Add(data);
+                    sink.Add(new AsmdefData(path)
+                    {
+                        ParseFailed = true,
+                        ParseError = e.Message,
+                    });
                     continue;
                 }
 
                 if (string.IsNullOrWhiteSpace(json))
                 {
-                    data.ParseFailed = true;
-                    data.ParseError = "empty file";
-                    sink.Add(data);
+                    sink.Add(new AsmdefData(path)
+                    {
+                        ParseFailed = true,
+                        ParseError = "empty file",
+                    });
                     continue;
                 }
 
-                ParseAsmdefJson(path, json, data);
-                if (data.ParseFailed)
+                var data = ParseAsmDef(path, json);
+                if (data == null)
                 {
-                    sink.Add(data);
+                    sink.Add(new AsmdefData(path)
+                    {
+                        ParseFailed = true,
+                        ParseError = "parse error",
+                    });
                     continue;
                 }
 
-                if (compiledNames == null)
+                if (settings.CheckBrokenReferences)
                 {
-                    BuildAssemblyNameIndex(out compiledNames, out compiledSimpleNames);
+                    if (compiledNames == null)
+                        BuildAssemblyNameIndex(out compiledNames, out compiledSimpleNames);
+                    ResolveReferences(data, compiledNames, compiledSimpleNames);
                 }
 
-                ResolveReferences(data, compiledNames, compiledSimpleNames);
                 sink.Add(data);
             }
         }
 
         // -------------------------------------------------------------------
-        // JSON parsing — minimal structural reader for the asmdef shape.
+        // JSON parsing — ported verbatim from the source scanner.
         //
-        // Unity's asmdef JSON is single-object with `references` as a string
-        // array. We avoid a full JSON parser dependency by walking the tokens
-        // we care about: `name`, `rootNamespace`, and each `references` entry.
-        // A real JSON library would be cleaner, but pulling one in just for
-        // this rule is heavier than the line-based walk below. The walk is
-        // tolerant of the formatting Unity emits (one key per line).
+        // Unity's asmdef JSON is a single object with string / string-array
+        // fields. The source deliberately avoids a JSON library and uses
+        // hand-rolled string extraction; the parsers below are a verbatim port
+        // (including the no-escape-handling quirk) so behaviour matches.
         // -------------------------------------------------------------------
 
-        private static void ParseAsmdefJson(string assetPath, string json, AsmdefData data)
+        private static AsmdefData ParseAsmDef(string assetPath, string json)
         {
-            var lines = json.Replace("\r\n", "\n").Split('\n');
-            var inReferences = false;
-            var braceDepth = 0;
-
-            for (var i = 0; i < lines.Length; i++)
+            try
             {
-                var raw = lines[i];
-                var line = raw.Trim();
-
-                // Track brace depth so we know when we leave the references
-                // array's enclosing object. Unity emits one key per line, so
-                // a depth counter on the trimmed line is sufficient.
-                braceDepth += CountUnescaped(raw, '{') - CountUnescaped(raw, '}');
-
-                if (line.StartsWith("\"references\"", StringComparison.Ordinal))
-                {
-                    inReferences = true;
-                    // Same-line array close: "references": []
-                    if (line.Contains("]")) inReferences = false;
-                    continue;
-                }
-
-                if (inReferences)
-                {
-                    if (line.StartsWith("]", StringComparison.Ordinal) || line.StartsWith("}", StringComparison.Ordinal))
-                    {
-                        inReferences = false;
-                        continue;
-                    }
-
-                    var entry = ExtractStringLiteral(line);
-                    if (entry != null)
-                    {
-                        data.References.Add(new AsmdefReference(entry, i + 1, resolves: false));
-                    }
-                    continue;
-                }
-
-                if (line.StartsWith("\"name\"", StringComparison.Ordinal))
-                {
-                    data.Name = ExtractStringLiteral(line);
-                    continue;
-                }
-
-                if (line.StartsWith("\"rootNamespace\"", StringComparison.Ordinal))
-                {
-                    data.RootNamespace = ExtractStringLiteral(line);
-                    continue;
-                }
+                var data = new AsmdefData(assetPath);
+                data.Name = ExtractStringField(json, "name");
+                data.RootNamespace = ExtractStringField(json, "rootNamespace");
+                data.AutoReferenced = ExtractBoolField(json, "autoReferenced", defaultIfMissing: true);
+                data.AnyPlatform = ExtractBoolField(json, "anyPlatform", defaultIfMissing: true);
+                ExtractStringArray(json, "references", data.References);
+                ExtractStringArray(json, "includePlatforms", data.IncludePlatforms);
+                ExtractStringArray(json, "excludePlatforms", data.ExcludePlatforms);
+                ParseVersionDefines(json, data);
+                data.IsEditorOnly = DeriveIsEditorOnly(data);
+                return data;
             }
-
-            // Validate the document shaped like an asmdef at all. Unity rejects
-            // a top-level non-object; we mirror that with a parse-failed flag.
-            if (braceDepth < 0)
+            catch
             {
-                data.ParseFailed = true;
-                data.ParseError = "unbalanced braces";
+                return null;
             }
         }
 
-        private static string ExtractStringLiteral(string line)
+        // Ported quirk: this derivation mirrors the source exactly.
+        //   IsEditorOnly =
+        //       IncludePlatforms.Contains("Editor")
+        //    OR (IncludePlatforms.Count == 0 AND ExcludePlatforms.Count > 0 AND !AnyPlatform)
+        //    OR (!AnyPlatform AND ExcludePlatforms.Count == 0 AND IncludePlatforms.Count == 0)
+        private static bool DeriveIsEditorOnly(AsmdefData data)
         {
-            var start = line.IndexOf('"');
-            if (start < 0) return null;
-            var valueStart = start + 1;
-            var end = line.IndexOf('"', valueStart);
-            if (end < 0) return null;
-            return line.Substring(valueStart, end - valueStart);
+            if (data.IncludePlatforms.Contains("Editor")) return true;
+            if (data.IncludePlatforms.Count == 0 && data.ExcludePlatforms.Count > 0 && !data.AnyPlatform) return true;
+            if (!data.AnyPlatform && data.ExcludePlatforms.Count == 0 && data.IncludePlatforms.Count == 0) return true;
+            return false;
         }
 
-        private static int CountUnescaped(string s, char c)
+        private static string ExtractStringField(string json, string fieldName)
         {
-            var count = 0;
-            for (var i = 0; i < s.Length; i++)
+            var marker = "\"" + fieldName + "\"";
+            var idx = json.IndexOf(marker, StringComparison.Ordinal);
+            if (idx < 0) return "";
+            idx = json.IndexOf(':', idx + marker.Length);
+            if (idx < 0) return "";
+            var start = idx + 1;
+            var quoteStart = json.IndexOf('"', start);
+            if (quoteStart < 0) return "";
+            var quoteEnd = json.IndexOf('"', quoteStart + 1);
+            if (quoteEnd < 0) return "";
+            return json.Substring(quoteStart + 1, quoteEnd - quoteStart - 1);
+        }
+
+        private static bool ExtractBoolField(string json, string fieldName, bool defaultIfMissing)
+        {
+            var marker = "\"" + fieldName + "\"";
+            var idx = json.IndexOf(marker, StringComparison.Ordinal);
+            if (idx < 0) return defaultIfMissing;
+            idx = json.IndexOf(':', idx + marker.Length);
+            if (idx < 0) return defaultIfMissing;
+            var start = idx + 1;
+            // Skip whitespace.
+            while (start < json.Length && (json[start] == ' ' || json[start] == '\t' || json[start] == '\r' || json[start] == '\n'))
+                start++;
+            var rest = json.Substring(start);
+            if (rest.StartsWith("true", StringComparison.Ordinal)) return true;
+            if (rest.StartsWith("false", StringComparison.Ordinal)) return false;
+            return defaultIfMissing;
+        }
+
+        private static void ExtractStringArray(string json, string fieldName, List<string> target)
+        {
+            target.Clear();
+            var marker = "\"" + fieldName + "\"";
+            var idx = json.IndexOf(marker, StringComparison.Ordinal);
+            if (idx < 0) return;
+            var openBracket = json.IndexOf('[', idx + marker.Length);
+            if (openBracket < 0) return;
+            // Bracket-match the array (asmdef reference arrays contain only
+            // string literals, so depth never exceeds 1 — but match anyway).
+            var depth = 0;
+            var closeBracket = -1;
+            for (var i = openBracket; i < json.Length; i++)
             {
-                if (s[i] == '\\') { i++; continue; }
-                if (s[i] == c) count++;
+                if (json[i] == '[') depth++;
+                else if (json[i] == ']')
+                {
+                    depth--;
+                    if (depth == 0) { closeBracket = i; break; }
+                }
             }
-            return count;
+            if (closeBracket < 0) return;
+            var inner = json.Substring(openBracket + 1, closeBracket - openBracket - 1);
+            var parts = inner.Split(',');
+            foreach (var part in parts)
+            {
+                var trimmed = part.Trim();
+                if (trimmed.Length < 2) continue;
+                var firstQuote = trimmed.IndexOf('"');
+                var lastQuote = trimmed.LastIndexOf('"');
+                if (firstQuote < 0 || lastQuote <= firstQuote) continue;
+                target.Add(trimmed.Substring(firstQuote + 1, lastQuote - firstQuote - 1));
+            }
+        }
+
+        private static void ParseVersionDefines(string json, AsmdefData data)
+        {
+            var marker = "\"versionDefines\"";
+            var idx = json.IndexOf(marker, StringComparison.Ordinal);
+            if (idx < 0) return;
+            var openBracket = json.IndexOf('[', idx + marker.Length);
+            if (openBracket < 0) return;
+            foreach (var obj in SplitObjects(json, openBracket))
+            {
+                var package = ExtractStringField(obj, "name");
+                var expression = ExtractStringField(obj, "expression");
+                var symbol = ExtractStringField(obj, "define");
+                data.VersionDefines.Add(new VersionDefineData
+                {
+                    Package = package,
+                    Expression = expression,
+                    Symbol = symbol,
+                });
+            }
+        }
+
+        // Splits a JSON array body into top-level {...} object substrings,
+        // respecting brace depth. Ported verbatim.
+        private static IEnumerable<string> SplitObjects(string json, int startSearch)
+        {
+            var objects = new List<string>();
+            var i = startSearch;
+            while (i < json.Length)
+            {
+                var open = json.IndexOf('{', i);
+                if (open < 0) break;
+                var depth = 0;
+                var close = -1;
+                for (var j = open; j < json.Length; j++)
+                {
+                    if (json[j] == '{') depth++;
+                    else if (json[j] == '}')
+                    {
+                        depth--;
+                        if (depth == 0) { close = j; break; }
+                    }
+                }
+                if (close < 0) break;
+                objects.Add(json.Substring(open, close - open + 1));
+                i = close + 1;
+            }
+            return objects;
         }
 
         // -------------------------------------------------------------------
-        // Reference resolution
+        // Broken-reference resolution (verify-package addition).
         // -------------------------------------------------------------------
 
         private static void ResolveReferences(AsmdefData data, HashSet<string> compiledNames, HashSet<string> compiledSimpleNames)
         {
-            var asmdefGuid = AssetDatabase.AssetPathToGUID(data.Path);
-
+            var selfGuid = AssetDatabase.AssetPathToGUID(data.Path);
+            data.ResolvedReferences.Clear();
             for (var i = 0; i < data.References.Count; i++)
             {
-                var r = data.References[i];
-                var resolves = ReferenceResolves(r.Reference, asmdefGuid, compiledNames, compiledSimpleNames);
-                data.References[i] = new AsmdefReference(r.Reference, r.Line, resolves);
+                var reference = data.References[i];
+                var resolves = ReferenceResolves(reference, selfGuid, compiledNames, compiledSimpleNames);
+                data.ResolvedReferences.Add(new AsmdefReference(reference, i + 1, resolves));
             }
         }
 
@@ -175,17 +251,15 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
         {
             if (string.IsNullOrEmpty(reference)) return false;
 
-            // GUID form: "GUID:abc123..." — resolve via the asset DB.
             if (reference.StartsWith("GUID:", StringComparison.OrdinalIgnoreCase))
             {
                 var guid = reference.Substring(5).Trim();
                 if (!SharedRegex.Guid32Hex.IsMatch(guid)) return false;
-                if (guid == selfAsmdefGuid) return true; // self-ref via GUID still resolves
+                if (guid == selfAsmdefGuid) return true;
                 var path = AssetDatabase.GUIDToAssetPath(guid);
                 return !string.IsNullOrEmpty(path);
             }
 
-            // Built-in special references that always resolve.
             if (reference == "UnityEngine" || reference.StartsWith("UnityEngine.", StringComparison.Ordinal))
                 return true;
             if (reference == "UnityEditor" || reference.StartsWith("UnityEditor.", StringComparison.Ordinal))
@@ -193,10 +267,6 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
             if (reference == "System" || reference.StartsWith("System.", StringComparison.Ordinal))
                 return true;
 
-            // Bare assembly name — resolve against the compiled set. Unity's
-            // own compile graph is the authority; if it is not in
-            // CompilationPipeline.GetAssemblies() and not a known precompiled
-            // DLL, the asmdef will not compile.
             if (compiledNames.Contains(reference)) return true;
             if (compiledSimpleNames.Contains(reference)) return true;
 
@@ -208,7 +278,6 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
             fullNames = new HashSet<string>(StringComparer.Ordinal);
             simpleNames = new HashSet<string>(StringComparer.Ordinal);
 
-            // Compiled assemblies (asmdef + package sources Unity built).
             try
             {
                 foreach (var asm in UnityEditor.Compilation.CompilationPipeline.GetAssemblies())
@@ -223,7 +292,6 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
             }
             catch { }
 
-            // Precompiled DLLs under Assets/ + Packages/.
             foreach (var dllGuid in AssetDatabase.FindAssets("l:PreloadAssembly"))
             {
                 var p = AssetDatabase.GUIDToAssetPath(dllGuid);

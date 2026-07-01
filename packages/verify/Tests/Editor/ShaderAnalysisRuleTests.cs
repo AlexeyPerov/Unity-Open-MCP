@@ -81,11 +81,29 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         [UnityTest]
-        public System.Collections.IEnumerator Scan_CompilingShader_LoadsAndClassifies()
+        public System.Collections.IEnumerator Scan_FallbackShader_ReportsFallback()
+        {
+            var path = FixtureRoot + "/Fallback.shader";
+            File.WriteAllText(path, ValidUnlitShaderWithFallback("Diffuse"));
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { path });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var fallback = sink.FirstOrDefault(i => i.IssueCode == "fallback_shader");
+            Assert.IsNotNull(fallback,
+                $"Expected fallback_shader. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+            Assert.AreEqual(VerifySeverity.Warning, fallback.Severity);
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_ShaderClassifiesWithoutThrowing()
         {
             // A shader with deliberately broken HLSL. Unity will either flag it
-            // as unsupported or surface ShaderMessages compile errors — either
-            // way the rule should classify the asset without throwing.
+            // as an error shader or surface compile errors — either way the
+            // rule must classify without throwing and emit known codes.
             var path = FixtureRoot + "/Broken.shader";
             File.WriteAllText(path, BrokenShader());
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
@@ -97,17 +115,18 @@ namespace UnityOpenMcpVerify.Tests
                 var scope = new VerifyScope(new[] { path });
                 rule.Scan(scope, VerifyRunMode.Full, sink);
 
-                // The shader may or may not surface a compile error depending
-                // on Unity's async compile timing in the test runner. The key
-                // invariant: every emitted issue carries the right rule id +
-                // a valid issue key.
                 foreach (var issue in sink)
                 {
                     Assert.AreEqual("shader_analysis", issue.RuleId);
                     Assert.AreEqual(path, issue.AssetPath);
                     Assert.IsTrue(
                         issue.IssueCode == "shader_compile_error" ||
-                        issue.IssueCode == "missing_shader_asset",
+                        issue.IssueCode == "missing_shader_asset" ||
+                        issue.IssueCode == "variant_explosion" ||
+                        issue.IssueCode == "pass_count_exceeded" ||
+                        issue.IssueCode == "fallback_shader" ||
+                        issue.IssueCode == "expensive_feature_platform" ||
+                        issue.IssueCode == "platform_keyword_mismatch",
                         $"Unexpected issue code: {issue.IssueCode}");
                 }
             });
@@ -143,7 +162,6 @@ namespace UnityOpenMcpVerify.Tests
                    "{\n" +
                    "    SubShader\n" +
                    "    {\n" +
-                   "        Tags { \"RenderType\"=\"Opaque\" }\n" +
                    "        Pass\n" +
                    "        {\n" +
                    "            CGPROGRAM\n" +
@@ -157,9 +175,28 @@ namespace UnityOpenMcpVerify.Tests
                    "}\n";
         }
 
+        private static string ValidUnlitShaderWithFallback(string fallbackName)
+        {
+            return "Shader \"Hidden/VerifyFallbackShader\"\n" +
+                   "{\n" +
+                   "    SubShader\n" +
+                   "    {\n" +
+                   "        Pass\n" +
+                   "        {\n" +
+                   "            CGPROGRAM\n" +
+                   "            #pragma vertex vert\n" +
+                   "            #pragma fragment frag\n" +
+                   "            float4 vert(float4 v : POSITION) : SV_POSITION { return UnityObjectToClipPos(v); }\n" +
+                   "            fixed4 frag() : SV_Target { return fixed4(1,1,1,1); }\n" +
+                   "            ENDCG\n" +
+                   "        }\n" +
+                   "    }\n" +
+                   "    Fallback \"" + fallbackName + "\"\n" +
+                   "}\n";
+        }
+
         private static string BrokenShader()
         {
-            // Reference an undeclared symbol so the shader fails to compile.
             return "Shader \"Hidden/VerifyBrokenShader\"\n" +
                    "{\n" +
                    "    SubShader\n" +

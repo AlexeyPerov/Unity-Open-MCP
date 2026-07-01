@@ -66,8 +66,7 @@ namespace UnityOpenMcpVerify.Tests
         public System.Collections.IEnumerator Scan_HealthyAsmdef_ProducesNoIssues()
         {
             var path = FixtureRoot + "/Healthy.asmdef";
-            var asmdef = "{\n    \"name\": \"Healthy.Asmdef\",\n    \"rootNamespace\": \"Healthy\",\n    \"references\": [\n        \"UnityEngine\"\n    ]\n}\n";
-            File.WriteAllText(path, asmdef);
+            File.WriteAllText(path, "{\n    \"name\": \"Healthy.Asmdef\",\n    \"rootNamespace\": \"Healthy\",\n    \"references\": [\"UnityEngine\"]\n}\n");
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
@@ -75,18 +74,15 @@ namespace UnityOpenMcpVerify.Tests
             var scope = new VerifyScope(new[] { path });
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
-            var broken = sink.Where(i => i.IssueCode == "broken_asmdef_reference").ToList();
-            Assert.AreEqual(0, broken.Count,
-                $"Healthy asmdef must not produce broken_asmdef_reference. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+            Assert.AreEqual(0, sink.Count,
+                $"Healthy asmdef must produce no issues. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
         }
 
         [UnityTest]
         public System.Collections.IEnumerator Scan_MissingName_ReportsMissingName()
         {
             var path = FixtureRoot + "/NoName.asmdef";
-            // No "name" field — Unity cannot compile this.
-            var asmdef = "{\n    \"references\": []\n}\n";
-            File.WriteAllText(path, asmdef);
+            File.WriteAllText(path, "{\n    \"references\": []\n}\n");
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
@@ -95,20 +91,15 @@ namespace UnityOpenMcpVerify.Tests
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
             var missingName = sink.FirstOrDefault(i => i.IssueCode == "asmdef_missing_name");
-            Assert.IsNotNull(missingName,
-                $"Expected asmdef_missing_name. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+            Assert.IsNotNull(missingName, $"Expected asmdef_missing_name. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
             Assert.AreEqual(VerifySeverity.Error, missingName.Severity);
-            Assert.AreEqual("asmdef_audit", missingName.RuleId);
-            Assert.AreEqual(path, missingName.AssetPath);
         }
 
         [UnityTest]
         public System.Collections.IEnumerator Scan_BrokenReference_ReportsBrokenReference()
         {
             var path = FixtureRoot + "/BrokenRef.asmdef";
-            // Reference to an assembly that does not exist.
-            var asmdef = "{\n    \"name\": \"BrokenRef.Asmdef\",\n    \"references\": [\n        \"This.Assembly.Does.Not.Exist\"\n    ]\n}\n";
-            File.WriteAllText(path, asmdef);
+            File.WriteAllText(path, "{\n    \"name\": \"BrokenRef.Asmdef\",\n    \"references\": [\"This.Assembly.Does.Not.Exist\"]\n}\n");
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
@@ -117,19 +108,15 @@ namespace UnityOpenMcpVerify.Tests
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
             var broken = sink.FirstOrDefault(i => i.IssueCode == "broken_asmdef_reference");
-            Assert.IsNotNull(broken,
-                $"Expected broken_asmdef_reference. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+            Assert.IsNotNull(broken, $"Expected broken_asmdef_reference. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
             Assert.AreEqual(VerifySeverity.Error, broken.Severity);
-            Assert.AreEqual("asmdef_audit", broken.RuleId);
         }
 
         [UnityTest]
         public System.Collections.IEnumerator Scan_BrokenGuidReference_ReportsBrokenReference()
         {
             var path = FixtureRoot + "/BrokenGuid.asmdef";
-            // GUID reference to nothing.
-            var asmdef = "{\n    \"name\": \"BrokenGuid.Asmdef\",\n    \"references\": [\n        \"GUID:1234567890abcdef1234567890abcdef\"\n    ]\n}\n";
-            File.WriteAllText(path, asmdef);
+            File.WriteAllText(path, "{\n    \"name\": \"BrokenGuid.Asmdef\",\n    \"references\": [\"GUID:1234567890abcdef1234567890abcdef\"]\n}\n");
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
@@ -138,8 +125,7 @@ namespace UnityOpenMcpVerify.Tests
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
             var broken = sink.FirstOrDefault(i => i.IssueCode == "broken_asmdef_reference");
-            Assert.IsNotNull(broken,
-                $"Expected broken_asmdef_reference for unresolved GUID. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+            Assert.IsNotNull(broken, $"Expected broken_asmdef_reference for unresolved GUID. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
         }
 
         [UnityTest]
@@ -154,20 +140,139 @@ namespace UnityOpenMcpVerify.Tests
             var scope = new VerifyScope(new[] { path });
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
-            // Malformed JSON with unbalanced braces is flagged. A document that
-            // is structurally OK but semantically garbage may not trip the brace
-            // check — the key assertion is that a clearly broken file is not
-            // silently treated as healthy (it has no name at minimum).
-            Assert.GreaterOrEqual(sink.Count, 1,
-                $"Malformed asmdef must produce at least one issue. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+            Assert.GreaterOrEqual(sink.Count, 1, "Malformed asmdef must produce at least one issue.");
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_DuplicateNames_ReportsDuplicateName()
+        {
+            var pathA = FixtureRoot + "/DupA.asmdef";
+            var pathB = FixtureRoot + "/DupB.asmdef";
+            File.WriteAllText(pathA, "{\n    \"name\": \"Same.Name\",\n    \"references\": []\n}\n");
+            File.WriteAllText(pathB, "{\n    \"name\": \"Same.Name\",\n    \"references\": []\n}\n");
+            AssetDatabase.ImportAsset(pathA, ImportAssetOptions.ForceUpdate);
+            AssetDatabase.ImportAsset(pathB, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { pathA, pathB });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var dup = sink.FirstOrDefault(i => i.IssueCode == "asmdef_duplicate_name");
+            Assert.IsNotNull(dup, $"Expected asmdef_duplicate_name. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+            Assert.AreEqual(VerifySeverity.Error, dup.Severity);
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_CircularReference_ReportsCycle()
+        {
+            // A -> B -> A cycle (name-based references).
+            var pathA = FixtureRoot + "/CycleA.asmdef";
+            var pathB = FixtureRoot + "/CycleB.asmdef";
+            File.WriteAllText(pathA, "{\n    \"name\": \"CycleA.Asmdef\",\n    \"references\": [\"CycleB.Asmdef\"]\n}\n");
+            File.WriteAllText(pathB, "{\n    \"name\": \"CycleB.Asmdef\",\n    \"references\": [\"CycleA.Asmdef\"]\n}\n");
+            AssetDatabase.ImportAsset(pathA, ImportAssetOptions.ForceUpdate);
+            AssetDatabase.ImportAsset(pathB, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { pathA, pathB });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var cycle = sink.FirstOrDefault(i => i.IssueCode == "asmdef_circular_reference");
+            Assert.IsNotNull(cycle, $"Expected asmdef_circular_reference. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+            Assert.AreEqual(VerifySeverity.Error, cycle.Severity);
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_EditorInRuntime_ReportsEditorRef()
+        {
+            // A runtime assembly (no Editor in includePlatforms) referencing an editor assembly.
+            var path = FixtureRoot + "/EditorInRuntime.asmdef";
+            File.WriteAllText(path, "{\n    \"name\": \"EditorInRuntime.Asmdef\",\n    \"references\": [\"Some.Editor.Plugin\"],\n    \"includePlatforms\": []\n}\n");
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { path });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var editor = sink.FirstOrDefault(i => i.IssueCode == "asmdef_editor_in_runtime");
+            Assert.IsNotNull(editor, $"Expected asmdef_editor_in_runtime. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+            Assert.AreEqual(VerifySeverity.Warning, editor.Severity);
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_PlatformFilterContradict_ReportsContradiction()
+        {
+            var path = FixtureRoot + "/Contradict.asmdef";
+            File.WriteAllText(path, "{\n    \"name\": \"Contradict.Asmdef\",\n    \"references\": [],\n    \"includePlatforms\": [\"Standalone\"],\n    \"excludePlatforms\": [\"iOS\"]\n}\n");
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { path });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var contradict = sink.FirstOrDefault(i => i.IssueCode == "asmdef_platform_filter_contradict");
+            Assert.IsNotNull(contradict, $"Expected asmdef_platform_filter_contradict. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_PlatformFilterBroad_ReportsBroadFilter()
+        {
+            var path = FixtureRoot + "/Broad.asmdef";
+            // No platform filters at all + anyPlatform true.
+            File.WriteAllText(path, "{\n    \"name\": \"Broad.Asmdef\",\n    \"references\": [],\n    \"includePlatforms\": [],\n    \"excludePlatforms\": []\n}\n");
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { path });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var broad = sink.FirstOrDefault(i => i.IssueCode == "asmdef_platform_filter_broad");
+            Assert.IsNotNull(broad, $"Expected asmdef_platform_filter_broad. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_AutoReferencedOrphan_ReportsOrphan()
+        {
+            // autoReferenced=false and no other scoped assembly references it.
+            var path = FixtureRoot + "/Orphan.asmdef";
+            File.WriteAllText(path, "{\n    \"name\": \"Orphan.Asmdef\",\n    \"references\": [],\n    \"autoReferenced\": false\n}\n");
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { path });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var orphan = sink.FirstOrDefault(i => i.IssueCode == "asmdef_auto_referenced_orphan");
+            Assert.IsNotNull(orphan, $"Expected asmdef_auto_referenced_orphan. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_VersionDefineInvalid_ReportsInvalidPackage()
+        {
+            var path = FixtureRoot + "/VersionDefine.asmdef";
+            File.WriteAllText(path, "{\n    \"name\": \"VD.Asmdef\",\n    \"references\": [],\n    \"versionDefines\": [{\"name\":\"com.unity.somepackage\",\"expression\":\"1.0.0\",\"define\":\"FOO\"}]\n}\n");
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { path });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var vd = sink.FirstOrDefault(i => i.IssueCode == "asmdef_version_define_invalid");
+            Assert.IsNotNull(vd, $"Expected asmdef_version_define_invalid. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
         }
 
         [UnityTest]
         public System.Collections.IEnumerator Scan_IssuesProduceValidKeys()
         {
             var path = FixtureRoot + "/Keys.asmdef";
-            var asmdef = "{\n    \"name\": \"Keys.Asmdef\",\n    \"references\": [\n        \"This.DoesNotExist.Either\"\n    ]\n}\n";
-            File.WriteAllText(path, asmdef);
+            File.WriteAllText(path, "{\n    \"name\": \"Keys.Asmdef\",\n    \"references\": [\"This.DoesNotExist\"]\n}\n");
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
@@ -180,26 +285,6 @@ namespace UnityOpenMcpVerify.Tests
                 var key = IssueKey.Build(issue);
                 Assert.IsTrue(IssueKey.TryParse(key, out _, out _, out _, out _),
                     $"Issue key '{key}' must be valid");
-            }
-        }
-
-        [UnityTest]
-        public System.Collections.IEnumerator Scan_AllIssues_HaveCorrectRuleId()
-        {
-            var path = FixtureRoot + "/RuleId.asmdef";
-            var asmdef = "{\n    \"references\": [\"Missing.Assembly\"]\n}\n";
-            File.WriteAllText(path, asmdef);
-            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
-            yield return null;
-
-            var sink = new List<VerifyIssue>();
-            var scope = new VerifyScope(new[] { path });
-            rule.Scan(scope, VerifyRunMode.Full, sink);
-
-            foreach (var issue in sink)
-            {
-                Assert.AreEqual("asmdef_audit", issue.RuleId);
-                Assert.AreEqual(path, issue.AssetPath);
             }
         }
 

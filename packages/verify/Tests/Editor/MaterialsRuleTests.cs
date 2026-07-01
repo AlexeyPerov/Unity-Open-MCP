@@ -64,7 +64,7 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         [UnityTest]
-        public System.Collections.IEnumerator Scan_HealthyMaterial_ProducesNoIssues()
+        public System.Collections.IEnumerator Scan_HealthyMaterial_ProducesNoMissingShaderOrTexture()
         {
             var path = FixtureRoot + "/Healthy.mat";
             AssetDatabase.CreateAsset(new Material(Shader.Find("Standard")), path);
@@ -83,13 +83,15 @@ namespace UnityOpenMcpVerify.Tests
         [UnityTest]
         public System.Collections.IEnumerator Scan_BrokenShaderReference_ReportsMissingShader()
         {
+            // Create a material, then corrupt its m_Shader GUID so Unity falls
+            // back to InternalErrorShader on load (the high-value detection the
+            // YAML-walk approach missed).
             var path = FixtureRoot + "/BrokenShader.mat";
             AssetDatabase.CreateAsset(new Material(Shader.Find("Standard")), path);
             AssetDatabase.Refresh();
             yield return null;
 
-            // Overwrite m_Shader with a GUID that does not resolve.
-            InjectBrokenGuid(path, "m_Shader", "1234567890abcdef1234567890abcdef");
+            InjectBrokenShaderGuid(path, "1234567890abcdef1234567890abcdef");
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
@@ -99,35 +101,47 @@ namespace UnityOpenMcpVerify.Tests
 
             var missingShader = sink.FirstOrDefault(i => i.IssueCode == "missing_shader");
             Assert.IsNotNull(missingShader,
-                $"Expected missing_shader. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+                $"Expected missing_shader (InternalErrorShader). Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
             Assert.AreEqual(VerifySeverity.Error, missingShader.Severity);
             Assert.AreEqual("materials", missingShader.RuleId);
             Assert.AreEqual(path, missingShader.AssetPath);
         }
 
         [UnityTest]
-        public System.Collections.IEnumerator Scan_BrokenTextureReference_ReportsMissingTexture()
+        public System.Collections.IEnumerator Scan_BuiltinShader_ReportsBuiltinShader()
         {
-            var path = FixtureRoot + "/BrokenTexture.mat";
-            var mat = new Material(Shader.Find("Standard"));
-            AssetDatabase.CreateAsset(mat, path);
+            var path = FixtureRoot + "/Builtin.mat";
+            AssetDatabase.CreateAsset(new Material(Shader.Find("Standard")), path);
             AssetDatabase.Refresh();
-            yield return null;
-
-            // Inject a broken texture ref into _MainTex's m_Texture field.
-            InjectBrokenGuid(path, "m_Texture", "fedcba0987654321fedcba0987654321");
-            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
             var sink = new List<VerifyIssue>();
             var scope = new VerifyScope(new[] { path });
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
-            var missingTexture = sink.FirstOrDefault(i => i.IssueCode == "missing_texture");
-            Assert.IsNotNull(missingTexture,
-                $"Expected missing_texture. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
-            Assert.AreEqual(VerifySeverity.Error, missingTexture.Severity);
-            Assert.AreEqual("materials", missingTexture.RuleId);
+            var builtin = sink.FirstOrDefault(i => i.IssueCode == "builtin_shader");
+            Assert.IsNotNull(builtin,
+                $"Expected builtin_shader for Standard. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+            Assert.AreEqual(VerifySeverity.Warning, builtin.Severity);
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_RenderQueueOverride_ReportsOverride()
+        {
+            var path = FixtureRoot + "/QueueOverride.mat";
+            var mat = new Material(Shader.Find("Standard"));
+            mat.renderQueue = 9999; // deliberately off the shader default.
+            AssetDatabase.CreateAsset(mat, path);
+            AssetDatabase.Refresh();
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { path });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var overrideIssue = sink.FirstOrDefault(i => i.IssueCode == "render_queue_override");
+            Assert.IsNotNull(overrideIssue,
+                $"Expected render_queue_override. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
         }
 
         [UnityTest]
@@ -136,10 +150,6 @@ namespace UnityOpenMcpVerify.Tests
             var path = FixtureRoot + "/Keys.mat";
             AssetDatabase.CreateAsset(new Material(Shader.Find("Standard")), path);
             AssetDatabase.Refresh();
-            yield return null;
-
-            InjectBrokenGuid(path, "m_Shader", "abcdef0123456789abcdef0123456789");
-            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
             var sink = new List<VerifyIssue>();
@@ -154,36 +164,49 @@ namespace UnityOpenMcpVerify.Tests
             }
         }
 
+        [UnityTest]
+        public System.Collections.IEnumerator Scan_FullMode_DetectsDuplicateMaterials()
+        {
+            // Two materials with identical shader + properties → same fingerprint.
+            var pathA = FixtureRoot + "/DupA.mat";
+            var pathB = FixtureRoot + "/DupB.mat";
+            AssetDatabase.CreateAsset(new Material(Shader.Find("Standard")), pathA);
+            AssetDatabase.CreateAsset(new Material(Shader.Find("Standard")), pathB);
+            AssetDatabase.Refresh();
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { pathA, pathB });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var dup = sink.FirstOrDefault(i => i.IssueCode == "duplicate_material");
+            Assert.IsNotNull(dup,
+                $"Expected duplicate_material. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+        }
+
         // -------------------------------------------------------------------
         // Fixture helpers
         // -------------------------------------------------------------------
 
-        // Replaces the first `guid: <realGuid>` occurrence on a line containing
-        // the target property with a broken GUID, so the material references a
-        // shader/texture that does not exist.
-        private static void InjectBrokenGuid(string matPath, string propertyMarker, string brokenGuid)
+        // Replaces the m_Shader GUID with a broken one so the material falls
+        // back to InternalErrorShader (the real-world "missing shader" case).
+        private static void InjectBrokenShaderGuid(string matPath, string brokenGuid)
         {
             var yaml = File.ReadAllText(matPath);
             var lines = yaml.Replace("\r\n", "\n").Split('\n');
-
             for (var i = 0; i < lines.Length; i++)
             {
-                if (!lines[i].Contains(propertyMarker)) continue;
-                // The GUID reference lives on this line (PPtr form). Replace the
-                // first real GUID we find with the broken one.
+                if (!lines[i].Contains("m_Shader:")) continue;
                 var idx = lines[i].IndexOf("guid: ");
                 if (idx < 0) continue;
                 var guidStart = idx + "guid: ".Length;
                 var guidEnd = guidStart + 32;
                 if (guidEnd > lines[i].Length) continue;
                 var currentGuid = lines[i].Substring(guidStart, 32);
-                // Only replace real (non-zero) GUIDs — built-in shader GUIDs are
-                // all-zero and represent valid built-ins.
                 if (currentGuid.StartsWith("0000000000")) continue;
                 lines[i] = lines[i].Substring(0, guidStart) + brokenGuid + lines[i].Substring(guidEnd);
                 break;
             }
-
             File.WriteAllText(matPath, string.Join("\n", lines));
         }
 

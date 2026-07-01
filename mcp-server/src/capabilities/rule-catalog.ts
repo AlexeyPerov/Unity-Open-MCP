@@ -222,6 +222,44 @@ const ASMDEF_AUDIT_ISSUES: RuleIssueDescriptor[] = [
     severity: "Error",
     fixIds: [],
   },
+  {
+    code: "asmdef_duplicate_name",
+    severity: "Error",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "asmdef_circular_reference",
+    severity: "Error",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "asmdef_editor_in_runtime",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "asmdef_auto_referenced_orphan",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "asmdef_platform_filter_broad",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "asmdef_platform_filter_contradict",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "asmdef_version_define_invalid",
+    severity: "Warning",
+    fixIds: [],
+  },
 ];
 
 const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
@@ -243,6 +281,42 @@ const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     fixIds: [],
     fullScanOnly: true,
   },
+  {
+    code: "project_empty_folder",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "project_meta_only_folder",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "project_deep_nesting",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "project_large_folder",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "project_broken_asset",
+    severity: "Error",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "project_empty_scene",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
 ];
 
 const MATERIALS_ISSUES: RuleIssueDescriptor[] = [
@@ -253,8 +327,88 @@ const MATERIALS_ISSUES: RuleIssueDescriptor[] = [
   },
   {
     code: "missing_texture",
-    severity: "Error",
+    severity: "Warning",
     fixIds: ["reassign_missing_texture"],
+  },
+  {
+    code: "builtin_shader",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "builtin_texture",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "render_queue_override",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "unable_to_load",
+    severity: "Error",
+    fixIds: [],
+  },
+  {
+    code: "duplicate_material",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "unused_material",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "variant_parent_invalid",
+    severity: "Error",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "variant_deep_chain",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "variant_heavy_overrides",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "gpu_instancing_off",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "srp_batcher_incompatible",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "null_material",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "null_material_slot",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "builtin_material",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
   },
 ];
 
@@ -269,6 +423,42 @@ const ANIMATION_ANALYSIS_ISSUES: RuleIssueDescriptor[] = [
     severity: "Warning",
     fixIds: [],
   },
+  {
+    code: "unreachable_state",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "complexity_over_threshold",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "anystate_overuse",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "parameter_mismatch",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "expensive_curves_density",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "expensive_curves_count",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "duplicate_clip",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
 ];
 
 const SHADER_ANALYSIS_ISSUES: RuleIssueDescriptor[] = [
@@ -281,6 +471,37 @@ const SHADER_ANALYSIS_ISSUES: RuleIssueDescriptor[] = [
     code: "missing_shader_asset",
     severity: "Error",
     fixIds: [],
+  },
+  {
+    code: "variant_explosion",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "pass_count_exceeded",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "fallback_shader",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "expensive_feature_platform",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "platform_keyword_mismatch",
+    severity: "Warning",
+    fixIds: [],
+  },
+  {
+    code: "duplicate_keyword_profiles",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
   },
 ];
 
@@ -396,7 +617,10 @@ export const RULE_CATALOG: RuleCapability[] = [
       "Validates assembly definition references, naming, and dependency " +
       "graph health: broken references (GUID or bare-name that does not " +
       "resolve to a compiled assembly), a missing required `name` field, " +
-      "and malformed JSON.",
+      "malformed JSON, duplicate assembly names, circular references (DFS " +
+      "over the name-based reference graph), editor assemblies referenced " +
+      "from runtime, orphaned autoReferenced=false assemblies, platform-" +
+      "filter breadth/contradictions, and version-define package references.",
     applicableAssetKinds: ["asmdef"],
     applicableExtensions: [".asmdef", ".cs"],
     implemented: true,
@@ -408,11 +632,13 @@ export const RULE_CATALOG: RuleCapability[] = [
     title: "Project health",
     description:
       "In-Editor project-wide health: orphaned .meta files (companion asset " +
-      "deleted), duplicate GUIDs (two+ assets sharing one GUID), and " +
+      "deleted), duplicate GUIDs (two+ assets sharing one GUID), " +
       "ProjectSettings integrity (missing required settings files, no editor " +
-      "version). Full-scan only — does not fire on a scoped validate_edit. " +
-      "The live counterpart of the offline_integrity aggregator.",
-    applicableAssetKinds: ["meta", "project_settings"],
+      "version), empty / meta-only folders, deep folder nesting, large " +
+      "folders, broken assets (failed to load), and empty scenes " +
+      "(rootCount == 0). Full-scan only — does not fire on a scoped " +
+      "validate_edit. The live counterpart of the offline_integrity aggregator.",
+    applicableAssetKinds: ["meta", "project_settings", "scene"],
     implemented: true,
     status: "implemented",
     issues: PROJECT_HEALTH_ISSUES,
@@ -421,10 +647,13 @@ export const RULE_CATALOG: RuleCapability[] = [
     id: "materials",
     title: "Material health",
     description:
-      "Detects broken material references: a shader GUID that does not " +
-      "resolve (missing_shader) or a texture GUID that does not resolve " +
-      "(missing_texture). Built-in shader GUIDs (all-zero) are treated as " +
-      "valid Unity built-ins.",
+      "Load-time material reference and performance analysis: missing shader " +
+      "(null or InternalErrorShader — the original shader failed to compile " +
+      "or is missing), null / unity_builtin textures per shader property via " +
+      "ShaderUtil, builtin shaders, render-queue overrides, and (full-scan " +
+      "only) duplicate materials (SHA-256 fingerprint), unused materials, " +
+      "material-variant chains (broken parent, deep chain, heavy overrides " +
+      "via reflection), GPU instancing off, and SRP-batcher incompatibility.",
     applicableAssetKinds: ["material"],
     applicableExtensions: [".mat"],
     implemented: true,
@@ -435,9 +664,14 @@ export const RULE_CATALOG: RuleCapability[] = [
     id: "animation_analysis",
     title: "Animation analysis",
     description:
-      "Detects broken animator state motion references (missing_clip — a " +
-      "controller state points at a GUID that does not resolve) and empty " +
-      "animation clips (empty_clip — a .anim that declares no curves).",
+      "Animator controller and clip analysis via the live AnimatorController " +
+      "object: missing motion/clip on a state (missing_clip), empty clips " +
+      "(empty_clip — a .anim declaring no curves), unreachable states (BFS " +
+      "over the transition graph seeded from entry/default/any-state), " +
+      "state-machine complexity over threshold, AnyState transition overuse, " +
+      "parameter mismatches (regex-scan of MonoScripts referencing params not " +
+      "in the controller), expensive curve density/count (AnimationUtility), " +
+      "and (full-scan only) duplicate clips by byte-size match.",
     applicableAssetKinds: ["animation"],
     applicableExtensions: [".controller", ".anim"],
     implemented: true,
@@ -448,10 +682,13 @@ export const RULE_CATALOG: RuleCapability[] = [
     id: "shader_analysis",
     title: "Shader analysis",
     description:
-      "Inspects shader compile state: a .shader that failed to load " +
-      "(missing_shader_asset) or a .shader Unity reports as unsupported / " +
-      "with compile messages (shader_compile_error). Compile messages are " +
-      "read via ShaderUtil reflection so the rule stays Unity-version-portable.",
+      "Shader compile-state and variant analysis: error shaders " +
+      "(InternalErrorShader — shader_compile_error), .shader assets that " +
+      "fail to load (missing_shader_asset), variant-explosion estimation " +
+      "(2^keywords × passes over threshold), pass-count exceeded, fallback " +
+      "shaders (raw .shader source parse), render-pipeline / platform-profile " +
+      "mismatch, expensive per-platform keywords (mobile blocklist), and " +
+      "(full-scan only) duplicate keyword profiles across materials.",
     applicableAssetKinds: ["shader"],
     // .mat is listed because the gate pairs shader_analysis with materials for
     // material edits (a broken material often points at a broken shader) and

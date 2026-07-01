@@ -10,9 +10,10 @@ namespace UnityOpenMcpVerify.Rules
         {
             if (scope.Paths == null || scope.Paths.Length == 0) return;
 
+            var settings = AsmdefAudit.AsmdefScanSettings.Default();
             var data = new List<AsmdefAudit.AsmdefData>();
-            AsmdefAudit.Scanner.ScanPaths(scope.Paths, data);
-            AsmdefAudit.IssueMapper.MapToIssues(data, sink);
+            AsmdefAudit.Scanner.ScanPaths(scope.Paths, settings, data);
+            AsmdefAudit.IssueMapper.MapToIssues(data, settings, sink);
         }
     }
 }

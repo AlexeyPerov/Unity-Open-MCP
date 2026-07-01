@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 
 namespace UnityOpenMcpVerify.Rules.Materials
 {
@@ -7,35 +6,56 @@ namespace UnityOpenMcpVerify.Rules.Materials
     {
         public const string CodeMissingShader = "missing_shader";
         public const string CodeMissingTexture = "missing_texture";
+        public const string CodeBuiltinShader = "builtin_shader";
+        public const string CodeBuiltinTexture = "builtin_texture";
+        public const string CodeRenderQueueOverride = "render_queue_override";
+        public const string CodeUnableToLoad = "unable_to_load";
+        public const string CodeDuplicateMaterial = "duplicate_material";
+        public const string CodeUnusedMaterial = "unused_material";
+        public const string CodeVariantParentInvalid = "variant_parent_invalid";
+        public const string CodeVariantDeepChain = "variant_deep_chain";
+        public const string CodeVariantHeavyOverrides = "variant_heavy_overrides";
+        public const string CodeGpuInstancingOff = "gpu_instancing_off";
+        public const string CodeSrpBatcherIncompatible = "srp_batcher_incompatible";
+        public const string CodeNullMaterial = "null_material";
+        public const string CodeNullMaterialSlot = "null_material_slot";
+        public const string CodeBuiltinMaterial = "builtin_material";
 
-        public static void MapToIssues(List<MaterialData> assets, List<VerifyIssue> sink)
+        public static void MapToIssues(List<MaterialData> materials, List<RendererData> renderers, List<VerifyIssue> sink)
         {
-            foreach (var asset in assets)
+            foreach (var data in materials)
             {
-                // One issue per distinct unresolved GUID — a shader and a
-                // texture pointing at the same broken GUID is one problem.
-                var reportedGuids = new HashSet<string>();
-
-                foreach (var reference in asset.References)
+                foreach (var issue in data.Issues)
                 {
-                    if (reference.Resolves) continue;
-                    if (!reportedGuids.Add(reference.TargetGuid)) continue;
-
-                    // Shader vs texture classification: the m_Shader field owns
-                    // the shader ref; everything else under m_TexEnvs is a
-                    // texture. We classify by property name so the issue code
-                    // matches what the operator needs to fix.
-                    var isShader = reference.Property == "m_Shader";
-                    var code = isShader ? CodeMissingShader : CodeMissingTexture;
-                    var label = isShader ? "shader" : "texture";
-
-                    sink.Add(new VerifyIssue(
-                        "materials",
-                        VerifySeverity.Error,
-                        asset.Path,
-                        code,
-                        $"Material references missing {label} (guid {reference.TargetGuid}, property '{reference.Property}' at line {reference.Line})"));
+                    sink.Add(new VerifyIssue("materials", issue.Severity, data.Path, issue.Code, issue.Description));
                 }
+                foreach (var tw in data.TextureWarnings)
+                {
+                    var severity = tw.IssueCode == CodeMissingTexture ? VerifySeverity.Warning : VerifySeverity.Warning;
+                    sink.Add(new VerifyIssue("materials", severity, data.Path, tw.IssueCode,
+                        $"{tw.Detail}"));
+                }
+            }
+
+            // Renderer-side warnings attach to the GameObject asset path.
+            foreach (var rd in renderers)
+            {
+                foreach (var warning in rd.Warnings)
+                {
+                    sink.Add(new VerifyIssue("materials", VerifySeverity.Warning, rd.AssetPath, warning,
+                        $"Renderer '{rd.ChildPath}': {RendererWarningText(warning)}"));
+                }
+            }
+        }
+
+        private static string RendererWarningText(string code)
+        {
+            switch (code)
+            {
+                case CodeNullMaterial: return "null material";
+                case CodeNullMaterialSlot: return "null material slot";
+                case CodeBuiltinMaterial: return "uses a unity_builtin material";
+                default: return code;
             }
         }
     }

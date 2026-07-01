@@ -1,108 +1,525 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using UnityEditor;
-using UnityOpenMcpVerify.Internals.AssetDatabase;
-using UnityOpenMcpVerify.Internals.RegexPatterns;
+using UnityEngine;
+using UnityOpenMcpVerify.Internals.UnityReflection;
 
 namespace UnityOpenMcpVerify.Rules.Materials
 {
     public static class Scanner
     {
-        public static void ScanPaths(string[] paths, List<MaterialData> sink)
+        // Builtin shader names ported verbatim from the source scanner.
+        private static readonly HashSet<string> BuiltinShaderNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Standard",
+            "Standard (Specular setup)",
+            "Standard (Roughness setup)",
+            "Unlit/Color",
+            "Unlit/Texture",
+            "Unlit/Transparent",
+            "Unlit/Transparent Cutout",
+            "Particles/Standard Unlit",
+            "Legacy Shaders/Diffuse",
+            "Legacy Shaders/Specular",
+            "Legacy Shaders/Bumped Diffuse",
+            "Legacy Shaders/Bumped Specular",
+            "Mobile/Diffuse",
+            "Mobile/Unlit (Supports Lightmap)",
+            "Mobile/VertexLit",
+            "Mobile/VertexLit-OnlyDirectionalLights",
+            "Mobile/Particles/Alpha Blended",
+            "Mobile/Particles/Additive",
+        };
+
+        private const string InternalErrorShader = "Hidden/InternalErrorShader";
+
+        /// <summary>Scan materials under the scoped paths. Per-asset detections
+        /// run in every mode; cross-asset detections (duplicates, unused,
+        /// variant hierarchies) only run when <paramref name="fullScan"/> is
+        /// true because they need the full material set as context.</summary>
+        public static void ScanPaths(string[] paths, MaterialsScanSettings settings, List<MaterialData> sink, List<RendererData> renderers, bool fullScan)
         {
             if (paths == null || paths.Length == 0) return;
 
+            // Phase 1: collect the material set + renderer-side warnings.
             foreach (var path in paths)
             {
                 if (string.IsNullOrEmpty(path)) continue;
-                if (!AssetTypeUtilities.IsTextSerializedYaml(path)) continue;
                 if (!path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase)) continue;
                 if (!File.Exists(path)) continue;
 
-                var data = new MaterialData(path);
-                CollectMaterialReferences(path, data);
-                sink.Add(data);
+                var data = CreateMaterialData(path, settings);
+                if (data != null) sink.Add(data);
+            }
+
+            // Renderer-side scan: GameObjects in scope with Renderer components.
+            if (fullScan && (settings.CheckMissingShader || settings.CheckUnusedMaterials || settings.CheckDuplicateMaterials))
+            {
+                ScanRenderers(paths, renderers);
+            }
+
+            // Phase 2: cross-asset post-passes (full-scan only).
+            if (fullScan)
+            {
+                if (settings.CheckDuplicateMaterials)
+                    DetectDuplicateMaterials(sink);
+                ApplyReferencedByPaths(sink, renderers);
+                if (settings.CheckUnusedMaterials)
+                    DetectUnusedMaterials(sink);
+                if (settings.CheckVariants || settings.CheckGpuInstancing || settings.CheckSrpBatcher)
+                    AnalyzeVariantsAndPerformance(sink, settings);
             }
         }
 
-        // A material's text serialization carries:
-        //   m_Shader: {fileID: <id>, guid: <guid>, type: <t>}
-        // and, inside m_SavedProperties.m_TexEnvs, per-texture:
-        //   m_Texture: {fileID: <id>, guid: <guid>, type: <t>}
-        //
-        // Both are standard PPtr edges. We scan for `guid:` lines and resolve
-        // each against the asset DB. Built-in shaders/textures use all-zero
-        // GUIDs with a non-zero fileID (e.g. the Standard shader GUID
-        // 0000000000000000f000000000000000) — those resolve to nothing in the
-        // DB but are valid Unity built-ins, so we treat all-zero GUIDs as
-        // resolving (they are not broken external edges).
-        private static void CollectMaterialReferences(string assetPath, MaterialData data)
+        // -------------------------------------------------------------------
+        // Per-material data collection + warnings (ported)
+        // -------------------------------------------------------------------
+
+        private static MaterialData CreateMaterialData(string path, MaterialsScanSettings settings)
         {
-            string[] lines;
-            try { lines = File.ReadAllLines(assetPath); }
-            catch { return; }
-
-            var pptr = SharedRegex.ExternalFileAndGuid;
-
-            // Track the current property name so issues carry a useful field
-            // label. Material YAML indents texture refs two levels under
-            // m_TexEnvs; the most recent property-starter line above a
-            // reference is the owning field.
-            var currentProperty = "";
-
-            for (var i = 0; i < lines.Length; i++)
+            var data = new MaterialData(path)
             {
-                var line = lines[i];
+                Name = Path.GetFileName(path),
+            };
 
-                // Property starters: a key at the material-property level. We
-                // capture both the top-level shader field and the per-texenv
-                // property names (the `- _MainTex:` line).
-                var trimmed = line.TrimStart();
-                if (trimmed.StartsWith("- ", StringComparison.Ordinal) ||
-                    trimmed.StartsWith("m_Shader", StringComparison.Ordinal) ||
-                    trimmed.StartsWith("m_Texture", StringComparison.Ordinal))
+            Material material;
+            try { material = AssetDatabase.LoadAssetAtPath<Material>(path); }
+            catch
+            {
+                data.Issues.Add(new MaterialIssue("unable_to_load",
+                    "Material could not be loaded.", VerifySeverity.Error));
+                return data;
+            }
+
+            if (material == null)
+            {
+                data.Issues.Add(new MaterialIssue("unable_to_load",
+                    "Material could not be loaded.", VerifySeverity.Error));
+                return data;
+            }
+
+            var shader = material.shader;
+            data.ShaderName = shader != null ? shader.name : "Unknown";
+            data.RenderQueue = material.renderQueue;
+            data.GpuInstancingEnabled = material.enableInstancing;
+            data.EnabledKeywords = new List<string>(material.shaderKeywords);
+
+            if (shader != null)
+            {
+                data.ShaderDefaultRenderQueue = shader.renderQueue;
+                PopulateMaterialProperties(data, material);
+                data.Fingerprint = ComputeMaterialFingerprint(material);
+            }
+
+            FindMaterialWarnings(data, material, shader, settings);
+            return data;
+        }
+
+        private static void FindMaterialWarnings(MaterialData data, Material material, Shader shader, MaterialsScanSettings settings)
+        {
+            if (shader == null)
+            {
+                if (settings.CheckMissingShader)
                 {
-                    var colon = trimmed.IndexOf(':');
-                    if (colon > 0)
+                    data.IsMissingShader = true;
+                    data.Issues.Add(new MaterialIssue("missing_shader",
+                        "Material shader is null.", VerifySeverity.Error));
+                }
+                return;
+            }
+
+            if (shader.name == InternalErrorShader)
+            {
+                if (settings.CheckMissingShader)
+                {
+                    data.IsMissingShader = true;
+                    data.Issues.Add(new MaterialIssue("missing_shader",
+                        "Material references the InternalErrorShader — the original shader failed to compile or is missing.",
+                        VerifySeverity.Error));
+                }
+                return;
+            }
+
+            if (settings.CheckBuiltinShader && IsBuiltinShader(shader.name))
+            {
+                data.IsBuiltinShader = true;
+                data.Issues.Add(new MaterialIssue("builtin_shader",
+                    $"Material uses built-in shader '{shader.name}'.", VerifySeverity.Warning));
+            }
+
+            if (settings.CheckRenderQueueOverride && data.HasRenderQueueOverride)
+            {
+                data.Issues.Add(new MaterialIssue("render_queue_override",
+                    $"Render queue override: {data.RenderQueue} (shader default: {data.ShaderDefaultRenderQueue}).",
+                    VerifySeverity.Warning));
+            }
+
+            // Per-property texture checks via ShaderUtil.
+            if (settings.CheckMissingTexture || settings.CheckBuiltinTexture)
+            {
+                var propCount = ShaderUtil.GetPropertyCount(shader);
+                for (var i = 0; i < propCount; i++)
+                {
+                    if (ShaderUtil.GetPropertyType(shader, i) != ShaderUtil.ShaderPropertyType.TexEnv) continue;
+                    var propName = ShaderUtil.GetPropertyName(shader, i);
+                    var texture = material.GetTexture(propName);
+                    var texturePath = texture != null ? AssetDatabase.GetAssetPath(texture) : null;
+
+                    if (texture == null)
                     {
-                        var name = trimmed.StartsWith("- ", StringComparison.Ordinal)
-                            ? trimmed.Substring(2, colon - 2).Trim()
-                            : trimmed.Substring(0, colon).Trim();
-                        if (!string.IsNullOrEmpty(name))
-                            currentProperty = name;
+                        if (settings.CheckMissingTexture)
+                        {
+                            data.TextureWarnings.Add(new TextureWarning(propName, "missing_texture",
+                                $"Texture is null at '{propName}'."));
+                        }
+                    }
+                    else if (texturePath != null && texturePath.Contains("unity_builtin"))
+                    {
+                        if (settings.CheckBuiltinTexture)
+                        {
+                            data.TextureWarnings.Add(new TextureWarning(propName, "builtin_texture",
+                                $"unity_builtin texture at '{propName}'."));
+                        }
+                    }
+                }
+            }
+        }
+
+        private static void PopulateMaterialProperties(MaterialData data, Material material)
+        {
+            var shader = material.shader;
+            if (shader == null) return;
+            var propCount = ShaderUtil.GetPropertyCount(shader);
+            for (var i = 0; i < propCount; i++)
+            {
+                var propName = ShaderUtil.GetPropertyName(shader, i);
+                var propType = ShaderUtil.GetPropertyType(shader, i);
+                string value;
+                switch (propType)
+                {
+                    case ShaderUtil.ShaderPropertyType.Color:
+                        value = material.GetColor(propName).ToString();
+                        break;
+                    case ShaderUtil.ShaderPropertyType.Vector:
+                        value = material.GetVector(propName).ToString();
+                        break;
+                    case ShaderUtil.ShaderPropertyType.Float:
+                    case ShaderUtil.ShaderPropertyType.Range:
+                        value = material.GetFloat(propName).ToString();
+                        break;
+                    case ShaderUtil.ShaderPropertyType.TexEnv:
+                        var tex = material.GetTexture(propName);
+                        value = tex != null ? AssetDatabase.GetAssetPath(tex) : "null";
+                        break;
+                    default:
+                        value = "";
+                        break;
+                }
+                data.Properties.Add(new MaterialPropertyData
+                {
+                    Name = propName,
+                    Type = propType.ToString(),
+                    Value = value,
+                });
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Fingerprint (ported verbatim): shader name + renderQueue + sorted
+        // keywords + all property values (textures by GUID). SHA-256 hex.
+        // -------------------------------------------------------------------
+
+        private static string ComputeMaterialFingerprint(Material material)
+        {
+            var sb = new StringBuilder();
+            var shader = material.shader;
+            sb.Append("shader:").Append(shader != null ? shader.name : "null").Append(';');
+            sb.Append("queue:").Append(material.renderQueue).Append(';');
+
+            var keywords = material.shaderKeywords;
+            Array.Sort(keywords, StringComparer.Ordinal);
+            sb.Append("keywords:").Append(string.Join(",", keywords)).Append(';');
+
+            if (shader != null)
+            {
+                var propCount = ShaderUtil.GetPropertyCount(shader);
+                for (var i = 0; i < propCount; i++)
+                {
+                    var propName = ShaderUtil.GetPropertyName(shader, i);
+                    var propType = ShaderUtil.GetPropertyType(shader, i);
+                    switch (propType)
+                    {
+                        case ShaderUtil.ShaderPropertyType.TexEnv:
+                            var tex = material.GetTexture(propName);
+                            if (tex != null)
+                            {
+                                var texPath = AssetDatabase.GetAssetPath(tex);
+                                sb.Append("tex:").Append(propName).Append('=')
+                                  .Append(AssetDatabase.AssetPathToGUID(texPath)).Append(';');
+                            }
+                            break;
+                        case ShaderUtil.ShaderPropertyType.Color:
+                            sb.Append("col:").Append(propName).Append('=')
+                              .Append(material.GetColor(propName)).Append(';');
+                            break;
+                        case ShaderUtil.ShaderPropertyType.Vector:
+                            sb.Append("vec:").Append(propName).Append('=')
+                              .Append(material.GetVector(propName)).Append(';');
+                            break;
+                        default:
+                            sb.Append("flt:").Append(propName).Append('=')
+                              .Append(material.GetFloat(propName)).Append(';');
+                            break;
+                    }
+                }
+            }
+
+            using (var sha = SHA256.Create())
+            {
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
+                return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Renderer scan (ported): null material slots + builtin materials.
+        // -------------------------------------------------------------------
+
+        private static void ScanRenderers(string[] paths, List<RendererData> renderers)
+        {
+            foreach (var path in paths)
+            {
+                if (string.IsNullOrEmpty(path)) continue;
+                var type = AssetDatabase.GetMainAssetTypeAtPath(path);
+                if (type != typeof(GameObject)) continue;
+
+                GameObject go;
+                try { go = AssetDatabase.LoadAssetAtPath<GameObject>(path); }
+                catch { continue; }
+                if (go == null) continue;
+
+                Renderer[] renderersOnGo;
+                try { renderersOnGo = go.GetComponentsInChildren<Renderer>(true); }
+                catch { continue; }
+                if (renderersOnGo == null) continue;
+
+                foreach (var renderer in renderersOnGo)
+                {
+                    if (renderer == null) continue;
+                    var childPath = GetFullName(renderer.transform);
+                    var rd = new RendererData(path, childPath);
+
+                    Material[] shared;
+                    try { shared = renderer.sharedMaterials; }
+                    catch { shared = null; }
+
+                    if (shared == null || shared.Length == 0)
+                    {
+                        rd.Warnings.Add("null_material");
+                    }
+                    else
+                    {
+                        foreach (var mat in shared)
+                        {
+                            if (mat == null) { rd.Warnings.Add("null_material_slot"); continue; }
+                            var matPath = AssetDatabase.GetAssetPath(mat);
+                            if (matPath != null && matPath.Contains("unity_builtin"))
+                                rd.Warnings.Add("builtin_material");
+                        }
+                    }
+
+                    renderers.Add(rd);
+                }
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Cross-asset detections (ported; full-scan only)
+        // -------------------------------------------------------------------
+
+        private static void DetectDuplicateMaterials(List<MaterialData> materials)
+        {
+            var groups = new Dictionary<string, List<MaterialData>>(StringComparer.Ordinal);
+            foreach (var mat in materials)
+            {
+                if (string.IsNullOrEmpty(mat.Fingerprint)) continue;
+                if (!groups.TryGetValue(mat.Fingerprint, out var list))
+                {
+                    list = new List<MaterialData>();
+                    groups[mat.Fingerprint] = list;
+                }
+                list.Add(mat);
+            }
+
+            foreach (var group in groups.Values)
+            {
+                if (group.Count < 2) continue;
+                foreach (var mat in group)
+                {
+                    mat.IsDuplicate = true;
+                    var others = group.Where(m => m != mat).ToList();
+                    mat.DuplicatePaths = others.Select(o => o.Path).ToList();
+                    mat.Issues.Add(new MaterialIssue("duplicate_material",
+                        $"Duplicate of {others.Count} material(s): {string.Join(", ", others.Select(o => o.Name))}.",
+                        VerifySeverity.Warning));
+                }
+            }
+        }
+
+        private static void ApplyReferencedByPaths(List<MaterialData> materials, List<RendererData> renderers)
+        {
+            // Build a map of material-path -> GameObject asset paths that
+            // reference it, by reloading each renderer's sharedMaterials.
+            var map = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            foreach (var rd in renderers)
+            {
+                GameObject go;
+                try { go = AssetDatabase.LoadAssetAtPath<GameObject>(rd.AssetPath); }
+                catch { continue; }
+                if (go == null) continue;
+
+                Renderer[] rs;
+                try { rs = go.GetComponentsInChildren<Renderer>(true); }
+                catch { continue; }
+                if (rs == null) continue;
+
+                foreach (var renderer in rs)
+                {
+                    if (renderer == null) continue;
+                    if (GetFullName(renderer.transform) != rd.ChildPath) continue;
+                    Material[] shared;
+                    try { shared = renderer.sharedMaterials; }
+                    catch { continue; }
+                    if (shared == null) continue;
+                    foreach (var mat in shared)
+                    {
+                        if (mat == null) continue;
+                        var matPath = AssetDatabase.GetAssetPath(mat);
+                        if (string.IsNullOrEmpty(matPath) || matPath.Contains("unity_builtin")) continue;
+                        if (!map.TryGetValue(matPath, out var set))
+                        {
+                            set = new HashSet<string>(StringComparer.Ordinal);
+                            map[matPath] = set;
+                        }
+                        set.Add(rd.AssetPath);
+                    }
+                }
+            }
+
+            foreach (var mat in materials)
+            {
+                if (map.TryGetValue(mat.Path, out var set))
+                    mat.ReferencedByPaths = set.OrderBy(p => p).ToList();
+            }
+        }
+
+        private static void DetectUnusedMaterials(List<MaterialData> materials)
+        {
+            foreach (var mat in materials)
+            {
+                var inResources = mat.Path.Contains("/Resources/");
+                if (mat.ReferencedByPaths.Count == 0 && !inResources)
+                {
+                    mat.Issues.Add(new MaterialIssue("unused_material",
+                        "Material is not referenced by any renderer and is not in Resources.",
+                        VerifySeverity.Warning));
+                }
+            }
+        }
+
+        private static void AnalyzeVariantsAndPerformance(List<MaterialData> materials, MaterialsScanSettings settings)
+        {
+            foreach (var data in materials)
+            {
+                Material material;
+                try { material = AssetDatabase.LoadAssetAtPath<Material>(data.Path); }
+                catch { continue; }
+                if (material == null) continue;
+
+                var shader = material.shader;
+
+                if (settings.CheckVariants && MaterialReflection.TryGetIsMaterialVariant(material, out var isVariant) && isVariant)
+                {
+                    data.IsVariant = true;
+                    if (MaterialReflection.TryGetParentMaterial(material, out var parent, out var parentLinkBroken))
+                    {
+                        data.ParentLinkBroken = parentLinkBroken;
+                        data.VariantChainDepth = MaterialReflection.ComputeVariantChainDepth(material);
+                        if (parentLinkBroken)
+                        {
+                            data.Issues.Add(new MaterialIssue("variant_parent_invalid",
+                                "Material variant parent link is broken — parent does not resolve to an asset.",
+                                VerifySeverity.Error));
+                        }
+                        if (data.VariantChainDepth > settings.VariantDeepChainThreshold)
+                        {
+                            data.Issues.Add(new MaterialIssue("variant_deep_chain",
+                                $"Variant chain depth {data.VariantChainDepth} exceeds threshold {settings.VariantDeepChainThreshold}.",
+                                VerifySeverity.Warning));
+                        }
+                        if (parent != null)
+                        {
+                            data.VariantOverrideCount = MaterialReflection.ComputeVariantOverrideCount(material, parent);
+                            if (data.VariantOverrideCount > settings.VariantHeavyOverridesThreshold)
+                            {
+                                data.Issues.Add(new MaterialIssue("variant_heavy_overrides",
+                                    $"Heavy variant overrides: {data.VariantOverrideCount} (threshold {settings.VariantHeavyOverridesThreshold}).",
+                                    VerifySeverity.Warning));
+                            }
+                        }
                     }
                 }
 
-                var matches = pptr.Matches(line);
-                foreach (System.Text.RegularExpressions.Match m in matches)
+                if (shader != null)
                 {
-                    if (!m.Success) continue;
-                    var guid = m.Groups[2].Value;
-                    if (!IsRealGuid(guid)) continue;
+                    if (settings.CheckGpuInstancing)
+                    {
+                        data.SupportsGpuInstancing = MaterialReflection.TryGetGpuInstancingSupport(shader);
+                        if (data.SupportsGpuInstancing == true && !data.GpuInstancingEnabled)
+                        {
+                            data.Issues.Add(new MaterialIssue("gpu_instancing_off",
+                                "Shader supports GPU instancing but it is disabled on the material.",
+                                VerifySeverity.Warning));
+                        }
+                    }
 
-                    var resolves = !string.IsNullOrEmpty(AssetDatabase.GUIDToAssetPath(guid));
-                    var property = string.IsNullOrEmpty(currentProperty) ? "<unknown>" : currentProperty;
-                    data.References.Add(new MaterialReference(property, guid, i + 1, resolves));
+                    if (settings.CheckSrpBatcher)
+                    {
+                        data.SrpBatcherCompatible = MaterialReflection.TryGetSrpBatcherCompatibility(shader);
+                        if (data.SrpBatcherCompatible == false)
+                        {
+                            data.Issues.Add(new MaterialIssue("srp_batcher_incompatible",
+                                $"Shader '{shader.name}' is not SRP Batcher compatible.",
+                                VerifySeverity.Warning));
+                        }
+                    }
                 }
             }
         }
 
-        // Mirrors the dependencies rule's real-GUID check: drop the all-zero
-        // built-in GUIDs (Standard shader etc.) since they are valid Unity
-        // built-ins, not broken external edges.
-        private static bool IsRealGuid(string guid)
+        // -------------------------------------------------------------------
+        // Helpers
+        // -------------------------------------------------------------------
+
+        private static bool IsBuiltinShader(string shaderName)
         {
-            if (string.IsNullOrEmpty(guid)) return false;
-            if (guid.Length != 32) return false;
-            if (guid.StartsWith("0000000000", StringComparison.Ordinal)) return false;
-            for (var i = 0; i < 32; i++)
+            return BuiltinShaderNames.Contains(shaderName);
+        }
+
+        private static string GetFullName(Transform transform)
+        {
+            var names = new Stack<string>();
+            var t = transform;
+            while (t != null)
             {
-                var c = guid[i];
-                var isHex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-                if (!isHex) return false;
+                names.Push(t.name);
+                t = t.parent;
             }
-            return true;
+            return string.Join("/", names);
         }
     }
 }

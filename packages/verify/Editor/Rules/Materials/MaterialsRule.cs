@@ -10,9 +10,16 @@ namespace UnityOpenMcpVerify.Rules
         {
             if (scope.Paths == null || scope.Paths.Length == 0) return;
 
-            var data = new List<Materials.MaterialData>();
-            Materials.Scanner.ScanPaths(scope.Paths, data);
-            Materials.IssueMapper.MapToIssues(data, sink);
+            var settings = Materials.MaterialsScanSettings.Default();
+            var materials = new List<Materials.MaterialData>();
+            var renderers = new List<Materials.RendererData>();
+            // Cross-asset detections (duplicates, unused, variants) need the
+            // full material set as context — only run them in Full mode. Per-
+            // asset detections (missing shader/texture, builtin, render-queue)
+            // run in every mode so a scoped validate_edit still catches them.
+            var fullScan = mode == VerifyRunMode.Full;
+            Materials.Scanner.ScanPaths(scope.Paths, settings, materials, renderers, fullScan);
+            Materials.IssueMapper.MapToIssues(materials, renderers, sink);
         }
     }
 }

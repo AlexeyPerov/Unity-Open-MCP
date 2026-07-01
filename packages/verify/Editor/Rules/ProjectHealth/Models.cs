@@ -9,7 +9,6 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
             MetaPath = metaPath;
         }
 
-        /// <summary>A <c>.meta</c> file whose companion asset no longer exists.</summary>
         public string MetaPath { get; }
     }
 
@@ -21,10 +20,7 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
             Paths = paths;
         }
 
-        /// <summary>The GUID shared by two or more assets.</summary>
         public string Guid { get; }
-
-        /// <summary>Every asset path that carries this GUID.</summary>
         public List<string> Paths { get; }
     }
 
@@ -37,14 +33,48 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
             Detail = detail;
         }
 
-        /// <summary>ProjectSettings asset path (e.g.
-        /// <c>ProjectSettings/ProjectSettings.asset</c>).</summary>
         public string SettingsPath { get; }
-
-        /// <summary>The missing/invalid field path inside the settings file.</summary>
         public string Field { get; }
-
         public string Detail { get; }
+    }
+
+    /// <summary>A folder-structure entry (empty / meta-only / deep / large).</summary>
+    public class FolderIssue
+    {
+        public FolderIssue(string folderPath, string issueCode, string detail)
+        {
+            FolderPath = folderPath;
+            IssueCode = issueCode;
+            Detail = detail;
+        }
+
+        public string FolderPath { get; }
+        public string IssueCode { get; }
+        public string Detail { get; }
+    }
+
+    /// <summary>An asset that failed to load (null or threw).</summary>
+    public class BrokenAssetEntry
+    {
+        public BrokenAssetEntry(string assetPath, string detail)
+        {
+            AssetPath = assetPath;
+            Detail = detail;
+        }
+
+        public string AssetPath { get; }
+        public string Detail { get; }
+    }
+
+    /// <summary>A scene with zero root objects.</summary>
+    public class EmptySceneEntry
+    {
+        public EmptySceneEntry(string scenePath)
+        {
+            ScenePath = scenePath;
+        }
+
+        public string ScenePath { get; }
     }
 
     public class ProjectHealthData
@@ -52,5 +82,41 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
         public List<OrphanMetaEntry> OrphanMetas { get; } = new List<OrphanMetaEntry>();
         public List<DuplicateGuidEntry> DuplicateGuids { get; } = new List<DuplicateGuidEntry>();
         public List<ProjectSettingIssue> SettingIssues { get; } = new List<ProjectSettingIssue>();
+        public List<FolderIssue> FolderIssues { get; } = new List<FolderIssue>();
+        public List<BrokenAssetEntry> BrokenAssets { get; } = new List<BrokenAssetEntry>();
+        public List<EmptySceneEntry> EmptyScenes { get; } = new List<EmptySceneEntry>();
+    }
+
+    public struct ProjectHealthScanSettings
+    {
+        public bool CheckOrphanedMeta;
+        public bool CheckDuplicateGuid;
+        public bool CheckProjectSettings;
+        public bool CheckEmptyFolders;
+        public bool CheckMetaOnlyFolders;
+        public bool CheckDeepNesting;
+        public bool CheckLargeFolders;
+        public bool CheckBrokenAssets;
+        public bool CheckEmptyScenes;
+        public int MaxFolderNestingDepth;
+        public int MaxFilesPerFolder;
+
+        public static ProjectHealthScanSettings Default()
+        {
+            return new ProjectHealthScanSettings
+            {
+                CheckOrphanedMeta = true,
+                CheckDuplicateGuid = true,
+                CheckProjectSettings = true,
+                CheckEmptyFolders = true,
+                CheckMetaOnlyFolders = true,
+                CheckDeepNesting = true,
+                CheckLargeFolders = true,
+                CheckBrokenAssets = true,
+                CheckEmptyScenes = true,
+                MaxFolderNestingDepth = 8,
+                MaxFilesPerFolder = 200,
+            };
+        }
     }
 }
