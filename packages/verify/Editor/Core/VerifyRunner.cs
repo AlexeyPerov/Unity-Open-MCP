@@ -21,6 +21,12 @@ namespace UnityOpenMcpVerify
                 RegisteredRules.Add(new Rules.MissingReferencesRule());
                 RegisteredRules.Add(new Rules.ScenePrefabHealthRule());
                 RegisteredRules.Add(new Rules.DependenciesRule());
+                // M25 Plan 1 — wave-1 rule families.
+                RegisteredRules.Add(new Rules.AsmdefAuditRule());
+                RegisteredRules.Add(new Rules.ProjectHealthRule());
+                RegisteredRules.Add(new Rules.MaterialsRule());
+                RegisteredRules.Add(new Rules.AnimationAnalysisRule());
+                RegisteredRules.Add(new Rules.ShaderAnalysisRule());
             }
         }
 

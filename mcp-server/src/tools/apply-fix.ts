@@ -5,8 +5,9 @@ export const applyFix: Tool = {
   description:
     "Apply a verify rule fix action. Supports dry_run (default true) to preview the fix before applying. " +
     "Returns gate envelope when dry_run is false (dry_run short-circuits the gate entirely). " +
-    "Implemented fixes: remove_missing_script (safe), relink_broken_guid (unsafe — needs target_guid). " +
-    "Planned fixes: remove_orphan_meta, fix_duplicate_guid, reassign_missing_texture, reassign_missing_shader.",
+    "Implemented fixes: remove_missing_script (safe), relink_broken_guid (unsafe — needs target_guid), " +
+    "remove_orphan_meta (safe), fix_duplicate_guid (unsafe). " +
+    "Planned fixes: reassign_missing_texture, reassign_missing_shader.",
   inputSchema: {
     type: "object",
     required: ["issue_id"],

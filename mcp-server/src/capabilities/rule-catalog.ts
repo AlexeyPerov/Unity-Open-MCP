@@ -201,51 +201,94 @@ const OFFLINE_INTEGRITY_ISSUES: RuleIssueDescriptor[] = [
   },
 ];
 
+// M25 Plan 1 — wave-1 rule families ported from backlog-verify-rules.
+// Each entry mirrors the C# verify package issue mappers
+// (packages/verify/Editor/Rules/*). The issue codes are the link keys the
+// fix registry matches on.
+
+const ASMDEF_AUDIT_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "broken_asmdef_reference",
+    severity: "Error",
+    fixIds: [],
+  },
+  {
+    code: "asmdef_missing_name",
+    severity: "Error",
+    fixIds: [],
+  },
+  {
+    code: "malformed_asmdef",
+    severity: "Error",
+    fixIds: [],
+  },
+];
+
+const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "orphan_meta",
+    severity: "Warning",
+    fixIds: ["remove_orphan_meta"],
+    fullScanOnly: true,
+  },
+  {
+    code: "duplicate_guid",
+    severity: "Error",
+    fixIds: ["fix_duplicate_guid"],
+    fullScanOnly: true,
+  },
+  {
+    code: "missing_project_setting",
+    severity: "Error",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+];
+
+const MATERIALS_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "missing_shader",
+    severity: "Error",
+    fixIds: ["reassign_missing_shader"],
+  },
+  {
+    code: "missing_texture",
+    severity: "Error",
+    fixIds: ["reassign_missing_texture"],
+  },
+];
+
+const ANIMATION_ANALYSIS_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "missing_clip",
+    severity: "Error",
+    fixIds: [],
+  },
+  {
+    code: "empty_clip",
+    severity: "Warning",
+    fixIds: [],
+  },
+];
+
+const SHADER_ANALYSIS_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "shader_compile_error",
+    severity: "Error",
+    fixIds: [],
+  },
+  {
+    code: "missing_shader_asset",
+    severity: "Error",
+    fixIds: [],
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Planned rules — mirror stubs in VerifyGateAdapter.SelectRuleIds
 // ---------------------------------------------------------------------------
 
 const PLANNED_RULES: RuleCapability[] = [
-  {
-    id: "asmdef_audit",
-    title: "Assembly definition audit",
-    description:
-      "Validates assembly definition references, naming, and dependency graph health.",
-    applicableAssetKinds: ["asmdef"],
-    applicableExtensions: [".cs", ".asmdef"],
-    implemented: false,
-    status: "planned",
-    issues: [],
-    guidance:
-      "Not yet ported. C#/asmdef files currently pass through the gate without rule coverage. " +
-      "Track asset references manually or use find_references on GUID-based deps.",
-  },
-  {
-    id: "materials",
-    title: "Material health",
-    description:
-      "Detects unreferenced materials, missing textures, and broken shader references.",
-    applicableAssetKinds: ["material"],
-    applicableExtensions: [".mat", ".shader", ".shadergraph"],
-    implemented: false,
-    status: "planned",
-    issues: [],
-    guidance:
-      "Not yet ported. Use find_references to check material usage and read_asset to inspect shader refs.",
-  },
-  {
-    id: "shader_analysis",
-    title: "Shader analysis",
-    description:
-      "Inspects shader compile state, variant count, and keyword explosion risk.",
-    applicableAssetKinds: ["shader"],
-    applicableExtensions: [".mat", ".shader", ".shadergraph"],
-    implemented: false,
-    status: "planned",
-    issues: [],
-    guidance:
-      "Not yet ported. Use read_console to catch shader compile errors after a build.",
-  },
   {
     id: "textures",
     title: "Texture analysis",
@@ -270,19 +313,6 @@ const PLANNED_RULES: RuleCapability[] = [
     status: "planned",
     issues: [],
     guidance: "Not yet ported. Inspect sprite importers via read_asset or execute_csharp.",
-  },
-  {
-    id: "animation_analysis",
-    title: "Animation analysis",
-    description:
-      "Detects missing animation curves, broken animator transitions, and unused clips.",
-    applicableAssetKinds: ["animation"],
-    applicableExtensions: [".controller", ".anim"],
-    implemented: false,
-    status: "planned",
-    issues: [],
-    guidance:
-      "Not yet ported. Use find_references to trace animator usage and read_asset to inspect clips.",
   },
   {
     id: "audio_analysis",
@@ -359,6 +389,78 @@ export const RULE_CATALOG: RuleCapability[] = [
     status: "implemented",
     issues: OFFLINE_INTEGRITY_ISSUES,
   },
+  {
+    id: "asmdef_audit",
+    title: "Assembly definition audit",
+    description:
+      "Validates assembly definition references, naming, and dependency " +
+      "graph health: broken references (GUID or bare-name that does not " +
+      "resolve to a compiled assembly), a missing required `name` field, " +
+      "and malformed JSON.",
+    applicableAssetKinds: ["asmdef"],
+    applicableExtensions: [".asmdef", ".cs"],
+    implemented: true,
+    status: "implemented",
+    issues: ASMDEF_AUDIT_ISSUES,
+  },
+  {
+    id: "project_health",
+    title: "Project health",
+    description:
+      "In-Editor project-wide health: orphaned .meta files (companion asset " +
+      "deleted), duplicate GUIDs (two+ assets sharing one GUID), and " +
+      "ProjectSettings integrity (missing required settings files, no editor " +
+      "version). Full-scan only — does not fire on a scoped validate_edit. " +
+      "The live counterpart of the offline_integrity aggregator.",
+    applicableAssetKinds: ["meta", "project_settings"],
+    implemented: true,
+    status: "implemented",
+    issues: PROJECT_HEALTH_ISSUES,
+  },
+  {
+    id: "materials",
+    title: "Material health",
+    description:
+      "Detects broken material references: a shader GUID that does not " +
+      "resolve (missing_shader) or a texture GUID that does not resolve " +
+      "(missing_texture). Built-in shader GUIDs (all-zero) are treated as " +
+      "valid Unity built-ins.",
+    applicableAssetKinds: ["material"],
+    applicableExtensions: [".mat"],
+    implemented: true,
+    status: "implemented",
+    issues: MATERIALS_ISSUES,
+  },
+  {
+    id: "animation_analysis",
+    title: "Animation analysis",
+    description:
+      "Detects broken animator state motion references (missing_clip — a " +
+      "controller state points at a GUID that does not resolve) and empty " +
+      "animation clips (empty_clip — a .anim that declares no curves).",
+    applicableAssetKinds: ["animation"],
+    applicableExtensions: [".controller", ".anim"],
+    implemented: true,
+    status: "implemented",
+    issues: ANIMATION_ANALYSIS_ISSUES,
+  },
+  {
+    id: "shader_analysis",
+    title: "Shader analysis",
+    description:
+      "Inspects shader compile state: a .shader that failed to load " +
+      "(missing_shader_asset) or a .shader Unity reports as unsupported / " +
+      "with compile messages (shader_compile_error). Compile messages are " +
+      "read via ShaderUtil reflection so the rule stays Unity-version-portable.",
+    applicableAssetKinds: ["shader"],
+    // .mat is listed because the gate pairs shader_analysis with materials for
+    // material edits (a broken material often points at a broken shader) and
+    // list_rules filters .mat to both rules.
+    applicableExtensions: [".shader", ".shadergraph", ".mat"],
+    implemented: true,
+    status: "implemented",
+    issues: SHADER_ANALYSIS_ISSUES,
+  },
   ...PLANNED_RULES,
 ];
 
@@ -368,8 +470,11 @@ export const RULE_CATALOG: RuleCapability[] = [
 // remove_orphan_meta + fix_duplicate_guid were promoted from planned to
 // implemented in M24 Plan 2 / T24.2 — the offline_integrity rule (the offline
 // scanIntegrityOffline scanner) now emits orphan_meta / duplicate_guid, so the
-// fixes have an emitting rule + issue-code linkage. reassign_missing_* still
-// wait on the `materials` rule (deferred to M17); they stay planned.
+// fixes have an emitting rule + issue-code linkage. M25 Plan 1 added the
+// project_health rule as a second producer of those codes (the live Editor
+// counterpart). reassign_missing_texture / reassign_missing_shader now have an
+// emitting rule (the M25 Plan 1 `materials` rule emits missing_texture /
+// missing_shader); the fix providers themselves ship in M25 Plan 2.
 // ---------------------------------------------------------------------------
 
 const PLANNED_FIXES: FixCapability[] = [
@@ -377,7 +482,7 @@ const PLANNED_FIXES: FixCapability[] = [
     id: "remove_orphan_meta",
     implemented: true,
     status: "implemented",
-    rules: ["offline_integrity"],
+    rules: ["offline_integrity", "project_health"],
     issueCodes: ["orphan_meta"],
     // Deletes an orphaned .meta file (no companion asset). No asset data is
     // lost — the .meta is already detached. Safe to auto-suggest.
@@ -387,7 +492,7 @@ const PLANNED_FIXES: FixCapability[] = [
     id: "fix_duplicate_guid",
     implemented: true,
     status: "implemented",
-    rules: ["offline_integrity"],
+    rules: ["offline_integrity", "project_health"],
     issueCodes: ["duplicate_guid"],
     // Regenerating a GUID silently rewires the asset graph; never auto-applied
     // under enforce. Apply via apply_fix with the target path picked
@@ -400,24 +505,26 @@ const PLANNED_FIXES: FixCapability[] = [
     implemented: false,
     status: "planned",
     rules: ["materials"],
-    issueCodes: [],
+    issueCodes: ["missing_texture"],
     safe: false,
     guidance:
-      "Not yet ported — depends on the `materials` rule (deferred to M17). " +
-      "Use read_asset on the .mat file and execute_csharp to reassign the " +
-      "_MainTex / texture properties in the meantime.",
+      "Not yet ported — the `materials` rule now emits `missing_texture`, " +
+      "but the fix provider ships in M25 Plan 2. Use read_asset on the .mat " +
+      "file and execute_csharp to reassign the _MainTex / texture properties " +
+      "in the meantime.",
   },
   {
     id: "reassign_missing_shader",
     implemented: false,
     status: "planned",
     rules: ["materials"],
-    issueCodes: [],
+    issueCodes: ["missing_shader"],
     safe: false,
     guidance:
-      "Not yet ported — depends on the `materials` rule (deferred to M17). " +
-      "Use find_references to locate the intended shader and execute_csharp " +
-      "to reassign m_Shader on the material in the meantime.",
+      "Not yet ported — the `materials` rule now emits `missing_shader`, " +
+      "but the fix provider ships in M25 Plan 2. Use find_references to " +
+      "locate the intended shader and execute_csharp to reassign m_Shader " +
+      "on the material in the meantime.",
   },
 ];
 

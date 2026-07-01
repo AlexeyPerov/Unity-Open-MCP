@@ -133,19 +133,88 @@ test("planned rules carry status and guidance, no hard errors", () => {
 });
 
 test("planned rule stubs from the bridge selector are all present", () => {
+  // M25 Plan 1 — asmdef_audit, materials, shader_analysis, animation_analysis
+  // flipped from planned to implemented. The remaining selector stubs are the
+  // wave-2 long tail (textures, sprite_2d_analysis, audio_analysis).
   const plannedIds = plannedRules().map((r) => r.id);
   const expected = [
-    "asmdef_audit",
-    "materials",
-    "shader_analysis",
     "textures",
     "sprite_2d_analysis",
-    "animation_analysis",
     "audio_analysis",
   ];
   for (const id of expected) {
     assert.ok(plannedIds.includes(id), `planned rule ${id} missing from catalog`);
   }
+  // Wave-1 rules must NOT be planned anymore.
+  const implementedIds = implementedRules().map((r) => r.id);
+  for (const id of ["asmdef_audit", "materials", "shader_analysis", "animation_analysis"]) {
+    assert.ok(implementedIds.includes(id), `${id} must be implemented after M25 Plan 1`);
+    assert.ok(!plannedIds.includes(id), `${id} must not be planned after M25 Plan 1`);
+  }
+});
+
+// M25 Plan 1 — wave-1 rule families ported. Each must declare its issue codes
+// with the right severities so the catalog mirrors the C# issue mappers.
+
+test("asmdef_audit rule is implemented with broken_asmdef_reference and friends", () => {
+  const rule = RULE_CATALOG.find((r) => r.id === "asmdef_audit");
+  assert.ok(rule, "asmdef_audit rule must be in the catalog");
+  assert.equal(rule!.implemented, true);
+  assert.equal(rule!.status, "implemented");
+  const codes = rule!.issues.map((i) => i.code);
+  assert.ok(codes.includes("broken_asmdef_reference"));
+  assert.ok(codes.includes("asmdef_missing_name"));
+  assert.ok(codes.includes("malformed_asmdef"));
+});
+
+test("project_health rule is implemented and reuses orphan_meta + duplicate_guid codes", () => {
+  const rule = RULE_CATALOG.find((r) => r.id === "project_health");
+  assert.ok(rule, "project_health rule must be in the catalog");
+  assert.equal(rule!.implemented, true);
+  assert.equal(rule!.status, "implemented");
+  const codes = rule!.issues.map((i) => i.code);
+  assert.ok(codes.includes("orphan_meta"));
+  assert.ok(codes.includes("duplicate_guid"));
+  assert.ok(codes.includes("missing_project_setting"));
+  // All project_health codes are full-scan-only (whole-project checks).
+  for (const issue of rule!.issues) {
+    assert.equal(issue.fullScanOnly, true, `${issue.code} must be fullScanOnly`);
+  }
+});
+
+test("materials rule is implemented with missing_shader and missing_texture codes", () => {
+  const rule = RULE_CATALOG.find((r) => r.id === "materials");
+  assert.ok(rule, "materials rule must be in the catalog");
+  assert.equal(rule!.implemented, true);
+  assert.equal(rule!.status, "implemented");
+  const codes = rule!.issues.map((i) => i.code);
+  assert.ok(codes.includes("missing_shader"));
+  assert.ok(codes.includes("missing_texture"));
+  // The planned reassign fixes link to the materials rule codes.
+  const shaderIssue = rule!.issues.find((i) => i.code === "missing_shader")!;
+  assert.ok(shaderIssue.fixIds.includes("reassign_missing_shader"));
+  const texIssue = rule!.issues.find((i) => i.code === "missing_texture")!;
+  assert.ok(texIssue.fixIds.includes("reassign_missing_texture"));
+});
+
+test("animation_analysis rule is implemented with missing_clip and empty_clip codes", () => {
+  const rule = RULE_CATALOG.find((r) => r.id === "animation_analysis");
+  assert.ok(rule, "animation_analysis rule must be in the catalog");
+  assert.equal(rule!.implemented, true);
+  assert.equal(rule!.status, "implemented");
+  const codes = rule!.issues.map((i) => i.code);
+  assert.ok(codes.includes("missing_clip"));
+  assert.ok(codes.includes("empty_clip"));
+});
+
+test("shader_analysis rule is implemented with shader_compile_error code", () => {
+  const rule = RULE_CATALOG.find((r) => r.id === "shader_analysis");
+  assert.ok(rule, "shader_analysis rule must be in the catalog");
+  assert.equal(rule!.implemented, true);
+  assert.equal(rule!.status, "implemented");
+  const codes = rule!.issues.map((i) => i.code);
+  assert.ok(codes.includes("shader_compile_error"));
+  assert.ok(codes.includes("missing_shader_asset"));
 });
 
 // ---------------------------------------------------------------------------

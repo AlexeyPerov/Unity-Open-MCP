@@ -201,6 +201,11 @@ Authoritative via `capabilities` (call for the live list). Implemented:
 - `**missing_references**` — per-PPtr-field view. Codes: `missing_guid` (Error, fix `relink_broken_guid` — unsafe, needs `target_guid`), `missing_fileid` (Error), `missing_script` (Error, fix `remove_missing_script`), `missing_local_fileid` / `empty_local_ref` (Warning), `missing_method` / `type_mismatch` / `duplicate_component` / `invalid_layer` (Warning, full-scan only).
 - `**scene_prefab_health**` — structural health. Codes: `broken_reference` (Error), `high_risk_bootstrap` / `scene_object_count` / `component_hotspot` / `inactive_expensive` / `inactive_heavy` / `deep_nesting` / `override_explosion` (Warning).
 - `**dependencies**` — forward dependency graph. Codes: `broken_dependency` (Error — asset-graph edge to a missing asset; fix `relink_broken_guid` — unsafe), `dependency_cycle` (Warning).
+- `**asmdef_audit**` — assembly definition health. Codes: `broken_asmdef_reference` (Error — a reference that does not resolve to a compiled assembly or known asmdef), `asmdef_missing_name` (Error — no `name` field), `malformed_asmdef` (Error — JSON failed to parse).
+- `**project_health**` — whole-project integrity, full-scan only (does not fire on a scoped validate_edit). Codes: `orphan_meta` (Warning — `.meta` with no companion asset, fix `remove_orphan_meta` safe), `duplicate_guid` (Error — GUID shared by 2+ assets, fix `fix_duplicate_guid` unsafe), `missing_project_setting` (Error — required ProjectSettings file missing).
+- `**materials**` — material reference health. Codes: `missing_shader` (Error — material references a shader GUID that does not resolve), `missing_texture` (Error — material references a texture GUID that does not resolve).
+- `**animation_analysis**` — animation health. Codes: `missing_clip` (Error — animator state references a motion GUID that does not resolve), `empty_clip` (Warning — `.anim` declares no curves).
+- `**shader_analysis**` — shader compile health. Codes: `shader_compile_error` (Error — Unity reports the shader as unsupported / with compile messages), `missing_shader_asset` (Error — `.shader` failed to load).
 
 ### Fixes
 
@@ -209,7 +214,7 @@ Authoritative via `capabilities` (call for the live list). Implemented:
 - `**remove_missing_script**` (safe) — strips `MonoBehaviour` whose script GUID no longer resolves. Works on `.prefab` / `.unity`.
 - `**relink_broken_guid**` (unsafe) — rewrites a broken external GUID reference. Dry-run advertises candidate targets; apply requires `target_guid`. Never auto-applied.
 
-Planned (capabilities advertises with guidance): `remove_orphan_meta`, `fix_duplicate_guid`, `reassign_missing_texture`, `reassign_missing_shader`.
+Planned (capabilities advertises with guidance): `reassign_missing_texture` (the `materials` rule now emits `missing_texture`; the fix ships in a later milestone), `reassign_missing_shader` (same — `materials` emits `missing_shader`). Implemented but not auto-suggested here: `remove_orphan_meta` (safe — deletes orphaned `.meta`), `fix_duplicate_guid` (unsafe — re-GUIDs an asset).
 
 If `fix_id` omitted, the response lists every fix that can resolve the given `issue_id`.
 
