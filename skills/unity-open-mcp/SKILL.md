@@ -84,7 +84,7 @@ A C# edit broke the bridge assembly (or a dependency); Unity is stuck mid-reload
 
 1. Call `**unity_open_mcp_read_compile_errors`** — reads `Editor.log` tail offline, returns structured CSxxxx errors (`file`/`line`/`code`). The **only** diagnostic that survives a dead bridge. (`compile_check` does **not** work here — its batch entry point lives in the same broken assembly, and the per-project lock blocks a second instance.)
 2. Read `errors[].file` / `line` / `code` and **fix the CS error in source first.** Do not retry tests, relaunch Unity, or call `compile_check`.
-3. Trigger a recompile (see [Local package source recompile caveat](#local-package-source-recompile-caveat) if you develop against `packages/` source; otherwise a normal recompile from Unity is enough); the bridge reloads itself once the assembly compiles. The MCP server auto-dismisses the Safe Mode dialog unless `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` is set.
+3. Trigger a recompile (see [Local package source recompile caveat](#local-package-source-recompile-caveat) if you develop against `packages/` source; otherwise a normal recompile from Unity is enough); the bridge reloads itself once the assembly compiles. The MCP server auto-dismisses the Safe Mode dialog under the default `UNITY_OPEN_MCP_DIALOG_POLICY=ignore`; set `manual` (or `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1`) to opt out entirely.
 4. Only when `read_compile_errors` reports no errors AND the lock shows fresh heartbeat + `state: idle` is the bridge back.
 
 ### Step 5 — Never conclude "Unity not running" while a process is alive

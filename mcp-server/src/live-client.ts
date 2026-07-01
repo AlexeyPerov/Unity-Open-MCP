@@ -7,7 +7,7 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
-  pollAndDismissLaunchErrors,
+  pollAndDismissDialogs,
   readDismissConfig,
   type PollAndDismissOptions,
 } from "./dialog-dismiss.js";
@@ -115,6 +115,13 @@ export class LiveClient implements Router {
   private dismissEnabled: boolean;
   private dismissTimeoutMs: number;
   private dismissIntervalMs: number;
+  /** M23 Plan 2 — active dialog policy (auto/manual/ignore/recover/safe-mode/
+   *  cancel). Stored so waitForCompile can thread it into the dismiss loop
+   *  without re-reading the env on every stall. */
+  private dialogPolicy: import("./dialog-policy.js").DialogPolicy;
+  /** M23 Plan 2 — opt-in for the Project Upgrade Required dialog (irreversible,
+   *  off by default). */
+  private allowProjectUpgrade: boolean;
   /** M14 — per-session bearer token auto-discovered from the instance lock.
    *  Undefined when no live lock was found (older bridge / env port override);
    *  in that case no Authorization header is sent and the bridge must be in
@@ -139,15 +146,19 @@ export class LiveClient implements Router {
     this.pingCache = pingCache;
     this.authToken = authToken;
     this.projectPath = projectPath;
-    // M13 T4.5 — launch-errors / Safe Mode dialog auto-dismissal. Resolved
-    // once at construction; the env vars do not change mid-process. The
-    // feature is enabled by default and runs concurrently with every
-    // compile/bridge readiness wait so it ticks on the same stall points
-    // agents hit, not only at process spawn.
+    // M13 T4.5 + M23 Plan 2 — startup dialog auto-dismissal. Resolved once at
+    // construction; the env vars do not change mid-process. The feature is
+    // enabled by default and runs concurrently with every compile/bridge
+    // readiness wait so it ticks on the same stall points agents hit, not
+    // only at process spawn. M23 Plan 2 generalizes T4.5's single Ignore
+    // click into the full 6-variant policy taxonomy (dialog-policy.ts) so
+    // different workflows can pick different buttons on the same dialog.
     const dismissCfg = readDismissConfig();
     this.dismissEnabled = dismissCfg.enabled;
     this.dismissTimeoutMs = dismissCfg.timeoutMs;
     this.dismissIntervalMs = dismissCfg.intervalMs;
+    this.dialogPolicy = dismissCfg.policy;
+    this.allowProjectUpgrade = dismissCfg.allowProjectUpgrade;
     this.compatWarned = false;
   }
 
@@ -645,6 +656,8 @@ export class LiveClient implements Router {
       const dismissOpts: PollAndDismissOptions = {
         timeoutMs: this.dismissTimeoutMs,
         intervalMs: this.dismissIntervalMs,
+        policy: this.dialogPolicy,
+        allowProjectUpgrade: this.allowProjectUpgrade,
         abortSignal: dismissAbort.signal,
       };
       dismissDone = this.runDismissLoop(dismissOpts);
@@ -703,13 +716,13 @@ export class LiveClient implements Router {
   }
 
   /**
-   * Run the launch-errors dismiss polling loop. Indirected through a method
+   * Run the startup-dialog dismiss polling loop. Indirected through a method
    * so unit tests can stub the OS-clicking loop without invoking
    * PowerShell / osascript / xdotool. Production uses the real
-   * `pollAndDismissLaunchErrors`.
+   * `pollAndDismissDialogs`.
    */
   protected runDismissLoop(opts: PollAndDismissOptions): Promise<void> {
-    return pollAndDismissLaunchErrors(opts);
+    return pollAndDismissDialogs(opts);
   }
 
   async readResource(route: string): Promise<Record<string, unknown>> {

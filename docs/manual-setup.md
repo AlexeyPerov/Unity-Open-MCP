@@ -123,10 +123,12 @@ What that means:
 - **Required:** `UNITY_PROJECT_PATH` — absolute path to the Unity project root.
 - Optional: `UNITY_OPEN_MCP_BRIDGE_PORT` (override the auto-derived port).
 - Optional: `UNITY_PATH` (batch fallback when the Editor can't auto-discover).
-- Optional launch-dialog handling:
-  - `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1`
-  - `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS`
-  - `UNITY_OPEN_MCP_DISMISS_INTERVAL_MS`
+- Optional startup-dialog handling (see [Dialog policy](#dialog-policy) below):
+  - `UNITY_OPEN_MCP_DIALOG_POLICY=auto|manual|ignore|recover|safe-mode|cancel` (default `ignore`)
+  - `UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1` (opt in to auto-confirming the irreversible Project Upgrade dialog; off by default)
+  - `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` (kill-switch — disables all OS clicks)
+  - `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS` (default 30000)
+  - `UNITY_OPEN_MCP_DISMISS_INTERVAL_MS` (default 1500)
 
 ## 3) Launch Unity and verify
 
@@ -156,6 +158,50 @@ npx -y unity-open-mcp@latest wait-for-ready --project /path/to/MyGame
 npx -y unity-open-mcp@latest run-tool unity_open_mcp_capabilities --project /path/to/MyGame --json
 ```
 
+## Dialog policy
+
+Unity raises native modal dialogs at startup that block the bridge from coming
+up — the "Enter Safe Mode?" / compile-errors prompt, "Opening Project in
+Non-Matching Editor Installation", "Project Upgrade Required", and "Auto
+Graphics API Notice". The MCP server probes the desktop for these while it
+waits for bridge readiness and clicks the appropriate button so unattended
+flows (CI, agents) are not stuck behind a modal no one is watching.
+
+`UNITY_OPEN_MCP_DIALOG_POLICY` selects which button to click on each dialog.
+The default `ignore` preserves the long-standing behaviour (Ignore on the
+compile-errors prompt) while also dismissing the two safe lower-frequency
+dialogs and **never** auto-confirming a project upgrade:
+
+| Policy | launch-errors | Non-Matching Editor | Project Upgrade | Auto Graphics API |
+| --- | --- | --- | --- | --- |
+| `ignore` (default) | Ignore | Continue | **blocked** (never auto-confirm) | OK |
+| `auto` | Ignore | Continue | blocked unless opt-in | OK |
+| `recover` | Enter Safe Mode | Continue | blocked unless opt-in | OK |
+| `safe-mode` | Enter Safe Mode | Quit | blocked | (declined) |
+| `cancel` | Quit | Quit | Quit | Quit |
+| `manual` | — (no clicks at all) | — | — | — |
+
+**Project Upgrade is irreversible** (it rewrites project metadata; recoverable
+only via VCS revert). No policy value auto-confirms it. Set
+`UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1` to opt in — then `auto`/`ignore`/
+`recover` will click Confirm. The opt-in is audited: each dismissal (or block)
+is logged once to the MCP server's stderr with the dialog kind, button, and
+policy.
+
+`UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` is the hard kill-switch: it
+disables all OS clicks regardless of policy (equivalent to `manual`, but
+reported distinctly so you can tell "operator turned the feature off entirely"
+from "operator chose manual for this run").
+
+**Cross-platform notes.** Windows performs precise per-button selection
+(Win32 `BM_CLICK` on the policy-chosen button). macOS and Linux/X11 press the
+**focused** (default) button via `key code 36` / `Return`, which under the
+default policies is the safe choice; both platforms detect and **block** a
+project-upgrade dialog rather than clicking. Linux requires `xdotool` (X11
+only — Wayland is unsupported); macOS requires an Accessibility permission for
+the terminal / `node` binary (System Settings → Privacy & Security →
+Accessibility).
+
 ## Troubleshooting
 
 - **Connection refused / "bridge unavailable":** confirm Unity is **open** with
@@ -168,8 +214,11 @@ npx -y unity-open-mcp@latest run-tool unity_open_mcp_capabilities --project /pat
   it picks up the new PATH.
 - **Tools missing in the client after editing config:** restart the client. Most
   MCP clients only read the config at startup.
-- **Compile-error launch dialog blocks startup:** dismiss it by hand, or keep
-  auto-dismiss enabled (`UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS` unset).
+- **Compile-error launch dialog blocks startup:** the server auto-dismisses it
+  by default (clicking Ignore). If it keeps reappearing, set
+  `UNITY_OPEN_MCP_DIALOG_POLICY=manual` and dismiss it by hand, or check
+  `unity_open_mcp_read_compile_errors` for the underlying CS error. See
+  [Dialog policy](#dialog-policy).
 - **"nothing happens" but no error:** double-check `UNITY_PROJECT_PATH` is an
   **absolute** path to the project root and contains no trailing slash or typos.
 

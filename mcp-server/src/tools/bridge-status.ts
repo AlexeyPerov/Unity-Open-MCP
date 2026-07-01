@@ -35,6 +35,14 @@ export const bridgeStatus: Tool = {
     "window; retry shortly), or `dead_bridge` (Unity process " +
     "alive but the bridge assembly failed to recompile, so /ping will " +
     "never recover; call unity_open_mcp_read_compile_errors). " +
+    "Also surfaces a top-level `classification` field " +
+    "(healthy | reloading | dead_bridge | gone) mirroring the instance " +
+    "lock, and a structured `recoveryHint` ({ tool, reason }) that is " +
+    "non-null only when the status has a specific recovery tool " +
+    "(dead_bridge → unity_open_mcp_read_compile_errors; null otherwise). " +
+    "When classification is dead_bridge the result explicitly reads as " +
+    "'Unity likely in Safe Mode / compile failure' rather than a generic " +
+    "stopped, so an agent can branch on the machine-readable signal. " +
     "Designed for the Validation Suite's manual bridge-offline scenario " +
     "pattern and operators confirming toolbar stop/start — not a " +
     "general agent health check (use unity_open_mcp_ping for that). " +

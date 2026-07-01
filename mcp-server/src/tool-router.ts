@@ -222,8 +222,48 @@ function bridgeStatusNextStep(
       // being masked by a clean-looking "stopped".
       return "Bridge listener is not responding but Unity is running — likely a transient domain-reload window (the bridge tears down its HTTP socket during compiles). Wait a moment and call unity_open_mcp_bridge_status again; if it persists, call unity_open_mcp_read_compile_errors to check for a failed recompile.";
     case "dead_bridge":
-      return "The bridge assembly failed to recompile and Unity is in a bad state. Call unity_open_mcp_read_compile_errors to retrieve the compiler errors from Editor.log, fix the cited file/line, then trigger a recompile.";
+      // M23 Plan 2 — safe-mode surfacing (feedback 2026-06-29). A dead_bridge
+      // signature (live PID + stale heartbeat) almost always means Unity is
+      // sitting in Safe Mode / showing compile errors; the generic "open the
+      // bridge window" hint was misleading. Name safe mode explicitly and
+      // point at the one channel that works in that state.
+      return "Unity is likely in Safe Mode or showing compile errors — the bridge " +
+        "assembly failed to recompile, so the HTTP listener will not return on its " +
+        "own. Call unity_open_mcp_read_compile_errors to retrieve the compiler " +
+        "errors from Editor.log, fix the cited file/line, then trigger a recompile " +
+        "(e.g. a no-op edit + focus Unity, or unity_open_mcp_compile_check once the " +
+        "source compiles). If Unity is NOT in safe mode, the bridge toolbar toggle " +
+        "may be off — open the bridge window (Unity menu: Tools/Unity Open MCP " +
+        "Bridge) and confirm it is started.";
   }
+}
+
+// M23 Plan 2 — structured recovery hint surfaced alongside `status`. Lets
+// agents (and the Validation Suite) branch on a machine-readable signal
+// instead of scraping `nextStep` prose. `null` when the status is healthy or
+// the recovery path is just "wait/retry" (no specific tool to call). Today
+// only `dead_bridge` carries a hint; the shape is extensible so future
+// failure modes (e.g. version_mismatch) can add their own.
+interface BridgeRecoveryHint {
+  /** The tool an agent should call next to diagnose/recover. */
+  tool: string;
+  /** Why that tool — one short sentence. */
+  reason: string;
+}
+
+function bridgeStatusRecoveryHint(
+  status: "running" | "compiling" | "stopped" | "dead_bridge" | "unreachable",
+): BridgeRecoveryHint | null {
+  if (status === "dead_bridge") {
+    return {
+      tool: "unity_open_mcp_read_compile_errors",
+      reason:
+        "Unity is likely in Safe Mode / compile failure — read_compile_errors " +
+        "reads Editor.log offline (the only channel that works with the bridge " +
+        "assembly dead).",
+    };
+  }
+  return null;
 }
 
 export class ToolRouter implements Router {
@@ -1056,6 +1096,17 @@ export class ToolRouter implements Router {
       // uses for poll termination).
       ready: status === "running",
       projectPath: this.projectPath,
+      // M23 Plan 2 — top-level mirror of the instance-lock classification
+      // (healthy | reloading | dead_bridge | gone) + a structured recovery
+      // hint. Mirrors `instance.classification` at the top level so agents
+      // can branch on a single field without digging into the instance
+      // sub-object; `recoveryHint` is null unless the status has a specific
+      // recovery tool to call (today: dead_bridge → read_compile_errors).
+      // Feedback 2026-06-29: a dead_bridge must read as "Unity likely in
+      // Safe Mode / compile failure", not the generic "stopped" the bare
+      // status used to suggest.
+      classification,
+      recoveryHint: bridgeStatusRecoveryHint(status),
       instance: {
         lockPath: lockOnDisk,
         classification,

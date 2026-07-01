@@ -180,7 +180,7 @@ The 5 classes:
 | --------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `none`          | Read-only / side-effect-free.                                 | Returns immediately; no settle wait, no dirty guard.                                                              | Retry on the next call. A failure is a real error, not a settle/reload artifact.                                                                                      |
 | `compile-reload`| Triggers or observes a domain reload (script / asmdef / package edit). | Blocks up to 60s for the compile to settle; the active-scene dirty guard preflights.                              | After the call, poll `editor_status` / `read_compile_errors` before assuming success. `compile_check` is batch-only and returns `editor_instance_locked` when a live Editor holds the project lock — do not retry blindly. |
-| `modal-dialog`  | May raise an OS modal (build, project upgrade, version mismatch). | No first-class dismiss yet; the call can hang on the modal until dismissed.                                       | Have an operator dismiss the dialog, or avoid the call in headless contexts. Detect/classify/dismiss policy is forthcoming.                                           |
+| `modal-dialog`  | May raise an OS modal (build, project upgrade, version mismatch). | Startup modals (Safe Mode, Non-Matching Editor, Project Upgrade, Auto Graphics API) are auto-dismissed by the MCP server while it waits for bridge readiness, per `UNITY_OPEN_MCP_DIALOG_POLICY`. Mid-call modals (build, save-scene) still need the operator or the scene-dirty guard. | Set `UNITY_OPEN_MCP_DIALOG_POLICY` (`ignore` default) and, for project-upgrade consent, `UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1`. See [manual-setup §Dialog policy](../manual-setup.md#dialog-policy). |
 | `scene-dirty`   | Mutates scene / prefab / hierarchy / asset state.             | Runs the gate (checkpoint → mutate → validate → delta); blocks up to 5s for asset refresh. Requires non-empty `paths_hint`. | Read `gate.delta` + `agentNextSteps` from the response. On a `scene_dirty` refusal, save or discard first, or pass `ignore_scene_dirty: true` to accept the risk.    |
 | `process-stale` | Long-running / async op where the bridge may become unresponsive. | Blocks until the op finishes; the heartbeat may stop advancing during the wait.                                   | Treat stale-heartbeat + live-PID as "still running", not crashed. Wait, then re-probe with `ping` / `editor_status` before concluding the bridge died.                |
 
@@ -449,6 +449,8 @@ Wraps the instance-lock classifier (`instance-discovery.ts#classifyInstance`) + 
   "status": "running",            // running | compiling | stopped | dead_bridge
   "ready": true,                  // true only when connected AND idle
   "projectPath": "/abs/project",
+  "classification": "healthy",    // top-level mirror of instance.classification
+  "recoveryHint": null,           // { tool, reason } when status has a recovery tool
   "instance": {
     "lockPath": "~/.unity-open-mcp/instances/<sha256>.json",
     "classification": "healthy",  // healthy | reloading | dead_bridge | gone
@@ -470,6 +472,8 @@ Wraps the instance-lock classifier (`instance-discovery.ts#classifyInstance`) + 
 | otherwise                  | —             | `stopped`      |
 
 `stopped` intentionally folds two indistinguishable cases from the MCP-server's vantage point: Unity is not running at all, OR Unity is running but the operator toggled the bridge off via the toolbar. `instance.lock` in the response disambiguates (`lock === null` → no Unity; `lock.pid` alive but no listener → toolbar off). The tool **never** errors on an offline bridge — `stopped` IS the answer in that case. Read-only, gate-free, never spawns Unity.
+
+**`classification` + `recoveryHint` (M23 Plan 2).** The top-level `classification` mirrors `instance.classification` so agents can branch on a single field. `recoveryHint` is non-null only when the status has a specific recovery tool — today, `dead_bridge` returns `{ tool: "unity_open_mcp_read_compile_errors", reason: "..." }` and every other status returns `null`. A `dead_bridge` signature (live PID + stale heartbeat) almost always means Unity is sitting in Safe Mode / showing compile errors, so the hint and `nextStep` wording name Safe Mode explicitly rather than the generic "toolbar off" reading. This is the machine-readable recovery signal — `ping` / live tools return `bridge_compile_failed` with the same wording when the dead-bridge signature is observed mid-call.
 
 ### Deferred: `bridge_stop` / `bridge_start`
 
