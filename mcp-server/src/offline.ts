@@ -2123,3 +2123,586 @@ function extractReferenceLocations(
 
   return locations;
 }
+
+// ===========================================================================
+// dependenciesOffline — forward + reverse edges + impact analysis (T24.2).
+//
+// The offline counterpart of the live DependenciesTool. Returns BOTH edge
+// directions in one call (forward = what this asset depends on; reverse = what
+// references this asset), plus the broken-forward-GUID set, dependency cycles
+// through the asset, and an optional transitive impact set ("what breaks if I
+// delete/move this?"). All offline — no running Editor required.
+//
+// Algorithm:
+//   - Forward edges: parse the queried asset's YAML, collect every external
+//     GUID it references (field refs + m_Script + PrefabInstance
+//     m_SourcePrefab), resolve each against the GUID→path index. GUIDs that
+//     fail to resolve are the brokenForwardGuids set.
+//   - Reverse edges: reuse the findReferencesOffline scan (raw-text GUID
+//     filter across Assets/).
+//   - Cycles: DFS over the forward edges of the queried asset's transitive
+//     closure, scoped by maxCycleDepth to bound the walk.
+//   - Transitive impact: BFS over the reverse edges of the queried asset
+//     (multi-hop "who depends on what depends on me"), scoped by
+//     maxImpactDepth to bound the walk.
+// ===========================================================================
+
+/** Edge-kind discriminator — surfaces HOW a forward edge was declared so an
+ * agent can reason about a missing ref (a broken m_Script is a different fix
+ * than a broken prefab base). Mirrors the C# Dependencies.Scanner edge kinds. */
+export type ForwardEdgeKind = "pptr" | "script" | "prefab_source";
+
+export interface ForwardEdge {
+  guid: string;
+  assetPath: string; // "" when the GUID does not resolve (broken edge)
+  kind: ForwardEdgeKind;
+  resolved: boolean;
+}
+
+export interface ReverseEdge {
+  assetPath: string;
+  guid: string;
+  kind: string;
+}
+
+export interface ImpactEntry {
+  assetPath: string;
+  /** Hop distance from the queried asset (1 = direct reverse edge). */
+  depth: number;
+}
+
+export interface DependenciesOfflineResult {
+  queriedAssetPath: string;
+  queriedAssetGuid: string;
+  forwardDependencies: ForwardEdge[];
+  forwardCount: number;
+  /** Distinct unresolved forward-edge target GUIDs (the broken_dependency set). */
+  brokenForwardGuids: string[];
+  /** Dependency cycles passing through the queried asset (each a path list). */
+  cycles: string[][];
+  reverseDependencies: ReverseEdge[];
+  reverseCount: number;
+  /** Transitive reverse closure ("what breaks if I delete/move this?"). Empty
+   * unless opts.includeImpact is set — the walk is the expensive part. */
+  impact?: {
+    affected: ImpactEntry[];
+    affectedCount: number;
+    maxDepth: number;
+    /** True when the impact walk hit the depth bound before exhausting the
+     * graph — the affected set is a prefix, not the full closure. */
+    truncated: boolean;
+  };
+  detail: string;
+  /** Reverse-edge roster truncation count (max_results cap). */
+  truncated: number;
+  /** Non-fatal: forward-edge extraction failed to parse the queried asset as
+   * YAML (e.g. a JSON-only kind or a binary asset read offline). The forward
+   * arrays are empty and this names the reason; reverse edges are unaffected. */
+  forwardSkipped?: string;
+  _source: "offline";
+}
+
+/** Collect the forward edges declared by a single asset: every external GUID
+ *  reference (field PPtrs + m_Script + PrefabInstance m_SourcePrefab). This is
+ *  the offline forward-edge primitive — unity-scanner has no full forward-edge
+ *  builder, so this is authored net-new on the existing GUID-extraction
+ *  primitives (findGUIDs / readGUIDField / parseAsset). */
+function collectForwardEdges(parsed: ParsedAsset): ForwardEdge[] {
+  const edges: ForwardEdge[] = [];
+  const seen = new Set<string>();
+
+  // 1. PrefabInstance.m_SourcePrefab — the base-prefab edge of a variant.
+  for (const obj of parsed.objects) {
+    if (obj.type !== "PrefabInstance") continue;
+    const sourceGuid = readGUIDField(obj.lines, "m_SourcePrefab");
+    if (sourceGuid !== "" && seen.add(`prefab:${sourceGuid}`)) {
+      edges.push({ guid: sourceGuid, assetPath: "", kind: "prefab_source", resolved: false });
+    }
+  }
+
+  // 2. m_Script GUIDs on MonoBehaviours — the script-class edge.
+  for (const obj of parsed.objects) {
+    if (obj.type !== "MonoBehaviour") continue;
+    if (obj.scriptGUID !== "" && seen.add(`script:${obj.scriptGUID}`)) {
+      edges.push({ guid: obj.scriptGUID, assetPath: "", kind: "script", resolved: false });
+    }
+  }
+
+  // 3. Every other guid: field — material refs, asset refs, animation clips,
+  //    etc. m_Script is handled above; m_SourcePrefab target: GUIDs inside
+  //    PrefabInstance.m_Modifications are included here so variant overrides
+  //    count as forward edges too.
+  for (const obj of parsed.objects) {
+    for (const line of obj.lines) {
+      if (!line.includes("guid:")) continue;
+      if (line.includes("m_Script:")) continue; // handled as a script edge above
+      for (const g of findGUIDs(line)) {
+        if (!seen.add(`pptr:${g}`)) continue;
+        edges.push({ guid: g, assetPath: "", kind: "pptr", resolved: false });
+      }
+    }
+  }
+
+  return edges;
+}
+
+/** Resolve forward edges against the GUID→path index. Mutates each edge in
+ *  place: sets assetPath + resolved. Returns the broken (unresolved) GUIDs. */
+function resolveForwardEdges(
+  edges: ForwardEdge[],
+  guidIndex: GUIDIndex,
+): string[] {
+  const broken: string[] = [];
+  const brokenSeen = new Set<string>();
+  for (const edge of edges) {
+    const path = guidIndex.get(edge.guid);
+    if (path !== undefined) {
+      edge.assetPath = path;
+      edge.resolved = true;
+    } else if (brokenSeen.add(edge.guid)) {
+      broken.push(edge.guid);
+    }
+  }
+  return broken;
+}
+
+export async function dependenciesOffline(
+  opts: {
+    assetPath?: string;
+    guid?: string;
+    detail?: string;
+    maxResults?: number;
+    /** Include the transitive impact closure (multi-hop reverse). Default
+     * false — the BFS is the expensive part of this call. */
+    includeImpact?: boolean;
+    /** Max hop depth for the impact BFS (default 5). Bounds the walk on large
+     * graphs. */
+    maxImpactDepth?: number;
+    /** Max depth for the forward-cycle DFS (default 8). */
+    maxCycleDepth?: number;
+    projectRoot: string;
+  },
+): Promise<DependenciesOfflineResult> {
+  const detail = (opts.detail ?? "normal") as "summary" | "normal";
+  const maxResults = opts.maxResults ?? 100;
+  const includeImpact = opts.includeImpact ?? false;
+  const maxImpactDepth = opts.maxImpactDepth ?? 5;
+  const maxCycleDepth = opts.maxCycleDepth ?? 8;
+
+  // Resolve target GUID + path (mirrors findReferencesOffline's resolution).
+  let targetGuid = "";
+  let targetPath = "";
+  if (opts.guid) {
+    targetGuid = opts.guid.toLowerCase();
+  } else if (opts.assetPath) {
+    targetPath = opts.assetPath;
+    targetGuid = (await safeReadMetaGUID(
+      join(opts.projectRoot, opts.assetPath + ".meta"),
+    )).toLowerCase();
+  }
+
+  if (targetGuid === "") {
+    return emptyDependencies(targetPath, "", detail);
+  }
+  if (targetPath === "") {
+    const idx = await buildGUIDIndex(opts.projectRoot, new Set([targetGuid]));
+    targetPath = idx.get(targetGuid) ?? "";
+  }
+
+  // ---- Forward edges ----
+  // Parse the queried asset + collect its declared edges, then resolve each
+  // against a GUID→path index scoped to exactly the GUIDs this asset names.
+  let forwardEdges: ForwardEdge[] = [];
+  let brokenGuids: string[] = [];
+  let cycles: string[][] = [];
+  let forwardSkipped: string | undefined;
+
+  const absPath = join(opts.projectRoot, targetPath);
+  let data: string | undefined;
+  try {
+    data = await readFile(absPath, "utf-8");
+  } catch {
+    // The queried asset isn't on disk (GUID resolve but path is stale). No
+    // forward edges can be extracted; reverse edges still computed below.
+    forwardSkipped = "queried asset not readable on disk";
+  }
+
+  if (data !== undefined) {
+    try {
+      const parsed = parseAsset(data);
+      parsed.path = targetPath;
+      forwardEdges = collectForwardEdges(parsed);
+      const wanted = new Set(forwardEdges.map((e) => e.guid));
+      const guidIndex = await buildGUIDIndex(opts.projectRoot, wanted);
+      brokenGuids = resolveForwardEdges(forwardEdges, guidIndex);
+      if (forwardEdges.length > 0) {
+        cycles = await detectCyclesOffline(
+          targetPath,
+          forwardEdges,
+          opts.projectRoot,
+          maxCycleDepth,
+        );
+      }
+    } catch (err) {
+      // Not parseable as Unity YAML (JSON-only kind, binary, malformed). The
+      // forward arrays stay empty; reverse edges are unaffected. This is the
+      // honest signal — the offline forward parser covers text-serialized YAML
+      // only, matching the documented offline coverage.
+      forwardSkipped = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  // ---- Reverse edges ---- (reuse the findReferencesOffline machinery).
+  const refResult = await findReferencesOffline({
+    assetPath: targetPath || undefined,
+    guid: targetGuid,
+    detail: "normal",
+    projectRoot: opts.projectRoot,
+  });
+
+  const reverseEdges: ReverseEdge[] = refResult.referencedBy.map((e) => ({
+    assetPath: e.assetPath,
+    guid: e.guid ?? "",
+    kind: e.kind,
+  }));
+
+  // ---- Transitive impact (optional) ----
+  let impact: DependenciesOfflineResult["impact"];
+  if (includeImpact) {
+    impact = await computeTransitiveImpact(
+      targetGuid,
+      targetPath,
+      opts.projectRoot,
+      maxImpactDepth,
+    );
+  }
+
+  // ---- Apply detail + caps ----
+  const displayForward = detail === "summary" ? [] : forwardEdges;
+  const totalCount = reverseEdges.length;
+  let displayReverse: ReverseEdge[];
+  let truncated = 0;
+  if (detail === "summary") {
+    displayReverse = [];
+  } else if (maxResults > 0 && totalCount > maxResults) {
+    displayReverse = reverseEdges.slice(0, maxResults);
+    truncated = totalCount - maxResults;
+  } else {
+    displayReverse = reverseEdges;
+  }
+
+  return {
+    queriedAssetPath: targetPath,
+    queriedAssetGuid: targetGuid,
+    forwardDependencies: displayForward,
+    forwardCount: forwardEdges.length,
+    brokenForwardGuids: brokenGuids,
+    cycles,
+    reverseDependencies: displayReverse,
+    reverseCount: totalCount,
+    impact,
+    detail,
+    truncated,
+    ...(forwardSkipped ? { forwardSkipped } : {}),
+    _source: "offline",
+  };
+}
+
+function emptyDependencies(
+  path: string,
+  guid: string,
+  detail: string,
+): DependenciesOfflineResult {
+  return {
+    queriedAssetPath: path,
+    queriedAssetGuid: guid,
+    forwardDependencies: [],
+    forwardCount: 0,
+    brokenForwardGuids: [],
+    cycles: [],
+    reverseDependencies: [],
+    reverseCount: 0,
+    detail,
+    truncated: 0,
+    _source: "offline",
+  };
+}
+
+/** Forward-cycle detection via DFS over the transitive forward closure of the
+ *  queried asset. Bounded by maxDepth to stay cheap on large graphs; a cycle
+ *  is reported when the DFS revisits the queried asset's path. This mirrors
+ *  the C# Dependencies.Scanner.DetectCycles shape (each cycle is a path list).
+ *
+ *  unity-scanner has no cycle detector — this is authored net-new. */
+async function detectCyclesOffline(
+  startPath: string,
+  startEdges: ForwardEdge[],
+  projectRoot: string,
+  maxDepth: number,
+): Promise<string[][]> {
+  const cycles: string[][] = [];
+
+  // Build a small forward-edge cache so repeated visits of the same asset
+  // parse once. Keyed by asset path.
+  const edgeCache = new Map<string, ForwardEdge[]>();
+  edgeCache.set(startPath, startEdges);
+
+  async function edgesOf(path: string): Promise<ForwardEdge[]> {
+    const cached = edgeCache.get(path);
+    if (cached) return cached;
+    try {
+      const data = await readFile(join(projectRoot, path), "utf-8");
+      const parsed = parseAsset(data);
+      const edges = collectForwardEdges(parsed);
+      // Best-effort resolve so the DFS walks resolved paths only.
+      const idx = await buildGUIDIndex(projectRoot, new Set(edges.map((e) => e.guid)));
+      resolveForwardEdges(edges, idx);
+      edgeCache.set(path, edges);
+      return edges;
+    } catch {
+      edgeCache.set(path, []);
+      return [];
+    }
+  }
+
+  // DFS from each resolved forward neighbor of the start asset, looking for a
+  // path back to startPath. visited guards against re-descending the same node
+  // within one root-neighbor walk (the cycle itself is the back-edge to start).
+  const visiting = new Set<string>();
+  async function dfs(current: string, trail: string[]): Promise<void> {
+    if (trail.length > maxDepth) return;
+    const edges = await edgesOf(current);
+    for (const edge of edges) {
+      if (!edge.resolved || edge.assetPath === "") continue;
+      if (edge.assetPath === startPath) {
+        cycles.push([...trail, startPath]);
+        continue;
+      }
+      if (visiting.has(edge.assetPath)) continue;
+      visiting.add(edge.assetPath);
+      await dfs(edge.assetPath, [...trail, edge.assetPath]);
+      visiting.delete(edge.assetPath);
+    }
+  }
+
+  for (const edge of startEdges) {
+    if (!edge.resolved || edge.assetPath === "" || edge.assetPath === startPath) continue;
+    visiting.clear();
+    visiting.add(edge.assetPath);
+    await dfs(edge.assetPath, [startPath, edge.assetPath]);
+  }
+  return cycles;
+}
+
+/** Transitive impact closure via BFS over reverse edges. Starting from the
+ *  queried asset's direct referencers, walk one hop out at a time, accumulating
+ *  every asset that (transitively) depends on the queried asset. Bounded by
+ *  maxDepth. This is the "what breaks if I delete/move this?" answer — neither
+ *  the offline nor the live path did multi-hop reverse before T24.2. */
+async function computeTransitiveImpact(
+  startGuid: string,
+  startPath: string,
+  projectRoot: string,
+  maxDepth: number,
+): Promise<NonNullable<DependenciesOfflineResult["impact"]>> {
+  const affected: ImpactEntry[] = [];
+  const seen = new Set<string>([startPath]);
+  let frontier: string[] = [];
+  let truncated = false;
+
+  // Seed: direct reverse edges of the queried asset.
+  const seed = await findReferencesOffline({
+    assetPath: startPath || undefined,
+    guid: startGuid,
+    detail: "normal",
+    projectRoot,
+  });
+  for (const e of seed.referencedBy) {
+    if (seen.has(e.assetPath)) continue;
+    seen.add(e.assetPath);
+    frontier.push(e.assetPath);
+    affected.push({ assetPath: e.assetPath, depth: 1 });
+  }
+
+  // BFS: for each level, resolve the reverse edges of every frontier asset.
+  for (let depth = 2; depth <= maxDepth; depth++) {
+    if (frontier.length === 0) break;
+    const next: string[] = [];
+    for (const nodePath of frontier) {
+      const nodeGuid = await safeReadMetaGUID(join(projectRoot, nodePath + ".meta"));
+      if (nodeGuid === "") continue;
+      const res = await findReferencesOffline({
+        guid: nodeGuid,
+        detail: "normal",
+        projectRoot,
+      });
+      for (const e of res.referencedBy) {
+        if (seen.has(e.assetPath)) continue;
+        seen.add(e.assetPath);
+        next.push(e.assetPath);
+        affected.push({ assetPath: e.assetPath, depth });
+      }
+    }
+    frontier = next;
+    if (depth === maxDepth && frontier.length > 0) {
+      // The next level exists but we stop here — the closure is a prefix.
+      truncated = true;
+    }
+  }
+
+  return {
+    affected,
+    affectedCount: affected.length,
+    maxDepth,
+    truncated,
+  };
+}
+
+// ===========================================================================
+// scanIntegrityOffline — project-wide offline integrity scan (T24.2 item 3).
+//
+// The per-read integrity checks (runYamlIntegrityChecks / runJsonIntegrityChecks)
+// surface on every read_asset call but are scoped to ONE asset. The verify
+// engine (M25) needs PROJECT-WIDE signals that don't fit the per-read model:
+//   - orphan_meta: a .meta file whose asset was deleted (no companion file).
+//   - duplicate_guid: a GUID shared by two+ .meta files.
+//   - (aggregated) missing refs: every unresolved field GUID across Assets/.
+//
+// These fill the planned remove_orphan_meta / fix_duplicate_guid fix
+// placeholders in the capability catalog — the first rules to emit those codes.
+// Runs entirely offline; no Editor, no AssetDatabase.
+// ===========================================================================
+
+export interface IntegrityScanEntry {
+  /** The asset/.meta path the issue is reported on. */
+  path: string;
+  code: string;
+  severity: "error" | "warning" | "info";
+  detail: string;
+  /** For duplicate_guid: the other paths sharing this GUID. */
+  relatedPaths?: string[];
+}
+
+export interface IntegrityScanResult {
+  issues: IntegrityScanEntry[];
+  byCode: Record<string, number>;
+  totalIssues: number;
+  assetsScanned: number;
+  _source: "offline";
+}
+
+/** Scan the whole Assets/ tree for project-wide integrity issues that the
+ *  per-read checks cannot surface (orphaned .meta, duplicate GUIDs) plus the
+ *  aggregated missing-reference set. Offline counterpart of a full verify
+ *  scan_paths run for these three rule families. */
+export async function scanIntegrityOffline(
+  opts: { projectRoot: string },
+): Promise<IntegrityScanResult> {
+  const issues: IntegrityScanEntry[] = [];
+  const assetsDir = join(opts.projectRoot, "Assets");
+
+  // ---- Walk every .meta + every asset file in one pass ----
+  // We collect: guidByPath (path -> guid), pathByGuid (guid -> paths[]), and
+  // the set of asset files (companions for the orphan-meta check). Skipping a
+  // dir uses the same skipDirs policy as every other offline walk.
+  const guidByPath = new Map<string, string>();
+  const allAssetPaths = new Set<string>();
+
+  const assetFiles = await collectFiles(assetsDir);
+  for (const absPath of assetFiles) {
+    const assetPath = toAssetPath(opts.projectRoot, absPath);
+    allAssetPaths.add(assetPath);
+    const metaGuid = await safeReadMetaGUID(absPath + ".meta");
+    if (metaGuid !== "") {
+      guidByPath.set(assetPath, metaGuid);
+    }
+  }
+
+  // Also index .meta-only paths (files whose companion was deleted show up
+  // here but not in allAssetPaths — those are the orphans). walkMeta gives us
+  // every .meta under Assets/.
+  const metaOnlyPaths = new Set<string>();
+  await walkMeta(assetsDir, async (metaPath) => {
+    const assetPath = toAssetPath(opts.projectRoot, metaPath.slice(0, -5));
+    if (!allAssetPaths.has(assetPath)) {
+      metaOnlyPaths.add(assetPath);
+    }
+  });
+
+  // ---- orphan_meta: .meta whose companion asset is gone ----
+  for (const path of metaOnlyPaths) {
+    issues.push({
+      path: path + ".meta",
+      code: "orphan_meta",
+      severity: "warning",
+      detail: `meta file has no companion asset at ${path}`,
+    });
+  }
+
+  // ---- duplicate_guid: GUID shared by 2+ assets ----
+  const pathsByGuid = new Map<string, string[]>();
+  for (const [assetPath, guid] of guidByPath) {
+    const list = pathsByGuid.get(guid);
+    if (list) list.push(assetPath);
+    else pathsByGuid.set(guid, [assetPath]);
+  }
+  for (const [guid, paths] of pathsByGuid) {
+    if (paths.length < 2) continue;
+    for (const p of paths) {
+      issues.push({
+        path: p,
+        code: "duplicate_guid",
+        severity: "error",
+        detail: `guid ${guid} shared by ${paths.length} assets`,
+        relatedPaths: paths.filter((other) => other !== p),
+      });
+    }
+  }
+
+  // ---- aggregated missing references (the per-read check, project-wide) ----
+  // Re-uses the full GUID index so unresolved field GUIDs are detected once
+  // per asset across the whole tree. This is the offline seed for the
+  // missing_references verify rule (M25 consumes these primitives).
+  const fullGuidIndex = await buildGUIDIndex(opts.projectRoot);
+  for (const absPath of assetFiles) {
+    const ext = extname(absPath).toLowerCase();
+    if (!OFFLINE_PARSEABLE_EXTENSIONS.has(ext)) continue;
+    const assetPath = toAssetPath(opts.projectRoot, absPath);
+    let data: string;
+    try { data = await readFile(absPath, "utf-8"); } catch { continue; }
+    if (!data.includes("guid:")) continue; // fast filter: no refs at all
+
+    try {
+      const parsed = parseAsset(data);
+      parsed.path = assetPath;
+      // Run the per-asset YAML integrity check against the FULL index (not a
+      // scoped one) so a ref resolves even if its target lives far away.
+      const perAsset = runYamlIntegrityChecks(parsed, fullGuidIndex);
+      for (const issue of perAsset) {
+        issues.push({
+          path: assetPath,
+          code: issue.code,
+          severity: issue.severity,
+          detail: issue.detail,
+        });
+      }
+    } catch {
+      // Not parseable as YAML — skip. JSON integrity is per-read only; a
+      // project-wide JSON scan is out of scope for the verify-engine seed.
+    }
+  }
+
+  // ---- group by code ----
+  const byCode: Record<string, number> = {};
+  for (const issue of issues) {
+    byCode[issue.code] = (byCode[issue.code] ?? 0) + 1;
+  }
+
+  return {
+    issues,
+    byCode,
+    totalIssues: issues.length,
+    assetsScanned: allAssetPaths.size,
+    _source: "offline",
+  };
+}

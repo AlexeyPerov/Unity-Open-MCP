@@ -172,7 +172,7 @@ Common route behavior:
 
 ### Offline read coverage
 
-`read_asset`, `search_assets`, and `find_references` parse text-serialized assets from disk without a running Editor — the hybrid live/offline differentiator. The offline parser covers two asset families:
+`read_asset`, `search_assets`, `find_references`, and `dependencies` parse text-serialized assets from disk without a running Editor — the hybrid live/offline differentiator. The offline parser covers two asset families:
 
 - **Text-serialized Unity YAML** — `.prefab`, `.unity`, `.asset`, `.mat`, `.controller`, `.anim`, `.playable`, `.preset`, `.spriteatlas`, `.terrainlayer`, `.vfx` (YAML object headers + GUID refs parse; embedded binary blobs are skipped).
 - **JSON assets** (a path unity-scanner does not handle) — `.asmdef` (single JSON object), `.shadergraph` / `.shadersubgraph` (a stream of pretty-printed JSON objects, one per graph element).
@@ -180,6 +180,10 @@ Common route behavior:
 Binary formats (`.png`, `.wav`, `.fbx`, …) stay live-routed. When the bridge is down, offline-parseable assets still read; non-parseable assets surface a `source_unavailable` error pointing at the bridge.
 
 The offline reader reconstructs the **full** GameObject/component tree (the compact default folds render-only leaves; `profile=full` shows every node), parses **prefab variant overrides** from `PrefabInstance.m_Modifications` (matching the live `prefab_get_overrides` shape), and emits **integrity signals** (`integrity[]` on the `read_asset` response) for malformed JSON, missing references, missing scripts, and orphaned prefab instances. The signals surface on every read so an agent sees them without a separate verify call; the verify rule suite consumes the same primitives as structured rules.
+
+**Dependency graph + impact analysis offline.** `dependencies` is offline-routeable: forward edges (what this asset depends on) come from parsing the queried asset's YAML on disk, reverse edges (what references this asset) reuse the offline reference scan, and broken forward-edge GUIDs + dependency cycles are computed offline. Set `include_impact=true` for the **transitive reverse closure** — every asset that (transitively) depends on the queried asset, with hop depth. This is the "what breaks if I delete/move this?" answer; it is offline-only (the live tool has no multi-hop reverse surface yet), so it routes offline even when the bridge is up. Non-YAML queried assets (JSON/binary) surface a `forwardSkipped` reason and empty forward arrays; reverse edges are unaffected.
+
+**Project-wide integrity scan offline.** The offline integrity scanner walks the whole `Assets/` tree and emits three rule families that the per-read check cannot surface project-wide: `orphan_meta` (a `.meta` whose companion asset was deleted), `duplicate_guid` (a GUID shared by two+ assets), and the aggregated `missing_reference` / `missing_script_reference` set. These feed the `offline_integrity` verify rule (the link keys for the `remove_orphan_meta` and `fix_duplicate_guid` fixes).
 
 ## Lifecycle policy
 

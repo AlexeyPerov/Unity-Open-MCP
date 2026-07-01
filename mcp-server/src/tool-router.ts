@@ -4,7 +4,7 @@ import type { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
-import { listAssetsOffline, findReferencesOffline } from "./offline.js";
+import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
 import { editorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES } from "./unity-log.js";
 import { summarizeProjectHealth } from "./project-health.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
@@ -367,6 +367,15 @@ export class ToolRouter implements Router {
     // ReferenceGraph remains available when the bridge is up.
     if (toolName === "unity_open_mcp_find_references") {
       return this.routeFindReferences(args, live);
+    }
+
+    // dependencies — offline-first (M24 Plan 2 / T24.2). Forward + reverse
+    // edges + impact analysis all compute from YAML on disk when no bridge is
+    // connected; the live DependenciesTool remains available when the bridge
+    // is up. The offline path is the only one that exposes include_impact
+    // (transitive reverse closure) today.
+    if (toolName === "unity_open_mcp_dependencies") {
+      return this.routeDependencies(args, live);
     }
 
     // M22 — verify tools. The bridge returns the full issues[] list; we fold +
@@ -1232,6 +1241,92 @@ export class ToolRouter implements Router {
         content: [
           { type: "text", text: JSON.stringify({ ...withPaging, _source: "offline" }) },
         ],
+        isError: false,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: { code: "offline_error", message },
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  // M24 Plan 2 / T24.2 — dependencies (forward + reverse edges + impact
+  // analysis). Offline-first when no bridge is connected; the live
+  // DependenciesTool is the fallback when the bridge is up. The live tool does
+  // not yet honor include_impact / max_impact_depth — those are offline-only
+  // today, so when the bridge is up and impact is requested we route offline
+  // regardless (the offline path is the only one with the transitive closure).
+  private async routeDependencies(
+    args: Record<string, unknown>,
+    live: LiveClient,
+  ): Promise<CallToolResult> {
+    const { detail } = readProfileAndDetail(args, "normal");
+    const assetPath = typeof args.asset_path === "string" ? args.asset_path : undefined;
+    const guid = typeof args.guid === "string" ? args.guid : undefined;
+    const includeImpact = args.include_impact === true;
+
+    if (!assetPath && !guid) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: {
+                code: "missing_parameter",
+                message: "Either 'asset_path' or 'guid' is required.",
+              },
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const liveAvailable = await live.isLiveAvailable();
+
+    // Impact analysis is offline-only. When requested, go straight to the
+    // offline path even if the bridge is up — the live DependenciesTool has no
+    // transitive-closure surface yet.
+    if (!includeImpact && liveAvailable) {
+      console.error("[unity-open-mcp] Route: dependencies -> live");
+      // The live tool honors asset_path/guid/detail/max_results only.
+      const liveArgs: Record<string, unknown> = {
+        asset_path: assetPath,
+        guid,
+        detail,
+        max_results: typeof args.max_results === "number" ? args.max_results : 100,
+      };
+      const result = await live.route("unity_open_mcp_dependencies", liveArgs);
+      return injectRouteMeta(result, { route: "live" });
+    }
+
+    console.error(
+      includeImpact && liveAvailable
+        ? "[unity-open-mcp] Route: dependencies -> offline (include_impact is offline-only)"
+        : "[unity-open-mcp] Route: dependencies -> offline (live bridge unavailable)",
+    );
+
+    try {
+      const result = await dependenciesOffline({
+        assetPath,
+        guid,
+        detail,
+        maxResults: typeof args.max_results === "number" ? args.max_results : 100,
+        includeImpact,
+        maxImpactDepth: typeof args.max_impact_depth === "number" ? args.max_impact_depth : 5,
+        projectRoot: this.projectPath,
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
         isError: false,
       };
     } catch (err) {

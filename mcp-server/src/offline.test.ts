@@ -15,6 +15,8 @@ import {
   searchAssetsOffline,
   listAssetsOffline,
   findReferencesOffline,
+  dependenciesOffline,
+  scanIntegrityOffline,
   countHierarchy,
 } from "./offline.js";
 import { renderAssetSummary } from "./compression/compact.js";
@@ -1428,6 +1430,475 @@ test("offline override target resolves to a GameObject path the live tool would 
     assert.ok(withTarget.length > 0, "at least one override with a resolved target");
     const namesVariant = withTarget.some((o) => (o.target ?? "").includes("PlayerVariant"));
     assert.ok(namesVariant, "a target references the variant root GameObject");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// dependenciesOffline — forward + reverse edges + impact analysis (T24.2).
+//
+// The graph fixture models a real dependency chain so forward/reverse/broken/
+// cycle/impact all exercise on one tree:
+//
+//   SharedMat.mat  ←─referenced by─  Player.prefab  ←─base of─  PlayerVariant.prefab
+//        │                                  │
+//        │                                  └─ m_Script → PlayerController.cs
+//        └─ also referenced by Main.unity
+//
+//   BrokenMat.mat is named by a GUID that has no .meta anywhere (broken edge).
+// ---------------------------------------------------------------------------
+
+async function setupDependencyProject(tmp: string): Promise<void> {
+  const matGuid = "cafe0000000000000000000000000001";
+  const basePrefabGuid = "cafe0000000000000000000000000002";
+  const variantGuid = "cafe0000000000000000000000000003";
+  const scriptGuid = "cafe0000000000000000000000000004";
+  const sceneGuid = "cafe0000000000000000000000000005";
+  // Deliberately unresolved — no .meta in the project.
+  const brokenGuid = "deadbeef000000000000000000000001";
+
+  // Shared material (leaf — referenced by prefab + scene).
+  await mkdir(join(tmp, "Assets", "Materials"), { recursive: true });
+  await writeFile(
+    join(tmp, "Assets", "Materials", "SharedMat.mat"),
+    `%YAML 1.1
+--- !u!21 &2100000
+Material:
+  m_Name: SharedMat
+`,
+  );
+  await writeFile(join(tmp, "Assets", "Materials", "SharedMat.mat.meta"), `guid: ${matGuid}\n`);
+
+  // PlayerController script (forward edge of Player.prefab via m_Script).
+  await mkdir(join(tmp, "Assets", "Scripts"), { recursive: true });
+  await writeFile(join(tmp, "Assets", "Scripts", "PlayerController.cs"), "using UnityEngine;\npublic class PlayerController : MonoBehaviour {}\n");
+  await writeFile(join(tmp, "Assets", "Scripts", "PlayerController.cs.meta"), `guid: ${scriptGuid}\n`);
+
+  // Base prefab — references the material (forward) + the script (forward) +
+  // a broken GUID (forward, unresolved).
+  await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+  await writeFile(
+    join(tmp, "Assets", "Prefabs", "Player.prefab"),
+    `%YAML 1.1
+--- !u!1 &100
+GameObject:
+  m_Component:
+  - component: {fileID: 200}
+  - component: {fileID: 300}
+  m_Name: Player
+--- !u!4 &200
+Transform:
+  m_GameObject: {fileID: 100}
+  m_Father: {fileID: 0}
+--- !u!23 &300
+MeshRenderer:
+  m_GameObject: {fileID: 100}
+  m_Material: {fileID: 0, guid: ${matGuid}, type: 2}
+--- !u!114 &400
+MonoBehaviour:
+  m_GameObject: {fileID: 100}
+  m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}
+  m_BrokenRef: {fileID: 0, guid: ${brokenGuid}, type: 2}
+`,
+  );
+  await writeFile(join(tmp, "Assets", "Prefabs", "Player.prefab.meta"), `guid: ${basePrefabGuid}\n`);
+
+  // Variant prefab — its base is Player.prefab (prefab_source forward edge).
+  await writeFile(
+    join(tmp, "Assets", "Prefabs", "PlayerVariant.prefab"),
+    `%YAML 1.1
+--- !u!1001 &500
+PrefabInstance:
+  m_SourcePrefab: {fileID: 100100000, guid: ${basePrefabGuid}, type: 3}
+  m_Modifications:
+  - target: {fileID: 100, guid: ${basePrefabGuid}, type: 3}
+    propertyPath: m_Name
+    value: PlayerVariant
+`,
+  );
+  await writeFile(join(tmp, "Assets", "Prefabs", "PlayerVariant.prefab.meta"), `guid: ${variantGuid}\n`);
+
+  // Scene — references the material (reverse edge of SharedMat).
+  await mkdir(join(tmp, "Assets", "Scenes"), { recursive: true });
+  await writeFile(
+    join(tmp, "Assets", "Scenes", "Main.unity"),
+    `%YAML 1.1
+--- !u!1 &100
+GameObject:
+  m_Component:
+  - component: {fileID: 200}
+  m_Name: SceneGO
+--- !u!4 &200
+Transform:
+  m_GameObject: {fileID: 100}
+  m_Father: {fileID: 0}
+--- !u!23 &300
+MeshRenderer:
+  m_GameObject: {fileID: 100}
+  m_Material: {fileID: 0, guid: ${matGuid}, type: 2}
+`,
+  );
+  await writeFile(join(tmp, "Assets", "Scenes", "Main.unity.meta"), `guid: ${sceneGuid}\n`);
+}
+
+test("dependenciesOffline returns forward edges for an asset that depends on others", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-forward-"));
+  try {
+    await setupDependencyProject(tmp);
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Prefabs/Player.prefab",
+      projectRoot: tmp,
+    });
+    // Player.prefab forward-depends on the material (pptr) + script (script).
+    const forwardPaths = result.forwardDependencies.filter((e) => e.resolved).map((e) => e.assetPath);
+    assert.ok(forwardPaths.includes("Assets/Materials/SharedMat.mat"), `material in forward edges: ${JSON.stringify(forwardPaths)}`);
+    assert.ok(forwardPaths.includes("Assets/Scripts/PlayerController.cs"), `script in forward edges: ${JSON.stringify(forwardPaths)}`);
+    assert.ok(result.forwardCount >= 2, `forwardCount >= 2: ${result.forwardCount}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline returns reverse edges for an asset that is referenced", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-reverse-"));
+  try {
+    await setupDependencyProject(tmp);
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Materials/SharedMat.mat",
+      projectRoot: tmp,
+    });
+    // SharedMat is referenced by Player.prefab + Main.unity.
+    const reversePaths = result.reverseDependencies.map((e) => e.assetPath).sort();
+    assert.ok(reversePaths.includes("Assets/Prefabs/Player.prefab"), `Player.prefab in reverse: ${JSON.stringify(reversePaths)}`);
+    assert.ok(reversePaths.includes("Assets/Scenes/Main.unity"), `Main.unity in reverse: ${JSON.stringify(reversePaths)}`);
+    assert.ok(result.reverseCount >= 2, `reverseCount >= 2: ${result.reverseCount}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline reports broken forward-edge GUIDs", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-broken-"));
+  try {
+    await setupDependencyProject(tmp);
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Prefabs/Player.prefab",
+      projectRoot: tmp,
+    });
+    assert.ok(
+      result.brokenForwardGuids.includes("deadbeef000000000000000000000001"),
+      `broken GUID reported: ${JSON.stringify(result.brokenForwardGuids)}`,
+    );
+    // The broken edge should appear in forwardDependencies as unresolved.
+    const brokenEdge = result.forwardDependencies.find((e) => !e.resolved);
+    assert.ok(brokenEdge, "at least one unresolved forward edge");
+    assert.equal(brokenEdge!.assetPath, "");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline detects prefab_source as a forward edge (variant → base)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-prefabsrc-"));
+  try {
+    await setupDependencyProject(tmp);
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Prefabs/PlayerVariant.prefab",
+      projectRoot: tmp,
+    });
+    const prefabSrcEdge = result.forwardDependencies.find((e) => e.kind === "prefab_source");
+    assert.ok(prefabSrcEdge, "prefab_source forward edge present");
+    assert.equal(prefabSrcEdge!.assetPath, "Assets/Prefabs/Player.prefab");
+    assert.equal(prefabSrcEdge!.resolved, true);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline returns BOTH forward and reverse in one call", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-both-"));
+  try {
+    await setupDependencyProject(tmp);
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Prefabs/Player.prefab",
+      projectRoot: tmp,
+    });
+    // Player.prefab has forward edges (material/script) AND a reverse edge
+    // (PlayerVariant depends on it as its prefab base).
+    assert.ok(result.forwardCount > 0, "forward edges present");
+    assert.ok(result.reverseCount > 0, "reverse edges present");
+    const reversePaths = result.reverseDependencies.map((e) => e.assetPath);
+    assert.ok(reversePaths.includes("Assets/Prefabs/PlayerVariant.prefab"), `variant in reverse: ${JSON.stringify(reversePaths)}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline summary detail omits edge rosters but keeps counts", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-summary-"));
+  try {
+    await setupDependencyProject(tmp);
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Prefabs/Player.prefab",
+      detail: "summary",
+      projectRoot: tmp,
+    });
+    assert.equal(result.forwardDependencies.length, 0, "summary drops forward roster");
+    assert.equal(result.reverseDependencies.length, 0, "summary drops reverse roster");
+    assert.ok(result.forwardCount > 0, "forwardCount still accurate");
+    assert.ok(result.reverseCount > 0, "reverseCount still accurate");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline include_impact returns the transitive reverse closure", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-impact-"));
+  try {
+    await setupDependencyProject(tmp);
+    // Impact of deleting SharedMat: direct (Player.prefab, Main.unity) +
+    // transitive (PlayerVariant.prefab depends on Player.prefab).
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Materials/SharedMat.mat",
+      includeImpact: true,
+      projectRoot: tmp,
+    });
+    assert.ok(result.impact, "impact block present");
+    const affected = result.impact!.affected.map((a) => a.assetPath);
+    assert.ok(affected.includes("Assets/Prefabs/Player.prefab"), "Player.prefab in impact (depth 1)");
+    assert.ok(affected.includes("Assets/Scenes/Main.unity"), "Main.unity in impact (depth 1)");
+    assert.ok(affected.includes("Assets/Prefabs/PlayerVariant.prefab"), "PlayerVariant in impact (depth 2, transitive)");
+    // Depth 1 = direct; depth 2 = transitive via Player.prefab.
+    const variant = result.impact!.affected.find((a) => a.assetPath.includes("PlayerVariant"));
+    assert.ok(variant, "variant entry present with depth");
+    assert.ok(variant!.depth >= 2, `variant depth >= 2: ${variant!.depth}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline omits impact block when include_impact is false", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-noimpact-"));
+  try {
+    await setupDependencyProject(tmp);
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Materials/SharedMat.mat",
+      includeImpact: false,
+      projectRoot: tmp,
+    });
+    assert.equal(result.impact, undefined, "no impact block by default");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline detects a forward dependency cycle", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-cycle-"));
+  try {
+    // A → B → A (a two-node cycle). Each references the other's GUID.
+    const aGuid = "c1c10000000000000000000000000001";
+    const bGuid = "c1c10000000000000000000000000002";
+    await mkdir(join(tmp, "Assets", "Data"), { recursive: true });
+    await writeFile(
+      join(tmp, "Assets", "Data", "A.asset"),
+      `%YAML 1.1
+--- !u!114 &11400000
+MonoBehaviour:
+  m_Name: A
+  m_Ref: {fileID: 0, guid: ${bGuid}, type: 2}
+`,
+    );
+    await writeFile(join(tmp, "Assets", "Data", "A.asset.meta"), `guid: ${aGuid}\n`);
+    await writeFile(
+      join(tmp, "Assets", "Data", "B.asset"),
+      `%YAML 1.1
+--- !u!114 &11400000
+MonoBehaviour:
+  m_Name: B
+  m_Ref: {fileID: 0, guid: ${aGuid}, type: 2}
+`,
+    );
+    await writeFile(join(tmp, "Assets", "Data", "B.asset.meta"), `guid: ${bGuid}\n`);
+
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Data/A.asset",
+      projectRoot: tmp,
+    });
+    assert.ok(result.cycles.length > 0, `cycle detected: ${JSON.stringify(result.cycles)}`);
+    // The cycle trail starts at A and returns to A.
+    const cycle = result.cycles[0];
+    assert.ok(cycle[0].endsWith("A.asset"), `cycle starts at A: ${JSON.stringify(cycle)}`);
+    assert.ok(cycle[cycle.length - 1].endsWith("A.asset"), `cycle returns to A: ${JSON.stringify(cycle)}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline resolves by GUID directly", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-byguid-"));
+  try {
+    await setupDependencyProject(tmp);
+    const result = await dependenciesOffline({
+      guid: "cafe0000000000000000000000000001", // SharedMat.mat
+      projectRoot: tmp,
+    });
+    assert.equal(result.queriedAssetPath, "Assets/Materials/SharedMat.mat");
+    assert.ok(result.reverseCount >= 2);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline returns empty result for an unknown GUID", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-unknown-"));
+  try {
+    await setupDependencyProject(tmp);
+    const result = await dependenciesOffline({
+      guid: "ffff000000000000000000000000ffff",
+      projectRoot: tmp,
+    });
+    assert.equal(result.forwardCount, 0);
+    assert.equal(result.reverseCount, 0);
+    assert.equal(result.queriedAssetGuid, "ffff000000000000000000000000ffff");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dependenciesOffline sets forwardSkipped for a non-YAML asset", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-skip-"));
+  try {
+    await setupDependencyProject(tmp);
+    // .asmdef is JSON — the YAML forward-edge parser cannot extract edges.
+    await mkdir(join(tmp, "Assets", "Scripts"), { recursive: true });
+    await writeFile(
+      join(tmp, "Assets", "Scripts", "MyAsm.asmdef"),
+      `{"name":"MyAsm","rootNamespace":"","references":[],"includePlatforms":[],"excludePlatforms":[],"allowUnsafeCode":false,"overrideReferences":false,"autoReferenced":true,"defineConstraints":[],"versionDefines":[]}`,
+    );
+    await writeFile(join(tmp, "Assets", "Scripts", "MyAsm.asmdef.meta"), "guid: cafe0000000000000000000000000099\n");
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Scripts/MyAsm.asmdef",
+      projectRoot: tmp,
+    });
+    assert.ok(result.forwardSkipped, "forwardSkipped reason set for non-YAML asset");
+    assert.equal(result.forwardCount, 0, "no forward edges extracted");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// scanIntegrityOffline — project-wide orphan_meta + duplicate_guid + missing
+// refs (T24.2 item 3).
+// ---------------------------------------------------------------------------
+
+test("scanIntegrityOffline detects orphaned .meta files (companion asset deleted)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-scan-orphan-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    // A .meta with NO companion asset file.
+    await writeFile(join(tmp, "Assets", "Prefabs", "Ghost.prefab.meta"), "guid: 0bad0000000000000000000000000bad\n");
+    // A healthy asset + its .meta (should NOT be flagged).
+    await writeFile(join(tmp, "Assets", "Prefabs", "Real.prefab"), `%YAML 1.1\n--- !u!1 &100\nGameObject:\n  m_Name: Real\n`);
+    await writeFile(join(tmp, "Assets", "Prefabs", "Real.prefab.meta"), "guid: 600d000000000000000000000000060d\n");
+
+    const result = await scanIntegrityOffline({ projectRoot: tmp });
+    const orphans = result.issues.filter((i) => i.code === "orphan_meta");
+    assert.ok(orphans.length >= 1, `at least one orphan_meta: ${JSON.stringify(orphans)}`);
+    assert.ok(orphans.some((o) => o.path.includes("Ghost.prefab.meta")), "Ghost flagged as orphan");
+    assert.ok(!orphans.some((o) => o.path.includes("Real.prefab")), "Real not flagged");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("scanIntegrityOffline detects duplicate GUIDs across two assets", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-scan-dupe-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    const dupGuid = "d0d0000000000000000000000000000d";
+    await writeFile(join(tmp, "Assets", "Prefabs", "One.prefab"), `%YAML 1.1\n--- !u!1 &100\nGameObject:\n  m_Name: One\n`);
+    await writeFile(join(tmp, "Assets", "Prefabs", "One.prefab.meta"), `guid: ${dupGuid}\n`);
+    await writeFile(join(tmp, "Assets", "Prefabs", "Two.prefab"), `%YAML 1.1\n--- !u!1 &100\nGameObject:\n  m_Name: Two\n`);
+    await writeFile(join(tmp, "Assets", "Prefabs", "Two.prefab.meta"), `guid: ${dupGuid}\n`);
+
+    const result = await scanIntegrityOffline({ projectRoot: tmp });
+    const dupes = result.issues.filter((i) => i.code === "duplicate_guid");
+    assert.ok(dupes.length >= 2, "both assets flagged for the shared GUID");
+    const one = dupes.find((d) => d.path.includes("One.prefab"));
+    assert.ok(one, "One.prefab flagged");
+    assert.ok(one!.relatedPaths && one!.relatedPaths.some((p) => p.includes("Two.prefab")), "relatedPaths names the other asset");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("scanIntegrityOffline aggregates missing references project-wide", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-scan-missing-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    await writeFile(
+      join(tmp, "Assets", "Prefabs", "Broken.prefab"),
+      `%YAML 1.1
+--- !u!1 &100
+GameObject:
+  m_Component:
+  - component: {fileID: 200}
+  m_Name: Broken
+--- !u!4 &200
+Transform:
+  m_GameObject: {fileID: 100}
+  m_Father: {fileID: 0}
+--- !u!114 &300
+MonoBehaviour:
+  m_GameObject: {fileID: 100}
+  m_Target: {fileID: 0, guid: 9999888800000000000000000000dead, type: 2}
+`,
+    );
+    await writeFile(join(tmp, "Assets", "Prefabs", "Broken.prefab.meta"), "guid: b0b00000000000000000000000000b0b\n");
+
+    const result = await scanIntegrityOffline({ projectRoot: tmp });
+    const missing = result.issues.filter((i) => i.code === "missing_reference");
+    assert.ok(missing.length >= 1, "missing_reference detected project-wide");
+    assert.ok(missing[0].detail.includes("99998888"), `detail names the unresolved GUID: ${missing[0].detail}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("scanIntegrityOffline reports clean tree with no issues", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-scan-clean-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    await writeFile(join(tmp, "Assets", "Prefabs", "Healthy.prefab"), `%YAML 1.1\n--- !u!1 &100\nGameObject:\n  m_Name: Healthy\n`);
+    await writeFile(join(tmp, "Assets", "Prefabs", "Healthy.prefab.meta"), "guid: 5a15000000000000000000000000aa55\n");
+
+    const result = await scanIntegrityOffline({ projectRoot: tmp });
+    assert.equal(result.totalIssues, 0, `no issues in a clean tree: ${JSON.stringify(result.byCode)}`);
+    assert.ok(result.assetsScanned >= 1, "assets scanned count > 0");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("scanIntegrityOffline groups issues by code in byCode", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-scan-bycode-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    // orphan
+    await writeFile(join(tmp, "Assets", "Prefabs", "Ghost.prefab.meta"), "guid: 0bad0000000000000000000000000a1\n");
+    // missing ref
+    await writeFile(
+      join(tmp, "Assets", "Prefabs", "Broken.prefab"),
+      `%YAML 1.1\n--- !u!1 &100\nGameObject:\n  m_Name: Broken\n  m_Ref: {fileID: 0, guid: 1111222200000000000000000000dead, type: 2}\n`,
+    );
+    await writeFile(join(tmp, "Assets", "Prefabs", "Broken.prefab.meta"), "guid: b0b00000000000000000000000000b0b\n");
+
+    const result = await scanIntegrityOffline({ projectRoot: tmp });
+    assert.ok((result.byCode.orphan_meta ?? 0) >= 1, "orphan_meta in byCode");
+    assert.ok((result.byCode.missing_reference ?? 0) >= 1, "missing_reference in byCode");
+    assert.equal(result.totalIssues, result.issues.length, "totalIssues matches issues length");
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

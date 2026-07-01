@@ -175,11 +175,12 @@ test("relink_broken_guid fix is registered and unsafe", () => {
 });
 
 test("planned fixes deferred from M12 are advertised with guidance", () => {
-  // T2.4 deferred: orphan meta, duplicate guid, material texture/shader.
+  // T2.4 deferred: material texture/shader reassignment (depend on the
+  // `materials` rule, deferred to M17). remove_orphan_meta + fix_duplicate_guid
+  // were promoted to implemented in M24 Plan 2 (the offline_integrity rule now
+  // emits their codes) — see the dedicated test below.
   const plannedIds = FIX_CATALOG.filter((f) => !f.implemented).map((f) => f.id);
   const expected = [
-    "remove_orphan_meta",
-    "fix_duplicate_guid",
     "reassign_missing_texture",
     "reassign_missing_shader",
   ];
@@ -192,6 +193,44 @@ test("planned fixes deferred from M12 are advertised with guidance", () => {
       typeof fix!.guidance === "string" && fix!.guidance.length > 0,
       `${id} planned fix must carry guidance`,
     );
+  }
+});
+
+// M24 Plan 2 / T24.2 — orphan_meta + duplicate_guid fixes now have an emitting
+// rule (offline_integrity) and are implemented. Previously planned; the
+// offline scanIntegrityOffline scanner is the producer.
+
+test("remove_orphan_meta fix is implemented and linked to offline_integrity", () => {
+  const fix = implementedFixes().find((f) => f.id === "remove_orphan_meta");
+  assert.ok(fix, "remove_orphan_meta must be in the implemented fix surface");
+  assert.equal(fix!.implemented, true);
+  assert.equal(fix!.safe, true, "deleting a detached .meta loses no asset data");
+  assert.ok(fix!.rules.includes("offline_integrity"));
+  assert.ok(fix!.issueCodes.includes("orphan_meta"));
+});
+
+test("fix_duplicate_guid fix is implemented and linked to offline_integrity", () => {
+  const fix = implementedFixes().find((f) => f.id === "fix_duplicate_guid");
+  assert.ok(fix, "fix_duplicate_guid must be in the implemented fix surface");
+  assert.equal(fix!.implemented, true);
+  assert.equal(fix!.safe, false, "re-GUIDing silently rewires the asset graph");
+  assert.ok(fix!.rules.includes("offline_integrity"));
+  assert.ok(fix!.issueCodes.includes("duplicate_guid"));
+});
+
+test("offline_integrity rule is implemented with orphan_meta and duplicate_guid codes", () => {
+  const rule = RULE_CATALOG.find((r) => r.id === "offline_integrity");
+  assert.ok(rule, "offline_integrity rule must be in the catalog");
+  assert.equal(rule!.implemented, true);
+  assert.equal(rule!.status, "implemented");
+  const codes = rule!.issues.map((i) => i.code);
+  assert.ok(codes.includes("orphan_meta"));
+  assert.ok(codes.includes("duplicate_guid"));
+  assert.ok(codes.includes("missing_reference"));
+  assert.ok(codes.includes("missing_script_reference"));
+  // All offline_integrity codes are full-scan-only (they need the whole tree).
+  for (const issue of rule!.issues) {
+    assert.equal(issue.fullScanOnly, true, `${issue.code} must be fullScanOnly`);
   }
 });
 

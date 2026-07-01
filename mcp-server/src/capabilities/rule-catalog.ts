@@ -166,6 +166,41 @@ const DEPENDENCIES_ISSUES: RuleIssueDescriptor[] = [
   },
 ];
 
+// M24 Plan 2 / T24.2 — offline project-wide integrity codes. Emitted by the
+// offline scanIntegrityOffline() walker (mcp-server/src/offline.ts), the
+// offline seed for the M25 verify engine. These are the first codes to fill
+// the remove_orphan_meta / fix_duplicate_guid fix placeholders (flipped to
+// implemented below). The per-read offline integrity codes
+// (missing_reference / missing_script_reference / orphaned_prefab_instance /
+// malformed_json / asmdef_missing_name / shadergraph_root_missing) surface on
+// every read_asset call; this rule family is the project-wide aggregator.
+const OFFLINE_INTEGRITY_ISSUES: RuleIssueDescriptor[] = [
+  {
+    code: "orphan_meta",
+    severity: "Warning",
+    fixIds: ["remove_orphan_meta"],
+    fullScanOnly: true,
+  },
+  {
+    code: "duplicate_guid",
+    severity: "Error",
+    fixIds: ["fix_duplicate_guid"],
+    fullScanOnly: true,
+  },
+  {
+    code: "missing_reference",
+    severity: "Warning",
+    fixIds: [],
+    fullScanOnly: true,
+  },
+  {
+    code: "missing_script_reference",
+    severity: "Error",
+    fixIds: ["remove_missing_script"],
+    fullScanOnly: true,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Planned rules — mirror stubs in VerifyGateAdapter.SelectRuleIds
 // ---------------------------------------------------------------------------
@@ -308,42 +343,57 @@ export const RULE_CATALOG: RuleCapability[] = [
     status: "implemented",
     issues: DEPENDENCIES_ISSUES,
   },
+  {
+    id: "offline_integrity",
+    title: "Offline project-wide integrity",
+    description:
+      "Project-wide integrity signals computed offline (no running Editor): " +
+      "orphaned .meta files (companion asset deleted), duplicate GUIDs (two+ " +
+      "assets sharing one GUID), and the aggregated missing-reference / " +
+      "missing-script set across Assets/. Emitted by the offline integrity " +
+      "scanner — the offline seed for the structured verify rules. Per-asset " +
+      "variants of these codes surface on every read_asset call; this rule " +
+      "is the full-scan aggregator.",
+    applicableAssetKinds: ["prefab", "scene", "scriptable_object", "material", "animation", "meta"],
+    implemented: true,
+    status: "implemented",
+    issues: OFFLINE_INTEGRITY_ISSUES,
+  },
   ...PLANNED_RULES,
 ];
 
 // ---------------------------------------------------------------------------
-// Planned fixes — deferred from M12 T2.4 (no emitting rule yet)
-// ---------------------------------------------------------------------------
+// Fix capability entries.
 //
-// These targets have no implemented rule today (orphan_meta / duplicate_guid
-// are not emitted by any rule; reassign_missing_* wait on the `materials` rule
-// which is deferred to M17). They are advertised as planned so agents get a
-// structured "not yet available" signal instead of trial-and-error.
+// remove_orphan_meta + fix_duplicate_guid were promoted from planned to
+// implemented in M24 Plan 2 / T24.2 — the offline_integrity rule (the offline
+// scanIntegrityOffline scanner) now emits orphan_meta / duplicate_guid, so the
+// fixes have an emitting rule + issue-code linkage. reassign_missing_* still
+// wait on the `materials` rule (deferred to M17); they stay planned.
+// ---------------------------------------------------------------------------
 
 const PLANNED_FIXES: FixCapability[] = [
   {
     id: "remove_orphan_meta",
-    implemented: false,
-    status: "planned",
-    rules: [],
-    issueCodes: [],
+    implemented: true,
+    status: "implemented",
+    rules: ["offline_integrity"],
+    issueCodes: ["orphan_meta"],
+    // Deletes an orphaned .meta file (no companion asset). No asset data is
+    // lost — the .meta is already detached. Safe to auto-suggest.
     safe: true,
-    guidance:
-      "Not yet ported. No rule emits an orphan_meta issue today. " +
-      "Find .meta files whose asset was deleted manually via find_members or " +
-      "AssetDatabase and delete them with execute_csharp in the meantime.",
   },
   {
     id: "fix_duplicate_guid",
-    implemented: false,
-    status: "planned",
-    rules: [],
-    issueCodes: [],
+    implemented: true,
+    status: "implemented",
+    rules: ["offline_integrity"],
+    issueCodes: ["duplicate_guid"],
+    // Regenerating a GUID silently rewires the asset graph; never auto-applied
+    // under enforce. Apply via apply_fix with the target path picked
+    // deliberately (the less-referenced asset is usually the right one to
+    // re-GUID, but that judgement is the operator's).
     safe: false,
-    guidance:
-      "Not yet ported. No rule emits a duplicate_guid issue today. " +
-      "Inspect .meta files manually (or via execute_csharp) and regenerate the " +
-      "duplicated GUID on the less-referenced asset, then update references.",
   },
   {
     id: "reassign_missing_texture",
