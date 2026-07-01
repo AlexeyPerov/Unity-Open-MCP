@@ -32,10 +32,43 @@ namespace UnityOpenMcpBridge.MetaTools
             "Window/Layouts"
         };
 
+        // Batch-viable menu allow-list (M26 Plan 3). Most Editor menus open a
+        // window or dialog and fail under -batchmode (no UI). This is the
+        // conservative subset whose [MenuItem] handlers perform pure
+        // AssetDatabase / project work that does not require the Editor UI, so
+        // they succeed headless. Everything else is rejected with
+        // menu_not_viable_in_batchmode by the batch entry point so an agent
+        // gets a clear signal to connect a live Editor instead of a hung spawn.
+        private static readonly HashSet<string> BatchViableMenuAllowlist = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Assets/Refresh",
+            "Assets/Reimport All",
+            "File/Save Project",
+            "File/Save Scenes",
+        };
+
         public static bool IsReadOnlyMenu(string menuPath)
         {
             if (string.IsNullOrEmpty(menuPath)) return false;
             foreach (var allowed in ReadOnlyMenuAllowlist)
+            {
+                if (menuPath.StartsWith(allowed, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// M26 Plan 3 — is <paramref name="menuPath"/> on the batch-viable
+        /// allow-list? Only the conservative subset of Editor menus whose
+        /// handlers do pure AssetDatabase/project work (no window/dialog) are
+        /// permitted under -batchmode. The batch entry point gates on this and
+        /// returns <c>menu_not_viable_in_batchmode</c> for everything else.
+        /// </summary>
+        public static bool IsBatchViable(string menuPath)
+        {
+            if (string.IsNullOrEmpty(menuPath)) return false;
+            foreach (var allowed in BatchViableMenuAllowlist)
             {
                 if (menuPath.StartsWith(allowed, StringComparison.OrdinalIgnoreCase))
                     return true;

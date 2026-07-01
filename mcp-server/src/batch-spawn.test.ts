@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, BatchClassificationError } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, BatchClassificationError, encodeSpaces } from "./batch-spawn.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 function parseBody(result: CallToolResult): Record<string, unknown> {
@@ -41,47 +41,112 @@ test("isBatchTool returns false for non-batch tools", () => {
   assert.ok(!batch.isBatchTool("unknown_tool"));
 });
 
-test("limited meta-tools fast-fail without spawning Unity", async () => {
-  const batch = new BatchSpawn();
-  const tools = [
-    "unity_open_mcp_execute_csharp",
-    "unity_open_mcp_invoke_method",
-    "unity_open_mcp_execute_menu",
-  ] as const;
+// ---------------------------------------------------------------------------
+// M26 Plan 3 — batch parity for execute_csharp / invoke_method / execute_menu
+// ---------------------------------------------------------------------------
 
-  for (const tool of tools) {
-    const result = await batch.route(tool, {});
-    assert.equal(result.isError, true);
+test("buildMetaArgs produces correct execute_csharp CLI flags", () => {
+  const cli = buildMetaArgs("execute_csharp", {
+    code: "return 1 + 2;",
+    usings: ["System.IO"],
+    object_ids: ["123"],
+    max_depth: 6,
+    max_items: 50,
+    confirm_bypass: true,
+  });
+
+  // Spaces in the code payload are encoded as ASCII unit separator (0x1f) so
+  // the snippet survives argv splitting; the C# entry point decodes them back.
+  assert.deepEqual(cli, [
+    "execute_csharp",
+    "--code", encodeSpaces("return 1 + 2;"),
+    "--using", "System.IO",
+    "--object-id", "123",
+    "--max-depth", "6",
+    "--max-items", "50",
+    "--confirm-bypass", "true",
+  ]);
+});
+
+test("buildMetaArgs omits execute_csharp optional fields when not supplied", () => {
+  const cli = buildMetaArgs("execute_csharp", {});
+  assert.deepEqual(cli, ["execute_csharp"]);
+});
+
+test("buildMetaArgs forwards only code for a minimal execute_csharp call", () => {
+  // A code value with no spaces passes through unencoded; spaces would be
+  // turned into ASCII unit separators (covered by the encodeSpaces test).
+  const cli = buildMetaArgs("execute_csharp", { code: "return;" });
+  assert.deepEqual(cli, ["execute_csharp", "--code", "return;"]);
+});
+
+test("buildMetaArgs produces correct invoke_method CLI flags", () => {
+  const cli = buildMetaArgs("invoke_method", {
+    type_name: "UnityEngine.Transform",
+    method_name: "GetPosition",
+    is_static: true,
+    assembly_name: "UnityEngine",
+    args: [42, "hello"],
+    arg_type_names: ["Int32"],
+    generic_arg_types: ["UnityEngine.Vector3"],
+    max_depth: 2,
+  });
+
+  assert.deepEqual(cli, [
+    "invoke_method",
+    "--type-name", "UnityEngine.Transform",
+    "--method-name", "GetPosition",
+    "--is-static", "true",
+    "--assembly-name", "UnityEngine",
+    "--arg", "42",
+    "--arg", encodeSpaces("hello"),
+    "--arg-type-name", "Int32",
+    "--generic-arg-type", "UnityEngine.Vector3",
+    "--max-depth", "2",
+  ]);
+});
+
+test("buildMetaArgs omits invoke_method optional fields when not supplied", () => {
+  const cli = buildMetaArgs("invoke_method", { type_name: "Foo", method_name: "Bar" });
+  assert.deepEqual(cli, ["invoke_method", "--type-name", "Foo", "--method-name", "Bar"]);
+});
+
+test("buildMetaArgs produces correct execute_menu CLI flags", () => {
+  const cli = buildMetaArgs("execute_menu", { menu_path: "Assets/Refresh" });
+  assert.deepEqual(cli, ["execute_menu", "--menu-path", "Assets/Refresh"]);
+});
+
+test("buildMetaArgs omits execute_menu optional fields when not supplied", () => {
+  const cli = buildMetaArgs("execute_menu", {});
+  assert.deepEqual(cli, ["execute_menu"]);
+});
+
+test("execute_csharp route gets past the old fast-fail (now spawns via discovery)", async () => {
+  // M26 Plan 3: the three meta-tools no longer fast-fail with
+  // batch_not_supported. With no Unity discovered they surface the
+  // unity_not_discovered error (the same path find_members takes), proving the
+  // router now proceeds to spawn instead of short-circuiting.
+  const savedPath = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  try {
+    const batch = new BatchSpawn({ discoveryRoots: [] });
+    const result = await batch.route("unity_open_mcp_execute_csharp", { code: "return 1;" });
     const body = parseBody(result);
     const error = body.error as Record<string, string>;
-    assert.equal(error.code, "batch_not_supported");
+    assert.equal(error.code, "unity_not_discovered");
     assert.ok(
-      error.message.includes("not supported in batch mode"),
-      `${tool} error should mention batch mode`,
+      !error.message.includes("not supported in batch mode"),
+      "execute_csharp should no longer fast-fail with batch_not_supported",
     );
-    assert.ok(
-      error.message.includes("find_members"),
-      `${tool} error should mention find_members as available`,
-    );
+  } finally {
+    if (savedPath) process.env.UNITY_PATH = savedPath;
   }
 });
 
-test("limited meta-tool errors mention the specific limitation", async () => {
-  const batch = new BatchSpawn();
-
-  const csharp = await batch.route("unity_open_mcp_execute_csharp", { code: "return 1;" });
-  const csharpBody = parseBody(csharp);
-  assert.ok(
-    (csharpBody.error as Record<string, string>).message.includes("gate"),
-    "execute_csharp error should mention gate",
-  );
-
-  const menu = await batch.route("unity_open_mcp_execute_menu", { menu_path: "Assets/Refresh" });
-  const menuBody = parseBody(menu);
-  assert.ok(
-    (menuBody.error as Record<string, string>).message.includes("UI"),
-    "execute_menu error should mention UI",
-  );
+test("encodeSpaces replaces spaces with ASCII unit separator", () => {
+  assert.equal(encodeSpaces("return 1 + 2;"), `return\x1f1\x1f+\x1f2;`);
+  assert.equal(encodeSpaces("nospace"), "nospace");
+  assert.equal(encodeSpaces(""), "");
 });
 
 test("buildMetaArgs produces correct find_members CLI flags", () => {

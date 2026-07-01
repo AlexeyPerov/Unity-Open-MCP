@@ -22,18 +22,14 @@ const VERIFY_TOOL_TO_OPERATION: Record<string, string> = {
 const META_TOOL_TO_OPERATION: Record<string, string> = {
   unity_open_mcp_find_members: "find_members",
   unity_open_mcp_compile_check: "compile_check",
+  unity_open_mcp_execute_csharp: "execute_csharp",
+  unity_open_mcp_invoke_method: "invoke_method",
+  unity_open_mcp_execute_menu: "execute_menu",
 };
-
-const LIMITED_META_TOOLS: ReadonlySet<string> = new Set([
-  "unity_open_mcp_execute_csharp",
-  "unity_open_mcp_invoke_method",
-  "unity_open_mcp_execute_menu",
-]);
 
 export const BATCH_TOOL_NAMES = new Set([
   ...Object.keys(VERIFY_TOOL_TO_OPERATION),
   ...Object.keys(META_TOOL_TO_OPERATION),
-  ...LIMITED_META_TOOLS,
 ]);
 
 interface ParsedBatchResult {
@@ -111,29 +107,53 @@ export function buildMetaArgs(
     if (args.max_results !== undefined) cli.push("--max-results", String(args.max_results));
   } else if (operation === "compile_check") {
     if (args.timeout_ms !== undefined) cli.push("--timeout-ms", String(args.timeout_ms));
+  } else if (operation === "execute_csharp") {
+    // The code payload is space-bearing and multi-line: it cannot round-trip
+    // through argv splitting on spaces. Encode spaces as ASCII unit separator
+    // (0x1f) here; the C# entry point decodes them back to spaces so the
+    // original snippet is reconstructed exactly.
+    if (args.code !== undefined) cli.push("--code", encodeSpaces(String(args.code)));
+    if (Array.isArray(args.usings)) {
+      for (const u of args.usings) cli.push("--using", String(u));
+    }
+    if (Array.isArray(args.object_ids)) {
+      for (const id of args.object_ids) cli.push("--object-id", String(id));
+    }
+    if (args.max_depth !== undefined) cli.push("--max-depth", String(args.max_depth));
+    if (args.max_items !== undefined) cli.push("--max-items", String(args.max_items));
+    // Deny-list bypass contract: confirm_bypass:true forces an explicit gate:"off".
+    if (args.confirm_bypass === true) cli.push("--confirm-bypass", "true");
+  } else if (operation === "invoke_method") {
+    if (args.type_name !== undefined) cli.push("--type-name", String(args.type_name));
+    if (args.method_name !== undefined) cli.push("--method-name", String(args.method_name));
+    if (args.is_static !== undefined) cli.push("--is-static", String(args.is_static));
+    if (args.assembly_name !== undefined) cli.push("--assembly-name", String(args.assembly_name));
+    if (args.object_id !== undefined) cli.push("--object-id", String(args.object_id));
+    if (Array.isArray(args.args)) {
+      for (const a of args.args) cli.push("--arg", encodeSpaces(String(a)));
+    }
+    if (Array.isArray(args.arg_type_names)) {
+      for (const t of args.arg_type_names) cli.push("--arg-type-name", String(t));
+    }
+    if (Array.isArray(args.generic_arg_types)) {
+      for (const g of args.generic_arg_types) cli.push("--generic-arg-type", String(g));
+    }
+    if (args.max_depth !== undefined) cli.push("--max-depth", String(args.max_depth));
+    if (args.max_items !== undefined) cli.push("--max-items", String(args.max_items));
+  } else if (operation === "execute_menu") {
+    if (args.menu_path !== undefined) cli.push("--menu-path", String(args.menu_path));
   }
 
   return cli;
 }
 
-const LIMITED_META_MESSAGES: Record<string, string> = {
-  unity_open_mcp_execute_csharp:
-    "execute_csharp is not supported in batch mode. " +
-    "The gate (checkpoint, validate, delta) cannot run headless and Roslyn compilation " +
-    "without a live Editor is unreliable. Connect a live Editor for full support. " +
-    "Only find_members is available in batch mode.",
-  unity_open_mcp_invoke_method:
-    "invoke_method is not supported in batch mode. " +
-    "Mutating method calls require gate enforcement which is unavailable headless, " +
-    "and instance methods may depend on Editor-only state. " +
-    "Connect a live Editor for full support. " +
-    "Only find_members is available in batch mode.",
-  unity_open_mcp_execute_menu:
-    "execute_menu is not supported in batch mode. " +
-    "Menu execution requires a live Editor UI; most menus fail in -batchmode. " +
-    "Connect a live Editor for full support. " +
-    "Only find_members is available in batch mode.",
-};
+// Encodes spaces in a value as ASCII unit separator (0x1f) so a space-bearing
+// flag value (e.g. a C# code snippet or a multi-token arg) survives argv
+// splitting when spawned through `Unity ... -- <flags>`. The C# entry point
+// (BridgeBatchEntry.ReadMultilineValue) decodes 0x1f back to a space.
+export function encodeSpaces(value: string): string {
+  return value.replace(/ /g, "\x1f");
+}
 
 // M22 Plan 3 / T-fix-2 — classify a batch failure tail before falling back
 // to the generic `batch_spawn_failed`. Unity's one-Editor-per-project lock
@@ -227,15 +247,6 @@ export class BatchSpawn implements Router {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
-    if (LIMITED_META_TOOLS.has(toolName)) {
-      return makeErrorResult({
-        code: "batch_not_supported",
-        message:
-          LIMITED_META_MESSAGES[toolName] ??
-          `${toolName} is not supported in batch mode.`,
-      });
-    }
-
     const verifyOperation = VERIFY_TOOL_TO_OPERATION[toolName];
     const metaOperation = META_TOOL_TO_OPERATION[toolName];
 

@@ -567,22 +567,11 @@ export const ROUTING_SUMMARY: RoutingSummary = {
   liveDefault: true,
   batchFallback: true,
   batchRequirements: ["UNITY_PATH", "UNITY_PROJECT_PATH"],
-  // Mutating meta-tools that need an interactive Editor UI or live
-  // compilation; intentionally rejected by the batch entry point.
-  batchBlocked: [
-    {
-      tool: "unity_open_mcp_execute_csharp",
-      reason: "Requires a live Editor compile context.",
-    },
-    {
-      tool: "unity_open_mcp_invoke_method",
-      reason: "Requires a live Editor reflection context.",
-    },
-    {
-      tool: "unity_open_mcp_execute_menu",
-      reason: "Menu execution needs the Editor UI; most menus fail in -batchmode.",
-    },
-  ],
+  // M26 Plan 3 — all four meta-tools are now batch-capable, so no
+  // meta-tool is on the batch-blocked list. (execute_menu is gated by a
+  // batch-viable allow-list inside the C# entry point; non-viable menus
+  // return menu_not_viable_in_batchmode, but the tool itself is batch-capable.)
+  batchBlocked: [],
   // Agent senses (screenshots, profiler, console, spatial, run_tests)
   // and gate mutations need a live Editor — they have no batch form.
   liveOnlyCategories: ["agent-senses"],

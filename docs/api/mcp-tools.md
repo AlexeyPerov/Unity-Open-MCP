@@ -232,8 +232,10 @@ A tool can carry a secondary concern in `lifecycleNote` (e.g. `build_start` is `
 
 Batch is intended for non-interactive scenarios and fallback operation.
 
-- Typical batch-friendly tools: scan/regression surfaces, compile check, member lookup.
-- Tools that require live editor state (for example direct C# execution) are not batch-enabled.
+- Typical batch-friendly tools: scan/regression surfaces, compile check, member lookup, code execution, reflection dispatch, and the batch-viable menu subset.
+- All four meta-tools (`find_members`, `execute_csharp`, `invoke_method`, `execute_menu`) run in batch. The mutating three (`execute_csharp`, `invoke_method`, `execute_menu`) **skip the gate** in batch — the envelope reports `gate.mode:"off"`, `gate.skipped:true` — because the checkpoint/validate/delta flow runs against the live AssetDatabase in an interactive Editor and is unavailable headless. Operators who want a guarded mutation connect a live Editor; batch is the unguarded CI/script path.
+- `execute_menu` is gated by a **batch-viable allow-list** (`Assets/Refresh`, `Assets/Reimport All`, `File/Save Project`, `File/Save Scenes`) because most Editor menus open a window or dialog and fail under `-batchmode`. Non-viable menus return `menu_not_viable_in_batchmode`.
+- Agent senses (screenshots, profiler, console, spatial) need a live Editor — they have no batch form.
 - Required environment for batch fallback:
   - `UNITY_PROJECT_PATH`
   - `UNITY_PATH` (when editor auto-discovery is unavailable)

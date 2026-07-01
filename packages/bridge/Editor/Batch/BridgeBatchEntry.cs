@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 using UnityOpenMcpBridge.MetaTools;
@@ -13,7 +14,14 @@ namespace UnityOpenMcpBridge.Batch
         public const int ExitPass = 0;
         public const int ExitFail = 1;
 
-        private static readonly string[] SupportedOperations = { "find_members", "compile_check" };
+        private static readonly string[] SupportedOperations =
+        {
+            "find_members",
+            "compile_check",
+            "execute_csharp",
+            "invoke_method",
+            "execute_menu",
+        };
 
         public static void Run()
         {
@@ -109,6 +117,12 @@ namespace UnityOpenMcpBridge.Batch
             {
                 case "find_members":
                     return RunFindMembers(flagArgs);
+                case "execute_csharp":
+                    return RunExecuteCSharp(flagArgs);
+                case "invoke_method":
+                    return RunInvokeMethod(flagArgs);
+                case "execute_menu":
+                    return RunExecuteMenu(flagArgs);
                 case "compile_check":
                     // Intercepted by Run() before reaching here (async handoff);
                     // arriving synchronously means the async branch misrouted.
@@ -132,6 +146,79 @@ namespace UnityOpenMcpBridge.Batch
 
             var body = BuildFindMembersBody(parsed);
             var result = FindMembersTool.Execute(body);
+
+            if (result.Success)
+            {
+                return (ExitPass, BuildSuccessEnvelope(result.Output ?? "null"));
+            }
+
+            return (ExitFail, BuildFailureEnvelope(result.ErrorCode, result.ErrorMessage));
+        }
+
+        // M26 Plan 3 — full batch parity for the mutating meta-tools. All three
+        // reuse the live tool implementations (ExecuteCSharpTool / InvokeMethodTool
+        // / ExecuteMenuTool) by reconstructing the JSON body the live dispatcher
+        // passes, so behavior is identical to the live path. The headless gate is
+        // intentionally skipped (gate.mode:"off", gate.skipped:true in the
+        // envelope) because the gate's checkpoint/validate/delta flow runs against
+        // the live AssetDatabase in an interactive Editor and is unavailable
+        // headless — this is the documented headless gate path (see
+        // docs/api/mcp-tools.md §Batch support). Operators who want a guarded
+        // mutation connect a live Editor; batch is the unguarded CI/script path.
+
+        private static (int exitCode, string json) RunExecuteCSharp(string[] args)
+        {
+            var parsed = ParseExecuteCSharpFlags(args);
+            if (parsed.error != null)
+                return Fail(parsed.error);
+
+            var body = BuildExecuteCSharpBody(parsed);
+            var result = ExecuteCSharpTool.Execute(body);
+
+            if (result.Success)
+            {
+                return (ExitPass, BuildSuccessEnvelope(result.Output ?? "null"));
+            }
+
+            return (ExitFail, BuildFailureEnvelope(result.ErrorCode, result.ErrorMessage));
+        }
+
+        private static (int exitCode, string json) RunInvokeMethod(string[] args)
+        {
+            var parsed = ParseInvokeMethodFlags(args);
+            if (parsed.error != null)
+                return Fail(parsed.error);
+
+            var body = BuildInvokeMethodBody(parsed);
+            var result = InvokeMethodTool.Execute(body);
+
+            if (result.Success)
+            {
+                return (ExitPass, BuildSuccessEnvelope(result.Output ?? "null"));
+            }
+
+            return (ExitFail, BuildFailureEnvelope(result.ErrorCode, result.ErrorMessage));
+        }
+
+        private static (int exitCode, string json) RunExecuteMenu(string[] args)
+        {
+            var parsed = ParseExecuteMenuFlags(args);
+            if (parsed.error != null)
+                return Fail(parsed.error);
+
+            if (!ExecuteMenuTool.IsBatchViable(parsed.menuPath))
+            {
+                return (ExitFail, BuildFailureEnvelope(
+                    "menu_not_viable_in_batchmode",
+                    $"Menu '{parsed.menuPath}' is not on the batch-viable allow-list. " +
+                    "Most Editor menus open a window or dialog and fail under -batchmode " +
+                    "(no UI). The allow-list covers pure AssetDatabase/project menus " +
+                    "(e.g. Assets/Refresh, File/Save Project). For the full menu set, " +
+                    "connect a live Editor."));
+            }
+
+            var body = BuildExecuteMenuBody(parsed);
+            var result = ExecuteMenuTool.Execute(body);
 
             if (result.Success)
             {
@@ -255,6 +342,249 @@ namespace UnityOpenMcpBridge.Batch
             return false;
         }
 
+        // --- execute_csharp flags -------------------------------------------
+        // The code payload is the only required field. Extra usings, object refs,
+        // serialize-depth caps, and the deny-bypass contract (confirm_bypass +
+        // gate:"off") are forwarded verbatim so a batch execute_csharp matches the
+        // live dispatcher's behavior.
+        class ExecuteCSharpFlags
+        {
+            public string code = "";
+            public List<string> usings = new();
+            public List<string> objectIds = new();
+            public int maxDepth = 4;
+            public int maxItems = 100;
+            public bool confirmBypass = false;
+            public string gate = null; // "off" when explicitly set
+            public string error;
+        }
+
+        private static ExecuteCSharpFlags ParseExecuteCSharpFlags(string[] args)
+        {
+            var p = new ExecuteCSharpFlags();
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                switch (args[i])
+                {
+                    case "--code":
+                        p.code = ReadMultilineValue(args, ref i, "--code");
+                        break;
+
+                    case "--using":
+                        if (i + 1 >= args.Length)
+                        {
+                            p.error = "--using requires a value.";
+                            return p;
+                        }
+                        p.usings.Add(args[++i]);
+                        break;
+
+                    case "--object-id":
+                        if (i + 1 >= args.Length)
+                        {
+                            p.error = "--object-id requires a value.";
+                            return p;
+                        }
+                        p.objectIds.Add(args[++i]);
+                        break;
+
+                    case "--max-depth":
+                        if (i + 1 >= args.Length || !int.TryParse(args[++i], out p.maxDepth))
+                        {
+                            p.error = "--max-depth requires an integer value.";
+                            return p;
+                        }
+                        break;
+
+                    case "--max-items":
+                        if (i + 1 >= args.Length || !int.TryParse(args[++i], out p.maxItems))
+                        {
+                            p.error = "--max-items requires an integer value.";
+                            return p;
+                        }
+                        break;
+
+                    case "--confirm-bypass":
+                        if (i + 1 >= args.Length || !TryParseBool(args[++i], out p.confirmBypass))
+                        {
+                            p.error = "--confirm-bypass requires a boolean (true or false).";
+                            return p;
+                        }
+                        // Bypass also requires an explicit gate:"off".
+                        p.gate = "off";
+                        break;
+
+                    default:
+                        if (args[i].StartsWith("--"))
+                        {
+                            p.error = $"Unknown argument '{args[i]}' for operation 'execute_csharp'.";
+                            return p;
+                        }
+                        break;
+                }
+            }
+
+            if (string.IsNullOrEmpty(p.code))
+                p.error = "--code is required for execute_csharp.";
+
+            return p;
+        }
+
+        // --- invoke_method flags --------------------------------------------
+        // type_name + method_name are required; the rest (static/instance, args,
+        // overload/generic disambiguation, serialize caps) mirror the live schema.
+        class InvokeMethodFlags
+        {
+            public string typeName = "";
+            public string methodName = "";
+            public bool isStatic = false;
+            public string assemblyName = null;
+            public string objectId = null;
+            public List<string> args = new();
+            public List<string> argTypeNames = new();
+            public List<string> genericArgTypes = new();
+            public int maxDepth = 4;
+            public int maxItems = 100;
+            public string error;
+        }
+
+        private static InvokeMethodFlags ParseInvokeMethodFlags(string[] args)
+        {
+            var p = new InvokeMethodFlags();
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                switch (args[i])
+                {
+                    case "--type-name":
+                        if (i + 1 >= args.Length) { p.error = "--type-name requires a value."; return p; }
+                        p.typeName = args[++i];
+                        break;
+
+                    case "--method-name":
+                        if (i + 1 >= args.Length) { p.error = "--method-name requires a value."; return p; }
+                        p.methodName = args[++i];
+                        break;
+
+                    case "--is-static":
+                        if (i + 1 >= args.Length || !TryParseBool(args[++i], out p.isStatic))
+                        {
+                            p.error = "--is-static requires a boolean (true or false).";
+                            return p;
+                        }
+                        break;
+
+                    case "--assembly-name":
+                        if (i + 1 >= args.Length) { p.error = "--assembly-name requires a value."; return p; }
+                        p.assemblyName = args[++i];
+                        break;
+
+                    case "--object-id":
+                        if (i + 1 >= args.Length) { p.error = "--object-id requires a value."; return p; }
+                        p.objectId = args[++i];
+                        break;
+
+                    case "--arg":
+                        if (i + 1 >= args.Length) { p.error = "--arg requires a value."; return p; }
+                        p.args.Add(args[++i]);
+                        break;
+
+                    case "--arg-type-name":
+                        if (i + 1 >= args.Length) { p.error = "--arg-type-name requires a value."; return p; }
+                        p.argTypeNames.Add(args[++i]);
+                        break;
+
+                    case "--generic-arg-type":
+                        if (i + 1 >= args.Length) { p.error = "--generic-arg-type requires a value."; return p; }
+                        p.genericArgTypes.Add(args[++i]);
+                        break;
+
+                    case "--max-depth":
+                        if (i + 1 >= args.Length || !int.TryParse(args[++i], out p.maxDepth))
+                        {
+                            p.error = "--max-depth requires an integer value.";
+                            return p;
+                        }
+                        break;
+
+                    case "--max-items":
+                        if (i + 1 >= args.Length || !int.TryParse(args[++i], out p.maxItems))
+                        {
+                            p.error = "--max-items requires an integer value.";
+                            return p;
+                        }
+                        break;
+
+                    default:
+                        if (args[i].StartsWith("--"))
+                        {
+                            p.error = $"Unknown argument '{args[i]}' for operation 'invoke_method'.";
+                            return p;
+                        }
+                        break;
+                }
+            }
+
+            if (string.IsNullOrEmpty(p.typeName))
+                p.error = "--type-name is required for invoke_method.";
+            else if (string.IsNullOrEmpty(p.methodName))
+                p.error = "--method-name is required for invoke_method.";
+
+            return p;
+        }
+
+        // --- execute_menu flags ---------------------------------------------
+        class ExecuteMenuFlags
+        {
+            public string menuPath = "";
+            public string error;
+        }
+
+        private static ExecuteMenuFlags ParseExecuteMenuFlags(string[] args)
+        {
+            var p = new ExecuteMenuFlags();
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                switch (args[i])
+                {
+                    case "--menu-path":
+                        if (i + 1 >= args.Length) { p.error = "--menu-path requires a value."; return p; }
+                        p.menuPath = args[++i];
+                        break;
+
+                    default:
+                        if (args[i].StartsWith("--"))
+                        {
+                            p.error = $"Unknown argument '{args[i]}' for operation 'execute_menu'.";
+                            return p;
+                        }
+                        break;
+                }
+            }
+
+            if (string.IsNullOrEmpty(p.menuPath))
+                p.error = "--menu-path is required for execute_menu.";
+
+            return p;
+        }
+
+        // Reads a flag value that may itself contain spaces / semicolons (C# code).
+        // The MCP server encodes the value with ASCII unit separators (\x1f)
+        // between space-split argv tokens so the original spaces round-trip
+        // exactly. Unknown future flags after --code are left for the main loop
+        // because --code is always the last value flag in practice.
+        private static string ReadMultilineValue(string[] args, ref int i, string flagName)
+        {
+            if (i + 1 >= args.Length)
+                return null;
+            var raw = args[++i];
+            // Rejoin tokens that the MCP server split on spaces and rejoined with
+            // ASCII unit separator (0x1f). Any literal \x1f becomes a space.
+            return raw.Replace("\x1f", " ");
+        }
+
         #endregion
 
         #region JSON body construction
@@ -276,10 +606,122 @@ namespace UnityOpenMcpBridge.Batch
             return sb.ToString();
         }
 
+        private static string BuildExecuteCSharpBody(ExecuteCSharpFlags flags)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append('{');
+            sb.Append("\"code\":").Append(JsonString(flags.code));
+
+            if (flags.usings.Count > 0)
+            {
+                sb.Append(",\"usings\":").Append(JsonStringArray(flags.usings));
+            }
+
+            if (flags.objectIds.Count > 0)
+            {
+                sb.Append(",\"object_ids\":").Append(JsonStringArray(flags.objectIds));
+            }
+
+            if (flags.gate != null)
+            {
+                sb.Append(",\"gate\":").Append(JsonString(flags.gate));
+                sb.Append(",\"confirm_bypass\":").Append(flags.confirmBypass ? "true" : "false");
+            }
+
+            sb.Append(",\"max_depth\":").Append(flags.maxDepth);
+            sb.Append(",\"max_items\":").Append(flags.maxItems);
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string BuildInvokeMethodBody(InvokeMethodFlags flags)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append('{');
+            sb.Append("\"type_name\":").Append(JsonString(flags.typeName));
+            sb.Append(",\"method_name\":").Append(JsonString(flags.methodName));
+            sb.Append(",\"is_static\":").Append(flags.isStatic ? "true" : "false");
+
+            if (!string.IsNullOrEmpty(flags.assemblyName))
+                sb.Append(",\"assembly_name\":").Append(JsonString(flags.assemblyName));
+
+            if (!string.IsNullOrEmpty(flags.objectId))
+                sb.Append(",\"object_id\":").Append(int.TryParse(flags.objectId, out var id) ? id.ToString() : flags.objectId);
+
+            if (flags.args.Count > 0)
+                sb.Append(",\"args\":").Append(JsonRawArray(flags.args));
+
+            if (flags.argTypeNames.Count > 0)
+                sb.Append(",\"arg_type_names\":").Append(JsonStringArray(flags.argTypeNames));
+
+            if (flags.genericArgTypes.Count > 0)
+                sb.Append(",\"generic_arg_types\":").Append(JsonStringArray(flags.genericArgTypes));
+
+            sb.Append(",\"max_depth\":").Append(flags.maxDepth);
+            sb.Append(",\"max_items\":").Append(flags.maxItems);
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string BuildExecuteMenuBody(ExecuteMenuFlags flags)
+        {
+            var sb = new StringBuilder(256);
+            sb.Append('{');
+            sb.Append("\"menu_path\":").Append(JsonString(flags.menuPath));
+            sb.Append('}');
+            return sb.ToString();
+        }
+
         private static string JsonString(string s)
         {
             if (s == null) return "null";
             return "\"" + OutputSerializer.EscapeJsonString(s) + "\"";
+        }
+
+        // Emits a JSON array of quoted strings: ["a","b"].
+        private static string JsonStringArray(List<string> values)
+        {
+            var sb = new StringBuilder(values.Count * 16 + 4);
+            sb.Append('[');
+            for (int i = 0; i < values.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(JsonString(values[i]));
+            }
+            sb.Append(']');
+            return sb.ToString();
+        }
+
+        // Emits a JSON array of raw values for invoke_method args. Each value is
+        // parsed as JSON if it looks like JSON (object/array/bool/null/number),
+        // otherwise quoted as a string — matching how the live dispatcher treats
+        // `args` as a list of typed JSON values.
+        private static string JsonRawArray(List<string> values)
+        {
+            var sb = new StringBuilder(values.Count * 16 + 4);
+            sb.Append('[');
+            for (int i = 0; i < values.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                var v = values[i];
+                if (LooksLikeJsonScalar(v))
+                    sb.Append(v);
+                else
+                    sb.Append(JsonString(v));
+            }
+            sb.Append(']');
+            return sb.ToString();
+        }
+
+        private static bool LooksLikeJsonScalar(string v)
+        {
+            if (string.IsNullOrEmpty(v)) return false;
+            var c = v[0];
+            // true / false / null / number literals pass through raw; objects and
+            // arrays (hand-rolled handle JSON, or nested structures) pass through
+            // raw too. Everything else is treated as a JSON string.
+            return c == '{' || c == '[' || c == 't' || c == 'f' || c == 'n'
+                || char.IsDigit(c) || c == '-' || c == '+' || c == '.';
         }
 
         #endregion

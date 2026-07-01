@@ -753,15 +753,16 @@ test("capabilities include a top-level routing summary", () => {
   assert.ok(Array.isArray(caps.routing.liveOnlyCategories));
 });
 
-test("routing summary names the batch env vars and the blocked meta-tools", () => {
+test("routing summary names the batch env vars; no meta-tool is batch-blocked (M26 Plan 3)", () => {
   const caps = buildCapabilities(DEPS);
   const r = caps.routing;
   assert.ok(r.batchRequirements.includes("UNITY_PATH"));
   assert.ok(r.batchRequirements.includes("UNITY_PROJECT_PATH"));
-  const blockedNames = r.batchBlocked.map((b) => b.tool);
-  assert.ok(blockedNames.includes("unity_open_mcp_execute_csharp"));
-  assert.ok(blockedNames.includes("unity_open_mcp_invoke_method"));
-  assert.ok(blockedNames.includes("unity_open_mcp_execute_menu"));
+  // M26 Plan 3 — all four meta-tools (find_members, execute_csharp,
+  // invoke_method, execute_menu) are now batch-capable, so the batch-blocked
+  // list is empty. execute_menu is gated by a batch-viable allow-list inside
+  // the C# entry point, but the tool itself is batch-capable.
+  assert.equal(r.batchBlocked.length, 0, "no meta-tool should be batch-blocked after M26 Plan 3");
   for (const b of r.batchBlocked) {
     assert.ok(
       typeof b.reason === "string" && b.reason.length > 0,
