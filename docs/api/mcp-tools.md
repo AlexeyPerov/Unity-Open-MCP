@@ -544,6 +544,44 @@ Wraps the instance-lock classifier (`instance-discovery.ts#classifyInstance`) + 
 
 Offline scenarios are therefore **operator-driven** in v1: stop/start via the toolbar, gated by `manual` setup actions and confirmed by `bridge_status` (or `ping` / the CLI `wait-for-ready`). Revisit the stop/start routes only if the manual pattern proves too painful in practice.
 
+## Automation CLI
+
+The `unity-open-mcp` package ships a first-class CLI for CI / scripting (`npx unity-open-mcp <command>`). A single `bin` serves both MCP clients (no subcommand → stdio server) and automation (subcommand → CLI). Commands share the same router stack the MCP server uses, so a CLI `run-tool` call returns byte-for-byte the same JSON an MCP client would receive.
+
+### Commands
+
+| Command | Purpose | Maps to |
+|---|---|---|
+| `ping` | One `/ping` against the bridge | `unity_open_mcp_ping` |
+| `wait-for-ready` | Poll until the bridge is responsive (or timeout) | `/ping` polling loop |
+| `status` | Resolved port, instance lock, readiness, compat | `unity_open_mcp_bridge_status` |
+| `run-tool <name>` | Invoke any MCP tool from CI | any tool by name |
+| `stream-events` | Drain bridge SSE events (console logs + state) to stdout | `unity_senses_pull_events` |
+| `verify [paths...]` | Run a verify scan; 4-level exit code | `scan_paths` / `validate_edit` / `scan_all` |
+| `baseline create\|update` | Create or refresh the regression baseline | `unity_open_mcp_baseline_create` |
+| `regression check` | Compare current scan against the baseline | `unity_open_mcp_regression_check` |
+
+### Exit-code contract
+
+`verify`, `baseline`, and `regression` follow a 4-level exit code so CI pipelines can branch on outcome without parsing JSON:
+
+| Code | Meaning | When |
+|---|---|---|
+| 0 | Success | no issues / no regression |
+| 1 | Warnings only | only severities below `--fail-on-severity` |
+| 2 | Errors | issues at/above threshold, or a regression detected |
+| 3 | Timeout | bridge unreachable, or a call timed out |
+
+`ping` / `wait-for-ready` / `status` / `run-tool` keep their simpler binary exit codes (0 success, non-zero failure); the 4-level contract applies to the verify/regression family.
+
+### `--json` everywhere
+
+Every command accepts `--json` and emits a machine-readable payload. Without `--json`, output is human-readable (success on stdout, failures on stderr).
+
+### CI templates
+
+Bundled templates for common CI providers live under [`docs/ci/`](../ci/README.md) — a GitHub Actions workflow and a GitLab CI pipeline covering the health-check → verify-on-PR → regression-on-main shape.
+
 ## Source references
 
 - `mcp-server/src/tools/index.ts`
@@ -554,4 +592,5 @@ Offline scenarios are therefore **operator-driven** in v1: stop/start via the to
 - `mcp-server/src/capabilities/tool-groups.ts` — canonical tool-group catalog (single source of truth).
 - `mcp-server/src/tool-session-state.ts` — per-session visibility store + ListTools filter.
 - `mcp-server/src/tools/bridge-status.ts` — operator-only bridge admin tool.
+- `mcp-server/src/cli/` — automation CLI (`args.ts`, `commands.ts`, `cli.ts`, `exit-codes.ts`, `ping-poller.ts`).
 

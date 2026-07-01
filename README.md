@@ -60,6 +60,7 @@ Optional: install extension packs for domain-specific workflows: [Extensions](do
 - [MCP resources API](docs/api/resources.md) — resource URIs and payloads.
 - [Code conventions](docs/code-conventions.md) — non-obvious C# decisions (instance IDs, namespace aliasing).
 - [Versioning](docs/versioning.md) — how the shared server/bridge/verify version and the Hub app version are managed, bumped, and kept in sync; the runtime compatibility check.
+- [CI templates](docs/ci/README.md) — GitHub Actions / GitLab CI templates for health checks, verify scans, and regression gates in standard CI.
 
 > Would like to see other MCP options? See the [MCP tools for Unity comparison](docs/mcp-tools-comparison.md) — a side-by-side feature matrix of Unity Open MCP and the other MCP tools / AI assistants in the space.
 

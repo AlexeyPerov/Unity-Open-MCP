@@ -24,9 +24,13 @@ function parse(argv: string[]): ParsedCli {
 
 test("parseCliArgs: recognizes every known command", () => {
   for (const cmd of KNOWN_COMMANDS) {
-    // run-tool legitimately requires a tool name positional; the others are
-    // complete on their own.
-    const argv = cmd === "run-tool" ? [cmd, "unity_open_mcp_ping"] : [cmd];
+    // Commands that need a second positional to be complete on their own.
+    const needsSub: Record<string, string[]> = {
+      "run-tool": ["run-tool", "unity_open_mcp_ping"],
+      baseline: ["baseline", "create"],
+      regression: ["regression", "check"],
+    };
+    const argv = needsSub[cmd] ?? [cmd];
     const p = parse(argv);
     assert.equal(p.command, cmd);
     assert.equal(p.error, undefined);
@@ -224,4 +228,139 @@ test("parseCliArgs: --project may appear after run-tool args", () => {
   assert.equal(p.projectPath, "/proj");
   assert.equal(p.toolName, "unity_open_mcp_ping");
   assert.deepEqual(p.toolArgs, { k: "v" });
+});
+
+// ---------------------------------------------------------------------------
+// stream-events
+// ---------------------------------------------------------------------------
+
+test("parseCliArgs: stream-events recognized with no extra positionals", () => {
+  const p = parse(["stream-events"]);
+  assert.equal(p.command, "stream-events");
+  assert.equal(p.error, undefined);
+});
+
+test("parseCliArgs: stream-events --max-events parses to a number", () => {
+  const p = parse(["stream-events", "--max-events", "100"]);
+  assert.equal(p.maxEvents, 100);
+});
+
+test("parseCliArgs: stream-events --follow sets the flag", () => {
+  const p = parse(["stream-events", "--follow"]);
+  assert.equal(p.follow, true);
+});
+
+test("parseCliArgs: stream-events --max-events rejects non-positive", () => {
+  assert.match(parse(["stream-events", "--max-events", "0"]).error ?? "", /--max-events/);
+  assert.match(parse(["stream-events", "--max-events", "-1"]).error ?? "", /--max-events/);
+});
+
+// ---------------------------------------------------------------------------
+// verify
+// ---------------------------------------------------------------------------
+
+test("parseCliArgs: verify with no paths → empty verifyPaths (whole-project scan_all)", () => {
+  const p = parse(["verify"]);
+  assert.equal(p.command, "verify");
+  assert.deepEqual(p.verifyPaths, []);
+  assert.equal(p.verifyMode, undefined);
+});
+
+test("parseCliArgs: verify captures variadic path positionals", () => {
+  const p = parse(["verify", "Assets/Prefabs", "Assets/Scripts", "--json"]);
+  assert.deepEqual(p.verifyPaths, ["Assets/Prefabs", "Assets/Scripts"]);
+  assert.equal(p.json, true);
+});
+
+test("parseCliArgs: verify --mode validates the value", () => {
+  assert.equal(parse(["verify", "--mode", "auto"]).verifyMode, "auto");
+  assert.equal(parse(["verify", "--mode", "scan-paths"]).verifyMode, "scan-paths");
+  assert.equal(parse(["verify", "--mode", "validate-edit"]).verifyMode, "validate-edit");
+  assert.match(parse(["verify", "--mode", "bogus"]).error ?? "", /--mode/);
+});
+
+test("parseCliArgs: verify --fail-on-severity validates the value", () => {
+  assert.equal(parse(["verify", "--fail-on-severity", "warn"]).failOnSeverity, "warn");
+  assert.match(parse(["verify", "--fail-on-severity", "bogus"]).error ?? "", /--fail-on-severity/);
+});
+
+test("parseCliArgs: verify --profile validates the value", () => {
+  assert.equal(parse(["verify", "--profile", "balanced"]).profile, "balanced");
+  assert.match(parse(["verify", "--profile", "bogus"]).error ?? "", /--profile/);
+});
+
+test("parseCliArgs: verify --include-rules / --exclude-rules split on comma", () => {
+  const p = parse([
+    "verify",
+    "--include-rules", "missing_references,orphan_meta",
+    "--exclude-rules", "duplicate_guid",
+  ]);
+  assert.deepEqual(p.includeRules, ["missing_references", "orphan_meta"]);
+  assert.deepEqual(p.excludeRules, ["duplicate_guid"]);
+});
+
+test("parseCliArgs: verify --platform-profile validates the value", () => {
+  assert.equal(parse(["verify", "--platform-profile", "mobile"]).platformProfile, "mobile");
+  assert.match(parse(["verify", "--platform-profile", "bogus"]).error ?? "", /--platform-profile/);
+});
+
+// ---------------------------------------------------------------------------
+// baseline / regression subcommands
+// ---------------------------------------------------------------------------
+
+test("parseCliArgs: baseline create is recognized", () => {
+  const p = parse(["baseline", "create"]);
+  assert.equal(p.command, "baseline");
+  assert.equal(p.subcommand, "create");
+  assert.equal(p.error, undefined);
+});
+
+test("parseCliArgs: baseline update is recognized", () => {
+  const p = parse(["baseline", "update"]);
+  assert.equal(p.subcommand, "update");
+});
+
+test("parseCliArgs: baseline without a subcommand is an error", () => {
+  const p = parse(["baseline"]);
+  assert.equal(p.command, "baseline");
+  assert.match(p.error ?? "", /requires a subcommand/);
+});
+
+test("parseCliArgs: baseline with an invalid subcommand is an error", () => {
+  const p = parse(["baseline", "bogus"]);
+  assert.match(p.error ?? "", /must be 'create' or 'update'/);
+});
+
+test("parseCliArgs: baseline --baseline-path captures the path", () => {
+  const p = parse(["baseline", "create", "--baseline-path", "CI/baseline.json"]);
+  assert.equal(p.baselinePath, "CI/baseline.json");
+});
+
+test("parseCliArgs: regression check is recognized", () => {
+  const p = parse(["regression", "check"]);
+  assert.equal(p.command, "regression");
+  assert.equal(p.subcommand, "check");
+  assert.equal(p.error, undefined);
+});
+
+test("parseCliArgs: regression without a subcommand is an error", () => {
+  const p = parse(["regression"]);
+  assert.match(p.error ?? "", /requires a subcommand/);
+});
+
+test("parseCliArgs: regression with an invalid subcommand is an error", () => {
+  const p = parse(["regression", "bogus"]);
+  assert.match(p.error ?? "", /must be 'check'/);
+});
+
+test("parseCliArgs: regression --regression-threshold allows zero", () => {
+  const p = parse(["regression", "check", "--regression-threshold", "0"]);
+  assert.equal(p.regressionThreshold, 0);
+});
+
+test("parseCliArgs: regression --regression-threshold rejects negative", () => {
+  assert.match(
+    parse(["regression", "check", "--regression-threshold", "-1"]).error ?? "",
+    /--regression-threshold/,
+  );
 });

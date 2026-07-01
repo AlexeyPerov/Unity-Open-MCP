@@ -10,6 +10,17 @@
 //   unity-open-mcp wait-for-ready [--json] [--timeout-ms N] [--interval-ms N]
 //   unity-open-mcp status [--json]
 //   unity-open-mcp run-tool <name> [--json] [--args '<json>'] [--arg k=v]...
+//   unity-open-mcp stream-events [--json] [--max-events N] [--follow]
+//   unity-open-mcp verify [paths...] [--json] [--mode auto|scan-paths|validate-edit]
+//                                 [--fail-on-severity error|warn|info|verbose|never]
+//                                 [--profile compact|balanced|full]
+//                                 [--include-rules a,b] [--exclude-rules a,b]
+//                                 [--platform-profile mobile|console|desktop]
+//   unity-open-mcp baseline create|update [--json] [--baseline-path <path>]
+//                                          [--platform-profile ...]
+//   unity-open-mcp regression check [--json] [--baseline-path <path>]
+//                                   [--regression-threshold N]
+//                                   [--platform-profile ...]
 //   unity-open-mcp --help | -h
 //   unity-open-mcp --version | -V
 //
@@ -25,14 +36,35 @@ export type CliCommand =
   | "wait-for-ready"
   | "status"
   | "run-tool"
+  | "stream-events"
+  | "verify"
+  | "baseline"
+  | "regression"
   | "help"
   | "version";
+
+/** Subcommand for `baseline` / `regression` (the second positional). */
+export type CliSubcommand = string | undefined;
 
 export const KNOWN_COMMANDS: readonly string[] = [
   "ping",
   "wait-for-ready",
   "status",
   "run-tool",
+  "stream-events",
+  "verify",
+  "baseline",
+  "regression",
+];
+
+/**
+ * Commands that take a second positional subcommand (`baseline create`,
+ * `regression check`). Used by the parser to accept rather than reject the
+ * extra positional.
+ */
+export const COMMANDS_WITH_SUBCOMMAND: readonly string[] = [
+  "baseline",
+  "regression",
 ];
 
 export interface ParsedCli {
@@ -51,6 +83,32 @@ export interface ParsedCli {
   toolName: string | undefined;
   /** Tool args for run-tool, merged from --args + --arg. */
   toolArgs: Record<string, unknown>;
+  // --- stream-events ---
+  /** stream-events: max events to drain per call. */
+  maxEvents: number | undefined;
+  /** stream-events: keep polling until interrupted (follow mode). */
+  follow: boolean;
+  // --- verify ---
+  /** verify: asset paths to scan (variadic positional). Empty = whole project (scan_all). */
+  verifyPaths: string[];
+  /** verify: which underlying tool to call. `auto` picks scan_all when no paths, else scan_paths. */
+  verifyMode: "auto" | "scan-paths" | "validate-edit" | undefined;
+  /** verify/regression: severity threshold string forwarded to the tool. */
+  failOnSeverity: string | undefined;
+  /** verify: output profile forwarded to scan_paths/validate_edit. */
+  profile: string | undefined;
+  /** verify: comma-separated include/exclude rule lists (parsed to arrays). */
+  includeRules: string[] | undefined;
+  excludeRules: string[] | undefined;
+  /** verify/baseline/regression: platform profile forwarded to the tool. */
+  platformProfile: string | undefined;
+  // --- baseline / regression ---
+  /** baseline/regression: second positional subcommand (create/update/check). */
+  subcommand: CliSubcommand;
+  /** baseline/regression: path to the baseline JSON file. */
+  baselinePath: string | undefined;
+  /** regression: max allowed error-count increase (global). */
+  regressionThreshold: number | undefined;
   /** Parse error message; when set, the dispatcher prints it and exits non-zero. */
   error: string | undefined;
   /** Unknown / unparsed leftovers (currently an error condition). */
@@ -67,6 +125,18 @@ export function emptyParsed(): ParsedCli {
     intervalMs: undefined,
     toolName: undefined,
     toolArgs: {},
+    maxEvents: undefined,
+    follow: false,
+    verifyPaths: [],
+    verifyMode: undefined,
+    failOnSeverity: undefined,
+    profile: undefined,
+    includeRules: undefined,
+    excludeRules: undefined,
+    platformProfile: undefined,
+    subcommand: undefined,
+    baselinePath: undefined,
+    regressionThreshold: undefined,
     error: undefined,
     unknown: [],
   };
@@ -151,6 +221,118 @@ export function parseCliArgs(argv: string[]): ParsedCli {
       continue;
     }
 
+    // --- stream-events flags ---
+    if (tok === "--max-events") {
+      const v = args[i + 1];
+      const n = parsePositiveInt(v);
+      if (n === undefined) {
+        parsed.error = "--max-events requires a positive integer.";
+        return parsed;
+      }
+      parsed.maxEvents = n;
+      i += 2;
+      continue;
+    }
+    if (tok === "--follow") {
+      parsed.follow = true;
+      i++;
+      continue;
+    }
+
+    // --- verify flags ---
+    if (tok === "--mode") {
+      const v = args[i + 1];
+      if (v !== "auto" && v !== "scan-paths" && v !== "validate-edit") {
+        parsed.error =
+          "--mode requires one of: auto, scan-paths, validate-edit.";
+        return parsed;
+      }
+      parsed.verifyMode = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--fail-on-severity") {
+      const v = args[i + 1];
+      if (
+        v !== "error" &&
+        v !== "warn" &&
+        v !== "info" &&
+        v !== "verbose" &&
+        v !== "never"
+      ) {
+        parsed.error =
+          "--fail-on-severity requires one of: error, warn, info, verbose, never.";
+        return parsed;
+      }
+      parsed.failOnSeverity = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--profile") {
+      const v = args[i + 1];
+      if (v !== "compact" && v !== "balanced" && v !== "full") {
+        parsed.error = "--profile requires one of: compact, balanced, full.";
+        return parsed;
+      }
+      parsed.profile = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--include-rules") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = "--include-rules requires a comma-separated rule list.";
+        return parsed;
+      }
+      parsed.includeRules = v.split(",").map((s) => s.trim()).filter(Boolean);
+      i += 2;
+      continue;
+    }
+    if (tok === "--exclude-rules") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = "--exclude-rules requires a comma-separated rule list.";
+        return parsed;
+      }
+      parsed.excludeRules = v.split(",").map((s) => s.trim()).filter(Boolean);
+      i += 2;
+      continue;
+    }
+    if (tok === "--platform-profile") {
+      const v = args[i + 1];
+      if (v !== "mobile" && v !== "console" && v !== "desktop") {
+        parsed.error =
+          "--platform-profile requires one of: mobile, console, desktop.";
+        return parsed;
+      }
+      parsed.platformProfile = v;
+      i += 2;
+      continue;
+    }
+
+    // --- baseline / regression flags ---
+    if (tok === "--baseline-path") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        parsed.error = "--baseline-path requires a path.";
+        return parsed;
+      }
+      parsed.baselinePath = v;
+      i += 2;
+      continue;
+    }
+    if (tok === "--regression-threshold") {
+      const v = args[i + 1];
+      const n = parseNonNegativeInt(v);
+      if (n === undefined) {
+        parsed.error = "--regression-threshold requires a non-negative integer.";
+        return parsed;
+      }
+      parsed.regressionThreshold = n;
+      i += 2;
+      continue;
+    }
+
     // run-tool arg passing. Two shapes:
     //   --args '<json blob>'   → merge parsed JSON object into toolArgs
     //   --arg key=value        → set one key; value JSON-parsed if valid JSON,
@@ -198,14 +380,32 @@ export function parseCliArgs(argv: string[]): ParsedCli {
         // narrowed by the includes() check above
         parsed.command = tok as CliCommand;
       } else if (positionalCount === 1) {
-        if (parsed.command !== "run-tool") {
+        // The second positional is command-specific:
+        //   run-tool <toolName>
+        //   baseline <create|update>
+        //   regression <check>
+        //   verify <first path>  (variadic — first path counted here)
+        if (parsed.command === "run-tool") {
+          parsed.toolName = tok;
+        } else if (parsed.command === "baseline") {
+          parsed.subcommand = tok;
+        } else if (parsed.command === "regression") {
+          parsed.subcommand = tok;
+        } else if (parsed.command === "verify") {
+          parsed.verifyPaths.push(tok);
+        } else {
           parsed.error = `Unexpected positional '${tok}' for command '${parsed.command}'.`;
           return parsed;
         }
-        parsed.toolName = tok;
       } else {
-        parsed.error = `Unexpected positional '${tok}'.`;
-        return parsed;
+        // positionalCount >= 2
+        if (parsed.command === "verify") {
+          // verify accepts variadic path positionals.
+          parsed.verifyPaths.push(tok);
+        } else {
+          parsed.error = `Unexpected positional '${tok}'.`;
+          return parsed;
+        }
       }
       positionalCount++;
       i++;
@@ -228,6 +428,30 @@ export function parseCliArgs(argv: string[]): ParsedCli {
     return parsed;
   }
 
+  // baseline requires a subcommand (create | update).
+  if (parsed.command === "baseline") {
+    if (!parsed.subcommand) {
+      parsed.error = "baseline requires a subcommand: baseline create | update.";
+      return parsed;
+    }
+    if (parsed.subcommand !== "create" && parsed.subcommand !== "update") {
+      parsed.error = `baseline subcommand must be 'create' or 'update' (got '${parsed.subcommand}').`;
+      return parsed;
+    }
+  }
+
+  // regression requires `check` as its subcommand.
+  if (parsed.command === "regression") {
+    if (!parsed.subcommand) {
+      parsed.error = "regression requires a subcommand: regression check.";
+      return parsed;
+    }
+    if (parsed.subcommand !== "check") {
+      parsed.error = `regression subcommand must be 'check' (got '${parsed.subcommand}').`;
+      return parsed;
+    }
+  }
+
   if (!parsed.command) {
     // No command at all — the caller (dispatcher) decides what to do. When
     // invoked as an MCP server (no subcommand), the stdio path handles it; we
@@ -242,6 +466,14 @@ function parsePositiveInt(v: string | undefined): number | undefined {
   if (v === undefined || v.startsWith("-")) return undefined;
   const n = Number(v);
   if (!Number.isInteger(n) || n <= 0) return undefined;
+  return n;
+}
+
+/** Like parsePositiveInt but allows zero (for regression_threshold). */
+function parseNonNegativeInt(v: string | undefined): number | undefined {
+  if (v === undefined || v.startsWith("-")) return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0) return undefined;
   return n;
 }
 

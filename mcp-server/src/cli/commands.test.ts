@@ -16,6 +16,10 @@ import {
   runWaitForReadyCommand,
   runStatusCommand,
   runRunToolCommand,
+  runStreamEventsCommand,
+  runVerifyCommand,
+  runBaselineCommand,
+  runRegressionCommand,
   helpText,
   versionText,
 } from "./commands.js";
@@ -311,15 +315,399 @@ test("runRunToolCommand: bridge_status is a known tool (CLI parity)", async () =
 });
 
 // ---------------------------------------------------------------------------
+// stream-events
+// ---------------------------------------------------------------------------
+
+test("runStreamEventsCommand: drains events and exits 0 on success (non-follow)", async () => {
+  const pullResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          subscriberId: "sub",
+          events: [
+            { seq: 1, ts: "t1", type: "log", logType: "log", message: "hello" },
+          ],
+          dropped: 0,
+          connected: true,
+          started: true,
+          lastError: null,
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(pullResult) });
+  const result = await runStreamEventsCommand(stack, {
+    json: true,
+    maxEvents: 50,
+    follow: false,
+  });
+  assert.equal(result.exitCode, 0);
+  const json = result.json as { connected: boolean; eventCount: number; events: unknown[] };
+  assert.equal(json.connected, true);
+  assert.equal(json.eventCount, 1);
+});
+
+test("runStreamEventsCommand: bridge unavailable + no events → exit 3 (timeout)", async () => {
+  const pullResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          events: [],
+          connected: false,
+          lastError: "connect ECONNREFUSED",
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(pullResult) });
+  const result = await runStreamEventsCommand(stack, {
+    json: true,
+    maxEvents: 50,
+    follow: false,
+  });
+  assert.equal(result.exitCode, 3);
+});
+
+// ---------------------------------------------------------------------------
+// verify
+// ---------------------------------------------------------------------------
+
+test("runVerifyCommand: no errors → exit 0 (success)", async () => {
+  const scanResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          passed: true,
+          issueCount: 0,
+          issuesBySeverity: { error: 0, warn: 0, info: 0, verbose: 0 },
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(scanResult) });
+  const result = await runVerifyCommand(stack, {
+    json: true,
+    paths: ["Assets/Prefabs"],
+    mode: "auto",
+    failOnSeverity: undefined,
+    profile: undefined,
+    includeRules: undefined,
+    excludeRules: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 0);
+  assert.equal((result.json as { tool: string }).tool, "unity_open_mcp_scan_paths");
+});
+
+test("runVerifyCommand: errors present → exit 2", async () => {
+  const scanResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          passed: false,
+          issueCount: 3,
+          issuesBySeverity: { error: 2, warn: 1, info: 0, verbose: 0 },
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(scanResult) });
+  const result = await runVerifyCommand(stack, {
+    json: true,
+    paths: ["Assets"],
+    mode: "auto",
+    failOnSeverity: undefined,
+    profile: undefined,
+    includeRules: undefined,
+    excludeRules: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 2);
+});
+
+test("runVerifyCommand: warnings-only → exit 1", async () => {
+  const scanResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          passed: true,
+          issueCount: 2,
+          issuesBySeverity: { error: 0, warn: 2, info: 0, verbose: 0 },
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(scanResult) });
+  const result = await runVerifyCommand(stack, {
+    json: true,
+    paths: ["Assets"],
+    mode: "auto",
+    failOnSeverity: undefined,
+    profile: undefined,
+    includeRules: undefined,
+    excludeRules: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 1);
+});
+
+test("runVerifyCommand: no paths + auto mode → routes to scan_all", async () => {
+  const scanAllResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          summary: { counts: { error: 0, warn: 0, info: 0, verbose: 0 } },
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(scanAllResult) });
+  const result = await runVerifyCommand(stack, {
+    json: true,
+    paths: [],
+    mode: "auto",
+    failOnSeverity: undefined,
+    profile: undefined,
+    includeRules: undefined,
+    excludeRules: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 0);
+  assert.equal((result.json as { tool: string }).tool, "unity_open_mcp_scan_all");
+});
+
+test("runVerifyCommand: validate-edit mode requires paths", async () => {
+  const stack = makeStack({});
+  const result = await runVerifyCommand(stack, {
+    json: true,
+    paths: [],
+    mode: "validate-edit",
+    failOnSeverity: undefined,
+    profile: undefined,
+    includeRules: undefined,
+    excludeRules: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 2);
+  assert.match(result.human, /validate-edit mode requires/);
+});
+
+test("runVerifyCommand: bridge_unavailable error → exit 3 (timeout)", async () => {
+  const errorResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ error: { code: "bridge_unavailable" } }),
+      },
+    ],
+    isError: true,
+  };
+  const stack = makeStack({ router: makeFakeRouter(errorResult) });
+  const result = await runVerifyCommand(stack, {
+    json: true,
+    paths: ["Assets"],
+    mode: "auto",
+    failOnSeverity: undefined,
+    profile: undefined,
+    includeRules: undefined,
+    excludeRules: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 3);
+});
+
+test("runVerifyCommand: --fail-on-severity warn makes warnings fail (exit 2)", async () => {
+  const scanResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          passed: false,
+          issueCount: 1,
+          issuesBySeverity: { error: 0, warn: 1, info: 0, verbose: 0 },
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(scanResult) });
+  const result = await runVerifyCommand(stack, {
+    json: true,
+    paths: ["Assets"],
+    mode: "auto",
+    failOnSeverity: "warn",
+    profile: undefined,
+    includeRules: undefined,
+    excludeRules: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 2);
+});
+
+// ---------------------------------------------------------------------------
+// baseline
+// ---------------------------------------------------------------------------
+
+test("runBaselineCommand: success → exit 0", async () => {
+  const baselineResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          baselinePath: "CI/baseline.json",
+          schemaVersion: "v1",
+          generatedAt: "2026-07-01T00:00:00Z",
+          summary: { error: 5, warn: 10, info: 0, verbose: 0 },
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(baselineResult) });
+  const result = await runBaselineCommand(stack, {
+    json: true,
+    subcommand: "create",
+    baselinePath: "CI/baseline.json",
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 0);
+  assert.equal((result.json as { subcommand: string }).subcommand, "create");
+});
+
+test("runBaselineCommand: tool error → exit 2", async () => {
+  const errorResult: CallToolResult = {
+    content: [
+      { type: "text", text: JSON.stringify({ error: { code: "scan_failed" } }) },
+    ],
+    isError: true,
+  };
+  const stack = makeStack({ router: makeFakeRouter(errorResult) });
+  const result = await runBaselineCommand(stack, {
+    json: true,
+    subcommand: "create",
+    baselinePath: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 2);
+});
+
+// ---------------------------------------------------------------------------
+// regression
+// ---------------------------------------------------------------------------
+
+test("runRegressionCommand: no regression → exit 0", async () => {
+  const regResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          regressed: false,
+          baseline: { error: 5 },
+          current: { error: 5 },
+          delta: { error: 0 },
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(regResult) });
+  const result = await runRegressionCommand(stack, {
+    json: true,
+    baselinePath: "CI/baseline.json",
+    regressionThreshold: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 0);
+  assert.equal((result.json as { regressed: boolean }).regressed, false);
+});
+
+test("runRegressionCommand: regression detected → exit 2", async () => {
+  const regResult: CallToolResult = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          regressed: true,
+          baseline: { error: 5 },
+          current: { error: 8 },
+          delta: { error: 3 },
+        }),
+      },
+    ],
+    isError: false,
+  };
+  const stack = makeStack({ router: makeFakeRouter(regResult) });
+  const result = await runRegressionCommand(stack, {
+    json: true,
+    baselinePath: "CI/baseline.json",
+    regressionThreshold: 0,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 2);
+  assert.equal((result.json as { regressed: boolean }).regressed, true);
+});
+
+test("runRegressionCommand: tool error → exit 2", async () => {
+  const errorResult: CallToolResult = {
+    content: [
+      { type: "text", text: JSON.stringify({ error: { code: "baseline_missing" } }) },
+    ],
+    isError: true,
+  };
+  const stack = makeStack({ router: makeFakeRouter(errorResult) });
+  const result = await runRegressionCommand(stack, {
+    json: true,
+    baselinePath: "CI/baseline.json",
+    regressionThreshold: undefined,
+    platformProfile: undefined,
+  });
+  assert.equal(result.exitCode, 2);
+});
+
+// ---------------------------------------------------------------------------
 // help / version text
 // ---------------------------------------------------------------------------
 
 test("helpText: mentions every command and key option", () => {
   const text = helpText("unity-open-mcp");
-  for (const cmd of ["ping", "wait-for-ready", "status", "run-tool"]) {
+  for (const cmd of [
+    "ping",
+    "wait-for-ready",
+    "status",
+    "run-tool",
+    "stream-events",
+    "verify",
+    "baseline",
+    "regression",
+  ]) {
     assert.ok(text.includes(cmd), `help missing ${cmd}`);
   }
-  for (const opt of ["--json", "--project", "--port", "--timeout-ms", "--args", "--arg"]) {
+  for (const opt of [
+    "--json",
+    "--project",
+    "--port",
+    "--timeout-ms",
+    "--args",
+    "--arg",
+    "--max-events",
+    "--follow",
+    "--mode",
+    "--fail-on-severity",
+    "--baseline-path",
+    "--regression-threshold",
+  ]) {
     assert.ok(text.includes(opt), `help missing ${opt}`);
   }
   assert.ok(text.includes("UNITY_PROJECT_PATH"));

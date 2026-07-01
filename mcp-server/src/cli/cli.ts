@@ -17,6 +17,10 @@ import {
   runWaitForReadyCommand,
   runStatusCommand,
   runRunToolCommand,
+  runStreamEventsCommand,
+  runVerifyCommand,
+  runBaselineCommand,
+  runRegressionCommand,
   helpText,
   versionText,
   DEFAULT_WAIT_TIMEOUT_MS,
@@ -121,6 +125,51 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
           json: parsed.json,
           toolName: parsed.toolName!,
           toolArgs: parsed.toolArgs,
+        });
+        break;
+      case "stream-events": {
+        // stream-events owns its stdout writes in --follow mode so events
+        // stream incrementally to the CI log instead of buffering until exit.
+        // We still go through emitResult for the non-follow summary shape.
+        const streamOpts = {
+          json: parsed.json,
+          maxEvents: parsed.maxEvents ?? 50,
+          follow: parsed.follow,
+          intervalMs: DEFAULT_POLL_INTERVAL_MS,
+        };
+        result = await runStreamEventsCommand(stack, streamOpts);
+        break;
+      }
+      case "verify":
+        result = await runVerifyCommand(stack, {
+          json: parsed.json,
+          paths: parsed.verifyPaths,
+          mode: parsed.verifyMode ?? "auto",
+          failOnSeverity: parsed.failOnSeverity,
+          profile: parsed.profile,
+          includeRules: parsed.includeRules,
+          excludeRules: parsed.excludeRules,
+          platformProfile: parsed.platformProfile,
+        });
+        break;
+      case "baseline":
+        result = await runBaselineCommand(stack, {
+          json: parsed.json,
+          // narrowed by args.ts validation: create | update
+          subcommand: parsed.subcommand as "create" | "update",
+          baselinePath: parsed.baselinePath,
+          platformProfile: parsed.platformProfile,
+        });
+        break;
+      case "regression":
+        result = await runRegressionCommand(stack, {
+          json: parsed.json,
+          // args.ts validation ensures the default baseline path is set below.
+          baselinePath:
+            parsed.baselinePath ??
+            "CI/unity-open-mcp-baseline.json",
+          regressionThreshold: parsed.regressionThreshold,
+          platformProfile: parsed.platformProfile,
         });
         break;
       default:

@@ -1,0 +1,77 @@
+# GitLab CI template — Unity Open MCP health check + verify + regression.
+#
+# Copy this file into your game repo at .gitlab-ci.yml (or include: it from a
+# shared location) and adjust the variables block for your project.
+#
+# Requires a runner with a Unity Editor installed (self-hosted, shell executor).
+# Set UNITY_PATH to the Editor executable; the verify/regression commands fall
+# back to batch mode automatically when no live bridge is reachable.
+#
+# Three jobs:
+#   1. health-check  — wait-for-ready (does the bridge answer?)
+#   2. verify-mr     — verify changed asset paths on merge requests
+#   3. regression    — regression check + baseline refresh on pushes to main
+
+variables:
+  UNITY_PROJECT_PATH: "$CI_PROJECT_DIR"
+  # Adjust to the Unity Editor on your runner.
+  UNITY_PATH: "/Applications/Unity/Hub/Editor/6000.0.0f1/Unity.app/Contents/MacOS/Unity"
+
+stages:
+  - health
+  - verify
+  - regression
+
+# -------------------------------------------------------------------------
+# 1) Health check — does the bridge (or batch fallback) answer?
+# -------------------------------------------------------------------------
+unity:health-check:
+  stage: health
+  image: node:22
+  script:
+    - npx unity-open-mcp@latest wait-for-ready --json --timeout-ms 180000
+
+# -------------------------------------------------------------------------
+# 2) Verify on MR — scan changed asset paths, fail on errors.
+# -------------------------------------------------------------------------
+unity:verify-mr:
+  stage: verify
+  image: node:22
+  needs: ["unity:health-check"]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    # Detect changed asset/package paths vs the merge-request target branch.
+    - BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-main}"
+    - PATHS=$(git diff --name-only "origin/$BASE...$CI_COMMIT_SHA" -- Assets/ Packages/ | tr '\n' ' ')
+    - |
+      npx unity-open-mcp@latest verify $PATHS \
+        --fail-on-severity error \
+        --profile balanced \
+        --json
+
+# -------------------------------------------------------------------------
+# 3) Regression on main — compare against baseline, then refresh it.
+# -------------------------------------------------------------------------
+unity:regression:
+  stage: regression
+  image: node:22
+  needs: ["unity:health-check"]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"
+  script:
+    - |
+      npx unity-open-mcp@latest regression check \
+        --baseline-path CI/unity-open-mcp-baseline.json \
+        --regression-threshold 0 \
+        --json
+    - |
+      npx unity-open-mcp@latest baseline update \
+        --baseline-path CI/unity-open-mcp-baseline.json \
+        --json
+    # Commit the refreshed baseline back to main.
+    - git config user.name "unity-verify-bot"
+    - git config user.email "bot@gitlab.local"
+    - git add CI/unity-open-mcp-baseline.json
+    - git commit -m "chore(ci): refresh unity-open-mcp regression baseline" || echo "no baseline changes"
+    - git push "https://gitlab-ci-token:$CI_JOB_TOKEN@$CI_SERVER_HOST/$CI_PROJECT_PATH.git" HEAD:main

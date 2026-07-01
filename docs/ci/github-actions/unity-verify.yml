@@ -1,0 +1,116 @@
+# GitHub Actions template — Unity Open MCP health check + verify + regression.
+#
+# Copy this file into your game repo at .github/workflows/unity-verify.yml and
+# adjust the env block (UNITY_VERSION, UNITY_PROJECT_PATH) for your project.
+#
+# Requires a runner with a Unity Editor installed. For a self-hosted runner,
+# set UNITY_PATH to the Editor executable. For GitHub-hosted runners, use the
+# game-ci/unity-builder action to activate a license and run Unity in batchmode
+# (the verify/regression commands fall back to batch mode automatically when no
+# live bridge is reachable).
+#
+# Three jobs:
+#   1. health-check  — wait-for-ready (does the bridge answer?)
+#   2. verify-pr     — verify changed asset paths on pull requests
+#   3. regression    — regression check + baseline refresh on pushes to main
+
+name: unity-verify
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "Assets/**"
+      - "Packages/**"
+      - "ProjectSettings/**"
+      - "CI/unity-open-mcp-baseline.json"
+  push:
+    branches:
+      - main
+    paths:
+      - "Assets/**"
+      - "Packages/**"
+      - "ProjectSettings/**"
+
+# Adjust these for your project + runner.
+env:
+  UNITY_PROJECT_PATH: ${{ github.workspace }}
+  # Point at the Unity Editor on the runner. For a self-hosted macOS runner:
+  #   /Applications/Unity/Hub/Editor/6000.0.0f1/Unity.app/Contents/MacOS/Unity
+  UNITY_PATH: /Applications/Unity/Hub/Editor/6000.0.0f1/Unity.app/Contents/MacOS/Unity
+
+jobs:
+  # -------------------------------------------------------------------------
+  # 1) Health check — does the bridge (or batch fallback) answer?
+  # -------------------------------------------------------------------------
+  health-check:
+    name: Unity bridge health check
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Wait for bridge ready
+        run: npx unity-open-mcp@latest wait-for-ready --json --timeout-ms 180000
+
+  # -------------------------------------------------------------------------
+  # 2) Verify on PR — scan changed asset paths, fail on errors.
+  # -------------------------------------------------------------------------
+  verify-pr:
+    name: Verify changed assets
+    needs: health-check
+    if: github.event_name == 'pull_request'
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed asset paths
+        id: paths
+        run: |
+          BASE="origin/${{ github.base_ref }}"
+          PATHS=$(git diff --name-only "$BASE...HEAD" -- Assets/ Packages/ | tr '\n' ' ')
+          echo "paths=$PATHS" >> "$GITHUB_OUTPUT"
+
+      - name: Verify (fail on errors)
+        # Exit 2 = errors present; 1 = warnings only (advisory, does not fail).
+        run: |
+          npx unity-open-mcp@latest verify ${{ steps.paths.outputs.paths }} \
+            --fail-on-severity error \
+            --profile balanced \
+            --json
+
+  # -------------------------------------------------------------------------
+  # 3) Regression on main — compare against baseline, then refresh it.
+  # -------------------------------------------------------------------------
+  regression:
+    name: Regression check + baseline refresh
+    needs: health-check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Regression check
+        run: |
+          npx unity-open-mcp@latest regression check \
+            --baseline-path CI/unity-open-mcp-baseline.json \
+            --regression-threshold 0 \
+            --json
+
+      - name: Update baseline (commit back to main)
+        run: |
+          npx unity-open-mcp@latest baseline update \
+            --baseline-path CI/unity-open-mcp-baseline.json \
+            --json
+
+      - name: Commit refreshed baseline
+        run: |
+          git config user.name "unity-verify-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add CI/unity-open-mcp-baseline.json
+          git commit -m "chore(ci): refresh unity-open-mcp regression baseline" || echo "no baseline changes"
+          git push

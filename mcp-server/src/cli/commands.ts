@@ -31,6 +31,13 @@ import {
   type PingBody,
 } from "./ping-poller.js";
 import { checkBridgeCompat } from "../compat.js";
+import {
+  EXIT,
+  classifyBySeverity,
+  severityThreshold,
+  withTimeout,
+  type SeverityCounts,
+} from "./exit-codes.js";
 
 export interface CliCommandResult {
   /** Process exit code. 0 = success, non-zero = failure. */
@@ -350,6 +357,513 @@ function wrapList(items: string[], perLine = 4): string {
 }
 
 // ---------------------------------------------------------------------------
+// stream-events
+// ---------------------------------------------------------------------------
+//
+// Drains the per-process SSE subscription (the same one
+// unity_senses_pull_events uses) and prints incremental console + editor-state
+// events. `--follow` keeps polling until the process is interrupted (Ctrl-C),
+// which is the CI logging shape. Without --follow it drains once and exits.
+
+export interface StreamEventsCommandOptions {
+  json: boolean;
+  maxEvents: number;
+  follow: boolean;
+  /** Poll interval in ms when following. Defaults to 1s. */
+  intervalMs?: number;
+}
+
+export async function runStreamEventsCommand(
+  stack: RouterStack,
+  opts: StreamEventsCommandOptions,
+): Promise<CliCommandResult> {
+  const intervalMs = opts.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const allEvents: unknown[] = [];
+  let firstPull: unknown = null;
+  let connected = false;
+  let lastError: string | null = null;
+
+  // First pull starts the subscription; subsequent pulls drain incrementally.
+  const pullOnce = async (maxEvents: number): Promise<unknown> => {
+    const result = await stack.router.route("unity_senses_pull_events", {
+      max_events: maxEvents,
+    });
+    const body = extractResultBody(result);
+    return body;
+  };
+
+  firstPull = await pullOnce(opts.maxEvents);
+  const firstBatch = extractEvents(firstPull);
+  connected = extractConnected(firstPull);
+  lastError = extractLastError(firstPull);
+  for (const evt of firstBatch) allEvents.push(evt);
+
+  if (opts.follow) {
+    // Keep draining until interrupted. The dispatcher's stdout writes happen
+    // per-batch in JSON-lines shape so a CI log shows events as they arrive.
+    let moreToRead = true;
+    while (moreToRead) {
+      await sleep(intervalMs);
+      const batch = await pullOnce(opts.maxEvents);
+      connected = extractConnected(batch);
+      lastError = extractLastError(batch);
+      const events = extractEvents(batch);
+      for (const evt of events) allEvents.push(evt);
+      // In follow mode the loop only ends on interruption (Ctrl-C → SIGINT →
+      // process.exit from the dispatcher). We do not break on bridge disconnect
+      // because the SSE reader auto-reconnects; surface the state in output.
+    }
+  }
+
+  const json = {
+    command: "stream-events",
+    connected,
+    lastError,
+    eventCount: allEvents.length,
+    events: allEvents,
+  };
+
+  // stream-events never fails the CI gate on event contents — it is a log
+  // tap. It exits non-zero only when the bridge was never reachable.
+  const unreachable = !connected && allEvents.length === 0 && lastError !== null;
+  const exitCode = unreachable ? EXIT.TIMEOUT : EXIT.SUCCESS;
+
+  return {
+    exitCode,
+    json,
+    human: formatStreamEventsHuman(json),
+    errorLabel: unreachable ? "bridge_unavailable" : undefined,
+  };
+}
+
+function extractEvents(body: unknown): unknown[] {
+  if (body && typeof body === "object" && Array.isArray((body as { events?: unknown }).events)) {
+    return (body as { events: unknown[] }).events;
+  }
+  return [];
+}
+
+function extractConnected(body: unknown): boolean {
+  if (body && typeof body === "object") {
+    return (body as { connected?: boolean }).connected === true;
+  }
+  return false;
+}
+
+function extractLastError(body: unknown): string | null {
+  if (body && typeof body === "object") {
+    const le = (body as { lastError?: string | null }).lastError;
+    return typeof le === "string" ? le : null;
+  }
+  return null;
+}
+
+function formatStreamEventsHuman(json: {
+  connected: boolean;
+  lastError: string | null;
+  eventCount: number;
+  events: unknown[];
+}): string {
+  const lines = [
+    `connected: ${json.connected}`,
+    `events: ${json.eventCount}`,
+  ];
+  if (json.lastError) lines.push(`lastError: ${json.lastError}`);
+  for (const evt of json.events) {
+    const e = evt as Record<string, unknown>;
+    if (typeof e === "object" && e !== null) {
+      const type = e.type ?? "event";
+      if (type === "log") {
+        lines.push(`[log ${e.logType ?? "log"}] ${e.message ?? ""}`);
+      } else if (type === "editor_state") {
+        lines.push(
+          `[state] ${e.state ?? ""}${e.isCompiling === true ? " (compiling)" : ""}${e.isPlaying === true ? " (playing)" : ""}`,
+        );
+      } else {
+        lines.push(`[${type}] ${JSON.stringify(e)}`);
+      }
+    } else {
+      lines.push(String(evt));
+    }
+  }
+  return lines.join("\n");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ---------------------------------------------------------------------------
+// verify
+// ---------------------------------------------------------------------------
+//
+// Thin wrapper over scan_paths / validate_edit / scan_all. Picks the tool:
+//   - --mode validate-edit  → unity_open_mcp_validate_edit (needs paths)
+//   - --mode scan-paths     → unity_open_mcp_scan_paths (needs paths)
+//   - --mode auto (default) → scan_paths when paths given, else scan_all
+// Exit code follows the 4-level contract based on severity counts vs the
+// resolved fail_on_severity threshold.
+
+export interface VerifyCommandOptions {
+  json: boolean;
+  paths: string[];
+  mode: "auto" | "scan-paths" | "validate-edit";
+  failOnSeverity: string | undefined;
+  profile: string | undefined;
+  includeRules: string[] | undefined;
+  excludeRules: string[] | undefined;
+  platformProfile: string | undefined;
+}
+
+export async function runVerifyCommand(
+  stack: RouterStack,
+  opts: VerifyCommandOptions,
+): Promise<CliCommandResult> {
+  const hasPaths = opts.paths.length > 0;
+
+  // Resolve which tool to call.
+  let toolName: string;
+  if (opts.mode === "validate-edit") {
+    if (!hasPaths) {
+      return verifyError("validate-edit mode requires at least one path.");
+    }
+    toolName = "unity_open_mcp_validate_edit";
+  } else if (opts.mode === "scan-paths") {
+    if (!hasPaths) {
+      return verifyError("scan-paths mode requires at least one path.");
+    }
+    toolName = "unity_open_mcp_scan_paths";
+  } else {
+    // auto: scan_paths when paths given, else scan_all (whole project).
+    toolName = hasPaths ? "unity_open_mcp_scan_paths" : "unity_open_mcp_scan_all";
+  }
+
+  const tool = TOOL_BY_NAME.get(toolName);
+  if (!tool) {
+    return verifyError(`Internal error: tool '${toolName}' not registered.`);
+  }
+
+  // Build args from the CLI flags, applying schema defaults for omitted keys.
+  const args: Record<string, unknown> = {};
+  if (hasPaths) args.paths = opts.paths;
+  if (opts.failOnSeverity) args.fail_on_severity = opts.failOnSeverity;
+  if (opts.profile) args.profile = opts.profile;
+  if (opts.includeRules) args.include_rules = opts.includeRules;
+  if (opts.excludeRules) args.exclude_rules = opts.excludeRules;
+  if (opts.platformProfile) args.platform_profile = opts.platformProfile;
+  // scan_all doesn't accept include/exclude/profile/paging — it's whole-project.
+  if (toolName === "unity_open_mcp_scan_all") {
+    delete args.include_rules;
+    delete args.exclude_rules;
+    delete args.profile;
+  }
+
+  const routedArgs = withSchemaDefaults(tool, args);
+  const result: CallToolResult = await stack.router.route(toolName, routedArgs);
+  const body = extractResultBody(result);
+  const isError = result.isError === true;
+
+  // Classify the exit code from severity counts. The folded verify result
+  // carries `issuesBySeverity`; scan_all carries a `summary` with severity
+  // counts. Extract whichever shape we got.
+  const counts = extractSeverityCounts(body);
+  const threshold = severityThreshold(opts.failOnSeverity);
+  const unreachable = isUnreachableResult(body, isError);
+  let exitCode: number = isError
+    ? (isTimeoutError(body) ? EXIT.TIMEOUT : EXIT.ERRORS)
+    : classifyBySeverity(counts, threshold);
+  exitCode = withTimeout(exitCode, unreachable);
+
+  const json = {
+    command: "verify",
+    tool: toolName,
+    isError,
+    result: body,
+    severityCounts: counts,
+    exitLevel: exitCodeToLevel(exitCode),
+  };
+
+  return {
+    exitCode,
+    json,
+    human: formatVerifyHuman(json),
+    errorLabel: isError ? "tool_error" : undefined,
+  };
+}
+
+function verifyError(message: string): CliCommandResult {
+  return {
+    exitCode: EXIT.ERRORS,
+    json: { command: "verify", error: { code: "verify_arg", message } },
+    human: `verify: ${message}`,
+    errorLabel: "verify_arg",
+  };
+}
+
+/** Pull {error,warn,info,verbose} counts from a verify/scan result body. */
+function extractSeverityCounts(body: unknown): SeverityCounts {
+  const counts: SeverityCounts = {};
+  if (!body || typeof body !== "object") return counts;
+  const obj = body as Record<string, unknown>;
+  // scan_paths/validate_edit folded shape: issuesBySeverity directly.
+  if (obj.issuesBySeverity && typeof obj.issuesBySeverity === "object") {
+    Object.assign(counts, obj.issuesBySeverity);
+  }
+  // scan_all shape: nested under summary.counts or summary.severity.
+  if (obj.summary && typeof obj.summary === "object") {
+    const summary = obj.summary as Record<string, unknown>;
+    if (summary.counts && typeof summary.counts === "object") {
+      Object.assign(counts, summary.counts);
+    }
+    if (summary.severity && typeof summary.severity === "object") {
+      Object.assign(counts, summary.severity);
+    }
+  }
+  return counts;
+}
+
+/** Detect bridge-unreachable / timeout error envelopes in a tool result. */
+function isUnreachableResult(body: unknown, isError: boolean): boolean {
+  if (!isError || !body || typeof body !== "object") return false;
+  const obj = body as Record<string, unknown>;
+  const err = obj.error;
+  if (err && typeof err === "object") {
+    const code = (err as Record<string, unknown>).code;
+    if (typeof code === "string") {
+      return (
+        code === "bridge_unavailable" ||
+        code === "bridge_compile_failed" ||
+        code === "timeout" ||
+        code === "request_timeout"
+      );
+    }
+  }
+  return false;
+}
+
+function isTimeoutError(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const obj = body as Record<string, unknown>;
+  const err = obj.error;
+  if (err && typeof err === "object") {
+    const code = (err as Record<string, unknown>).code;
+    return code === "timeout" || code === "request_timeout";
+  }
+  return false;
+}
+
+function exitCodeToLevel(code: number): string {
+  switch (code) {
+    case EXIT.SUCCESS:
+      return "success";
+    case EXIT.WARNINGS:
+      return "warnings";
+    case EXIT.ERRORS:
+      return "errors";
+    case EXIT.TIMEOUT:
+      return "timeout";
+    default:
+      return "unknown";
+  }
+}
+
+function formatVerifyHuman(json: {
+  tool: string;
+  isError: boolean;
+  severityCounts: SeverityCounts;
+  exitLevel: string;
+  result: unknown;
+}): string {
+  const c = json.severityCounts;
+  const head =
+    `verify (${json.tool}): ${json.isError ? "ERROR" : json.exitLevel.toUpperCase()} ` +
+    `[errors=${c.error ?? 0} warn=${c.warn ?? 0} info=${c.info ?? 0} verbose=${c.verbose ?? 0}]`;
+  const bodyStr =
+    typeof json.result === "string"
+      ? json.result
+      : JSON.stringify(json.result, null, 2);
+  return `${head}\n${bodyStr}`;
+}
+
+// ---------------------------------------------------------------------------
+// baseline
+// ---------------------------------------------------------------------------
+//
+// Wraps unity_open_mcp_baseline_create. `create` and `update` are the same
+// operation (the tool always overwrites the file); the two subcommands exist
+// for CI semantics (create = initial, update = refresh on main).
+
+export interface BaselineCommandOptions {
+  json: boolean;
+  subcommand: "create" | "update";
+  baselinePath: string | undefined;
+  platformProfile: string | undefined;
+}
+
+export async function runBaselineCommand(
+  stack: RouterStack,
+  opts: BaselineCommandOptions,
+): Promise<CliCommandResult> {
+  const toolName = "unity_open_mcp_baseline_create";
+  const tool = TOOL_BY_NAME.get(toolName);
+  if (!tool) {
+    return baselineError(`Internal error: tool '${toolName}' not registered.`);
+  }
+
+  const args: Record<string, unknown> = {};
+  if (opts.baselinePath) args.baseline_path = opts.baselinePath;
+  if (opts.platformProfile) args.platform_profile = opts.platformProfile;
+
+  const routedArgs = withSchemaDefaults(tool, args);
+  const result: CallToolResult = await stack.router.route(toolName, routedArgs);
+  const body = extractResultBody(result);
+  const isError = result.isError === true;
+  const unreachable = isUnreachableResult(body, isError);
+  const exitCode = withTimeout(
+    isError ? EXIT.ERRORS : EXIT.SUCCESS,
+    unreachable,
+  );
+
+  const json = {
+    command: "baseline",
+    subcommand: opts.subcommand,
+    tool: toolName,
+    isError,
+    result: body,
+    exitLevel: exitCodeToLevel(exitCode),
+  };
+
+  return {
+    exitCode,
+    json,
+    human: formatBaselineHuman(json),
+    errorLabel: isError ? "tool_error" : undefined,
+  };
+}
+
+function baselineError(message: string): CliCommandResult {
+  return {
+    exitCode: EXIT.ERRORS,
+    json: { command: "baseline", error: { code: "baseline_arg", message } },
+    human: `baseline: ${message}`,
+    errorLabel: "baseline_arg",
+  };
+}
+
+function formatBaselineHuman(json: {
+  subcommand: string;
+  isError: boolean;
+  exitLevel: string;
+  result: unknown;
+}): string {
+  const head = `baseline ${json.subcommand}: ${json.isError ? "ERROR" : json.exitLevel.toUpperCase()}`;
+  const bodyStr =
+    typeof json.result === "string"
+      ? json.result
+      : JSON.stringify(json.result, null, 2);
+  return `${head}\n${bodyStr}`;
+}
+
+// ---------------------------------------------------------------------------
+// regression
+// ---------------------------------------------------------------------------
+//
+// Wraps unity_open_mcp_regression_check. The tool already returns a structured
+// `regressed`/`passed` verdict; we surface it and map to the 4-level exit code.
+
+export interface RegressionCommandOptions {
+  json: boolean;
+  baselinePath: string;
+  regressionThreshold: number | undefined;
+  platformProfile: string | undefined;
+}
+
+export async function runRegressionCommand(
+  stack: RouterStack,
+  opts: RegressionCommandOptions,
+): Promise<CliCommandResult> {
+  const toolName = "unity_open_mcp_regression_check";
+  const tool = TOOL_BY_NAME.get(toolName);
+  if (!tool) {
+    return regressionError(`Internal error: tool '${toolName}' not registered.`);
+  }
+
+  const args: Record<string, unknown> = {
+    baseline_path: opts.baselinePath,
+  };
+  if (opts.regressionThreshold !== undefined) {
+    args.regression_threshold = opts.regressionThreshold;
+  }
+  if (opts.platformProfile) args.platform_profile = opts.platformProfile;
+
+  const routedArgs = withSchemaDefaults(tool, args);
+  const result: CallToolResult = await stack.router.route(toolName, routedArgs);
+  const body = extractResultBody(result);
+  const isError = result.isError === true;
+  const unreachable = isUnreachableResult(body, isError);
+
+  // The regression tool returns regressed=true when the error-count increase
+  // exceeded the threshold. A regression → ERRORS exit code.
+  const regressed = isRegressed(body);
+  let exitCode: number = isError
+    ? (isTimeoutError(body) ? EXIT.TIMEOUT : EXIT.ERRORS)
+    : regressed
+      ? EXIT.ERRORS
+      : EXIT.SUCCESS;
+  exitCode = withTimeout(exitCode, unreachable);
+
+  const json = {
+    command: "regression",
+    subcommand: "check",
+    tool: toolName,
+    isError,
+    regressed,
+    result: body,
+    exitLevel: exitCodeToLevel(exitCode),
+  };
+
+  return {
+    exitCode,
+    json,
+    human: formatRegressionHuman(json),
+    errorLabel: isError ? "tool_error" : undefined,
+  };
+}
+
+function isRegressed(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  return (body as { regressed?: boolean }).regressed === true;
+}
+
+function regressionError(message: string): CliCommandResult {
+  return {
+    exitCode: EXIT.ERRORS,
+    json: { command: "regression", error: { code: "regression_arg", message } },
+    human: `regression: ${message}`,
+    errorLabel: "regression_arg",
+  };
+}
+
+function formatRegressionHuman(json: {
+  isError: boolean;
+  regressed: boolean;
+  exitLevel: string;
+  result: unknown;
+}): string {
+  const verdict = json.isError
+    ? "ERROR"
+    : json.regressed
+      ? "REGRESSED"
+      : "OK (no regression)";
+  const head = `regression check: ${verdict}`;
+  const bodyStr =
+    typeof json.result === "string"
+      ? json.result
+      : JSON.stringify(json.result, null, 2);
+  return `${head}\n${bodyStr}`;
+}
+
+// ---------------------------------------------------------------------------
 // help / version
 // ---------------------------------------------------------------------------
 
@@ -365,8 +879,18 @@ export function helpText(binName: string): string {
     "  wait-for-ready                Poll /ping until the bridge is ready; exit 0/non-zero.",
     "  status                        Show resolved bridge port, instance lock, and readiness.",
     "  run-tool <name>               Invoke an MCP tool by name; print its JSON result.",
+    "  stream-events                 Drain bridge SSE events (console logs + state) to stdout.",
+    "  verify [paths...]             Run a verify scan; exit code reflects severity (4-level).",
+    "  baseline create|update        Create/refresh the regression baseline JSON file.",
+    "  regression check              Compare current scan against the baseline; exit on regression.",
     "  --help, -h                    Show this help.",
     "  --version, -V                 Print the package version.",
+    "",
+    "Exit codes (verify / baseline / regression):",
+    "  0  success        no issues / no regression.",
+    "  1  warnings       only warnings/info below the fail threshold.",
+    "  2  errors         errors present, or a regression was detected.",
+    "  3  timeout        bridge never became reachable, or a call timed out.",
     "",
     "Options:",
     "  --json                        Emit JSON instead of human-readable output (all commands).",
@@ -376,6 +900,16 @@ export function helpText(binName: string): string {
     "  --interval-ms <n>             wait-for-ready poll interval in ms.",
     "  --args '<json>'               JSON object of tool args (run-tool).",
     "  --arg key=value               One tool arg (run-tool, repeatable; JSON-parsed if valid).",
+    "  --max-events <n>              stream-events: max events to drain per pull.",
+    "  --follow                      stream-events: keep polling until interrupted (CI log tap).",
+    "  --mode <m>                    verify: auto (default) | scan-paths | validate-edit.",
+    "  --fail-on-severity <s>        verify: error | warn | info | verbose | never.",
+    "  --profile <p>                 verify: compact (default) | balanced | full.",
+    "  --include-rules <a,b>         verify: comma-separated rule allow-list.",
+    "  --exclude-rules <a,b>         verify: comma-separated rule deny-list.",
+    "  --platform-profile <p>        verify/baseline/regression: mobile | console | desktop.",
+    "  --baseline-path <path>        baseline/regression: path to the baseline JSON file.",
+    "  --regression-threshold <n>    regression: max allowed error-count increase (default 0).",
     "",
     "Environment:",
     "  UNITY_PROJECT_PATH             Required for every command.",
@@ -386,6 +920,11 @@ export function helpText(binName: string): string {
     `  ${binName} wait-for-ready`,
     `  ${binName} run-tool unity_open_mcp_ping --json`,
     `  ${binName} run-tool unity_open_mcp_list_assets --arg folder=Assets --arg max_per_folder=10`,
+    `  ${binName} stream-events --follow`,
+    `  ${binName} verify Assets/Prefabs --fail-on-severity warn`,
+    `  ${binName} verify --mode scan-paths Assets/Scripts --profile balanced`,
+    `  ${binName} baseline create --baseline-path CI/baseline.json`,
+    `  ${binName} regression check --baseline-path CI/baseline.json --json`,
     `  ${binName} status --json`,
   ].join("\n");
 }
