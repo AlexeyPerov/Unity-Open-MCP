@@ -545,6 +545,44 @@ test("every other shipped domain is NOT auto-activating (manual only)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// M26 Plan 2 — unity-hub-control catalog (local-routed, built-in, ungated)
+// ---------------------------------------------------------------------------
+
+test("unity-hub-control group is registered, ungated, and manual-activation", () => {
+  const g = getGroup("unity-hub-control");
+  assert.ok(g, "unity-hub-control group must exist");
+  assert.equal(g!.defaultEnabled, false);
+  // Built-in module — no domain define, no Unity package, no auto-activation.
+  assert.equal(g!.domainDefine, undefined);
+  assert.equal(g!.unityPackage, undefined);
+  assert.equal(g!.autoActivate, undefined);
+});
+
+test("groupFor assigns the 6 hub control tools to unity-hub-control", () => {
+  for (const name of [
+    "unity_open_mcp_hub_list_editors",
+    "unity_open_mcp_hub_available_releases",
+    "unity_open_mcp_hub_install_editor",
+    "unity_open_mcp_hub_install_modules",
+    "unity_open_mcp_hub_get_install_path",
+    "unity_open_mcp_hub_set_install_path",
+  ]) {
+    assert.equal(groupFor(name), "unity-hub-control", `${name} must map to unity-hub-control`);
+  }
+});
+
+test("groupToTools unity-hub-control roster has all 6 tools", () => {
+  const map = groupToTools();
+  assert.equal(map["unity-hub-control"].length, 6);
+  assert.ok(map["unity-hub-control"].includes("unity_open_mcp_hub_list_editors"));
+  assert.ok(map["unity-hub-control"].includes("unity_open_mcp_hub_available_releases"));
+  assert.ok(map["unity-hub-control"].includes("unity_open_mcp_hub_install_editor"));
+  assert.ok(map["unity-hub-control"].includes("unity_open_mcp_hub_install_modules"));
+  assert.ok(map["unity-hub-control"].includes("unity_open_mcp_hub_get_install_path"));
+  assert.ok(map["unity-hub-control"].includes("unity_open_mcp_hub_set_install_path"));
+});
+
+// ---------------------------------------------------------------------------
 // Session state — activate / deactivate / reset
 // ---------------------------------------------------------------------------
 

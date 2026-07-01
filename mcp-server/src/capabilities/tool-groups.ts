@@ -336,6 +336,19 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "/ rendering, spatial_query). Live-only.",
     defaultEnabled: false,
   },
+  {
+    id: "unity-hub-control",
+    description:
+      "Unity Hub control tools — list installed editors (with build-target " +
+      "platforms), available releases feed, install editor/modules via the " +
+      "unityhub:// deep link, get/set the default editor install path. " +
+      "Local-routed (resolved inside the MCP server: filesystem discovery + " +
+      "Unity archive feed + deep link + Hub CLI); no Unity Editor or bridge " +
+      "connection required. Built-in module (always compiled, no domain " +
+      "define). Mutating members are system-level ops (paths_hint N/A, " +
+      "gate-free).",
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -909,6 +922,16 @@ assign("agent-senses", [
   "unity_senses_profiler_memory",
   "unity_senses_profiler_rendering",
   "unity_senses_spatial_query",
+]);
+
+// --- unity-hub-control (M26 Plan 2 — local-routed, built-in, ungated) -------
+assign("unity-hub-control", [
+  "unity_open_mcp_hub_list_editors",
+  "unity_open_mcp_hub_available_releases",
+  "unity_open_mcp_hub_install_editor",
+  "unity_open_mcp_hub_install_modules",
+  "unity_open_mcp_hub_get_install_path",
+  "unity_open_mcp_hub_set_install_path",
 ]);
 
 // ---------------------------------------------------------------------------

@@ -170,6 +170,7 @@ function makeRouter(
   eventStream: BridgeEventStream,
   sessionState: ToolSessionState = new ToolSessionState(),
   onToolListChanged?: () => void | Promise<void>,
+  hubBackend?: import("./tool-router.js").HubControlBackend,
 ): ToolRouter {
   return new ToolRouter(
     live,
@@ -178,7 +179,66 @@ function makeRouter(
     eventStream,
     sessionState,
     onToolListChanged,
+    hubBackend,
   );
+}
+
+/**
+ * M26 Plan 2 — fake Hub-control backend. Avoids real subprocess + network
+ * side effects in router tests. Each method records its call + returns a
+ * canned result. `openOk` controls whether install/install-modules deep links
+ * "succeed".
+ */
+function makeFakeHubBackend(opts: {
+  editors?: { version: string; path: string; platforms: string[]; releaseType: string }[];
+  releases?: { entries: { version: string; stream: string; releaseDate: string | null; releaseNotesUrl: string; changeset: string | null }[]; stale: boolean; fetchedAt: string };
+  openOk?: boolean;
+  installPath?: { path: string | null; source: "hub-cli" | "filesystem" | "none"; error: { code: string; message: string } | null };
+  setOk?: boolean;
+} = {}): import("./tool-router.js").HubControlBackend & { calls: string[] } {
+  const calls: string[] = [];
+  const editors = opts.editors ?? [];
+  const releases =
+    opts.releases ?? { entries: [], stale: false, fetchedAt: "2026-07-01T00:00:00.000Z" };
+  const openOk = opts.openOk ?? true;
+  const installPath =
+    opts.installPath ?? { path: "/fake/Hub/Editor", source: "filesystem" as const, error: null };
+  const setOk = opts.setOk ?? true;
+  return {
+    calls,
+    listInstalledEditors() {
+      calls.push("listInstalledEditors");
+      return editors;
+    },
+    async fetchAvailableReleases() {
+      calls.push("fetchAvailableReleases");
+      return releases;
+    },
+    openInstallDeepLink(version, changeset) {
+      calls.push(`openInstallDeepLink:${version}`);
+      return openOk
+        ? { deepLink: `unityhub://${version}`, opened: true, error: null }
+        : {
+            deepLink: `unityhub://${version}`,
+            opened: false,
+            error: { code: "deep_link_open_failed", message: "fake: no handler" },
+          };
+    },
+    getInstallPath() {
+      calls.push("getInstallPath");
+      return installPath;
+    },
+    setInstallPath(path) {
+      calls.push(`setInstallPath:${path}`);
+      return setOk
+        ? { success: true, error: null, output: "ok" }
+        : {
+            success: false,
+            error: { code: "hub_cli_not_found", message: "fake: no hub" },
+            output: "",
+          };
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1060,6 +1120,225 @@ test("route: bridge_status is registered in ALL_TOOLS and always-visible", async
     visible.includes("unity_open_mcp_bridge_status"),
     "bridge_status is always-visible (no group assignment)",
   );
+});
+
+// ---------------------------------------------------------------------------
+// M26 Plan 2 — Unity Hub control tools (local-routed).
+//
+// These resolve entirely in the MCP server (no bridge hop, no batch Unity):
+// every response is tagged `_source: "local"`. They live in the
+// `unity-hub-control` group (NOT always-visible), so a fresh core-only session
+// must hide them until the group is activated. Mutating members
+// (install_editor / install_modules / set_install_path) return the gate-
+// consistent mutation/gate/agentNextSteps envelope with gate.skipped=true.
+// ---------------------------------------------------------------------------
+
+test("hub control tools are registered in ALL_TOOLS and group-gated (not always-visible)", async () => {
+  const { ALL_TOOLS } = await import("./tools/index.js");
+  const { filterVisibleTools, groupFor } = await import("./tool-session-state.js");
+  const names = ALL_TOOLS.map((t) => t.name);
+  const hubTools = [
+    "unity_open_mcp_hub_list_editors",
+    "unity_open_mcp_hub_available_releases",
+    "unity_open_mcp_hub_install_editor",
+    "unity_open_mcp_hub_install_modules",
+    "unity_open_mcp_hub_get_install_path",
+    "unity_open_mcp_hub_set_install_path",
+  ];
+  for (const name of hubTools) {
+    assert.ok(names.includes(name), `${name} must be in ALL_TOOLS`);
+    assert.equal(groupFor(name), "unity-hub-control", `${name} must map to unity-hub-control`);
+  }
+  // A fresh core-only session must NOT see the hub tools (they're group-gated).
+  const freshSession = new ToolSessionState();
+  const visible = filterVisibleTools(ALL_TOOLS, freshSession).map((t) => t.name);
+  for (const name of hubTools) {
+    assert.ok(!visible.includes(name), `${name} must be hidden in a fresh core-only session`);
+  }
+  // Activating the group exposes them.
+  freshSession.activate("unity-hub-control");
+  const visibleAfterActivate = filterVisibleTools(ALL_TOOLS, freshSession).map((t) => t.name);
+  for (const name of hubTools) {
+    assert.ok(
+      visibleAfterActivate.includes(name),
+      `${name} must be visible after activating unity-hub-control`,
+    );
+  }
+});
+
+test("route: hub_list_editors returns local source, no bridge hop", async () => {
+  await withTmp("router-hub-list-", async (tmp) => {
+    const live = makeFakeLive();
+    const hub = makeFakeHubBackend({
+      editors: [
+        { version: "6000.3.18f1", path: "/fake/Unity", platforms: ["Android"], releaseType: "LTS" },
+      ],
+    });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
+    const result = await router.route("unity_open_mcp_hub_list_editors", {});
+    const body = parseBody(result);
+    assert.equal(result.isError, false);
+    assert.equal(body._source, "local");
+    assert.ok(Array.isArray(body.editors));
+    assert.equal(body.count, 1);
+    assert.equal(body.editors[0].version, "6000.3.18f1");
+    assert.equal(hub.calls[0], "listInstalledEditors");
+    assert.equal(live.calls.length, 0);
+  });
+});
+
+test("route: hub_list_editors never touches the live client", async () => {
+  await withTmp("router-hub-list-nohop-", async (tmp) => {
+    const live = makeFakeLive();
+    const hub = makeFakeHubBackend();
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
+    await router.route("unity_open_mcp_hub_list_editors", {});
+    // Local-route contract: zero bridge calls.
+    assert.equal(live.calls.length, 0);
+  });
+});
+
+test("route: hub_available_releases returns local source with entries + stale flag", async () => {
+  await withTmp("router-hub-releases-", async (tmp) => {
+    const live = makeFakeLive();
+    const hub = makeFakeHubBackend({
+      releases: {
+        entries: [
+          { version: "6000.3.18f1", stream: "LTS", releaseDate: "2026-06-17", releaseNotesUrl: "u", changeset: "abc" },
+        ],
+        stale: false,
+        fetchedAt: "2026-07-01T00:00:00.000Z",
+      },
+    });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
+    const result = await router.route("unity_open_mcp_hub_available_releases", {});
+    const body = parseBody(result);
+    assert.equal(result.isError, false);
+    assert.equal(body._source, "local");
+    assert.ok(Array.isArray(body.entries));
+    assert.equal(body.entries.length, 1);
+    assert.equal(body.stale, false);
+    assert.equal(body.fetchedAt, "2026-07-01T00:00:00.000Z");
+    assert.equal(hub.calls[0], "fetchAvailableReleases");
+    assert.equal(live.calls.length, 0);
+  });
+});
+
+test("route: hub_install_editor missing version -> missing_parameter, local source", async () => {
+  await withTmp("router-hub-install-missing-", async (tmp) => {
+    const live = makeFakeLive();
+    const hub = makeFakeHubBackend();
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
+    const result = await router.route("unity_open_mcp_hub_install_editor", {});
+    assert.equal(result.isError, true);
+    assert.equal(errorCode(result), "missing_parameter");
+    assert.equal(parseBody(result)._source, "local");
+    // Missing param short-circuits before the backend is touched.
+    assert.equal(hub.calls.length, 0);
+    assert.equal(live.calls.length, 0);
+  });
+});
+
+test("route: hub_install_editor returns mutation envelope with gate skipped (success)", async () => {
+  await withTmp("router-hub-install-envelope-", async (tmp) => {
+    const live = makeFakeLive();
+    const hub = makeFakeHubBackend({ openOk: true });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
+    const result = await router.route("unity_open_mcp_hub_install_editor", {
+      version: "6000.3.18f1",
+      changeset: "5ebeb53e4c07",
+    });
+    const body = parseBody(result) as Record<string, any>;
+    assert.equal(body._source, "local");
+    assert.ok(body.mutation, "must carry a mutation envelope");
+    assert.equal(body.mutation.success, true);
+    assert.equal(body.gate.skipped, true);
+    assert.ok(Array.isArray(body.agentNextSteps));
+    assert.equal(hub.calls[0], "openInstallDeepLink:6000.3.18f1");
+    assert.equal(live.calls.length, 0);
+  });
+});
+
+test("route: hub_install_editor surfaces a failed deep-link open in the envelope", async () => {
+  await withTmp("router-hub-install-fail-", async (tmp) => {
+    const live = makeFakeLive();
+    const hub = makeFakeHubBackend({ openOk: false });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
+    const result = await router.route("unity_open_mcp_hub_install_editor", {
+      version: "6000.3.18f1",
+    });
+    const body = parseBody(result) as Record<string, any>;
+    assert.equal(result.isError, true);
+    assert.equal(body.mutation.success, false);
+    assert.equal(body.mutation.error.code, "deep_link_open_failed");
+  });
+});
+
+test("route: hub_get_install_path returns local source with source field", async () => {
+  await withTmp("router-hub-getpath-", async (tmp) => {
+    const live = makeFakeLive();
+    const hub = makeFakeHubBackend({
+      installPath: { path: "/fake/Hub/Editor", source: "filesystem", error: null },
+    });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
+    const result = await router.route("unity_open_mcp_hub_get_install_path", {});
+    const body = parseBody(result);
+    assert.equal(body._source, "local");
+    assert.equal(body.path, "/fake/Hub/Editor");
+    assert.equal(body.source, "filesystem");
+    assert.equal(hub.calls[0], "getInstallPath");
+    assert.equal(live.calls.length, 0);
+  });
+});
+
+test("route: hub_set_install_path missing path -> missing_parameter", async () => {
+  await withTmp("router-hub-setpath-missing-", async (tmp) => {
+    const live = makeFakeLive();
+    const hub = makeFakeHubBackend();
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
+    const result = await router.route("unity_open_mcp_hub_set_install_path", {});
+    assert.equal(result.isError, true);
+    assert.equal(errorCode(result), "missing_parameter");
+    assert.equal(hub.calls.length, 0);
+    assert.equal(live.calls.length, 0);
+  });
+});
+
+test("route: hub_set_install_path returns mutation envelope", async () => {
+  await withTmp("router-hub-setpath-envelope-", async (tmp) => {
+    const live = makeFakeLive();
+    const hub = makeFakeHubBackend({ setOk: true });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
+    const result = await router.route("unity_open_mcp_hub_set_install_path", {
+      path: "/some/install/path",
+    });
+    const body = parseBody(result) as Record<string, any>;
+    assert.equal(body._source, "local");
+    assert.ok(body.mutation, "must carry a mutation envelope");
+    assert.equal(body.mutation.success, true);
+    assert.equal(body.gate.skipped, true);
+    assert.equal(hub.calls[0], "setInstallPath:/some/install/path");
+    assert.equal(live.calls.length, 0);
+  });
+});
+
+test("route: hub_install_modules returns mutation envelope with modulesRequested", async () => {
+  await withTmp("router-hub-modules-", async (tmp) => {
+    const live = makeFakeLive();
+    const hub = makeFakeHubBackend({ openOk: true });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream(), undefined, undefined, hub);
+    const result = await router.route("unity_open_mcp_hub_install_modules", {
+      version: "6000.3.18f1",
+      modules: ["android", "ios"],
+    });
+    const body = parseBody(result) as Record<string, any>;
+    assert.equal(body._source, "local");
+    assert.equal(body.mutation.success, true);
+    assert.deepEqual(body.mutation.output.modulesRequested, ["android", "ios"]);
+    assert.equal(body.gate.skipped, true);
+    assert.equal(hub.calls[0], "openInstallDeepLink:6000.3.18f1");
+    assert.equal(live.calls.length, 0);
+  });
 });
 
 // ---------------------------------------------------------------------------

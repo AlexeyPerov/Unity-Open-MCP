@@ -450,6 +450,12 @@ import { textureGetImporter } from "./texture-get-importer.js";
 import { textureSetImport } from "./texture-set-import.js";
 import { textureReimport } from "./texture-reimport.js";
 import { textureGet } from "./texture-get.js";
+import { hubListEditors } from "./hub-list-editors.js";
+import { hubAvailableReleases } from "./hub-available-releases.js";
+import { hubInstallEditor } from "./hub-install-editor.js";
+import { hubInstallModules } from "./hub-install-modules.js";
+import { hubGetInstallPath } from "./hub-get-install-path.js";
+import { hubSetInstallPath } from "./hub-set-install-path.js";
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -1058,6 +1064,23 @@ export const M20_PLAN9_2D_TOOLS: Tool[] = [
   textureGet,
 ];
 
+// M26 Plan 2 — Unity Hub control tools. Local-routed (resolved inside the MCP
+// server: filesystem discovery + Unity archive feed + unityhub:// deep link +
+// Hub CLI). Never hit the Unity bridge or spawn Unity. Read-only members
+// (list_editors, available_releases, get_install_path) are gate-free; mutating
+// members (install_editor, install_modules, set_install_path) are system-level
+// ops where paths_hint is N/A, so they are gate-free too (the gate validates
+// project-asset fallout, which does not apply). Live in the `unity-hub-control`
+// group (activate via manage_tools); not always-visible meta-tools.
+export const M26_PLAN2_HUB_TOOLS: Tool[] = [
+  hubListEditors,
+  hubAvailableReleases,
+  hubInstallEditor,
+  hubInstallModules,
+  hubGetInstallPath,
+  hubSetInstallPath,
+];
+
 export const ALL_TOOLS: Tool[] = [
   ...M2_TOOLS,
   ...M2_5_TOOLS,
@@ -1100,4 +1123,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M20_PLAN7_VFX_TOOLS,
   ...M20_PLAN7_MEMORYPROFILER_TOOLS,
   ...M20_PLAN9_2D_TOOLS,
+  ...M26_PLAN2_HUB_TOOLS,
 ];

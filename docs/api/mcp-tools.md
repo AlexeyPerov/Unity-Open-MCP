@@ -17,6 +17,7 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 - **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers, ScriptableObject create + list-by-type, Assembly Definition (asmdef) list/get/create/modify.
 - **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio, ui, constraints, terrain, cinemachine, timeline, tilemap, shader graph, vfx graph, 2D art pipeline (sprite atlas + texture import).
 - **Discovery utilities**: capabilities, rules list, skill generation, manage_tools.
+- **Unity Hub control**: list installed editors (+ build-target platforms), available releases feed, install editor/modules via the `unityhub://` deep link, get/set the default editor install path. Local-routed (no running Unity or bridge required).
 
 ## Tool groups and session visibility
 
@@ -53,6 +54,7 @@ Sessions start with few main groups enabled. Every other group is hidden from `L
 | `vfx`                | off†    | VFX Graph tools — list VisualEffectGraph assets, open a `.vfx` in the VFX Graph editor (returns a structured context/block/property summary), patch a single block property. Compile-gated on `com.unity.visualeffectgraph`. **Auto-activating** (†): activates automatically when `com.unity.visualeffectgraph` is installed — no manual manage_tools call. The read paths (`list`/`open`) work over the public runtime `VisualEffectAsset` type (version-stable); the mutating `block_edit` requires the VFX Graph window to be open and degrades to a structured `vfx_block_edit_requires_editor_window` error otherwise.   |
 | `memoryprofiler`     | off†    | Memory Profiler tool — capture a Memory Profiler snapshot to a `.snap` file via the com.unity.memoryprofiler package API. Sense-prefixed (`unity_senses_*`) because it pairs with the existing profiler family (profiler_get_script_stats / profiler_capture_frame). **Auto-activating** (†): activates automatically when `com.unity.memoryprofiler` is installed — no manual manage_tools call. Read-only re: game/project state but produces a file — Gate = Off, ReadOnlyHint = true, Lifecycle = EditorSettle (capture can take seconds). The capture is callback-based; the bridge blocks until the snapshot file is written.   |
 | `agent-senses`       | off     | run_tests, screenshot, screenshot_camera, capture_inline, screenshot_window, frame_debugger, read_console, profiler capture/capture_frame/memory/rendering, spatial_query (live-only)                        |
+| `unity-hub-control`  | off     | Unity Hub control — hub_list_editors (installed editors + build-target platforms), hub_available_releases (download feed), hub_install_editor / hub_install_modules (unityhub:// deep link), hub_get/set_install_path. Local-routed (no bridge/Unity required); mutating members are system-level ops (paths_hint N/A, gate-free)   |
 
 
 Always-visible meta-tools (no group assignment): `unity_open_mcp_capabilities`, `unity_open_mcp_list_rules`, `unity_open_mcp_generate_skill`, `unity_open_mcp_manage_tools`, `unity_open_mcp_pull_events` / `unity_senses_pull_events`, `unity_open_mcp_read_compile_errors`, `unity_open_mcp_bridge_status`.
@@ -169,6 +171,7 @@ Common route behavior:
   - `unity_open_mcp_read_compile_errors` always uses offline.
   - `unity_open_mcp_capabilities`, `unity_open_mcp_generate_skill`, and `unity_open_mcp_manage_tools` are local.
   - `unity_open_mcp_bridge_status` is local (server-resolved from the instance lock + one `/ping` probe).
+  - `unity_open_mcp_hub_*` tools are local (filesystem discovery + Unity archive feed + `unityhub://` deep link + Hub CLI; no bridge or Unity dependency).
 
 ### Offline read coverage
 
@@ -543,6 +546,66 @@ Wraps the instance-lock classifier (`instance-discovery.ts#classifyInstance`) + 
 2. **Self-disconnect hazard on `stop`.** The `stop` request arrives over the very HTTP listener it is about to tear down. A correct implementation must send the response *before* the listener stops (deferred / async stop), or the caller gets a connection-reset instead of the OK.
 
 Offline scenarios are therefore **operator-driven** in v1: stop/start via the toolbar, gated by `manual` setup actions and confirmed by `bridge_status` (or `ping` / the CLI `wait-for-ready`). Revisit the stop/start routes only if the manual pattern proves too painful in practice.
+
+## Unity Hub control tools
+
+A six-tool surface (`unity_open_mcp_hub_*`) for managing Unity Editor installs **without** a running Unity Editor or bridge connection. All are **local-routed** — resolved entirely in the MCP server from filesystem discovery, Unity's public download-archive feed, the `unityhub://` deep link, and (for install-path management) the Hub headless CLI. Activate the `unity-hub-control` group via `manage_tools` to surface them.
+
+The install path is the `unityhub://` deep link (single-instance install inside Unity Hub with its native progress UI), not a headless `Unity Hub --headless install` subprocess — that earlier approach spawned a fresh Hub process per call and showed a disconnected window. The deep link brings the Hub to the foreground at its real install dialog.
+
+| Tool | Purpose | Backend | Mutating |
+|---|---|---|---|
+| `hub_list_editors` | List installed Unity editors (version, path, build-target platforms from `Data/PlaybackEngines/`, release stream) | Filesystem scan of OS-default Hub roots (`+ UNITY_HUB` env) | no |
+| `hub_available_releases` | List Unity versions available for download (version, stream, release date, release-notes URL, changeset) | Unity's public download-archive page (`unity.com/releases/editor/archive`); falls back to a bundled snapshot (`stale: true`) on network failure | no |
+| `hub_install_editor` | Install a Unity version (+ optional changeset) via the `unityhub://` deep link | OS URL handler (`open` / `xdg-open` / `start`) | yes |
+| `hub_install_modules` | Add platform modules to an installed editor (opens the Hub's install dialog) | OS URL handler (`unityhub://` deep link) | yes |
+| `hub_get_install_path` | Get the default editor install directory | Hub headless CLI (`install-path`), falls back to filesystem inference | no |
+| `hub_set_install_path` | Set the default editor install directory | Hub headless CLI (`install-path --set <path>`) | yes |
+
+**Mutating ops are system-level, not project-asset.** `install_editor`, `install_modules`, and `set_install_path` install software or change Hub configuration at the system level, so `paths_hint` is N/A and the call is gate-free (the gate validates project-asset-reference fallout, which does not apply). They still return the gate-consistent `mutation` / `gate` / `agentNextSteps` envelope shape so agents parse them uniformly — `gate.skipped` is `true` and `gate.mode` is `"off"`.
+
+**No in-call install completion detection.** The install runs inside Unity Hub, which owns the process. The `install_editor` / `install_modules` calls return once the deep link is accepted, not when the download finishes — poll `hub_list_editors` afterwards to confirm the new editor / modules landed.
+
+**Cross-platform Hub CLI resolution.** `get_install_path` and `set_install_path` need the Hub binary directly (the deep link cannot set the install path). Resolution honors the `UNITY_HUB_PATH` env var, then per-platform defaults:
+
+| Platform | Default Hub binary |
+|---|---|
+| macOS | `/Applications/Unity Hub.app/Contents/MacOS/Unity Hub` |
+| Windows | `%ProgramFiles%\Unity Hub\Unity Hub.exe` |
+| Linux | `~/Unity Hub/Unity Hub` |
+
+When the Hub binary is not found, `get_install_path` falls back to filesystem inference (and reports `source: "filesystem"`); `set_install_path` returns a structured `hub_cli_not_found` error pointing at `UNITY_HUB_PATH`.
+
+Example `hub_list_editors` response:
+
+```json
+{
+  "editors": [
+    {
+      "version": "6000.3.18f1",
+      "path": "/Applications/Unity/Hub/Editor/6000.3.18f1/Unity.app/Contents/MacOS/Unity",
+      "platforms": ["Android", "iOS", "WebGL"],
+      "releaseType": "LTS"
+    }
+  ],
+  "count": 1,
+  "_source": "local"
+}
+```
+
+Example `hub_install_editor` response (envelope shape):
+
+```json
+{
+  "mutation": { "success": true, "output": { "deepLink": "unityhub://6000.3.18f1/5ebeb53e4c07", "version": "6000.3.18f1", "changeset": "5ebeb53e4c07" }, "error": null },
+  "gate": { "mode": "off", "skipped": true, "validation": null, "delta": null },
+  "agentNextSteps": [
+    "Unity Hub opened at the install dialog for 6000.3.18f1. The download runs inside the Hub (watch its progress UI).",
+    "There is no in-call completion detection — poll unity_open_mcp_hub_list_editors after the Hub finishes to confirm the new editor."
+  ],
+  "_source": "local"
+}
+```
 
 ## Automation CLI
 

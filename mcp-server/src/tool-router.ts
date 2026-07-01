@@ -20,6 +20,43 @@ import { generateSkill } from "./skill/generate-skill.js";
 import { knownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
+import {
+  listInstalledEditors,
+  fetchAvailableReleases,
+  openInstallDeepLink,
+  getInstallPath,
+  setInstallPath,
+  type AvailableReleasesResult,
+  type InstallPathResult,
+  type OpenDeepLinkResult,
+} from "./hub-control.js";
+
+/**
+ * Injectable Hub-control backend. Each method maps 1:1 to a hub_* route
+ * handler; the default implementation calls the real hub-control functions
+ * (filesystem discovery / Unity archive feed / unityhub:// deep link / Hub
+ * CLI). Tests inject a fake to avoid real subprocess + network side effects
+ * (matching how `live` / `batch` are injected via the constructor).
+ */
+export interface HubControlBackend {
+  listInstalledEditors(): ReturnType<typeof listInstalledEditors>;
+  fetchAvailableReleases(): Promise<AvailableReleasesResult>;
+  openInstallDeepLink(
+    version: string,
+    changeset?: string | null,
+  ): OpenDeepLinkResult;
+  getInstallPath(): InstallPathResult;
+  setInstallPath(path: string): ReturnType<typeof setInstallPath>;
+}
+
+/** Default Hub-control backend — calls the real hub-control functions. */
+const defaultHubBackend: HubControlBackend = {
+  listInstalledEditors: () => listInstalledEditors(),
+  fetchAvailableReleases: () => fetchAvailableReleases(),
+  openInstallDeepLink: (version, changeset) => openInstallDeepLink(version, changeset),
+  getInstallPath: () => getInstallPath(),
+  setInstallPath: (path) => setInstallPath(path),
+};
 import { BATCH_TOOL_NAMES } from "./batch-spawn.js";
 import type { ToolSessionState } from "./tool-session-state.js";
 import {
@@ -61,6 +98,51 @@ function injectRouteMeta(
   } catch {
     return result;
   }
+}
+
+// M26 Plan 2 — local-routed error result (used by the Hub control tools for
+// missing-parameter refusals before any side effect runs). Tagged _source=local
+// because it is resolved entirely in the MCP server.
+function localError(code: string, message: string): CallToolResult {
+  return {
+    content: [
+      { type: "text", text: JSON.stringify({ error: { code, message }, _source: "local" }) },
+    ],
+    isError: true,
+  };
+}
+
+// M26 Plan 2 — gate-consistent envelope shape for the mutating Hub control
+// tools (install_editor / install_modules / set_install_path). These are
+// system-level ops, not project-asset mutations, so paths_hint is N/A and the
+// gate is skipped (gate.skipped=true). The shape matches MutationEnvelope so
+// agents parse it uniformly alongside bridge-routed mutating tools.
+function hubMutationEnvelope(opts: {
+  success: boolean;
+  output: unknown;
+  error: { code: string; message: string } | null;
+  nextSteps: string[];
+  isError: boolean;
+}): CallToolResult {
+  const body = {
+    mutation: {
+      success: opts.success,
+      output: opts.output,
+      error: opts.error,
+    },
+    gate: {
+      mode: "off",
+      skipped: true,
+      validation: null,
+      delta: null,
+    },
+    agentNextSteps: opts.nextSteps,
+    _source: "local",
+  };
+  return {
+    content: [{ type: "text", text: JSON.stringify(body) }],
+    isError: opts.isError,
+  };
 }
 
 function activeGroupsEqual(
@@ -275,6 +357,10 @@ export class ToolRouter implements Router {
     private eventStream: BridgeEventStream,
     private sessionState: ToolSessionState,
     private onToolListChanged?: () => void | Promise<void>,
+    // M26 Plan 2 — injectable Hub-control backend. Omit in production (the
+    // default calls the real hub-control functions); tests pass a fake to
+    // avoid real subprocess + network side effects.
+    private hubBackend: HubControlBackend = defaultHubBackend,
   ) {}
 
   async route(
@@ -361,6 +447,29 @@ export class ToolRouter implements Router {
     // Suite app drives its offline-scenario gate off. Read-only, gate-free.
     if (toolName === "unity_open_mcp_bridge_status") {
       return this.routeBridgeStatus(args, live);
+    }
+
+    // M26 Plan 2 — Unity Hub control tools. Local-routed: resolved inside the
+    // MCP server (filesystem discovery + Unity archive feed + unityhub:// deep
+    // link + Hub CLI). Never hit the bridge tool endpoint, never spawn Unity.
+    // Mutating members are system-level ops (paths_hint N/A, gate-free).
+    if (toolName === "unity_open_mcp_hub_list_editors") {
+      return this.routeHubListEditors();
+    }
+    if (toolName === "unity_open_mcp_hub_available_releases") {
+      return this.routeHubAvailableReleases();
+    }
+    if (toolName === "unity_open_mcp_hub_install_editor") {
+      return this.routeHubInstallEditor(args);
+    }
+    if (toolName === "unity_open_mcp_hub_install_modules") {
+      return this.routeHubInstallModules(args);
+    }
+    if (toolName === "unity_open_mcp_hub_get_install_path") {
+      return this.routeHubGetInstallPath();
+    }
+    if (toolName === "unity_open_mcp_hub_set_install_path") {
+      return this.routeHubSetInstallPath(args);
     }
 
     // find_references — offline-first when no bridge is connected; live
@@ -1171,6 +1280,141 @@ export class ToolRouter implements Router {
       content: [{ type: "text", text: JSON.stringify(body) }],
       isError: false,
     };
+  }
+
+  // ── M26 Plan 2 — Unity Hub control (local-routed) ────────────────
+  //
+  // Each of these resolves entirely inside the MCP server (no bridge tool
+  // endpoint, no batch Unity) → every response is tagged `_source: "local"`.
+  // Read-only members are plain JSON bodies; mutating members return the
+  // gate-consistent mutation/gate/agentNextSteps envelope shape so agents
+  // parse them uniformly, with gate.skipped=true because these are system-
+  // level ops where the project-asset gate does not apply (paths_hint N/A).
+
+  private async routeHubListEditors(): Promise<CallToolResult> {
+    const editors = this.hubBackend.listInstalledEditors();
+    const body = {
+      editors,
+      count: editors.length,
+      _source: "local",
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(body) }],
+      isError: false,
+    };
+  }
+
+  private async routeHubAvailableReleases(): Promise<CallToolResult> {
+    const result = await this.hubBackend.fetchAvailableReleases();
+    const body = {
+      entries: result.entries,
+      count: result.entries.length,
+      stale: result.stale,
+      fetchedAt: result.fetchedAt,
+      _source: "local",
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(body) }],
+      isError: false,
+    };
+  }
+
+  private async routeHubInstallEditor(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const version = typeof args.version === "string" ? args.version : "";
+    const changeset = typeof args.changeset === "string" ? args.changeset : undefined;
+    if (!version.trim()) {
+      return localError("missing_parameter", "version is required.");
+    }
+    const res = this.hubBackend.openInstallDeepLink(version, changeset);
+    return hubMutationEnvelope({
+      success: res.opened,
+      output: { deepLink: res.deepLink, version, changeset: changeset ?? null },
+      error: res.error,
+      nextSteps: res.opened
+        ? [
+            "Unity Hub opened at the install dialog for " +
+              version +
+              ". The download runs inside the Hub (watch its progress UI).",
+            "There is no in-call completion detection — poll " +
+              "unity_open_mcp_hub_list_editors after the Hub finishes to confirm the new editor.",
+          ]
+        : [
+            "Ensure Unity Hub is installed and registered as the unityhub:// handler, then retry.",
+            "Fallback: open the release-notes URL from hub_available_releases in a browser and install manually.",
+          ],
+      isError: !res.opened,
+    });
+  }
+
+  private async routeHubInstallModules(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const version = typeof args.version === "string" ? args.version : "";
+    const changeset = typeof args.changeset === "string" ? args.changeset : undefined;
+    const modules = Array.isArray(args.modules)
+      ? args.modules.filter((m): m is string => typeof m === "string")
+      : [];
+    if (!version.trim()) {
+      return localError("missing_parameter", "version is required.");
+    }
+    const res = this.hubBackend.openInstallDeepLink(version, changeset);
+    return hubMutationEnvelope({
+      success: res.opened,
+      output: {
+        deepLink: res.deepLink,
+        version,
+        changeset: changeset ?? null,
+        modulesRequested: modules,
+        note: "The unityhub:// scheme does not expose a module-specific deep link; the Hub opens at the version's install dialog where the operator selects the modules.",
+      },
+      error: res.error,
+      nextSteps: res.opened
+        ? [
+            `Unity Hub opened at the install dialog for ${version}. Select the requested modules (${modules.join(", ") || "none specified"}) in the Hub UI.`,
+            "Poll unity_open_mcp_hub_list_editors (which scans Data/PlaybackEngines) afterwards to confirm the new modules.",
+          ]
+        : [
+            "Ensure Unity Hub is installed and registered as the unityhub:// handler, then retry.",
+          ],
+      isError: !res.opened,
+    });
+  }
+
+  private async routeHubGetInstallPath(): Promise<CallToolResult> {
+    const res = this.hubBackend.getInstallPath();
+    const body = {
+      path: res.path,
+      source: res.source,
+      error: res.error,
+      _source: "local",
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(body) }],
+      isError: res.error !== null,
+    };
+  }
+
+  private async routeHubSetInstallPath(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const path = typeof args.path === "string" ? args.path : "";
+    if (!path.trim()) {
+      return localError("missing_parameter", "path is required.");
+    }
+    const res = this.hubBackend.setInstallPath(path);
+    return hubMutationEnvelope({
+      success: res.success,
+      output: { path, hubCliOutput: res.output },
+      error: res.error,
+      nextSteps: res.success
+        ? [`Default Unity Editor install path set to ${path}.`]
+        : [
+            "Set the UNITY_HUB_PATH env var to the Unity Hub binary if the CLI was not found, then retry.",
+          ],
+      isError: !res.success,
+    });
   }
 
   private async routeFindReferences(

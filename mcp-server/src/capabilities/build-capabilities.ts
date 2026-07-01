@@ -474,6 +474,14 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_senses_profiler_memory: "agent-senses",
   unity_senses_profiler_rendering: "agent-senses",
   unity_senses_spatial_query: "agent-senses",
+  // M26 Plan 2 — Unity Hub control tools. Local-routed (no bridge/batch);
+  // mutating members are system-level ops (paths_hint N/A, gate-free).
+  unity_open_mcp_hub_list_editors: "unity-hub-control",
+  unity_open_mcp_hub_available_releases: "unity-hub-control",
+  unity_open_mcp_hub_install_editor: "unity-hub-control",
+  unity_open_mcp_hub_install_modules: "unity-hub-control",
+  unity_open_mcp_hub_get_install_path: "unity-hub-control",
+  unity_open_mcp_hub_set_install_path: "unity-hub-control",
 };
 
 function categoryFor(toolName: string): string {
