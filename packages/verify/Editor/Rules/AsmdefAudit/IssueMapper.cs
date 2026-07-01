@@ -30,7 +30,8 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                     {
                         sink.Add(MakeIssue(asset, CodeMalformedAsmdef,
                             $"Assembly definition failed to parse: {asset.ParseError ?? "unknown error"}",
-                            VerifySeverity.Error));
+                            VerifySeverity.Error,
+                            Evidence(("parseError", asset.ParseError ?? "unknown error"))));
                     }
                     continue;
                 }
@@ -39,7 +40,8 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                 {
                     sink.Add(MakeIssue(asset, CodeMissingName,
                         "Assembly definition has no 'name' field — Unity cannot compile it.",
-                        VerifySeverity.Error));
+                        VerifySeverity.Error,
+                        Evidence(("assemblyName", asset.Name))));
                 }
 
                 if (settings.CheckBrokenReferences)
@@ -51,7 +53,9 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                         if (!reported.Add(r.Reference)) continue;
                         sink.Add(MakeIssue(asset, CodeBrokenReference,
                             $"Assembly reference '{r.Reference}' does not resolve to a compiled assembly or known asmdef.",
-                            VerifySeverity.Error));
+                            VerifySeverity.Error,
+                            Evidence(("reference", r.Reference),
+                                ("line", r.Line.ToString()))));
                     }
                 }
 
@@ -88,7 +92,9 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                     if (data.IncludePlatforms.Contains("Editor")) continue;
                     sink.Add(MakeIssue(data, CodeEditorInRuntime,
                         $"Runtime assembly references editor assembly '{reference}' but is not editor-only.",
-                        VerifySeverity.Warning));
+                        VerifySeverity.Warning,
+                        Evidence(("reference", reference),
+                            ("isEditorOnly", data.IsEditorOnly.ToString()))));
                 }
             }
         }
@@ -99,7 +105,8 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
             {
                 sink.Add(MakeIssue(data, CodePlatformFilterBroad,
                     "Assembly compiles for all platforms (no platform filters).",
-                    VerifySeverity.Warning));
+                    VerifySeverity.Warning,
+                    Evidence(("anyPlatform", data.AnyPlatform.ToString()))));
             }
         }
 
@@ -109,7 +116,9 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
             {
                 sink.Add(MakeIssue(data, CodePlatformFilterContradict,
                     $"Assembly has both includePlatforms ({string.Join(", ", data.IncludePlatforms)}) and excludePlatforms ({string.Join(", ", data.ExcludePlatforms)}).",
-                    VerifySeverity.Warning));
+                    VerifySeverity.Warning,
+                    Evidence(("includePlatforms", string.Join(", ", data.IncludePlatforms)),
+                        ("excludePlatforms", string.Join(", ", data.ExcludePlatforms)))));
             }
         }
 
@@ -121,7 +130,10 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                 {
                     sink.Add(MakeIssue(data, CodeVersionDefineInvalid,
                         $"Version define references package '{vd.Package}' (symbol '{vd.Symbol}') — could silently fail.",
-                        VerifySeverity.Warning));
+                        VerifySeverity.Warning,
+                        Evidence(("package", vd.Package),
+                            ("symbol", vd.Symbol),
+                            ("expression", vd.Expression))));
                 }
             }
         }
@@ -144,7 +156,10 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                 var first = group.First();
                 sink.Add(MakeIssue(first, CodeDuplicateName,
                     $"Duplicate assembly name '{group.Key}' found in {group.Count()} files: {paths}.",
-                    VerifySeverity.Error));
+                    VerifySeverity.Error,
+                    Evidence(("assemblyName", group.Key),
+                        ("assetCount", group.Count().ToString()),
+                        ("assetPaths", paths))));
             }
         }
 
@@ -161,7 +176,8 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                 {
                     sink.Add(MakeIssue(start, CodeCircularReference,
                         $"Circular reference detected: {cycle}.",
-                        VerifySeverity.Error));
+                        VerifySeverity.Error,
+                        Evidence(("cycle", cycle))));
                 }
             }
         }
@@ -215,16 +231,30 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                 {
                     sink.Add(MakeIssue(data, CodeAutoReferencedOrphan,
                         "Assembly has autoReferenced=false but no other assembly references it.",
-                        VerifySeverity.Warning));
+                        VerifySeverity.Warning,
+                        Evidence(("assemblyName", data.Name),
+                            ("autoReferenced", data.AutoReferenced.ToString()))));
                 }
             }
         }
 
         private static VerifyIssue MakeIssue(
             AsmdefData asset, string code, string description,
-            VerifySeverity severity)
+            VerifySeverity severity,
+            IReadOnlyDictionary<string, string> evidence = null)
         {
-            return new VerifyIssue("asmdef_audit", severity, asset.Path, code, description);
+            return new VerifyIssue("asmdef_audit", severity, asset.Path, code, description, evidence);
+        }
+
+        private static IReadOnlyDictionary<string, string> Evidence(params (string, string)[] pairs)
+        {
+            var dict = new Dictionary<string, string>();
+            foreach (var (k, v) in pairs)
+            {
+                if (!string.IsNullOrEmpty(k) && v != null)
+                    dict[k] = v;
+            }
+            return dict;
         }
     }
 }

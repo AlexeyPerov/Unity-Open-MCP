@@ -27,7 +27,8 @@ namespace UnityOpenMcpVerify.Rules.ShaderAnalysis
                 {
                     sink.Add(Make(shader, CodeMissingShaderAsset,
                         "Shader asset failed to load — it may be corrupted or removed.",
-                        VerifySeverity.Error));
+                        VerifySeverity.Error,
+                        Evidence(("shader", shader.Name))));
                     continue;
                 }
 
@@ -35,7 +36,8 @@ namespace UnityOpenMcpVerify.Rules.ShaderAnalysis
                 {
                     sink.Add(Make(shader, CodeShaderCompileError,
                         $"Shader '{shader.Name}' is an error shader (InternalErrorShader) — it failed to compile or is missing.",
-                        VerifySeverity.Error));
+                        VerifySeverity.Error,
+                        Evidence(("shader", shader.Name))));
                     // An error shader skips the remaining checks (matches source).
                     continue;
                 }
@@ -45,35 +47,51 @@ namespace UnityOpenMcpVerify.Rules.ShaderAnalysis
                     var name = !string.IsNullOrEmpty(shader.FallbackName) ? shader.FallbackName : "Yes";
                     sink.Add(Make(shader, CodeFallbackShader,
                         $"Shader '{shader.Name}' has a fallback: {name}.",
-                        VerifySeverity.Warning));
+                        VerifySeverity.Warning,
+                        Evidence(("shader", shader.Name),
+                            ("fallback", name))));
                 }
 
                 if (settings.DetectVariantExplosion && shader.VariantCount > settings.VariantThreshold)
                 {
                     sink.Add(Make(shader, CodeVariantExplosion,
                         $"Shader '{shader.Name}' variant estimate {shader.VariantCount} exceeds threshold {settings.VariantThreshold} (keywords: {shader.KeywordCount}, passes: {shader.PassCount}).",
-                        VerifySeverity.Warning));
+                        VerifySeverity.Warning,
+                        Evidence(("shader", shader.Name),
+                            ("variantCount", shader.VariantCount.ToString()),
+                            ("threshold", settings.VariantThreshold.ToString()),
+                            ("keywordCount", shader.KeywordCount.ToString()),
+                            ("passCount", shader.PassCount.ToString()))));
                 }
 
                 if (settings.DetectPassCountExceeded && shader.PassCount > settings.PassThreshold)
                 {
                     sink.Add(Make(shader, CodePassCountExceeded,
                         $"Shader '{shader.Name}' pass count {shader.PassCount} exceeds threshold {settings.PassThreshold}.",
-                        VerifySeverity.Warning));
+                        VerifySeverity.Warning,
+                        Evidence(("shader", shader.Name),
+                            ("passCount", shader.PassCount.ToString()),
+                            ("threshold", settings.PassThreshold.ToString()))));
                 }
 
                 if (settings.DetectExpensiveFeatures && platformProfileId == "mobile" && shader.ExpensiveKeywords.Count > 0)
                 {
                     sink.Add(Make(shader, CodeExpensiveFeaturePlatform,
                         $"Shader '{shader.Name}' uses expensive keywords for the mobile profile: {string.Join("; ", shader.ExpensiveKeywords)}.",
-                        VerifySeverity.Warning));
+                        VerifySeverity.Warning,
+                        Evidence(("shader", shader.Name),
+                            ("platformProfile", platformProfileId),
+                            ("expensiveKeywords", string.Join("; ", shader.ExpensiveKeywords)))));
                 }
 
                 if (settings.DetectPlatformMismatches && platformProfileId == "mobile" && shader.RenderPipeline == "HDRP")
                 {
                     sink.Add(Make(shader, CodePlatformKeywordMismatch,
                         $"Shader '{shader.Name}' render pipeline is HDRP but the profile is mobile.",
-                        VerifySeverity.Warning));
+                        VerifySeverity.Warning,
+                        Evidence(("shader", shader.Name),
+                            ("renderPipeline", shader.RenderPipeline),
+                            ("platformProfile", platformProfileId))));
                 }
             }
 
@@ -99,14 +117,28 @@ namespace UnityOpenMcpVerify.Rules.ShaderAnalysis
                     var keywords = string.Join(",", group[0].Keywords.OrderBy(k => k, StringComparer.Ordinal));
                     sink.Add(new VerifyIssue("shader_analysis", VerifySeverity.Warning,
                         group[0].MaterialPath, CodeDuplicateKeywordProfiles,
-                        $"Duplicate keyword profiles: {group.Count} materials share keywords [{keywords}]."));
+                        $"Duplicate keyword profiles: {group.Count} materials share keywords [{keywords}].",
+                        Evidence(("materialCount", group.Count.ToString()),
+                            ("keywords", keywords))));
                 }
             }
         }
 
-        private static VerifyIssue Make(ShaderData shader, string code, string description, VerifySeverity severity)
+        private static VerifyIssue Make(ShaderData shader, string code, string description, VerifySeverity severity,
+            IReadOnlyDictionary<string, string> evidence = null)
         {
-            return new VerifyIssue("shader_analysis", severity, shader.Path, code, description);
+            return new VerifyIssue("shader_analysis", severity, shader.Path, code, description, evidence);
+        }
+
+        private static IReadOnlyDictionary<string, string> Evidence(params (string, string)[] pairs)
+        {
+            var dict = new Dictionary<string, string>();
+            foreach (var (k, v) in pairs)
+            {
+                if (!string.IsNullOrEmpty(k) && v != null)
+                    dict[k] = v;
+            }
+            return dict;
         }
     }
 }

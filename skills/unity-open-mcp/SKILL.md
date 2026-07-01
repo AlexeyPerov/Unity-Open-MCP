@@ -149,7 +149,7 @@ After editing `packages/` source, before tests:
 2. **Declare scope** — `paths_hint` for every asset path you intend to touch.
 3. **Mutate** — typed tools preferred over `execute_csharp` / `invoke_method` / `execute_menu`; default `gate: "enforce"`.
 4. **Read the gate** — on `isError: true`, inspect `gate.delta.newIssues` + `agentNextSteps`.
-5. **Fix** — address the top error; `apply_fix` with `dry_run: true` first when a `fixId` is present.
+5. **Fix** — address the top error; `apply_fix` with `dry_run: true` first when a `fixId` is present. Each issue carries `rootCause` (machine-readable, branch on it) + `evidence` (the specific broken ref/value) + `fixCandidates` (every fix option with its `safe` flag) + `remediation` (the human-readable next step) — read these before choosing a fix.
 6. **Retry** — confirm `gate.delta.resolvedErrors > 0` or `newErrors == 0`.
 
 ### Gate modes
@@ -206,6 +206,15 @@ Authoritative via `capabilities` (call for the live list). Implemented:
 - `**materials**` — material reference + performance health. Per-asset codes: `missing_shader` (Error — null shader or InternalErrorShader, i.e. the original shader failed to compile/is missing), `missing_texture` (Warning — null texture at a shader property), `builtin_shader` (Warning — Standard/Legacy/Mobile builtin), `builtin_texture` (Warning — unity_builtin texture), `render_queue_override` (Warning), `unable_to_load` (Error). Full-scan-only codes: `duplicate_material` (Warning — SHA-256 fingerprint match), `unused_material` (Warning — unreferenced + not in Resources), `variant_parent_invalid` (Error), `variant_deep_chain` / `variant_heavy_overrides` (Warning), `gpu_instancing_off` / `srp_batcher_incompatible` (Warning), `null_material` / `null_material_slot` / `builtin_material` (Warning, renderer-side).
 - `**animation_analysis**` — animator controller + clip health. Per-asset codes: `missing_clip` (Error — state with no motion assigned), `empty_clip` (Warning — `.anim` declaring no curves), `unreachable_state` (Warning — not reachable from entry/default/any-state via BFS), `complexity_over_threshold` (Warning — > 50 states), `anystate_overuse` (Warning — > 5 any-state transitions), `parameter_mismatch` (Warning — script references a param not in the controller), `expensive_curves_density` / `expensive_curves_count` (Warning). Full-scan-only: `duplicate_clip` (Warning — byte-size match).
 - `**shader_analysis**` — shader compile + variant health. Per-asset codes: `shader_compile_error` (Error — InternalErrorShader), `missing_shader_asset` (Error — `.shader` failed to load), `variant_explosion` (Warning — `2^keywords × passes` over threshold), `pass_count_exceeded` (Warning), `fallback_shader` (Warning — has a `Fallback` directive), `expensive_feature_platform` (Warning — mobile-expensive keywords, mobile profile only), `platform_keyword_mismatch` (Warning — HDRP shader on mobile profile). Full-scan-only: `duplicate_keyword_profiles` (Warning — materials sharing a keyword set).
+
+### Issue explainability
+
+Every issue in a `scan_paths` / `validate_edit` response carries optional explainability fields (beyond `ruleId` / `severity` / `code` / `assetPath` / `description`):
+
+- **`rootCause`** — a stable machine-readable code identifying *why* the issue class happens. Branch recovery on this, not on free-text. Values: `missing_guid_reference`, `missing_fileid_reference`, `missing_script_class`, `missing_dependency`, `orphaned_meta`, `duplicate_guid`, `structural_complexity`, `configuration_mismatch`, `resource_missing`, `build_blocker`. The same code is declared on the issue descriptor in `capabilities` / `list_rules` (`issues[].rootCause`).
+- **`evidence`** — the per-instance payload that fired *this* issue (the broken reference's GUID / fileID / line, the duplicate group's paths, the count vs threshold, etc.). Keys are issue-class-specific, always string-valued. Absent when the rule has no per-instance detail.
+- **`fixCandidates`** — every fix that can resolve the issue, each `{fixId, safe}`. Use this over the legacy single `fixId` / `fixSafe` pair (kept for backwards compat): it lists safe **and** unsafe options so you pick deliberately. Absent when no fix exists.
+- **`remediation`** — a short, clean, user-visible playbook for the issue class (the human-readable next step). Pair with `rootCause`: branch on the code, surface the remediation text.
 
 ### Fixes
 

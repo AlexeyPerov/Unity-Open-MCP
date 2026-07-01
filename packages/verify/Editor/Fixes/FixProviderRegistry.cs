@@ -19,6 +19,15 @@ namespace UnityOpenMcpVerify.Fixes
         public string[] TouchedPaths;
     }
 
+    // M25 Plan 3 — a fix candidate the gate can advertise alongside an issue so
+    // an agent sees every option (safe vs unsafe) in one pass, not just the
+    // first match TryGetFixInfo returns. Safe mirrors the provider's Describe().
+    public class FixCandidate
+    {
+        public string FixId;
+        public bool Safe;
+    }
+
     public interface IFixProvider
     {
         string FixId { get; }
@@ -104,6 +113,35 @@ namespace UnityOpenMcpVerify.Fixes
         {
             if (string.IsNullOrEmpty(issueId)) return System.Array.Empty<string>();
             return _providers.Where(p => p.CanFix(issueId)).Select(p => p.FixId).ToArray();
+        }
+
+        // M25 Plan 3 — every fix candidate for a rule+issue pair, each with its
+        // real Safe flag from Describe(). Used by scan_paths / validate_edit to
+        // emit a fixCandidates[] block so agents see safe vs unsafe options up
+        // front. Like TryGetFixInfo this builds a synthetic key — providers'
+        // CanFix only inspect ruleId+issueCode.
+        public static FixCandidate[] CandidatesForIssue(string ruleId, string issueCode)
+        {
+            if (string.IsNullOrEmpty(ruleId) || string.IsNullOrEmpty(issueCode))
+                return System.Array.Empty<FixCandidate>();
+
+            var testKey = $"{ruleId}|ERROR|__test__|{issueCode}";
+            var result = new List<FixCandidate>();
+            foreach (var provider in _providers)
+            {
+                if (!provider.CanFix(testKey)) continue;
+                bool safe;
+                try
+                {
+                    safe = provider.Describe(testKey).Safe;
+                }
+                catch
+                {
+                    safe = false;
+                }
+                result.Add(new FixCandidate { FixId = provider.FixId, Safe = safe });
+            }
+            return result.ToArray();
         }
 
         public static string[] AvailableFixIds()

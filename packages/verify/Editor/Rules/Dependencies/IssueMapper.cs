@@ -22,7 +22,10 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
 
                     sink.Add(MakeIssue(asset, CodeBrokenDependency,
                         $"Forward dependency on missing asset (guid {edge.TargetGuid}, {edge.Kind} at line {edge.Line}) does not resolve",
-                        VerifySeverity.Error));
+                        VerifySeverity.Error,
+                        Evidence(("guid", edge.TargetGuid),
+                            ("edgeKind", edge.Kind),
+                            ("line", edge.Line.ToString()))));
                 }
 
                 foreach (var cycle in asset.CyclesThrough)
@@ -30,16 +33,29 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
                     var trail = string.Join(" -> ", cycle);
                     sink.Add(MakeIssue(asset, CodeDependencyCycle,
                         $"Forward dependency cycle: {trail}",
-                        VerifySeverity.Warning));
+                        VerifySeverity.Warning,
+                        Evidence(("cycle", trail))));
                 }
             }
         }
 
         private static VerifyIssue MakeIssue(
             AssetDependencyData asset, string code, string description,
-            VerifySeverity severity)
+            VerifySeverity severity,
+            IReadOnlyDictionary<string, string> evidence = null)
         {
-            return new VerifyIssue("dependencies", severity, asset.Path, code, description);
+            return new VerifyIssue("dependencies", severity, asset.Path, code, description, evidence);
+        }
+
+        private static IReadOnlyDictionary<string, string> Evidence(params (string, string)[] pairs)
+        {
+            var dict = new Dictionary<string, string>();
+            foreach (var (k, v) in pairs)
+            {
+                if (!string.IsNullOrEmpty(k) && v != null)
+                    dict[k] = v;
+            }
+            return dict;
         }
     }
 }

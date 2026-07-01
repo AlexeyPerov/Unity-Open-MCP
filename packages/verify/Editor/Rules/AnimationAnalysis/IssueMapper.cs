@@ -25,34 +25,46 @@ namespace UnityOpenMcpVerify.Rules.AnimationAnalysis
                 foreach (var missing in data.MissingReferences)
                 {
                     sink.Add(new VerifyIssue("animation_analysis", VerifySeverity.Error,
-                        data.Path, CodeMissingClip, missing));
+                        data.Path, CodeMissingClip, missing,
+                        Evidence(("animator", data.Name),
+                            ("detail", missing))));
                 }
 
                 foreach (var state in data.UnreachableStates)
                 {
                     sink.Add(new VerifyIssue("animation_analysis", VerifySeverity.Warning,
                         data.Path, CodeUnreachableState,
-                        $"State '{state}' is unreachable from any entry/default/any-state transition."));
+                        $"State '{state}' is unreachable from any entry/default/any-state transition.",
+                        Evidence(("animator", data.Name),
+                            ("state", state))));
                 }
 
                 if (settings.DetectComplexityOverThreshold && data.StateCount > settings.StateMachineComplexityThreshold)
                 {
                     sink.Add(new VerifyIssue("animation_analysis", VerifySeverity.Warning,
                         data.Path, CodeComplexityOverThreshold,
-                        $"State count {data.StateCount} exceeds threshold {settings.StateMachineComplexityThreshold}."));
+                        $"State count {data.StateCount} exceeds threshold {settings.StateMachineComplexityThreshold}.",
+                        Evidence(("animator", data.Name),
+                            ("stateCount", data.StateCount.ToString()),
+                            ("threshold", settings.StateMachineComplexityThreshold.ToString()))));
                 }
 
                 if (settings.DetectAnyStateOveruse && data.AnyStateTransitionCount > settings.AnyStateTransitionThreshold)
                 {
                     sink.Add(new VerifyIssue("animation_analysis", VerifySeverity.Warning,
                         data.Path, CodeAnyStateOveruse,
-                        $"AnyState transition count {data.AnyStateTransitionCount} exceeds threshold {settings.AnyStateTransitionThreshold}."));
+                        $"AnyState transition count {data.AnyStateTransitionCount} exceeds threshold {settings.AnyStateTransitionThreshold}.",
+                        Evidence(("animator", data.Name),
+                            ("anyStateTransitionCount", data.AnyStateTransitionCount.ToString()),
+                            ("threshold", settings.AnyStateTransitionThreshold.ToString()))));
                 }
 
                 foreach (var mismatch in data.ParameterMismatches)
                 {
                     sink.Add(new VerifyIssue("animation_analysis", VerifySeverity.Warning,
-                        data.Path, CodeParameterMismatch, mismatch));
+                        data.Path, CodeParameterMismatch, mismatch,
+                        Evidence(("animator", data.Name),
+                            ("detail", mismatch))));
                 }
             }
 
@@ -62,30 +74,51 @@ namespace UnityOpenMcpVerify.Rules.AnimationAnalysis
                 {
                     sink.Add(new VerifyIssue("animation_analysis", VerifySeverity.Warning,
                         clip.Path, CodeEmptyClip,
-                        $"Animation clip '{clip.Name}' declares no animation curves ({clip.TotalKeyframes} keyframes) — it animates nothing."));
+                        $"Animation clip '{clip.Name}' declares no animation curves ({clip.TotalKeyframes} keyframes) — it animates nothing.",
+                        Evidence(("clip", clip.Name),
+                            ("keyframeCount", clip.TotalKeyframes.ToString()))));
                 }
 
                 if (clip.KeyframeDensity > settings.CurveKeyframeDensityThreshold)
                 {
                     sink.Add(new VerifyIssue("animation_analysis", VerifySeverity.Warning,
                         clip.Path, CodeExpensiveCurvesDensity,
-                        $"Curve keyframe density {clip.KeyframeDensity}/s exceeds threshold {settings.CurveKeyframeDensityThreshold}."));
+                        $"Curve keyframe density {clip.KeyframeDensity}/s exceeds threshold {settings.CurveKeyframeDensityThreshold}.",
+                        Evidence(("clip", clip.Name),
+                            ("keyframeDensity", clip.KeyframeDensity.ToString()),
+                            ("threshold", settings.CurveKeyframeDensityThreshold.ToString()))));
                 }
 
                 if (clip.CurveCount > settings.CurveCountThreshold)
                 {
                     sink.Add(new VerifyIssue("animation_analysis", VerifySeverity.Warning,
                         clip.Path, CodeExpensiveCurvesCount,
-                        $"Curve count {clip.CurveCount} exceeds threshold {settings.CurveCountThreshold}."));
+                        $"Curve count {clip.CurveCount} exceeds threshold {settings.CurveCountThreshold}.",
+                        Evidence(("clip", clip.Name),
+                            ("curveCount", clip.CurveCount.ToString()),
+                            ("threshold", settings.CurveCountThreshold.ToString()))));
                 }
 
                 if (clip.IsDuplicate && clip.DuplicatePaths.Count > 0)
                 {
                     sink.Add(new VerifyIssue("animation_analysis", VerifySeverity.Warning,
                         clip.Path, CodeDuplicateClip,
-                        $"Duplicate clip (byte-size match): also at {string.Join(", ", clip.DuplicatePaths)}."));
+                        $"Duplicate clip (byte-size match): also at {string.Join(", ", clip.DuplicatePaths)}.",
+                        Evidence(("clip", clip.Name),
+                            ("duplicatePaths", string.Join(", ", clip.DuplicatePaths)))));
                 }
             }
+        }
+
+        private static IReadOnlyDictionary<string, string> Evidence(params (string, string)[] pairs)
+        {
+            var dict = new Dictionary<string, string>();
+            foreach (var (k, v) in pairs)
+            {
+                if (!string.IsNullOrEmpty(k) && v != null)
+                    dict[k] = v;
+            }
+            return dict;
         }
     }
 }

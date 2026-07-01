@@ -27,13 +27,17 @@ namespace UnityOpenMcpVerify.Rules.Materials
             {
                 foreach (var issue in data.Issues)
                 {
-                    sink.Add(new VerifyIssue("materials", issue.Severity, data.Path, issue.Code, issue.Description));
+                    sink.Add(new VerifyIssue("materials", issue.Severity, data.Path, issue.Code, issue.Description,
+                        Evidence(("material", data.Name),
+                            ("shader", data.ShaderName))));
                 }
                 foreach (var tw in data.TextureWarnings)
                 {
                     var severity = tw.IssueCode == CodeMissingTexture ? VerifySeverity.Warning : VerifySeverity.Warning;
                     sink.Add(new VerifyIssue("materials", severity, data.Path, tw.IssueCode,
-                        $"{tw.Detail}"));
+                        $"{tw.Detail}",
+                        Evidence(("material", data.Name),
+                            ("property", tw.PropertyName))));
                 }
             }
 
@@ -43,9 +47,22 @@ namespace UnityOpenMcpVerify.Rules.Materials
                 foreach (var warning in rd.Warnings)
                 {
                     sink.Add(new VerifyIssue("materials", VerifySeverity.Warning, rd.AssetPath, warning,
-                        $"Renderer '{rd.ChildPath}': {RendererWarningText(warning)}"));
+                        $"Renderer '{rd.ChildPath}': {RendererWarningText(warning)}",
+                        Evidence(("renderer", rd.ChildPath),
+                            ("warningCode", warning))));
                 }
             }
+        }
+
+        private static IReadOnlyDictionary<string, string> Evidence(params (string, string)[] pairs)
+        {
+            var dict = new Dictionary<string, string>();
+            foreach (var (k, v) in pairs)
+            {
+                if (!string.IsNullOrEmpty(k) && v != null)
+                    dict[k] = v;
+            }
+            return dict;
         }
 
         private static string RendererWarningText(string code)

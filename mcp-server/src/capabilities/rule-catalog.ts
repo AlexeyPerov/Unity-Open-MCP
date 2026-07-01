@@ -17,11 +17,23 @@ export interface RuleIssueDescriptor {
   /** Issue code emitted by the rule (e.g. `missing_script`). */
   code: string;
   /** Default severity (`Error` | `Warning`). */
-  severity: "Error" | "Warning";
+  severity: "Error" | `Warning`;
   /** Fix IDs that can resolve this issue code, if any. */
   fixIds: string[];
   /** True when the issue is only emitted during a full project scan. */
   fullScanOnly?: boolean;
+  /**
+   * Machine-readable root-cause code (e.g. `missing_guid_reference`,
+   * `duplicate_guid`). Stable across releases — agents branch on it. Mirrors
+   * the C# `IssueExplainability` taxonomy in
+   * `packages/verify/Editor/Core/IssueExplainability.cs`.
+   */
+  rootCause?: string;
+  /**
+   * Short, user-visible remediation playbook for this issue class. Clean of
+   * internal IDs (no milestone / spec / execution-plan references).
+   */
+  remediation?: string;
 }
 
 export interface RuleCapability {
@@ -63,50 +75,77 @@ const MISSING_REFERENCES_ISSUES: RuleIssueDescriptor[] = [
     code: "missing_guid",
     severity: "Error",
     fixIds: ["relink_broken_guid"],
+    rootCause: "missing_guid_reference",
+    remediation:
+      "The reference's GUID does not resolve to a loadable asset — the target was likely deleted, moved, or never committed. Relink to the correct target GUID via apply_fix (relink_broken_guid) with a deliberately chosen target_guid, or remove the reference.",
   },
   {
     code: "missing_fileid",
     severity: "Error",
     fixIds: [],
+    rootCause: "missing_fileid_reference",
+    remediation:
+      "The GUID resolves but the fileID is not a top-level object in the target asset (the sub-object was removed or the asset was re-exported). Relink to the correct fileID, or repoint the reference.",
   },
   {
     code: "missing_local_fileid",
     severity: "Warning",
     fixIds: [],
+    rootCause: "missing_fileid_reference",
+    remediation:
+      "A local (same-file) fileID is referenced but no longer declared in the file. Reconnect the reference to a valid local object, or remove it.",
   },
   {
     code: "empty_local_ref",
     severity: "Warning",
     fixIds: [],
+    rootCause: "missing_fileid_reference",
+    remediation:
+      "An empty local fileID reference was serialized. Reconnect it to a valid local object, or remove it.",
   },
   {
     code: "missing_method",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "missing_script_class",
+    remediation:
+      "A serialized call (e.g. UnityEvent) targets a method that no longer exists on the receiver class. Re-add the method, update the call to the new name, or clear the target.",
   },
   {
     code: "type_mismatch",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "missing_script_class",
+    remediation:
+      "A serialized type name cannot be resolved to a loaded class (renamed, removed, or in an assembly that no longer compiles). Restore or rename the class so the type resolves.",
   },
   {
     code: "missing_script",
     severity: "Error",
     fixIds: ["remove_missing_script"],
+    rootCause: "missing_script_class",
+    remediation:
+      "A MonoBehaviour's script GUID no longer resolves to a compiled script (the script was deleted, renamed, or its assembly no longer compiles). Remove the missing script component via apply_fix (remove_missing_script), or re-add the correct script.",
   },
   {
     code: "duplicate_component",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The same component type appears more than once on one GameObject, which Unity does not allow on reload. Remove the duplicate component(s), keeping the one with the intended serialized values.",
   },
   {
     code: "invalid_layer",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The serialized layer index is out of range (the layer was removed from TagManager). Reassign the GameObject to a valid layer.",
   },
 ];
 
@@ -115,41 +154,65 @@ const SCENE_PREFAB_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     code: "broken_reference",
     severity: "Error",
     fixIds: [],
+    rootCause: "missing_guid_reference",
+    remediation:
+      "The scene/prefab holds a broken object reference. Identify the referenced object via the issue description, then relink or remove it.",
   },
   {
     code: "high_risk_bootstrap",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "A bootstrap scene carries more than half the object budget, making load slow and startup fragile. Split content into additive scenes that load after startup.",
   },
   {
     code: "scene_object_count",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "The scene exceeds the configured object budget. Reduce object count, move static content into prefabs, or raise the budget deliberately.",
   },
   {
     code: "component_hotspot",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "A single GameObject holds an unusually high component count, which hurts performance and editability. Split responsibilities across child objects.",
   },
   {
     code: "inactive_expensive",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "Inactive objects still carry Renderers (and their meshes/materials), wasting memory. Disable or remove the Renderer components, or delete the inactive objects.",
   },
   {
     code: "inactive_heavy",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "A large pool of inactive objects bloats the scene file and Hierarchy. Move them into prefabs instantiated on demand, or delete unused ones.",
   },
   {
     code: "deep_nesting",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "Prefab nesting exceeds the configured depth; deeply nested prefabs are fragile and slow to edit. Flatten the hierarchy or extract the inner prefab.",
   },
   {
     code: "override_explosion",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "The prefab instance has too many overrides, undermining the point of a prefab base. Apply intentional overrides into the base prefab, or unpack the instance.",
   },
 ];
 
@@ -158,11 +221,17 @@ const DEPENDENCIES_ISSUES: RuleIssueDescriptor[] = [
     code: "broken_dependency",
     severity: "Error",
     fixIds: ["relink_broken_guid"],
+    rootCause: "missing_dependency",
+    remediation:
+      "A forward dependency edge targets a GUID that does not resolve. Relink the dependency to the correct target GUID via apply_fix (relink_broken_guid), or remove the dependency.",
   },
   {
     code: "dependency_cycle",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The forward dependency graph contains a cycle. Break the cycle by removing or reversing one edge in the loop.",
   },
 ];
 
@@ -180,24 +249,36 @@ const OFFLINE_INTEGRITY_ISSUES: RuleIssueDescriptor[] = [
     severity: "Warning",
     fixIds: ["remove_orphan_meta"],
     fullScanOnly: true,
+    rootCause: "orphaned_meta",
+    remediation:
+      "A .meta file has no companion asset on disk. Remove the orphaned .meta via apply_fix (remove_orphan_meta), or restore the missing asset.",
   },
   {
     code: "duplicate_guid",
     severity: "Error",
     fixIds: ["fix_duplicate_guid"],
     fullScanOnly: true,
+    rootCause: "duplicate_guid",
+    remediation:
+      "Two or more assets share one GUID. Regenerate the GUID on the less-referenced asset via apply_fix (fix_duplicate_guid) — choose the target path deliberately.",
   },
   {
     code: "missing_reference",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "missing_guid_reference",
+    remediation:
+      "A serialized reference resolves to a GUID no asset owns. Relink to the correct target, or remove the reference.",
   },
   {
     code: "missing_script_reference",
     severity: "Error",
     fixIds: ["remove_missing_script"],
     fullScanOnly: true,
+    rootCause: "missing_script_class",
+    remediation:
+      "A MonoBehaviour script GUID does not resolve to a compiled script. Remove the missing script component via apply_fix (remove_missing_script), or re-add the correct script.",
   },
 ];
 
@@ -211,54 +292,84 @@ const ASMDEF_AUDIT_ISSUES: RuleIssueDescriptor[] = [
     code: "broken_asmdef_reference",
     severity: "Error",
     fixIds: [],
+    rootCause: "missing_dependency",
+    remediation:
+      "An asmdef references a GUID or assembly name that does not resolve to a compiled assembly or known asmdef. Correct the reference name/GUID, or create the referenced assembly.",
   },
   {
     code: "asmdef_missing_name",
     severity: "Error",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The asmdef has no 'name' field, so Unity cannot compile it. Add a name matching the assembly (Unity sets it automatically when the file is renamed correctly).",
   },
   {
     code: "malformed_asmdef",
     severity: "Error",
     fixIds: [],
+    rootCause: "build_blocker",
+    remediation:
+      "The asmdef JSON failed to parse. Fix the JSON syntax error shown in the issue description.",
   },
   {
     code: "asmdef_duplicate_name",
     severity: "Error",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "duplicate_guid",
+    remediation:
+      "Two or more asmdef files declare the same assembly name, which prevents compilation. Rename one of the assemblies so each name is unique.",
   },
   {
     code: "asmdef_circular_reference",
     severity: "Error",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The assembly reference graph contains a cycle. Break the cycle by removing or reversing one reference in the loop.",
   },
   {
     code: "asmdef_editor_in_runtime",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "A runtime assembly references an editor-only assembly. Either mark this assembly editor-only (add the Editor platform), or remove the editor reference.",
   },
   {
     code: "asmdef_auto_referenced_orphan",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The assembly has autoReferenced=false but no other assembly references it, so it will not compile into the project. Add a reference from the consuming assembly, or set autoReferenced=true.",
   },
   {
     code: "asmdef_platform_filter_broad",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The assembly compiles for all platforms with no filters. Add include/exclude platform filters if a narrower target is intended.",
   },
   {
     code: "asmdef_platform_filter_contradict",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The asmdef sets both includePlatforms and excludePlatforms, which is contradictory. Keep one and remove the other.",
   },
   {
     code: "asmdef_version_define_invalid",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "A version define references a package by id, which can silently fail to match. Verify the package id and version expression, or use a different expression.",
   },
 ];
 
@@ -268,54 +379,81 @@ const PROJECT_HEALTH_ISSUES: RuleIssueDescriptor[] = [
     severity: "Warning",
     fixIds: ["remove_orphan_meta"],
     fullScanOnly: true,
+    rootCause: "orphaned_meta",
+    remediation:
+      "A .meta file has no companion asset on disk — the asset was deleted while its .meta remained. Remove the orphaned .meta via apply_fix (remove_orphan_meta), or restore the missing asset.",
   },
   {
     code: "duplicate_guid",
     severity: "Error",
     fixIds: ["fix_duplicate_guid"],
     fullScanOnly: true,
+    rootCause: "duplicate_guid",
+    remediation:
+      "Two or more assets share one GUID, so Unity cannot reliably resolve references to it. Regenerate the GUID on the less-referenced asset via apply_fix (fix_duplicate_guid) — choose the target path deliberately.",
   },
   {
     code: "missing_project_setting",
     severity: "Error",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "configuration_mismatch",
+    remediation:
+      "A required ProjectSettings file or field is missing or empty. Restore the setting (e.g. re-add the file, or set the editor version) via the Project Settings window or settings_set_player.",
   },
   {
     code: "project_empty_folder",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "structural_complexity",
+    remediation:
+      "An empty folder adds clutter without content. Delete it (and its .meta), or add the intended content.",
   },
   {
     code: "project_meta_only_folder",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "orphaned_meta",
+    remediation:
+      "A folder .meta exists but the folder itself is gone. Delete the orphaned .meta, or recreate the folder.",
   },
   {
     code: "project_deep_nesting",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "structural_complexity",
+    remediation:
+      "Folder nesting exceeds the configured depth, making paths long and hard to navigate. Flatten the directory structure.",
   },
   {
     code: "project_large_folder",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "structural_complexity",
+    remediation:
+      "A folder holds more assets than the configured budget, slowing AssetDatabase and obscuring structure. Split it into sub-folders.",
   },
   {
     code: "project_broken_asset",
     severity: "Error",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "build_blocker",
+    remediation:
+      "The asset failed to load in the Editor (corrupted or unimportable). Reimport the asset, or restore it from version control.",
   },
   {
     code: "project_empty_scene",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "structural_complexity",
+    remediation:
+      "The scene has zero root objects and is effectively empty. Populate it, or delete it if unused.",
   },
 ];
 
@@ -324,91 +462,139 @@ const MATERIALS_ISSUES: RuleIssueDescriptor[] = [
     code: "missing_shader",
     severity: "Error",
     fixIds: ["reassign_missing_shader"],
+    rootCause: "resource_missing",
+    remediation:
+      "The material's shader is null or the error shader — the original shader failed to compile or is missing. Reassign a valid shader via apply_fix (reassign_missing_shader) with a target_shader name or path.",
   },
   {
     code: "missing_texture",
     severity: "Warning",
     fixIds: ["reassign_missing_texture"],
+    rootCause: "resource_missing",
+    remediation:
+      "A material texture slot is null or a builtin placeholder. Reassign a valid texture via apply_fix (reassign_missing_texture) with a target_texture asset path or GUID.",
   },
   {
     code: "builtin_shader",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The material uses a built-in shader. If intentional, ignore; otherwise assign the project's render-pipeline shader.",
   },
   {
     code: "builtin_texture",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "A material texture slot holds a unity_builtin placeholder. Reassign the intended texture.",
   },
   {
     code: "render_queue_override",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The material overrides the shader's render queue, which can break draw ordering. Remove the override unless a specific queue is intended.",
   },
   {
     code: "unable_to_load",
     severity: "Error",
     fixIds: [],
+    rootCause: "build_blocker",
+    remediation:
+      "The material could not be loaded by the Editor (corrupted or unimportable). Reimport the material, or restore it from version control.",
   },
   {
     code: "duplicate_material",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "structural_complexity",
+    remediation:
+      "Two or more materials share an identical content fingerprint. Consolidate them into one shared material.",
   },
   {
     code: "unused_material",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "structural_complexity",
+    remediation:
+      "The material is not referenced by any renderer or dependency. Delete it if truly unused.",
   },
   {
     code: "variant_parent_invalid",
     severity: "Error",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "missing_dependency",
+    remediation:
+      "A material variant's parent is missing or invalid. Reparent the variant to a valid base material, or convert it to a standalone material.",
   },
   {
     code: "variant_deep_chain",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "structural_complexity",
+    remediation:
+      "The material-variant chain exceeds the configured depth. Flatten the chain by applying overrides into an earlier variant.",
   },
   {
     code: "variant_heavy_overrides",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "structural_complexity",
+    remediation:
+      "The material variant has too many overrides, undermining the point of a variant base. Apply the overrides into the parent, or reduce them.",
   },
   {
     code: "gpu_instancing_off",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "configuration_mismatch",
+    remediation:
+      "GPU instancing is disabled on a material that could benefit from it. Enable GPU instancing in the material if the shader supports it.",
   },
   {
     code: "srp_batcher_incompatible",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The material is incompatible with the SRP Batcher (mixed shader or non-batchable properties). Make shared materials use the same shader to allow batching.",
   },
   {
     code: "null_material",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "resource_missing",
+    remediation:
+      "A renderer references a null material. Assign a material to the slot.",
   },
   {
     code: "null_material_slot",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "resource_missing",
+    remediation:
+      "A renderer has a material slot that is null. Assign a material, or remove the slot.",
   },
   {
     code: "builtin_material",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "configuration_mismatch",
+    remediation:
+      "A renderer uses a unity_builtin material. Assign a project material instead.",
   },
 ];
 
@@ -417,47 +603,74 @@ const ANIMATION_ANALYSIS_ISSUES: RuleIssueDescriptor[] = [
     code: "missing_clip",
     severity: "Error",
     fixIds: [],
+    rootCause: "resource_missing",
+    remediation:
+      "An animator state has no motion/clip assigned, or its clip is missing. Assign a valid AnimationClip to the state.",
   },
   {
     code: "empty_clip",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "An AnimationClip declares no curves, so it animates nothing. Add curves to the clip, or remove it if unused.",
   },
   {
     code: "unreachable_state",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "An animator state is unreachable from any entry/default/any-state transition. Add a transition to it, or remove the state.",
   },
   {
     code: "complexity_over_threshold",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "The animator's state count exceeds the configured threshold. Split the controller into sub-state machines or simplify it.",
   },
   {
     code: "anystate_overuse",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "AnyState transition count exceeds the threshold; overusing AnyState hurts performance and obscures flow. Replace some with direct transitions.",
   },
   {
     code: "parameter_mismatch",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "A transition references a parameter that is not declared in the controller (renamed or removed). Re-add the parameter, or fix the transition condition.",
   },
   {
     code: "expensive_curves_density",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "The clip's keyframe density exceeds the threshold (too many keys per second). Reduce keyframe density by baking or simplifying the curves.",
   },
   {
     code: "expensive_curves_count",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "The clip's curve count exceeds the threshold. Reduce the number of animated curves.",
   },
   {
     code: "duplicate_clip",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "structural_complexity",
+    remediation:
+      "Two or more clips are byte-identical duplicates. Consolidate them into one shared clip.",
   },
 ];
 
@@ -466,42 +679,66 @@ const SHADER_ANALYSIS_ISSUES: RuleIssueDescriptor[] = [
     code: "shader_compile_error",
     severity: "Error",
     fixIds: [],
+    rootCause: "build_blocker",
+    remediation:
+      "The shader failed to compile and fell back to the error shader. Fix the compile error (check the Editor console for the shader error), or reassign materials using it.",
   },
   {
     code: "missing_shader_asset",
     severity: "Error",
     fixIds: [],
+    rootCause: "resource_missing",
+    remediation:
+      "The shader asset failed to load — it may be corrupted or removed. Restore the shader asset, or reassign materials using it.",
   },
   {
     code: "variant_explosion",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "The shader's estimated variant count (2^keywords × passes) exceeds the threshold. Reduce shader keywords or passes to shrink the variant space.",
   },
   {
     code: "pass_count_exceeded",
     severity: "Warning",
     fixIds: [],
+    rootCause: "structural_complexity",
+    remediation:
+      "The shader's pass count exceeds the threshold. Reduce the number of passes.",
   },
   {
     code: "fallback_shader",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The shader declares a fallback. Confirm the fallback is intended; remove it if not.",
   },
   {
     code: "expensive_feature_platform",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The shader uses keywords flagged expensive for the active platform profile (mobile). Remove or gate the expensive keywords for that profile.",
   },
   {
     code: "platform_keyword_mismatch",
     severity: "Warning",
     fixIds: [],
+    rootCause: "configuration_mismatch",
+    remediation:
+      "The shader's render pipeline does not match the active platform profile. Align the shader's pipeline with the target profile.",
   },
   {
     code: "duplicate_keyword_profiles",
     severity: "Warning",
     fixIds: [],
     fullScanOnly: true,
+    rootCause: "structural_complexity",
+    remediation:
+      "Two or more materials share an identical keyword profile. Consolidate them into one material to reduce variant count.",
   },
 ];
 

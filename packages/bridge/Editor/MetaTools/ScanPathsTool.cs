@@ -83,6 +83,42 @@ namespace UnityOpenMcpBridge.MetaTools
                 sb.Append("\"issueCode\":\"").Append(Esc(issue.IssueCode)).Append("\",");
                 sb.Append("\"assetPath\":\"").Append(Esc(issue.AssetPath)).Append("\",");
                 sb.Append("\"description\":\"").Append(Esc(issue.Description)).Append("\"");
+
+                // M25 Plan 3 — explainability. rootCause + remediation are
+                // static per issue class (looked up from IssueExplainability);
+                // evidence is per-instance (the specific broken ref/value).
+                // fixCandidates advertises every fix option (safe vs unsafe),
+                // superseding the single fixId/fixSafe pair below (kept for
+                // backwards compatibility).
+                if (IssueExplainability.TryGet(issue.RuleId, issue.IssueCode, out var explain))
+                {
+                    sb.Append(",\"rootCause\":\"").Append(Esc(explain.RootCause)).Append("\"");
+                    sb.Append(",\"remediation\":\"").Append(Esc(explain.Remediation)).Append("\"");
+                }
+                if (issue.Evidence != null && issue.Evidence.Count > 0)
+                {
+                    sb.Append(",\"evidence\":{");
+                    int ei = 0;
+                    foreach (var kv in issue.Evidence)
+                    {
+                        if (ei++ > 0) sb.Append(',');
+                        sb.Append('"').Append(Esc(kv.Key)).Append("\":\"").Append(Esc(kv.Value ?? "")).Append('"');
+                    }
+                    sb.Append('}');
+                }
+                var candidates = FixProviderRegistry.CandidatesForIssue(issue.RuleId, issue.IssueCode);
+                if (candidates.Length > 0)
+                {
+                    sb.Append(",\"fixCandidates\":[");
+                    for (int ci = 0; ci < candidates.Length; ci++)
+                    {
+                        if (ci > 0) sb.Append(',');
+                        sb.Append("{\"fixId\":\"").Append(Esc(candidates[ci].FixId)).Append("\"");
+                        sb.Append(",\"safe\":").Append(candidates[ci].Safe ? "true" : "false");
+                        sb.Append('}');
+                    }
+                    sb.Append(']');
+                }
                 if (FixProviderRegistry.TryGetFixInfo(issue.RuleId, issue.IssueCode, out var fixId, out var safe))
                 {
                     sb.Append(",\"fixId\":\"").Append(Esc(fixId)).Append("\"");

@@ -34,7 +34,8 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
                 {
                     sink.Add(MakeIssue(scene.Path, CodeBrokenReference,
                         "Scene '" + scene.Name + "': " + br,
-                        VerifySeverity.Error));
+                        VerifySeverity.Error,
+                        Evidence(("detail", br))));
                 }
             }
 
@@ -42,14 +43,20 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             {
                 sink.Add(MakeIssue(scene.Path, CodeHighRiskBootstrap,
                     "Bootstrap scene '" + scene.Name + "' has " + scene.TotalObjectCount + " objects (budget: " + (settings.MaxSceneObjectCount / 2) + ").",
-                    VerifySeverity.Warning));
+                    VerifySeverity.Warning,
+                    Evidence(("scene", scene.Name),
+                        ("objectCount", scene.TotalObjectCount.ToString()),
+                        ("budget", (settings.MaxSceneObjectCount / 2).ToString()))));
             }
 
             if (settings.DetectHierarchyHotspots && scene.TotalObjectCount > settings.MaxSceneObjectCount)
             {
                 sink.Add(MakeIssue(scene.Path, CodeSceneObjectCount,
                     "Scene '" + scene.Name + "' has " + scene.TotalObjectCount + " objects (budget: " + settings.MaxSceneObjectCount + ").",
-                    VerifySeverity.Warning));
+                    VerifySeverity.Warning,
+                    Evidence(("scene", scene.Name),
+                        ("objectCount", scene.TotalObjectCount.ToString()),
+                        ("budget", settings.MaxSceneObjectCount.ToString()))));
             }
 
             if (settings.DetectHierarchyHotspots)
@@ -58,7 +65,8 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
                 {
                     sink.Add(MakeIssue(scene.Path, CodeComponentHotspot,
                         "Scene '" + scene.Name + "' hotspot: " + hotspot,
-                        VerifySeverity.Warning));
+                        VerifySeverity.Warning,
+                        Evidence(("hotspot", hotspot))));
                 }
             }
 
@@ -66,14 +74,19 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             {
                 sink.Add(MakeIssue(scene.Path, CodeInactiveExpensive,
                     "Scene '" + scene.Name + "' has " + scene.InactiveRendererCount + " inactive objects with renderers.",
-                    VerifySeverity.Warning));
+                    VerifySeverity.Warning,
+                    Evidence(("scene", scene.Name),
+                        ("inactiveRendererCount", scene.InactiveRendererCount.ToString()))));
             }
 
             if (settings.DetectInactiveAntiPatterns && scene.InactiveObjectCount > settings.MaxInactiveObjectThreshold)
             {
                 sink.Add(MakeIssue(scene.Path, CodeInactiveHeavy,
                     "Scene '" + scene.Name + "' has " + scene.InactiveObjectCount + " inactive objects (threshold: " + settings.MaxInactiveObjectThreshold + ").",
-                    VerifySeverity.Warning));
+                    VerifySeverity.Warning,
+                    Evidence(("scene", scene.Name),
+                        ("inactiveObjectCount", scene.InactiveObjectCount.ToString()),
+                        ("threshold", settings.MaxInactiveObjectThreshold.ToString()))));
             }
         }
 
@@ -83,22 +96,40 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             {
                 sink.Add(MakeIssue(prefab.Path, CodeDeepNesting,
                     "Prefab '" + prefab.Name + "' has nesting depth " + prefab.NestingDepth + " (max: " + settings.MaxPrefabNestingDepth + ").",
-                    VerifySeverity.Warning));
+                    VerifySeverity.Warning,
+                    Evidence(("prefab", prefab.Name),
+                        ("nestingDepth", prefab.NestingDepth.ToString()),
+                        ("max", settings.MaxPrefabNestingDepth.ToString()))));
             }
 
             if (settings.DetectOverrideExplosion && prefab.OverrideCount > settings.MaxPrefabOverrideCount)
             {
                 sink.Add(MakeIssue(prefab.Path, CodeOverrideExplosion,
                     "Prefab '" + prefab.Name + "' has " + prefab.OverrideCount + " overrides (max: " + settings.MaxPrefabOverrideCount + ").",
-                    VerifySeverity.Warning));
+                    VerifySeverity.Warning,
+                    Evidence(("prefab", prefab.Name),
+                        ("overrideCount", prefab.OverrideCount.ToString()),
+                        ("max", settings.MaxPrefabOverrideCount.ToString()))));
             }
         }
 
         private static VerifyIssue MakeIssue(
             string assetPath, string code, string description,
-            VerifySeverity severity)
+            VerifySeverity severity,
+            IReadOnlyDictionary<string, string> evidence = null)
         {
-            return new VerifyIssue("scene_prefab_health", severity, assetPath, code, description);
+            return new VerifyIssue("scene_prefab_health", severity, assetPath, code, description, evidence);
+        }
+
+        private static IReadOnlyDictionary<string, string> Evidence(params (string, string)[] pairs)
+        {
+            var dict = new Dictionary<string, string>();
+            foreach (var (k, v) in pairs)
+            {
+                if (!string.IsNullOrEmpty(k) && v != null)
+                    dict[k] = v;
+            }
+            return dict;
         }
     }
 }

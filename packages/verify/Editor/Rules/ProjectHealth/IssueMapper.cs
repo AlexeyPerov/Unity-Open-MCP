@@ -24,7 +24,8 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
             {
                 sink.Add(new VerifyIssue("project_health", VerifySeverity.Warning,
                     orphan.MetaPath, CodeOrphanMeta,
-                    $"Orphaned .meta file (no companion asset): {orphan.MetaPath}"));
+                    $"Orphaned .meta file (no companion asset): {orphan.MetaPath}",
+                    Evidence(("metaPath", orphan.MetaPath))));
             }
 
             foreach (var dup in data.DuplicateGuids)
@@ -32,14 +33,19 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                 var paths = string.Join(", ", dup.Paths.OrderBy(p => p));
                 sink.Add(new VerifyIssue("project_health", VerifySeverity.Error,
                     dup.Paths[0], CodeDuplicateGuid,
-                    $"Duplicate GUID {dup.Guid} shared by {dup.Paths.Count} assets: {paths}"));
+                    $"Duplicate GUID {dup.Guid} shared by {dup.Paths.Count} assets: {paths}",
+                    Evidence(("guid", dup.Guid),
+                        ("assetPaths", paths),
+                        ("assetCount", dup.Paths.Count.ToString()))));
             }
 
             foreach (var setting in data.SettingIssues)
             {
                 sink.Add(new VerifyIssue("project_health", VerifySeverity.Error,
                     setting.SettingsPath, CodeMissingProjectSetting,
-                    $"ProjectSettings issue: {setting.Field} — {setting.Detail}"));
+                    $"ProjectSettings issue: {setting.Field} — {setting.Detail}",
+                    Evidence(("field", setting.Field),
+                        ("settingsPath", setting.SettingsPath))));
             }
 
             foreach (var folder in data.FolderIssues)
@@ -47,21 +53,35 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                 // Source severity is Info for all folder issues; mapped to
                 // Warning (Info → Warning per the severity mapping rule).
                 sink.Add(new VerifyIssue("project_health", VerifySeverity.Warning,
-                    folder.FolderPath, folder.IssueCode, folder.Detail));
+                    folder.FolderPath, folder.IssueCode, folder.Detail,
+                    Evidence(("folderPath", folder.FolderPath))));
             }
 
             foreach (var broken in data.BrokenAssets)
             {
                 sink.Add(new VerifyIssue("project_health", VerifySeverity.Error,
-                    broken.AssetPath, CodeBrokenAsset, broken.Detail));
+                    broken.AssetPath, CodeBrokenAsset, broken.Detail,
+                    Evidence(("assetPath", broken.AssetPath))));
             }
 
             foreach (var scene in data.EmptyScenes)
             {
                 sink.Add(new VerifyIssue("project_health", VerifySeverity.Warning,
                     scene.ScenePath, CodeEmptyScene,
-                    "Scene has zero root objects — effectively empty"));
+                    "Scene has zero root objects — effectively empty",
+                    Evidence(("scenePath", scene.ScenePath))));
             }
+        }
+
+        private static IReadOnlyDictionary<string, string> Evidence(params (string, string)[] pairs)
+        {
+            var dict = new Dictionary<string, string>();
+            foreach (var (k, v) in pairs)
+            {
+                if (!string.IsNullOrEmpty(k) && v != null)
+                    dict[k] = v;
+            }
+            return dict;
         }
     }
 }

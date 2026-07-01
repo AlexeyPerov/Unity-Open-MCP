@@ -218,8 +218,104 @@ test("shader_analysis rule is implemented with shader_compile_error code", () =>
 });
 
 // ---------------------------------------------------------------------------
+// M25 Plan 3 — explainability. Every implemented-rule issue descriptor must
+// carry a stable machine-readable rootCause + a clean remediation playbook.
+// These mirror the C# IssueExplainability taxonomy
+// (packages/verify/Editor/Core/IssueExplainability.cs) and are emitted per-issue
+// in scan_paths / validate_edit responses.
+// ---------------------------------------------------------------------------
+
+const STABLE_ROOT_CAUSES = new Set([
+  "missing_guid_reference",
+  "missing_fileid_reference",
+  "missing_script_class",
+  "missing_dependency",
+  "orphaned_meta",
+  "duplicate_guid",
+  "structural_complexity",
+  "configuration_mismatch",
+  "resource_missing",
+  "build_blocker",
+]);
+
+// Forbidden tokens in user-visible remediation copy (AGENTS.md
+// §No internal references). None should ever leak into remediation text.
+const FORBIDDEN_INTERNAL_TOKENS = [
+  "M25", "M24", "M1", "M4", "M9", "M12", "M18", "M22",
+  "execution-plan", "specs/", "backlog-", "Plan 1", "Plan 2", "Plan 3",
+];
+
+test("every implemented-rule issue carries a stable rootCause", () => {
+  for (const rule of implementedRules()) {
+    for (const issue of rule.issues) {
+      assert.ok(
+        typeof issue.rootCause === "string" && issue.rootCause.length > 0,
+        `${rule.id}/${issue.code} must declare a rootCause`,
+      );
+      assert.ok(
+        STABLE_ROOT_CAUSES.has(issue.rootCause!),
+        `${rule.id}/${issue.code} rootCause '${issue.rootCause}' is not in the stable taxonomy`,
+      );
+    }
+  }
+});
+
+test("every implemented-rule issue carries remediation guidance", () => {
+  for (const rule of implementedRules()) {
+    for (const issue of rule.issues) {
+      assert.ok(
+        typeof issue.remediation === "string" && issue.remediation.length > 0,
+        `${rule.id}/${issue.code} must declare remediation guidance`,
+      );
+    }
+  }
+});
+
+test("remediation copy is clean of internal IDs", () => {
+  for (const rule of implementedRules()) {
+    for (const issue of rule.issues) {
+      for (const token of FORBIDDEN_INTERNAL_TOKENS) {
+        assert.ok(
+          !(issue.remediation ?? "").includes(token),
+          `${rule.id}/${issue.code} remediation leaks internal token '${token}'`,
+        );
+      }
+    }
+  }
+});
+
+test("capabilities surfaces rootCause and remediation on issue descriptors", () => {
+  // buildCapabilities passes the catalog through, so the capabilities surface
+  // carries the explainability fields verbatim.
+  const caps = buildCapabilities(DEPS, { kind: "rules" });
+  const missingRef = caps.rules.find((r) => r.id === "missing_references");
+  assert.ok(missingRef);
+  const missingScript = missingRef!.issues.find((i) => i.code === "missing_script");
+  assert.ok(missingScript);
+  assert.equal(missingScript!.rootCause, "missing_script_class");
+  assert.ok(
+    typeof missingScript!.remediation === "string" && missingScript!.remediation!.length > 0,
+  );
+});
+
+test("rootCause differentiates missing-guid vs duplicate-guid classes", () => {
+  // Two issue classes that a naive "broken reference" label would conflate —
+  // the taxonomy splits them so an agent branches recovery programmatically.
+  const missingRef = RULE_CATALOG.find((r) => r.id === "missing_references")!;
+  const missingGuid = missingRef.issues.find((i) => i.code === "missing_guid")!;
+  assert.equal(missingGuid.rootCause, "missing_guid_reference");
+
+  const projectHealth = RULE_CATALOG.find((r) => r.id === "project_health")!;
+  const dupGuid = projectHealth.issues.find((i) => i.code === "duplicate_guid")!;
+  assert.equal(dupGuid.rootCause, "duplicate_guid");
+
+  assert.notEqual(missingGuid.rootCause, dupGuid.rootCause);
+});
+
+// ---------------------------------------------------------------------------
 // Fix catalog
 // ---------------------------------------------------------------------------
+
 
 test("remove_missing_script fix is registered and safe", () => {
   const fix = implementedFixes().find((f) => f.id === "remove_missing_script");
