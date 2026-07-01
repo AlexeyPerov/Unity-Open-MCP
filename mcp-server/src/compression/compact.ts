@@ -19,6 +19,7 @@ import type {
   AssetComponent,
   HierarchyNode,
   PrefabOverrideEntry,
+  AssetIntegrityIssue,
   SearchModel,
   SearchMatch,
   SearchObjectMatch,
@@ -407,6 +408,8 @@ export interface CompactAssetResult {
   pathScope?: string;
   idResult?: IdResult;
   overrides?: PrefabOverrideEntry[];
+  /** M24 — offline integrity signals (surfaced on every read so agents see them). */
+  integrity?: AssetIntegrityIssue[];
 }
 
 /** Render the compact asset summary / drill-down. */
@@ -422,6 +425,10 @@ export function renderAssetSummary(
     objects: model.objectCount,
     components: model.componentCount,
   };
+  // M24 — surface offline integrity signals on every read so an agent sees
+  // missing refs / malformed structure without a separate verify call. The
+  // verify rule suite (M25) consumes the same signals as structured rules.
+  if (model.integrity && model.integrity.length > 0) result.integrity = model.integrity;
 
   // Non-hierarchical assets (ScriptableObject / Material / .asset): no TREE.
   if (model.roots.length === 0) {

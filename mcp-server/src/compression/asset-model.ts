@@ -75,6 +75,20 @@ export interface PrefabOverrideEntry {
   addedObject?: string;
 }
 
+/**
+ * M24 — offline integrity signal. The parser emits these from raw bytes (no
+ * Editor); the verify rule suite (M25) turns the same signals into structured
+ * rules. Each issue names the asset-local location that triggered it.
+ */
+export interface AssetIntegrityIssue {
+  /** Stable rule id (e.g. "malformed_json", "missing_reference", "orphaned_prefab_instance"). */
+  code: string;
+  /** Human-readable detail (path / field / count). */
+  detail: string;
+  /** Severity hint for the verify engine. */
+  severity: "error" | "warning" | "info";
+}
+
 export interface AssetModel {
   kind: AssetKind | string;
   path: string;
@@ -88,6 +102,8 @@ export interface AssetModel {
   flatObjects?: FlatObject[];
   /** Prefab variant overrides. Populated for prefabs with PrefabInstance objects. */
   overrides?: PrefabOverrideEntry[];
+  /** M24 — offline integrity signals (malformed structure, missing refs). Feeds the verify engine (M25). */
+  integrity?: AssetIntegrityIssue[];
   /** Optional source-side notice (e.g. "scene hierarchy requires offline parser"). */
   note?: string;
 }

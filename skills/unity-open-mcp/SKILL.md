@@ -249,7 +249,7 @@ Treat `capabilities.routePolicy` + `batchCapable` as source of truth.
 - **Live is the default** — when the bridge is connected, most tools route to `POST /tools/{name}` on the Editor.
 - **Batch fallback** — spawns headless Unity (`-batchmode`) **only** for `batchCapable: true` tools when the live bridge is unavailable. Mutating meta-tools (`execute_csharp`, `invoke_method`, `execute_menu`) are blocked in batch — they need a live Editor.
 - **Senses are live-only** — `run_tests`, screenshots, profiler, console, spatial queries have no batch form.
-- **Offline reads** (`list_assets`, `find_references`, `read_asset`, `search_assets`) parse the project from disk and never need Unity.
+- **Offline reads** (`list_assets`, `find_references`, `read_asset`, `search_assets`) parse the project from disk and never need Unity. Coverage: text-serialized Unity YAML (`.prefab`/`.unity`/`.asset`/`.mat`/`.controller`/`.anim`/`.playable`/`.preset`/`.spriteatlas`/`.terrainlayer`/`.vfx`) **plus** JSON assets unity-scanner can't parse (`.asmdef`, `.shadergraph`/`.shadersubgraph`). `read_asset` also reconstructs the full hierarchy offline, parses prefab-variant overrides (matching `prefab_get_overrides`), and surfaces `integrity[]` signals (missing refs, missing scripts, malformed JSON, orphaned prefab instances) on the response — act on them before a `validate_edit` round-trip.
 - `**dependencies` is live-only** — it reuses the verify `Dependencies.Scanner` (forward) + `ReferenceGraph` (reverse), both of which call AssetDatabase. No offline form.
 - `**compile_check` is always batch** — spawns a fresh headless Unity that recompiles from scratch, even when the live bridge is up.
 

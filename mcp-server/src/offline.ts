@@ -19,6 +19,7 @@ import type {
   FlatObject,
   ComponentField,
   PrefabOverrideEntry,
+  AssetIntegrityIssue,
   SearchModel,
   SearchMatch,
   SearchObjectMatch,
@@ -65,6 +66,7 @@ function nativeClassName(classID: number): string {
 
 const extToKind: Record<string, string> = {
   ".anim": "anim",
+  ".asmdef": "asmdef",
   ".asset": "asset",
   ".controller": "controller",
   ".cs": "cs",
@@ -74,13 +76,49 @@ const extToKind: Record<string, string> = {
   ".physicMaterial": "physics",
   ".playable": "playable",
   ".prefab": "prefab",
+  ".preset": "preset",
   ".shader": "shader",
+  ".shadergraph": "shadergraph",
+  ".shadersubgraph": "shadergraph",
   ".spriteatlas": "atlas",
+  ".terrainlayer": "terrainlayer",
   ".unity": "scene",
   ".uss": "uss",
   ".uxml": "uxml",
+  ".vfx": "vfx",
   ".meta": "meta",
 };
+
+// ===========================================================================
+// M24 — offline-parseable extension sets.
+// YAML_PARSEABLE covers text-serialized Unity YAML; JSON_PARSEABLE covers the
+// JSON asset kinds unity-scanner does not handle (our differentiator). Both are
+// merged into OFFLINE_PARSEABLE for the read_asset / search / find_references
+// gates. LISTABLE stays broader (it never parses, only enumerates files).
+// ===========================================================================
+
+const YAML_PARSEABLE_EXTENSIONS = new Set([
+  ".prefab", ".unity", ".asset", ".mat", ".controller", ".anim", ".playable",
+  ".preset", ".spriteatlas", ".terrainlayer", ".vfx",
+]);
+
+const JSON_PARSEABLE_EXTENSIONS = new Set([
+  ".asmdef", ".shadergraph", ".shadersubgraph",
+]);
+
+const OFFLINE_PARSEABLE_EXTENSIONS = new Set<string>([
+  ...YAML_PARSEABLE_EXTENSIONS,
+  ...JSON_PARSEABLE_EXTENSIONS,
+]);
+
+function offlineParseKind(assetPath: string): "yaml" | "json" | null {
+  const dot = assetPath.lastIndexOf(".");
+  if (dot < 0) return null;
+  const ext = assetPath.slice(dot).toLowerCase();
+  if (YAML_PARSEABLE_EXTENSIONS.has(ext)) return "yaml";
+  if (JSON_PARSEABLE_EXTENSIONS.has(ext)) return "json";
+  return null;
+}
 
 const kindAliases: Record<string, string> = {
   prefabs: "prefab",
@@ -1066,19 +1104,40 @@ async function walkMeta(
 // readAssetOffline — parse a text-serialized asset → AssetModel.
 // ===========================================================================
 
-const OFFLINE_EXTENSIONS = new Set([
-  ".prefab", ".unity", ".asset", ".mat", ".controller", ".anim", ".playable",
-]);
-
 export function isOfflineAsset(assetPath: string): boolean {
-  const dot = assetPath.lastIndexOf(".");
-  if (dot < 0) return false;
-  return OFFLINE_EXTENSIONS.has(assetPath.slice(dot).toLowerCase());
+  return offlineParseKind(assetPath) !== null;
 }
 
 export interface OfflineReadResult {
   model: AssetModel;
   source: "offline";
+}
+
+/**
+ * M24 — full-hierarchy parity helper. The offline `objectCount` counts every
+ * YAML object in the file; the live `read_asset` bridge counts only GameObjects
+ * + the components attached to them (it walks the loaded Transform tree, not
+ * the raw YAML). This helper returns the live-comparable counts so an
+ * acceptance test can verify the offline-reconstructed tree matches a live read
+ * node-for-node and component-for-component, without depending on the bridge.
+ *
+ * Returns `{ nodes, components }` where `nodes` is the GameObject count and
+ * `components` is the sum of components across the tree — the two numbers the
+ * live `ReadAssetTool` emits as `objectCount` (nodes+components) and
+ * `componentCount`.
+ */
+export function countHierarchy(model: AssetModel): { nodes: number; components: number } {
+  let nodes = 0;
+  let components = 0;
+  const walk = (list: HierarchyNode[]): void => {
+    for (const node of list) {
+      nodes++;
+      components += node.components.length;
+      walk(node.children);
+    }
+  };
+  walk(model.roots);
+  return { nodes, components };
 }
 
 export async function readAssetOffline(
@@ -1087,10 +1146,24 @@ export async function readAssetOffline(
 ): Promise<OfflineReadResult> {
   const absPath = join(opts.projectRoot, assetPath);
   const data = await readFile(absPath, "utf-8");
+  const kind = kindForPath(assetPath);
+  const guid = await safeReadMetaGUID(absPath + ".meta");
+  const parseKind = offlineParseKind(assetPath);
+
+  // M24 — JSON asset kinds (.asmdef/.shadergraph/.shadersubgraph/.vfx) parse
+  // through a separate path; unity-scanner handles YAML only, so this is the
+  // coverage differentiator. vfx is YAML+binary, but its object headers + GUID
+  // refs still parse via the YAML path (binary blobs are skipped).
+  if (parseKind === "json") {
+    const guidIndex = await buildGUIDIndex(opts.projectRoot, new Set(findGUIDs(data)));
+    const model = buildJsonAssetModel(data, assetPath, kind, guid, guidIndex, opts.fieldLimit);
+    return { model, source: "offline" };
+  }
+
   const parsed = parseAsset(data);
   parsed.path = assetPath;
-  parsed.kind = kindForPath(assetPath);
-  parsed.guid = await safeReadMetaGUID(absPath + ".meta");
+  parsed.kind = kind;
+  parsed.guid = guid;
 
   const wantedScripts = scriptGUIDs(parsed);
   const scriptIndex = await buildScriptIndex(opts.projectRoot, wantedScripts);
@@ -1098,7 +1171,11 @@ export async function readAssetOffline(
   const guidIndex = await buildGUIDIndex(opts.projectRoot, wantedGUIDs);
   for (const [g, p] of scriptIndex) guidIndex.set(g, p);
 
-  return { model: buildAssetModel(parsed, scriptIndex, guidIndex, opts.fieldLimit), source: "offline" };
+  const integrity = runYamlIntegrityChecks(parsed, guidIndex);
+  return {
+    model: { ...buildAssetModel(parsed, scriptIndex, guidIndex, opts.fieldLimit), ...(integrity ? { integrity } : {}) },
+    source: "offline",
+  };
 }
 
 async function safeReadMetaGUID(metaPath: string): Promise<string> {
@@ -1171,6 +1248,290 @@ function buildAssetModel(
   };
 }
 
+// ===========================================================================
+// M24 — JSON asset parser (.asmdef / .shadergraph / .shadersubgraph).
+//
+// unity-scanner handles YAML only; this path is the coverage differentiator.
+// Each kind has a distinct on-disk shape:
+//  - .asmdef  → a single JSON object (assembly-definition manifest).
+//  - .shadergraph / .shadersubgraph → a JSON-document stream: multiple pretty-
+//    printed JSON objects concatenated on blank-line boundaries, each carrying
+//    an "m_Type" discriminator. The first is always the graph root.
+// GUID references inside the JSON are resolved against the meta index the same
+// way YAML field refs are.
+// ===========================================================================
+
+function buildJsonAssetModel(
+  data: string,
+  assetPath: string,
+  kind: string,
+  guid: string,
+  guidIndex: GUIDIndex,
+  fieldLimit: number,
+): AssetModel {
+  const issues: AssetIntegrityIssue[] = [];
+  const objects = parseJsonAsset(data, issues);
+
+  const flatObjects: FlatObject[] = [];
+  for (const obj of objects) {
+    const fields = jsonFields(obj.value, fieldLimit, guidIndex);
+    flatObjects.push({
+      name: obj.name,
+      type: obj.type,
+      fields: fields.length > 0 ? fields : undefined,
+    });
+  }
+
+  const integrity = runJsonIntegrityChecks(kind, objects, issues, assetPath);
+  return {
+    kind,
+    path: assetPath,
+    guid: guid || undefined,
+    objectCount: objects.length,
+    componentCount: 0,
+    roots: [],
+    flatObjects,
+    ...(integrity.length > 0 ? { integrity } : {}),
+  };
+}
+
+interface JsonParsedObject {
+  /** Display label (m_Name / m_ObjectId / name key, or a generated label). */
+  name: string;
+  /** Type label (top-level kind, or the m_Type discriminator for shadergraph). */
+  type: string;
+  /** The parsed JSON value. */
+  value: unknown;
+}
+
+/**
+ * Parse a JSON asset into one or more JsonParsedObjects. `.asmdef` is a single
+ * object; `.shadergraph` is a stream of objects. Malformed JSON records an
+ * integrity issue instead of throwing — a partial read is more useful to an
+ * agent than a hard failure when the bridge is down.
+ */
+function parseJsonAsset(data: string, issues: AssetIntegrityIssue[]): JsonParsedObject[] {
+  const ext = "json";
+  const chunks = splitJsonStream(data);
+  if (chunks.length === 0) {
+    issues.push({ code: "malformed_json", detail: "no JSON objects found", severity: "error" });
+    return [];
+  }
+
+  const out: JsonParsedObject[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    let value: unknown;
+    try {
+      value = JSON.parse(chunks[i]);
+    } catch (e) {
+      issues.push({
+        code: "malformed_json",
+        detail: `object ${i + 1}: ${(e as Error).message}`,
+        severity: "error",
+      });
+      continue;
+    }
+    out.push(jsonParsedObject(value, i));
+  }
+  return out;
+
+  function jsonParsedObject(value: unknown, index: number): JsonParsedObject {
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      const obj = value as Record<string, unknown>;
+      const type =
+        typeof obj.m_Type === "string" && obj.m_Type !== ""
+          ? jsonShortType(obj.m_Type)
+          : "json";
+      const name =
+        pickString(obj.m_Name) ??
+        pickString(obj.m_ObjectId) ??
+        pickString(obj.name) ??
+        (type !== "json" ? `${type}#${index}` : `object#${index}`);
+      return { name, type, value };
+    }
+    return { name: `value#${index}`, type: ext, value };
+  }
+}
+
+function pickString(v: unknown): string | undefined {
+  return typeof v === "string" && v !== "" ? v : undefined;
+}
+
+/** Shorten a ShaderGraph m_Type like "UnityEditor.ShaderGraph.MultiplyNode" → "MultiplyNode". */
+function jsonShortType(full: string): string {
+  const dot = full.lastIndexOf(".");
+  return dot >= 0 ? full.slice(dot + 1) : full;
+}
+
+/**
+ * A `.shadergraph` is a stream of pretty-printed JSON objects. They are
+ * separated by blank lines, but a single object's pretty-printed body also
+ * contains newlines — so the split must track brace depth, not line gaps.
+ * `.asmdef` is a single object; this still returns a one-element array.
+ */
+function splitJsonStream(data: string): string[] {
+  const trimmed = data.trim();
+  if (trimmed === "") return [];
+  const chunks: string[] = [];
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let start = -1;
+
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        chunks.push(trimmed.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  // Fallback: if brace tracking found nothing (e.g. a top-level array or a
+  // malformed file), try a single JSON.parse on the whole content so the
+  // malformed_json issue path can report it.
+  if (chunks.length === 0) chunks.push(trimmed);
+  return chunks;
+}
+
+/**
+ * Flatten a parsed JSON value into display fields. Scalars, arrays, and nested
+ * objects are summarized into short `name: value` rows, mirroring the YAML
+ * field renderer. GUID refs are resolved against the meta index.
+ */
+function jsonFields(
+  value: unknown,
+  limit: number,
+  guidIndex: GUIDIndex,
+): { name: string; value: string }[] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
+  const obj = value as Record<string, unknown>;
+  const out: { name: string; value: string }[] = [];
+  for (const [key, raw] of Object.entries(obj)) {
+    if (out.length >= limit && limit > 0) break;
+    out.push({ name: key, value: jsonScalar(raw, guidIndex) });
+  }
+  return out;
+}
+
+function jsonScalar(value: unknown, guidIndex: GUIDIndex): string {
+  if (value === null) return "null";
+  switch (typeof value) {
+    case "string":
+      return resolveReferences(value, guidIndex, EMPTY_PARSED);
+    case "number":
+    case "boolean":
+      return String(value);
+    default: {
+      if (Array.isArray(value)) return `[${value.length}]`;
+      const obj = value as Record<string, unknown>;
+      // Inline {fileID, guid, type} PPtr → resolve to asset name.
+      if (typeof obj.guid === "string" && obj.guid.length === 32) {
+        return resolveReferences(`{fileID: ${obj.fileID ?? 0}, guid: ${obj.guid}, type: ${obj.type ?? 0}}`, guidIndex, EMPTY_PARSED);
+      }
+      const keys = Object.keys(obj);
+      if (keys.length === 0) return "{}";
+      return `{${keys.slice(0, 4).join(", ")}${keys.length > 4 ? ", …" : ""}}`;
+    }
+  }
+}
+
+// A ParsedAsset stand-in used only by resolveReferences' local-reference path.
+// JSON assets have no in-file fileIDs, so local ref resolution is a no-op.
+const EMPTY_PARSED: ParsedAsset = { path: "", kind: "", guid: "", objects: [], byID: new Map() };
+
+// ===========================================================================
+// M24 — offline integrity checks. The verify rule suite (M25) consumes these
+// signals; here we only emit asset-local findings derivable from raw bytes.
+// ===========================================================================
+
+function runYamlIntegrityChecks(parsed: ParsedAsset, guidIndex: GUIDIndex): AssetIntegrityIssue[] {
+  const issues: AssetIntegrityIssue[] = [];
+
+  // Orphaned PrefabInstance: a PrefabInstance whose m_SourcePrefab GUID is
+  // missing from the project (the base prefab was deleted or never imported).
+  for (const obj of parsed.objects) {
+    if (obj.type !== "PrefabInstance") continue;
+    const sourceGuid = readGUIDField(obj.lines, "m_SourcePrefab");
+    if (sourceGuid !== "" && !guidIndex.has(sourceGuid)) {
+      issues.push({
+        code: "orphaned_prefab_instance",
+        detail: `m_SourcePrefab guid ${sourceGuid} not found in project`,
+        severity: "warning",
+      });
+    }
+  }
+
+  // Unresolved field GUIDs (missing references) — every guid: in a field that
+  // the meta index cannot resolve. Component m_Script guids get their own code
+  // so a missing-script is distinguishable from a missing asset ref.
+  const missingScripts = new Set<string>();
+  const missingRefs = new Set<string>();
+  for (const obj of parsed.objects) {
+    for (const line of obj.lines) {
+      if (!line.includes("guid:")) continue;
+      const isScript = line.includes("m_Script");
+      for (const g of findGUIDs(line)) {
+        if (guidIndex.has(g)) continue;
+        if (isScript) missingScripts.add(g);
+        else missingRefs.add(g);
+      }
+    }
+  }
+  for (const g of missingScripts) {
+    issues.push({ code: "missing_script_reference", detail: `script guid ${g} unresolved`, severity: "error" });
+  }
+  for (const g of missingRefs) {
+    issues.push({ code: "missing_reference", detail: `asset guid ${g} unresolved`, severity: "warning" });
+  }
+
+  return issues;
+}
+
+function runJsonIntegrityChecks(
+  kind: string,
+  objects: JsonParsedObject[],
+  parseIssues: AssetIntegrityIssue[],
+  _assetPath: string,
+): AssetIntegrityIssue[] {
+  const issues = [...parseIssues];
+
+  if (kind === "asmdef") {
+    const first = objects[0]?.value;
+    if (first && typeof first === "object" && !Array.isArray(first)) {
+      const obj = first as Record<string, unknown>;
+      if (pickString(obj.name) === undefined) {
+        issues.push({ code: "asmdef_missing_name", detail: "asmdef has no 'name' field", severity: "error" });
+      }
+    }
+  }
+
+  if (kind === "shadergraph") {
+    // A valid graph stream must start with the GraphData root.
+    const rootType = objects[0]?.type;
+    if (rootType !== undefined && !rootType.includes("GraphData")) {
+      issues.push({
+        code: "shadergraph_root_missing",
+        detail: `first object is ${rootType}, expected a GraphData root`,
+        severity: "warning",
+      });
+    }
+  }
+
+  return issues;
+}
+
 function convertNode(
   node: HierarchyResult,
   parsed: ParsedAsset,
@@ -1208,9 +1569,7 @@ function toComponentField(f: { name: string; value: string }): ComponentField {
 // searchAssetsOffline — scan Assets/ → SearchModel.
 // ===========================================================================
 
-const SEARCHABLE_EXTENSIONS = new Set([
-  ".prefab", ".unity", ".asset", ".mat", ".controller", ".anim", ".playable",
-]);
+const SEARCHABLE_EXTENSIONS = OFFLINE_PARSEABLE_EXTENSIONS;
 
 export async function searchAssetsOffline(
   opts: {
@@ -1245,11 +1604,24 @@ export async function searchAssetsOffline(
     const kind = kindForPath(filePath);
     if (typeFilter && typeFilter.size > 0 && !typeFilter.has(kind)) continue;
 
+    const guid = await safeReadMetaGUID(filePath + ".meta");
+
+    // M24 — JSON asset kinds route through a content-based match path (they
+    // have no GameObject/component tree for the YAML matcher to walk).
+    if (offlineParseKind(filePath) === "json") {
+      let content: string;
+      try { content = await readFile(filePath, "utf-8"); } catch { continue; }
+      const match = checkJsonMatch(content, guidIndex, assetPath, kind, guid, {
+        nameQuery, componentQuery, guidQuery,
+      });
+      if (match) matches.push(match);
+      continue;
+    }
+
     let parsed: ParsedAsset;
     try { parsed = parseAsset(await readFile(filePath, "utf-8")); } catch { continue; }
     parsed.path = assetPath;
     parsed.kind = kind;
-    const guid = await safeReadMetaGUID(filePath + ".meta");
 
     const match = checkMatch(parsed, scriptIndex, guidIndex, assetPath, kind, guid, { nameQuery, componentQuery, guidQuery });
     if (match) matches.push(match);
@@ -1322,6 +1694,47 @@ function checkMatch(
   if (reasons.length === 0) return null;
 
   return { path: assetPath, guid: guid || undefined, kind, reasons, objects: objects.length > 0 ? objects : undefined };
+}
+
+/**
+ * M24 — content-based matcher for JSON asset kinds (.asmdef/.shadergraph).
+ * They have no GameObject tree, so matching is by file name, raw-text GUID
+ * presence, and content substring (name/component queries search the raw text
+ * since JSON is human-readable). This keeps `search_assets` offline-capable for
+ * the expanded type set.
+ */
+function checkJsonMatch(
+  content: string,
+  guidIndex: Map<string, string>,
+  assetPath: string,
+  kind: string,
+  guid: string,
+  criteria: { nameQuery: string; componentQuery: string; guidQuery: string },
+): SearchMatch | null {
+  const reasons: string[] = [];
+  const { nameQuery, componentQuery, guidQuery } = criteria;
+  const fileName = basename(assetPath);
+  const lower = content.toLowerCase();
+
+  if (nameQuery && fileName.toLowerCase().includes(nameQuery)) reasons.push("file-name");
+
+  if (guidQuery) {
+    if (guid.toLowerCase() === guidQuery) reasons.push("guid");
+    else if (lower.includes(guidQuery)) reasons.push("guid");
+  }
+
+  if (nameQuery && !reasons.includes("file-name") && lower.includes(nameQuery)) {
+    reasons.push("gameobject");
+  }
+  if (componentQuery && lower.includes(componentQuery)) {
+    reasons.push("component");
+  }
+
+  if (!componentQuery && !nameQuery && !guidQuery) reasons.push("file-name");
+  if (reasons.length === 0) return null;
+
+  void guidIndex;
+  return { path: assetPath, guid: guid || undefined, kind, reasons };
 }
 
 function flattenHierarchy(nodes: HierarchyResult[]): HierarchyResult[] {
@@ -1406,6 +1819,9 @@ const LISTABLE_EXTENSIONS = new Set([
   ".prefab", ".unity", ".asset", ".mat", ".controller", ".anim", ".playable",
   ".cs", ".shader", ".spriteatlas", ".physicMaterial", ".physicsMaterial2D",
   ".overrideController", ".uxml", ".uss",
+  // M24 — expanded offline-parseable kinds (also listable so they show up in
+  // directory listings; listing never parses, so they cost nothing to include).
+  ".asmdef", ".shadergraph", ".shadersubgraph", ".vfx", ".preset", ".terrainlayer",
 ]);
 
 export async function listAssetsOffline(
@@ -1498,9 +1914,7 @@ async function walkFiles(
 // locations → group + cap + collapse.
 // ===========================================================================
 
-const REFERENCEABLE_EXTENSIONS = new Set([
-  ".prefab", ".unity", ".asset", ".mat", ".controller", ".anim", ".playable",
-]);
+const REFERENCEABLE_EXTENSIONS = OFFLINE_PARSEABLE_EXTENSIONS;
 
 export interface ReferencedByEntry {
   assetPath: string;

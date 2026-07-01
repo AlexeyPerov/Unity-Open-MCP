@@ -15,6 +15,7 @@ import {
   searchAssetsOffline,
   listAssetsOffline,
   findReferencesOffline,
+  countHierarchy,
 } from "./offline.js";
 import { renderAssetSummary } from "./compression/compact.js";
 import type { AssetModel } from "./compression/asset-model.js";
@@ -786,3 +787,648 @@ PrefabInstance:
     "guid: variant000000000000000000000000002\n",
   );
 }
+
+// ===========================================================================
+// M24 Plan 1 — expanded offline parsers (T24.1.1).
+//
+// Coverage: .asmdef (JSON), .shadergraph (JSON stream), .preset (YAML),
+// .terrainlayer (YAML), .spriteatlas (YAML) — plus per-type integrity checks.
+// unity-scanner handles YAML only; the JSON path is our differentiator.
+// ===========================================================================
+
+test("isOfflineAsset gates the expanded type set", () => {
+  // Original YAML set still offline-parseable.
+  assert.equal(isOfflineAsset("Assets/Foo.prefab"), true);
+  assert.equal(isOfflineAsset("Assets/Scene.unity"), true);
+  // M24 additions.
+  assert.equal(isOfflineAsset("Assets/Foo.asmdef"), true);
+  assert.equal(isOfflineAsset("Assets/Foo.shadergraph"), true);
+  assert.equal(isOfflineAsset("Assets/Foo.shadersubgraph"), true);
+  assert.equal(isOfflineAsset("Assets/Foo.preset"), true);
+  assert.equal(isOfflineAsset("Assets/Foo.terrainlayer"), true);
+  assert.equal(isOfflineAsset("Assets/Foo.spriteatlas"), true);
+  assert.equal(isOfflineAsset("Assets/Foo.vfx"), true);
+  // Binary / unsupported stay live-routed.
+  assert.equal(isOfflineAsset("Assets/Tex.png"), false);
+  assert.equal(isOfflineAsset("Assets/Audio.wav"), false);
+});
+
+test("readAssetOffline parses .asmdef (single JSON object)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-asmdef-"));
+  try {
+    await setupAsmdefProject(tmp);
+    const { model, source } = await readAssetOffline("Assets/Scripts/Foo.asmdef", {
+      fieldLimit: 20,
+      projectRoot: tmp,
+    });
+    assert.equal(source, "offline");
+    assert.equal(model.kind, "asmdef");
+    assert.equal(model.roots.length, 0, "no hierarchy for asmdef");
+    assert.ok(model.flatObjects && model.flatObjects.length > 0, "flatObjects present");
+    const nameField = model.flatObjects[0].fields?.find((f) => f.name === "name");
+    assert.ok(nameField, "name field present");
+    assert.equal(nameField.value, "Foo");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("readAssetOffline parses .shadergraph (JSON object stream)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-sg-"));
+  try {
+    await setupShaderGraphProject(tmp);
+    const { model } = await readAssetOffline("Assets/Foo.shadergraph", {
+      fieldLimit: 30,
+      projectRoot: tmp,
+    });
+    assert.equal(model.kind, "shadergraph");
+    assert.equal(model.roots.length, 0, "no hierarchy for shadergraph");
+    // The stream splits into one object per JSON document (graph root + node).
+    assert.ok(model.flatObjects && model.flatObjects.length >= 2, "multiple flat objects from stream");
+    const root = model.flatObjects[0];
+    assert.ok(root.type.includes("GraphData"), `root type is GraphData: ${root.type}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("readAssetOffline parses .preset (YAML)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-preset-"));
+  try {
+    await setupPresetProject(tmp);
+    const { model } = await readAssetOffline("Assets/Presets/MyPreset.preset", {
+      fieldLimit: 20,
+      projectRoot: tmp,
+    });
+    assert.equal(model.kind, "preset");
+    assert.equal(model.roots.length, 0, "no hierarchy for preset");
+    assert.ok(model.flatObjects && model.flatObjects.length > 0);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("readAssetOffline parses .terrainlayer (YAML) and resolves texture refs", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-terrainlayer-"));
+  try {
+    await setupTerrainLayerProject(tmp);
+    const { model } = await readAssetOffline("Assets/Terrain/dry_soil.terrainlayer", {
+      fieldLimit: 20,
+      projectRoot: tmp,
+    });
+    assert.equal(model.kind, "terrainlayer");
+    assert.ok(model.flatObjects && model.flatObjects.length > 0);
+    const diffuse = model.flatObjects[0].fields?.find((f) => f.name === "m_DiffuseTexture");
+    assert.ok(diffuse, "m_DiffuseTexture field present");
+    // The field GUID should resolve to the texture asset name via the meta index.
+    assert.ok(diffuse.value.includes("Diffuse"), `diffuse ref resolves: ${diffuse.value}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("readAssetOffline parses .spriteatlas (YAML) packable refs", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-atlas-"));
+  try {
+    await setupSpriteAtlasProject(tmp);
+    const { model } = await readAssetOffline("Assets/UI/Icons.spriteatlas", {
+      fieldLimit: 0,
+      projectRoot: tmp,
+    });
+    assert.equal(model.kind, "atlas");
+    assert.ok(model.flatObjects && model.flatObjects.length > 0);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// M24 — integrity checks (T24.1.1 "feeding the verify engine").
+// ---------------------------------------------------------------------------
+
+test("readAssetOffline reports missing-reference integrity for unresolved field GUIDs", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-integrity-missing-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    await writeFile(
+      join(tmp, "Assets", "Prefabs", "Broken.prefab"),
+      `%YAML 1.1
+--- !u!1 &100
+GameObject:
+  m_Component:
+  - component: {fileID: 200}
+  m_Name: Broken
+--- !u!4 &200
+Transform:
+  m_GameObject: {fileID: 100}
+  m_Father: {fileID: 0}
+--- !u!114 &300
+MonoBehaviour:
+  m_GameObject: {fileID: 100}
+  m_Material: {fileID: 0, guid: 9999888800000000000000000000dead, type: 2}
+`,
+    );
+    await writeFile(join(tmp, "Assets", "Prefabs", "Broken.prefab.meta"), "guid: brok000000000000000000000000001\n");
+    // No .meta for the referenced GUID → missing_reference signal.
+
+    const { model } = await readAssetOffline("Assets/Prefabs/Broken.prefab", {
+      fieldLimit: 10,
+      projectRoot: tmp,
+    });
+    assert.ok(model.integrity, "integrity signals present");
+    const missing = model.integrity.find((i) => i.code === "missing_reference");
+    assert.ok(missing, "missing_reference signal emitted");
+    assert.ok(missing.detail.includes("99998888"), `detail names the guid: ${missing.detail}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("readAssetOffline reports missing-script-reference for unresolved m_Script GUIDs", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-integrity-script-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    await writeFile(
+      join(tmp, "Assets", "Prefabs", "MissingScript.prefab"),
+      `%YAML 1.1
+--- !u!1 &100
+GameObject:
+  m_Component:
+  - component: {fileID: 200}
+  - component: {fileID: 300}
+  m_Name: MissingScript
+--- !u!4 &200
+Transform:
+  m_GameObject: {fileID: 100}
+  m_Father: {fileID: 0}
+--- !u!114 &300
+MonoBehaviour:
+  m_GameObject: {fileID: 100}
+  m_Script: {fileID: 11500000, guid: 7777666600000000000000000000abcd, type: 3}
+`,
+    );
+    await writeFile(join(tmp, "Assets", "Prefabs", "MissingScript.prefab.meta"), "guid: ms00000000000000000000000000001\n");
+
+    const { model } = await readAssetOffline("Assets/Prefabs/MissingScript.prefab", {
+      fieldLimit: 0,
+      projectRoot: tmp,
+    });
+    assert.ok(model.integrity);
+    const scriptMissing = model.integrity.find((i) => i.code === "missing_script_reference");
+    assert.ok(scriptMissing, "missing_script_reference signal emitted");
+    assert.equal(scriptMissing.severity, "error");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("readAssetOffline reports malformed_json integrity for broken .asmdef", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-integrity-json-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Scripts"), { recursive: true });
+    await writeFile(join(tmp, "Assets", "Scripts", "Bad.asmdef"), `{ "name": "broken `);
+    await writeFile(join(tmp, "Assets", "Scripts", "Bad.asmdef.meta"), "guid: bad00000000000000000000000000001\n");
+
+    const { model } = await readAssetOffline("Assets/Scripts/Bad.asmdef", {
+      fieldLimit: 0,
+      projectRoot: tmp,
+    });
+    assert.ok(model.integrity, "integrity present even for malformed JSON");
+    const malformed = model.integrity.find((i) => i.code === "malformed_json");
+    assert.ok(malformed, "malformed_json signal emitted");
+    assert.equal(malformed.severity, "error");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("readAssetOffline reports asmdef_missing_name integrity", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-integrity-asmdef-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Scripts"), { recursive: true });
+    await writeFile(join(tmp, "Assets", "Scripts", "Noname.asmdef"), `{"references": []}`);
+    await writeFile(join(tmp, "Assets", "Scripts", "Noname.asmdef.meta"), "guid: non00000000000000000000000000001\n");
+
+    const { model } = await readAssetOffline("Assets/Scripts/Noname.asmdef", {
+      fieldLimit: 0,
+      projectRoot: tmp,
+    });
+    assert.ok(model.integrity);
+    const missingName = model.integrity.find((i) => i.code === "asmdef_missing_name");
+    assert.ok(missingName, "asmdef_missing_name signal emitted");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("readAssetOffline reports orphaned_prefab_instance when base prefab missing", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-integrity-orphan-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    // Variant references a base GUID that has no .meta in the project. The GUID
+    // must be valid 32-char hex so the scanner reads it whole.
+    const missingBaseGuid = "0badbad000000000000000000000abcd";
+    await writeFile(
+      join(tmp, "Assets", "Prefabs", "OrphanVariant.prefab"),
+      `%YAML 1.1
+--- !u!1001 &500
+PrefabInstance:
+  m_Modification:
+    m_Modifications: []
+  m_SourcePrefab: {fileID: 100100000, guid: ${missingBaseGuid}, type: 3}
+`,
+    );
+    await writeFile(join(tmp, "Assets", "Prefabs", "OrphanVariant.prefab.meta"), "guid: orph00000000000000000000000000001\n");
+
+    const { model } = await readAssetOffline("Assets/Prefabs/OrphanVariant.prefab", {
+      fieldLimit: 0,
+      projectRoot: tmp,
+    });
+    assert.ok(model.integrity);
+    const orphan = model.integrity.find((i) => i.code === "orphaned_prefab_instance");
+    assert.ok(orphan, "orphaned_prefab_instance signal emitted");
+    assert.ok(orphan.detail.includes(missingBaseGuid), `detail names the base guid: ${orphan.detail}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("renderAssetSummary surfaces integrity signals on the compact output", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-integrity-render-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    await writeFile(
+      join(tmp, "Assets", "Prefabs", "Broken.prefab"),
+      `%YAML 1.1
+--- !u!1 &100
+GameObject:
+  m_Component:
+  - component: {fileID: 200}
+  m_Name: Broken
+--- !u!4 &200
+Transform:
+  m_GameObject: {fileID: 100}
+  m_Father: {fileID: 0}
+--- !u!114 &300
+MonoBehaviour:
+  m_GameObject: {fileID: 100}
+  m_Material: {fileID: 0, guid: 5555444400000000000000000000dead, type: 2}
+`,
+    );
+    await writeFile(join(tmp, "Assets", "Prefabs", "Broken.prefab.meta"), "guid: brk00000000000000000000000000001\n");
+
+    const { model } = await readAssetOffline("Assets/Prefabs/Broken.prefab", {
+      fieldLimit: 0,
+      projectRoot: tmp,
+    });
+    const compact = renderAssetSummary(model, { detail: "summary" });
+    assert.ok(compact.integrity, "integrity on compact result");
+    assert.ok(compact.integrity.length > 0);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("searchAssetsOffline finds .asmdef by name (expanded type search)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-search-asmdef-"));
+  try {
+    await setupAsmdefProject(tmp);
+    const result = await searchAssetsOffline({ name: "Foo", projectRoot: tmp });
+    const asmdefMatch = result.matches.find((m) => m.path.endsWith("Foo.asmdef"));
+    assert.ok(asmdefMatch, "asmdef found by name");
+    assert.ok(asmdefMatch.reasons.includes("file-name"));
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("searchAssetsOffline finds .shadergraph by guid reference", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-search-sg-guid-"));
+  try {
+    await setupShaderGraphProject(tmp);
+    const result = await searchAssetsOffline({
+      guid: "tex111000000000000000000000000001",
+      projectRoot: tmp,
+    });
+    const sgMatch = result.matches.find((m) => m.path.endsWith("Foo.shadergraph"));
+    assert.ok(sgMatch, "shadergraph found by referenced guid");
+    assert.ok(sgMatch.reasons.includes("guid"));
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("listAssetsOffline includes the expanded types", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-list-expanded-"));
+  try {
+    await setupAsmdefProject(tmp);
+    await setupPresetProject(tmp);
+    const result = await listAssetsOffline({ projectRoot: tmp });
+    const kinds = new Set(Object.keys(result.kindSummary));
+    assert.ok(kinds.has("asmdef"), "asmdef kind in summary");
+    assert.ok(kinds.has("preset"), "preset kind in summary");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("findReferencesOffline scans .shadergraph and .asmdef (expanded ref targets)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-refs-expanded-"));
+  try {
+    await setupShaderGraphProject(tmp);
+    const result = await findReferencesOffline({
+      guid: "tex111000000000000000000000000001",
+      projectRoot: tmp,
+    });
+    const sgHit = result.referencedBy.find((e) => e.assetPath.endsWith("Foo.shadergraph"));
+    assert.ok(sgHit, "shadergraph found as a referencer of the texture GUID");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Fixtures for M24 expanded-type tests.
+// ---------------------------------------------------------------------------
+
+async function setupAsmdefProject(tmp: string): Promise<void> {
+  await mkdir(join(tmp, "Assets", "Scripts"), { recursive: true });
+  await writeFile(
+    join(tmp, "Assets", "Scripts", "Foo.asmdef"),
+    JSON.stringify({
+      name: "Foo",
+      rootNamespace: "",
+      references: ["Bar"],
+      includePlatforms: ["Editor"],
+      excludePlatforms: [],
+      allowUnsafeCode: false,
+      overrideReferences: false,
+      precompiledReferences: [],
+      autoReferenced: true,
+      defineConstraints: [],
+      versionDefines: [],
+      noEngineReferences: false,
+    }, null, 4),
+  );
+  await writeFile(join(tmp, "Assets", "Scripts", "Foo.asmdef.meta"), "guid: asmd0000000000000000000000000001\n");
+}
+
+async function setupShaderGraphProject(tmp: string): Promise<void> {
+  await mkdir(join(tmp, "Assets"), { recursive: true });
+  // A realistic .shadergraph is a stream of pretty-printed JSON objects
+  // separated by blank lines, each carrying an "m_Type" discriminator. The
+  // first object is always the GraphData root. Texture refs are inline PPtrs.
+  const texGuid = "tex111000000000000000000000000001";
+  await writeFile(
+    join(tmp, "Assets", "Foo.shadergraph"),
+    `{
+    "m_SGVersion": 3,
+    "m_Type": "UnityEditor.ShaderGraph.GraphData",
+    "m_ObjectId": "root0000000000000000000000000001",
+    "m_Properties": [],
+    "m_Nodes": []
+}
+
+{
+    "m_Type": "UnityEditor.ShaderGraph.SampleTexture2DNode",
+    "m_Id": "node00000000000000000000000000001",
+    "m_Texture": {
+        "m_SerializedTexture": "",
+        "m_Guid": "00000000000000000000000000000000"
+    },
+    "m_RefTexture": { "fileID": 2800000, "guid": "${texGuid}", "type": 3 }
+}`,
+  );
+  await writeFile(join(tmp, "Assets", "Foo.shadergraph.meta"), "guid: sg0000000000000000000000000000011\n");
+  // A texture meta so the ref resolves in find_references / integrity.
+  await mkdir(join(tmp, "Assets", "Textures"), { recursive: true });
+  await writeFile(join(tmp, "Assets", "Textures", "Diffuse.png.meta"), `guid: ${texGuid}\n`);
+}
+
+async function setupPresetProject(tmp: string): Promise<void> {
+  await mkdir(join(tmp, "Assets", "Presets"), { recursive: true });
+  // .preset is text YAML with a Preset object (classID 1386491679).
+  await writeFile(
+    join(tmp, "Assets", "Presets", "MyPreset.preset"),
+    `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1386491679 &9000000
+Preset:
+  m_Name: MyPreset
+  m_TargetTypeSerialized: 108
+`,
+  );
+  await writeFile(join(tmp, "Assets", "Presets", "MyPreset.preset.meta"), "guid: prst00000000000000000000000000001\n");
+}
+
+async function setupTerrainLayerProject(tmp: string): Promise<void> {
+  // GUIDs must be valid 32-char hex (0-9a-f); the scanner stops at the first
+  // non-hex char, so mnemonic prefixes like "diff..." break resolution.
+  const diffuseGuid = "da1f0000000000000000000000000aa1";
+  await mkdir(join(tmp, "Assets", "Terrain"), { recursive: true });
+  await mkdir(join(tmp, "Assets", "Textures"), { recursive: true });
+  await writeFile(
+    join(tmp, "Assets", "Terrain", "dry_soil.terrainlayer"),
+    `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1953259897 &8574412962073106934
+TerrainLayer:
+  m_ObjectHideFlags: 0
+  m_Name: dry_soil
+  m_DiffuseTexture: {fileID: 2800000, guid: ${diffuseGuid}, type: 3}
+  m_TileSize: {x: 2.3, y: 2.3}
+  m_Metallic: 0
+  m_Smoothness: 0
+`,
+  );
+  await writeFile(join(tmp, "Assets", "Terrain", "dry_soil.terrainlayer.meta"), "guid: tl0000000000000000000000000000a1\n");
+  await writeFile(join(tmp, "Assets", "Textures", "Diffuse.png.meta"), `guid: ${diffuseGuid}\n`);
+}
+
+async function setupSpriteAtlasProject(tmp: string): Promise<void> {
+  const folderGuid = "fold00000000000000000000000000aa1";
+  await mkdir(join(tmp, "Assets", "UI", "Icons"), { recursive: true });
+  await writeFile(
+    join(tmp, "Assets", "UI", "Icons.spriteatlas"),
+    `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!635262636 &7000000
+SpriteAtlas:
+  m_Name: Icons
+  m_EditorData:
+    m_Packables:
+    - {fileID: 102900000, guid: ${folderGuid}, type: 3}
+`,
+  );
+  await writeFile(join(tmp, "Assets", "UI", "Icons.spriteatlas.meta"), "guid: satl00000000000000000000000000a1\n");
+}
+
+// ===========================================================================
+// M24 Plan 1 — full hierarchy reconstruction parity (T24.1.2).
+//
+// The offline parser already returns the complete GameObject/component tree;
+// the gap was parity with the live read_asset bridge (which counts GameObjects
+// + attached components, not every raw YAML object). countHierarchy() returns
+// the live-comparable {nodes, components} so a fixture verifies the
+// reconstructed tree matches what a live read would emit node-for-node.
+// ===========================================================================
+
+test("countHierarchy returns live-comparable node and component counts", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-parity-count-"));
+  try {
+    await setupDeepHierarchyProject(tmp);
+    const { model } = await readAssetOffline("Assets/Prefabs/Deep.prefab", {
+      fieldLimit: 0,
+      projectRoot: tmp,
+    });
+    // Fixture: Root (Transform + MeshRenderer + MonoBehaviour)
+    //          └─ Child (Transform + Camera)
+    //             └─ Grandchild (Transform)
+    //  → 3 GameObject nodes, 6 components total (Transform x3, MeshRenderer,
+    //    MonoBehaviour, Camera).
+    const { nodes, components } = countHierarchy(model);
+    assert.equal(nodes, 3, "3 GameObject nodes reconstructed");
+    assert.equal(components, 6, "6 components across the tree");
+    // Sanity: the model's componentCount (which the renderer reports) agrees
+    // with the parity count — both derive from the same reconstructed tree.
+    assert.equal(model.componentCount, components, "model.componentCount matches parity");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("full hierarchy reconstruction preserves depth and path for the whole tree", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-parity-tree-"));
+  try {
+    await setupDeepHierarchyProject(tmp);
+    const { model } = await readAssetOffline("Assets/Prefabs/Deep.prefab", {
+      fieldLimit: 0,
+      projectRoot: tmp,
+    });
+    // verbose profile disables render-only folding, so the TREE shows every node.
+    const compact = renderAssetSummary(model, { detail: "verbose" });
+    assert.ok(compact.tree, "tree rendered");
+    const paths = compact.tree.map((r) => `${r.depth}:${r.name}`);
+    // Every node appears (no folding collapsed a non-render-only node away).
+    assert.ok(paths.some((p) => p === "0:Root"), "Root at depth 0");
+    assert.ok(paths.some((p) => p === "1:Child"), "Child at depth 1");
+    assert.ok(paths.some((p) => p === "2:Grandchild"), "Grandchild at depth 2");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+async function setupDeepHierarchyProject(tmp: string): Promise<void> {
+  const scriptGuid = "dpth0000000000000000000000000001";
+  await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+  await mkdir(join(tmp, "Assets", "Scripts"), { recursive: true });
+  await writeFile(
+    join(tmp, "Assets", "Prefabs", "Deep.prefab"),
+    `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &100
+GameObject:
+  m_Component:
+  - component: {fileID: 200}
+  - component: {fileID: 300}
+  - component: {fileID: 400}
+  m_Name: Root
+--- !u!4 &200
+Transform:
+  m_GameObject: {fileID: 100}
+  m_Father: {fileID: 0}
+--- !u!23 &300
+MeshRenderer:
+  m_GameObject: {fileID: 100}
+--- !u!114 &400
+MonoBehaviour:
+  m_GameObject: {fileID: 100}
+  m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}
+--- !u!1 &101
+GameObject:
+  m_Component:
+  - component: {fileID: 201}
+  - component: {fileID: 500}
+  m_Name: Child
+--- !u!4 &201
+Transform:
+  m_GameObject: {fileID: 101}
+  m_Father: {fileID: 200}
+--- !u!20 &500
+Camera:
+  m_GameObject: {fileID: 101}
+--- !u!1 &102
+GameObject:
+  m_Component:
+  - component: {fileID: 202}
+  m_Name: Grandchild
+--- !u!4 &202
+Transform:
+  m_GameObject: {fileID: 102}
+  m_Father: {fileID: 201}
+`,
+  );
+  await writeFile(join(tmp, "Assets", "Prefabs", "Deep.prefab.meta"), "guid: dpthprefab000000000000000000a1\n");
+  await writeFile(join(tmp, "Assets", "Scripts", "DepthController.cs.meta"), `guid: ${scriptGuid}\n`);
+}
+
+// ===========================================================================
+// M24 Plan 1 — offline prefab override parsing vs live shape (T24.1.3).
+//
+// The offline parser already emits PrefabOverrideEntry records; the M24
+// acceptance criterion is that the offline override set matches what the live
+// prefab_get_overrides tool returns on a variant fixture. The live tool emits
+// propertyModifications / addedComponents / removedComponents arrays; the
+// offline entries normalize to the same kinds (property / added-component /
+// removed-components). These tests pin the shape parity.
+// ===========================================================================
+
+test("offline prefab overrides match the live prefab_get_overrides kind set", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-overrides-parity-"));
+  try {
+    await setupVariantProject(tmp);
+    const { model } = await readAssetOffline("Assets/Prefabs/PlayerVariant.prefab", {
+      fieldLimit: 0,
+      projectRoot: tmp,
+    });
+    assert.ok(model.overrides, "overrides populated");
+
+    // Live prefab_get_overrides emits three buckets; the offline parser must
+    // cover all three kinds present in the fixture.
+    const kinds = new Set(model.overrides.map((o) => o.kind));
+    assert.ok(kinds.has("property"), "property overrides (live: propertyModifications)");
+    assert.ok(kinds.has("added-component"), "added-component overrides (live: addedComponents)");
+    assert.ok(kinds.has("removed-components"), "removed-components overrides (live: removedComponents)");
+
+    // The live tool reports the property path and value verbatim; the offline
+    // parser unwraps backing fields but otherwise mirrors the same fields.
+    const speedOverride = model.overrides.find(
+      (o) => o.kind === "property" && o.propertyPath === "m_Speed",
+    );
+    assert.ok(speedOverride, "m_Speed property override present");
+    assert.equal(speedOverride.value, "10", "value matches the serialized override");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("offline override target resolves to a GameObject path the live tool would report", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-overrides-target-"));
+  try {
+    await setupVariantProject(tmp);
+    const { model } = await readAssetOffline("Assets/Prefabs/PlayerVariant.prefab", {
+      fieldLimit: 0,
+      projectRoot: tmp,
+    });
+    assert.ok(model.overrides);
+    // The live tool resolves the override target to the component's host
+    // GameObject; the offline parser resolves to "Component on Path" or the
+    // path itself. Either way, the resolved target must name the variant root.
+    const withTarget = model.overrides.filter((o) => o.target && o.target.length > 0);
+    assert.ok(withTarget.length > 0, "at least one override with a resolved target");
+    const namesVariant = withTarget.some((o) => (o.target ?? "").includes("PlayerVariant"));
+    assert.ok(namesVariant, "a target references the variant root GameObject");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});

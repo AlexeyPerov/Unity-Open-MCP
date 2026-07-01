@@ -170,6 +170,17 @@ Common route behavior:
   - `unity_open_mcp_capabilities`, `unity_open_mcp_generate_skill`, and `unity_open_mcp_manage_tools` are local.
   - `unity_open_mcp_bridge_status` is local (server-resolved from the instance lock + one `/ping` probe).
 
+### Offline read coverage
+
+`read_asset`, `search_assets`, and `find_references` parse text-serialized assets from disk without a running Editor — the hybrid live/offline differentiator. The offline parser covers two asset families:
+
+- **Text-serialized Unity YAML** — `.prefab`, `.unity`, `.asset`, `.mat`, `.controller`, `.anim`, `.playable`, `.preset`, `.spriteatlas`, `.terrainlayer`, `.vfx` (YAML object headers + GUID refs parse; embedded binary blobs are skipped).
+- **JSON assets** (a path unity-scanner does not handle) — `.asmdef` (single JSON object), `.shadergraph` / `.shadersubgraph` (a stream of pretty-printed JSON objects, one per graph element).
+
+Binary formats (`.png`, `.wav`, `.fbx`, …) stay live-routed. When the bridge is down, offline-parseable assets still read; non-parseable assets surface a `source_unavailable` error pointing at the bridge.
+
+The offline reader reconstructs the **full** GameObject/component tree (the compact default folds render-only leaves; `profile=full` shows every node), parses **prefab variant overrides** from `PrefabInstance.m_Modifications` (matching the live `prefab_get_overrides` shape), and emits **integrity signals** (`integrity[]` on the `read_asset` response) for malformed JSON, missing references, missing scripts, and orphaned prefab instances. The signals surface on every read so an agent sees them without a separate verify call; the verify rule suite consumes the same primitives as structured rules.
+
 ## Lifecycle policy
 
 Every tool declares a **lifecycle class** that describes the recovery concern an agent must reason about when the call fails or the bridge becomes unresponsive. It is exposed per tool as `capabilities.tools[].lifecycle` (+ an optional `lifecycleNote` for tool-specific constraints), and the full taxonomy is attached as `capabilities.lifecycleBlock`. Read it *before* the call to pick a recovery strategy.
