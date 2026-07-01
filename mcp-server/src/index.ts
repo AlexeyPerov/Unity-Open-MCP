@@ -17,6 +17,8 @@ import { PingCache } from "./ping-cache.js";
 import { ResourceRouter } from "./resource-router.js";
 import { withSchemaDefaults } from "./schema-defaults.js";
 import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
+// M23 Plan 3 — per-request routing (port override + agent identity).
+import { extractRouting } from "./agent-identity.js";
 import { BridgeEventStream } from "./event-stream.js";
 import { KNOWN_COMMANDS } from "./cli/args.js";
 import { runCli } from "./cli/cli.js";
@@ -159,13 +161,37 @@ export function createServer(
     async (request): Promise<CallToolResult> => {
       const { name, arguments: args } = request.params;
       const callArgs = (args ?? {}) as Record<string, unknown>;
+      // M23 Plan 3 — extract per-request routing (port override + agent id)
+      // BEFORE schema defaults are applied, so the routing keys (_meta, port)
+      // are stripped and never forwarded to the bridge. The default path (no
+      // override) is zero-overhead: the default LiveClient + process agent id.
+      const routing = extractRouting(callArgs);
       // Fill missing top-level scalar defaults (e.g. timeout_ms) from the
       // tool's documented schema. MCP clients may omit these; without this
       // step every downstream layer falls back to its own hardcoded value and
       // silently contradicts the schema (historically 30s vs run_tests' 60s).
       const tool = TOOL_BY_NAME.get(name);
-      const routedArgs = tool ? withSchemaDefaults(tool, callArgs) : callArgs;
-      return router.route(name, routedArgs);
+      const routedArgs = tool
+        ? withSchemaDefaults(tool, routing.strippedArgs)
+        : routing.strippedArgs;
+      // No port override → default router (the common single-bridge case).
+      if (routing.portOverride === undefined) {
+        return router.route(name, routedArgs);
+      }
+      // Port override → build a transient LiveClient aimed at the override
+      // port. The override bypasses shared session state: it is a fresh client
+      // that resolves its own auth token from the override port's instance
+      // lock (when one exists). The agent id travels as X-Agent-Id so the
+      // target bridge's fair queue can schedule it.
+      const overrideAuth = resolveAuthToken(projectPath, routing.portOverride);
+      const overrideLive = new LiveClient(
+        routing.portOverride,
+        pingCache,
+        overrideAuth,
+        projectPath,
+        routing.agentId,
+      );
+      return router.routeOverride(name, routedArgs, overrideLive);
     },
   );
 

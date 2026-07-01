@@ -93,12 +93,14 @@ Safe Mode still owns the per-project lock and may show a window, but the bridge 
 
 ## Compile failure recovery
 
-Two distinct failure shapes:
+Compile failures surface as **machine-readable error codes** — branch on the code, not free-text. The four you will hit:
 
-- `**bridge_compile_failed`** — bridge assembly itself failed; live Editor stuck, every live tool refuses (including `read_console`). Use `read_compile_errors` (reads `Editor.log` offline; survives the broken bridge).
-- **Plain `bridge_offline`** — Unity may not be running, or not yet recompiled. If Unity **is** open it has already written the latest CSxxxx diagnostics to `Editor.log`; `read_compile_errors` retrieves them.
+- `**bridge_compile_failed`** — bridge assembly itself failed; live Editor stuck (Safe Mode), every live tool refuses. **Recovery:** `read_compile_errors` (reads `Editor.log` offline; survives the broken bridge) → fix the CS error → trigger a recompile.
+- **`bridge_offline`** — Unity may not be running, or not yet recompiled. If Unity **is** open it has already written the latest CSxxxx diagnostics to `Editor.log`; `read_compile_errors` retrieves them.
+- **`editor_instance_locked`** — `compile_check` cannot run while a live Editor holds the project lock. Close the live Editor, or verify compile state via the live bridge instead.
+- **`_compileVerify: { code: "compile_noop" | "dll_stale" }`** — a recompile *reported success* but the compiled state did not advance. Surfaced as an additive annotation on a **successful** result (not an error), so check for it after any `compile-reload` tool. `compile_noop` = tool registry count + DLL mtime unchanged (incremental no-op); `dll_stale` = `Library/ScriptAssemblies/*.dll` older than your source edit. Both mean: do **not** trust the success — force a rebuild (no-op `package_add`/`package_remove`, or operator refocus of the Editor), then verify DLL mtime > edit mtime before tests.
 
-Either way: call `**unity_open_mcp_read_compile_errors`** → fix `errors[].file`/`line`/`code` → trigger recompile. (If no Editor is open, `Editor.log` is stale from the previous session and won't reflect your latest edits — recompile verification needs Unity running.)
+For `bridge_compile_failed` / `bridge_offline`: call `**unity_open_mcp_read_compile_errors`** → fix `errors[].file`/`line`/`code` → trigger recompile. (If no Editor is open, `Editor.log` is stale from the previous session and won't reflect your latest edits — recompile verification needs Unity running.)
 
 Use `**unity_open_mcp_compile_check**` only for a deliberate "does this build clean from scratch?" check — it spawns a fresh headless Unity and **always** routes to batch. It is not first-line recovery for a broken bridge assembly. When a live Editor already has the project open, the headless spawn cannot acquire Unity's one-Editor-per-project lock and returns `editor_instance_locked` — either close the live Editor and retry, or verify compile state via the live bridge instead (`execute_csharp` + `Library/ScriptAssemblies/*.dll` mtime check, or `read_compile_errors`).
 

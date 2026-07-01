@@ -3,7 +3,7 @@ import type { Router } from "./router.js";
 import type { MutationEnvelope } from "./gate-error.js";
 import type { PingCache } from "./ping-cache.js";
 import { deriveIsError } from "./gate-error.js";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -18,17 +18,29 @@ import {
   checkBridgeCompat,
   isVersionCheckSuppressed,
 } from "./compat.js";
+// M23 Plan 3 — structured retry policy + env-overridable tunables. Replaces
+// the hardcoded module constants that previously bounded the compile-wait and
+// transient-retry loops. The policy is keyed by lifecycle class (see
+// retryConfigFor); the tunables are resolved once at construction.
+import {
+  readRetryTunables,
+  type RetryTunables,
+} from "./retry-policy.js";
+// M23 Plan 3 — compile-verify failure-code detection (compile_noop /
+// dll_stale). Applied as an additive annotation on compile-reload results so
+// an agent can branch when a recompile reported success but the compiled state
+// did not advance.
+import {
+  detectCompileVerify,
+  buildCompileVerifyAnnotation,
+  type CompileVerifySnapshot,
+} from "./compile-verify.js";
+import { lifecycleFor } from "./capabilities/lifecycle.js";
+// M23 Plan 3 — per-process agent identity (sent as X-Agent-Id so the bridge's
+// fair round-robin queue can schedule across agents).
+import { PROCESS_AGENT_ID } from "./agent-identity.js";
 
-const MAX_COMPILE_WAIT_MS = 120_000;
-const COMPILE_POLL_INTERVAL_MS = 2_000;
 const PING_TIMEOUT_MS = 5_000;
-// M20 Plan 4-5 / T-fix-2 — transient-connection recovery. When /ping (or a
-// tool POST) throws on a connection failure during a domain reload, the client
-// now classifies the failure via the instance lock and either waits out the
-// reload window or retries with backoff before declaring bridge_offline. These
-// constants bound that recovery.
-const TRANSIENT_RETRY_ATTEMPTS = 3;
-const TRANSIENT_RETRY_BACKOFF_MS = 500;
 
 const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_validate_edit",
@@ -135,17 +147,30 @@ export class LiveClient implements Router {
   /** One-shot guard so the version-compat warning (server vs bridge) is emitted
    *  at most once per process — every /ping would otherwise re-warn. */
   private compatWarned: boolean;
+  /** M23 Plan 3 — env-overridable retry/compile-wait tunables. Resolved once
+   *  at construction (the env does not change mid-process). Replaces the
+   *  hardcoded MAX_COMPILE_WAIT_MS / COMPILE_POLL_INTERVAL_MS /
+   *  TRANSIENT_RETRY_* module constants. */
+  private retry: RetryTunables;
+  /** M23 Plan 3 — agent identity sent as X-Agent-Id on every request so the
+   *  bridge's fair round-robin queue can schedule across agents sharing one
+   *  bridge. Defaults to the process-wide id; a transient LiveClient built for
+   *  a per-request port override may carry a per-call id. */
+  private agentId: string;
 
   constructor(
     port: number,
     pingCache: PingCache,
     authToken?: string,
     projectPath?: string,
+    agentId: string = PROCESS_AGENT_ID,
   ) {
     this.baseUrl = `http://127.0.0.1:${port}`;
     this.pingCache = pingCache;
     this.authToken = authToken;
     this.projectPath = projectPath;
+    this.retry = readRetryTunables();
+    this.agentId = agentId;
     // M13 T4.5 + M23 Plan 2 — startup dialog auto-dismissal. Resolved once at
     // construction; the env vars do not change mid-process. The feature is
     // enabled by default and runs concurrently with every compile/bridge
@@ -239,7 +264,20 @@ export class LiveClient implements Router {
     const readyError = await this.ensureReady();
     if (readyError) return readyError;
 
-    return this.postTool(toolName, args, true);
+    // M23 Plan 3 — compile-verify annotation. For compile-reload tools, capture
+    // a before-snapshot (bridge tool count + newest ScriptAssemblies DLL mtime)
+    // so the post-call detectCompileVerify() can flag a no-op/stale compile.
+    // Non-compile-reload tools skip this entirely (no extra /tools round-trip,
+    // no fs scan). The annotation is additive: it never blocks a success.
+    const isCompileReload = lifecycleFor(toolName).class === "compile-reload";
+    const before = isCompileReload ? await this.captureCompileSnapshot() : null;
+
+    const result = await this.postTool(toolName, args, true);
+
+    if (isCompileReload && !result.isError && before !== null) {
+      return this.annotateCompileVerify(toolName, result, before, args);
+    }
+    return result;
   }
 
   private async handleRunTests(
@@ -542,9 +580,12 @@ export class LiveClient implements Router {
 
     // No reload signal but a transient refusal/reset/timeout. Retry a bounded
     // number of times with backoff before declaring offline. Covers brief
-    // socket churn that isn't reflected in the lock yet.
-    for (let attempt = 1; attempt <= TRANSIENT_RETRY_ATTEMPTS; attempt++) {
-      await sleep(TRANSIENT_RETRY_BACKOFF_MS * attempt);
+    // socket churn that isn't reflected in the lock yet. The bounds come from
+    // the env-overridable retry tunables (M23 Plan 3 / retry-policy.ts).
+    const maxAttempts = this.retry.transientRetryAttempts;
+    const backoffMs = this.retry.transientBackoffMs;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await sleep(backoffMs * attempt);
       // Re-classify on each attempt: a reload may have begun between the
       // first failure and now.
       const reclass = this.classifyLockNow();
@@ -567,7 +608,7 @@ export class LiveClient implements Router {
       }
     }
     void operation; // log-only parameter, reserved for future telemetry
-    const retryMsg = `Bridge is not reachable at ${this.baseUrl} after ${TRANSIENT_RETRY_ATTEMPTS} retries. ${buildOfflineHint(this.projectPath)}`;
+    const retryMsg = `Bridge is not reachable at ${this.baseUrl} after ${maxAttempts} retries. ${buildOfflineHint(this.projectPath)}`;
     return makeErrorResult({
       code: "bridge_offline",
       message: retryMsg,
@@ -636,7 +677,8 @@ export class LiveClient implements Router {
   }
 
   private async waitForCompile(): Promise<CallToolResult | null> {
-    const deadline = Date.now() + MAX_COMPILE_WAIT_MS;
+    const compileWaitMs = this.retry.compileWaitMs;
+    const deadline = Date.now() + compileWaitMs;
 
     // M13 T4.5 — run the launch-errors / Safe Mode dialog auto-dismiss loop
     // CONCURRENTLY with the compile poll. The dismiss loop ticks on the same
@@ -665,7 +707,7 @@ export class LiveClient implements Router {
 
     try {
       while (Date.now() < deadline) {
-        await sleep(COMPILE_POLL_INTERVAL_MS);
+        await sleep(this.retry.compilePollIntervalMs);
 
         try {
           const res = await this.fetchWithTimeout("/ping", { method: "GET" });
@@ -698,12 +740,12 @@ export class LiveClient implements Router {
       return makeErrorResult({
         code: "compile_timeout",
         message:
-          `Unity is still compiling after ${MAX_COMPILE_WAIT_MS / 1000}s. ` +
+          `Unity is still compiling after ${compileWaitMs / 1000}s. ` +
           "The compile-wait timeout was exceeded.",
         detail: {
           error: {
             code: "compile_timeout",
-            message: `Compile-wait exceeded ${MAX_COMPILE_WAIT_MS / 1000}s`,
+            message: `Compile-wait exceeded ${compileWaitMs / 1000}s`,
           },
         },
       });
@@ -790,6 +832,105 @@ export class LiveClient implements Router {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // M23 Plan 3 — compile-verify annotation (compile_noop / dll_stale).
+  //
+  // For compile-reload tools we capture a before/after snapshot and let the
+  // pure detectCompileVerify() flag a no-op or stale compile. The annotation
+  // is additive (`_compileVerify` on the result body) — it never blocks a
+  // successful response, only surfaces a structured signal so an agent can
+  // branch instead of trusting a no-op success. Snapshots degrade gracefully:
+  // if the bridge inventory or DLL mtimes can't be read, the fields are
+  // undefined and the detector returns null (no false positive).
+  // -------------------------------------------------------------------------
+
+  /**
+   * Capture a compile-verify snapshot: the bridge tool inventory count + the
+   * newest mtime under Library/ScriptAssemblies. Returns undefined fields
+   * (never throws) when the bridge or filesystem is unavailable.
+   */
+  private async captureCompileSnapshot(): Promise<CompileVerifySnapshot> {
+    const snap: CompileVerifySnapshot = {};
+    try {
+      const inventory = await this.listBridgeTools();
+      if (inventory) snap.bridgeToolCount = inventory.tools.size;
+    } catch {
+      // best-effort — undefined count is a valid "unknown" snapshot
+    }
+    const dllMtime = this.newestScriptAssembliesMtime();
+    if (dllMtime !== undefined) snap.dllMtimeMs = dllMtime;
+    return snap;
+  }
+
+  /**
+   * Newest mtime (epoch ms) of `Library/ScriptAssemblies/*.dll` for this
+   * project, or undefined when the directory is missing/unreadable. Used by
+   * the compile-verify detector to tell whether a recompile actually advanced
+   * the compiled output.
+   */
+  private newestScriptAssembliesMtime(): number | undefined {
+    if (!this.projectPath) return undefined;
+    const dir = join(this.projectPath, "Library", "ScriptAssemblies");
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return undefined;
+    }
+    let newest: number | undefined;
+    for (const name of entries) {
+      if (!name.endsWith(".dll")) continue;
+      try {
+        const m = statSync(join(dir, name)).mtimeMs;
+        if (newest === undefined || m > newest) newest = m;
+      } catch {
+        // best-effort per file
+      }
+    }
+    return newest;
+  }
+
+  /**
+   * Apply the compile-verify annotation to a successful compile-reload result.
+   * Reads the after-snapshot, runs the pure detector, and — when flagged —
+   * injects `_compileVerify: { code, recommendation }` into the result body.
+   * The source-edit mtime is inferred from `args._sourceMtimeMs` when the
+   * caller (e.g. script_write) supplied it; otherwise only the no-op path
+   * (count + dll-mtime delta) is evaluated.
+   */
+  private async annotateCompileVerify(
+    _toolName: string,
+    result: CallToolResult,
+    before: CompileVerifySnapshot,
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    const after = await this.captureCompileSnapshot();
+    const sourceMtimeMs =
+      typeof args._sourceMtimeMs === "number"
+        ? (args._sourceMtimeMs as number)
+        : undefined;
+
+    const detection = detectCompileVerify({ before, after, sourceMtimeMs });
+    const annotation = buildCompileVerifyAnnotation(detection);
+    if (annotation === null) return result;
+
+    // Inject into the first text content block's JSON body. Mirrors the
+    // injectRouteMeta shape in tool-router.ts.
+    const textIndex = result.content.findIndex((c) => c.type === "text");
+    if (textIndex < 0) return result;
+    const block = result.content[textIndex];
+    if (block.type !== "text") return result;
+    try {
+      const body = JSON.parse(block.text) as Record<string, unknown>;
+      body._compileVerify = annotation;
+      const newContent = result.content.slice();
+      newContent[textIndex] = { type: "text", text: JSON.stringify(body) };
+      return { ...result, content: newContent };
+    } catch {
+      return result;
+    }
+  }
+
   private fetchWithTimeout(
     path: string,
     init: RequestInit,
@@ -804,6 +945,12 @@ export class LiveClient implements Router {
     const headers = new Headers(init.headers);
     if (this.authToken && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${this.authToken}`);
+    }
+    // M23 Plan 3 — attach the agent identity so the bridge's fair round-robin
+    // queue can schedule across agents sharing one bridge. Merge so a caller-
+    // supplied header (rare) wins.
+    if (this.agentId && !headers.has("X-Agent-Id")) {
+      headers.set("X-Agent-Id", this.agentId);
     }
 
     return fetch(`${this.baseUrl}${path}`, {

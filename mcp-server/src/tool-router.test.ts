@@ -1061,3 +1061,62 @@ test("route: bridge_status is registered in ALL_TOOLS and always-visible", async
     "bridge_status is always-visible (no group assignment)",
   );
 });
+
+// ---------------------------------------------------------------------------
+// M23 Plan 3 — per-request port override routing (routeOverride).
+//
+// When a per-call `_meta.port` override is present, the router must dispatch
+// through the OVERRIDE LiveClient, not the default one. This is the parallel-
+// safe primitive: multiple agents sharing one MCP process each target their
+// own bridge instance via the override, bypassing shared session state.
+// ---------------------------------------------------------------------------
+
+test("routeOverride: dispatches through the override LiveClient, not the default", async () => {
+  const defaultLive = makeFakeLive({ result: { content: [{ type: "text", text: JSON.stringify({ from: "default" }) }], isError: false } });
+  const overrideLive = makeFakeLive({ result: { content: [{ type: "text", text: JSON.stringify({ from: "override" }) }], isError: false } });
+  const batch = makeFakeBatch({ batchTools: new Set() }); // force live path
+  const router = makeRouter(defaultLive, batch, "/proj", makeFakeEventStream());
+
+  const result = await router.routeOverride(
+    "unity_open_mcp_ping",
+    {},
+    overrideLive as unknown as LiveClient,
+  );
+
+  // The override client was used, not the default.
+  assert.equal((overrideLive as unknown as { calls: LiveCall[] }).calls.length, 1);
+  assert.equal((defaultLive as unknown as { calls: LiveCall[] }).calls.length, 0);
+  assert.equal(parseBody(result).from, "override");
+});
+
+test("routeOverride: find_references uses the override client for the live hop", async () => {
+  const defaultLive = makeFakeLive();
+  const overrideLive = makeFakeLive({
+    result: { content: [{ type: "text", text: JSON.stringify({ referencedBy: ["Assets/a.prefab"], totalCount: 1 }) }], isError: false },
+  });
+  const batch = makeFakeBatch();
+  const router = makeRouter(defaultLive, batch, "/proj", makeFakeEventStream());
+
+  await router.routeOverride(
+    "unity_open_mcp_find_references",
+    { asset_path: "Assets/a.prefab" },
+    overrideLive as unknown as LiveClient,
+  );
+
+  assert.equal((overrideLive as unknown as { calls: LiveCall[] }).calls.length, 1);
+  assert.equal((defaultLive as unknown as { calls: LiveCall[] }).calls.length, 0);
+});
+
+test("default route (no override) still uses the default LiveClient", async () => {
+  // Regression guard: the common single-bridge path must be unchanged.
+  const defaultLive = makeFakeLive();
+  const overrideLive = makeFakeLive();
+  const batch = makeFakeBatch({ batchTools: new Set() });
+  const router = makeRouter(defaultLive, batch, "/proj", makeFakeEventStream());
+
+  await router.route("unity_open_mcp_ping", {});
+
+  assert.equal((defaultLive as unknown as { calls: LiveCall[] }).calls.length, 1);
+  assert.equal((overrideLive as unknown as { calls: LiveCall[] }).calls.length, 0);
+});
+

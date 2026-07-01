@@ -439,6 +439,25 @@ namespace UnityOpenMcpBridge
             return false;
         }
 
+        // M23 Plan 3 — extract the agent identity from the X-Agent-Id header.
+        // The MCP server sets it on every POST so the fair round-robin queue
+        // can schedule across agents. When absent (e.g. a hand-rolled curl),
+        // a synthetic per-request id is used so single-agent traffic still
+        // flows through the queue's single-agent bypass path.
+        private static string ExtractAgentId(HttpListenerRequest request)
+        {
+            try
+            {
+                var id = request.Headers["X-Agent-Id"];
+                if (!string.IsNullOrEmpty(id)) return id;
+            }
+            catch { /* malformed header — treat as missing */ }
+            // Synthetic id for untracked callers. Uses the request's local
+            // endpoint port as a disambiguator so two concurrent curl calls
+            // from different sessions do not collapse into one agent.
+            return "agent-anon-" + request.RemoteEndPoint?.Port;
+        }
+
         private static void HandlePing(HttpListenerContext context)
         {
             if (!BridgeSession.IsInitialized)
@@ -686,10 +705,48 @@ namespace UnityOpenMcpBridge
 
             try
             {
-                var task = MainThreadDispatcher.EnqueueAsync(
-                    () => DispatchWithGate(toolName, body, effectiveGateMode, pathsHint), timeoutMs);
+                // M23 Plan 3 — route through the fair round-robin queue instead
+                // of dispatching directly to the main thread. The queue bypasses
+                // scheduling for the single-agent case (identical to the old
+                // direct dispatch) and activates read-batch/write-serialize
+                // fairness only when ≥2 agents share this bridge. The agent id
+                // comes from the X-Agent-Id header (set by the MCP server);
+                // when absent a synthetic per-request id is used so single-
+                // agent traffic still flows through the bypass path.
+                string agentId = ExtractAgentId(context.Request);
+                // isMutating was computed above (MutatingTools.Contains ||
+                // registryEntry.IsMutating); reuse it so the queue knows
+                // whether to count this as a write for the per-frame limit.
+                GateDispatchResult result = null;
+                System.Exception dispatchError = null;
 
-                var result = task.Result;
+                var queueTask = BridgeRequestQueue.Enqueue(agentId, toolName, isMutating, () =>
+                {
+                    try
+                    {
+                        result = DispatchWithGate(toolName, body, effectiveGateMode, pathsHint);
+                    }
+                    catch (System.Exception e)
+                    {
+                        dispatchError = e;
+                        throw;
+                    }
+                });
+
+                // Apply the timeout on the worker thread (the queue has no
+                // built-in timeout). Wait for either completion or the deadline.
+                if (!queueTask.Wait(timeoutMs))
+                {
+                    sw.Stop();
+                    BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "timeout", $"Tool {toolName} timed out after {timeoutMs}ms", sw.ElapsedMilliseconds);
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs));
+                    return;
+                }
+
+                // Re-throw dispatch exceptions so the catch blocks below build
+                // the right error envelope (same shape as the pre-queue path).
+                if (dispatchError != null) throw dispatchError;
+
                 sw.Stop();
 
                 // M13 T4.1 — compile-settle wait. Done on THIS worker thread,

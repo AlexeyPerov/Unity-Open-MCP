@@ -434,7 +434,40 @@ Errors are returned as JSON with:
 - `error.code`
 - `error.message`
 
-Examples: `bridge_unavailable`, `batch_not_supported`, `validation_failed`, `scene_dirty`.
+Every retryable failure returns a **machine-readable error code** so agents can branch recovery programmatically instead of parsing free-text. The codes an agent is most likely to see:
+
+| Code | When | Agent recovery branch |
+| --- | --- | --- |
+| `bridge_offline` | Bridge listener unreachable (Unity not running, wrong port, toolbar off) | Open Unity with the bridge started; check the instance lock for the live port/pid. Offline reads + `read_compile_errors` still work. |
+| `bridge_compile_failed` | Unity PID alive but heartbeat stale — bridge assembly failed to recompile (Safe Mode) | Call `read_compile_errors` (reads `Editor.log` offline, survives the dead bridge); fix the CS error; trigger a recompile. |
+| `compile_timeout` | Compile-wait exceeded (`UNITY_OPEN_MCP_COMPILE_WAIT_MS`, default 120s) | Re-probe `ping` / `bridge_status`; if still compiling, wait. If a dead-bridge signature appears, switch to `read_compile_errors`. |
+| `editor_instance_locked` | `compile_check` while a live Editor holds the project lock | Close the live Editor for a headless check, or verify compile state via the live bridge instead. |
+| `compile_noop` | Recompile reported success but the bridge tool registry + `ScriptAssemblies/*.dll` mtime did not advance (incremental no-op). Surfaced as an additive `_compileVerify` annotation on a successful result, not an error. | Do not trust the success alone; force a rebuild (no-op `package_add`/`package_remove`, or operator refocus), then re-check DLL mtime. |
+| `dll_stale` | After a recompile, `Library/ScriptAssemblies/*.dll` is older than the source edit — the new code was not compiled in. Surfaced as `_compileVerify`. | Expected for local `packages/` source (outside Unity's `Assets/` watch root); trigger a recompile and verify DLL mtime > source mtime. |
+| `scene_dirty` | A mutating op that can disrupt the editor was refused because a loaded scene has unsaved changes | Save or discard the scene first, or pass `ignore_scene_dirty: true` to accept the risk. Not retried automatically. |
+| `bridge_unavailable` | Event stream / offline-first read needs a live bridge that is down | Same as `bridge_offline`. |
+
+Settle / retry behavior is governed by the tool's lifecycle class (`none` / `compile-reload` / `modal-dialog` / `scene-dirty` / `process-stale` — see [Lifecycle policy](#lifecycle-policy)). The retry tunables are env-overridable: `UNITY_OPEN_MCP_COMPILE_WAIT_MS`, `UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS`, `UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS`, `UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS`.
+
+## Multi-agent scheduling
+
+When multiple agents share one MCP stdio process — or multiple MCP processes target one bridge — two primitives keep them from starving each other:
+
+**Per-request port override.** A tool call may carry `_meta.port` (or a top-level `port`) to route to a specific bridge instance, bypassing the default port resolution. `_meta.agentId` optionally overrides the per-process agent identity. Both are stripped before the call reaches the bridge. This is the parallel-safe primitive: agents sharing one MCP process each target their own bridge.
+
+```json
+{ "_meta": { "port": 24678, "agentId": "agent-coworker-1" }, "gate": "enforce", "paths_hint": ["Assets"] }
+```
+
+**Fair round-robin queue (bridge-side).** When ≥2 distinct agents (by `X-Agent-Id` header) share one bridge instance, the bridge schedules requests fairly per Editor frame: up to **N reads per frame** (default 5, round-robin across agents) + exactly **1 write per frame** (serialized). This prevents a write-heavy agent from starving read-heavy agents. The queue is **opt-in**: single-agent traffic bypasses scheduling entirely (dispatched immediately, identical to the pre-queue path); the fair scheduler activates only when a second agent arrives.
+
+Configurable in `.unity-open-mcp/settings.json`:
+
+- `fairQueueEnabled` (default `true`) — kill-switch; when `false`, every request is dispatched FIFO with no per-frame batching.
+- `fairQueueReadsPerFrame` (default `5`, clamped to [1, 50]) — read-batch size per Editor frame.
+- `editorSettleCapMs` (default `5000`) / `restartSettleCapMs` (default `60000`) — compile-settle wait caps, clamped to [1000, 120000].
+
+The agent identity sent as `X-Agent-Id` is `agent-<pid>-<6 hex chars>` per MCP process (pid for cross-process disambiguation, hex suffix for uniqueness within a pid); `_meta.agentId` overrides it per call.
 
 ## Bridge admin tools (operator-only)
 

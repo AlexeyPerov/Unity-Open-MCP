@@ -28,8 +28,12 @@ namespace UnityOpenMcpBridge
     public static class EditorSettleWait
     {
         private const int TickMs = 100;
-        private const int EditorSettleCapMs = 5000;
-        private const int RestartSettleCapMs = 60000;
+        // Caps are now configurable via .unity-open-mcp/settings.json
+        // (BridgeProjectSettings.EditorSettleCapMs / RestartSettleCapMs).
+        // The consts below are the documented defaults, kept as fallbacks so
+        // the wait never blocks indefinitely even when settings fail to load.
+        private const int DefaultEditorSettleCapMs = 5000;
+        private const int DefaultRestartSettleCapMs = 60000;
 
         // Blocks the calling (worker) thread until isCompiling flips false or
         // the policy cap elapses. Returns the elapsed wait in milliseconds.
@@ -37,9 +41,22 @@ namespace UnityOpenMcpBridge
         {
             if (!ToolLifecycle.RequiresSettleWait(policy)) return 0;
 
-            int capMs = policy == LifecyclePolicy.RestartThenSettle
-                ? RestartSettleCapMs
-                : EditorSettleCapMs;
+            // Read the configurable cap; fall back to the default on any failure
+            // (BridgeProjectSettings.Load never throws, but the guard is cheap
+            // insurance against a settings corruption edge case).
+            int capMs;
+            try
+            {
+                capMs = policy == LifecyclePolicy.RestartThenSettle
+                    ? BridgeProjectSettings.RestartSettleCapMs
+                    : BridgeProjectSettings.EditorSettleCapMs;
+            }
+            catch
+            {
+                capMs = policy == LifecyclePolicy.RestartThenSettle
+                    ? DefaultRestartSettleCapMs
+                    : DefaultEditorSettleCapMs;
+            }
 
             long elapsed = 0;
             while (elapsed < capMs)

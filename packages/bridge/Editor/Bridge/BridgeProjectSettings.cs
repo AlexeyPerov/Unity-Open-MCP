@@ -41,6 +41,25 @@ namespace UnityOpenMcpBridge
         // last scan/validate/gate result. Clamped to [15, 3600] on load/write;
         // default 60s matches VerifyCacheService.DefaultTtl.
         public int verifyCacheTtlSeconds = 60;
+
+        // Compile-settle wait caps (ms). After an EditorSettle /
+        // RestartThenSettle mutation the dispatcher blocks on the worker
+        // thread polling isCompiling until it flips false OR the cap elapses.
+        // editorSettleCapMs covers asset refresh / import settle (default 5s);
+        // restartSettleCapMs covers a real domain reload (default 60s).
+        // Clamped to [1000, 120000] on load. See EditorSettleWait.
+        public int editorSettleCapMs = 5000;
+        public int restartSettleCapMs = 60000;
+
+        // Fair round-robin queue tunables. When ≥2 agents (distinct X-Agent-Id
+        // headers) share one bridge, requests are scheduled read-batch(N)/
+        // write-serialize(1) per Editor frame so a write-heavy agent cannot
+        // starve read-heavy agents. fairQueueEnabled lets an operator force-
+        // disable the queue (single-agent bypass is always on regardless).
+        // fairQueueReadsPerFrame is clamped to [1, 50]; default 5. See
+        // BridgeRequestQueue.
+        public bool fairQueueEnabled = true;
+        public int fairQueueReadsPerFrame = 5;
     }
 
     public static class BridgeProjectSettings
@@ -110,6 +129,10 @@ namespace UnityOpenMcpBridge
                     // Clamp the verify cache TTL into range; out-of-range values
                     // on disk (e.g. hand-edited settings.json) fall back to 60s.
                     _data.verifyCacheTtlSeconds = ClampVerifyCacheTtl(_data.verifyCacheTtlSeconds);
+                    // Clamp the compile-settle wait caps + fair-queue tunables.
+                    _data.editorSettleCapMs = ClampSettleCap(_data.editorSettleCapMs, DefaultEditorSettleCapMs);
+                    _data.restartSettleCapMs = ClampSettleCap(_data.restartSettleCapMs, DefaultRestartSettleCapMs);
+                    _data.fairQueueReadsPerFrame = ClampFairQueueReads(_data.fairQueueReadsPerFrame);
                 }
             }
             catch (Exception e)
@@ -355,6 +378,17 @@ namespace UnityOpenMcpBridge
         public const int MaxVerifyCacheTtlSeconds = 3600;
         public const int DefaultVerifyCacheTtlSeconds = 60;
 
+        // Compile-settle wait cap clamps (ms). See EditorSettleWait.
+        public const int MinSettleCapMs = 1000;
+        public const int MaxSettleCapMs = 120000;
+        public const int DefaultEditorSettleCapMs = 5000;
+        public const int DefaultRestartSettleCapMs = 60000;
+
+        // Fair-queue read-batch clamps. See BridgeRequestQueue.
+        public const int MinFairQueueReadsPerFrame = 1;
+        public const int MaxFairQueueReadsPerFrame = 50;
+        public const int DefaultFairQueueReadsPerFrame = 5;
+
         public static int VerifyCacheTtlSeconds
         {
             get
@@ -389,6 +423,84 @@ namespace UnityOpenMcpBridge
             if (value < MinVerifyCacheTtlSeconds) return DefaultVerifyCacheTtlSeconds;
             if (value > MaxVerifyCacheTtlSeconds) return MaxVerifyCacheTtlSeconds;
             return value;
+        }
+
+        /// Clamp a settle-window cap into [MinSettleCapMs, MaxSettleCapMs],
+        /// falling back to the per-cap default when below the minimum.
+        private static int ClampSettleCap(int value, int defaultCap)
+        {
+            if (value < MinSettleCapMs) return defaultCap;
+            if (value > MaxSettleCapMs) return MaxSettleCapMs;
+            return value;
+        }
+
+        /// Clamp the fair-queue reads-per-frame into range.
+        private static int ClampFairQueueReads(int value)
+        {
+            if (value < MinFairQueueReadsPerFrame) return DefaultFairQueueReadsPerFrame;
+            if (value > MaxFairQueueReadsPerFrame) return MaxFairQueueReadsPerFrame;
+            return value;
+        }
+
+        // Compile-settle wait caps (ms). EditorSettleWait reads these instead
+        // of its old hardcoded consts so an operator can tune the settle window
+        // via .unity-open-mcp/settings.json without a code change.
+        public static int EditorSettleCapMs
+        {
+            get
+            {
+                if (!_loaded) Load();
+                return ClampSettleCap(_data.editorSettleCapMs, DefaultEditorSettleCapMs);
+            }
+            set
+            {
+                if (!_loaded) Load();
+                _data.editorSettleCapMs = ClampSettleCap(value, DefaultEditorSettleCapMs);
+            }
+        }
+
+        public static int RestartSettleCapMs
+        {
+            get
+            {
+                if (!_loaded) Load();
+                return ClampSettleCap(_data.restartSettleCapMs, DefaultRestartSettleCapMs);
+            }
+            set
+            {
+                if (!_loaded) Load();
+                _data.restartSettleCapMs = ClampSettleCap(value, DefaultRestartSettleCapMs);
+            }
+        }
+
+        // Fair-queue tunables. BridgeRequestQueue reads these to decide whether
+        // to activate the scheduler and how many reads to batch per frame.
+        public static bool FairQueueEnabled
+        {
+            get
+            {
+                if (!_loaded) Load();
+                return _data.fairQueueEnabled;
+            }
+            set
+            {
+                if (!_loaded) Load();
+                _data.fairQueueEnabled = value;
+            }
+        }
+
+        public static int FairQueueReadsPerFrame
+        {
+            get
+            {
+                if (!_loaded) Load();
+                return ClampFairQueueReads(_data.fairQueueReadsPerFrame);
+            }
+            set
+            {
+                if (!_loaded) Load();
+                _data.fairQueueReadsPerFrame = ClampFairQueueReads(value);
+            }
         }
 
         // Push the persisted TTL into the runtime cache service. Called on Load

@@ -281,6 +281,30 @@ export class ToolRouter implements Router {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
+    return this.routeCore(this.live, toolName, args);
+  }
+
+  /**
+   * M23 Plan 3 — route with a per-call live-client override. Used when a
+   * per-request `_meta.port` override targets a different bridge instance than
+   * the default. The override client bypasses shared session state (it is a
+   * fresh LiveClient aimed at the override port); all other routing logic is
+   * identical to {@link route}. When `overrideLive` is null the default client
+   * is used (identical to {@link route}).
+   */
+  async routeOverride(
+    toolName: string,
+    args: Record<string, unknown>,
+    overrideLive: LiveClient,
+  ): Promise<CallToolResult> {
+    return this.routeCore(overrideLive, toolName, args);
+  }
+
+  private async routeCore(
+    live: LiveClient,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
     // list_assets — always offline (no live equivalent needed).
     if (toolName === "unity_open_mcp_list_assets") {
       return this.routeListAssets(args);
@@ -300,12 +324,12 @@ export class ToolRouter implements Router {
     // bridge is reachable; an unreachable bridge returns a clear error instead
     // of hanging on connect.
     if (toolName === "unity_senses_pull_events") {
-      return this.routePullEvents(args);
+      return this.routePullEvents(args, live);
     }
 
     // capabilities — local capability-discovery surface (no live/batch hop).
     if (toolName === "unity_open_mcp_capabilities") {
-      return this.routeCapabilities(args);
+      return this.routeCapabilities(args, live);
     }
 
     // list_rules — local rule catalog (no live/batch hop). Lets an agent
@@ -327,7 +351,7 @@ export class ToolRouter implements Router {
     // server applies the activate / deactivate filter to ListTools. Always
     // visible regardless of the current active set (meta-tool).
     if (toolName === "unity_open_mcp_manage_tools") {
-      return this.routeManageTools(args);
+      return this.routeManageTools(args, live);
     }
 
     // testsuite-tauri phase-3 — bridge_status. Operator-only health snapshot.
@@ -336,26 +360,26 @@ export class ToolRouter implements Router {
     // `status` token (running/compiling/stopped/dead_bridge) the Validation
     // Suite app drives its offline-scenario gate off. Read-only, gate-free.
     if (toolName === "unity_open_mcp_bridge_status") {
-      return this.routeBridgeStatus(args);
+      return this.routeBridgeStatus(args, live);
     }
 
     // find_references — offline-first when no bridge is connected; live
     // ReferenceGraph remains available when the bridge is up.
     if (toolName === "unity_open_mcp_find_references") {
-      return this.routeFindReferences(args);
+      return this.routeFindReferences(args, live);
     }
 
     // M22 — verify tools. The bridge returns the full issues[] list; we fold +
     // page server-side per the output profile (compact = counts only).
     if (toolName === "unity_open_mcp_validate_edit" || toolName === "unity_open_mcp_scan_paths") {
-      return this.routeVerifyResult(toolName, args);
+      return this.routeVerifyResult(toolName, args, live);
     }
 
     // M22 — scene_get_data. Resolves the output profile (onto detail) and pages
     // the node stream server-side; the bridge detail/max_nodes params keep
     // working as back-compat aliases.
     if (toolName === "unity_open_mcp_scene_get_data") {
-      return this.routeSceneGetData(args);
+      return this.routeSceneGetData(args, live);
     }
 
     // Compact drill-down reads: offline-first for text-serialized assets, fall
@@ -365,7 +389,7 @@ export class ToolRouter implements Router {
       const result = await routeCompressible(
         toolName,
         args,
-        this.live,
+        live,
         this.modelCache,
         this.projectPath,
       );
@@ -392,15 +416,15 @@ export class ToolRouter implements Router {
     }
 
     if (!canBatch && !isPing) {
-      const result = await this.live.route(toolName, args);
+      const result = await live.route(toolName, args);
       return injectRouteMeta(result, { route: "live" });
     }
 
-    const liveAvailable = await this.live.isLiveAvailable();
+    const liveAvailable = await live.isLiveAvailable();
 
     if (liveAvailable) {
       console.error(`[unity-open-mcp] Route: ${toolName} -> live`);
-      const result = await this.live.route(toolName, args);
+      const result = await live.route(toolName, args);
       return injectRouteMeta(result, { route: "live" });
     }
 
@@ -561,8 +585,9 @@ export class ToolRouter implements Router {
   // unity_senses_read_console.
   private async routePullEvents(
     args: Record<string, unknown>,
+    live: LiveClient,
   ): Promise<CallToolResult> {
-    const liveAvailable = await this.live.isLiveAvailable();
+    const liveAvailable = await live.isLiveAvailable();
     if (!liveAvailable) {
       return {
         content: [
@@ -599,6 +624,7 @@ export class ToolRouter implements Router {
 
   private async routeCapabilities(
     args: Record<string, unknown>,
+    live: LiveClient,
   ): Promise<CallToolResult> {
     const kind =
       args.kind === "tools" || args.kind === "rules" || args.kind === "fixes"
@@ -612,9 +638,9 @@ export class ToolRouter implements Router {
     // Capabilities stays local-route; the bridge probe is a read-only fetch
     // that does not change the route classification.
     let availableBridgeTools: ReadonlySet<string> | undefined;
-    const liveAvailable = await this.live.isLiveAvailable();
+    const liveAvailable = await live.isLiveAvailable();
     if (liveAvailable) {
-      const inventory = await this.live.listBridgeTools();
+      const inventory = await live.listBridgeTools();
       if (inventory) availableBridgeTools = inventory.tools;
     }
 
@@ -737,12 +763,13 @@ export class ToolRouter implements Router {
   // for the authoritative compiled-state report.
   private async routeManageTools(
     args: Record<string, unknown>,
+    live: LiveClient,
   ): Promise<CallToolResult> {
     const action = typeof args.action === "string" ? args.action : "";
     const group = typeof args.group === "string" ? args.group.trim() : "";
 
     if (action === "list_groups") {
-      return this.manageToolsListGroups();
+      return this.manageToolsListGroups(live);
     }
 
     if (action === "reset") {
@@ -802,14 +829,14 @@ export class ToolRouter implements Router {
     );
   }
 
-  private async manageToolsListGroups(): Promise<CallToolResult> {
+  private async manageToolsListGroups(live: LiveClient): Promise<CallToolResult> {
     // M20 Plan 7 / T20.7.0 — fetch the compiled-state inventory once and
     // reuse it for both auto-activation reconciliation and compiled-state
     // availability (two GET /tools hops → one). When the bridge is offline
     // both paths degrade gracefully (no auto-activation; availability=null).
-    const liveAvailable = await this.live.isLiveAvailable();
+    const liveAvailable = await live.isLiveAvailable();
     const inventory = liveAvailable
-      ? await this.live.listBridgeTools()
+      ? await live.listBridgeTools()
       : null;
     // Reconcile auto-activation first so the listed active set reflects
     // packages that came online since the last call.
@@ -1044,6 +1071,7 @@ export class ToolRouter implements Router {
   // error path.
   private async routeBridgeStatus(
     _args: Record<string, unknown>,
+    live: LiveClient,
   ): Promise<CallToolResult> {
     const lockOnDisk = lockPath(this.projectPath);
     let lock: InstanceLock | null = null;
@@ -1060,7 +1088,7 @@ export class ToolRouter implements Router {
     // — both shapes are valid inputs here. A compile-in-progress bridge
     // returns HTTP 503 from /ping which isLiveAvailable() treats as reachable;
     // the ping body's `compiling` field is the authoritative signal.
-    const pingResult = await this.live.route("unity_open_mcp_ping", {});
+    const pingResult = await live.route("unity_open_mcp_ping", {});
     const pingBody = parsePingBody(pingResult);
     const pingReachable = !pingResult.isError && pingBody !== null;
     const compiling = pingReachable === true && pingBody?.compiling === true;
@@ -1138,13 +1166,14 @@ export class ToolRouter implements Router {
 
   private async routeFindReferences(
     args: Record<string, unknown>,
+    live: LiveClient,
   ): Promise<CallToolResult> {
     // M22 — resolve profile -> detail. compact (default) maps to summary
     // (counts/byKind/byFolder only); balanced -> normal; full -> verbose.
     const { detail, profile } = readProfileAndDetail(args, "summary");
     const wantPaging = typeof args.page_size === "number" && args.page_size > 0;
 
-    const liveAvailable = await this.live.isLiveAvailable();
+    const liveAvailable = await live.isLiveAvailable();
     if (liveAvailable) {
       console.error("[unity-open-mcp] Route: find_references -> live");
       // The live bridge only honors max_results (no detail/per-file/threshold).
@@ -1154,7 +1183,7 @@ export class ToolRouter implements Router {
         ...args,
         max_results: wantPaging ? 0 : (typeof args.max_results === "number" ? args.max_results : 100),
       };
-      const result = await this.live.route("unity_open_mcp_find_references", liveArgs);
+      const result = await live.route("unity_open_mcp_find_references", liveArgs);
       const folded = foldFindReferencesLive(result, profile, wantPaging, args);
       return injectRouteMeta(folded, { route: "live" });
     }
@@ -1227,6 +1256,7 @@ export class ToolRouter implements Router {
   private async routeVerifyResult(
     toolName: string,
     args: Record<string, unknown>,
+    live: LiveClient,
   ): Promise<CallToolResult> {
     const { profile } = readProfileAndDetail(args, "summary");
     const pageSize = typeof args.page_size === "number" && args.page_size > 0 ? (args.page_size as number) : 0;
@@ -1238,12 +1268,12 @@ export class ToolRouter implements Router {
     const canBatch = this.batch.isBatchTool(toolName);
     let raw: CallToolResult;
     if (!canBatch) {
-      raw = await this.live.route(toolName, args);
+      raw = await live.route(toolName, args);
       raw = injectRouteMeta(raw, { route: "live" });
     } else {
-      const liveAvailable = await this.live.isLiveAvailable();
+      const liveAvailable = await live.isLiveAvailable();
       if (liveAvailable) {
-        raw = await this.live.route(toolName, args);
+        raw = await live.route(toolName, args);
         raw = injectRouteMeta(raw, { route: "live" });
       } else {
         raw = await this.batch.route(toolName, args);
@@ -1264,6 +1294,7 @@ export class ToolRouter implements Router {
   // working as back-compat aliases; profile wins when both are present.
   private async routeSceneGetData(
     args: Record<string, unknown>,
+    live: LiveClient,
   ): Promise<CallToolResult> {
     const { detail } = readProfileAndDetail(args, "summary");
     const wantPaging = typeof args.page_size === "number" && args.page_size > 0;
@@ -1280,12 +1311,12 @@ export class ToolRouter implements Router {
     const canBatch = this.batch.isBatchTool("unity_open_mcp_scene_get_data");
     let raw: CallToolResult;
     if (!canBatch) {
-      raw = await this.live.route("unity_open_mcp_scene_get_data", bridgeArgs);
+      raw = await live.route("unity_open_mcp_scene_get_data", bridgeArgs);
       raw = injectRouteMeta(raw, { route: "live" });
     } else {
-      const liveAvailable = await this.live.isLiveAvailable();
+      const liveAvailable = await live.isLiveAvailable();
       if (liveAvailable) {
-        raw = await this.live.route("unity_open_mcp_scene_get_data", bridgeArgs);
+        raw = await live.route("unity_open_mcp_scene_get_data", bridgeArgs);
         raw = injectRouteMeta(raw, { route: "live" });
       } else {
         raw = await this.batch.route("unity_open_mcp_scene_get_data", bridgeArgs);
