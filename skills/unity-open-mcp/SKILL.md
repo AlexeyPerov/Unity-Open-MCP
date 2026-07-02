@@ -342,6 +342,12 @@ Workflow (CI build prep): `build_get_scenes` → `build_set_scenes` → `build_g
 ## Agent senses (live-only, no batch fallback)
 
 - `**unity_senses_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Set `include_passes: false` on large suites to avoid truncation. **Never fire a second `run_tests` before the first resolves** (no concurrency guard; results interleave).
+  - **Headless / CI alternative.** `run_tests` has no MCP batch form (it needs a live Editor). For headless CI, invoke Unity's CLI directly with `-runTests`. **Omit `-quit`** — with `-quit` the editor exits after the initial asset refresh, *before* the test runner starts, so no tests run and no XML is written despite an exit code of 0. The correct invocation:
+    ```
+    Unity -batchmode -projectPath <project> -runTests -testPlatform EditMode \
+          -testResults out.xml -logFile run.log -nographics
+    ```
+    Exit codes: `0` = all tests passed, `2` = test failures present (NOT a process error — do not treat 2 as a crash), `3` = test runner setup failure. Known **batchmode-only** red tests that pass in the GUI editor — don't try to "fix" these, validate them in the GUI editor instead: in-process HTTP-server lifecycle (socket-disposed), GPU/SceneView (no graphic device under `-nographics`), Unity-6's removed `LogEntries.GetEntries(List<LogEntry>)` internal API (console/capture), MSBuild/Roslyn `Microsoft.Build.Utilities.Core` host assembly load, and TimeManager SerializedProperty float access.
 - `**unity_senses_read_console`** — console entries via reflection. Filter `type: "error"` to confirm clean compile. `detail: "summary"` for messages only (saves tokens); `detail: "verbose"` includes Unity-internal frames.
 - `**unity_senses_screenshot**` — Scene / Game / isolated 2×2 composite of one GameObject.
 - `**unity_senses_screenshot_camera**` — render from an arbitrary world-space pose (position + rotation + fov) without moving the scene/game camera; transient camera, scene camera untouched.

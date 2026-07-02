@@ -24,6 +24,8 @@ The `unity-open-mcp` CLI ships six automation commands (see `unity-open-mcp --he
 | 2 | Errors — issues at/above threshold, or a regression | **fail the job** |
 | 3 | Timeout — bridge unreachable or a call timed out | **fail the job** |
 
+> **Note — Unity's own `-runTests` exit codes differ.** The table above is for the `unity-open-mcp` CLI. If you run Unity tests headlessly with `Unity -batchmode -runTests ...` (the `unity_senses_run_tests` tool has no MCP batch form), the exit codes are: `0` = all passed, `2` = test failures present (not a process error), `3` = runner setup failure. Also **omit `-quit`** — with `-quit`, the editor exits after the initial asset refresh, before the runner starts, so no tests run and no results XML is written despite exit 0.
+
 ## Prerequisites
 
 1. A Unity Editor installed on the runner (self-hosted or a Unity-licensed cloud runner). The bridge can run against an already-open Editor, or the CLI falls back to headless batch mode for scan/regression tools.

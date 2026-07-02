@@ -11,8 +11,8 @@ import {
   readDismissConfig,
   type PollAndDismissOptions,
 } from "./dialog-dismiss.js";
-import { readInstanceLock, classifyInstance, lockPath } from "./instance-discovery.js";
-import type { InstanceClassification } from "./instance-discovery.js";
+import { readInstanceLock, classifyInstance, lockPath, isPidAlive } from "./instance-discovery.js";
+import type { InstanceClassification, InstanceLock } from "./instance-discovery.js";
 import { makeErrorResult } from "./results.js";
 import {
   checkBridgeCompat,
@@ -41,6 +41,18 @@ import { lifecycleFor } from "./capabilities/lifecycle.js";
 import { PROCESS_AGENT_ID } from "./agent-identity.js";
 
 const PING_TIMEOUT_MS = 5_000;
+
+// The bridge's default per-tool wait before IT gives up and returns a timeout
+// envelope (packages/bridge/Editor/Bridge/BridgeRequestBody.cs
+// DefaultTimeoutMs). The client fetch timeout must never preempt this — if the
+// client aborts first it re-POSTs while the bridge is still processing the
+// original Work, manufacturing duplicate side-effects (specs/feedback.md entry
+// 4B/4A). postTool floors its fetch timeout at BRIDGE_DEFAULT_TIMEOUT_MS +
+// slack so a small/absent timeout_ms can't make the client give up before the
+// bridge. Kept as a literal here (not imported from the C# side) because the
+// bridge assembly isn't readable from the TS server; the cross-reference above
+// is the contract — bump both together.
+const BRIDGE_DEFAULT_TIMEOUT_MS = 30_000;
 
 const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_validate_edit",
@@ -157,6 +169,13 @@ export class LiveClient implements Router {
    *  bridge. Defaults to the process-wide id; a transient LiveClient built for
    *  a per-request port override may carry a per-call id. */
   private agentId: string;
+  /** Parsed UNITY_OPEN_MCP_BRIDGE_PORT, or undefined. When set, the env
+   *  override is authoritative and refreshEndpointFromLock() is a no-op (there
+   *  is no lock to read — matches resolvePort/resolveAuthToken semantics).
+   *  Stored so a mid-session refresh can respect the same override precedence
+   *  the constructor used; without it a refresh would silently switch from an
+   *  env-pinned port to the lock port. */
+  private readonly envPort: number | undefined;
 
   constructor(
     port: number,
@@ -164,6 +183,7 @@ export class LiveClient implements Router {
     authToken?: string,
     projectPath?: string,
     agentId: string = PROCESS_AGENT_ID,
+    envPort?: number,
   ) {
     this.baseUrl = `http://127.0.0.1:${port}`;
     this.pingCache = pingCache;
@@ -171,6 +191,7 @@ export class LiveClient implements Router {
     this.projectPath = projectPath;
     this.retry = readRetryTunables();
     this.agentId = agentId;
+    this.envPort = envPort;
     // M13 T4.5 + M23 Plan 2 — startup dialog auto-dismissal. Resolved once at
     // construction; the env vars do not change mid-process. The feature is
     // enabled by default and runs concurrently with every compile/bridge
@@ -387,6 +408,17 @@ export class LiveClient implements Router {
     try {
       const timeoutMs =
         typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
+      // Floor the client fetch timeout at the bridge's own default wait + slack
+      // so the client never aborts before the bridge has had a chance to return
+      // its timeout envelope. Without this floor, a small/absent timeout_ms
+      // (MCP hosts often omit the field → schema default 30000, or smaller)
+      // makes the client re-POST while the bridge is still processing →
+      // duplicate mutations (specs/feedback.md entry 4B). An explicit large
+      // timeout_ms still wins via the Math.max.
+      const fetchTimeout = Math.max(
+        timeoutMs + 10_000,
+        BRIDGE_DEFAULT_TIMEOUT_MS + 10_000,
+      );
       const res = await this.fetchWithTimeout(
         `/tools/${toolName}`,
         {
@@ -394,7 +426,7 @@ export class LiveClient implements Router {
           headers: { "Content-Type": "application/json; charset=utf-8" },
           body: JSON.stringify(args),
         },
-        timeoutMs + 10_000,
+        fetchTimeout,
       );
 
       if (res.status === 503 && retryOn503) {
@@ -470,11 +502,38 @@ export class LiveClient implements Router {
     } catch {
       // M20 Plan 4-5 / T-fix-2 — transient POST failure (ECONNREFUSED /
       // timeout during a domain reload). Classify + recover before declaring
-      // offline. On recovery (`null`) retry the POST once (retryOn503 stays
-      // as-passed so a post-recovery 503 still triggers the compile-wait path).
+      // offline. handleTransientOffline re-syncs the cached endpoint from the
+      // lock first (so a Unity restart self-heals).
+      //
+      // Re-POST discipline (specs/feedback.md entry 4A — duplicate side-effects):
+      // only re-POST when the endpoint CHANGED during recovery (a restart → new
+      // bridge that never saw the original POST, so a retry is safe). When the
+      // endpoint is unchanged the same live bridge is still processing — or has
+      // queued — the original POST's Work; re-POSTing would run the mutation a
+      // second time. In that case surface the timeout instead of retrying.
+      const endpointBefore = this.baseUrl;
       const recovered = await this.handleTransientOffline("post");
       if (recovered !== null) return recovered;
-      return this.postTool(toolName, args, retryOn503);
+      const endpointChanged = this.baseUrl !== endpointBefore;
+      if (endpointChanged) {
+        return this.postTool(toolName, args, retryOn503);
+      }
+      return makeErrorResult({
+        code: "bridge_offline",
+        message:
+          `Tool '${toolName}' did not return from the bridge within the client ` +
+          `timeout. The bridge endpoint did not change (no restart detected), so ` +
+          `the request was NOT retried — re-POSTing would risk running the ` +
+          `mutation twice on the same bridge. If the editor was briefly slow ` +
+          `(unfocused, GC, a long main-thread op), the original call may still ` +
+          `complete there; verify the effect before retrying. Endpoint: ${this.baseUrl}.`,
+        detail: {
+          error: {
+            code: "bridge_offline",
+            message: `Client timeout against unchanged endpoint ${this.baseUrl}; not retried to avoid duplicate side-effects.`,
+          },
+        },
+      });
     }
   }
 
@@ -522,8 +581,32 @@ export class LiveClient implements Router {
       //     out (the listener socket is torn down for the reload duration) then
       //     re-probe once before declaring offline (T-fix-2)
       //   - otherwise      → retry with backoff a few times, then offline
+      // handleTransientOffline refreshes the cached endpoint from the lock
+      // first, so a Unity restart (new PID/port) re-points this client before
+      // the retry probes (specs/feedback.md entry 2).
       const recovered = await this.handleTransientOffline("ping");
       if (recovered !== null) return recovered;
+
+      // Recovery returned null ("recovered" — a /ping probe succeeded during
+      // handleTransientOffline, possibly against a freshly-refreshed endpoint
+      // after a restart). Re-probe /ping ONCE on the (possibly new) endpoint
+      // before declaring offline: without this, a restart that refreshed the
+      // endpoint mid-recovery would still surface bridge_offline here, and the
+      // caller (handleToolCall) treats any non-null ensureReady result as a
+      // terminal error — so the next tool call would fail despite the bridge
+      // being back. The single re-probe closes that gap.
+      try {
+        const retryRes = await this.fetchWithTimeout("/ping", { method: "GET" });
+        if (retryRes.status === 503) return this.waitForCompile();
+        if (retryRes.ok) {
+          const retryBody = (await retryRes.json()) as PingResponse;
+          this.pingCache.record(retryBody);
+          if (retryBody.compiling) return this.waitForCompile();
+          if (retryBody.connected) return null; // recovered against the new endpoint
+        }
+      } catch {
+        // Re-probe also failed — fall through to the offline error below.
+      }
 
       return makeErrorResult({
         code: "bridge_offline",
@@ -559,6 +642,15 @@ export class LiveClient implements Router {
   private async handleTransientOffline(
     operation: "ping" | "post",
   ): Promise<CallToolResult | null> {
+    // Before any classification/retry, re-sync the cached endpoint to the
+    // current live bridge. A Unity restart writes a fresh PID/port/authToken
+    // to the lock; without this refresh every retry below would keep hitting
+    // the dead cached listener (specs/feedback.md entry 2) and, on the POST
+    // path, re-dispatch the Work to the new bridge (duplicate side-effects,
+    // entry 4A). refreshEndpointFromLock is a no-op when an env-port override
+    // is in force or nothing has changed.
+    this.refreshEndpointFromLock();
+
     // Dead bridge assembly — not recoverable by waiting. Fail fast so the
     // agent can fetch compile errors instead of hanging on /ping.
     const deadBridge = this.deadBridgeResult();
@@ -619,6 +711,46 @@ export class LiveClient implements Router {
         },
       },
     });
+  }
+
+  /**
+   * Re-resolve the bridge endpoint (port + authToken) from the on-disk instance
+   * lock and update the cached {@link baseUrl} / {@link authToken} when the
+   * live bridge has moved. Returns true when the endpoint changed.
+   *
+   * This is the single fix for two coupled failure modes (specs/feedback.md
+   * entries 2 + 4A): the client cached the port/token once at construction,
+   * so a Unity restart (new PID/port/authToken in the lock) left every retry
+   * hitting a dead listener — producing minutes of `bridge_offline` *and*
+   * (because {@link postTool} re-POSTs on recovery) duplicate side-effects
+   * once the editor came back. Refreshing here lets a restart self-heal.
+   *
+   * No-op (returns false) when there is no projectPath, an env-port override
+   * is in force (env is authoritative — no lock to read, matching
+   * resolvePort/resolveAuthToken), or the lock is missing/its PID is dead/
+   * nothing actually changed. Never throws — readInstanceLock/isPidAlive are
+   * already fault-tolerant.
+   */
+  private refreshEndpointFromLock(): boolean {
+    if (!this.projectPath) return false;
+    if (typeof this.envPort === "number") return false; // env override wins
+    let lock: InstanceLock | null;
+    try {
+      lock = readInstanceLock(this.projectPath);
+    } catch {
+      return false;
+    }
+    if (!lock) return false;
+    if (!isPidAlive(lock.pid)) return false;
+    const portChanged =
+      typeof lock.port === "number" &&
+      lock.port > 0 &&
+      this.baseUrl !== `http://127.0.0.1:${lock.port}`;
+    const tokenChanged = lock.authToken !== this.authToken;
+    if (!portChanged && !tokenChanged) return false;
+    if (portChanged) this.baseUrl = `http://127.0.0.1:${lock.port}`;
+    if (tokenChanged) this.authToken = lock.authToken;
+    return true;
   }
 
   /**

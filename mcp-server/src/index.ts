@@ -49,7 +49,7 @@ const TOOL_BY_NAME = new Map<string, Tool>(
  *   3. deterministic hash of the project path (20000 + sha256 % 10000)
  * The resolved port is logged so users can see which bridge was picked.
  */
-function getEnv(): { projectPath: string; port: number; authToken?: string } {
+function getEnv(): { projectPath: string; port: number; authToken?: string; envPort?: number } {
   const projectPath = process.env.UNITY_PROJECT_PATH;
   if (!projectPath) {
     console.error(
@@ -59,10 +59,9 @@ function getEnv(): { projectPath: string; port: number; authToken?: string } {
   }
   const rawEnvPort = process.env.UNITY_OPEN_MCP_BRIDGE_PORT;
   const envPort = rawEnvPort ? parseInt(rawEnvPort, 10) : undefined;
-  const port = resolvePort(
-    projectPath,
-    Number.isInteger(envPort) ? envPort : undefined,
-  );
+  const resolvedEnvPort =
+    rawEnvPort && Number.isInteger(envPort) ? envPort : undefined;
+  const port = resolvePort(projectPath, resolvedEnvPort);
   const source =
     rawEnvPort && Number.isInteger(envPort)
       ? "env override"
@@ -85,13 +84,14 @@ function getEnv(): { projectPath: string; port: number; authToken?: string } {
       "[unity-open-mcp] No bridge auth token discovered (authMode must be \"none\").",
     );
   }
-  return { projectPath, port, authToken };
+  return { projectPath, port, authToken, envPort: resolvedEnvPort };
 }
 
 export function createServer(
   projectPath: string,
   port: number,
   authToken?: string,
+  envPort?: number,
 ): Server {
   const server = new Server(
     { name: "unity-open-mcp", version: PACKAGE_VERSION },
@@ -107,7 +107,7 @@ export function createServer(
   );
 
   const pingCache = new PingCache();
-  const liveClient = new LiveClient(port, pingCache, authToken, projectPath);
+  const liveClient = new LiveClient(port, pingCache, authToken, projectPath, undefined, envPort);
   const batchSpawn = new BatchSpawn();
   // M13 T4.4 — one SSE subscription per server process. The MCP server is the
   // only long-lived hop between the bridge and the LLM; a per-process reader
@@ -190,6 +190,10 @@ export function createServer(
         overrideAuth,
         projectPath,
         routing.agentId,
+        // A per-request _meta.port override is authoritative exactly like an
+        // env-port override: pass it as envPort so refreshEndpointFromLock is
+        // a no-op for this transient client (no lock re-resolution).
+        routing.portOverride,
       );
       return router.routeOverride(name, routedArgs, overrideLive);
     },
@@ -229,8 +233,8 @@ async function main() {
     // in that case fall through to the stdio server below.
   }
 
-  const { port, projectPath, authToken } = getEnv();
-  const server = createServer(projectPath, port, authToken);
+  const { port, projectPath, authToken, envPort } = getEnv();
+  const server = createServer(projectPath, port, authToken, envPort);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

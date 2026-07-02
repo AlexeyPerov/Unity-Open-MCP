@@ -279,6 +279,8 @@ function plantLock(
   pid: number,
   heartbeatAgeMs: number,
   state: string = "reloading",
+  port: number = 22028,
+  authToken: string = "deadbeef",
 ): void {
   process.env.HOME = s.dir;
   process.env.USERPROFILE = s.dir;
@@ -289,8 +291,8 @@ function plantLock(
   const heartbeatAt = new Date(Date.now() - heartbeatAgeMs).toISOString();
   const payload = {
     pid,
-    port: 22028,
-    authToken: "deadbeef",
+    port,
+    authToken,
     projectPath,
     projectHash: hash,
     startedAt: heartbeatAt,
@@ -468,6 +470,177 @@ test("T-fix-2: dead-bridge still fails fast despite recovery paths", async () =>
     assert.equal(result.isError, true);
     const body = JSON.parse((result.content[0] as { text: string }).text);
     assert.equal(body.error.code, "bridge_compile_failed");
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+// ----- Endpoint refresh from lock (specs/feedback.md entries 2 + 4A) -----
+//
+// LiveClient cached baseUrl/authToken once at construction. On a Unity restart
+// (new PID/port/authToken in the lock) every retry hit the dead cached port
+// for minutes (entry 2), and the POST-path retry re-dispatched the Work to the
+// new bridge — duplicate side-effects (entry 4A). The fix: handleTransientOffline
+// calls refreshEndpointFromLock() first, and postTool only re-POSTs when the
+// endpoint actually changed.
+
+const REFRESH_PROJECT = "/test/RestartRefreshGame";
+
+/**
+ * Handler that serves idle 200 on /ping and a DIRECT_RESPONSE-style success on
+ * /tools/*, recording how many tool POSTs it received. Used to prove (a) the
+ * client reached this stub after a lock rewrite, and (b) no duplicate POSTs.
+ */
+function countingIdleHandler(
+  toolHits: { count: number },
+): (req: IncomingMessage, res: ServerResponse) => void {
+  return (req, res) => {
+    if (req.url?.startsWith("/tools/")) toolHits.count++;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (req.url === "/ping") {
+      res.end(
+        JSON.stringify({
+          connected: true,
+          projectPath: REFRESH_PROJECT,
+          unityVersion: "6000.0.0f1",
+          bridgeVersion: "0.1.0",
+          mode: "live",
+          compiling: false,
+          isPlaying: false,
+        }),
+      );
+      return;
+    }
+    res.end(JSON.stringify({ ok: true }));
+  };
+}
+
+test("refresh: LiveClient re-points at the new port after a Unity restart (entry 2)", async () => {
+  // Start a stub on port A, plant a lock pointing at port A (live PID = us).
+  // Then rewrite the lock to port B, start a stub on port B, and close stub A.
+  // A tool call must now succeed against port B — proving baseUrl refreshed.
+  const s = makeSandbox();
+  const hitsB: { count: number } = { count: 0 };
+  try {
+    const bridgeA = await startBridgeStub(countingIdleHandler({ count: 0 }));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridgeA.port);
+    const client = new LiveClient(
+      bridgeA.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    // Simulate the restart: new port in the lock, stub B up, stub A down.
+    const bridgeB = await startBridgeStub(countingIdleHandler(hitsB));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridgeB.port);
+    await bridgeA.close();
+
+    // route a read-only tool. The first fetch hits the dead port A → ECONNREFUSED
+    // → handleTransientOffline → refreshEndpointFromLock re-points to port B →
+    // the /ping probe succeeds → caller retries → succeeds on port B.
+    const result = await client.route("unity_open_mcp_validate_edit", {
+      paths: ["Assets"],
+    });
+    assert.equal(result.isError, false, "tool must succeed against the new port");
+    assert.ok(
+      hitsB.count >= 1,
+      "the tool POST reached stub B (the refreshed endpoint)",
+    );
+    await bridgeB.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("refresh: no re-POST when the endpoint is unchanged after recovery (entry 4A)", async () => {
+  // A bridge that is UP for /ping (so handleTransientOffline recovers → null)
+  // but whose /tools/* POST throws (simulated by destroying the socket). With
+  // the endpoint UNCHANGED, postTool must NOT re-POST (a retry would run the
+  // mutation twice on the same bridge). Instead it surfaces the no-retry
+  // result. Pre-fix this looped/re-POSTed.
+  const s = makeSandbox();
+  const toolHits: { count: number } = { count: 0 };
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      if (req.url?.startsWith("/tools/")) {
+        toolHits.count++;
+        // Hard-reset the connection so the client's POST throws fast → enters
+        // postTool's catch → recovery. /ping below still answers 200, so
+        // handleTransientOffline returns null ("recovered"). req.socket.destroy
+        // (not res.destroy) reliably aborts the client's fetch; res.destroy can
+        // leave the socket half-open and hang the client until its timeout.
+        req.socket.destroy();
+        return;
+      }
+      // /ping answers idle 200 so recovery returns null ("recovered").
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          connected: true,
+          projectPath: REFRESH_PROJECT,
+          unityVersion: "6000.0.0f1",
+          bridgeVersion: "0.1.0",
+          mode: "live",
+          compiling: false,
+          isPlaying: false,
+        }),
+      );
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_validate_edit", {
+      paths: ["Assets"],
+    });
+    // Exactly one tool POST — the retry was suppressed because the endpoint
+    // did not change during recovery (same live bridge; re-POSTing would
+    // duplicate the Work).
+    assert.equal(
+      toolHits.count,
+      1,
+      `expected exactly one tool POST (no re-POST on unchanged endpoint), got ${toolHits.count}`,
+    );
+    assert.equal(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(
+      body.error.code,
+      "bridge_offline",
+      "unchanged-endpoint timeout must surface the no-retry result, not loop",
+    );
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("refresh: env-port override disables lock refresh", async () => {
+  // When UNITY_OPEN_MCP_BRIDGE_PORT (passed as envPort) pins the endpoint,
+  // refreshEndpointFromLock must be a no-op even if the lock points elsewhere.
+  // The client stays on the env port; a lock rewrite must NOT redirect it.
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub(countingIdleHandler({ count: 0 }));
+    // Lock points at a DIFFERENT port, but envPort pins the client to the stub.
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", 1);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      undefined,
+      REFRESH_PROJECT,
+      undefined,
+      bridge.port, // envPort override — authoritative
+    );
+    // Direct call: a ping against the env-pinned port must succeed despite the
+    // lock claiming port 1.
+    const live = await client.isLiveAvailable();
+    assert.equal(live, true, "env-port override keeps the client on the stub port");
+    await bridge.close();
   } finally {
     disposeSandbox(s);
   }

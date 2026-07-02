@@ -19,6 +19,10 @@ export interface ResolvedEnv {
   projectPath: string;
   port: number;
   authToken: string | undefined;
+  /** Parsed UNITY_OPEN_MCP_BRIDGE_PORT (or CLI --port override), else undefined.
+   *  Threaded into LiveClient so refreshEndpointFromLock respects the same
+   *  override precedence as construction (env override ⇒ no lock refresh). */
+  envPort: number | undefined;
 }
 
 /**
@@ -58,7 +62,7 @@ export function resolveEnv(
     portOverride ?? effectiveEnvPort,
   );
 
-  return { projectPath, port, authToken };
+  return { projectPath, port, authToken, envPort: portOverride ?? effectiveEnvPort };
 }
 
 export class ResolveEnvError extends Error {}
@@ -86,7 +90,7 @@ export interface RouterStack {
  */
 export function buildRouterStack(env: ResolvedEnv): RouterStack {
   const pingCache = new PingCache();
-  const live = new LiveClient(env.port, pingCache, env.authToken, env.projectPath);
+  const live = new LiveClient(env.port, pingCache, env.authToken, env.projectPath, undefined, env.envPort);
   const batch = new BatchSpawn();
   const eventStream = new BridgeEventStream(
     `http://127.0.0.1:${env.port}`,
