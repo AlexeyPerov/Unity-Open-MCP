@@ -93,6 +93,13 @@ namespace UnityOpenMcpBridge
             // the None default below (they are gate-free, dispatched direct).
             { "unity_open_mcp_package_add",         LifecyclePolicy.RestartThenSettle },
             { "unity_open_mcp_package_remove",      LifecyclePolicy.RestartThenSettle },
+            // reimport_package force-reimports a local file: package's source
+            // and calls RequestScriptCompilation — a domain reload / recompile
+            // can follow. RestartThenSettle blocks until it settles. Unlike
+            // package_add/remove it does not write manifest.json (the package
+            // id is the scope); the tool additionally reports dllMtimeBefore/
+            // After so an agent can detect a no-op recompile (specs/feedback.md).
+            { "unity_open_mcp_reimport_package",    LifecyclePolicy.RestartThenSettle },
             // M16 Plan 5 — typed TagManager mutators. add_tag / add_layer
             // rewrite ProjectSettings/TagManager.asset and refresh the asset
             // database. None of them recompile editor scripts, so EditorSettle

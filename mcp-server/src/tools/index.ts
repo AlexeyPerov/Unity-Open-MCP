@@ -108,6 +108,7 @@ import { packageList } from "./package-list.js";
 import { packageSearch } from "./package-search.js";
 import { packageAdd } from "./package-add.js";
 import { packageRemove } from "./package-remove.js";
+import { reimportPackage } from "./reimport-package.js";
 import { packageGetInfo } from "./package-get-info.js";
 import { packageGetDependencies } from "./package-get-dependencies.js";
 import { packageCheck } from "./package-check.js";
@@ -612,6 +613,7 @@ export const M16_PLAN4_TOOLS: Tool[] = [
   packageSearch,
   packageAdd,
   packageRemove,
+  reimportPackage,
   packageGetInfo,
   packageGetDependencies,
   packageCheck,

@@ -488,6 +488,185 @@ namespace UnityOpenMcpBridge.TypedTools
             return ToolDispatchResult.Ok(sb.ToString());
         }
 
+        // Force a reimport of a LOCAL (file:-linked) package's source so Unity
+        // recompiles the package assembly. Mutating: triggers a recompile /
+        // domain reload (RestartThenSettle).
+        //
+        // Background (specs/feedback.md): when a local package's source lives
+        // outside Assets/, AssetDatabase.Refresh no-ops on it (Unity's
+        // incremental compiler sees no import change). assets_refresh /
+        // execute_csharp(RequestScriptCompilation) therefore cannot reliably
+        // force a recompile of a file: package while a live Editor holds the
+        // project. This tool resolves the package, force-reimports every .cs +
+        // .asmdef under its resolved source root via the Packages/<id> import
+        // view, nudges a script recompile, and — crucially — reports the
+        // newest matching ScriptAssemblies DLL mtime before AND after so an
+        // agent can DETECT when the recompile was a no-op and fall back to a
+        // standalone Roslyn compile.
+        //
+        // Non-local packages (registry / git / embedded) have nothing outside
+        // Assets/ to reimport here: the tool returns not_local_package and
+        // points the agent at assets_refresh.
+        public static ToolDispatchResult ReimportPackage(string body)
+        {
+            var query = JsonBody.GetString(body, "package_id");
+            if (string.IsNullOrWhiteSpace(query))
+                return ToolDispatchResult.Fail("missing_parameter",
+                    "'package_id' is required (the package name, packageId, or " +
+                    "displayName — e.g. 'com.alexeyperov.unity-open-mcp-bridge').");
+
+            var installed = CollectInstalled();
+            if (installed == null)
+                return Fail("list_request_failed",
+                    "Client.List failed; cannot resolve the package. " +
+                    "Retry, or call unity_open_mcp_read_compile_errors to inspect compile state.");
+
+            // Resolve by name (exact) first, then by MatchesPackage (name /
+            // packageId / displayName). Mirrors the resolution the other
+            // package tools use.
+            PackageInfo pkg = null;
+            var trimmed = query.Contains("@")
+                ? query.Substring(0, query.IndexOf('@'))
+                : query;
+            if (installed.TryGetValue(trimmed, out var exact))
+            {
+                pkg = exact;
+            }
+            else
+            {
+                foreach (var p in installed.Values)
+                {
+                    if (MatchesPackage(p, query)) { pkg = p; break; }
+                }
+            }
+            if (pkg == null)
+                return Fail("package_not_found",
+                    $"No installed package matches '{query}'. Use " +
+                    "unity_open_mcp_package_list to enumerate installed packages.");
+
+            // Only local packages have source outside Assets/ worth reimporting.
+            if (pkg.source != PackageSource.Local)
+            {
+                var nlSb = new StringBuilder(160);
+                nlSb.Append("{\"status\":\"not_local_package\",");
+                nlSb.Append("\"packageId\":\"").Append(Esc(pkg.name)).Append("\",");
+                nlSb.Append("\"source\":\"").Append(Esc(pkg.source.ToString())).Append("\",");
+                nlSb.Append("\"agentNextSteps\":[");
+                nlSb.Append("\"Only local (file:-linked) packages have source outside Assets/ to reimport; this package is ")
+                  .Append(Esc(pkg.source.ToString())).Append(".\",");
+                nlSb.Append("\"For a generic asset reimport, call unity_open_mcp_assets_refresh.\",");
+                nlSb.Append("\"To pull a newer version of a registry/git package, use unity_open_mcp_package_add with the desired specifier.\"");
+                nlSb.Append("]}");
+                return ToolDispatchResult.Ok(nlSb.ToString());
+            }
+
+            var resolvedPath = pkg.resolvedPath;
+            if (string.IsNullOrEmpty(resolvedPath) || !Directory.Exists(resolvedPath))
+                return Fail("resolved_path_unavailable",
+                    $"Resolved path for '{pkg.name}' is unavailable or missing " +
+                    $"('{resolvedPath}'). The package may not be fully resolved; " +
+                    "retry, or call unity_open_mcp_package_get_info.");
+
+            // Snapshot the matching ScriptAssemblies DLL(s) BEFORE the reimport
+            // so we can detect whether Unity actually rebuilt the assembly.
+            // Mapping: read each .asmdef under the package root, take its
+            // assembly name, map to Library/ScriptAssemblies/<name>.dll.
+            var assemblyNames = CollectPackageAssemblyNames(resolvedPath);
+            var dllDir = Path.Combine(
+                Directory.GetParent(UnityEngine.Application.dataPath).FullName,
+                "Library", "ScriptAssemblies");
+            long mtimeBefore = NewestAssemblyMtime(dllDir, assemblyNames);
+
+            // Enumerate source files (.cs + .asmdef) under the resolved root and
+            // force-reimport each through its Packages/<id>/... import path
+            // (AssetDatabase understands that form for local packages; the
+            // physical resolvedPath is outside Assets/ and not importable
+            // directly). Mirror AssemblyDefinitionTools.WriteAsmdef's
+            // ImportAsset(ForceUpdate) + RestartThenSettle contract.
+            var packageImportRoot = "Packages/" + pkg.name;
+            int reimported = 0;
+            var reimportErrors = new List<string>();
+            try
+            {
+                foreach (var relPath in EnumeratePackageSourcePaths(resolvedPath, packageImportRoot))
+                {
+                    try
+                    {
+                        UnityEditor.AssetDatabase.ImportAsset(relPath, UnityEditor.ImportAssetOptions.ForceUpdate);
+                        reimported++;
+                    }
+                    catch (System.Exception e)
+                    {
+                        reimportErrors.Add(relPath + ": " + e.Message);
+                    }
+                }
+            }
+            catch (System.Exception e)
+            {
+                return Fail("enumerate_failed",
+                    $"Failed to enumerate source under '{resolvedPath}': {e.Message}");
+            }
+
+            // Belt-and-suspenders: explicitly request a script compilation. The
+            // dispatcher's RestartThenSettle window (set via ToolLifecycle) then
+            // blocks until the compile settles before this method returns.
+            try
+            {
+                UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation();
+            }
+            catch
+            {
+                // RequestScriptCompilation throws if a compile is already in
+                // flight; the settle wait below covers either case. Ignore.
+            }
+
+            // Block briefly for the compile to settle on this (main) thread so
+            // the AFTER mtime reflects the recompiled DLL. The dispatcher's own
+            // RestartThenSettle wait covers the long tail; this short inline
+            // poll lets us report a meaningful dllMtimeAfter without relying
+            // solely on the envelope's settleMs.
+            SpinWaitForCompileSettle();
+
+            long mtimeAfter = NewestAssemblyMtime(dllDir, assemblyNames);
+            bool recompiled = mtimeAfter > mtimeBefore;
+
+            var sb = new StringBuilder(256);
+            sb.Append("{\"status\":\"ok\",");
+            sb.Append("\"packageId\":\"").Append(Esc(pkg.name)).Append("\",");
+            sb.Append("\"source\":\"").Append(Esc(pkg.source.ToString())).Append("\",");
+            sb.Append("\"resolvedPath\":\"").Append(Esc(resolvedPath)).Append("\",");
+            sb.Append("\"reimportedFiles\":").Append(reimported).Append(',');
+            sb.Append("\"assemblyCount\":").Append(assemblyNames.Count).Append(',');
+            sb.Append("\"dllMtimeBefore\":").Append(mtimeBefore).Append(',');
+            sb.Append("\"dllMtimeAfter\":").Append(mtimeAfter).Append(',');
+            sb.Append("\"recompiled\":").Append(recompiled ? "true" : "false").Append(',');
+            sb.Append("\"isCompiling\":").Append(UnityEditor.EditorApplication.isCompiling ? "true" : "false");
+            if (reimportErrors.Count > 0)
+            {
+                sb.Append(",\"reimportErrors\":[");
+                for (int i = 0; i < reimportErrors.Count && i < 20; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('"').Append(Esc(reimportErrors[i])).Append('"');
+                }
+                sb.Append(']');
+            }
+            sb.Append(",\"agentNextSteps\":[");
+            if (recompiled)
+            {
+                sb.Append("\"The package assembly was rebuilt (dllMtimeAfter > dllMtimeBefore). To confirm there are no compile errors, call unity_open_mcp_read_compile_errors.\"");
+            }
+            else
+            {
+                sb.Append("\"Unity's incremental compiler did NOT rebuild the package assembly (dllMtimeAfter == dllMtimeBefore). This is a known no-op case for local file: packages.\",");
+                sb.Append("\"For real syntax/type validation, do a standalone Roslyn compile of the changed .cs files against netstandard.dll + the UnityEngine/* module DLLs (csc.dll under <Unity>/<version>/Editor/Data/NetStandard/DotNetSdkRoslyn), filtering reference-assembly artifacts that need the full Unity ref set.\",");
+                sb.Append("\"Or call unity_open_mcp_read_compile_errors to inspect Unity's Editor.log for compile errors.\",");
+                sb.Append("\"As a last resort, a no-op unity_open_mcp_package_add with the same package id, or refocusing the Editor window, can nudge Unity into recompiling.\"");
+            }
+            sb.Append("]}");
+            return ToolDispatchResult.Ok(sb.ToString());
+        }
+
         // ----------------------------- helpers ----------------------------
 
         private static PackageSource? ParseSourceFilter(string raw)
@@ -785,6 +964,157 @@ namespace UnityOpenMcpBridge.TypedTools
                 }
             }
             return sb.ToString();
+        }
+
+        // --------------------- reimport_package helpers ---------------------
+
+        // Read the assembly name from a .asmdef JSON blob without depending
+        // on AsmdefJson (which lives in AssemblyDefinitionTools and is
+        // internal to a different sub-concern). We only need the top-level
+        // "name" field; a lightweight scan is enough and avoids coupling.
+        private static string ReadAsmdefName(string asmdefJson)
+        {
+            if (string.IsNullOrEmpty(asmdefJson)) return null;
+            // Match `"name"` followed by a colon and a quoted string. Cheap and
+            // sufficient for asmdef (Unity writes the field canonically).
+            var idx = asmdefJson.IndexOf("\"name\"", System.StringComparison.Ordinal);
+            while (idx >= 0)
+            {
+                int i = idx + 6;
+                while (i < asmdefJson.Length && char.IsWhiteSpace(asmdefJson[i])) i++;
+                if (i < asmdefJson.Length && asmdefJson[i] == ':')
+                {
+                    i++;
+                    while (i < asmdefJson.Length && char.IsWhiteSpace(asmdefJson[i])) i++;
+                    if (i < asmdefJson.Length && asmdefJson[i] == '"')
+                    {
+                        i++;
+                        int start = i;
+                        while (i < asmdefJson.Length && asmdefJson[i] != '"')
+                        {
+                            if (asmdefJson[i] == '\\' && i + 1 < asmdefJson.Length) i++;
+                            i++;
+                        }
+                        return asmdefJson.Substring(start, i - start);
+                    }
+                }
+                idx = asmdefJson.IndexOf("\"name\"", idx + 6, System.StringComparison.Ordinal);
+            }
+            return null;
+        }
+
+        // Walk the package source root for .asmdef files and collect their
+        // declared assembly names. These map to Library/ScriptAssemblies/
+        // <AssemblyName>.dll (Unity compiles each asmdef into one assembly).
+        private static List<string> CollectPackageAssemblyNames(string resolvedPath)
+        {
+            var names = new List<string>();
+            string[] asmdefs;
+            try { asmdefs = Directory.GetFiles(resolvedPath, "*.asmdef", SearchOption.AllDirectories); }
+            catch { return names; }
+            foreach (var asmdef in asmdefs)
+            {
+                try
+                {
+                    var name = ReadAsmdefName(File.ReadAllText(asmdef));
+                    if (!string.IsNullOrWhiteSpace(name)) names.Add(name);
+                }
+                catch { /* skip unreadable asmdef */ }
+            }
+            return names;
+        }
+
+        // Newest write time (UTC ticks) among the package's assemblies under
+        // Library/ScriptAssemblies/. Returns long.MinValue when no DLL matches
+        // (so the recompiled flag stays false rather than spuriously true).
+        // When assemblyNames is empty, falls back to the newest DLL in the dir
+        // so the agent still gets SOME signal.
+        private static long NewestAssemblyMtime(string scriptAssembliesDir, List<string> assemblyNames)
+        {
+            if (string.IsNullOrEmpty(scriptAssembliesDir) || !Directory.Exists(scriptAssembliesDir))
+                return System.DateTime.MinValue.Ticks;
+
+            string[] candidates;
+            try { candidates = Directory.GetFiles(scriptAssembliesDir, "*.dll"); }
+            catch { return System.DateTime.MinValue.Ticks; }
+
+            long newest = System.DateTime.MinValue.Ticks;
+            bool useAll = assemblyNames == null || assemblyNames.Count == 0;
+            foreach (var dll in candidates)
+            {
+                string fileName = Path.GetFileNameWithoutExtension(dll);
+                bool match = useAll;
+                if (!match)
+                {
+                    foreach (var n in assemblyNames)
+                    {
+                        if (string.Equals(fileName, n, System.StringComparison.OrdinalIgnoreCase))
+                        {
+                            match = true;
+                            break;
+                        }
+                    }
+                }
+                if (!match) continue;
+                try
+                {
+                    var t = System.IO.File.GetLastWriteTimeUtc(dll).Ticks;
+                    if (t > newest) newest = t;
+                }
+                catch { /* file vanished mid-scan */ }
+            }
+            return newest;
+        }
+
+        // Enumerate the package's source files (.cs + .asmdef) under the
+        // physical resolvedPath and yield their Packages/<id>/... import-view
+        // paths (the form AssetDatabase.ImportAsset understands for local
+        // packages whose real source is outside Assets/).
+        private static IEnumerable<string> EnumeratePackageSourcePaths(string resolvedPath, string packageImportRoot)
+        {
+            string[] files;
+            try
+            {
+                var list = new List<string>();
+                list.AddRange(Directory.GetFiles(resolvedPath, "*.cs", SearchOption.AllDirectories));
+                list.AddRange(Directory.GetFiles(resolvedPath, "*.asmdef", SearchOption.AllDirectories));
+                files = list.ToArray();
+            }
+            catch { yield break; }
+
+            string resolvedFull = Path.GetFullPath(resolvedPath).TrimEnd('/', '\\');
+            foreach (var abs in files)
+            {
+                string rel;
+                try { rel = Path.GetFullPath(abs).Substring(resolvedFull.Length).TrimStart('/', '\\').Replace('\\', '/'); }
+                catch { continue; }
+                if (string.IsNullOrEmpty(rel)) continue;
+                yield return packageImportRoot + "/" + rel;
+            }
+        }
+
+        // Short inline poll (runs on the main thread, before the dispatcher's
+        // own RestartThenSettle wait) so the AFTER mtime reflects the freshly
+        // compiled DLL. Caps at a few seconds; the dispatcher's long-cap wait
+        // covers any remaining tail. We tick EditorApplication.update manually
+        // is NOT needed — CompilationPipeline.RequestScriptCompilation flips
+        // isCompiling synchronously enough that a direct poll suffices.
+        private static void SpinWaitForCompileSettle()
+        {
+            const int capMs = 4000;
+            const int tickMs = 100;
+            int elapsed = 0;
+            // Give Unity a beat to START compiling before we poll for it to
+            // FINISH — RequestScriptCompilation may not flip isCompiling within
+            // the same frame.
+            System.Threading.Thread.Sleep(tickMs);
+            elapsed += tickMs;
+            while (elapsed < capMs)
+            {
+                if (!UnityEditor.EditorApplication.isCompiling) break;
+                System.Threading.Thread.Sleep(tickMs);
+                elapsed += tickMs;
+            }
         }
     }
 }

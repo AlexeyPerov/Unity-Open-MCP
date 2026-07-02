@@ -682,6 +682,23 @@ namespace UnityOpenMcpBridge
                             pathsHint = new[] { "Assets" };
                         }
                     }
+                    else if (toolName == "unity_open_mcp_reimport_package")
+                    {
+                        // reimport_package's scope IS the named local package;
+                        // there is no Assets/ path for the gate to validate
+                        // (the source lives outside Assets/). Default the hint
+                        // to Packages/<package_id> so the gate still has a
+                        // non-empty scope without forcing the caller to pass
+                        // one. A trailing @version is stripped.
+                        var pid = JsonBody.GetString(body, "package_id");
+                        if (!string.IsNullOrWhiteSpace(pid))
+                        {
+                            var bare = pid.Contains("@")
+                                ? pid.Substring(0, pid.IndexOf('@'))
+                                : pid;
+                            pathsHint = new[] { "Packages/" + bare };
+                        }
+                    }
 
                     if (pathsHint == null || pathsHint.Length == 0)
                     {
@@ -938,6 +955,7 @@ namespace UnityOpenMcpBridge
                 "unity_open_mcp_package_search" => PackagesTools.Search(body),
                 "unity_open_mcp_package_add" => PackagesTools.Add(body),
                 "unity_open_mcp_package_remove" => PackagesTools.Remove(body),
+                "unity_open_mcp_reimport_package" => PackagesTools.ReimportPackage(body),
                 "unity_open_mcp_package_get_info" => PackagesTools.GetInfo(body),
                 "unity_open_mcp_package_get_dependencies" => PackagesTools.GetDependencies(body),
                 "unity_open_mcp_package_check" => PackagesTools.Check(body),

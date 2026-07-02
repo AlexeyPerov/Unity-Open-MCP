@@ -462,6 +462,16 @@ test("compile_check with a live Editor open surfaces editor_instance_locked, not
         error.message.includes("live Unity Editor"),
         "message should explain the live-Editor lock",
       );
+      // specs/feedback.md (editor_instance_locked) — the response now carries a
+      // structured recovery hint array pointing at the live-bridge branch.
+      assert.ok(
+        Array.isArray(body.agentNextSteps) && body.agentNextSteps.length > 0,
+        "editor_instance_locked should carry a non-empty agentNextSteps array",
+      );
+      assert.ok(
+        (body.agentNextSteps as string[]).some((s) => s.includes("read_compile_errors")),
+        "agentNextSteps should mention read_compile_errors",
+      );
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

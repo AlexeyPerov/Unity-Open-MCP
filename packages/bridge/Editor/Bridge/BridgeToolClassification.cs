@@ -98,6 +98,7 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_package_search",
             "unity_open_mcp_package_add",
             "unity_open_mcp_package_remove",
+            "unity_open_mcp_reimport_package",
             "unity_open_mcp_package_get_info",
             "unity_open_mcp_package_get_dependencies",
             "unity_open_mcp_package_check",
@@ -430,6 +431,13 @@ namespace UnityOpenMcpBridge
             // (the lock file is touched implicitly).
             "unity_open_mcp_package_add",
             "unity_open_mcp_package_remove",
+            // reimport_package force-reimports a local file: package's source
+            // and nudges a recompile; it does not write Packages/manifest.json
+            // (the package id IS the scope — see the paths_hint default in
+            // BridgeHttpServer). RestartThenSettle covers the recompile; the
+            // tool also returns dllMtimeBefore/After so a no-op recompile is
+            // detectable (specs/feedback.md).
+            "unity_open_mcp_reimport_package",
             // M16 Plan 5 — typed TagManager mutators. Each rewrites
             // ProjectSettings/TagManager.asset; the caller must scope
             // paths_hint to that asset. The other Plan 5 tools mutate editor

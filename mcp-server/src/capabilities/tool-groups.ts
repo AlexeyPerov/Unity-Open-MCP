@@ -490,6 +490,7 @@ assign(
     "package_search",
     "package_add",
     "package_remove",
+    "reimport_package",
     "package_get_info",
     "package_get_dependencies",
     "package_check",

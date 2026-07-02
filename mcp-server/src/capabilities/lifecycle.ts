@@ -124,6 +124,17 @@ export const TOOL_LIFECYCLE: Record<string, ToolLifecycle> = {
       "Rewrites Packages/manifest.json + triggers UPM resolution which can " +
       "force a domain reload.",
   },
+  "unity_open_mcp_reimport_package": {
+    class: "compile-reload",
+    note:
+      "Force-reimports a local file: package's source and nudges a script " +
+      "recompile (RequestScriptCompilation); a domain reload can follow. The " +
+      "package id is the scope (source lives outside Assets/, so the gate has " +
+      "no Assets/ path to validate — paths_hint defaults to " +
+      "Packages/<package_id>). The response reports dllMtimeBefore/After so " +
+      "an agent can detect a no-op recompile and fall back to a standalone " +
+      "Roslyn compile (documented in agentNextSteps on a no-op).",
+  },
 
   // ----- process-stale: long-running / async; bridge may stall -------------
   // The heartbeat may stop advancing during these; an agent should expect a

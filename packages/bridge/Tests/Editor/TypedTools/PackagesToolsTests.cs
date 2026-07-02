@@ -307,5 +307,66 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(SceneDirtyGuard.AppliesTo(
                 "unity_open_mcp_package_remove", "{\"ignore_scene_dirty\":true}"));
         }
+
+        // ----------------------- ReimportPackage ------------------------
+
+        [Test]
+        public void ReimportPackage_MissingPackageId_ReturnsMissingParameter()
+        {
+            var result = PackagesTools.ReimportPackage("{}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("missing_parameter", result.ErrorCode);
+            StringAssert.Contains("'package_id'", result.ErrorMessage);
+        }
+
+        [Test]
+        public void ReimportPackage_EmptyPackageId_ReturnsMissingParameter()
+        {
+            var result = PackagesTools.ReimportPackage("{\"package_id\":\"   \"}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("missing_parameter", result.ErrorCode);
+        }
+
+        [Test]
+        public void ReimportPackage_UnknownPackage_ReturnsPackageNotFound()
+        {
+            // A package id that cannot exist — CollectInstalled succeeds but
+            // MatchesPackage finds nothing.
+            var result = PackagesTools.ReimportPackage(
+                "{\"package_id\":\"com.nonexistent.fake.reimport.target\"}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("package_not_found", result.ErrorCode);
+        }
+
+        [Test]
+        public void ReimportPackage_RegistryPackage_ReturnsNotLocalPackageEnvelope()
+        {
+            // Every EditMode project has com.unity.modules.ui installed as a
+            // built-in/registry package — exercising the not_local_package
+            // branch. Returns Success with a structured redirect to
+            // assets_refresh (non-local packages have nothing outside Assets/).
+            var result = PackagesTools.ReimportPackage(
+                "{\"package_id\":\"com.unity.modules.ui\"}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("\"status\":\"not_local_package\"", result.Output);
+            StringAssert.Contains("\"source\":", result.Output);
+            // The recovery branch must surface structured guidance.
+            StringAssert.Contains("\"agentNextSteps\":", result.Output);
+            StringAssert.Contains("assets_refresh", result.Output);
+        }
+
+        [Test]
+        public void DirtyGuard_ReimportPackage_IsGuarded_RestartThenSettleLifecycle()
+        {
+            // reimport_package forces a reimport + RequestScriptCompilation
+            // (RestartThenSettle) and so must be guarded like package_add /
+            // package_remove. The ignore_scene_dirty opt-out mirrors them.
+            Assert.IsTrue(SceneDirtyGuard.AppliesTo(
+                "unity_open_mcp_reimport_package", "{\"package_id\":\"com.x.y\"}"),
+                "reimport_package must be guarded (RestartThenSettle lifecycle)");
+            Assert.IsFalse(SceneDirtyGuard.AppliesTo(
+                "unity_open_mcp_reimport_package",
+                "{\"package_id\":\"com.x.y\",\"ignore_scene_dirty\":true}"));
+        }
     }
 }

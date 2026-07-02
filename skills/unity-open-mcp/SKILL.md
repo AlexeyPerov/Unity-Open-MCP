@@ -99,7 +99,7 @@ Compile failures surface as **machine-readable error codes** — branch on the c
 
 - `**bridge_compile_failed`** — bridge assembly itself failed; live Editor stuck (Safe Mode), every live tool refuses. **Recovery:** `read_compile_errors` (reads `Editor.log` offline; survives the broken bridge) → fix the CS error → trigger a recompile.
 - **`bridge_offline`** — Unity may not be running, or not yet recompiled. If Unity **is** open it has already written the latest CSxxxx diagnostics to `Editor.log`; `read_compile_errors` retrieves them.
-- **`editor_instance_locked`** — `compile_check` cannot run while a live Editor holds the project lock. Close the live Editor, or verify compile state via the live bridge instead.
+- **`editor_instance_locked`** — `compile_check` cannot run while a live Editor holds the project lock. The response carries a structured `agentNextSteps[]`. Close the live Editor, or verify compile state without closing via `read_compile_errors`, or `reimport_package` (with `dllMtimeBefore`/`After`) to confirm a specific local package recompiled.
 - **`_compileVerify: { code: "compile_noop" | "dll_stale" }`** — a recompile *reported success* but the compiled state did not advance. Surfaced as an additive annotation on a **successful** result (not an error), so check for it after any `compile-reload` tool. `compile_noop` = tool registry count + DLL mtime unchanged (incremental no-op); `dll_stale` = `Library/ScriptAssemblies/*.dll` older than your source edit. Both mean: do **not** trust the success — force a rebuild (no-op `package_add`/`package_remove`, or operator refocus of the Editor), then verify DLL mtime > edit mtime before tests.
 
 For `bridge_compile_failed` / `bridge_offline`: call `**unity_open_mcp_read_compile_errors`** → fix `errors[].file`/`line`/`code` → trigger recompile. (If no Editor is open, `Editor.log` is stale from the previous session and won't reflect your latest edits — recompile verification needs Unity running.)
@@ -132,9 +132,10 @@ After editing `packages/` source, before tests:
 
 1. Confirm the new source has no CS errors (only meaningful once Unity has seen it once — see [Safe Mode recovery](#step-4--safe-mode--bridge_compile_failed-recovery) if the bridge is already dead).
 2. Trigger the recompile via one of:
-  - **(a, most reliable)** `package_add` / `package_remove` a no-op entry to force UPM resolution + domain reload, then revert it.
-  - **(b)** Ask the user to focus the Unity window after you touch a tracked `Assets/` file.
-  - **(c, if bridge up)** `execute_csharp` calling `AssetDatabase.ImportAsset("Packages/<pkg>/...", ImportAssetOptions.ForceUpdate)` then `CompilationPipeline.RequestScriptCompilation()`.
+  - **(a, recommended)** `reimport_package` with `package_id` — force-reimports the local package's source and reports `dllMtimeBefore`/`After` + a `recompiled` boolean, so a no-op recompile is detectable (on a no-op the response's `agentNextSteps` points at a standalone Roslyn-compile fallback). The package id is the scope; `paths_hint` is optional.
+  - **(b)** `package_add` / `package_remove` a no-op entry to force UPM resolution + domain reload, then revert it.
+  - **(c)** Ask the user to focus the Unity window after you touch a tracked `Assets/` file.
+  - **(d, if bridge up)** `execute_csharp` calling `AssetDatabase.ImportAsset("Packages/<pkg>/...", ImportAssetOptions.ForceUpdate)` then `CompilationPipeline.RequestScriptCompilation()`.
 3. **Verify the DLL actually rebuilt before tests:**
   ```bash
    stat -f "%Sm %N" Library/ScriptAssemblies/<assembly>.dll   # macOS

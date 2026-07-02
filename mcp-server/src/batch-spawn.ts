@@ -174,12 +174,20 @@ export function classifyBatchFailure(combined: string): string | null {
 // Error carrying a classified code so route()'s catch can emit a targeted
 // error result instead of the generic batch_spawn_failed. Thrown by the
 // spawn close-handler when classifyBatchFailure matches the tail.
+//
+// `agentNextSteps` is an optional structured recovery hint (an array of
+// actionable strings naming specific tools). When present, route()'s catch
+// emits it alongside the error envelope so an agent has a machine-readable
+// recovery branch — mirroring the MutationEnvelope.agentNextSteps pattern
+// used by the live-bridge gate results. See specs/feedback.md (editor_instance_locked).
 export class BatchClassificationError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  readonly agentNextSteps?: string[];
+  constructor(code: string, message: string, agentNextSteps?: string[]) {
     super(message);
     this.name = "BatchClassificationError";
     this.code = code;
+    this.agentNextSteps = agentNextSteps;
   }
 }
 
@@ -285,10 +293,35 @@ export class BatchSpawn implements Router {
       // editor_instance_locked) carries a targeted code; only fall back to the
       // generic batch_spawn_failed for unclassified errors so genuine spawn /
       // compile failures keep their existing behavior.
-      const code = err instanceof BatchClassificationError
-        ? err.code
-        : "batch_spawn_failed";
-      return makeErrorResult({ code, message });
+      if (err instanceof BatchClassificationError) {
+        // When the classified error carries structured recovery hints, surface
+        // them as a top-level agentNextSteps[] sibling to the error envelope —
+        // matching MutationEnvelope's shape so an agent has a machine-readable
+        // recovery branch instead of having to parse prose. See specs/feedback.md.
+        if (err.agentNextSteps && err.agentNextSteps.length > 0) {
+          return makeErrorResult({
+            code: err.code,
+            message,
+            detail: { error: { code: err.code, message }, agentNextSteps: err.agentNextSteps },
+          });
+        }
+        return makeErrorResult({ code: err.code, message });
+      }
+      // Unclassified spawn failure — point the agent at the same recovery tools
+      // (read_compile_errors, reimport_package) so it is not left with an opaque
+      // code and no next step.
+      return makeErrorResult({
+        code: "batch_spawn_failed",
+        message,
+        detail: {
+          error: { code: "batch_spawn_failed", message },
+          agentNextSteps: [
+            "The batch spawn failed for an unclassified reason. To check compile state without spawning a headless Editor, call unity_open_mcp_read_compile_errors.",
+            "If the issue is local-package source not under Assets/, call unity_open_mcp_reimport_package on the package to force a reimport.",
+            "To run a headless batch, ensure no live Editor holds the project lock and the Unity install path is valid.",
+          ],
+        },
+      });
     }
 
     const body = parsed.json;
@@ -453,6 +486,12 @@ export class BatchSpawn implements Router {
                 "retry compile_check, or verify compile state via the live " +
                 "bridge instead (execute_csharp + Library/ScriptAssemblies DLL " +
                 "mtime check, or read_compile_errors).",
+              [
+                "A live Unity Editor holds the project lock, so the headless compile_check spawn cannot open the project (one Editor per project).",
+                "To verify compile state without closing the Editor, call unity_open_mcp_read_compile_errors (reads Editor.log offline).",
+                "To confirm a specific local package recompiled, call unity_open_mcp_reimport_package on the package and compare dllMtimeBefore/dllMtimeAfter.",
+                "To run a true headless compile_check, close the live Editor first.",
+              ],
             ));
             return;
           }
