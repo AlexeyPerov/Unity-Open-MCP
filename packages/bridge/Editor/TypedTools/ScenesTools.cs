@@ -144,12 +144,15 @@ namespace UnityOpenMcpBridge.TypedTools
                         : $"No opened scene named '{name}'. Use unity_open_mcp_scene_list_opened to enumerate opened scenes.");
 
             var savePath = string.IsNullOrEmpty(destPath) ? scene.path : NormalizeScenePath(destPath);
+            // NormalizeScenePath returns null for a path that does not end with
+            // '.unity' — that is an invalid_parameter, not a missing_parameter,
+            // so check it before the empty-path guard below.
+            if (destPath != null && savePath == null)
+                return ToolDispatchResult.Fail("invalid_parameter",
+                    $"'path' must end with '.unity': '{destPath}'.");
             if (string.IsNullOrEmpty(savePath))
                 return ToolDispatchResult.Fail("missing_parameter",
                     $"Scene '{scene.name}' has no path. Provide 'path' (ending with '.unity') to save-as.");
-            if (savePath == null)
-                return ToolDispatchResult.Fail("invalid_parameter",
-                    $"'path' must end with '.unity': '{destPath}'.");
 
             // Idempotent: a clean scene is reported as saved:false with a note.
             // Only the asset-backed write counts as a mutation.

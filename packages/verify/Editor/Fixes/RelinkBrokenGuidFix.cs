@@ -79,18 +79,15 @@ namespace UnityOpenMcpVerify.Fixes
                     TouchedPaths = null
                 };
 
-            var brokenGuid = ExtractBrokenGuidFromIssue(issueId);
-            if (string.IsNullOrEmpty(brokenGuid))
-                return new FixResult
-                {
-                    Success = false,
-                    Description = $"Could not determine the broken GUID to replace from issue id '{issueId}'.",
-                    TouchedPaths = null
-                };
-
+            // Argument validation first — a missing or malformed target_guid must
+            // be reported before we touch the asset, so callers learn what to fix
+            // without needing a resolvable asset on disk.
             if (string.IsNullOrEmpty(targetGuid))
             {
-                var candidates = FindCandidateAssets(brokenGuid, assetPath);
+                var brokenForCandidates = ExtractBrokenGuidFromIssue(issueId);
+                var candidates = !string.IsNullOrEmpty(brokenForCandidates)
+                    ? FindCandidateAssets(brokenForCandidates, assetPath)
+                    : new List<GuidCandidate>(0);
                 return new FixResult
                 {
                     Success = false,
@@ -106,6 +103,15 @@ namespace UnityOpenMcpVerify.Fixes
                 {
                     Success = false,
                     Description = $"target_guid '{targetGuid}' is not a valid 32-hex Unity GUID.",
+                    TouchedPaths = null
+                };
+
+            var brokenGuid = ExtractBrokenGuidFromIssue(issueId);
+            if (string.IsNullOrEmpty(brokenGuid))
+                return new FixResult
+                {
+                    Success = false,
+                    Description = $"Could not determine the broken GUID to replace from issue id '{issueId}'.",
                     TouchedPaths = null
                 };
 

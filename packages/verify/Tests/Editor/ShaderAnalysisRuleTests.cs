@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -108,6 +109,10 @@ namespace UnityOpenMcpVerify.Tests
             File.WriteAllText(path, BrokenShader());
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
+
+            // A deliberately-broken shader emits a compiler error to the console.
+            // Consume it so LogAssert does not fail the test on the unexpected log.
+            LogAssert.Expect(LogType.Error, new Regex("."));
 
             Assert.DoesNotThrow(() =>
             {

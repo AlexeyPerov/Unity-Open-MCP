@@ -272,8 +272,16 @@ namespace UnityOpenMcpBridge.Tests
                     created.Add(new GameObject("__MCPTest_SceneDataCap_" + i));
                 var result = ScenesTools.GetData("{\"detail\":\"summary\",\"max_nodes\":2}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
-                // With 5 roots and a cap of 2, at least 3 must be truncated.
-                StringAssert.Contains("\"truncated\":3", result.Output);
+                // The active scene may carry pre-existing roots (Camera, etc.),
+                // so we assert the cap dropped *at least* the 5 created roots
+                // beyond the cap, not an exact count.
+                StringAssert.Contains("\"truncated\":", result.Output);
+                Assert.IsTrue(result.Output.Contains("\"rootCount\""),
+                    "output must report rootCount");
+                // At least 3 roots beyond a cap of 2 must be dropped.
+                var truncated = ExtractInt(result.Output, "\"truncated\":");
+                Assert.GreaterOrEqual(truncated, 3,
+                    $"truncated count ({truncated}) must be >= 3 with 5 extra roots and a cap of 2");
             }
             finally
             {
@@ -421,6 +429,17 @@ namespace UnityOpenMcpBridge.Tests
 
             Assert.IsTrue(BridgeToolClassification.MutatingTools.Contains("unity_open_mcp_sceneview_set_camera"));
             Assert.IsFalse(BridgeToolClassification.MutatingTools.Contains("unity_open_mcp_sceneview_get_camera"));
+        }
+
+        // Pull the integer following a JSON key token from a JSON string body.
+        private static int ExtractInt(string json, string key)
+        {
+            var idx = json.IndexOf(key, System.StringComparison.Ordinal);
+            if (idx < 0) return -1;
+            var start = idx + key.Length;
+            var end = start;
+            while (end < json.Length && (char.IsDigit(json[end]) || json[end] == '-')) end++;
+            return int.TryParse(json.Substring(start, end - start), out var v) ? v : -1;
         }
     }
 }

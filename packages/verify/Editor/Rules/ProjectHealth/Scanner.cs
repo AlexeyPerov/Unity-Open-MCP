@@ -90,19 +90,26 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                     dir = parent;
                 }
 
-                if (!Directory.Exists(dir)) continue;
+                // Directory.GetFiles/Exists resolve relative paths against the
+                // process working directory, which is NOT the Unity project root
+                // under the test runner. Resolve to absolute first, then convert
+                // results back to the project-relative form the rest of the rule
+                // uses.
+                var absDir = ToAbsolutePath(dir);
+                if (!Directory.Exists(absDir)) continue;
                 if (!seen.Add(dir)) continue;
 
                 string[] metas;
-                try { metas = Directory.GetFiles(dir, "*.meta", SearchOption.TopDirectoryOnly); }
+                try { metas = Directory.GetFiles(absDir, "*.meta", SearchOption.TopDirectoryOnly); }
                 catch { continue; }
 
                 foreach (var meta in metas)
                 {
-                    var metaNorm = meta.Replace('\\', '/');
+                    var metaNorm = ToProjectRelative(meta);
                     if (!metaNorm.EndsWith(".meta", StringComparison.Ordinal)) continue;
                     var companion = metaNorm.Substring(0, metaNorm.Length - 5);
-                    if (File.Exists(companion)) continue;
+                    var absCompanion = ToAbsolutePath(companion);
+                    if (File.Exists(absCompanion)) continue;
                     if (AssetDatabase.IsValidFolder(companion)) continue;
 
                     if (!companion.StartsWith("Assets/", StringComparison.Ordinal) &&
@@ -401,6 +408,29 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                     return true;
             }
             return false;
+        }
+
+        // Normalize a filesystem path from Directory.GetFiles back to the
+        // project-relative form (Assets/...) so the StartsWith("Assets/") gate
+        // and AssetDatabase-relative checks below behave consistently.
+        private static string ToProjectRelative(string absoluteOrRelative)
+        {
+            var norm = absoluteOrRelative.Replace('\\', '/');
+            var dataPath = UnityEngine.Application.dataPath.Replace('\\', '/'); // .../Assets
+            if (norm.StartsWith(dataPath + "/", StringComparison.Ordinal))
+            {
+                return "Assets" + norm.Substring(dataPath.Length);
+            }
+            return norm;
+        }
+
+        private static string ToAbsolutePath(string projectRelative)
+        {
+            if (string.IsNullOrEmpty(projectRelative) ||
+                !projectRelative.StartsWith("Assets/", StringComparison.Ordinal))
+                return projectRelative;
+            var dataPath = UnityEngine.Application.dataPath.Replace('\\', '/'); // .../Assets
+            return dataPath + projectRelative.Substring("Assets".Length);
         }
     }
 }

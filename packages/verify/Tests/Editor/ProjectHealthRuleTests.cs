@@ -65,9 +65,13 @@ namespace UnityOpenMcpVerify.Tests
         [UnityTest]
         public System.Collections.IEnumerator Scan_OrphanMeta_Detected()
         {
-            var orphanMeta = FixtureRoot + "/OrphanAsset.cs.meta";
+            var orphanMeta = AbsPath(FixtureRoot + "/OrphanAsset.cs.meta");
             File.WriteAllText(orphanMeta, "fileFormatVersion: 2\nguid: " + System.Guid.NewGuid().ToString("N") + "\n");
-            AssetDatabase.Refresh();
+            // Do NOT AssetDatabase.Refresh() here: Unity's importer deletes an
+            // orphan .meta (no companion asset) on refresh, which would remove
+            // the fixture before the rule can detect it. The rule scans the
+            // filesystem directly, so a refresh is not required.
+            yield return null;
             yield return null;
 
             try
@@ -132,9 +136,9 @@ namespace UnityOpenMcpVerify.Tests
         [UnityTest]
         public System.Collections.IEnumerator Scan_IssuesProduceValidKeys()
         {
-            var orphanMeta = FixtureRoot + "/KeysOrphan.cs.meta";
+            var orphanMeta = AbsPath(FixtureRoot + "/KeysOrphan.cs.meta");
             File.WriteAllText(orphanMeta, "fileFormatVersion: 2\nguid: " + System.Guid.NewGuid().ToString("N") + "\n");
-            AssetDatabase.Refresh();
+            // No AssetDatabase.Refresh — Unity deletes orphan metas on refresh.
             yield return null;
 
             try
@@ -191,6 +195,18 @@ namespace UnityOpenMcpVerify.Tests
             if (!AssetDatabase.IsValidFolder(parent))
                 EnsureDirectory(parent);
             AssetDatabase.CreateFolder(parent, name);
+        }
+
+        // Resolve a project-relative (Assets/...) path to an absolute filesystem
+        // path. File IO (File.WriteAllText/Delete) resolves relative paths against
+        // the process working directory, which is NOT the project root under the
+        // test runner, so fixture files must be addressed absolutely.
+        private static string AbsPath(string projectRelative)
+        {
+            var dataPath = UnityEngine.Application.dataPath.Replace('\\', '/');
+            return projectRelative.StartsWith("Assets/", System.StringComparison.Ordinal)
+                ? dataPath + projectRelative.Substring("Assets".Length)
+                : projectRelative;
         }
     }
 }

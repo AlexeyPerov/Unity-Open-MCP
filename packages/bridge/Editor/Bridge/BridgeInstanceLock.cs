@@ -207,6 +207,9 @@ namespace UnityOpenMcpBridge
             var heartbeatAt = ExtractString(json, "heartbeatAt");
             // pid is the minimum signal that this is a real lock payload.
             var valid = pid > 0;
+            // A missing port should read as 0 (the natural "absent" sentinel for
+            // a port number), not -1 which ExtractInt returns for absent keys.
+            if (port < 0) port = 0;
             return new LockSnapshot(valid, pid, port, state, updatedAt, heartbeatAt);
         }
 

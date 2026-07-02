@@ -165,9 +165,16 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
 
         private static void CheckCircularReferences(List<AsmdefData> assets, List<VerifyIssue> sink)
         {
-            var nameMap = assets
-                .Where(a => !a.ParseFailed && !string.IsNullOrWhiteSpace(a.Name))
-                .ToDictionary(a => a.Name, a => a);
+            // Build a name -> asset lookup that tolerates duplicate assembly
+            // names (ToDictionary would throw on duplicates; the duplicate-name
+            // check reports those separately). On collision the first asset wins.
+            var nameMap = new Dictionary<string, AsmdefData>(System.StringComparer.Ordinal);
+            foreach (var a in assets)
+            {
+                if (a.ParseFailed || string.IsNullOrWhiteSpace(a.Name)) continue;
+                if (!nameMap.ContainsKey(a.Name))
+                    nameMap[a.Name] = a;
+            }
 
             foreach (var start in assets.Where(a => !a.ParseFailed && !string.IsNullOrWhiteSpace(a.Name)))
             {

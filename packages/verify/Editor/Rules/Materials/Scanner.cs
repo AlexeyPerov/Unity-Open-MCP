@@ -160,7 +160,16 @@ namespace UnityOpenMcpVerify.Rules.Materials
             }
 
             // Per-property texture checks via the public Shader API.
-            if (settings.CheckMissingTexture || settings.CheckBuiltinTexture)
+            //
+            // Note: a null texture slot is NOT reported as missing_texture. Most
+            // shader texture properties are optional (e.g. _BumpMap, _ParallaxMap,
+            // _DetailMask on a Standard material) and a freshly-created material
+            // legitimately leaves them unassigned. Reporting every null slot
+            // produces false positives. A genuinely-missing texture (a PPtr whose
+            // GUID no longer resolves) is surfaced by the missing_references rule,
+            // which inspects the material YAML for broken GUIDs. Here we only flag
+            // textures that resolve to a unity_builtin asset.
+            if (settings.CheckBuiltinTexture)
             {
                 var propCount = shader.GetPropertyCount();
                 for (var i = 0; i < propCount; i++)
@@ -168,23 +177,12 @@ namespace UnityOpenMcpVerify.Rules.Materials
                     if (shader.GetPropertyType(i) != ShaderPropertyType.Texture) continue;
                     var propName = shader.GetPropertyName(i);
                     var texture = material.GetTexture(propName);
-                    var texturePath = texture != null ? AssetDatabase.GetAssetPath(texture) : null;
-
-                    if (texture == null)
+                    if (texture == null) continue;
+                    var texturePath = AssetDatabase.GetAssetPath(texture);
+                    if (texturePath != null && texturePath.Contains("unity_builtin"))
                     {
-                        if (settings.CheckMissingTexture)
-                        {
-                            data.TextureWarnings.Add(new TextureWarning(propName, "missing_texture",
-                                $"Texture is null at '{propName}'."));
-                        }
-                    }
-                    else if (texturePath != null && texturePath.Contains("unity_builtin"))
-                    {
-                        if (settings.CheckBuiltinTexture)
-                        {
-                            data.TextureWarnings.Add(new TextureWarning(propName, "builtin_texture",
-                                $"unity_builtin texture at '{propName}'."));
-                        }
+                        data.TextureWarnings.Add(new TextureWarning(propName, "builtin_texture",
+                            $"unity_builtin texture at '{propName}'."));
                     }
                 }
             }

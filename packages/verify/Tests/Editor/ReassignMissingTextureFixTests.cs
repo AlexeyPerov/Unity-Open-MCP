@@ -158,7 +158,10 @@ namespace UnityOpenMcpVerify.Tests
         public System.Collections.IEnumerator Apply_WithTargetTexture_AssignsToNullSlot()
         {
             var matPath = FixtureRoot + "/MissingTex.mat";
-            var texPath = FixtureRoot + "/TargetTex.png";
+            // CreateAsset on a Texture2D rejects image-file extensions (.png/.jpg)
+            // in Unity 6 — use .asset so the in-memory Texture2D persists as a
+            // loadable asset without triggering the image-importer guard.
+            var texPath = FixtureRoot + "/TargetTex.asset";
 
             var mat = new Material(Shader.Find("Standard"));
             AssetDatabase.CreateAsset(mat, matPath);

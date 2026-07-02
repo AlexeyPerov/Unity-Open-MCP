@@ -85,6 +85,16 @@ namespace UnityOpenMcpVerify.Fixes
                     TouchedPaths = null
                 };
 
+            // Validate an explicit regenerate_guid before touching the asset so
+            // callers learn the format error without needing a resolvable file.
+            if (!string.IsNullOrEmpty(regenerateGuid) && !SharedRegex.Guid32Hex.IsMatch(regenerateGuid))
+                return new FixResult
+                {
+                    Success = false,
+                    Description = $"regenerate_guid '{regenerateGuid}' is not a valid 32-hex GUID.",
+                    TouchedPaths = null
+                };
+
             var metaPath = assetPath + ".meta";
             if (!File.Exists(metaPath))
                 return new FixResult
@@ -105,17 +115,11 @@ namespace UnityOpenMcpVerify.Fixes
 
             // Determine the new GUID. Deterministic override (tests) or a fresh
             // random one. Unity GUIDs are 32 hex chars; System.Guid.ToString
-            // ("N") yields exactly that.
+            // ("N") yields exactly that. The format of an explicit override was
+            // already validated above.
             string newGuid;
             if (!string.IsNullOrEmpty(regenerateGuid))
             {
-                if (!SharedRegex.Guid32Hex.IsMatch(regenerateGuid))
-                    return new FixResult
-                    {
-                        Success = false,
-                        Description = $"regenerate_guid '{regenerateGuid}' is not a valid 32-hex GUID.",
-                        TouchedPaths = null
-                    };
                 newGuid = regenerateGuid.ToLowerInvariant();
             }
             else

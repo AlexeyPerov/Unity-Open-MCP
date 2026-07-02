@@ -132,7 +132,8 @@ namespace UnityOpenMcpBridge.TypedTools
 
         private static readonly System.Reflection.MethodInfo GetShaderMessagesMethod =
             typeof(UnityEditor.ShaderUtil).GetMethod("GetShaderMessages",
-                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public,
+                null, new[] { typeof(Shader) }, null);
 
         // Render shader compile errors as a JSON array via reflection. The
         // returned array elements are internal UnityEditor.ShaderMessage

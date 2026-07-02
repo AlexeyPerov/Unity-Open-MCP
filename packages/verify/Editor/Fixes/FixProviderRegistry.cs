@@ -84,7 +84,7 @@ namespace UnityOpenMcpVerify.Fixes
             fixId = null;
             safe = false;
 
-            var testKey = $"{ruleId}|ERROR|__test__|{issueCode}";
+            var testKey = $"{ruleId}|ERROR|__test__.prefab|{issueCode}";
             foreach (var provider in _providers)
             {
                 if (!provider.CanFix(testKey)) continue;
@@ -125,7 +125,7 @@ namespace UnityOpenMcpVerify.Fixes
             if (string.IsNullOrEmpty(ruleId) || string.IsNullOrEmpty(issueCode))
                 return System.Array.Empty<FixCandidate>();
 
-            var testKey = $"{ruleId}|ERROR|__test__|{issueCode}";
+            var testKey = $"{ruleId}|ERROR|__test__.prefab|{issueCode}";
             var result = new List<FixCandidate>();
             foreach (var provider in _providers)
             {

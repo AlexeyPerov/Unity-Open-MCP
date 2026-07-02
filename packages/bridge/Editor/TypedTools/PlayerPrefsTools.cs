@@ -92,6 +92,12 @@ namespace UnityOpenMcpBridge.TypedTools
                         PlayerPrefs.SetString(key, AsString(valueRaw));
                         break;
                 }
+                // Record the type in a companion key so a later type-less Get
+                // can recover it. PlayerPrefs stores int and float in the same
+                // 4-byte slot with no type tag, so probing the value cannot
+                // reliably distinguish them (3.14 read as int ≈ 1e9; 42 read as
+                // float ≈ 5.9e-44). The side channel is the source of truth.
+                PlayerPrefs.SetString(TypeTagKey(key), type);
                 PlayerPrefs.Save();
             }
             catch (System.Exception e)
@@ -113,6 +119,7 @@ namespace UnityOpenMcpBridge.TypedTools
             {
                 bool existed = PlayerPrefs.HasKey(key);
                 PlayerPrefs.DeleteKey(key);
+                PlayerPrefs.DeleteKey(TypeTagKey(key));
                 PlayerPrefs.Save();
                 var sb = new StringBuilder(96);
                 sb.Append("{\"status\":\"ok\",\"store\":\"playerprefs\"");
@@ -171,6 +178,9 @@ namespace UnityOpenMcpBridge.TypedTools
                         EditorPrefs.SetString(key, AsString(valueRaw));
                         break;
                 }
+                // Record the type in a companion key (see PlayerPrefsSet for the
+                // rationale: the same 4-byte slot ambiguity applies to EditorPrefs).
+                EditorPrefs.SetString(TypeTagKey(key), type);
                 // EditorPrefs writes through on every Set call — no Save().
             }
             catch (System.Exception e)
@@ -192,6 +202,7 @@ namespace UnityOpenMcpBridge.TypedTools
             {
                 bool existed = EditorPrefs.HasKey(key);
                 EditorPrefs.DeleteKey(key);
+                EditorPrefs.DeleteKey(TypeTagKey(key));
                 var sb = new StringBuilder(96);
                 sb.Append("{\"status\":\"ok\",\"store\":\"editorprefs\"");
                 sb.Append(",\"key\":").Append(Q(key));
@@ -221,19 +232,32 @@ namespace UnityOpenMcpBridge.TypedTools
             string type = requestedType;
             if (string.IsNullOrEmpty(type))
             {
-                // Infer. Order matters: a value stored as int also satisfies
-                // float, so probe int first.
-                if (isEditor)
+                // Prefer the companion type tag written by Set — it is the only
+                // reliable signal, since PlayerPrefs/EditorPrefs store int and
+                // float in the same 4-byte slot with no type discrimination.
+                var tag = isEditor ? EditorPrefs.GetString(TypeTagKey(key), "")
+                                   : PlayerPrefs.GetString(TypeTagKey(key), "");
+                if (tag == "int" || tag == "float" || tag == "string")
                 {
-                    type = EditorPrefProbeInt(key) ? "int"
-                        : EditorPrefProbeFloat(key) ? "float"
-                        : "string";
+                    type = tag;
                 }
                 else
                 {
-                    type = PlayerPrefsProbeInt(key) ? "int"
-                        : PlayerPrefsProbeFloat(key) ? "float"
-                        : "string";
+                    // Fall back to value-probing for keys written by other tools
+                    // (no type tag). Order matters: a value stored as int also
+                    // satisfies float, so probe int first.
+                    if (isEditor)
+                    {
+                        type = EditorPrefProbeInt(key) ? "int"
+                            : EditorPrefProbeFloat(key) ? "float"
+                            : "string";
+                    }
+                    else
+                    {
+                        type = PlayerPrefsProbeInt(key) ? "int"
+                            : PlayerPrefsProbeFloat(key) ? "float"
+                            : "string";
+                    }
                 }
             }
             else
@@ -287,6 +311,11 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(",\"saved\":true}");
             return ToolDispatchResult.Ok(sb.ToString());
         }
+
+        // Namespaced companion key recording the type a value was stored as, so
+        // a type-less read can recover it without the unreliable value-probe.
+        // The prefix is namespaced to avoid colliding with user keys.
+        private static string TypeTagKey(string key) => key + "__uom_type";
 
         // PlayerPrefs.HasKey is type-agnostic; the only type-discriminating
         // API is the typed getter. We probe by reading and comparing back —

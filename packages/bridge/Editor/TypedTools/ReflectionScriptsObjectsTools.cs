@@ -760,6 +760,28 @@ namespace UnityOpenMcpBridge.TypedTools
             // FindAssets supports t:<Type> which matches the Unity asset-type
             // label. We pass includeFolders:false so only files come back.
             var guids = AssetDatabase.FindAssets("t:" + searchType, new[] { folder });
+
+            // The t:<Type> label filter only matches types Unity classifies as
+            // asset types. Custom ScriptableObject types (especially ones defined
+            // in a test/runtime assembly) are not always registered as asset-type
+            // labels, so the filter can return empty even when matching .asset
+            // files exist. Fall back to enumerating every asset in the folder and
+            // checking the loaded type via IsAssignableFrom.
+            if (guids.Length == 0 && type != null)
+            {
+                var allGuids = AssetDatabase.FindAssets("", new[] { folder });
+                var filtered = new System.Collections.Generic.List<string>();
+                foreach (var g in allGuids)
+                {
+                    var p = AssetDatabase.GUIDToAssetPath(g);
+                    if (string.IsNullOrEmpty(p) || !p.EndsWith(".asset", System.StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    var loaded = AssetDatabase.LoadMainAssetAtPath(p);
+                    if (loaded != null && type.IsAssignableFrom(loaded.GetType()))
+                        filtered.Add(g);
+                }
+                guids = filtered.ToArray();
+            }
             // When includeIndirect is false (default), FindAssets already returns
             // only top-level results; the flag is a no-op here but kept for
             // schema parity with list_assets.

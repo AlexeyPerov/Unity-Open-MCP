@@ -173,7 +173,7 @@ namespace UnityOpenMcpBridge.Tests
         [TestCase("  error CS1002: ; expected", ExpectedResult = "CS1002")]
         [TestCase("no code here", ExpectedResult = "")]
         [TestCase("", ExpectedResult = "")]
-        public static string ExtractCode_PullsCsToken(string message, string expected)
+        public static string ExtractCode_PullsCsToken(string message)
         {
             return CompileCheckState.ExtractCode(message);
         }

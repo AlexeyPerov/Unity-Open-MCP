@@ -55,7 +55,8 @@ namespace UnityOpenMcpBridge.Tests
         {
             var response = HttpClient.GetAsync($"{BaseUrl}/ping").Result;
             var body = response.Content.ReadAsStringAsync().Result;
-            Assert.IsTrue(body.Contains("\"bridgeVersion\":\"0.1.0\""), $"Unexpected version in: {body}");
+            Assert.IsTrue(body.Contains("\"bridgeVersion\":\"" + UnityOpenMcpBridge.BridgeSession.BridgeVersion + "\""),
+                $"Unexpected version in: {body}");
         }
 
         [Test]

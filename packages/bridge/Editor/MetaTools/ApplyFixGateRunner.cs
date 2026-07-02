@@ -84,7 +84,10 @@ namespace UnityOpenMcpBridge.MetaTools
                 result.RollbackReason = mutationFailed
                     ? "fix failed to apply — restored touched files to pre-fix state"
                     : $"fix introduced {result.Delta.NewErrors} new error(s) under enforce — restored touched files to pre-fix state";
-                result.RestoredPaths = restore.RestoredPaths;
+                // Normalize restored paths to the Assets/-relative form the rest
+                // of the tool surface uses, so callers can compare directly
+                // against issue asset paths without handling absolute prefixes.
+                result.RestoredPaths = NormalizeRestoredPaths(restore.RestoredPaths);
 
                 // Augment agent guidance so the next step is clear.
                 var steps = result.AgentNextSteps == null
@@ -131,6 +134,26 @@ namespace UnityOpenMcpBridge.MetaTools
             var abs = Path.GetFullPath(Path.Combine(projectRoot, assetRelativePath));
             if (!sink.Contains(abs))
                 sink.Add(abs);
+        }
+
+        // Convert absolute restored paths back to the Assets/-relative form so
+        // the envelope matches the asset paths used everywhere else in the API.
+        private static string[] NormalizeRestoredPaths(string[] restored)
+        {
+            if (restored == null || restored.Length == 0) return restored;
+            var dataPath = Application.dataPath.Replace('\\', '/');
+            var result = new string[restored.Length];
+            for (int i = 0; i < restored.Length; i++)
+            {
+                var norm = restored[i].Replace('\\', '/');
+                if (norm.StartsWith(dataPath + "/", System.StringComparison.Ordinal))
+                    result[i] = "Assets" + norm.Substring(dataPath.Length);
+                else if (norm.StartsWith(dataPath, System.StringComparison.Ordinal))
+                    result[i] = "Assets" + norm.Substring(dataPath.Length);
+                else
+                    result[i] = norm;
+            }
+            return result;
         }
     }
 }

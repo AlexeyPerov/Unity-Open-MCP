@@ -168,10 +168,17 @@ namespace UnityOpenMcpBridge.MetaTools
 
             if (record.Reasons.Count == 0
                 && !string.IsNullOrEmpty(name) && !nameOnFile
-                && !structuredMatch)
+                && !structuredMatch
+                && !guidHit)
             {
                 return null;
             }
+
+            // No reasons at all (e.g. a guid-only query that did not match this
+            // asset) means the asset is not a hit — drop it so the envelope only
+            // contains real matches.
+            if (record.Reasons.Count == 0 && !guidHit && !nameOnFile && !structuredMatch)
+                return null;
 
             if (structuredObjects.Count > 0) record.Objects = structuredObjects;
             return record;

@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEditor;
+using UnityEngine;
 using UnityEngine.TestTools;
 using UnityOpenMcpVerify;
 using UnityOpenMcpVerify.Rules;
@@ -20,6 +22,17 @@ namespace UnityOpenMcpVerify.Tests
         public void SetUp()
         {
             rule = new AsmdefAuditRule();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            // Each test writes its own .asmdef into the shared FixtureRoot but
+            // never deletes it. A leftover .asmdef from the previous test makes
+            // the folder contain multiple assembly definition files, which Unity
+            // flags as an error on the next import. Clear the folder between
+            // tests so every test starts from a clean single-asmdef state.
+            ClearFolder(FixtureRoot);
         }
 
         [OneTimeSetUp]
@@ -66,7 +79,9 @@ namespace UnityOpenMcpVerify.Tests
         public System.Collections.IEnumerator Scan_HealthyAsmdef_ProducesNoIssues()
         {
             var path = FixtureRoot + "/Healthy.asmdef";
-            File.WriteAllText(path, "{\n    \"name\": \"Healthy.Asmdef\",\n    \"rootNamespace\": \"Healthy\",\n    \"references\": [\"UnityEngine\"]\n}\n");
+            // includePlatforms narrows the build so the asmdef is not flagged as
+            // asmdef_platform_filter_broad (a healthy asmdef scopes its platforms).
+            File.WriteAllText(path, "{\n    \"name\": \"Healthy.Asmdef\",\n    \"rootNamespace\": \"Healthy\",\n    \"references\": [\"UnityEngine\"],\n    \"includePlatforms\": [\"Editor\"]\n}\n");
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
@@ -83,6 +98,9 @@ namespace UnityOpenMcpVerify.Tests
         {
             var path = FixtureRoot + "/NoName.asmdef";
             File.WriteAllText(path, "{\n    \"references\": []\n}\n");
+            // Unity logs an error for the missing required 'name' property. Register
+            // the expectation BEFORE the import so LogAssert does not fail on it.
+            LogAssert.Expect(LogType.Error, new Regex("."));
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
@@ -133,6 +151,8 @@ namespace UnityOpenMcpVerify.Tests
         {
             var path = FixtureRoot + "/Malformed.asmdef";
             File.WriteAllText(path, "{ this is not valid json ");
+            // Unity logs a JSON parse error for the malformed asmdef.
+            LogAssert.Expect(LogType.Error, new Regex("."));
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
@@ -150,6 +170,10 @@ namespace UnityOpenMcpVerify.Tests
             var pathB = FixtureRoot + "/DupB.asmdef";
             File.WriteAllText(pathA, "{\n    \"name\": \"Same.Name\",\n    \"references\": []\n}\n");
             File.WriteAllText(pathB, "{\n    \"name\": \"Same.Name\",\n    \"references\": []\n}\n");
+            // Unity logs errors: one for the duplicate assembly name, and one for
+            // the folder containing multiple asmdef files. Expect both.
+            LogAssert.Expect(LogType.Error, new Regex("."));
+            LogAssert.Expect(LogType.Error, new Regex("."));
             AssetDatabase.ImportAsset(pathA, ImportAssetOptions.ForceUpdate);
             AssetDatabase.ImportAsset(pathB, ImportAssetOptions.ForceUpdate);
             yield return null;
@@ -171,6 +195,9 @@ namespace UnityOpenMcpVerify.Tests
             var pathB = FixtureRoot + "/CycleB.asmdef";
             File.WriteAllText(pathA, "{\n    \"name\": \"CycleA.Asmdef\",\n    \"references\": [\"CycleB.Asmdef\"]\n}\n");
             File.WriteAllText(pathB, "{\n    \"name\": \"CycleB.Asmdef\",\n    \"references\": [\"CycleA.Asmdef\"]\n}\n");
+            // Two asmdefs in one folder + a circular ref each log an error.
+            LogAssert.Expect(LogType.Error, new Regex("."));
+            LogAssert.Expect(LogType.Error, new Regex("."));
             AssetDatabase.ImportAsset(pathA, ImportAssetOptions.ForceUpdate);
             AssetDatabase.ImportAsset(pathB, ImportAssetOptions.ForceUpdate);
             yield return null;
@@ -207,6 +234,8 @@ namespace UnityOpenMcpVerify.Tests
         {
             var path = FixtureRoot + "/Contradict.asmdef";
             File.WriteAllText(path, "{\n    \"name\": \"Contradict.Asmdef\",\n    \"references\": [],\n    \"includePlatforms\": [\"Standalone\"],\n    \"excludePlatforms\": [\"iOS\"]\n}\n");
+            // Unity logs an error when both includePlatforms and excludePlatforms are set.
+            LogAssert.Expect(LogType.Error, new Regex("."));
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
             yield return null;
 
@@ -296,6 +325,16 @@ namespace UnityOpenMcpVerify.Tests
             if (!AssetDatabase.IsValidFolder(parent))
                 EnsureDirectory(parent);
             AssetDatabase.CreateFolder(parent, name);
+        }
+
+        private static void ClearFolder(string path)
+        {
+            if (!AssetDatabase.IsValidFolder(path)) return;
+            foreach (var file in Directory.GetFiles(path, "*.asmdef"))
+            {
+                AssetDatabase.DeleteAsset(file);
+            }
+            AssetDatabase.Refresh();
         }
     }
 }

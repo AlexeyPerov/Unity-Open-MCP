@@ -203,7 +203,10 @@ namespace UnityOpenMcpVerify.Tests
                 var guidEnd = guidStart + 32;
                 if (guidEnd > lines[i].Length) continue;
                 var currentGuid = lines[i].Substring(guidStart, 32);
-                if (currentGuid.StartsWith("0000000000")) continue;
+                // Skip an all-zero GUID (already broken/empty), but do NOT skip
+                // built-in shader GUIDs such as 0000000000000000f000000000000000
+                // (Standard) which legitimately start with zeros.
+                if (currentGuid == "00000000000000000000000000000000") continue;
                 lines[i] = lines[i].Substring(0, guidStart) + brokenGuid + lines[i].Substring(guidEnd);
                 break;
             }

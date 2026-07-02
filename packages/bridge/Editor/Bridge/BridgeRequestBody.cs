@@ -46,10 +46,17 @@ namespace UnityOpenMcpBridge
             var start = colonIdx + 1;
             while (start < body.Length && char.IsWhiteSpace(body[start])) start++;
 
-            var end = start;
+            // Allow an optional leading sign so negative values parse and then
+            // get clamped to the minimum, rather than falling through to the
+            // default (which would silently ignore the caller's explicit value).
+            var signEnd = start;
+            if (signEnd < body.Length && (body[signEnd] == '-' || body[signEnd] == '+'))
+                signEnd++;
+
+            var end = signEnd;
             while (end < body.Length && char.IsDigit(body[end])) end++;
 
-            if (end == start || !int.TryParse(body.Substring(start, end - start), out var ms))
+            if (end == signEnd || !int.TryParse(body.Substring(start, end - start), out var ms))
                 return DefaultTimeoutMs;
 
             return Math.Clamp(ms, MinTimeoutMs, MaxTimeoutMs);

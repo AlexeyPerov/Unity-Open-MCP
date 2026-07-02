@@ -66,6 +66,8 @@ namespace UnityOpenMcpBridge.Tests
         {
             // Mathf.Max is a static method that runs cleanly headless and does
             // not depend on any live Editor state — a safe reflection target.
+            // Mathf.Max has many overloads (int/int, float/float, params), so
+            // pass arg_type_names to disambiguate the int overload.
             var args = new[]
             {
                 "--", "invoke_method",
@@ -74,6 +76,8 @@ namespace UnityOpenMcpBridge.Tests
                 "--is-static", "true",
                 "--arg", "3",
                 "--arg", "7",
+                "--arg-type-name", "Int32",
+                "--arg-type-name", "Int32",
             };
             var (exitCode, json) = BridgeBatchEntry.Execute(args);
 
@@ -188,10 +192,12 @@ namespace UnityOpenMcpBridge.Tests
             // must decode them back to spaces before passing to Roslyn. A
             // snippet with a space ("return 1;") compiles only when the space
             // is correctly restored.
+            // Use the 4-digit \u001f escape: C# \x is a greedy hex escape, so
+            // "\x1f1" parses as U+01F1 (Ǳ), not U+001F followed by '1'.
             var args = new[]
             {
                 "--", "execute_csharp",
-                "--code", "return\x1f1;",
+                "--code", "return\u001f1;",
             };
             var (exitCode, json) = BridgeBatchEntry.Execute(args);
 
