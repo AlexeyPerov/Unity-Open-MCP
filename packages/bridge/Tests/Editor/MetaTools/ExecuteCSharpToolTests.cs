@@ -46,6 +46,21 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual("denied_by_policy", result.ErrorCode);
         }
 
+        // TestRunnerApi driving from execute_csharp deadlocks the main thread
+        // (its callbacks fire on the same thread the snippet occupies). The
+        // deny heuristic must refuse it before Roslyn runs and redirect to
+        // unity_senses_run_tests. See specs/feedback.md entry 1.
+        [Test]
+        public static void Execute_TestRunnerApi_ReturnsDeniedByPolicy()
+        {
+            var result = ExecuteCSharpTool.Execute(
+                "{\"code\":\"var api = ScriptableObject.CreateInstance<TestRunnerApi>(); api.Execute(null);\"}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("denied_by_policy", result.ErrorCode);
+            StringAssert.Contains("TestRunnerApi", result.ErrorMessage);
+            StringAssert.Contains("unity_senses_run_tests", result.ErrorMessage);
+        }
+
         [Test]
         public static void Execute_BypassWithGateOffAndConfirm_AllowsDestructive()
         {

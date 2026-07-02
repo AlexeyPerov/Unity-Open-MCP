@@ -226,6 +226,8 @@ Three constraints apply specifically to the `compile-reload` class — internali
 
 3. **Tools that trigger a domain reload declare `compile-reload`; read-only introspection stays `none`.** `execute_csharp`, `invoke_method`, `execute_menu`, `asmdef_create` / `asmdef_modify`, `script_write` / `script_delete`, `package_add` / `package_remove`, `reimport_package`, `build_set_target`, `build_set_defines`, `settings_set_player`, `scene_open`, and `compile_check` are all `compile-reload`. `find_members`, `read_asset`, `editor_status`, the senses, etc. are `none`.
 
+4. **`execute_csharp` runs on Unity's main thread — never block it.** The snippet executes synchronously inline on `EditorApplication.update`. A blocking primitive (`WaitOne`, `.Result`, `Thread.Sleep`, `while(!done)` awaiting a callback) or driving `TestRunnerApi` (which delivers its callbacks on the same main thread) **deadlocks the editor unrecoverably**: the HTTP timeout fires on the worker thread and cannot unwind a stuck main thread, no further editor tick runs, and recovery requires killing the editor externally. The timeout envelope's `agentNextSteps` says exactly this — heed it (check `editor_status` / `bridge_status` before retrying; **do not** just raise `timeout_ms`). `TestRunnerApi` is deny-listed in `execute_csharp` for this reason and redirects to `unity_senses_run_tests` (async, does not block). For other work, prefer a typed tool or write the snippet fire-and-forget and poll via a follow-up call.
+
 A tool can carry a secondary concern in `lifecycleNote` (e.g. `build_start` is `modal-dialog` and notes its secondary `scene-dirty` concern; `package_add` is `compile-reload` and notes the rare project-upgrade modal). Read the note when present.
 
 ## Batch support notes

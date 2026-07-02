@@ -60,6 +60,47 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(r.Allowed);
         }
 
+        // TestRunnerApi is async/callback-driven — its callbacks fire on the
+        // main thread (the same thread execute_csharp occupies), so driving it
+        // from a snippet deadlocks the editor unrecoverably. The whole API
+        // surface is deny-listed by the type name; agents must use
+        // unity_senses_run_tests instead. See specs/feedback.md entry 1.
+        [Test]
+        public void CSharp_Defaults_BlockTestRunnerApi_CreateInstance()
+        {
+            var r = BridgeDenyList.EvaluateCSharp(
+                "var api = ScriptableObject.CreateInstance<TestRunnerApi>(); api.Execute(null);",
+                null, bypass: false);
+            Assert.IsFalse(r.Allowed);
+            Assert.That(r.MatchedPattern, Does.Contain("TestRunnerApi"));
+        }
+
+        [Test]
+        public void CSharp_Defaults_BlockTestRunnerApi_RetrieveTestList()
+        {
+            var r = BridgeDenyList.EvaluateCSharp(
+                "TestRunnerApi.RetrieveTestList(TestPlatform.EditMode);", null, bypass: false);
+            Assert.IsFalse(r.Allowed);
+        }
+
+        [Test]
+        public void CSharp_Defaults_TestRunnerApiSuggestsRunTests()
+        {
+            var r = BridgeDenyList.EvaluateCSharp(
+                "ScriptableObject.CreateInstance<TestRunnerApi>();", null, bypass: false);
+            Assert.IsFalse(r.Allowed);
+            Assert.That(r.Suggestion, Does.Contain("unity_senses_run_tests"),
+                "Denied TestRunnerApi snippets must redirect to unity_senses_run_tests");
+        }
+
+        [Test]
+        public void CSharp_Bypass_AllowsTestRunnerApi()
+        {
+            var r = BridgeDenyList.EvaluateCSharp(
+                "ScriptableObject.CreateInstance<TestRunnerApi>();", null, bypass: true);
+            Assert.IsTrue(r.Allowed);
+        }
+
         [Test]
         public void CSharp_Defaults_AllowBenignSnippet()
         {

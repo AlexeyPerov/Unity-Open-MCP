@@ -168,6 +168,41 @@ namespace UnityOpenMcpBridge.Tests
                 body => Assert.IsFalse(body.Contains("\"paths_hint_required\""), $"find_members should not require paths_hint: {body}"));
         }
 
+        // execute_csharp runs the snippet synchronously on Unity's main thread;
+        // if it blocks, the worker-thread timeout cannot unwind it and the
+        // editor stays wedged. The timeout envelope must steer the agent toward
+        // diagnosis (editor_status / bridge_status) + the async test path, NOT
+        // toward the harmful "raise timeout_ms" reflex. Pure builder unit test
+        // — we never drive a real deadlock, which would wedge the test runner.
+        // See specs/feedback.md entry 1.
+        [Test]
+        public static void TimeoutEnvelope_ExecuteCSharp_WarnsAboutMainThreadBlock()
+        {
+            var json = BridgeJson.BuildTimeoutEnvelope(
+                "unity_open_mcp_execute_csharp", "enforce", 30000);
+            Assert.IsTrue(json.Contains("\"agentNextSteps\":["), $"Missing agentNextSteps: {json}");
+            StringAssert.Contains("main thread", json, $"execute_csharp timeout must mention main thread: {json}");
+            StringAssert.Contains("wedged", json, $"execute_csharp timeout must warn the editor may be wedged: {json}");
+            StringAssert.Contains("unity_senses_run_tests", json,
+                $"execute_csharp timeout must redirect tests to run_tests: {json}");
+            // The harmful generic advice ("Consider increasing timeout_ms")
+            // must NOT appear for execute_csharp — it makes the agent loop
+            // against an already-dead editor.
+            Assert.IsFalse(json.Contains("Consider increasing timeout_ms"),
+                $"execute_csharp timeout must not suggest raising timeout_ms: {json}");
+        }
+
+        [Test]
+        public static void TimeoutEnvelope_GenericTool_KeepsRaiseTimeoutAdvice()
+        {
+            // Other tools (compile-reload, big scans) genuinely may need more
+            // time — keep the generic copy for them.
+            var json = BridgeJson.BuildTimeoutEnvelope(
+                "unity_open_mcp_reserialize", "enforce", 30000);
+            StringAssert.Contains("Consider increasing timeout_ms", json,
+                $"Generic tools should keep the raise-timeout advice: {json}");
+        }
+
         [UnityTest]
         public static IEnumerator PathsHintRequired_EnvelopeHasAgentNextSteps()
         {

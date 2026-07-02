@@ -261,7 +261,9 @@ Typical sequence: `impact_preview` (size) → `gate_budget_estimate` `mode: "sam
 
 `apply_fix`, `reserialize`, and the non-`scene_open` scene mutators (`scene_create` / `scene_save` / `scene_unload` / `scene_set_active` / `scene_focus` / `sceneview_set_camera`) are **not** guarded.
 
-**Power-tool deny heuristic.** `execute_csharp` / `execute_menu` are blocked from destructive patterns by default (`EditorApplication.Exit`, `Application.Quit`, `AssetDatabase.DeleteAsset`, `BuildPipeline.BuildPlayer`, `File/Quit`). Refused calls return `error.code = "denied_by_policy"` (csharp) or `"menu_blocked"` (menu) with the matched pattern + alternative. If you genuinely need one, set **both** `gate: "off"` and `confirm_bypass: true` — the bypass is audited.
+**Power-tool deny heuristic.** `execute_csharp` / `execute_menu` are blocked from destructive patterns by default (`EditorApplication.Exit`, `Application.Quit`, `AssetDatabase.DeleteAsset`, `BuildPipeline.BuildPlayer`, `File/Quit`, `TestRunnerApi`). Refused calls return `error.code = "denied_by_policy"` (csharp) or `"menu_blocked"` (menu) with the matched pattern + alternative. If you genuinely need one, set **both** `gate: "off"` and `confirm_bypass: true` — the bypass is audited.
+
+**`execute_csharp` runs on Unity's main thread — never block it.** The snippet executes synchronously inline on `EditorApplication.update`, so any blocking primitive wedges the editor **unrecoverably**: `WaitOne` / `.Result` / `Thread.Sleep` / `while(!done)` waiting for a callback, and driving `TestRunnerApi` (which delivers its callbacks on the same main thread), all deadlock. The HTTP timeout fires on the worker thread and **cannot self-heal a stuck main thread** — no further editor tick runs, so the editor must be killed externally. The timeout envelope's `agentNextSteps` will tell you this; heed it (check `editor_status` / `bridge_status` before retrying, **don't** just raise `timeout_ms`). For test execution use `unity_senses_run_tests` (async, does not block). For everything else, prefer a typed tool or write the snippet to be non-blocking (fire-and-forget + poll via a follow-up call).
 
 ## Routing rules
 

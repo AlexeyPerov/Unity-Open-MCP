@@ -272,7 +272,29 @@ namespace UnityOpenMcpBridge
             // short-circuits before capture completes, so there is nothing to
             // report; the field still round-trips for shape consistency.
             sb.Append(",\"logs\":[]");
-            sb.Append(",\"agentNextSteps\":[\"Tool execution timed out. Consider increasing timeout_ms or simplifying the operation.\"]}");
+            // execute_csharp runs the snippet synchronously inline on Unity's
+            // main thread (ExecuteCSharpTool → method.Invoke, dispatched from
+            // BridgeRequestQueue.ProcessQueue on EditorApplication.update). If
+            // the snippet blocks the main thread, the worker-thread timeout
+            // fires but cannot unwind it — no further editor tick runs, so no
+            // cancel/probe/self-heal is possible and the editor stays wedged
+            // until externally killed. Steer the agent away from the obvious
+            // (and harmful) "raise timeout_ms" reflex and toward diagnosis +
+            // the non-blocking test path.
+            sb.Append(",\"agentNextSteps\":[");
+            if (toolName == "unity_open_mcp_execute_csharp")
+            {
+                sb.Append("\"execute_csharp runs on Unity's main thread; a timeout usually means the snippet blocked it "
+                    + "(e.g. waiting on a callback, WaitOne, .Result, Thread.Sleep, or an infinite loop). "
+                    + "The editor may be wedged and unreachable — the HTTP timeout cannot self-heal a stuck main thread. "
+                    + "Check editor_status / bridge_status before retrying, and do NOT simply raise timeout_ms. "
+                    + "For test execution use unity_senses_run_tests (it is async and does not block).\"");
+            }
+            else
+            {
+                sb.Append("\"Tool execution timed out. Consider increasing timeout_ms or simplifying the operation.\"");
+            }
+            sb.Append("]}");
             return sb.ToString();
         }
 

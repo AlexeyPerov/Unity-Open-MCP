@@ -54,7 +54,18 @@ namespace UnityOpenMcpBridge
             // Filesystem nukes under Assets/ — the verify gate runs on asset
             // GUIDs, a raw Directory.Delete leaves dangling references the gate
             // would only catch as missing-reference noise.
-            @"Directory\.Delete\s*\([^)]*Assets"
+            @"Directory\.Delete\s*\([^)]*Assets",
+            // TestRunnerApi is async/callback-driven: RetrieveTestList and
+            // Execute(ExecutionSettings) deliver their results on the main
+            // thread via EditorApplication.update — the same thread the
+            // execute_csharp snippet occupies. A snippet that calls any of
+            // these and then waits (WaitOne / .Result / a busy loop) for the
+            // callback deadlocks the main thread irrecoverably; the HTTP
+            // timeout cannot unwind it and the editor has to be killed.
+            // There is no legitimate synchronous use — agents must use
+            // unity_senses_run_tests, which registers callbacks before Execute
+            // and persists results from the async RunFinished callback.
+            @"TestRunnerApi"
         };
 
         private static readonly string[] DefaultMenuPatterns =
@@ -125,6 +136,7 @@ namespace UnityOpenMcpBridge
             return Match(code, GetOrCompileCSharp(ResolveCSharpPatterns(settingsPatterns)),
                 "execute_csharp",
                 "Use a scoped typed tool (apply_fix, reserialize, invoke_method) instead of a raw snippet, " +
+                "unity_senses_run_tests for test execution, " +
                 "or retry with gate: \"off\" and confirm_bypass: true to proceed and accept the risk.");
         }
 
