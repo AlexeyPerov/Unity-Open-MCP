@@ -4,35 +4,42 @@ If you didn't find what you were looking for here, this page lists the other MCP
 
 > **A note on categories.** Most entries below are **MCP servers** — they expose Unity to an AI client of *your* choice (Claude, Cursor, Windsurf, etc.). Two entries (**Bezi** and **Unity's official AI**) are **bundled assistants** that ship their own AI and simply live inside Unity; they're included because they solve the same problem from the user's side.
 
+
+
 ## Legend
 
-- ✅ supported &nbsp;·&nbsp; 🟡 partial / limited &nbsp;·&nbsp; ❌ not available &nbsp;·&nbsp; ⭐ standout
+- ✅ supported  ·  🟡 partial / limited  ·  ❌ not available  ·  ⭐ standout
 - `BYO AI` = bring your own AI client via MCP; `bundled` = the tool ships its own AI.
+
+
 
 ## Feature matrix
 
 Columns are abbreviated; see **Projects** below for full names and links.
 
-| Feature | Open MCP | Unity-MCP (Ivan) | Coplay | unity-cli | UCP | Unified | AnkleBreaker | Unity AI (official) | Bezi |
-|---|---|---|---|---|---|---|---|---|---|
-| Model | BYO AI | BYO AI | BYO AI | BYO AI | BYO AI | BYO AI | BYO AI | bundled | bundled |
-| License | ✅ MIT | ✅ MIT | ✅ MIT / Apache-2.0 | open | open | open | 🟡 custom¹ | proprietary | proprietary |
-| Cost | free | free | free | free | free | free | free | Unity sub + credits | $60–$200/mo² |
-| Unity versions | ✅ 2022.3 LTS+ | 2021.3+ | ✅ 2021.3+ | 6 only | 2021.3+ | 2021.3+ | 2021.3 LTS+ | 6+ | see site |
-| Setup experience | ⭐ Hub wizard + launcher | ✅ in-Unity window + CLI | ✅ in-Unity configurator | install script | `ucp install` + `doctor` | copy folder | 🟡 plugin + manual JSON config | in-Editor settings | plugin + account |
-| Tool surface | ✅ 172 | ✅ 70+ | ✅ 43 grouped | ~11 | ~30 | ~52 | ✅ ~288 | growing | n/a (assistant) |
-| Scene / GameObject / component editing | ✅ | ✅ | ✅ | 🟡 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Asset read / search / references | ✅ | ✅ | ✅ | 🟡 | ✅ | 🟡 | ✅ | 🟡 | 🟡 full-project context |
-| Screenshots | ✅ | ⭐ scene/game/iso | ✅ | ✅ | ✅ | ❌ | ✅ | 🟡 | 🟡 visual-bug tracing |
-| Console & compile errors | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Profiler | ✅ | ⭐ deep | ✅ | 🟡 | ✅ | 🟡 | ✅ | 🟡 | ❌ |
-| Test runner | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 | ❌ |
-| Dynamic code execution | ✅ Roslyn | ✅ Roslyn | ✅ Roslyn | ✅ Roslyn | ✅ | ❌ | ✅ Roslyn | 🟡 | ✅ in-engine Actions |
-| Safety: checkpoints / validation / undo | ⭐ gate + delta + regression | ❌ | ❌ | ❌ | 🟡 dirty-guard | ❌ | ❌ | ❌ | ✅ reviewable + one-click undo |
-| Offline / CI / batch | ✅ | ✅ server mode | ✅ CLI + remote | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Multi-agent concurrency | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⭐ fair queue + routing | ❌ | ❌ |
-| Extension / domain packs | ✅ 6 (Nav/Input/ProBuilder/Particles/Animation/Splines) | ⭐ 10 (Cinemachine/Terrain/…) | 🟡 tool groups | custom | — | module stubs | 🟡 package-gated | — | — |
-| AI client auto-config | ✅ Cursor/Claude/OpenCode/Zed | ⭐ 14+ | ⭐ broad matrix | manual | Claude plugin | generic | ❌ manual | n/a | n/a |
+
+| Feature                                 | Open MCP                                               | Unity-MCP (Ivan)             | Coplay                  | unity-cli      | UCP                      | Unified      | AnkleBreaker                   | MCP Unity                                                      | Unity AI (official) | Bezi                          |
+| --------------------------------------- | ------------------------------------------------------ | ---------------------------- | ----------------------- | -------------- | ------------------------ | ------------ | ------------------------------ | -------------------------------------------------------------- | ------------------- | ----------------------------- |
+| Model                                   | BYO AI                                                 | BYO AI                       | BYO AI                  | BYO AI         | BYO AI                   | BYO AI       | BYO AI                         | BYO AI                                                         | bundled             | bundled                       |
+| License                                 | ✅ MIT                                                  | ✅ MIT                        | ✅ MIT / Apache-2.0      | open           | open                     | open         | 🟡 custom¹                     | ✅ MIT                                                          | proprietary         | proprietary                   |
+| Cost                                    | free                                                   | free                         | free                    | free           | free                     | free         | free                           | free                                                           | Unity sub + credits | $60–$200/mo²                  |
+| Unity versions                          | ✅ 2022.3 LTS+                                          | 2021.3+                      | ✅ 2021.3+               | 6 only         | 2021.3+                  | 2021.3+      | 2021.3 LTS+                    | 6 only                                                         | 6+                  | see site                      |
+| Setup experience                        | ⭐ Hub wizard + launcher                                | ✅ in-Unity window + CLI      | ✅ in-Unity configurator | install script | `ucp install` + `doctor` | copy folder  | 🟡 plugin + manual JSON config | ✅ in-Unity Server Window + UPM git URL                         | in-Editor settings  | plugin + account              |
+| Tool surface                            | ✅ 229                                                  | ✅ 70+                        | ✅ 43 grouped            | ~11            | ~30                      | ~52          | ✅ ~288                         | ~30 tools + 7 resources                                        | growing             | n/a (assistant)               |
+| Scene / GameObject / component editing  | ✅                                                      | ✅                            | ✅                       | 🟡             | ✅                        | ✅            | ✅                              | ✅                                                              | ✅                   | ✅                             |
+| Asset read / search / references        | ✅                                                      | ✅                            | ✅                       | 🟡             | ✅                        | 🟡           | ✅                              | 🟡                                                             | 🟡                  | 🟡 full-project context       |
+| Screenshots                             | ✅                                                      | ⭐ scene/game/iso             | ✅                       | ✅              | ✅                        | ❌            | ✅                              | ❌                                                              | 🟡                  | 🟡 visual-bug tracing         |
+| Console & compile errors                | ✅                                                      | ✅                            | ✅                       | ✅              | ✅                        | ✅            | ✅                              | ✅                                                              | ✅                   | ✅                             |
+| Profiler                                | ✅                                                      | ⭐ deep                       | ✅                       | 🟡             | ✅                        | 🟡           | ✅                              | ❌                                                              | 🟡                  | ❌                             |
+| Test runner                             | ✅                                                      | ✅                            | ✅                       | ✅              | ✅                        | ✅            | ✅                              | ✅                                                              | 🟡                  | ❌                             |
+| Dynamic code execution                  | ✅ Roslyn                                               | ✅ Roslyn                     | ✅ Roslyn                | ✅ Roslyn       | ✅                        | ❌            | ✅ Roslyn                       | ❌                                                              | 🟡                  | ✅ in-engine Actions           |
+| Safety: checkpoints / validation / undo | ⭐ gate + delta + regression                            | ❌                            | ❌                       | ❌              | 🟡 dirty-guard           | ❌            | ❌                              | 🟡 batch rollback only                                         | ❌                   | ✅ reviewable + one-click undo |
+| Offline / CI / batch                    | ✅                                                      | ✅ server mode                | ✅ CLI + remote          | ❌              | ✅                        | ❌            | ❌                              | ❌                                                              | ❌                   | ❌                             |
+| Multi-agent concurrency                 | ❌                                                      | ❌                            | ❌                       | ❌              | ❌                        | ❌            | ⭐ fair queue + routing         | ❌                                                              | ❌                   | ❌                             |
+| Extension / domain packs                | ✅ 6 (Nav/Input/ProBuilder/Particles/Animation/Splines) | ⭐ 10 (Cinemachine/Terrain/…) | 🟡 tool groups          | custom         | —                        | module stubs | 🟡 package-gated               | 🟡 custom `McpToolBase`                                        | —                   | —                             |
+| AI client auto-config                   | ✅ Cursor/Claude/OpenCode/Zed                           | ⭐ 14+                        | ⭐ broad matrix          | manual         | Claude plugin            | generic      | ❌ manual                       | ⭐ Cursor/Claude/Codex/Copilot/OpenCode + project-local configs | n/a                 | n/a                           |
+| MCP resources (read-only URIs)          | 🟡 4 (health/bridge)                                   | 🟡                           | 🟡                      | ❌              | 🟡                       | ❌            | 🟡                             | ⭐ 7 (hierarchy, menu items, assets, …)                         | 🟡                  | n/a                           |
+
 
 ¹ AnkleBreaker uses a custom "AnkleBreaker Open License" (attribution required, resale forbidden) — read it before depending on it commercially.
 ² Bezi is credit-based with a bundled model (Claude); price is on top of your existing AI subscriptions.
@@ -46,6 +53,7 @@ Columns are abbreviated; see **Projects** below for full names and links.
 - **UCP** — Unity Control Protocol. Rust binary + npm, explicit lifecycle taxonomy.
 - **Unified** — UnifiedUnityMCP. In-editor, module-factory design.
 - **AnkleBreaker** — AnkleBreaker-Studio/unity-mcp-server. Broadest raw tool count (~288) and the only multi-agent scheduling model. [GitHub](https://github.com/AnkleBreaker-Studio/unity-mcp-server).
+- **MCP Unity** — CoderGamester/mcp-unity. Unity 6 UPM package + Node.js MCP server over WebSocket; ~30 scene/asset/material tools plus seven MCP resources (hierarchy, menu items, packages, assets, tests, logs). In-Editor Server Window with one-click client config (global and project-local). [GitHub](https://github.com/CoderGamester/mcp-unity) · MIT.
 - **Unity AI (official)** — Unity's own AI Assistant package (`com.unity.ai.assistant`), MCP-exposed. [Unity docs](https://docs.unity3d.com/Packages/com.unity.ai.assistant@latest).
 - **Bezi** — proprietary Unity AI assistant; bundled model, reviewable checkpointed changes. [bezi.com](https://www.bezi.com/) · [pricing](https://www.bezi.com/pricing).
 
