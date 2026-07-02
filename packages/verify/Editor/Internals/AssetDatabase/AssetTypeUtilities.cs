@@ -54,15 +54,18 @@ namespace UnityOpenMcpVerify.Internals.AssetDatabase
 
         public static bool IsValidType(string path, Type type)
         {
-            if (type != null)
-            {
-                if (type == typeof(DefaultAsset))
-                    return false;
-                return true;
-            }
+            // A null type is the normal result for paths Unity does not import
+            // as a typed asset (.asmdef, .cs, .meta, pending imports, …). That
+            // is not an error condition — just skip the path silently. The
+            // downstream CanAnalyzeType filter already restricts analysis to
+            // GameObject / SceneAsset / ScriptableObject.
+            if (type == null)
+                return false;
 
-            Debug.LogWarning($"Invalid asset type found at {path}");
-            return false;
+            if (type == typeof(DefaultAsset))
+                return false;
+
+            return true;
         }
 
         public static bool CanAnalyzeType(Type type)

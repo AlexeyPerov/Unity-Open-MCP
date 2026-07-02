@@ -24,7 +24,7 @@
     onMutated: (updated: ProjectEntry) => void;
   } = $props();
 
-  type Tab = "manifest" | "meta" | "migrate";
+  type Tab = "manifest" | "meta" | "migrate" | "lineCounter";
   let activeTab = $state<Tab>("manifest");
 
   // --- Manifest tab ---
@@ -226,6 +226,7 @@
     <button class="pkg-tab" class:active={activeTab === "manifest"} onclick={() => (activeTab = "manifest")}>Manifest</button>
     <button class="pkg-tab" class:active={activeTab === "meta"} onclick={() => (activeTab = "meta")}>Meta</button>
     <button class="pkg-tab" class:active={activeTab === "migrate"} onclick={() => (activeTab = "migrate")}>Migrate</button>
+    <button class="pkg-tab" class:active={activeTab === "lineCounter"} onclick={() => (activeTab = "lineCounter")}>Line counter</button>
   </nav>
 
   {#if activeTab === "manifest"}
@@ -452,9 +453,9 @@
         {/if}
       {/if}
     </section>
+  {:else if activeTab === "lineCounter"}
+    <LineCounterPanel {project} />
   {/if}
-
-  <LineCounterPanel {project} />
 </div>
 
 <style>

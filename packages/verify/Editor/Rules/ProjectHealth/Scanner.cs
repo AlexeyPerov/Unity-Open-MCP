@@ -198,6 +198,7 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
             {
                 var hasFiles = false;
                 var hasOnlyMeta = true;
+                var enumerationFailed = false;
                 try
                 {
                     foreach (var f in Directory.EnumerateFiles(dir))
@@ -210,9 +211,9 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                         }
                     }
                 }
-                catch { continue; }
+                catch { enumerationFailed = true; }
 
-                if (!hasFiles)
+                if (!enumerationFailed && !hasFiles)
                 {
                     bool hasSubDirs;
                     try { hasSubDirs = Directory.EnumerateDirectories(dir).Any(); }

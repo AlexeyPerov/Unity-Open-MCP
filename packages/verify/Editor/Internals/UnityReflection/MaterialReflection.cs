@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace UnityOpenMcpVerify.Internals.UnityReflection
 {
@@ -77,7 +78,10 @@ namespace UnityOpenMcpVerify.Internals.UnityReflection
 
                 if (parent != null)
                 {
-                    var parentPath = AssetDatabase.GetAssetPath(parent);
+                    // Fully qualified: this package also defines the namespace
+                    // UnityOpenMcpVerify.Internals.AssetDatabase, which would
+                    // otherwise shadow UnityEditor.AssetDatabase here.
+                    var parentPath = UnityEditor.AssetDatabase.GetAssetPath(parent);
                     parentLinkBroken = string.IsNullOrEmpty(parentPath);
                     return true;
                 }
@@ -119,20 +123,20 @@ namespace UnityOpenMcpVerify.Internals.UnityReflection
 
             var shader = childShader;
             if (shader == null) return count;
-            var propCount = ShaderUtil.GetPropertyCount(shader);
+            var propCount = shader.GetPropertyCount();
             for (var i = 0; i < propCount; i++)
             {
-                var propName = ShaderUtil.GetPropertyName(shader, i);
-                var propType = ShaderUtil.GetPropertyType(shader, i);
-                if (propType == ShaderUtil.ShaderPropertyType.TexEnv)
+                var propName = shader.GetPropertyName(i);
+                var propType = shader.GetPropertyType(i);
+                if (propType == ShaderPropertyType.Texture)
                 {
                     if (TexturesDifferByAssetPath(child, parent, propName)) count++;
                 }
-                else if (propType == ShaderUtil.ShaderPropertyType.Color)
+                else if (propType == ShaderPropertyType.Color)
                 {
                     if (child.GetColor(propName) != parent.GetColor(propName)) count++;
                 }
-                else if (propType == ShaderUtil.ShaderPropertyType.Vector)
+                else if (propType == ShaderPropertyType.Vector)
                 {
                     if (child.GetVector(propName) != parent.GetVector(propName)) count++;
                 }
@@ -172,8 +176,10 @@ namespace UnityOpenMcpVerify.Internals.UnityReflection
         {
             var ta = a.GetTexture(propName);
             var tb = b.GetTexture(propName);
-            var pa = ta != null ? AssetDatabase.GetAssetPath(ta) : null;
-            var pb = tb != null ? AssetDatabase.GetAssetPath(tb) : null;
+            // Fully qualified to avoid the UnityOpenMcpVerify.Internals.AssetDatabase
+            // namespace shadowing UnityEditor.AssetDatabase.
+            var pa = ta != null ? UnityEditor.AssetDatabase.GetAssetPath(ta) : null;
+            var pb = tb != null ? UnityEditor.AssetDatabase.GetAssetPath(tb) : null;
             return pa != pb;
         }
     }

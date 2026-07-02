@@ -7,5 +7,10 @@
     "csharpDenyPatterns": [],
     "menuDenyPatterns": [],
     "bindAddress": "127.0.0.1",
-    "auditLogEnabled": false
+    "auditLogEnabled": false,
+    "verifyCacheTtlSeconds": 60,
+    "editorSettleCapMs": 5000,
+    "restartSettleCapMs": 60000,
+    "fairQueueEnabled": true,
+    "fairQueueReadsPerFrame": 5
 }

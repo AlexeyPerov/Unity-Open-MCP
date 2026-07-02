@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityOpenMcpVerify.Internals.RegexPatterns;
 
 namespace UnityOpenMcpVerify.Fixes
@@ -152,11 +153,11 @@ namespace UnityOpenMcpVerify.Fixes
             // several missing slots so the operator doesn't need one call per
             // property.
             var assigned = new List<string>();
-            var propCount = ShaderUtil.GetPropertyCount(shader);
+            var propCount = shader.GetPropertyCount();
             for (var i = 0; i < propCount; i++)
             {
-                if (ShaderUtil.GetPropertyType(shader, i) != ShaderUtil.ShaderPropertyType.TexEnv) continue;
-                var propName = ShaderUtil.GetPropertyName(shader, i);
+                if (shader.GetPropertyType(i) != ShaderPropertyType.Texture) continue;
+                var propName = shader.GetPropertyName(i);
                 if (material.GetTexture(propName) != null) continue;
                 material.SetTexture(propName, texture);
                 assigned.Add(propName);

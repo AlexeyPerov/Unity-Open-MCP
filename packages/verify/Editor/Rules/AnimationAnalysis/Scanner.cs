@@ -154,7 +154,8 @@ namespace UnityOpenMcpVerify.Rules.AnimationAnalysis
             {
                 foreach (var child in sm.states)
                 {
-                    if (child == null || child.state == null) continue;
+                    // ChildAnimatorState is a struct; only its `state` field can be null.
+                    if (child.state == null) continue;
                     allStates.Add(child.state);
                     if (child.state.transitions != null)
                     {
@@ -193,7 +194,8 @@ namespace UnityOpenMcpVerify.Rules.AnimationAnalysis
             {
                 foreach (var childSm in sm.stateMachines)
                 {
-                    if (childSm == null || childSm.stateMachine == null) continue;
+                    // ChildAnimatorStateMachine is a struct; only its `stateMachine` field can be null.
+                    if (childSm.stateMachine == null) continue;
                     CollectStatesAndTransitions(childSm.stateMachine, allStates, entryStates, transitions, anyStateTargets);
                 }
             }
@@ -412,7 +414,8 @@ namespace UnityOpenMcpVerify.Rules.AnimationAnalysis
                 foreach (var clip in group)
                 {
                     clip.IsDuplicate = true;
-                    clip.DuplicatePaths = group.Where(c => c != clip).Select(c => c.Path).ToList();
+                    clip.DuplicatePaths.Clear();
+                    clip.DuplicatePaths.AddRange(group.Where(c => c != clip).Select(c => c.Path));
                 }
             }
         }

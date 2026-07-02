@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityOpenMcpVerify.Internals.UnityReflection;
 
 namespace UnityOpenMcpVerify.Rules.Materials
@@ -158,14 +159,14 @@ namespace UnityOpenMcpVerify.Rules.Materials
                     VerifySeverity.Warning));
             }
 
-            // Per-property texture checks via ShaderUtil.
+            // Per-property texture checks via the public Shader API.
             if (settings.CheckMissingTexture || settings.CheckBuiltinTexture)
             {
-                var propCount = ShaderUtil.GetPropertyCount(shader);
+                var propCount = shader.GetPropertyCount();
                 for (var i = 0; i < propCount; i++)
                 {
-                    if (ShaderUtil.GetPropertyType(shader, i) != ShaderUtil.ShaderPropertyType.TexEnv) continue;
-                    var propName = ShaderUtil.GetPropertyName(shader, i);
+                    if (shader.GetPropertyType(i) != ShaderPropertyType.Texture) continue;
+                    var propName = shader.GetPropertyName(i);
                     var texture = material.GetTexture(propName);
                     var texturePath = texture != null ? AssetDatabase.GetAssetPath(texture) : null;
 
@@ -193,25 +194,25 @@ namespace UnityOpenMcpVerify.Rules.Materials
         {
             var shader = material.shader;
             if (shader == null) return;
-            var propCount = ShaderUtil.GetPropertyCount(shader);
+            var propCount = shader.GetPropertyCount();
             for (var i = 0; i < propCount; i++)
             {
-                var propName = ShaderUtil.GetPropertyName(shader, i);
-                var propType = ShaderUtil.GetPropertyType(shader, i);
+                var propName = shader.GetPropertyName(i);
+                var propType = shader.GetPropertyType(i);
                 string value;
                 switch (propType)
                 {
-                    case ShaderUtil.ShaderPropertyType.Color:
+                    case ShaderPropertyType.Color:
                         value = material.GetColor(propName).ToString();
                         break;
-                    case ShaderUtil.ShaderPropertyType.Vector:
+                    case ShaderPropertyType.Vector:
                         value = material.GetVector(propName).ToString();
                         break;
-                    case ShaderUtil.ShaderPropertyType.Float:
-                    case ShaderUtil.ShaderPropertyType.Range:
+                    case ShaderPropertyType.Float:
+                    case ShaderPropertyType.Range:
                         value = material.GetFloat(propName).ToString();
                         break;
-                    case ShaderUtil.ShaderPropertyType.TexEnv:
+                    case ShaderPropertyType.Texture:
                         var tex = material.GetTexture(propName);
                         value = tex != null ? AssetDatabase.GetAssetPath(tex) : "null";
                         break;
@@ -246,14 +247,14 @@ namespace UnityOpenMcpVerify.Rules.Materials
 
             if (shader != null)
             {
-                var propCount = ShaderUtil.GetPropertyCount(shader);
+                var propCount = shader.GetPropertyCount();
                 for (var i = 0; i < propCount; i++)
                 {
-                    var propName = ShaderUtil.GetPropertyName(shader, i);
-                    var propType = ShaderUtil.GetPropertyType(shader, i);
+                    var propName = shader.GetPropertyName(i);
+                    var propType = shader.GetPropertyType(i);
                     switch (propType)
                     {
-                        case ShaderUtil.ShaderPropertyType.TexEnv:
+                        case ShaderPropertyType.Texture:
                             var tex = material.GetTexture(propName);
                             if (tex != null)
                             {
@@ -262,11 +263,11 @@ namespace UnityOpenMcpVerify.Rules.Materials
                                   .Append(AssetDatabase.AssetPathToGUID(texPath)).Append(';');
                             }
                             break;
-                        case ShaderUtil.ShaderPropertyType.Color:
+                        case ShaderPropertyType.Color:
                             sb.Append("col:").Append(propName).Append('=')
                               .Append(material.GetColor(propName)).Append(';');
                             break;
-                        case ShaderUtil.ShaderPropertyType.Vector:
+                        case ShaderPropertyType.Vector:
                             sb.Append("vec:").Append(propName).Append('=')
                               .Append(material.GetVector(propName)).Append(';');
                             break;
@@ -362,7 +363,8 @@ namespace UnityOpenMcpVerify.Rules.Materials
                 {
                     mat.IsDuplicate = true;
                     var others = group.Where(m => m != mat).ToList();
-                    mat.DuplicatePaths = others.Select(o => o.Path).ToList();
+                    mat.DuplicatePaths.Clear();
+                    mat.DuplicatePaths.AddRange(others.Select(o => o.Path));
                     mat.Issues.Add(new MaterialIssue("duplicate_material",
                         $"Duplicate of {others.Count} material(s): {string.Join(", ", others.Select(o => o.Name))}.",
                         VerifySeverity.Warning));
@@ -413,7 +415,10 @@ namespace UnityOpenMcpVerify.Rules.Materials
             foreach (var mat in materials)
             {
                 if (map.TryGetValue(mat.Path, out var set))
-                    mat.ReferencedByPaths = set.OrderBy(p => p).ToList();
+                {
+                    mat.ReferencedByPaths.Clear();
+                    mat.ReferencedByPaths.AddRange(set.OrderBy(p => p));
+                }
             }
         }
 

@@ -47,6 +47,13 @@
 
   let customArgs = $state("run lint");
 
+  // The popup uses a two-tab strip: "Commands" holds all the npm panels
+  // (build / test / version / publish / sync / custom), and "Line counter"
+  // isolates the inspection affordance. The project-summary header above
+  // the strip is always visible.
+  type Tab = "commands" | "lineCounter";
+  let activeTab = $state<Tab>("commands");
+
   // --- Maintainer panel state -------------------------------------------
 
   // Read-only package identity + registry snapshot. `packageInfo` is the
@@ -293,6 +300,12 @@
     </p>
   </section>
 
+  <nav class="popup-tabs">
+    <button class="popup-tab" class:active={activeTab === "commands"} onclick={() => (activeTab = "commands")}>Commands</button>
+    <button class="popup-tab" class:active={activeTab === "lineCounter"} onclick={() => (activeTab = "lineCounter")}>Line counter</button>
+  </nav>
+
+  {#if activeTab === "commands"}
   <div class="panel-row">
     <div class="panel-head">
       <span class="panel-label">Build</span>
@@ -511,8 +524,9 @@
     />
     <Console lines={panels.custom.lines} title="npm (custom)" />
   </div>
-
-  <LineCounterPanel {project} />
+  {:else if activeTab === "lineCounter"}
+    <LineCounterPanel {project} />
+  {/if}
 </div>
 
 {#if showPublishConfirm}
@@ -564,6 +578,24 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
+  }
+  .popup-tabs {
+    display: flex;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--hub-border);
+  }
+  .popup-tab {
+    padding: 0.4rem 0.8rem;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--hub-text-dim);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .popup-tab.active {
+    color: var(--hub-text);
+    border-bottom-color: var(--hub-accent, #5c7cfa);
   }
   .info-block {
     padding: 0.6rem 0.8rem;

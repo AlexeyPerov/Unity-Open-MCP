@@ -2,6 +2,7 @@ using System.IO;
 using UnityOpenMcpVerify;
 using UnityOpenMcpVerify.Fixes;
 using UnityEditor;
+using UnityEngine;
 
 namespace UnityOpenMcpBridge.MetaTools
 {
