@@ -103,6 +103,34 @@ namespace UnityOpenMcpBridge.MetaTools
 
                 var result = method.Invoke(null, null);
                 var output = OutputSerializer.Serialize(result, BuildSerializeOptions(body));
+
+                // Defense-in-depth: OutputSerializer is per-member defensive
+                // (each field/property access is try/catch'd), but an exception
+                // can still escape mid-walk — e.g. a TypeLoadException when a
+                // field references a missing assembly — leaving truncated /
+                // unbalanced JSON. BuildGateEnvelope interpolates that output
+                // raw into the gate envelope at `result.Mutation.Output`,
+                // corrupting the whole response body; the MCP server's JSON
+                // parser then rejects it (and without the matching server-side
+                // guard, silently degrades to a fake success — see
+                // specs/feedback.md entry 2026-07-03-c).
+                //
+                // Validate the serialized output is a balanced JSON object
+                // before trusting it. A null output is LEGITIMATE and common
+                // (the default `return null;` snippet tail) — the envelope
+                // emits `"output":null`, which is valid JSON — so only a
+                // non-null output that fails validation is treated as malformed.
+                // Surface a structured execution_error built from primitives
+                // (return type + likely cause, no object-graph walk) so the
+                // mutation block is always well formed.
+                if (output != null && !BridgeJson.IsValidJsonObject(output))
+                {
+                    var diag = result == null
+                        ? "snippet returned null but serialization produced non-object JSON"
+                        : $"snippet return type {result.GetType().FullName}: serialization produced malformed JSON (likely an exception during the reflective walk — e.g. a TypeLoadException on a field referencing a missing assembly). The result could not be safely serialized.";
+                    return ToolDispatchResult.Fail("execution_error", diag);
+                }
+
                 return ToolDispatchResult.Ok(output);
             }
             catch (TargetInvocationException tie)

@@ -881,3 +881,164 @@ test("envelope shape: mutation body with newErrors is an error", async () => {
     disposeSandbox(s);
   }
 });
+
+// ----- Malformed bridge body (specs/feedback.md entry 2026-07-03-c) -----
+//
+// When the bridge returns HTTP 200 with a body that is NOT valid JSON (the case
+// that motivated the fix: an execute_csharp snippet whose OutputSerializer
+// output was corrupted by a TypeLoadException mid-walk, interpolated raw into
+// the gate envelope), res.json() rejects. Previously postTool's direct-body
+// fallback silently degraded to isError:false with an empty `{}` — a fake
+// success. For compile-reload tools, annotateCompileVerify (gated on
+// !result.isError) then stamped `_compileVerify` onto the `{}`, producing a
+// malformed envelope `{"_compileVerify":{...}}` with NO `mutation` object —
+// violating the documented contract. The fix: surface a structured
+// `bridge_response_unparsable` error instead so the failure is visible and the
+// annotation never runs on a body that lost its mutation block.
+
+test("malformed body: compile-reload tool surfaces as error and is NOT annotated with _compileVerify", async () => {
+  // execute_csharp is a compile-reload tool. The bridge returns 200 with a body
+  // that is not valid JSON (unbalanced braces — mirroring the real failure:
+  // OutputSerializer truncating mid-walk). postTool must surface a structured
+  // error, and because isError is true, annotateCompileVerify must NOT stamp
+  // _compileVerify onto the body.
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      // Malformed: unbalanced JSON. res.json() will reject on the client side.
+      res.end('{"mutation":{"success":true,"output":{"broken":');
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_execute_csharp", {
+      code: "return 1;",
+    });
+    assert.equal(
+      result.isError,
+      true,
+      "malformed bridge body must surface as an error, not a fake success",
+    );
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(
+      body.error.code,
+      "bridge_response_unparsable",
+      "must carry the machine-readable unparsable-body code",
+    );
+    // The body must NOT carry a _compileVerify annotation — that was the
+    // signature of the bug (an envelope with _compileVerify but no mutation).
+    assert.equal(
+      body._compileVerify,
+      undefined,
+      "annotateCompileVerify must not run on an errored result",
+    );
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("malformed body: non-compile-reload tool surfaces as error", async () => {
+  // A read-only tool (lifecycle 'none') whose body fails to parse must also
+  // surface as a structured error — the guard is not compile-reload-specific.
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      // Garbage bytes, not JSON at all.
+      res.end("<<<not json>>>");
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_editor_get_tags", {});
+    assert.equal(result.isError, true, "garbage body must surface as an error");
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_response_unparsable");
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("malformed body: direct-body tool with valid JSON still succeeds (regression guard)", async () => {
+  // The unparsable-body guard must NOT regress the direct-body success path:
+  // a tool whose body parses cleanly (even when it has no `mutation` field)
+  // must still return isError:false verbatim. This pins the boundary between
+  // "parsed === null → error" and "parsed !== null → direct body".
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      res.end(JSON.stringify({ tags: ["Untagged", "Player"] }));
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_editor_get_tags", {});
+    assert.equal(result.isError, false, "valid direct body must still succeed");
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.deepEqual(body.tags, ["Untagged", "Player"]);
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});

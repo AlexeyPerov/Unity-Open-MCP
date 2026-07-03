@@ -555,16 +555,47 @@ export class LiveClient implements Router {
         };
       }
 
+      // Malformed bridge body — res.json() rejected (parsed === null) on what
+      // should be a 200 OK application/json response. The bridge's two response
+      // shapes (BuildGateEnvelope, BuildDirectToolErrorJson) are always valid
+      // JSON, so a parse failure means the response was corrupted in transit or
+      // — the case that motivated this guard — a mutating tool's serialized
+      // output was interpolated raw into the gate envelope and produced
+      // unbalanced JSON (e.g. an execute_csharp snippet whose result threw a
+      // TypeLoadException during OutputSerializer's reflective walk).
+      //
+      // Previously this branch silently degraded to isError:false with an empty
+      // `{}` body, manufacturing a fake success. For compile-reload tools,
+      // annotateCompileVerify then stamped `_compileVerify` onto that `{}`,
+      // producing a malformed envelope `{"_compileVerify":{...}}` with NO
+      // `mutation` object — violating the documented contract and confusing
+      // agents that key off mutation.success (specs/feedback.md entry
+      // 2026-07-03-c). Surface a structured error instead so the failure is
+      // visible and annotateCompileVerify (gated on !result.isError) never
+      // annotates a body that lost its mutation block.
+      if (parsed == null) {
+        return makeErrorResult({
+          code: "bridge_response_unparsable",
+          message:
+            `Bridge returned HTTP 200 for '${toolName}' but the response body ` +
+            `was not valid JSON. This usually means a mutating tool's serialized ` +
+            `output was corrupted (e.g. an execute_csharp snippet whose result ` +
+            `threw during serialization). The result is unreliable — do not trust ` +
+            `any partial output. Check editor_status / bridge_status, then retry. ` +
+            `Endpoint: ${this.baseUrl}.`,
+        });
+      }
+
       // Direct body: return it verbatim. isError when the tool reported a
       // top-level error field (the bridge's direct-response convention).
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(parsed ?? {}),
+            text: JSON.stringify(parsed),
           },
         ],
-        isError: parsed?.error != null,
+        isError: parsed.error != null,
       };
     } catch (err) {
       // M20 Plan 4-5 / T-fix-2 — transient POST failure (ECONNREFUSED /

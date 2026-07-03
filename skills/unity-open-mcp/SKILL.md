@@ -411,6 +411,7 @@ Results are walked by a depth-limited reflective serializer before becoming `mut
 - Lists truncate to 100 items (`max_items` configurable); truncated arrays report `{"items":[...],"truncated":N}`.
 - Recursion caps at depth 4 (`max_depth` configurable).
 - Cycles / `UnityEngine.Object` refs never infinite-loop — back-edges become `{"$ref":"TypeName"}`, Unity objects become `{"$type":...,"name":...,"instanceId":...}`.
+- **Malformed output is rejected, not trusted.** The per-member walk is try/catch'd, but an exception can still escape mid-walk (e.g. a `TypeLoadException` when a field references a missing assembly), leaving unbalanced JSON. `execute_csharp` validates the serialized output before it enters the envelope; if it isn't a balanced JSON object the call fails with `error.code = "execution_error"` and a diagnostic naming the return type. On the rare chance the body is still corrupted in transit, the MCP server surfaces `bridge_response_unparsable` instead of a fake success — either way you'll never see a `_compileVerify`-annotated result missing its `mutation` block.
 
 ## Read-only tools (no gate)
 

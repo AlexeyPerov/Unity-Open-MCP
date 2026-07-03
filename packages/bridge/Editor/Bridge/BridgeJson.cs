@@ -12,6 +12,72 @@ namespace UnityOpenMcpBridge
 
     internal static class BridgeJson
     {
+        // --- JSON validity check --------------------------------------------------
+
+        // Lightweight top-level JSON VALUE validator. Returns true only when
+        // `json` is a single, balanced JSON value — object, array, string,
+        // number, or one of true/false/null — with no trailing garbage and no
+        // dangling/truncated structure. Strings, escapes, and both brace kinds
+        // ({}, []) are respected so braces/quotes inside string literals don't
+        // fool the walker.
+        //
+        // Used by ExecuteCSharpTool to guard against OutputSerializer producing
+        // unbalanced JSON when a snippet result throws mid-walk (e.g. a
+        // TypeLoadException escaping the per-member try/catch). Without this
+        // guard, the malformed output is interpolated raw into the gate envelope
+        // at `result.Mutation.Output`, corrupting the whole body — and the MCP
+        // server's res.json() then rejects it.
+        //
+        // Why a VALUE validator and not just an object validator: OutputSerializer
+        // legitimately emits bare scalars for primitive returns (`return 42;` →
+        // `"42"`, `return "hi";` → `"\"hi\""`) and bare arrays for array returns
+        // (`return new[]{1,2,3};` → `"[1,2,3]"`). These are valid to interpolate
+        // into `"output":<value>`. A guard that required a `{...}` object would
+        // reject every primitive/array return as malformed — a regression. The
+        // only failure to catch is truncation/unbalance (a `{` or `[` with no
+        // matching close, or a structural token stranded outside its container),
+        // which is exactly what an exception mid-walk produces. The validator is
+        // deliberately minimal (no schema, no value-type strictness): its only
+        // job is to refuse to trust a string as JSON when its containers don't
+        // balance or its string escapes don't terminate.
+        internal static bool IsValidJsonObject(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return false;
+            var depth = 0;          // tracks BOTH {} and [] containers together
+            var inStr = false;
+            var esc = false;
+            for (int i = 0; i < json.Length; i++)
+            {
+                var c = json[i];
+                if (inStr)
+                {
+                    if (esc) esc = false;
+                    else if (c == '\\') esc = true;
+                    else if (c == '"') inStr = false;
+                    continue;
+                }
+                if (c == '"') { inStr = true; continue; }
+                if (c == '{' || c == '[')
+                {
+                    depth++;
+                }
+                else if (c == '}' || c == ']')
+                {
+                    depth--;
+                    if (depth < 0) return false; // closing before opening
+                }
+            }
+            // Balanced containers (depth 0) and no dangling string. Bare scalars
+            // (numbers, true/false/null, quoted strings) have depth 0 throughout
+            // and either end cleanly (inStr false) or — for a truncated string —
+            // are caught by the inStr check. Objects/arrays balance to depth 0.
+            // OutputSerializer serializes exactly one value, so there is no
+            // trailing-garbage failure mode to guard against here; the only
+            // corruption a mid-walk exception produces is truncation, which the
+            // depth/inStr checks catch.
+            return depth == 0 && !inStr;
+        }
+
         // --- JSON string escaping -------------------------------------------------
 
         internal static string EscapeString(string s)
