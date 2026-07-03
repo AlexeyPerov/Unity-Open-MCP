@@ -107,16 +107,28 @@ function defaultWarn(msg: string): void {
 // ---------------------------------------------------------------------------
 
 /**
- * The four Unity startup modal families this helper knows how to classify and
- * (under the active policy) dismiss. Each maps to a window-title keyword set
- * (see {@link DIALOG_TITLE_FRAGMENTS}) and a per-policy button preference
- * table (see {@link preferredDialogButtonLabel}).
+ * The Unity startup/steady-state modal families this helper knows how to
+ * classify and (under the active policy) dismiss. Each maps to a window-title
+ * keyword set (see {@link DIALOG_TITLE_FRAGMENTS}) and a per-policy button
+ * preference table (see {@link preferredDialogButtonLabel}).
+ *
+ * The first four (`launch_errors` … `auto_graphics_api`) are launch-time
+ * modals. The last two (`scene_modified_externally`, `unsaved_scene_changes`)
+ * are steady-state modals that can surface ANY time the editor is running —
+ * see specs/feedback.md 2026-07-03 (entries "Scene has been modified
+ * externally" + cascade-from-Unity-modal-dialog). They are NOT auto-dismissed
+ * by default: `unsaved_scene_changes` is destructive (data loss) so it is
+ * treated like `project_upgrade` (blocked unless opted in), and
+ * `scene_modified_externally` defaults to the safe Reload/Revert under auto/
+ * ignore but a `manual`/`safe-mode` policy still declines.
  */
 export type DialogKind =
   | "launch_errors"
   | "non_matching_editor"
   | "project_upgrade"
-  | "auto_graphics_api";
+  | "auto_graphics_api"
+  | "scene_modified_externally"
+  | "unsaved_scene_changes";
 
 /**
  * Window-title fragments per dialog kind. Case-insensitive substring match
@@ -126,6 +138,13 @@ export type DialogKind =
  *
  * The `launch_errors` set mirrors the M13 T4.5 fragment list so the new
  * classifier stays a strict superset of the old matcher.
+ *
+ * The steady-state kinds (`scene_modified_externally`,
+ * `unsaved_scene_changes`) cover the two modals that jam the bridge when an
+ * external process rewrites a scene file (git checkout, codegen, build
+ * tooling) or when a mutating tool leaves a scene dirty and Unity surfaces its
+ * native save prompt. Without these fragments the dismiss loop can never
+ * match them, so the modal blocks the main thread until a human clicks.
  */
 export const DIALOG_TITLE_FRAGMENTS: Readonly<Record<DialogKind, readonly string[]>> = {
   // Unity 2020.2+ renamed the launch-errors dialog to "Enter Safe Mode?".
@@ -148,6 +167,38 @@ export const DIALOG_TITLE_FRAGMENTS: Readonly<Record<DialogKind, readonly string
   project_upgrade: ["projectupgraderequired"],
   // "Auto Graphics API Notice" — informational, typically OK only.
   auto_graphics_api: ["autographicsapi"],
+  // specs/feedback.md 2026-07-03 — "Scene has been modified externally. Do you
+  // want to reload?" surfaces when an external process (git checkout, build
+  // tooling, codegen) rewrites a .unity file Unity has open. Buttons are
+  // typically "Reload" / "Revert" / "Keep Mine". The safe forward-progress
+  // choice under auto/ignore is to accept the disk version (Reload/Revert) —
+  // the external rewrite was intentional. Title fragments cover the observed
+  // spellings across Unity 2022 LTS and 6000.x.
+  scene_modified_externally: [
+    "modifiedexternally",
+    "scenemodified",
+    "fileondiskwasmodified",
+    "reloadscene",
+    "scenemodifiedonthedisk",
+  ],
+  // specs/feedback.md 2026-07-03 — "Unsaved changes to scene. Save Changes?"
+  // surfaces when a mutating tool leaves a scene dirty and Unity's native save
+  // prompt fires (often via a domain reload / scene reload). Buttons are
+  // typically "Save" / "Don't Save" / "Cancel". This is DESTRUCTIVE under every
+  // policy: "Don't Save" discards work, "Save" persists potentially-unwanted
+  // state. So it is treated like project_upgrade — blocked unless the dedicated
+  // opt-in UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1 is set (see
+  // blockedKindsForPolicy / isUnsavedSceneBlocked). The fragment list lets the
+  // classifier still RECOGNIZE the modal (so the dismiss loop reports `blocked`
+  // with a clear audit line instead of `not-found`) even when it declines to
+  // click.
+  unsaved_scene_changes: [
+    "unsavedchanges",
+    "savechanges",
+    "savethechanges",
+    "savemodifiedscenes",
+    "doyouwanttosave",
+  ],
 };
 
 /**
@@ -208,15 +259,25 @@ export function normalizeDialogLabel(value: string): string {
  * Project Upgrade is gated: even when a policy WOULD confirm it (auto/ignore/
  * recover), this function returns `null` unless `allowProjectUpgrade` is true.
  * See {@link isProjectUpgradeBlocked}.
+ *
+ * `unsaved_scene_changes` is gated the same way via
+ * `allowUnsavedSceneDismiss` — it is destructive under every policy ("Don't
+ * Save" loses work, "Save" persists unwanted state), so it requires the
+ * dedicated opt-in before any policy may click. See
+ * {@link isUnsavedSceneBlocked}.
  */
 export function preferenceTokensForPolicy(
   kind: DialogKind,
   policy: DialogPolicy,
   allowProjectUpgrade = false,
+  allowUnsavedSceneDismiss = false,
 ): readonly string[] | null {
   // Project Upgrade: never confirm unless the dedicated opt-in is set,
   // regardless of policy. This is the irreversible-mutation guard.
   if (kind === "project_upgrade" && !allowProjectUpgrade) return null;
+  // Unsaved-scene-changes: destructive under every policy (data loss either
+  // way). Requires the dedicated opt-in before any policy may click.
+  if (kind === "unsaved_scene_changes" && !allowUnsavedSceneDismiss) return null;
 
   switch (kind) {
     case "launch_errors":
@@ -228,6 +289,11 @@ export function preferenceTokensForPolicy(
       return projectUpgradeTokens(policy);
     case "auto_graphics_api":
       return autoGraphicsApiTokens(policy);
+    case "scene_modified_externally":
+      return sceneModifiedExternallyTokens(policy);
+    case "unsaved_scene_changes":
+      // Only reached when allowUnsavedSceneDismiss === true.
+      return unsavedSceneChangesTokens(policy);
   }
 }
 
@@ -286,6 +352,52 @@ function autoGraphicsApiTokens(policy: DialogPolicy): readonly string[] | null {
       return ["ok", "continue", "confirm", "yes"];
     case "cancel":
       return ["quit", "cancel", "close", "no"];
+    case "safe-mode":
+    case "manual":
+      return null;
+  }
+}
+
+// specs/feedback.md 2026-07-03 — "Scene has been modified externally" modal.
+// Under auto/ignore/recover the safe choice is to accept the disk version
+// (Reload/Revert) — the external rewrite (git checkout, codegen) was
+// intentional, so keeping the in-memory copy would silently undo it. cancel
+// declines (Quit/Cancel). safe-mode/manual decline (no safe forward-progress
+// button — the operator should inspect).
+function sceneModifiedExternallyTokens(policy: DialogPolicy): readonly string[] | null {
+  switch (policy) {
+    case "auto":
+    case "ignore":
+    case "recover":
+      // "Reload" / "Revert" / "Load From Disk" all accept the on-disk version.
+      // "Continue" covers variants that phrase it that way. Order matters: we
+      // prefer the explicit reload verbs before the generic continue/ok.
+      return ["reload", "revert", "loadfromdisk", "continue", "ok"];
+    case "cancel":
+      return ["quit", "cancel", "close", "no"];
+    case "safe-mode":
+    case "manual":
+      return null;
+  }
+}
+
+// specs/feedback.md 2026-07-03 — "Unsaved changes to scene. Save Changes?"
+// modal. Only reached when allowUnsavedSceneDismiss === true (the dedicated
+// opt-in). Under auto/ignore/recover the least-bad choice is to Save
+// (preserve work) — "Don't Save" discards it. cancel still declines. This is
+// inherently judgment-laden, which is why it is opt-in only.
+function unsavedSceneChangesTokens(policy: DialogPolicy): readonly string[] | null {
+  switch (policy) {
+    case "auto":
+    case "ignore":
+    case "recover":
+      // Prefer Save (preserve work) over Don't Save (discard). "Save All"
+      // covers the multi-scene variant.
+      return ["save", "saveall", "savechanges", "ok", "yes"];
+    case "cancel":
+      // Cancel under cancel policy = Don't Save (decline to persist). Phrased
+      // as the explicit dontsave token first so the audit line is unambiguous.
+      return ["dontsave", "dontsaveall", "no", "quit", "cancel", "close"];
     case "safe-mode":
     case "manual":
       return null;
@@ -354,16 +466,23 @@ export function genericFallbackTokens(policy: DialogPolicy): readonly string[] {
 /**
  * The kinds a policy explicitly declines to dismiss. Used by the polling loop
  * to report a `blocked` outcome (audit line, no click) instead of silently
- * ignoring the dialog. Currently only `project_upgrade` under the default
- * (no opt-in) — the one irreversible-mutation guard.
+ * ignoring the dialog. Currently `project_upgrade` and `unsaved_scene_changes`
+ * under the default (no opt-ins) — the two destructive-mutation guards.
  */
 export function blockedKindsForPolicy(
   policy: DialogPolicy,
   allowProjectUpgrade = false,
+  allowUnsavedSceneDismiss = false,
 ): readonly DialogKind[] {
   if (policy === "manual") return []; // manual declines everything — not "blocked"
-  if (!allowProjectUpgrade) return ["project_upgrade"];
-  return [];
+  const blocked: DialogKind[] = [];
+  if (!allowProjectUpgrade) blocked.push("project_upgrade");
+  // unsaved_scene_changes is destructive under every policy (data loss either
+  // way); block it unless the dedicated opt-in is set. This means the dismiss
+  // loop reports `blocked` with a clear audit line instead of silently passing
+  // it as `not-found` — so a stall shows up with the right diagnosis.
+  if (!allowUnsavedSceneDismiss) blocked.push("unsaved_scene_changes");
+  return blocked;
 }
 
 /**
@@ -376,6 +495,19 @@ export function isProjectUpgradeBlocked(
   allowProjectUpgrade = false,
 ): boolean {
   return !allowProjectUpgrade;
+}
+
+/**
+ * Whether an unsaved-scene-changes dismissal would be blocked under the given
+ * flags. True unless the dedicated opt-in is set — independent of policy
+ * because "Don't Save" loses work and "Save" persists unwanted state under
+ * every policy. See {@link blockedKindsForPolicy}.
+ */
+export function isUnsavedSceneBlocked(
+  _policy: DialogPolicy,
+  allowUnsavedSceneDismiss = false,
+): boolean {
+  return !allowUnsavedSceneDismiss;
 }
 
 /**
@@ -396,10 +528,16 @@ export function preferredDialogButtonLabel(
   kind: DialogKind,
   buttonLabels: readonly string[],
   policy: DialogPolicy,
-  opts: { allowProjectUpgrade?: boolean } = {},
+  opts: { allowProjectUpgrade?: boolean; allowUnsavedSceneDismiss?: boolean } = {},
 ): { button: string; token: string } | null {
   const allowProjectUpgrade = opts.allowProjectUpgrade ?? false;
-  const tokens = preferenceTokensForPolicy(kind, policy, allowProjectUpgrade);
+  const allowUnsavedSceneDismiss = opts.allowUnsavedSceneDismiss ?? false;
+  const tokens = preferenceTokensForPolicy(
+    kind,
+    policy,
+    allowProjectUpgrade,
+    allowUnsavedSceneDismiss,
+  );
   if (tokens === null) return null;
   return matchTokens(tokens, buttonLabels);
 }

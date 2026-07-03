@@ -79,7 +79,7 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append("\"rotation\":[").Append(rotation.x).Append(',').Append(rotation.y).Append(',').Append(rotation.z).Append("],");
             sb.Append("\"fov\":").Append(fov);
             sb.Append("},");
-            sb.Append("\"resolution\":").Append(width).Append('x').Append(height).Append(',');
+            sb.Append("\"resolution\":\"").Append(width).Append('x').Append(height).Append("\",");
             sb.Append("\"filePath\":").Append(Esc(filePath));
             sb.Append('}');
             return sb.ToString();

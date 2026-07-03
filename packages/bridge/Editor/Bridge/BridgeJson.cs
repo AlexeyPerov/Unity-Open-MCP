@@ -376,6 +376,42 @@ namespace UnityOpenMcpBridge
             return sb.ToString();
         }
 
+        // specs/feedback.md 2026-07-03 — a Unity modal (unsaved-changes,
+        // scene-modified-externally, safe mode) blocked the main thread for the
+        // entire per-call window, so the queued dispatch never started. Distinct
+        // from BuildTimeoutEnvelope (the work started but ran long): the fix is
+        // NOT to raise timeout_ms — it's to dismiss the modal or save/restart.
+        // The envelope carries agentNextSteps pointing at the recovery paths so
+        // an agent can react instead of burning another 30s.
+        internal static string BuildMainThreadBlockedEnvelope(string toolName, string gateMode, int timeoutMs)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append("{\"mutation\":{\"success\":false,\"output\":null,\"error\":{\"code\":\"main_thread_blocked\"");
+            sb.Append(",\"message\":\"Tool '");
+            sb.Append(EscapeStringContent(toolName));
+            sb.Append("' could not run — the Unity main thread did not pick up the dispatch within ");
+            sb.Append(timeoutMs);
+            sb.Append("ms, which means a Unity modal dialog (unsaved changes, scene modified externally, ");
+            sb.Append("safe mode) or a long editor operation is blocking it. Do NOT raise timeout_ms — ");
+            sb.Append("the main thread is wedged, not slow.\"}}");
+            sb.Append(",\"gate\":{\"mode\":\"").Append(EscapeStringContent(gateMode));
+            sb.Append("\",\"skipped\":true,\"validation\":null,\"delta\":null}");
+            sb.Append(",\"logs\":[]");
+            sb.Append(",\"agentNextSteps\":[");
+            sb.Append("\"A Unity modal dialog is almost certainly open. Recovery options: \"");
+            sb.Append(",\"1. If a scene is dirty, call unity_open_mcp_scene_save (idempotent, never guarded) then retry — ");
+            sb.Append("mutating tools that leave a scene dirty can trigger Unity's native save modal on the next reload.\"");
+            sb.Append(",\"2. Check editor_status / bridge_status — if it reports bridge_compile_failed or a long stall, ");
+            sb.Append("a popup is wedging the editor.\"");
+            sb.Append(",\"3. The dismiss loop (UNITY_OPEN_MCP_DIALOG_POLICY) auto-clicks launch-errors / safe-mode / ");
+            sb.Append("scene-modified-externally modals during compile-wait; for the unsaved-changes modal set ");
+            sb.Append("UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1 to opt in (destructive).\"");
+            sb.Append(",\"4. If unreachable, restart the Unity Editor (the popup cannot be dismissed programmatically ");
+            sb.Append("from the bridge when the main thread is fully blocked).\"");
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
         internal static string BuildPathsHintErrorEnvelope(string toolName, string gateMode)
         {
             var sb = new StringBuilder(512);

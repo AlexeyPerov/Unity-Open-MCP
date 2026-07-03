@@ -83,5 +83,49 @@ namespace UnityOpenMcpBridge.Tests
                 LogEntriesReader.Clear();
             }
         }
+
+        // Regression: specs/feedback.md 2026-07-03 — read_console returned
+        // execution_error "UnityEditor.LogEntries internal API not available"
+        // on Unity 6 because GetEntries(List<LogEntry>) was removed from the
+        // bindings. IsAvailable must be true as long as EITHER the legacy
+        // GetEntries OR the GetCount()+GetEntryInternal fallback resolves; on
+        // 6000.x only the fallback is present.
+        [Test]
+        public static void LogEntriesReader_AvailableInEditor_EitherPath()
+        {
+            Assert.IsTrue(LogEntriesReader.IsAvailable,
+                "read_console requires either GetEntries(List<LogEntry>) or the " +
+                "GetCount()+GetEntryInternal fallback. On Unity 6 (6000.x) only the " +
+                "fallback resolves — IsAvailable must be true regardless.");
+        }
+
+        // Regression: same entry. GetEntries() must not throw on Unity 6; it
+        // should drain the console via the per-row fallback and include any entry
+        // emitted before the call.
+        [Test]
+        public static void GetEntries_ReturnsEmittedEntry_OnUnity6Fallback()
+        {
+            if (!LogEntriesReader.IsAvailable)
+                Assert.Ignore("LogEntries reader unavailable on this Unity version.");
+
+            LogEntriesReader.Clear();
+            try
+            {
+                const string marker = "M22_READCONSOLE_FALLBACK_MARKER";
+                Debug.Log(marker);
+
+                var entries = LogEntriesReader.GetEntries();
+                Assert.IsNotNull(entries, "GetEntries must never return null.");
+                var match = entries.FirstOrDefault(e => (e.Message ?? "").Contains(marker));
+                Assert.IsNotNull(match,
+                    $"GetEntries should include the emitted log '{marker}'. " +
+                    $"Got {entries.Count} entries: " +
+                    string.Join(" | ", entries.Select(e => e.Message)));
+            }
+            finally
+            {
+                LogEntriesReader.Clear();
+            }
+        }
     }
 }

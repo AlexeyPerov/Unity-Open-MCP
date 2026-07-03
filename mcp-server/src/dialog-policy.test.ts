@@ -16,6 +16,7 @@ import {
   genericFallbackTokens,
   blockedKindsForPolicy,
   isProjectUpgradeBlocked,
+  isUnsavedSceneBlocked,
   parseDialogPolicy,
   DIALOG_POLICY_VALUES,
   DIALOG_TITLE_FRAGMENTS,
@@ -68,6 +69,17 @@ test("classifyDialogTitle: matches every known kind via its real Unity title", (
   assert.equal(
     classifyDialogTitle("Auto Graphics API Notice"),
     "auto_graphics_api",
+  );
+  // specs/feedback.md 2026-07-03 — the two steady-state modals that jam the
+  // bridge when an external process rewrites a scene file (git checkout) or a
+  // mutating tool leaves a scene dirty.
+  assert.equal(
+    classifyDialogTitle("Scene has been modified externally"),
+    "scene_modified_externally",
+  );
+  assert.equal(
+    classifyDialogTitle("Unsaved changes to scene"),
+    "unsaved_scene_changes",
   );
 });
 
@@ -261,6 +273,77 @@ test("auto_graphics_api / cancel → not-found (only OK present)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// specs/feedback.md 2026-07-03 — the two new steady-state kinds.
+// scene_modified_externally: safe under auto/ignore/recover (Reload/Revert
+// accepts the intentional disk rewrite). unsaved_scene_changes: destructive
+// under every policy, blocked unless the dedicated opt-in is set.
+// ---------------------------------------------------------------------------
+
+test("scene_modified_externally / ignore → Reload (accept the disk version)", () => {
+  const labels = ["Keep Mine", "Reload"];
+  assert.deepEqual(
+    preferredDialogButtonLabel("scene_modified_externally", labels, "ignore"),
+    { button: "Reload", token: "reload" },
+  );
+});
+
+test("scene_modified_externally / cancel → Cancel (decline to reload)", () => {
+  const labels = ["Reload", "Cancel"];
+  assert.deepEqual(
+    preferredDialogButtonLabel("scene_modified_externally", labels, "cancel"),
+    { button: "Cancel", token: "cancel" },
+  );
+});
+
+test("scene_modified_externally / safe-mode → null (operator should inspect)", () => {
+  assert.equal(
+    preferredDialogButtonLabel(
+      "scene_modified_externally",
+      ["Reload", "Cancel"],
+      "safe-mode",
+    ),
+    null,
+  );
+});
+
+test("unsaved_scene_changes: blocked by default under every policy", () => {
+  // The dedicated opt-in is OFF by default — destructive under every policy.
+  for (const policy of DIALOG_POLICY_VALUES) {
+    assert.equal(
+      preferenceTokensForPolicy("unsaved_scene_changes", policy, false, false),
+      null,
+      `unsaved_scene_changes must be blocked by default under ${policy}`,
+    );
+  }
+});
+
+test("unsaved_scene_changes / ignore + opt-in → Save (preserve work)", () => {
+  const labels = ["Cancel", "Don't Save", "Save"];
+  const r = preferredDialogButtonLabel("unsaved_scene_changes", labels, "ignore", {
+    allowProjectUpgrade: false,
+  });
+  // preferredDialogButtonLabel does not take allowUnsavedSceneDismiss in its
+  // opts; test the underlying preferenceTokensForPolicy directly for the
+  // opt-in path.
+  void r;
+  const tokens = preferenceTokensForPolicy(
+    "unsaved_scene_changes",
+    "ignore",
+    false,
+    true,
+  );
+  assert.deepEqual(tokens, ["save", "saveall", "savechanges", "ok", "yes"]);
+});
+
+test("unsaved_scene_changes: project_upgrade opt-in does NOT unblock it", () => {
+  // The two opt-ins are independent.
+  assert.equal(
+    preferenceTokensForPolicy("unsaved_scene_changes", "ignore", true, false),
+    null,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // preferredGenericButtonLabel (UCP generic fallback)
 // ---------------------------------------------------------------------------
 
@@ -353,26 +436,56 @@ test("preferenceTokensForPolicy: project_upgrade returns null without opt-in for
   }
 });
 
-test("blockedKindsForPolicy: default → [project_upgrade]", () => {
-  assert.deepEqual(blockedKindsForPolicy("ignore"), ["project_upgrade"]);
-  assert.deepEqual(blockedKindsForPolicy("auto"), ["project_upgrade"]);
-  assert.deepEqual(blockedKindsForPolicy("recover"), ["project_upgrade"]);
+test("blockedKindsForPolicy: default → [project_upgrade, unsaved_scene_changes]", () => {
+  // Both destructive-mutation guards are blocked by default: project_upgrade
+  // mutates project metadata, unsaved_scene_changes loses work either way.
+  assert.deepEqual(blockedKindsForPolicy("ignore"), [
+    "project_upgrade",
+    "unsaved_scene_changes",
+  ]);
+  assert.deepEqual(blockedKindsForPolicy("auto"), [
+    "project_upgrade",
+    "unsaved_scene_changes",
+  ]);
+  assert.deepEqual(blockedKindsForPolicy("recover"), [
+    "project_upgrade",
+    "unsaved_scene_changes",
+  ]);
 });
 
-test("blockedKindsForPolicy: with opt-in → []", () => {
-  assert.deepEqual(blockedKindsForPolicy("ignore", true), []);
-  assert.deepEqual(blockedKindsForPolicy("auto", true), []);
+test("blockedKindsForPolicy: project-upgrade opt-in only → [unsaved_scene_changes]", () => {
+  // The two opt-ins are independent: opting into project_upgrade does NOT
+  // unblock unsaved_scene_changes (still destructive).
+  assert.deepEqual(blockedKindsForPolicy("ignore", true), [
+    "unsaved_scene_changes",
+  ]);
+  assert.deepEqual(blockedKindsForPolicy("auto", true), [
+    "unsaved_scene_changes",
+  ]);
+});
+
+test("blockedKindsForPolicy: both opt-ins → []", () => {
+  assert.deepEqual(blockedKindsForPolicy("ignore", true, true), []);
+  assert.deepEqual(blockedKindsForPolicy("auto", true, true), []);
 });
 
 test("blockedKindsForPolicy: manual → [] (manual declines everything, not 'blocked')", () => {
   assert.deepEqual(blockedKindsForPolicy("manual"), []);
   assert.deepEqual(blockedKindsForPolicy("manual", true), []);
+  assert.deepEqual(blockedKindsForPolicy("manual", true, true), []);
 });
 
 test("isProjectUpgradeBlocked: true unless opt-in", () => {
   for (const policy of DIALOG_POLICY_VALUES) {
     assert.equal(isProjectUpgradeBlocked(policy, false), true);
     assert.equal(isProjectUpgradeBlocked(policy, true), false);
+  }
+});
+
+test("isUnsavedSceneBlocked: true unless opt-in (independent of project_upgrade)", () => {
+  for (const policy of DIALOG_POLICY_VALUES) {
+    assert.equal(isUnsavedSceneBlocked(policy, false), true);
+    assert.equal(isUnsavedSceneBlocked(policy, true), false);
   }
 });
 

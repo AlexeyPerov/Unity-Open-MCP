@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -44,12 +45,29 @@ namespace UnityOpenMcpBridge.TestRunner
                 TestRunnerState.MarkPending(run_id, assembly_name, test_namespace, test_class, test_method, include_passes);
             }
 
-            StartRun(filter, run_id, mode, play_mode, include_passes);
+            // specs/feedback.md 2026-07-03 — TestRunnerApi.Execute is the
+            // blocking call that wedged the bridge: EditMode runs execute
+            // synchronously on the main thread (the same thread this tool
+            // dispatches on), so a 33-45s test run held the dispatch queue and
+            // every subsequent tool timed out. Defer Execute to the next editor
+            // tick (delayCall) so this method returns the documented
+            // {status:"started", runId} envelope IMMEDIATELY, before the test
+            // runner starts. Results are polled via the results file the
+            // callbacks write — the agent's next step is unchanged.
+            //
+            // delayCall fires once on the next main-thread update, which is the
+            // earliest point TestRunnerApi will accept the run anyway. The
+            // callbacks (registered below) own the api lifetime and the results
+            // file write, so no further coordination is needed here.
+            StartRunDeferred(filter, run_id, mode, play_mode, include_passes);
 
             return TestRunnerService.BuildStartedJson(run_id, mode);
         }
 
-        private static void StartRun(Filter filter, string runId, string mode, bool playMode, bool includePasses)
+        // Register the TestRunnerApi callbacks and queue Execute on the next
+        // editor tick. Split out so the deferred-call closure captures the same
+        // locals the synchronous path did.
+        private static void StartRunDeferred(Filter filter, string runId, string mode, bool playMode, bool includePasses)
         {
             var results = new List<TestResultInfo>();
             TestRunnerApi api = null;
@@ -64,9 +82,27 @@ namespace UnityOpenMcpBridge.TestRunner
                     TestRunnerService.WriteResultsFile(runId, mode, results, includePasses);
                 });
 
-            api = ScriptableObject.CreateInstance<TestRunnerApi>();
-            api.RegisterCallbacks(callbacks);
-            api.Execute(new ExecutionSettings(filter));
+            EditorApplication.delayCall += () =>
+            {
+                // Re-resolve api inside the deferred call: TestRunnerApi is a
+                // ScriptableObject and must be created on the main thread (which
+                // delayCall guarantees), and the callbacks close over it so the
+                // onFinished callback can destroy it.
+                api = ScriptableObject.CreateInstance<TestRunnerApi>();
+                api.RegisterCallbacks(callbacks);
+                try
+                {
+                    api.Execute(new ExecutionSettings(filter));
+                }
+                catch (Exception e)
+                {
+                    // If Execute itself throws (e.g. filter rejected), still
+                    // surface a results file so the polling agent sees a
+                    // terminal state instead of waiting on a never-written file.
+                    TestRunnerService.WriteErrorFile(runId, mode, "test_run_failed", e.Message);
+                    Object.DestroyImmediate(api);
+                }
+            };
         }
     }
 }

@@ -43,6 +43,7 @@ const DEFAULT_PROBE_OPTS = {
   platform: "darwin" as DismissPlatform,
   policy: "ignore" as const,
   allowProjectUpgrade: false,
+  allowUnsavedSceneDismiss: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -275,6 +276,7 @@ test("tryDismissDialog: unsupported platform → error outcome", async () => {
     platform: "plan9" as unknown as DismissPlatform,
     policy: "ignore",
     allowProjectUpgrade: false,
+    allowUnsavedSceneDismiss: false,
   });
   assert.equal(result.kind, "error");
   if (result.kind !== "error") return;
@@ -290,6 +292,7 @@ test("tryDismissDialog: linux with no xdotool on PATH → error mentioning xdoto
       platform: "linux",
       policy: "ignore",
       allowProjectUpgrade: false,
+      allowUnsavedSceneDismiss: false,
     });
     assert.ok(["error", "not-found"].includes(result.kind));
     if (result.kind === "error") {
@@ -313,6 +316,7 @@ test("readDismissConfig: enabled by default with policy=ignore", () => {
     intervalMs: DEFAULT_DISMISS_INTERVAL_MS,
     policy: "ignore",
     allowProjectUpgrade: false,
+    allowUnsavedSceneDismiss: false,
   });
 });
 
@@ -403,6 +407,7 @@ const LOOP_OPTS = {
   intervalMs: 1,
   policy: "ignore" as const,
   allowProjectUpgrade: false,
+  allowUnsavedSceneDismiss: false,
 };
 
 test("pollAndDismissDialogs: logs each dismissal once with dialog + policy", async () => {

@@ -34,12 +34,35 @@ namespace UnityOpenMcpVerify
             issueCode = parts[3];
 
             if (string.IsNullOrEmpty(ruleId)) return false;
-            if (sevStr != "ERROR" && sevStr != "WARN") return false;
+            // Accept any case of the severity token. scan_paths / validate_edit
+            // emit "Error"/"Warning" (SeverityStr), IssueKey.Build emits
+            // "ERROR"/"WARN", and an agent may hand-transcribe either. Without
+            // case-insensitive matching the documented scan→apply_fix loop fails
+            // with invalid_issue_id across separate calls (specs/feedback.md
+            // 2026-07-03). Also accept the long form "WARNING" for symmetry.
+            if (!TryMatchSeverity(sevStr, out severity)) return false;
             if (string.IsNullOrEmpty(assetPath)) return false;
             if (string.IsNullOrEmpty(issueCode)) return false;
 
-            severity = sevStr == "ERROR" ? VerifySeverity.Error : VerifySeverity.Warning;
             return true;
+        }
+
+        // Case-insensitive severity matcher. Recognizes the short ("WARN") and
+        // long ("WARNING") warning spellings plus "ERROR" so all three producers
+        // (IssueKey.Build, ScanPathsTool.SeverityStr, ValidateEditTool.SeverityStr)
+        // and hand-transcribed keys parse uniformly. Returns false for anything
+        // else so a genuinely malformed severity (e.g. "CRITICAL") still rejects.
+        private static bool TryMatchSeverity(string sevStr, out VerifySeverity severity)
+        {
+            severity = VerifySeverity.Warning;
+            if (string.IsNullOrEmpty(sevStr)) return false;
+            switch (sevStr.ToUpperInvariant())
+            {
+                case "ERROR": severity = VerifySeverity.Error; return true;
+                case "WARN":
+                case "WARNING": severity = VerifySeverity.Warning; return true;
+                default: return false;
+            }
         }
 
         public static void ValidateKey(string key)

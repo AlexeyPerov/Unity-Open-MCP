@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 using UnityOpenMcpBridge;
 
@@ -135,6 +136,55 @@ namespace UnityOpenMcpBridge.Tests
             // A top-level string that never closes — OutputSerializer's quoted-
             // string emission cut off mid-value by an exception.
             Assert.IsFalse(BridgeJson.IsValidJsonObject("\"never closed"));
+        }
+
+        // specs/feedback.md 2026-07-03 — main_thread_blocked envelope. When a
+        // Unity modal wedges the main thread, MainThreadDispatcher raises
+        // MainThreadBlockedException (distinct from TimeoutException), and the
+        // dispatcher builds this envelope so the agent gets a structured signal
+        // + recovery hints instead of a generic timeout. Assert the shape +
+        // that the error code is the documented `main_thread_blocked`.
+        [Test]
+        public static void BuildMainThreadBlockedEnvelope_CarriesStructuredErrorCode()
+        {
+            var json = BridgeJson.BuildMainThreadBlockedEnvelope(
+                "unity_open_mcp_validate_edit", "off", 30000);
+
+            // The whole point: a distinct error code so the agent can branch on
+            // "modal likely open" vs "tool ran long".
+            StringAssert.Contains("\"code\":\"main_thread_blocked\"", json);
+            StringAssert.Contains("\"success\":false", json);
+            // Must include the tool name + timeout for triage.
+            StringAssert.Contains("unity_open_mcp_validate_edit", json);
+            StringAssert.Contains("30000ms", json);
+            // The recovery hints are the actionable payload — assert at least
+            // the scene_save + restart pointers are present.
+            StringAssert.Contains("scene_save", json);
+            StringAssert.Contains("restart", json);
+            // And it must NOT suggest raising timeout_ms (the wrong reflex).
+            StringAssert.DoesNotContain("increase timeout_ms", json);
+            StringAssert.DoesNotContain("Consider increasing", json);
+        }
+
+        [Test]
+        public static void MainThreadBlockedException_CarriesTimeoutAndMessage()
+        {
+            var ex = new MainThreadBlockedException(30000);
+            Assert.AreEqual(30000, ex.TimeoutMs);
+            // Message must mention the modal / main-thread cause so it surfaces
+            // usefully in logs even if the envelope builder is bypassed.
+            StringAssert.Contains("main thread", ex.Message.ToLowerInvariant());
+            StringAssert.Contains("modal", ex.Message.ToLowerInvariant());
+            // And it must NOT be a TimeoutException (the whole reason it exists
+            // is to be distinguishable from TimeoutException in catch blocks).
+            // Use a typeof check rather than `ex is TimeoutException` so the
+            // assertion doesn't trip CS0184 (the compiler statically proves the
+            // `is` is always false for the var-typed local — which is the very
+            // property under test, but the warning is noise).
+            Assert.IsFalse(
+                typeof(TimeoutException).IsAssignableFrom(typeof(MainThreadBlockedException)),
+                "MainThreadBlockedException must NOT be a TimeoutException subclass " +
+                "(the dispatcher's catch branches on the distinction).");
         }
     }
 }

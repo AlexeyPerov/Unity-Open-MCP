@@ -466,5 +466,34 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"name\":\"Test.List\"", result.Output);
             StringAssert.Contains("\"count\":", result.Output);
         }
+
+        // Regression: specs/feedback.md 2026-07-03 — asmdef_list returned
+        // bridge_response_unparsable because `autoReferenced` was emitted as the
+        // C# Boolean.ToString() form ("True"/"False"), which is invalid JSON.
+        // Assert the field serializes as a lowercase JSON boolean so the bug
+        // cannot silently return. (The bridge has no JSON lib in the test
+        // assembly, so we assert the literal token shape directly — this is the
+        // exact regression.)
+        [Test]
+        public void AsmdefList_AutoReferencedSerializesAsLowercaseJsonBoolean()
+        {
+            var path = TmpRoot + "/JsonValidity.asmdef";
+            // auto_referenced:false exercises the nullable-bool serialization path
+            // that regressed (model?.AutoReferenced ?? true boxed to Append(object)).
+            AssemblyDefinitionTools.Create(
+                "{\"asset_path\":\"" + path + "\",\"name\":\"Test.JsonValidity\"," +
+                "\"auto_referenced\":false}");
+
+            var result = AssemblyDefinitionTools.List("{\"folder\":\"" + TmpRoot + "\"}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+
+            // Must be the JSON literal `false`, never the C# "False".
+            Assert.IsTrue(result.Output.Contains("\"autoReferenced\":false"),
+                "autoReferenced must serialize as lowercase JSON boolean 'false'");
+            Assert.IsFalse(result.Output.Contains("\"autoReferenced\":False"),
+                "autoReferenced must NOT serialize as Boolean.ToString() 'False'");
+            Assert.IsFalse(result.Output.Contains("\"autoReferenced\":True"),
+                "autoReferenced must NOT serialize as Boolean.ToString() 'True'");
+        }
     }
 }

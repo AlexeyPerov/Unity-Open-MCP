@@ -6,6 +6,7 @@ This file is the index for external interfaces and protocol contracts exposed by
 
 | Document | Covers |
 |---|---|
+| `dialog-policy.md` | Startup/steady-state Unity modal auto-dismiss, `UNITY_OPEN_MCP_DIALOG_POLICY`, and related env vars. |
 | `api/bridge-http.md` | Unity bridge HTTP endpoints (`/ping`, `/tools/*`, `/resources*`), envelopes, and errors. |
 | `api/mcp-tools.md` | MCP tool catalog, tool families, route policy (live/batch/offline), and fallback behavior. |
 | `api/resources.md` | MCP resource URIs, payload shapes, and resource router behavior. |

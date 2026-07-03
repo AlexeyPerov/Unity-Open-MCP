@@ -188,6 +188,9 @@ export class LiveClient implements Router {
   /** M23 Plan 2 — opt-in for the Project Upgrade Required dialog (irreversible,
    *  off by default). */
   private allowProjectUpgrade: boolean;
+  /** specs/feedback.md 2026-07-03 — opt-in for the "Unsaved changes to scene"
+   *  modal (destructive under every policy, off by default). */
+  private allowUnsavedSceneDismiss: boolean;
   /** M14 — per-session bearer token auto-discovered from the instance lock.
    *  Undefined when no live lock was found (older bridge / env port override);
    *  in that case no Authorization header is sent and the bridge must be in
@@ -247,6 +250,7 @@ export class LiveClient implements Router {
     this.dismissIntervalMs = dismissCfg.intervalMs;
     this.dialogPolicy = dismissCfg.policy;
     this.allowProjectUpgrade = dismissCfg.allowProjectUpgrade;
+    this.allowUnsavedSceneDismiss = dismissCfg.allowUnsavedSceneDismiss;
     this.compatWarned = false;
   }
 
@@ -940,6 +944,7 @@ export class LiveClient implements Router {
         intervalMs: this.dismissIntervalMs,
         policy: this.dialogPolicy,
         allowProjectUpgrade: this.allowProjectUpgrade,
+        allowUnsavedSceneDismiss: this.allowUnsavedSceneDismiss,
         abortSignal: dismissAbort.signal,
       };
       dismissDone = this.runDismissLoop(dismissOpts);

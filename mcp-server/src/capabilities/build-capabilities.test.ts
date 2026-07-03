@@ -557,6 +557,53 @@ test("domain-gated group reports available=null when bridge inventory is omitted
   assert.equal(nav!.domainDefine, "UNITY_OPEN_MCP_EXT_NAVIGATION");
   assert.equal(nav!.unityPackage, "com.unity.ai.navigation");
   assert.ok(nav!.availableReason !== null);
+  // specs/feedback.md 2026-07-03 — top-level bridgeReachable mirrors the
+  // omitted-inventory state so a caller can tell the null availability is a
+  // reachability artifact, not a compile-state verdict.
+  assert.equal(caps.bridgeReachable, false);
+});
+
+// specs/feedback.md 2026-07-03 — bridgeReachable flag distinguishes
+// "group genuinely not compiled in" from "I can't tell because the bridge is
+// down". When the bridge is reachable, bridgeReachable is true; when omitted
+// (offline), it is false and every domain-gated group is available:null.
+test("bridgeReachable is true when the bridge inventory is provided", () => {
+  const caps = buildCapabilities({
+    ...DEPS,
+    availableBridgeTools: new Set<string>(["unity_open_mcp_ping"]),
+  });
+  assert.equal(caps.bridgeReachable, true);
+});
+
+test("available:false reason mentions both the package and the bridge build config", () => {
+  // When the bridge IS reachable but a domain group's tools are absent, the
+  // reason must point at BOTH possible causes (Unity package not installed OR
+  // the bridge binary not built with the extension pack) — otherwise an
+  // operator whose package IS installed loops on a misleading "install the
+  // package" hint when the real fix is rebuilding the bridge.
+  const caps = buildCapabilities({
+    ...DEPS,
+    tools: [
+      ...FIXTURE_TOOLS,
+      {
+        name: "unity_open_mcp_navigation_surface_add",
+        description: "NavMesh surface add (fixture).",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    availableBridgeTools: new Set<string>(["unity_open_mcp_ping"]),
+  });
+  assert.equal(caps.bridgeReachable, true);
+  const nav = caps.toolGroups.find((g) => g.id === "navigation");
+  assert.ok(nav);
+  assert.equal(nav!.available, false);
+  assert.ok(nav!.availableReason);
+  assert.match(nav!.availableReason!, /com\.unity\.ai\.navigation/);
+  assert.match(
+    nav!.availableReason!,
+    /built without|extension pack/i,
+    "reason must mention the bridge build configuration, not only the package",
+  );
 });
 
 test("domain-gated group reports available=true when bridge inventory includes its tools", () => {

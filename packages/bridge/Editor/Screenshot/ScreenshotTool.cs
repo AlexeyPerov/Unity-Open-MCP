@@ -110,10 +110,10 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append("\"view\":").Append(Esc(view)).Append(',');
             if (view == "isolated")
                 sb.Append("\"composite\":\"2x2 (Front/Right/Back/Top)\",")
-                  .Append("\"quadrantSize\":").Append(width).Append('x').Append(height).Append(',')
-                  .Append("\"fullSize\":").Append(width * 2).Append('x').Append(height * 2).Append(',');
+                  .Append("\"quadrantSize\":\"").Append(width).Append('x').Append(height).Append("\",")
+                  .Append("\"fullSize\":\"").Append(width * 2).Append('x').Append(height * 2).Append("\",");
             else
-                sb.Append("\"resolution\":").Append(width).Append('x').Append(height).Append(',');
+                sb.Append("\"resolution\":\"").Append(width).Append('x').Append(height).Append("\",");
             sb.Append("\"filePath\":").Append(Esc(filePath));
             sb.Append('}');
             return sb.ToString();

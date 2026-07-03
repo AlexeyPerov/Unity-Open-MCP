@@ -278,7 +278,7 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append("\"type\":").Append(Esc(window.GetType().Name)).Append(',');
             sb.Append("\"title\":").Append(Esc(window.titleContent.text));
             sb.Append("},");
-            sb.Append("\"resolution\":").Append(width).Append('x').Append(height).Append(',');
+            sb.Append("\"resolution\":\"").Append(width).Append('x').Append(height).Append("\",");
             sb.Append("\"platformLimited\":").Append(platformLimited ? "true" : "false").Append(',');
             sb.Append("\"windowOpenedDuringCapture\":").Append(wasOpenBefore ? "false" : "true").Append(',');
             sb.Append("\"filePath\":").Append(Esc(filePath));

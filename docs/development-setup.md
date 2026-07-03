@@ -72,6 +72,10 @@ package by replacing the `npx` command with a direct node launch:
 }
 ```
 
+Optional startup-dialog env vars (`UNITY_OPEN_MCP_DIALOG_POLICY`, project-upgrade
+and unsaved-scene opt-ins, dismiss timeouts) apply the same way — see
+[Dialog policy](dialog-policy.md).
+
 ## 3) Optional Unity domain dependencies
 
 Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation)
@@ -208,6 +212,7 @@ fork then point their clients at the forked package name
 
 ## Related docs
 
+- [Dialog policy](dialog-policy.md)
 - [Manual setup](manual-setup.md)
 - [Wizard setup](wizard-setup.md)
 - [Extensions](extensions.md)

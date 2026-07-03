@@ -114,6 +114,13 @@ export interface DismissProbeOptions {
   platform: DismissPlatform;
   policy: DialogPolicy;
   allowProjectUpgrade: boolean;
+  /**
+   * Opt-in for the destructive `unsaved_scene_changes` modal
+   * (UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1). Off by default — "Don't
+   * Save" loses work and "Save" persists unwanted state under every policy, so
+   * the modal is blocked (audit line, no click) unless this is set.
+   */
+  allowUnsavedSceneDismiss: boolean;
 }
 
 /**
@@ -185,6 +192,7 @@ function buildTokenTable(opts: DismissProbeOptions): {
       kind,
       opts.policy,
       opts.allowProjectUpgrade,
+      opts.allowUnsavedSceneDismiss,
     );
     kinds[kind] = {
       fragments: [...DIALOG_TITLE_FRAGMENTS[kind]],
@@ -193,7 +201,13 @@ function buildTokenTable(opts: DismissProbeOptions): {
   }
   return {
     kinds,
-    blocked: [...blockedKindsForPolicy(opts.policy, opts.allowProjectUpgrade)],
+    blocked: [
+      ...blockedKindsForPolicy(
+        opts.policy,
+        opts.allowProjectUpgrade,
+        opts.allowUnsavedSceneDismiss,
+      ),
+    ],
     genericTokens: [...genericFallbackTokens(opts.policy)],
   };
 }
@@ -408,12 +422,19 @@ export function macosDismissAppleScript(opts: DismissProbeOptions): string {
   const launchFrags = DIALOG_TITLE_FRAGMENTS.launch_errors;
   const nonMatchFrags = DIALOG_TITLE_FRAGMENTS.non_matching_editor;
   const graphicsFrags = DIALOG_TITLE_FRAGMENTS.auto_graphics_api;
+  const sceneModifiedFrags = DIALOG_TITLE_FRAGMENTS.scene_modified_externally;
   // Whether the active policy dismisses each safe kind at all. Under manual,
   // or safe-mode on non_matching/auto_graphics (no safe button), the loop
   // should NOT click — return not-found so polling continues.
   const dismissesLaunch = preferenceTokensForPolicy("launch_errors", opts.policy, opts.allowProjectUpgrade) !== null;
   const dismissesNonMatch = preferenceTokensForPolicy("non_matching_editor", opts.policy, opts.allowProjectUpgrade) !== null;
   const dismissesGraphics = preferenceTokensForPolicy("auto_graphics_api", opts.policy, opts.allowProjectUpgrade) !== null;
+  // scene_modified_externally: safe to Return-click (focused button is Reload)
+  // under auto/ignore/recover. unsaved_scene_changes is intentionally NOT
+  // Return-clicked here — it's destructive (data loss either way) and is
+  // blocked by default; even with the opt-in the per-button Windows path is
+  // the safer surface for it.
+  const dismissesSceneModified = preferenceTokensForPolicy("scene_modified_externally", opts.policy, opts.allowProjectUpgrade) !== null;
   return `
 on run
   try
@@ -433,9 +454,18 @@ on run
           if (wt contains "Upgrade") and (wt contains "Project") then
             return "blocked:" & "project_upgrade"
           end if
+          -- specs/feedback.md 2026-07-03 — Unsaved scene changes: destructive
+          -- under every policy (data loss either way). When the opt-in is OFF
+          -- (the default), report blocked so the stall surfaces with a clear
+          -- diagnosis instead of timing out. When ON, fall through to the
+          -- generic path below (the focused button is usually Save).
+          if ${(opts.allowUnsavedSceneDismiss ? "false" : "true")} then
+            ${DIALOG_TITLE_FRAGMENTS.unsaved_scene_changes.map((f) => `if wt contains "${f}" then return "blocked:" & "unsaved_scene_changes"`).join("\n            ")}
+          end if
           ${launchFrags.map((f) => fragmentCheck(f, "launch_errors", dismissesLaunch)).join("\n          ")}
           ${nonMatchFrags.map((f) => fragmentCheck(f, "non_matching_editor", dismissesNonMatch)).join("\n          ")}
           ${graphicsFrags.map((f) => fragmentCheck(f, "auto_graphics_api", dismissesGraphics)).join("\n          ")}
+          ${sceneModifiedFrags.map((f) => fragmentCheck(f, "scene_modified_externally", dismissesSceneModified)).join("\n          ")}
         end repeat
       end tell
     end tell
@@ -481,6 +511,7 @@ export const MACOS_DISMISS_APPLESCRIPT: string = macosDismissAppleScript({
   platform: "darwin",
   policy: "ignore",
   allowProjectUpgrade: false,
+  allowUnsavedSceneDismiss: false,
 });
 
 async function tryDismissMacOS(
@@ -585,14 +616,20 @@ async function tryDismissLinuxX11(
   //     (default) button. Under default/auto/ignore/recover the default
   //     button is the safe choice for launch_errors / non_matching_editor /
   //     auto_graphics_api. Project upgrade is never clicked here (blocked).
-  const blocked = new Set<string>(blockedKindsForPolicy(opts.policy, opts.allowProjectUpgrade));
+  const blocked = new Set<string>(
+    blockedKindsForPolicy(opts.policy, opts.allowProjectUpgrade, opts.allowUnsavedSceneDismiss),
+  );
   const kinds = Object.keys(DIALOG_TITLE_FRAGMENTS) as DialogKind[];
-  // Prefer launch_errors first (the common stall), then the others.
+  // Prefer launch_errors first (the common stall), then the safe kinds, then
+  // the destructive kinds last so a blocked destructive modal doesn't shadow a
+  // dismissable safe one that's also up.
   const order: DialogKind[] = [
     "launch_errors",
     "non_matching_editor",
     "auto_graphics_api",
+    "scene_modified_externally",
     "project_upgrade",
+    "unsaved_scene_changes",
   ];
   void kinds;
   return new Promise<DismissOutcome>((resolve) => {
@@ -603,7 +640,12 @@ async function tryDismissLinuxX11(
         return;
       }
       const kind = order[idx++];
-      const tokens = preferenceTokensForPolicy(kind, opts.policy, opts.allowProjectUpgrade);
+      const tokens = preferenceTokensForPolicy(
+        kind,
+        opts.policy,
+        opts.allowProjectUpgrade,
+        opts.allowUnsavedSceneDismiss,
+      );
       const fragments = DIALOG_TITLE_FRAGMENTS[kind];
       // Probe this kind's fragments one at a time.
       let fIdx = 0;
@@ -778,7 +820,9 @@ function isDialogKind(s: string): s is DialogKind {
     s === "launch_errors" ||
     s === "non_matching_editor" ||
     s === "project_upgrade" ||
-    s === "auto_graphics_api"
+    s === "auto_graphics_api" ||
+    s === "scene_modified_externally" ||
+    s === "unsaved_scene_changes"
   );
 }
 
@@ -820,6 +864,9 @@ function isPermanentDismissError(message: string): boolean {
  *     off entirely".
  *   - `UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1` opts in to auto-confirming the
  *     Project Upgrade Required dialog (irreversible — off by default).
+ *   - `UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1` opts in to auto-dismissing
+ *     the "Unsaved changes to scene" modal (destructive under every policy —
+ *     off by default). See isUnsavedSceneBlocked.
  *   - `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS` overrides the overall timeout.
  *   - `UNITY_OPEN_MCP_DISMISS_INTERVAL_MS` overrides the poll interval.
  *
@@ -832,6 +879,7 @@ export interface DismissConfig {
   intervalMs: number;
   policy: DialogPolicy;
   allowProjectUpgrade: boolean;
+  allowUnsavedSceneDismiss: boolean;
 }
 
 export function readDismissConfig(
@@ -851,6 +899,8 @@ export function readDismissConfig(
     ),
     policy,
     allowProjectUpgrade: env.UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE === "1",
+    allowUnsavedSceneDismiss:
+      env.UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS === "1",
   };
 }
 
@@ -877,6 +927,7 @@ export interface PollAndDismissOptions {
   intervalMs: number;
   policy: DialogPolicy;
   allowProjectUpgrade: boolean;
+  allowUnsavedSceneDismiss: boolean;
   /**
    * Override the platform — exposed for tests so the polling logic can be
    * exercised across all three OS branches without hopping process.platform.
@@ -942,6 +993,7 @@ export async function pollAndDismissDialogs(
         platform,
         policy: opts.policy,
         allowProjectUpgrade: opts.allowProjectUpgrade,
+        allowUnsavedSceneDismiss: opts.allowUnsavedSceneDismiss,
       });
       // Re-check exit conditions BEFORE applying the outcome: if abort fired
       // (or the deadline lapsed) while `probe` was in flight, the in-flight
@@ -955,17 +1007,21 @@ export async function pollAndDismissDialogs(
         // Keep polling — the dialog may re-appear after the resolver fixes
         // one error and surfaces the next.
       } else if (outcome.kind === "blocked") {
-        // Project-upgrade (or future blocked kind): log once per kind per
-        // run, then keep polling. A human must dismiss it; exiting would
-        // hide the stall behind a clean-looking readiness abort.
+        // Project-upgrade / unsaved-scene-changes (or future blocked kind):
+        // log once per kind per run, then keep polling. A human must dismiss
+        // it; exiting would hide the stall behind a clean-looking readiness
+        // abort.
         if (!seenBlocked.has(outcome.dialog)) {
           seenBlocked.add(outcome.dialog);
+          const optIn =
+            outcome.dialog === "project_upgrade"
+              ? "Set UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1 to opt in to auto-confirm (irreversible)."
+              : outcome.dialog === "unsaved_scene_changes"
+                ? "Set UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1 to opt in to auto-dismiss (destructive — data loss either way)."
+                : "Dismiss it manually or change UNITY_OPEN_MCP_DIALOG_POLICY.";
           log(
             `[unity-open-mcp] dialog auto-dismiss blocked on ${outcome.dialog} ` +
-              `(policy=${opts.policy}): ${outcome.message}. ` +
-              (outcome.dialog === "project_upgrade"
-                ? "Set UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1 to opt in to auto-confirm (irreversible)."
-                : "Dismiss it manually or change UNITY_OPEN_MCP_DIALOG_POLICY."),
+              `(policy=${opts.policy}): ${outcome.message}. ${optIn}`,
           );
         }
       } else if (outcome.kind === "error") {

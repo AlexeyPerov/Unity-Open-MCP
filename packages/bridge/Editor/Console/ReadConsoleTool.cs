@@ -293,8 +293,20 @@ namespace UnityOpenMcpBridge.Console
         private static Type _logEntryType;
         private static MethodInfo _getEntriesMethod;
         private static MethodInfo _clearMethod;
+        // The total-row-count getter. Renamed across Unity versions: legacy code
+        // looked for `GetEntryCount()` (a 2019-2021 internal name), but modern
+        // Unity (2022 LTS, 6000.x) exposes it as `GetCount()`. Resolve both so
+        // the reader degrades gracefully regardless of editor version.
         private static MethodInfo _getEntryCountMethod;
         private static MethodInfo _getEntryInternalMethod;
+        // Unity's LogEntries contract requires GetEntryInternal calls to be
+        // bracketed by StartGettingEntries()/EndGettingEntries() (see
+        // LogEntries.bindings.cs: "All functions marked internal may not be
+        // called unless you call StartGettingEntries and EndGettingEntries").
+        // These are no-ops on versions that don't enforce it, but calling them
+        // when present avoids corrupted reads on 6000.x.
+        private static MethodInfo _startGettingEntriesMethod;
+        private static MethodInfo _endGettingEntriesMethod;
         private static FieldInfo _messageField;
         private static FieldInfo _stackField;
         private static FieldInfo _modeField;
@@ -312,24 +324,30 @@ namespace UnityOpenMcpBridge.Console
 
             if (_logEntriesType != null)
             {
-                // GetEntries(List<LogEntry>) — returns count
-                _getEntriesMethod = _logEntriesType.GetMethod("GetEntries",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                const BindingFlags StaticFlags =
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+                // GetEntries(List<LogEntry>) — legacy bulk-drain API. Removed in
+                // Unity 6 (the bindings no longer declare it); read_console falls
+                // back to GetCount() + GetEntryInternal iteration when this is null.
+                _getEntriesMethod = _logEntriesType.GetMethod("GetEntries", StaticFlags);
 
                 // Clear() — clears console
-                _clearMethod = _logEntriesType.GetMethod("Clear",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                _clearMethod = _logEntriesType.GetMethod("Clear", StaticFlags);
 
-                // M22 T22.1.3 — GetEntryCount() / GetEntryInternal(int, LogEntry):
-                // the delta-capture surface used to populate the per-call `logs`
-                // envelope field. Same internal API the Console window relies on;
-                // resolved by reflection so the reader degrades gracefully when a
-                // Unity version changes the signature.
-                _getEntryCountMethod = _logEntriesType.GetMethod("GetEntryCount",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                // Total row count. Modern Unity (6000.x) names this `GetCount()`;
+                // older internals exposed it as `GetEntryCount()`. Resolve either.
+                _getEntryCountMethod =
+                    _logEntriesType.GetMethod("GetCount", StaticFlags)
+                    ?? _logEntriesType.GetMethod("GetEntryCount", StaticFlags);
 
-                _getEntryInternalMethod = _logEntriesType.GetMethod("GetEntryInternal",
-                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                _getEntryInternalMethod = _logEntriesType.GetMethod("GetEntryInternal", StaticFlags);
+
+                // Bracketing pair required by the LogEntries contract on modern
+                // Unity (see comment above). Absent on older versions — the
+                // iteration path simply skips the bracket when null.
+                _startGettingEntriesMethod = _logEntriesType.GetMethod("StartGettingEntries", StaticFlags);
+                _endGettingEntriesMethod = _logEntriesType.GetMethod("EndGettingEntries", StaticFlags);
             }
 
             if (_logEntryType != null)
@@ -348,14 +366,20 @@ namespace UnityOpenMcpBridge.Console
             get
             {
                 Init();
-                return _logEntriesType != null && _getEntriesMethod != null && _logEntryType != null;
+                // Either path is enough: the legacy GetEntries(List<LogEntry>)
+                // bulk drain, OR the per-entry GetCount()+GetEntryInternal walk
+                // (the only surface Unity 6 exposes). Requiring GetEntries left
+                // read_console throwing "internal API not available" on 6000.x.
+                return _logEntriesType != null && _logEntryType != null
+                    && (_getEntriesMethod != null
+                        || (_getEntryCountMethod != null && _getEntryInternalMethod != null));
             }
         }
 
         // M22 T22.1.3 — delta-capture availability. StartCapture/StopCapture
-        // need GetEntryCount + GetEntryInternal; GetEntries (the full-drain path
-        // read_console uses) is a separate, older surface. Kept distinct so a
-        // Unity version that drops one of these still leaves read_console working.
+        // need the per-entry count + GetEntryInternal pair. Kept distinct from
+        // IsAvailable (the full-drain path read_console uses) so a Unity version
+        // that exposes only one surface still leaves the other working.
         public static bool IsCaptureAvailable
         {
             get
@@ -387,10 +411,33 @@ namespace UnityOpenMcpBridge.Console
         {
             Init();
 
-            if (_getEntriesMethod == null || _logEntryType == null)
+            if (_logEntryType == null)
                 throw new InvalidOperationException(
-                    "UnityEditor.LogEntries internal API not available in this Unity version.");
+                    "UnityEditor.LogEntry internal type not available in this Unity version.");
 
+            // Prefer the legacy bulk-drain API when present (older Unity). It
+            // allocates one managed LogEntry per row in C++ and hands back the
+            // list — cheaper than the per-row reflection walk below.
+            if (_getEntriesMethod != null)
+                return DrainViaGetEntries();
+
+            // Unity 6 fallback: GetEntries(List<LogEntry>) was removed from the
+            // bindings. Walk GetCount() + GetEntryInternal(int, LogEntry) inside
+            // the StartGettingEntries/EndGettingEntries bracket the LogEntries
+            // contract requires. Without this fallback read_console threw
+            // "internal API not available" on 6000.x (specs/feedback.md 2026-07-03).
+            if (_getEntryCountMethod != null && _getEntryInternalMethod != null)
+                return ReadAllViaGetEntryInternal(0);
+
+            throw new InvalidOperationException(
+                "UnityEditor.LogEntries internal API not available in this Unity version. " +
+                "Neither GetEntries(List<LogEntry>) nor GetCount()+GetEntryInternal(int,LogEntry) resolved.");
+        }
+
+        // Legacy path: GetEntries(List<LogEntry>) populates a managed list in
+        // one C++ call. Used on Unity versions that still expose it.
+        private static List<LogEntryInfo> DrainViaGetEntries()
+        {
             var listType = typeof(List<>).MakeGenericType(_logEntryType);
             var entriesList = Activator.CreateInstance(listType);
 
@@ -413,6 +460,68 @@ namespace UnityOpenMcpBridge.Console
                 });
             }
 
+            return result;
+        }
+
+        // Per-row walk used by both the Unity-6 read_console fallback (from 0)
+        // and the delta-capture StopCapture path (from startIndex). Brackets the
+        // iteration with StartGettingEntries/EndGettingEntries when present —
+        // the LogEntries contract requires it on modern Unity, and it's a no-op
+        // on versions where those methods don't exist.
+        private static List<LogEntryInfo> ReadAllViaGetEntryInternal(int startIndex)
+        {
+            int endIndex;
+            try { endIndex = (int)_getEntryCountMethod.Invoke(null, null); }
+            catch { return new List<LogEntryInfo>(0); }
+            if (endIndex <= startIndex) return new List<LogEntryInfo>(0);
+
+            var result = new List<LogEntryInfo>(endIndex - startIndex);
+            // GetEntryInternal(int index, LogEntry entry) fills a single reused
+            // LogEntry instance by reference. Allocate once and reuse.
+            object entryInstance;
+            try { entryInstance = Activator.CreateInstance(_logEntryType); }
+            catch { return result; }
+
+            // Bracket the iteration. StartGettingEntries returns the total line
+            // count (ignored here — we use GetCount for the row count); we only
+            // need its side effect of making GetEntryInternal safe to call.
+            bool started = false;
+            if (_startGettingEntriesMethod != null)
+            {
+                try { _startGettingEntriesMethod.Invoke(null, null); started = true; }
+                catch { /* fall through to unbracketed read */ }
+            }
+
+            try
+            {
+                for (int i = startIndex; i < endIndex; i++)
+                {
+                    try
+                    {
+                        _getEntryInternalMethod.Invoke(null, new[] { (object)i, entryInstance });
+                    }
+                    catch
+                    {
+                        // Skip entries that fail to read rather than aborting.
+                        continue;
+                    }
+
+                    result.Add(new LogEntryInfo
+                    {
+                        Mode = _modeField != null ? Convert.ToInt32(_modeField.GetValue(entryInstance)) : 0,
+                        Message = _messageField != null ? (string)_messageField.GetValue(entryInstance) : "",
+                        StackRaw = _stackField != null ? (string)_stackField.GetValue(entryInstance) : "",
+                    });
+                }
+            }
+            finally
+            {
+                if (started && _endGettingEntriesMethod != null)
+                {
+                    try { _endGettingEntriesMethod.Invoke(null, null); }
+                    catch { /* best-effort release */ }
+                }
+            }
             return result;
         }
 
@@ -442,44 +551,12 @@ namespace UnityOpenMcpBridge.Console
 
         public static List<LogEntryInfo> StopCapture(int startIndex)
         {
-            var empty = new List<LogEntryInfo>(0);
-            if (startIndex < 0) return empty;
+            if (startIndex < 0) return new List<LogEntryInfo>(0);
             Init();
             if (_getEntryCountMethod == null || _getEntryInternalMethod == null || _logEntryType == null)
-                return empty;
+                return new List<LogEntryInfo>(0);
 
-            int endIndex;
-            try { endIndex = (int)_getEntryCountMethod.Invoke(null, null); }
-            catch { return empty; }
-            if (endIndex <= startIndex) return empty;
-
-            var result = new List<LogEntryInfo>(endIndex - startIndex);
-            // GetEntryInternal(int index, LogEntry entry) fills a single reused
-            // LogEntry instance by reference. Allocate once and reuse.
-            object entryInstance;
-            try { entryInstance = Activator.CreateInstance(_logEntryType); }
-            catch { return empty; }
-
-            for (int i = startIndex; i < endIndex; i++)
-            {
-                try
-                {
-                    _getEntryInternalMethod.Invoke(null, new[] { (object)i, entryInstance });
-                }
-                catch
-                {
-                    // Skip entries that fail to read rather than aborting capture.
-                    continue;
-                }
-
-                result.Add(new LogEntryInfo
-                {
-                    Mode = _modeField != null ? Convert.ToInt32(_modeField.GetValue(entryInstance)) : 0,
-                    Message = _messageField != null ? (string)_messageField.GetValue(entryInstance) : "",
-                    StackRaw = _stackField != null ? (string)_stackField.GetValue(entryInstance) : "",
-                });
-            }
-            return result;
+            return ReadAllViaGetEntryInternal(startIndex);
         }
     }
 }

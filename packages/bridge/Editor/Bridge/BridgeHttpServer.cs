@@ -787,7 +787,16 @@ namespace UnityOpenMcpBridge
             {
                 sw.Stop();
                 var inner = ae.InnerException;
-                if (inner is TimeoutException)
+                if (inner is MainThreadBlockedException)
+                {
+                    // specs/feedback.md 2026-07-03 — main thread never drained
+                    // the dispatch (a Unity modal is blocking it). Surface a
+                    // structured main_thread_blocked error instead of the
+                    // generic timeout so the agent can react.
+                    BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "main_thread_blocked", inner.Message, sw.ElapsedMilliseconds);
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildMainThreadBlockedEnvelope(toolName, effectiveGateMode, timeoutMs));
+                }
+                else if (inner is TimeoutException)
                 {
                     BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "timeout", inner.Message, sw.ElapsedMilliseconds);
                     BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs));
@@ -1109,7 +1118,12 @@ namespace UnityOpenMcpBridge
             {
                 sw.Stop();
                 var inner = ae.InnerException;
-                if (inner is TimeoutException)
+                if (inner is MainThreadBlockedException)
+                {
+                    BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "main_thread_blocked", inner.Message, sw.ElapsedMilliseconds);
+                    BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildMainThreadBlockedEnvelope("unity_open_mcp_apply_fix", gateMode, timeoutMs));
+                }
+                else if (inner is TimeoutException)
                 {
                     BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "timeout", inner.Message, sw.ElapsedMilliseconds);
                     BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildTimeoutEnvelope("unity_open_mcp_apply_fix", gateMode, timeoutMs));
@@ -1160,7 +1174,13 @@ namespace UnityOpenMcpBridge
             catch (AggregateException ae)
             {
                 var inner = ae.InnerException;
-                if (inner is TimeoutException)
+                if (inner is MainThreadBlockedException)
+                    // Direct-response path: build a flat main_thread_blocked
+                    // error pointing at the same recovery hints the gate path
+                    // surfaces (the diagnostic is the value here, not the gate
+                    // envelope shape).
+                    BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError($"{{\"error\":{{\"code\":\"main_thread_blocked\",\"message\":\"Tool '{BridgeJson.EscapeStringContent(toolName)}' could not run — the Unity main thread is blocked by a modal dialog (unsaved changes, scene modified externally, safe mode). Do NOT raise timeout_ms. Check editor_status / bridge_status, call scene_save before retrying, or restart the editor.\"}}}}", capturedLogs));
+                else if (inner is TimeoutException)
                     BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError($"{{\"error\":{{\"code\":\"timeout\",\"message\":\"Tool '{BridgeJson.EscapeStringContent(toolName)}' timed out after {timeoutMs}ms\"}}}}", capturedLogs));
                 else
                     BridgeHttpResponse.SendJson(context, 200, SpliceLogsIntoFlatError($"{{\"error\":{{\"code\":\"execution_error\",\"message\":\"{BridgeJson.EscapeStringContent(inner?.Message ?? ae.Message)}\"}}}}", capturedLogs));

@@ -710,6 +710,17 @@ export interface CapabilitiesResult {
    * recovery narrative.
    */
   lifecycleBlock: LifecycleBlock;
+  /**
+   * specs/feedback.md 2026-07-03 — whether the live bridge was reachable when
+   * this capabilities response was assembled. When false, every domain-gated
+   * tool group reports `available: null` (compiled-state unknown) regardless of
+   * whether the Unity package is installed; callers should treat `null`
+   * availability as "I can't tell because the bridge is down" rather than
+   * "genuinely unavailable". Lets an agent short-circuit: bridgeReachable=false
+   * means the per-group `available:null` is a reachability artifact, not a
+   * compile-state verdict.
+   */
+  bridgeReachable: boolean;
 }
 
 /**
@@ -856,6 +867,13 @@ export function buildCapabilities(
     // reason: an agent asking for rules/fixes still benefits from the recovery
     // narrative. Constant, so no per-call computation.
     lifecycleBlock: buildLifecycle(),
+    // specs/feedback.md 2026-07-03 — surface bridge reachability at the top
+    // level so a caller can distinguish "group genuinely not compiled in"
+    // (available:false + reason) from "I can't tell because the bridge is
+    // down" (available:null when bridgeReachable:false). Without this flag an
+    // agent reading all-null availability can't tell reachability from a real
+    // compile-state gap.
+    bridgeReachable: deps.availableBridgeTools !== undefined,
   };
 }
 
@@ -953,11 +971,20 @@ function buildOneGroup(
     toolCount: tools.length,
     tools,
     available: anyToolCompiledIn,
+    // specs/feedback.md 2026-07-03 — when the bridge is reachable but the
+    // group's tools are absent, EITHER the Unity package is not installed OR
+    // the installed bridge binary was not built with the domain extension
+    // pack. The reason must mention both so an operator chasing
+    // "navigation shows available:false even though the package is in
+    // manifest.json" lands on the bridge-build fix, not a false "install the
+    // package" loop.
     availableReason: anyToolCompiledIn
       ? null
-      : `Unity package '${group.unityPackage}' not installed — the bridge ` +
-        `did not compile the ${group.domainDefine} domain. Install the ` +
-        `package to make the group's tools available.`,
+      : `Group tools are not compiled into the running bridge. Either the ` +
+        `Unity package '${group.unityPackage}' is not installed, OR the ` +
+        `installed bridge binary was built without the ${group.domainDefine} ` +
+        `domain extension pack. Install the package, or rebuild/install the ` +
+        `bridge with the extension pack included.`,
     unityPackage: group.unityPackage ?? null,
     domainDefine: group.domainDefine,
     autoActivate,

@@ -106,6 +106,10 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 - Wait for compile and bridge readiness
 - Finish when health checks pass
 
+While waiting, the MCP server auto-dismisses common Unity startup modals (Safe
+Mode, version mismatch, and similar) per `UNITY_OPEN_MCP_DIALOG_POLICY`. If
+Step 6 stalls on a modal, see [Dialog policy](dialog-policy.md).
+
 ![plot](../screenshots/hub-wizard-6.png)
 
 ## Clear AI Setup
@@ -129,13 +133,15 @@ A `.bak` backup is created next to each changed file. Per-target failures are re
   MCP clients only read their config at startup.
 - **Bridge unavailable in Step 6:** verify the project path is right, Unity
   actually launched, and finished compiling. The health check runs while Unity is
-  running.
+  running. If a startup modal blocks progress (Safe Mode, project upgrade),
+  see [Dialog policy](dialog-policy.md).
 - **Re-detect does nothing:** it refreshes the on-disk snapshot only — bridge
   reachability is checked in Step 6 while Unity is running.
 - **npx first run looks slow:** expected — the server downloads on first launch.
 
 ## Related docs
 
+- [Dialog policy](dialog-policy.md)
 - [Manual setup](manual-setup.md)
 - [Unity Hub Pro](unity-hub-pro.md)
 - [Bridge HTTP API](api/bridge-http.md)

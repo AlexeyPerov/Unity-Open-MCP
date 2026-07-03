@@ -92,7 +92,11 @@ namespace UnityOpenMcpBridge.TypedTools
                 sb.Append(",\"includePlatformCount\":").Append(model?.IncludePlatforms?.Count ?? 0);
                 sb.Append(",\"excludePlatformCount\":").Append(model?.ExcludePlatforms?.Count ?? 0);
                 sb.Append(",\"defineConstraintCount\":").Append(model?.DefineConstraints?.Count ?? 0);
-                sb.Append(",\"autoReferenced\":").Append(model?.AutoReferenced ?? true);
+                // bool? boxes to object under StringBuilder.Append(object), which
+                // would emit "True"/"False" (Boolean.ToString) — invalid JSON. Force
+                // a real bool and append the lowercase literal explicitly.
+                bool autoRef = model?.AutoReferenced ?? true;
+                sb.Append(",\"autoReferenced\":").Append(autoRef ? "true" : "false");
                 if (parseError != null)
                 {
                     sb.Append(",\"parseError\":\"").Append(OutputSerializer.EscapeJsonString(parseError)).Append('"');

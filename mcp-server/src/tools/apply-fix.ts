@@ -23,7 +23,10 @@ export const applyFix: Tool = {
       },
       issue_id: {
         type: "string",
-        description: "Issue key from validate_edit or scan_paths (format: ruleId|severity|assetPath|issueCode)",
+        description:
+          "Issue key from validate_edit or scan_paths (format: ruleId|severity|assetPath|issueCode). " +
+          "Severity is case-insensitive and accepts any of error/warn/warning — copy the key verbatim " +
+          "from a scan_paths issue's ruleId|severity|assetPath|issueCode fields.",
       },
       target_guid: {
         type: "string",

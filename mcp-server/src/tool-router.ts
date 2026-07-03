@@ -1127,10 +1127,17 @@ export class ToolRouter implements Router {
         groupTools.some((t) => inventory.tools.has(t));
       out.set(g.id, {
         available: anyCompiledIn,
+        // specs/feedback.md 2026-07-03 — when the bridge is reachable but the
+        // group's tools are absent, EITHER the Unity package is not installed
+        // OR the installed bridge binary was not built with the domain
+        // extension pack. Mention both so an operator whose package IS
+        // installed lands on the bridge-build fix, not a false install loop.
         reason: anyCompiledIn
           ? null
-          : `Unity package '${g.unityPackage}' not installed — the bridge ` +
-            `did not compile the ${g.domainDefine} domain.`,
+          : `Group tools are not compiled into the running bridge. Either the ` +
+            `Unity package '${g.unityPackage}' is not installed, OR the ` +
+            `installed bridge binary was built without the ${g.domainDefine} ` +
+            `domain extension pack.`,
       });
     }
     return out;

@@ -135,6 +135,50 @@ namespace UnityOpenMcpVerify.Tests
                 out _, out _, out _, out _));
         }
 
+        // Regression: specs/feedback.md 2026-07-03 — scan_paths / validate_edit
+        // emit severity as "Error"/"Warning" (SeverityStr), but the old parser
+        // only accepted "ERROR"/"WARN". An agent that copied the issue_id from a
+        // scan_paths response into apply_fix got invalid_issue_id. TryParse must
+        // accept any case of ERROR / WARN / WARNING so the documented scan→fix
+        // loop works across separate calls.
+        [Test]
+        public void TryParse_AcceptsScanPathsSeverityCasing()
+        {
+            // scan_paths / validate_edit spelling.
+            Assert.IsTrue(IssueKey.TryParse("missing_references|Error|Assets/A.prefab|missing_script",
+                out var ruleId, out var sev, out var path, out var code));
+            Assert.AreEqual("missing_references", ruleId);
+            Assert.AreEqual(VerifySeverity.Error, sev);
+            Assert.AreEqual("Assets/A.prefab", path);
+            Assert.AreEqual("missing_script", code);
+
+            Assert.IsTrue(IssueKey.TryParse("scene_prefab_health|Warning|Assets/B.unity|deep_nesting",
+                out _, out var warnSev, out _, out _));
+            Assert.AreEqual(VerifySeverity.Warning, warnSev);
+        }
+
+        [Test]
+        public void TryParse_AcceptsLongFormWarningSpelling()
+        {
+            // "WARNING" (the long form) should also parse as a warning — symmetry
+            // with "WARN", in case any producer spells it out.
+            Assert.IsTrue(IssueKey.TryParse("rule|WARNING|Assets/A.prefab|code",
+                out _, out var sev, out _, out _));
+            Assert.AreEqual(VerifySeverity.Warning, sev);
+        }
+
+        [Test]
+        public void TryParse_AcceptsLowercaseSeverity()
+        {
+            // Any case is accepted; an agent that lowercased the token still parses.
+            Assert.IsTrue(IssueKey.TryParse("rule|error|Assets/A.prefab|code",
+                out _, out var sev, out _, out _));
+            Assert.AreEqual(VerifySeverity.Error, sev);
+            Assert.IsTrue(IssueKey.TryParse("rule|warn|Assets/A.prefab|code",
+                out _, out var warnSev, out _, out _));
+            Assert.AreEqual(VerifySeverity.Warning, warnSev);
+        }
+
         [Test]
         public void TryParse_EmptyRuleId_ReturnsFalse()
         {
