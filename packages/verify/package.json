@@ -1,7 +1,7 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-verify",
   "displayName": "Unity Open MCP Verify",
-  "version": "0.1.2",
+  "version": "0.3.0",
   "unity": "2022.3",
   "description": "Scoped health checks for Unity Hub Pro gate-first validation.",
   "author": {
