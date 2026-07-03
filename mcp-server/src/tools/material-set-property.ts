@@ -37,7 +37,11 @@ export const materialSetProperty: Tool = {
       },
       value: {
         description:
-          "The new value. Shape depends on `type` — see `type` for each shape. Pass null with type=texture to clear.",
+          "The new value. Shape depends on `type` — see `type` for each shape. " +
+          "For color/vector: [r,g,b] or [r,g,b,a] arrays; the {" +
+          "\"r\":..,\"g\":..,\"b\":..,\"a\":..} / {\"x\":..,\"y\":..,\"z\":..,\"w\":..} " +
+          "object form is also accepted (useful for MCP hosts that serialize arrays as strings). " +
+          "float/int = number; texture = {\"path\": \"Assets/...\"} or null. Pass null with type=texture to clear.",
       },
       paths_hint: {
         type: "array",

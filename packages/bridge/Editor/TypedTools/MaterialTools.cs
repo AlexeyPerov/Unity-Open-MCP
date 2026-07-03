@@ -387,22 +387,75 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        // Parse a JSON array of numbers [1,2,3,4] into floats.
+        // Parse a numeric sequence into floats. Accepts the canonical JSON
+        // array form `[1,2,3,4]` AND two host-serialization fallbacks so the
+        // tool degrades gracefully across MCP hosts that mangle array args:
+        //   • Stringified array — `"[1,0,0,1]"` (some hosts box arrays as
+        //     JSON strings). Surrounding quotes are stripped first.
+        //   • Object form — `{"r":1,"g":0,"b":0,"a":1}` or
+        //     `{"x":1,"y":0,"z":0,"w":1}` (channel names for color/vector).
+        //     Channels are read in r/g/b/a or x/y/z/w order; only channels
+        //     actually present are emitted, so callers that require a minimum
+        //     length (e.g. color needs >=3) still validate.
+        // Returns null when the input matches none of these shapes.
         public static float[] ParseFloatArray(string raw)
         {
             if (string.IsNullOrEmpty(raw)) return null;
             raw = raw.Trim();
-            if (!raw.StartsWith("[") || !raw.EndsWith("]")) return null;
-            var inner = raw.Substring(1, raw.Length - 2);
-            if (string.IsNullOrWhiteSpace(inner)) return new float[0];
-            var parts = inner.Split(',');
-            var result = new float[parts.Length];
-            for (int i = 0; i < parts.Length; i++)
+
+            // Stringified-array fallback: a JSON string wrapping an array.
+            if (raw.Length >= 2 && raw[0] == '"' && raw[raw.Length - 1] == '"')
+                raw = raw.Substring(1, raw.Length - 2).Trim();
+
+            if (raw.StartsWith("[") && raw.EndsWith("]"))
             {
-                if (!float.TryParse(parts[i].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out result[i]))
-                    return null;
+                var inner = raw.Substring(1, raw.Length - 2);
+                if (string.IsNullOrWhiteSpace(inner)) return new float[0];
+                var parts = inner.Split(',');
+                var result = new float[parts.Length];
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    if (!float.TryParse(parts[i].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out result[i]))
+                        return null;
+                }
+                return result;
             }
-            return result;
+
+            // Object fallback: { "r":.., "g":.., "b":.., "a":.. } (color)
+            // or { "x":.., "y":.., "z":.., "w":.. } (vector). Read in the
+            // canonical channel order, skipping channels that are absent.
+            // GetRawValue returns null for absent keys, so explicit zeros
+            // (raw "0") are preserved correctly.
+            if (raw.StartsWith("{") && raw.EndsWith("}"))
+            {
+                var rgba = new[] { "r", "g", "b", "a" };
+                var xyzw = new[] { "x", "y", "z", "w" };
+                var present = new List<float>(4);
+                bool usedRgba = false;
+                foreach (var ch in rgba)
+                {
+                    var chRaw = JsonBody.GetRawValue(raw, ch);
+                    if (chRaw == null) continue;
+                    if (!float.TryParse(chRaw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+                        return null;
+                    present.Add(v);
+                    usedRgba = true;
+                }
+                if (!usedRgba)
+                {
+                    foreach (var ch in xyzw)
+                    {
+                        var chRaw = JsonBody.GetRawValue(raw, ch);
+                        if (chRaw == null) continue;
+                        if (!float.TryParse(chRaw.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+                            return null;
+                        present.Add(v);
+                    }
+                }
+                return present.Count == 0 ? null : present.ToArray();
+            }
+
+            return null;
         }
 
         private static string StripQuotes(string s)

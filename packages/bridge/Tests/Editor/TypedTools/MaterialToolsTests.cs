@@ -102,6 +102,57 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(0, parts.Length);
         }
 
+        // Hosts that box array args as JSON strings (the color/vector feedback
+        // case) must round-trip the same as a bare array.
+        [Test]
+        public void ParseFloatArray_StringifiedArray_StripsQuotesAndParses()
+        {
+            var parts = MaterialTools.ParseFloatArray("\"[1, 0, 0, 1]\"");
+            Assert.IsNotNull(parts);
+            Assert.AreEqual(new[] { 1f, 0f, 0f, 1f }, parts);
+        }
+
+        [Test]
+        public void ParseFloatArray_ObjectRgba_ReadsChannelsInOrder()
+        {
+            var parts = MaterialTools.ParseFloatArray("{\"r\":1,\"g\":0,\"b\":0,\"a\":1}");
+            Assert.IsNotNull(parts);
+            Assert.AreEqual(new[] { 1f, 0f, 0f, 1f }, parts);
+        }
+
+        [Test]
+        public void ParseFloatArray_ObjectXyzw_FallsBackWhenNoRgba()
+        {
+            var parts = MaterialTools.ParseFloatArray("{\"x\":2,\"y\":3,\"z\":4,\"w\":5}");
+            Assert.IsNotNull(parts);
+            Assert.AreEqual(new[] { 2f, 3f, 4f, 5f }, parts);
+        }
+
+        [Test]
+        public void ParseFloatArray_ObjectPartial_DropsAbsentChannels()
+        {
+            // Only r/g/b present — caller (color) supplies alpha=1 default.
+            var parts = MaterialTools.ParseFloatArray("{\"r\":0.5,\"g\":0.25,\"b\":0.1}");
+            Assert.IsNotNull(parts);
+            Assert.AreEqual(new[] { 0.5f, 0.25f, 0.1f }, parts);
+        }
+
+        [Test]
+        public void ParseFloatArray_ObjectExplicitZero_NotConfusedWithAbsent()
+        {
+            // "a":0 must be preserved (not dropped as if absent).
+            var parts = MaterialTools.ParseFloatArray("{\"r\":1,\"g\":1,\"b\":1,\"a\":0}");
+            Assert.IsNotNull(parts);
+            Assert.AreEqual(4, parts.Length);
+            Assert.AreEqual(0f, parts[3]);
+        }
+
+        [Test]
+        public void ParseFloatArray_EmptyObject_ReturnsNull()
+        {
+            Assert.IsNull(MaterialTools.ParseFloatArray("{}"));
+        }
+
         [Test]
         public void SetProperty_MissingProperty_ReturnsMissingParameter()
         {

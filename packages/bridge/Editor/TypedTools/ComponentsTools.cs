@@ -253,25 +253,32 @@ namespace UnityOpenMcpBridge.TypedTools
             var seen = new HashSet<string>();
             var matches = new List<ComponentTypeEntry>();
 
-            // Built-in components — scanned from the UnityEngine / UnityEditor
-            // assemblies so we don't hard-code a list that drifts per version.
+            // Built-in components live across MANY Unity module assemblies
+            // (PhysicsModule → Rigidbody/Colliders, AudioModule, ParticleSystem
+            // modules, …), not just CoreModule. Scanning every loaded
+            // UnityEngine.*/UnityEditor.* assembly avoids hard-coding — and
+            // drift across Unity versions — while still surfacing physics types
+            // the original 2-assembly scan silently dropped. Two passes keep
+            // built-ins surfaced before project MonoBehaviours.
             if (includeBuiltIn)
             {
-                ScanAssembly(typeof(GameObject).Assembly, query, seen, matches, maxResults);
-                ScanAssembly(typeof(Editor).Assembly, query, seen, matches, maxResults);
+                foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (matches.Count >= maxResults) break;
+                    var name = asm.GetName().Name;
+                    if (!IsUnityFrameworkAssembly(name)) continue;
+                    ScanAssembly(asm, query, seen, matches, maxResults);
+                }
             }
 
-            // Project MonoBehaviours — every loaded assembly that defines
-            // types deriving from Component. Includes package assemblies.
+            // Project MonoBehaviours — every NON-Unity loaded assembly that
+            // defines types deriving from Component. Includes package assemblies.
             if (includeProject && matches.Count < maxResults)
             {
                 foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
                 {
                     if (matches.Count >= maxResults) break;
-                    // Skip the Unity framework assemblies we already scanned.
-                    var name = asm.GetName().Name;
-                    if (name == "UnityEngine" || name == "UnityEditor") continue;
-                    if (name.StartsWith("UnityEngine.") || name.StartsWith("UnityEditor.")) continue;
+                    if (IsUnityFrameworkAssembly(asm.GetName().Name)) continue;
                     ScanAssembly(asm, query, seen, matches, maxResults);
                 }
             }
@@ -335,12 +342,20 @@ namespace UnityOpenMcpBridge.TypedTools
 
         private static IEnumerable<System.Type> SafeGetTypes(System.Reflection.Assembly asm)
         {
+            // Some assemblies throw on GetTypes — not only ReflectionTypeLoadException
+            // (missing dependency in a package assembly) but also FileNotFoundException
+            // / BadImageFormatException from tooling assemblies pulled into the editor
+            // (e.g. Microsoft.CodeAnalysis.BuildTasks). Catch broadly so one broken
+            // assembly never aborts the whole component catalog; for the reflection-
+            // load case we still salvage the partial Types array.
             try { return asm.GetTypes(); }
             catch (ReflectionTypeLoadException e)
             {
-                // Some assemblies (especially package-loaded ones) throw on
-                // GetTypes when a dependency is missing. Return what we can.
                 return e.Types != null ? FilterNull(e.Types) : System.Array.Empty<System.Type>();
+            }
+            catch (System.Exception)
+            {
+                return System.Array.Empty<System.Type>();
             }
         }
 
@@ -349,39 +364,61 @@ namespace UnityOpenMcpBridge.TypedTools
             foreach (var t in types) if (t != null) yield return t;
         }
 
+        // True for the Unity framework assembly roots (UnityEngine, UnityEditor)
+        // and every module assembly under them (UnityEngine.PhysicsModule,
+        // UnityEngine.AudioModule, …). Used to split the built-in vs project
+        // scan passes in ListAll and to classify an entry as builtin.
+        private static bool IsUnityFrameworkAssembly(string name)
+            => name == "UnityEngine" || name == "UnityEditor"
+                || name.StartsWith("UnityEngine.") || name.StartsWith("UnityEditor.");
+
         private static void ScanAssembly(System.Reflection.Assembly asm, string query,
             HashSet<string> seen, List<ComponentTypeEntry> sink, int maxResults)
         {
             var asmName = asm.GetName().Name;
-            var isBuiltIn = asmName == "UnityEngine" || asmName == "UnityEditor"
-                || asmName.StartsWith("UnityEngine.") || asmName.StartsWith("UnityEditor.");
+            var isBuiltIn = IsUnityFrameworkAssembly(asmName);
 
             foreach (var type in SafeGetTypes(asm))
             {
                 if (sink.Count >= maxResults) return;
                 if (type == null) continue;
-                if (!typeof(Component).IsAssignableFrom(type)) continue;
-                if (type.IsAbstract) continue;
-                if (type.IsGenericType) continue;
-                // Skip internal Unity sub-types that can't be added directly.
-                if (type.ContainsGenericParameters) continue;
-                var fullName = type.FullName;
-                if (string.IsNullOrEmpty(fullName)) continue;
-                if (!seen.Add(fullName)) continue;
-                if (!string.IsNullOrEmpty(query))
+                // Touching a broken type's metadata (e.g. a Roslyn/MSBuild type
+                // missing a transitive dependency) throws TypeLoadException at
+                // the point of resolution — during enumeration, not during
+                // GetTypes(). Isolate each type so one bad type never aborts
+                // the whole catalog scan.
+                ComponentTypeEntry? entry;
+                try
                 {
-                    if (fullName.IndexOf(query, System.StringComparison.OrdinalIgnoreCase) < 0
-                        && type.Name.IndexOf(query, System.StringComparison.OrdinalIgnoreCase) < 0)
-                        continue;
+                    if (!typeof(Component).IsAssignableFrom(type)) continue;
+                    if (type.IsAbstract) continue;
+                    if (type.IsGenericType) continue;
+                    // Skip internal Unity sub-types that can't be added directly.
+                    if (type.ContainsGenericParameters) continue;
+                    var fullName = type.FullName;
+                    if (string.IsNullOrEmpty(fullName)) continue;
+                    if (!seen.Add(fullName)) continue;
+                    if (!string.IsNullOrEmpty(query))
+                    {
+                        if (fullName.IndexOf(query, System.StringComparison.OrdinalIgnoreCase) < 0
+                            && type.Name.IndexOf(query, System.StringComparison.OrdinalIgnoreCase) < 0)
+                            continue;
+                    }
+                    entry = new ComponentTypeEntry
+                    {
+                        FullName = fullName,
+                        Name = type.Name,
+                        Namespace = type.Namespace,
+                        Assembly = asmName,
+                        BuiltIn = isBuiltIn
+                    };
                 }
-                sink.Add(new ComponentTypeEntry
+                catch (System.Exception)
                 {
-                    FullName = fullName,
-                    Name = type.Name,
-                    Namespace = type.Namespace,
-                    Assembly = asmName,
-                    BuiltIn = isBuiltIn
-                });
+                    // Type metadata could not be resolved — skip it and move on.
+                    continue;
+                }
+                sink.Add(entry.Value);
             }
         }
 

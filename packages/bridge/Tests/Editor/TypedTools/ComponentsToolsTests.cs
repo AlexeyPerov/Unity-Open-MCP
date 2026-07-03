@@ -219,6 +219,45 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.DoesNotContain("UnityEngine.BoxCollider", result.Output);
         }
 
+        // Regression for the discovery gap where query:"Rigidbody" / "Collider"
+        // returned zero types even though those components ARE attachable.
+        // Rigidbody + the built-in Colliders live in UnityEngine.PhysicsModule,
+        // which the old 2-assembly scan never reached. The scan now walks every
+        // loaded UnityEngine.* module assembly, so a query must surface them.
+        [Test]
+        public void ListAll_Query_RigidbodyDiscoverable()
+        {
+            var result = ComponentsTools.ListAll(
+                "{\"query\":\"Rigidbody\",\"max_results\":200}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("\"UnityEngine.Rigidbody\"", result.Output);
+        }
+
+        [Test]
+        public void ListAll_Query_BuiltinCollidersDiscoverable()
+        {
+            var result = ComponentsTools.ListAll(
+                "{\"query\":\"Collider\",\"max_results\":200}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("\"UnityEngine.BoxCollider\"", result.Output);
+            StringAssert.Contains("\"UnityEngine.SphereCollider\"", result.Output);
+            StringAssert.Contains("\"UnityEngine.MeshCollider\"", result.Output);
+        }
+
+        [Test]
+        public void ListAll_BuiltinOnly_ClassifiesAsBuiltin()
+        {
+            var result = ComponentsTools.ListAll(
+                "{\"query\":\"Rigidbody\",\"include_project\":false}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            // Rigidbody lives in UnityEngine.PhysicsModule, a UnityEngine.*
+            // module assembly — its entry must carry builtin:true. (Fields are
+            // not adjacent in the object, so assert each fact independently.)
+            StringAssert.Contains("\"fullName\":\"UnityEngine.Rigidbody\"", result.Output);
+            StringAssert.Contains("\"assembly\":\"UnityEngine.PhysicsModule\"", result.Output);
+            StringAssert.Contains("\"builtin\":true", result.Output);
+        }
+
         [Test]
         public void ResolveComponentType_FullName()
         {

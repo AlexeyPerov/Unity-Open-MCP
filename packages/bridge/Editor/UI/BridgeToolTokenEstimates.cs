@@ -129,7 +129,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_material_get_keywords", 162 },
             { "unity_open_mcp_material_get_properties", 236 },
             { "unity_open_mcp_material_set_keyword", 284 },
-            { "unity_open_mcp_material_set_property", 378 },
+            { "unity_open_mcp_material_set_property", 448 },
             { "unity_open_mcp_material_set_shader", 296 },
             { "unity_open_mcp_mutation_explain", 286 },
             { "unity_open_mcp_navigation_agent_add", 370 },
