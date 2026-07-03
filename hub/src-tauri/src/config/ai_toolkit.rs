@@ -212,8 +212,24 @@ pub fn derived_mcp_index_path(
 /// non-zero exit, unparsable output) populate `error` and set
 /// `ok: false` without panicking. Used by the wizard Step 2 Node
 /// check and the Step 2 blocked screen.
+///
+/// Like the maintainer-panel command runner, this enriches PATH with the
+/// resolved Node bin directory (`resolve_node_bin_dir`) before spawning —
+/// otherwise a GUI-app launch (minimal inherited PATH, no nvm/fnm/volta)
+/// fails the check even when `node` is installed. See
+/// `config::command_runner::resolve_node_bin_dir` for the full rationale.
 pub fn probe_node() -> NodeProbe {
-    let output = std::process::Command::new("node").arg("--version").output();
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg("--version");
+    if let Some(bin) = crate::config::command_runner::resolve_node_bin_dir() {
+        let bin_str = bin.to_string_lossy();
+        if let Ok(existing) = std::env::var("PATH") {
+            cmd.env("PATH", format!("{}:{}", bin_str, existing));
+        } else {
+            cmd.env("PATH", bin_str.into_owned());
+        }
+    }
+    let output = cmd.output();
 
     match output {
         Err(e) => NodeProbe {
@@ -451,5 +467,26 @@ mod tests {
         make_valid_toolkit(dir.path());
         let v = validate_toolkit_root_at(dir.path());
         assert!(toolkit_failure_summary(&v).is_none());
+    }
+
+    #[test]
+    fn probe_node_finds_real_node_on_this_machine() {
+        // Regression guard for the GUI-app PATH bug: probe_node must enrich
+        // PATH via resolve_node_bin_dir so it finds nvm/fnm/volta node even
+        // under a minimal inherited PATH. Best-effort — skipped (not failed)
+        // on CI runners with no Node installed.
+        let probe = probe_node();
+        if !probe.ok && probe
+            .error
+            .as_deref()
+            .map(|e| e.contains("not found on PATH"))
+            .unwrap_or(false)
+        {
+            eprintln!("probe_node: no Node install found; skipping. error={:?}", probe.error);
+            return;
+        }
+        assert!(probe.ok, "probe_node failed: error={:?}", probe.error);
+        assert!(probe.major.unwrap_or(0) >= MIN_NODE_MAJOR);
+        assert!(probe.version.is_some());
     }
 }

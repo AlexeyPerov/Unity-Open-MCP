@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -46,16 +46,167 @@ fn key(project_id: &str, panel: &str) -> String {
     format!("{}|{}", project_id, panel)
 }
 
-/// Cross-platform npm wrapper: `npm` on Unix, `cmd /C npm` on Windows
-/// (Windows needs the shell to resolve `npm.cmd`).
-fn npm_command() -> Command {
-    if cfg!(target_os = "windows") {
-        let mut cmd = Command::new("cmd");
-        cmd.arg("/C").arg("npm");
-        cmd
-    } else {
-        Command::new("npm")
+/// Locate a directory containing `npm`/`node` when the current process's
+/// PATH does not. The Hub runs as a GUI app, and on macOS GUI apps launched
+/// from a `.app` bundle inherit a minimal PATH (`/usr/bin:/bin:…`) that does
+/// **not** include nvm/fnm/volta — those version managers only seed PATH from
+/// interactive-shell init (`~/.zshrc`). Without this resolution, spawning
+/// `npm` for the maintainer-panel commands fails with `ENOENT`, which the
+/// frontend previously surfaced as the unhelpful `[object Object]`.
+///
+/// Returns the first existing bin directory found, searched in the same order
+/// the `tauri-run.sh` wrapper uses: an nvm default/installed version, fnm,
+/// volta, then Homebrew prefixes. `None` means "nothing extra found; rely on
+/// the inherited PATH" (the spawn will then either succeed or fail with the
+/// OS's own message).
+///
+/// `pub(crate)` so the wizard's Node probe (`config::ai_toolkit::probe_node`)
+/// shares the same resolution as the maintainer-panel commands — without that,
+/// a GUI-app launch fails the Step 2 Node check with "node not found on PATH"
+/// even though `node` is installed via nvm.
+pub(crate) fn resolve_node_bin_dir() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+
+    // (a) nvm: prefer the `default` alias target, else the highest installed
+    // version under ~/.nvm/versions/node/.
+    let nvm_versions = home.join(".nvm").join("versions").join("node");
+    if let Some(default_target) = read_nvm_default_alias(&home, &nvm_versions) {
+        let candidate = nvm_versions.join(&default_target).join("bin");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
     }
+    if let Some(v) = pick_highest_version_dir(&nvm_versions) {
+        let candidate = nvm_versions.join(v).join("bin");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+
+    // (b) fnm: ~/.fnm/node-versions/<v>/installation/bin (and the
+    // XDG_DATA_HOME variant some setups use).
+    let fnm_bases: [Option<PathBuf>; 2] = [
+        Some(home.join(".fnm").join("node-versions")),
+        dirs::data_dir().map(|d| d.join("fnm").join("node-versions")),
+    ];
+    for base in fnm_bases.into_iter().flatten() {
+        if let Some(v) = pick_highest_version_dir(&base) {
+            let candidate = base.join(v).join("installation").join("bin");
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // (c) volta: ~/.volta/bin.
+    let volta_bin = home.join(".volta").join("bin");
+    if volta_bin.is_dir() {
+        return Some(volta_bin);
+    }
+
+    // (d) Homebrew prefixes (Apple Silicon then Intel). Only return when the
+    // prefix actually has an `npm` executable so we don't shadow nothing with
+    // nothing.
+    for prefix in ["/opt/homebrew/bin", "/usr/local/bin"] {
+        let p = PathBuf::from(prefix);
+        if p.join("npm").is_file() || p.join("npm.cmd").is_file() {
+            return Some(p);
+        }
+    }
+
+    None
+}
+
+/// Reads `~/.nvm/alias/default` and, when it names an installed version
+/// (e.g. `v24.15.0` or `24.15.0`), returns that version string so it can be
+/// joined under `versions/node/`. Returns `None` for aliases that point at
+/// remote LTS names (`lts/hydrogen`) or when the alias file is absent — the
+/// caller falls back to picking the highest installed version.
+fn read_nvm_default_alias(home: &Path, _versions_dir: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(home.join(".nvm").join("alias").join("default"))
+        .ok()?
+        .trim()
+        .to_string();
+    if raw.is_empty() {
+        return None;
+    }
+    // Strip an optional leading `v`; alias files often read `v20.11.0`.
+    let stripped = raw.strip_prefix('v').unwrap_or(&raw);
+    if stripped
+        .split('.')
+        .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+    {
+        Some(stripped.to_string())
+    } else {
+        None
+    }
+}
+
+/// Lists immediate children of `dir` whose names parse as a Node version
+/// (optional leading `v` + dotted digits) and returns the highest one by
+/// numeric (major, minor, patch) comparison. Used for both nvm and fnm.
+fn pick_highest_version_dir(dir: &Path) -> Option<String> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut versions: Vec<(u64, u64, u64, String)> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let stripped = name.strip_prefix('v').unwrap_or(&name);
+        let mut parts = stripped.split('.');
+        match (parts.next(), parts.next(), parts.next(), parts.next()) {
+            (Some(a), Some(b), Some(c), None)
+                if !a.is_empty()
+                    && a.bytes().all(|x| x.is_ascii_digit())
+                    && !b.is_empty()
+                    && b.bytes().all(|x| x.is_ascii_digit())
+                    && !c.is_empty()
+                    && c.bytes().all(|x| x.is_ascii_digit()) =>
+            {
+                versions.push((
+                    a.parse().unwrap_or(0),
+                    b.parse().unwrap_or(0),
+                    c.parse().unwrap_or(0),
+                    name,
+                ));
+            }
+            _ => {}
+        }
+    }
+    versions.sort_by(|x, y| y.0.cmp(&x.0).then(y.1.cmp(&x.1)).then(y.2.cmp(&x.2)));
+    versions.into_iter().next().map(|(_, _, _, name)| name)
+}
+
+/// Builds a `Command` for `program` (e.g. `"npm"` / `"node"`) with the Node
+/// bin directory prepended to `PATH` so GUI-app launches can still find it.
+/// On Windows the shell is required to resolve `npm.cmd`/`node.exe` the same
+/// way the original code did, so this only enriches PATH on Unix.
+fn command_with_node_path(program: &str, use_shell: bool) -> Command {
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg(program);
+        c
+    } else if use_shell {
+        let mut c = Command::new("sh");
+        c.arg("-c").arg(program);
+        c
+    } else {
+        Command::new(program)
+    };
+    if let Some(bin) = resolve_node_bin_dir() {
+        if let (Ok(existing), bin_str) = (std::env::var("PATH"), bin.to_string_lossy()) {
+            cmd.env("PATH", format!("{}:{}", bin_str, existing));
+        } else {
+            cmd.env("PATH", bin.to_string_lossy().into_owned());
+        }
+    }
+    cmd
+}
+
+/// Cross-platform npm wrapper: `npm` on Unix, `cmd /C npm` on Windows
+/// (Windows needs the shell to resolve `npm.cmd`). Enriches PATH with the
+/// resolved Node bin dir (see `resolve_node_bin_dir`) so the maintainer-panel
+/// commands work when the Hub is launched as a GUI app with a minimal PATH.
+fn npm_command() -> Command {
+    command_with_node_path("npm", false)
 }
 
 /// Resolve the npm working directory for a tracked project.
@@ -666,15 +817,10 @@ pub enum SyncVersionAction {
 
 /// Cross-platform `node` wrapper: `node` on Unix, `cmd /C node` on Windows
 /// (mirrors `npm_command` — Windows needs the shell to resolve `node.exe`
-/// off PATH the same way it resolves `npm.cmd`).
+/// off PATH the same way it resolves `npm.cmd`). Shares the same Node bin-dir
+/// PATH enrichment so the version-sync script runs under a GUI-app launch.
 fn node_command() -> Command {
-    if cfg!(target_os = "windows") {
-        let mut cmd = Command::new("cmd");
-        cmd.arg("/C").arg("node");
-        cmd
-    } else {
-        Command::new("node")
-    }
+    command_with_node_path("node", false)
 }
 
 /// Validates the bump level / set-version operand using the same rules as
@@ -956,5 +1102,85 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, CommandRunnerError::SpawnFailed { .. }));
+    }
+
+    // ---- Node bin-dir resolver (nvm/fnm version parsing) -----------------
+
+    #[test]
+    fn pick_highest_version_dir_picks_newest_numeric() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("v18.20.0")).unwrap();
+        std::fs::create_dir_all(dir.path().join("v24.15.0")).unwrap();
+        std::fs::create_dir_all(dir.path().join("v20.11.1")).unwrap();
+        // A non-version entry must be ignored.
+        std::fs::create_dir_all(dir.path().join("latest")).unwrap();
+
+        let picked = pick_highest_version_dir(dir.path()).unwrap();
+        assert_eq!(picked, "v24.15.0");
+    }
+
+    #[test]
+    fn pick_highest_version_dir_handles_bare_versions_without_v_prefix() {
+        // fnm uses directory names like `v24.15.0` (with prefix) by default,
+        // but plain `24.15.0` should also parse so the resolver is tolerant.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("20.11.1")).unwrap();
+        std::fs::create_dir_all(dir.path().join("22.4.0")).unwrap();
+        let picked = pick_highest_version_dir(dir.path()).unwrap();
+        assert_eq!(picked, "22.4.0");
+    }
+
+    #[test]
+    fn pick_highest_version_dir_returns_none_for_empty_or_garbage() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("not-a-version")).unwrap();
+        assert!(pick_highest_version_dir(dir.path()).is_none());
+
+        let empty = tempfile::tempdir().unwrap();
+        assert!(pick_highest_version_dir(empty.path()).is_none());
+    }
+
+    #[test]
+    fn read_nvm_default_alias_strips_leading_v_and_validates_digits() {
+        let home = tempfile::tempdir().unwrap();
+        let nvm = home.path().join(".nvm");
+        let alias_dir = nvm.join("alias");
+        std::fs::create_dir_all(&alias_dir).unwrap();
+        let versions_dir = nvm.join("versions").join("node");
+        std::fs::create_dir_all(&versions_dir).unwrap();
+
+        std::fs::write(alias_dir.join("default"), "v24.15.0\n").unwrap();
+        assert_eq!(
+            read_nvm_default_alias(home.path(), &versions_dir),
+            Some("24.15.0".to_string())
+        );
+
+        // A remote LTS alias name is not an installed version — must be
+        // rejected so we fall back to picking the highest installed version.
+        std::fs::write(alias_dir.join("default"), "lts/hydrogen\n").unwrap();
+        assert!(read_nvm_default_alias(home.path(), &versions_dir).is_none());
+    }
+
+    #[test]
+    fn npm_command_resolves_real_npm_on_this_machine() {
+        // Integration guard: when run on a dev box with nvm/fnm/volta/Homebrew,
+        // the spawned `npm` Command must point at a real npm executable. This
+        // catches regressions where the PATH enrichment stops working (the
+        // exact bug that surfaced as "build failed to start: [object Object]").
+        // Best-effort: skipped (not failed) on CI runners with no Node.
+        let bin = resolve_node_bin_dir();
+        let bin = match bin {
+            Some(b) => b,
+            None => {
+                eprintln!("resolve_node_bin_dir: no Node install found; skipping");
+                return;
+            }
+        };
+        let npm_path = bin.join("npm");
+        assert!(
+            npm_path.is_file(),
+            "resolver returned {:?} but npm is not there",
+            bin
+        );
     }
 }

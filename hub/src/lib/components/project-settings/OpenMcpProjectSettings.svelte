@@ -127,6 +127,23 @@
     return exitCode === 0 ? "passed" : `failed (${exitCode})`;
   }
 
+  // Tauri `invoke` rejections arrive as the backend's serialized error enum
+  // (e.g. `{ type: "spawnFailed", message: "No such file or directory …" }`),
+  // but the value can also be a plain `Error` or a string depending on where
+  // the rejection originated. Extract a readable message so failures surface
+  // the actual reason instead of "[object Object]".
+  function describeInvokeError(e: unknown): string {
+    if (typeof e === "string") return e;
+    if (e instanceof Error) return e.message;
+    if (e && typeof e === "object") {
+      const any = e as Record<string, unknown>;
+      if (typeof any.message === "string" && any.message.length > 0) return any.message;
+      // Serde-flattened enum variants sometimes only carry a `type` tag.
+      if (typeof any.type === "string") return any.type;
+    }
+    return String(e);
+  }
+
   async function refreshPackageInfo() {
     try {
       packageInfo = await readMcpPackageInfo(project.path, project.kind ?? "openMcp");
@@ -184,7 +201,11 @@
       S.appendDrawerLog(`started ${panel} for ${project.name}`);
     } catch (e) {
       commandLogsStore.markExited(project.id, panel, 1);
-      S.appendErrorLog(`${panel} failed to start: ${e}`);
+      // Tauri rejects with the serialized backend error enum (an object like
+      // `{ type: "spawnFailed", message: "…" }`), but the transport can also
+      // surface a plain Error or a string. Extract a human-readable message
+      // instead of stringifying the object to "[object Object]".
+      S.appendErrorLog(`${panel} failed to start: ${describeInvokeError(e)}`);
     }
   }
 
@@ -194,7 +215,7 @@
       commandLogsStore.markExited(project.id, panel, null);
       S.appendDrawerLog(`stopped ${panel} for ${project.name}`);
     } catch (e) {
-      S.appendErrorLog(`stop ${panel} failed: ${e}`);
+      S.appendErrorLog(`stop ${panel} failed: ${describeInvokeError(e)}`);
     }
   }
 
