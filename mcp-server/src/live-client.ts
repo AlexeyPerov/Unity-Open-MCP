@@ -104,6 +104,48 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Decide whether {@link LiveClient#postTool}'s catch block should re-POST after
+ * a transient fetch failure. Exported so the retry policy is unit-testable in
+ * isolation (driving a real response-timeout through postTool takes 40s because
+ * the fetch timeout is floored at BRIDGE_DEFAULT_TIMEOUT_MS + slack).
+ *
+ * undici (Node's fetch) throws a DISTINGUISHABLE error class for the two
+ * failure modes that reach this catch:
+ *   - `TypeError` ("fetch failed") → CONNECTION failure: the socket never
+ *     connected, was reset before the request body flushed, or the listen port
+ *     is dead (ECONNREFUSED). No bytes reached the server → no Work was queued
+ *     → no side effect is possible. Re-POSTing is ALWAYS safe, even on an
+ *     unchanged endpoint (the same live bridge never received the first POST).
+ *   - `AbortError` (AbortController timer) → RESPONSE timeout: the request
+ *     connected and the server is still processing it. A side effect may have
+ *     happened or be queued. Re-POSTing is only safe when the endpoint CHANGED
+ *     during recovery (a restart → new bridge that never saw the original POST);
+ *     on an unchanged endpoint the original call may still complete there, so
+ *     re-POSTing would risk running the mutation a second time.
+ *
+ * This distinction matters because a burst of parallel /tools/* calls can leave
+ * a dead/reset connection in the pool: the next POST throws a TypeError on
+ * connect, and the old "unchanged endpoint → no retry" guard wedged the whole
+ * typed-editor surface even though the bridge was healthy and idle
+ * (specs/feedback.md entry 2026-07-02-b). The bug was that the guard conflated
+ * "endpoint unchanged" with "request in flight," which is only true when the
+ * fetch actually connected (AbortError), not when it failed to connect
+ * (TypeError).
+ */
+export function shouldRetryPostAfterFailure(
+  err: unknown,
+  endpointChanged: boolean,
+): boolean {
+  // An endpoint change (Unity restart detected during recovery) always makes a
+  // retry safe regardless of failure class — the new bridge never saw the POST.
+  if (endpointChanged) return true;
+  // Unchanged endpoint: only retry on a connection failure (TypeError). A
+  // response timeout (AbortError or anything else) on the same endpoint means
+  // the request may have reached the bridge → suppress the retry.
+  return err instanceof TypeError;
+}
+
 const OFFLINE_HINT =
   "Ensure the Unity Editor is open with the Agent Bridge running. " +
   "The bridge port is per-project (20000 + sha256(projectPath) % 10000), not " +
@@ -451,55 +493,80 @@ export class LiveClient implements Router {
         });
       }
 
-      if (DIRECT_RESPONSE_TOOLS.has(toolName)) {
-        const directBody = (await res.json().catch(() => null)) as Record<
-          string,
-          unknown
-        > | null;
+      // The bridge returns TWO response shapes from /tools/*:
+      //   1. A MUTATION envelope: { mutation: { success, ... }, gate: {...} }
+      //      for gate-tracked mutating tools (gameobject_*, assets_*, etc.).
+      //   2. A DIRECT body: the tool's own JSON (e.g. { status, count, tags })
+      //      for read-only / state-only tools the bridge classifies as
+      //      DirectResponseTools (editor_get_tags, asmdef_list, shader_list_all,
+      //      scene_list_opened, material_get_properties, ~80 total).
+      //
+      // Previously postTool dispatched off a hardcoded DIRECT_RESPONSE_TOOLS set
+      // that was ~60 entries behind the bridge's set. Tools missing from it fell
+      // through to deriveIsError(body), which dereferences body.mutation.success
+      // — undefined for a direct body → TypeError. That thrown TypeError landed
+      // in the connection-recovery catch block, surfacing a misleading
+      // bridge_offline (and, with the entry-2026-07-02-b retry change, looping).
+      //
+      // The fix: detect the envelope shape from the BODY itself. A response with
+      // a top-level `mutation` object is a mutation envelope; anything else is a
+      // direct body. This is reliable because the bridge's DirectResponseTools
+      // path (HandleDirectResponseTool) never emits a `mutation` field and the
+      // gate path always does (BuildMutationEnvelope). The DIRECT_RESPONSE_TOOLS
+      // set is now only the inlineImage-unwrap allowlist (capture_inline), kept
+      // for that one special-case transform, not for shape routing.
+      const parsed = (await res.json().catch(() => null)) as Record<
+        string,
+        unknown
+      > | null;
 
-        // M20 Plan 1 / T20.1.1 — capture_inline returns an `inlineImage` base64
-        // PNG field. Unwrap it into an MCP image content block alongside a text
-        // metadata block ([{type: image}, {type: text}]). The image carries the
-        // same viewable payload a file-path screenshot would; the metadata keeps
-        // the view / resolution / byteLength fields without the base64 blob.
-        const inlineImage = directBody?.inlineImage;
-        if (
-          directBody != null &&
-          typeof inlineImage === "string" &&
-          inlineImage.length > 0 &&
-          directBody.error == null
-        ) {
-          const body: Record<string, unknown> = directBody;
-          const mimeType =
-            typeof body.mimeType === "string" ? body.mimeType : "image/png";
-          const metadata = { ...body };
-          delete metadata.inlineImage;
-          return {
-            content: [
-              { type: "image", data: inlineImage, mimeType },
-              { type: "text", text: JSON.stringify(metadata) },
-            ],
-            isError: false,
-          };
-        }
-
+      // capture_inline returns an `inlineImage` base64 PNG field. Unwrap it into
+      // an MCP image content block alongside a text metadata block
+      // ([{type: image}, {type: text}]). The image carries the same viewable
+      // payload a file-path screenshot would; the metadata keeps the view /
+      // resolution / byteLength fields without the base64 blob.
+      const inlineImage = parsed?.inlineImage;
+      if (
+        DIRECT_RESPONSE_TOOLS.has(toolName) &&
+        parsed != null &&
+        typeof inlineImage === "string" &&
+        inlineImage.length > 0 &&
+        parsed.error == null
+      ) {
+        const mimeType =
+          typeof parsed.mimeType === "string" ? parsed.mimeType : "image/png";
+        const metadata = { ...parsed };
+        delete metadata.inlineImage;
         return {
           content: [
-            {
-              type: "text",
-              text: JSON.stringify(directBody ?? {}),
-            },
+            { type: "image", data: inlineImage, mimeType },
+            { type: "text", text: JSON.stringify(metadata) },
           ],
-          isError: directBody?.error != null,
+          isError: false,
         };
       }
 
-      const body = (await res.json()) as MutationEnvelope;
+      // Mutation envelope vs direct body, decided from the body itself.
+      if (parsed != null && typeof parsed.mutation === "object" && parsed.mutation !== null) {
+        const body = parsed as unknown as MutationEnvelope;
+        return {
+          content: [{ type: "text", text: JSON.stringify(body) }],
+          isError: deriveIsError(body),
+        };
+      }
+
+      // Direct body: return it verbatim. isError when the tool reported a
+      // top-level error field (the bridge's direct-response convention).
       return {
-        content: [{ type: "text", text: JSON.stringify(body) }],
-        isError: deriveIsError(body),
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(parsed ?? {}),
+          },
+        ],
+        isError: parsed?.error != null,
       };
-    } catch {
+    } catch (err) {
       // M20 Plan 4-5 / T-fix-2 — transient POST failure (ECONNREFUSED /
       // timeout during a domain reload). Classify + recover before declaring
       // offline. handleTransientOffline re-syncs the cached endpoint from the
@@ -511,18 +578,28 @@ export class LiveClient implements Router {
       // endpoint is unchanged the same live bridge is still processing — or has
       // queued — the original POST's Work; re-POSTing would run the mutation a
       // second time. In that case surface the timeout instead of retrying.
+      //
+      // shouldRetryPostAfterFailure additionally allows a re-POST on a genuine
+      // CONNECTION failure (TypeError — the socket never connected / was reset
+      // before the body flushed / ECONNREFUSED), because no bytes reached the
+      // server and no side effect is possible. This must NOT fire for a
+      // TypeError thrown by response parsing (e.g. deriveIsError on a malformed
+      // body) — that path is now guarded by parsing the body defensively above,
+      // but as a belt-and-braces measure the response-parsing path is structured
+      // so it cannot throw into this catch (every .json() is .catch()-guarded).
       const endpointBefore = this.baseUrl;
       const recovered = await this.handleTransientOffline("post");
       if (recovered !== null) return recovered;
       const endpointChanged = this.baseUrl !== endpointBefore;
-      if (endpointChanged) {
+      if (shouldRetryPostAfterFailure(err, endpointChanged)) {
         return this.postTool(toolName, args, retryOn503);
       }
       return makeErrorResult({
         code: "bridge_offline",
         message:
           `Tool '${toolName}' did not return from the bridge within the client ` +
-          `timeout. The bridge endpoint did not change (no restart detected), so ` +
+          `timeout. The bridge endpoint did not change (no restart detected) and ` +
+          `the failure was a response timeout (not a connection failure), so ` +
           `the request was NOT retried — re-POSTing would risk running the ` +
           `mutation twice on the same bridge. If the editor was briefly slow ` +
           `(unfocused, GC, a long main-thread op), the original call may still ` +

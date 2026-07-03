@@ -27,7 +27,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PingCache } from "./ping-cache.js";
-import { LiveClient } from "./live-client.js";
+import { LiveClient, shouldRetryPostAfterFailure } from "./live-client.js";
 import { projectHash } from "./instance-discovery.js";
 import type { PollAndDismissOptions } from "./dialog-dismiss.js";
 
@@ -553,27 +553,41 @@ test("refresh: LiveClient re-points at the new port after a Unity restart (entry
   }
 });
 
-test("refresh: no re-POST when the endpoint is unchanged after recovery (entry 4A)", async () => {
+test("refresh: connection failure (socket reset) RETRIES on unchanged endpoint (entry 2026-07-02-b)", async () => {
   // A bridge that is UP for /ping (so handleTransientOffline recovers → null)
-  // but whose /tools/* POST throws (simulated by destroying the socket). With
-  // the endpoint UNCHANGED, postTool must NOT re-POST (a retry would run the
-  // mutation twice on the same bridge). Instead it surfaces the no-retry
-  // result. Pre-fix this looped/re-POSTed.
+  // but whose FIRST /tools/* POST hard-resets the socket (req.socket.destroy),
+  // then succeeds on the next POST. undici throws a TypeError for a socket
+  // reset — a *connection* failure, not a response timeout. Because no bytes
+  // reached the server's dispatch queue on the reset POST, no side effect is
+  // possible and re-POSTing is SAFE even on an unchanged endpoint. The client
+  // must retry and the second POST must succeed.
+  //
+  // This is the regression test for the bug where a burst of parallel /tools/*
+  // calls left a dead connection in the pool: every subsequent POST threw a
+  // TypeError on connect, the old "unchanged endpoint → no retry" guard
+  // wedged the whole typed-editor surface, and the agent saw bridge_offline
+  // even though the bridge was healthy and curl worked fine.
   const s = makeSandbox();
   const toolHits: { count: number } = { count: 0 };
   try {
     const bridge = await startBridgeStub((req, res) => {
       if (req.url?.startsWith("/tools/")) {
         toolHits.count++;
-        // Hard-reset the connection so the client's POST throws fast → enters
-        // postTool's catch → recovery. /ping below still answers 200, so
-        // handleTransientOffline returns null ("recovered"). req.socket.destroy
-        // (not res.destroy) reliably aborts the client's fetch; res.destroy can
-        // leave the socket half-open and hang the client until its timeout.
-        req.socket.destroy();
+        if (toolHits.count === 1) {
+          // First POST: hard-reset the socket BEFORE responding. The client's
+          // fetch throws a TypeError ("fetch failed") → connection-class failure.
+          // req.socket.destroy (not res.destroy) reliably aborts the client's
+          // fetch; res.destroy can leave the socket half-open and hang the
+          // client until its timeout.
+          req.socket.destroy();
+          return;
+        }
+        // Second POST: succeed (DIRECT_RESPONSE-style body).
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
         return;
       }
-      // /ping answers idle 200 so recovery returns null ("recovered").
+      // /ping answers idle 200 so recovery returns null ("recovered") fast.
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
@@ -598,25 +612,47 @@ test("refresh: no re-POST when the endpoint is unchanged after recovery (entry 4
     const result = await client.route("unity_open_mcp_validate_edit", {
       paths: ["Assets"],
     });
-    // Exactly one tool POST — the retry was suppressed because the endpoint
-    // did not change during recovery (same live bridge; re-POSTing would
-    // duplicate the Work).
+    // Exactly two tool POSTs — the first reset, the retry succeeded. Pre-fix
+    // this was 1 POST and a bridge_offline result (the wedge).
     assert.equal(
       toolHits.count,
-      1,
-      `expected exactly one tool POST (no re-POST on unchanged endpoint), got ${toolHits.count}`,
+      2,
+      `expected exactly two tool POSTs (reset then retry), got ${toolHits.count}`,
     );
-    assert.equal(result.isError, true);
-    const body = JSON.parse((result.content[0] as { text: string }).text);
-    assert.equal(
-      body.error.code,
-      "bridge_offline",
-      "unchanged-endpoint timeout must surface the no-retry result, not loop",
-    );
+    assert.equal(result.isError, false, "retry against the same endpoint must succeed");
     await bridge.close();
   } finally {
     disposeSandbox(s);
   }
+});
+
+test("shouldRetryPostAfterFailure: unit cases for the connection-vs-timeout retry policy", () => {
+  // Pure unit test of the retry decision — fast and exhaustive, complementing
+  // the connection-failure integration test above. Driving a real response-
+  // timeout through postTool takes 40s (the fetch timeout is floored at
+  // BRIDGE_DEFAULT_TIMEOUT_MS + slack), so the four discriminating cases are
+  // covered here on the pure helper instead.
+  //
+  // TypeError   = connection failure (socket never connected / reset before the
+  //               body flushed / ECONNREFUSED). No bytes reached the server →
+  //               retry is always safe.
+  // AbortError  = response timeout (connected, server still processing). A side
+  //               effect may have happened → only retry when endpoint changed.
+  const typeErr = new TypeError("fetch failed");
+  const abortErr = new DOMException("The operation was aborted", "AbortError");
+  const otherErr = new Error("something else");
+
+  // Unchanged endpoint: connection failure retries, timeout/other does not.
+  assert.equal(shouldRetryPostAfterFailure(typeErr, false), true);
+  assert.equal(shouldRetryPostAfterFailure(abortErr, false), false);
+  assert.equal(shouldRetryPostAfterFailure(otherErr, false), false);
+
+  // Endpoint changed (Unity restart → new bridge never saw the POST): always
+  // retry regardless of failure class — a restart makes the retry safe even for
+  // a response timeout, because the new listener never received the Work.
+  assert.equal(shouldRetryPostAfterFailure(typeErr, true), true);
+  assert.equal(shouldRetryPostAfterFailure(abortErr, true), true);
+  assert.equal(shouldRetryPostAfterFailure(otherErr, true), true);
 });
 
 test("refresh: env-port override disables lock refresh", async () => {
@@ -640,6 +676,206 @@ test("refresh: env-port override disables lock refresh", async () => {
     // lock claiming port 1.
     const live = await client.isLiveAvailable();
     assert.equal(live, true, "env-port override keeps the client on the stub port");
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+// ----- Direct-response envelope-shape routing (entry 2026-07-02-b real cause) -----
+//
+// The bridge returns TWO /tools/* response shapes:
+//   1. Mutation envelope  { mutation: { success, ... }, gate: {...} } for gate-
+//      tracked mutating tools.
+//   2. Direct body         the tool's own JSON (e.g. { status, count, tags })
+//      for read-only / state-only tools the bridge classifies as
+//      DirectResponseTools (~80: editor_get_tags, asmdef_list, shader_list_all,
+//      scene_list_opened, material_get_properties, ...).
+//
+// postTool previously routed off a hardcoded DIRECT_RESPONSE_TOOLS set that was
+// ~60 entries behind the bridge's set. Tools missing from it fell through to
+// deriveIsError(body), which dereferenced body.mutation.success — undefined for
+// a direct body → TypeError. That thrown TypeError landed in the connection-
+// recovery catch block, surfacing a misleading bridge_offline (and, with the
+// entry-2026-07-02-b retry change, looping). The fix: detect the envelope shape
+// from the body itself (presence of a top-level `mutation` object), so the
+// hardcoded set is no longer the routing authority. These tests pin both shapes.
+
+/**
+ * Bridge stub that serves idle /ping and a DIRECT body (no `mutation` field)
+ * for /tools/*, recording how many tool POSTs it received. The direct body
+ * shape is what ~80 read-only typed-editor tools return.
+ */
+function directBodyHandler(
+  toolHits: { count: number },
+): (req: IncomingMessage, res: ServerResponse) => void {
+  return (req, res) => {
+    if (req.url?.startsWith("/tools/")) toolHits.count++;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (req.url === "/ping") {
+      res.end(
+        JSON.stringify({
+          connected: true,
+          projectPath: REFRESH_PROJECT,
+          unityVersion: "6000.0.0f1",
+          bridgeVersion: "0.1.0",
+          mode: "live",
+          compiling: false,
+          isPlaying: false,
+        }),
+      );
+      return;
+    }
+    // Direct body: the tool's own JSON, NO mutation/gate envelope. This is the
+    // shape that broke before the fix (deriveIsError threw on missing mutation).
+    res.end(JSON.stringify({ status: "ok", count: 7, tags: ["Untagged", "Player"] }));
+  };
+}
+
+test("envelope shape: direct body (no mutation field) is returned verbatim, no loop", async () => {
+  // A tool NOT in the DIRECT_RESPONSE_TOOLS allowlist that returns a direct body
+  // (editor_get_tags shape). postTool must route it as a direct response based
+  // on the BODY, return it verbatim, and post exactly ONE POST (no retry loop).
+  // Pre-fix this surfaced bridge_offline (the thrown TypeError hit the catch).
+  const s = makeSandbox();
+  const toolHits: { count: number } = { count: 0 };
+  try {
+    const bridge = await startBridgeStub(directBodyHandler(toolHits));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    // editor_get_tags is NOT in DIRECT_RESPONSE_TOOLS but the bridge returns a
+    // direct body for it. Must succeed and post exactly once.
+    const result = await client.route("unity_open_mcp_editor_get_tags", {});
+    assert.equal(result.isError, false, "direct body must not be an error");
+    assert.equal(
+      toolHits.count,
+      1,
+      `expected exactly one tool POST (no retry/loop), got ${toolHits.count}`,
+    );
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.status, "ok");
+    assert.equal(body.count, 7);
+    assert.deepEqual(body.tags, ["Untagged", "Player"]);
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("envelope shape: mutation body is routed through deriveIsError", async () => {
+  // A mutating tool that returns a proper mutation envelope. postTool must route
+  // it through deriveIsError and surface the gate envelope. Regression guard
+  // that the shape-detection change did not break the mutation path.
+  const s = makeSandbox();
+  const toolHits: { count: number } = { count: 0 };
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      if (req.url?.startsWith("/tools/")) toolHits.count++;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      // Full mutation envelope with a clean gate delta.
+      res.end(
+        JSON.stringify({
+          mutation: { success: true, output: { ok: true }, error: null },
+          gate: {
+            mode: "enforce",
+            skipped: false,
+            validation: { passed: true },
+            delta: { newErrors: 0, newWarnings: 0 },
+          },
+          agentNextSteps: [],
+        }),
+      );
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_gameobject_create", {
+      name: "X",
+      paths_hint: ["Assets"],
+    });
+    assert.equal(result.isError, false, "clean mutation envelope is not an error");
+    assert.equal(toolHits.count, 1);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.mutation.success, true);
+    assert.equal(body.gate.mode, "enforce");
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("envelope shape: mutation body with newErrors is an error", async () => {
+  // deriveIsError must still flag a mutation envelope whose gate delta reports
+  // new errors, even after the shape-detection + defensive hardening change.
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      res.end(
+        JSON.stringify({
+          mutation: { success: true, output: {}, error: null },
+          gate: {
+            mode: "enforce",
+            skipped: false,
+            validation: { passed: false },
+            delta: { newErrors: 2, newWarnings: 0 },
+          },
+          agentNextSteps: [],
+        }),
+      );
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_gameobject_create", {
+      name: "X",
+      paths_hint: ["Assets"],
+    });
+    assert.equal(result.isError, true, "gate delta with newErrors must be an error");
     await bridge.close();
   } finally {
     disposeSandbox(s);

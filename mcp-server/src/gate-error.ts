@@ -29,9 +29,22 @@ export interface LogEntry {
 }
 
 export function deriveIsError(envelope: MutationEnvelope): boolean {
-  if (!envelope.mutation.success) return true;
+  // Defensive: the envelope is only a MutationEnvelope when the caller has
+  // already confirmed `body.mutation` is an object (postTool's shape check).
+  // Guard anyway so a malformed/partial body can never throw here — historically
+  // a missing `mutation` field threw TypeError, which postTool's catch
+  // misclassified as a connection failure (specs/feedback.md entry 2026-07-02-b).
+  if (
+    !envelope ||
+    typeof envelope !== "object" ||
+    typeof envelope.mutation !== "object" ||
+    envelope.mutation === null
+  ) {
+    return false;
+  }
+  if (envelope.mutation.success === false) return true;
 
-  if (envelope.gate.mode === "enforce" && envelope.gate.delta) {
+  if (envelope.gate?.mode === "enforce" && envelope.gate.delta) {
     const newErrors = envelope.gate.delta.newErrors;
     if (typeof newErrors === "number" && newErrors > 0) return true;
   }

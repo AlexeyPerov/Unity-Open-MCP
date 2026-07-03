@@ -189,7 +189,7 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     }
   }
 
-  emitResult(result, parsed.json);
+  await emitResult(result, parsed.json);
   return { handled: true, exitCode: result.exitCode };
 }
 
@@ -204,13 +204,47 @@ function logResolve(port: number, projectPath: string, authToken: string | undef
   }
 }
 
-function emitResult(result: CliCommandResult, json: boolean): void {
+/**
+ * Minimal writable interface {@link writeAndDrain} needs. Narrowed from
+ * NodeJS.WriteStream so the function is unit-testable with a small fake
+ * (a real stream's `.write` returns false under backpressure and emits
+ * 'drain' once the buffer flushes).
+ */
+export interface DrainableWritable {
+  write(chunk: string): boolean;
+  once(event: "drain", listener: () => void): unknown;
+}
+
+/**
+ * Write a string to a Writable stream and resolve once it has fully drained.
+ * `stream.write` is asynchronous when the destination is a pipe: it returns
+ * `false` once the internal buffer exceeds the high-water mark and the data is
+ * held until the next 'drain' event. Without awaiting that drain, an immediate
+ * `process.exit` after a large write (e.g. `run-tool` output for capabilities,
+ * a big read_asset, or a wide scan) can truncate the output at the pipe buffer
+ * size (64 KB on macOS). Resolves immediately for TTY/file destinations where
+ * write is effectively synchronous.
+ */
+export function writeAndDrain(
+  stream: DrainableWritable,
+  chunk: string,
+): Promise<void> {
+  return new Promise((resolve) => {
+    if (stream.write(chunk)) {
+      resolve();
+      return;
+    }
+    stream.once("drain", () => resolve());
+  });
+}
+
+async function emitResult(result: CliCommandResult, json: boolean): Promise<void> {
   const stream = result.exitCode === 0 ? process.stdout : process.stderr;
   if (json) {
-    process.stdout.write(JSON.stringify(result.json, null, 2) + "\n");
+    await writeAndDrain(process.stdout, JSON.stringify(result.json, null, 2) + "\n");
     return;
   }
   // Human-readable: keep success on stdout, failures on stderr so a CI pipeline
   // can capture the message without mixing it into stdout JSON downstream.
-  stream.write(result.human + "\n");
+  await writeAndDrain(stream, result.human + "\n");
 }
