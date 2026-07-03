@@ -3070,7 +3070,9 @@
     border-radius: 12px;
     width: 100%;
     max-width: 980px;
-    max-height: calc(100vh - 3rem);
+    /* dvh accounts for the titleBarStyle "Overlay" drag region so the modal
+     * never overhangs the visible viewport on constrained heights. */
+    max-height: calc(100dvh - 3rem);
     display: flex;
     flex-direction: column;
     box-shadow: 0 12px 48px rgba(0, 0, 0, 0.55);
@@ -3227,6 +3229,10 @@
 
   .wiz-body {
     flex: 1;
+    /* min-height: 0 lets this flex child shrink below its content height so
+     * it scrolls instead of overflowing the shell and shoving the footer out
+     * of view. Without it, the default min-height: auto prevents shrinking. */
+    min-height: 0;
     overflow-y: auto;
     padding: 1rem 1.25rem 1.25rem;
     display: flex;
@@ -3681,8 +3687,12 @@
   }
 
   .wiz-footer {
-    position: sticky;
-    bottom: 0;
+    /* In-flow flex child of .wiz-shell. Now that .wiz-body has min-height: 0
+     * it shrinks and scrolls, so this footer sits naturally at the shell's
+     * bottom as a pinned action bar — no sticky needed (sticky had no effect
+     * here anyway: the footer is a sibling of the scroll container, not a
+     * descendant, so it had no sticky scroll context). */
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3690,6 +3700,7 @@
     padding: 0.7rem 1.25rem;
     border-top: 1px solid var(--hub-border-light);
     background: var(--hub-bg);
+    border-radius: 0 0 12px 12px;
   }
 
   .wiz-footer-left {
