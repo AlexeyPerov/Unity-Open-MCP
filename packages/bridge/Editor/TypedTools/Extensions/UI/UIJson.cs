@@ -9,9 +9,10 @@
 // and detected at call time — when an agent requests element_type=TMP_Text and
 // TMP is absent, the tool returns a structured `tmp_package_required` error
 // instead of a silent legacy-Text fallback. The tools compile regardless (no
-// compile-time TMP reference), so this domain ships UNGATED — no
-// UNITY_OPEN_MCP_EXT_UI define, no sub-asmdef defineConstraints. The `ui` tool
-// group is still hidden from ListTools until the session activates it via
+// compile-time TMP reference). This domain is GATED on the com.unity.ugui
+// package via the UNITY_OPEN_MCP_EXT_UI define (produced by the root bridge
+// asmdef's versionDefines); see UITools.cs for the gating details. The `ui`
+// tool group is still hidden from ListTools until the session activates it via
 // unity_open_mcp_manage_tools (group visibility is a session concern,
 // independent of compile-gating).
 using System.Text;

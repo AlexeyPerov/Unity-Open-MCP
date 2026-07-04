@@ -16,12 +16,6 @@
   "defineConstraints": [
     "UNITY_OPEN_MCP_EXT_UI"
   ],
-  "versionDefines": [
-    {
-      "name": "UNITY_OPEN_MCP_EXT_UI",
-      "expression": "com.unity.ugui",
-      "define": "UNITY_OPEN_MCP_EXT_UI"
-    }
-  ],
+  "versionDefines": [],
   "noEngineReferences": false
 }

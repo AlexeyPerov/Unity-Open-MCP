@@ -16,14 +16,16 @@
 //                             preferred sizes).
 //
 // Unity 6 decoupled uGUI from the engine into the optional com.unity.ugui
-// package, so this domain is GATED on that package's presence via the
-// com_unity_ugui define Unity sets automatically when ugui is installed. When
-// ugui is absent the file compiles to an empty namespace and the tools are
-// simply unavailable (returns tool_not_found at call time). TextMesh Pro
-// (TMP_Text) is OPTIONAL and detected at call time via reflection; when an
-// agent requests element_type=TMP_Text and TMP is absent, the tool returns a
-// structured `tmp_package_required` error instead of a silent legacy-Text
-// fallback.
+// package, so this domain is GATED on that package's presence. The symbol is
+// defined centrally by the root bridge asmdef's versionDefines entry
+// (`com.unity.ugui` → UNITY_OPEN_MCP_EXT_UI); this sub-asmdef only carries
+// defineConstraints on that symbol (the same pattern every other gated domain
+// follows). When ugui is absent the file compiles to an empty namespace and
+// the tools are simply unavailable (returns tool_not_found at call time).
+// TextMesh Pro (TMP_Text) is OPTIONAL and detected at call time via
+// reflection; when an agent requests element_type=TMP_Text and TMP is absent,
+// the tool returns a structured `tmp_package_required` error instead of a
+// silent legacy-Text fallback.
 //
 // The `ui` tool group is still hidden from ListTools until the session
 // activates it via unity_open_mcp_manage_tools (group visibility is a session

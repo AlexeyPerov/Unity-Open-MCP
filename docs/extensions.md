@@ -17,7 +17,7 @@ step.
 | Splines | `com.unity.splines` | `UNITY_OPEN_MCP_EXT_SPLINES` | `.../Extensions/Splines/` |
 | Lighting | built-in (`Light` / `ReflectionProbe` / `RenderSettings` / `Lightmapping`) | *(none — ungated)* | `.../Extensions/Lighting/` |
 | Audio | built-in (`AudioSource` / `AudioListener` / `AudioMixer` / `AudioMixerGroup`) | *(none — ungated)* | `.../Extensions/Audio/` |
-| UI (uGUI) | built-in (`Canvas` / `CanvasScaler` / `GraphicRaycaster` / `Image` / `Text` / `Button` / `Slider` / `Toggle` / `InputField` / layout groups / `EventSystem`) | *(none — ungated)* | `.../Extensions/UI/` |
+| UI (uGUI) | `com.unity.ugui` (`Canvas` / `CanvasScaler` / `GraphicRaycaster` / `Image` / `Text` / `Button` / `Slider` / `Toggle` / `InputField` / layout groups / `EventSystem`) | `UNITY_OPEN_MCP_EXT_UI` | `.../Extensions/UI/` |
 | Constraints & LOD | built-in (`PositionConstraint` / `RotationConstraint` / `AimConstraint` / `ParentConstraint` / `ScaleConstraint` / `LODGroup`) | *(none — ungated)* | `.../Extensions/Constraints/` |
 | Terrain | built-in (`Terrain` / `TerrainData` / `TreePrototype` / `TerrainLayer`) | *(none — ungated)* | `.../Extensions/Terrain/` |
 | SpriteAtlas | built-in (`SpriteAtlas` / `SpriteAtlasAsset` / `SpriteAtlasPackingSettings` / `SpriteAtlasTextureSettings` in `UnityEngine.U2D` / `UnityEditor.U2D`) | *(none — ungated)* | `.../Extensions/SpriteAtlas/` |
@@ -32,16 +32,19 @@ step.
 Navigation is the reference template; InputSystem, ProBuilder, ParticleSystem,
 Animation, and Timeline share the same layout. Splines is the most recently
 added compile-gated domain — it proves the embedded + grouped model extends to
-additional Unity APIs. Lighting, Audio, UI, Constraints & LOD, Terrain,
+additional Unity APIs. Lighting, Audio, Constraints & LOD, Terrain,
 SpriteAtlas, and Texture are **ungated** domains: their types are
 unconditionally present in every Unity install, so they ship without a
 `UNITY_OPEN_MCP_EXT_*` define and compile into every bridge build (their
-`lighting` / `audio` / `ui` / `constraints` / `terrain` / `sprite2d` tool
+`lighting` / `audio` / `constraints` / `terrain` / `sprite2d` tool
 groups are still hidden from `ListTools` until the session activates them via
 `manage_tools`). SpriteAtlas + Texture share the `sprite2d` group (the 2D art
 pipeline activates together). Terrain's heightmap / splat writes cap at
-513×513 per call to push agents toward tiled region writes. UI's TextMesh Pro
-(`TMP_Text`) is optional and detected at call time via reflection — when absent,
+513×513 per call to push agents toward tiled region writes. UI (uGUI) is
+compile-gated on `com.unity.ugui` (Unity 6 made the formerly built-in uGUI
+types optional); its `ui` tool group is hidden from `ListTools` until the
+session activates it via `manage_tools`. UI's TextMesh Pro (`TMP_Text`) is
+optional and detected at call time via reflection — when absent,
 `ui_element_add` returns `tmp_package_required` (no silent legacy-`Text`
 fallback).
 

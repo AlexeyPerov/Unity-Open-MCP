@@ -66,12 +66,14 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
   const binName = opts.binName ?? "unity-open-mcp";
 
   // --help / --version short-circuit before any project-path requirement.
+  // Every stdout/stderr write goes through writeAndDrain so the caller's
+  // process.exit() can't truncate output that's still in the pipe buffer.
   if (parsed.command === "help") {
-    process.stdout.write(helpText(binName) + "\n");
+    await writeAndDrain(process.stdout, helpText(binName) + "\n");
     return { handled: true, exitCode: 0 };
   }
   if (parsed.command === "version") {
-    process.stdout.write(versionText(opts.version) + "\n");
+    await writeAndDrain(process.stdout, versionText(opts.version) + "\n");
     return { handled: true, exitCode: 0 };
   }
 
@@ -81,8 +83,10 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
   }
 
   if (parsed.error) {
-    process.stderr.write(`unity-open-mcp: ${parsed.error}\n\n`);
-    process.stderr.write(helpText(binName) + "\n");
+    await writeAndDrain(
+      process.stderr,
+      `unity-open-mcp: ${parsed.error}\n\n${helpText(binName)}\n`,
+    );
     return { handled: true, exitCode: 2 };
   }
 
@@ -95,7 +99,7 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     stack = buildRouterStack(env);
   } catch (err) {
     if (err instanceof ResolveEnvError) {
-      process.stderr.write(`unity-open-mcp: ${err.message}\n`);
+      await writeAndDrain(process.stderr, `unity-open-mcp: ${err.message}\n`);
       return { handled: true, exitCode: 2 };
     }
     throw err;
@@ -174,7 +178,8 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
         break;
       default:
         // Unreachable: parsed.command is one of the cases above or help/version.
-        process.stderr.write(
+        await writeAndDrain(
+          process.stderr,
           `unity-open-mcp: internal error — unhandled command '${parsed.command}'.\n`,
         );
         return { handled: true, exitCode: 2 };
@@ -207,34 +212,41 @@ function logResolve(port: number, projectPath: string, authToken: string | undef
 /**
  * Minimal writable interface {@link writeAndDrain} needs. Narrowed from
  * NodeJS.WriteStream so the function is unit-testable with a small fake
- * (a real stream's `.write` returns false under backpressure and emits
- * 'drain' once the buffer flushes).
+ * (a real stream's `.write` returns false under backpressure and the callback
+ * form fires only after the OS-level write completes).
  */
 export interface DrainableWritable {
   write(chunk: string): boolean;
+  write(chunk: string, callback: (err?: Error | null) => void): boolean;
   once(event: "drain", listener: () => void): unknown;
 }
 
 /**
- * Write a string to a Writable stream and resolve once it has fully drained.
- * `stream.write` is asynchronous when the destination is a pipe: it returns
- * `false` once the internal buffer exceeds the high-water mark and the data is
- * held until the next 'drain' event. Without awaiting that drain, an immediate
- * `process.exit` after a large write (e.g. `run-tool` output for capabilities,
- * a big read_asset, or a wide scan) can truncate the output at the pipe buffer
- * size (64 KB on macOS). Resolves immediately for TTY/file destinations where
- * write is effectively synchronous.
+ * Write a string to a Writable stream and resolve once the OS has consumed it.
+ *
+ * `stream.write` is asynchronous when the destination is a pipe. There are two
+ * layers of "pending": (1) Node's internal buffer fills past the high-water
+ * mark → `.write()` returns `false` and the stream emits `'drain'` once the
+ * buffer drops back below the mark; (2) libuv still has the write queued at the
+ * kernel level after `'drain'` fires. Waiting only for `'drain'` (the previous
+ * implementation) was not enough: `process.exit()` immediately afterwards
+ * truncated large payloads (~64 KB on macOS) because the OS write was still in
+ * flight.
+ *
+ * The `write(chunk, callback)` overload is the correct primitive — its callback
+ * fires only after libuv completes (or errors) the actual write to the kernel,
+ * regardless of backpressure. Resolves immediately for TTY/file destinations
+ * where the write is effectively synchronous.
  */
 export function writeAndDrain(
   stream: DrainableWritable,
   chunk: string,
 ): Promise<void> {
-  return new Promise((resolve) => {
-    if (stream.write(chunk)) {
-      resolve();
-      return;
-    }
-    stream.once("drain", () => resolve());
+  return new Promise((resolve, reject) => {
+    stream.write(chunk, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
   });
 }
 

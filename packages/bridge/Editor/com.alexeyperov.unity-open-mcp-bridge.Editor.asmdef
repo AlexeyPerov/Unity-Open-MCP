@@ -78,6 +78,11 @@
       "name": "com.unity.memoryprofiler",
       "expression": "1.0.0",
       "define": "UNITY_OPEN_MCP_EXT_MEMORYPROFILER"
+    },
+    {
+      "name": "com.unity.ugui",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_UI"
     }
   ],
   "noEngineReferences": false
