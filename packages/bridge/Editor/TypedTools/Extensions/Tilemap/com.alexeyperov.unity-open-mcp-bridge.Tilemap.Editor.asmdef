@@ -16,6 +16,17 @@
   "defineConstraints": [
     "UNITY_OPEN_MCP_EXT_TILEMAP"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.2d.tilemap",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_TILEMAP"
+    },
+    {
+      "name": "com.unity.2d.tilemap.extras",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS"
+    }
+  ],
   "noEngineReferences": false
 }

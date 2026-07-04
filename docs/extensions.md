@@ -108,17 +108,32 @@ the API cannot be reached, the tool returns a structured
 
 Shipped domain tools live in `packages/bridge/Editor/TypedTools/Extensions/*`,
 not as separate UPM packages. They compile in **only** when their Unity
-dependency is present, using a two-layer gate:
+dependency is present, using a **self-contained per-sub-asmdef gate**:
 
-1. **`versionDefines` on the bridge root asmdef**
-   (`packages/bridge/Editor/com.alexeyperov.unity-open-mcp-bridge.Editor.asmdef`)
-   set `UNITY_OPEN_MCP_EXT_<DOMAIN>` when the Unity package/module resolves.
-   The symbol naming convention is `UNITY_OPEN_MCP_EXT_<DOMAIN>` (uppercase,
-   `<DOMAIN>` matches the tool-group id).
-2. **A per-domain sub-asmdef** under `TypedTools/Extensions/<Domain>/` carries
-   `defineConstraints: ["UNITY_OPEN_MCP_EXT_<DOMAIN>"]` and references the
-   domain package. Unity only compiles the sub-asmdef when the define is set,
-   so the optional package reference never breaks a project that lacks it.
+1. **A per-domain sub-asmdef** under `TypedTools/Extensions/<Domain>/` carries
+   BOTH:
+   - a `versionDefines` entry matching the Unity dependency (`name` = package
+     or module id, `expression` = semver expression like `1.0.0`) that
+     defines `UNITY_OPEN_MCP_EXT_<DOMAIN>` when the dependency resolves, AND
+   - a `defineConstraints: ["UNITY_OPEN_MCP_EXT_<DOMAIN>"]` entry on the same
+     symbol.
+   The gate is fully self-contained on the sub-asmdef. Unity only compiles
+   the sub-asmdef when the `versionDefines` rule fires, so the optional
+   package reference never breaks a project that lacks it.
+
+The symbol naming convention is `UNITY_OPEN_MCP_EXT_<DOMAIN>` (uppercase,
+`<DOMAIN>` matches the tool-group id).
+
+> **Why per-sub-asmdef (not the root bridge asmdef).** Unity 6's
+> `versionDefines` semantics are per-assembly: a symbol defined by a
+> `versionDefines` entry on asmdef A only satisfies `defineConstraints` on
+> asmdef A itself — it does **not** propagate to sibling sub-asmdefs. An
+> earlier design placed all `versionDefines` on the root bridge asmdef and
+> relied on them flowing to the sub-asmdefs' `defineConstraints`; on Unity 6
+> that silently failed for every gated domain (the symbol was set on the
+> root but never satisfied the sub-asmdef constraints, so no gated
+> sub-assembly compiled). Putting both halves of the gate on the SAME
+> sub-asmdef is the only shape that reliably resolves on Unity 6.
 
 Each domain source file additionally wraps its body in
 `#if UNITY_OPEN_MCP_EXT_<DOMAIN>` as a belt-and-suspenders guard that
@@ -149,26 +164,32 @@ its 2.x `CinemachineVirtualCamera` vs 3.x `Unity.Cinemachine.CinemachineCamera`
 API split spans a class rename (no compile-time symbol can bridge both). The
 `CinemachineVersion` layer in `CinemachineJson.cs` detects the installed major
 at call time and returns `cinemachine_3x_required` (when 2.x is installed) or
-`cinemachine_package_required` (when the package is absent). All other shipped
-domains (Nav, Input, ProBuilder, Particles, Animation, Splines, Timeline,
-Tilemap, Lighting, Audio, UI, Constraints & LOD, Terrain) use compile-gating
-only.
+`cinemachine_package_required` (when the package is absent). The
+**compile-gated** domains are Nav, Input, ProBuilder, Particles, Animation,
+Splines, Timeline, Tilemap, ShaderGraph, VFX, MemoryProfiler, and UI (each
+gated on its optional Unity package via the self-contained per-sub-asmdef
+gate described above). The **ungated** domains — Lighting, Audio,
+Constraints & LOD, Terrain, SpriteAtlas, Texture — ship unconditionally
+because their types are part of the core engine modules present in every
+Unity install.
 
 ### Wiring in a new embedded domain
 
-1. Add a `versionDefines` entry to the bridge root asmdef mapping the Unity
-   dependency to `UNITY_OPEN_MCP_EXT_<DOMAIN>`.
-2. Create `packages/bridge/Editor/TypedTools/Extensions/<Domain>/` with:
-   - a sub-asmdef (`defineConstraints` + the domain package reference),
+1. Create `packages/bridge/Editor/TypedTools/Extensions/<Domain>/` with:
+   - a sub-asmdef carrying BOTH a `versionDefines` entry (mapping the Unity
+     dependency → `UNITY_OPEN_MCP_EXT_<DOMAIN>`) AND a `defineConstraints`
+     entry on the same symbol, plus the domain package reference. The two
+     halves of the gate live on the SAME asmdef so Unity 6 resolves them
+     reliably (see the note above).
    - the tool source files, each wrapped in `#if UNITY_OPEN_MCP_EXT_<DOMAIN>`,
    - registry discovery via `[BridgeToolType]` + `[BridgeTool]` (the
      `BridgeToolRegistry` scans all loaded assemblies, so sub-asmdefs register
      automatically).
-3. Keep tool IDs stable: `unity_open_mcp_<domain>_<action>`.
-4. Preserve gate contracts on mutating tools (`paths_hint`, `IsMutating`,
+2. Keep tool IDs stable: `unity_open_mcp_<domain>_<action>`.
+3. Preserve gate contracts on mutating tools (`paths_hint`, `IsMutating`,
    `Gate`, `Lifecycle`, idempotent/destructive hints) and JSON response schema
    parity with the MCP tool definition.
-5. Mirror the layout for EditMode tests under
+4. Mirror the layout for EditMode tests under
    `packages/bridge/Tests/Editor/TypedTools/<Domain>/` with their own gated
    test sub-asmdef.
 

@@ -16,6 +16,12 @@
   "defineConstraints": [
     "UNITY_OPEN_MCP_EXT_VFX"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.visualeffectgraph",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_VFX"
+    }
+  ],
   "noEngineReferences": false
 }

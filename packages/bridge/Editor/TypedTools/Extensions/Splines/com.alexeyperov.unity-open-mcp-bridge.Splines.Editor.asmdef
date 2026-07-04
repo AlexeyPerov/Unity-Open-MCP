@@ -17,6 +17,12 @@
   "defineConstraints": [
     "UNITY_OPEN_MCP_EXT_SPLINES"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.splines",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_SPLINES"
+    }
+  ],
   "noEngineReferences": false
 }

@@ -15,6 +15,12 @@
   "defineConstraints": [
     "UNITY_OPEN_MCP_EXT_ANIMATION"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.modules.animation",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_ANIMATION"
+    }
+  ],
   "noEngineReferences": false
 }

@@ -17,6 +17,12 @@
   "defineConstraints": [
     "UNITY_OPEN_MCP_EXT_TIMELINE"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.timeline",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_TIMELINE"
+    }
+  ],
   "noEngineReferences": false
 }

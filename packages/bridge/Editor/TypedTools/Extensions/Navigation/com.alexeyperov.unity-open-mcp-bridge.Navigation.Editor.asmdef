@@ -16,6 +16,12 @@
   "defineConstraints": [
     "UNITY_OPEN_MCP_EXT_NAVIGATION"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.ai.navigation",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_NAVIGATION"
+    }
+  ],
   "noEngineReferences": false
 }

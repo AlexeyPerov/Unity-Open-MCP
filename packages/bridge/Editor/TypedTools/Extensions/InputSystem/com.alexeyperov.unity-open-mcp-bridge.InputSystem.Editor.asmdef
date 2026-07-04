@@ -16,6 +16,12 @@
   "defineConstraints": [
     "UNITY_OPEN_MCP_EXT_INPUTSYSTEM"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.inputsystem",
+      "expression": "1.0.0",
+      "define": "UNITY_OPEN_MCP_EXT_INPUTSYSTEM"
+    }
+  ],
   "noEngineReferences": false
 }
