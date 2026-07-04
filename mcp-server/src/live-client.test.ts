@@ -333,6 +333,36 @@ test("LiveClient: fail-fast bridge_compile_failed when heartbeat is stale + PID 
   }
 });
 
+test("LiveClient: does NOT fail-fast bridge_compile_failed when a fresh test-pending file exists", async () => {
+  // specs/feedback.md — a Unity test run can freeze the heartbeat writer long
+  // enough to trip the stale-heartbeat threshold, flipping the classification
+  // to dead_bridge even though the run will recover. When a fresh
+  // test-pending-*.json signal exists, deadBridgeResult() must return null so
+  // the client keeps waiting instead of poisoning the session. With no bridge
+  // stub here, the wait loop eventually exhausts and returns bridge_offline —
+  // the point is that it does NOT return the immediate bridge_compile_failed.
+  const s = makeSandbox();
+  try {
+    plantLock(s, DEAD_BRIDGE_PROJECT, process.pid, 60_000, "reloading");
+    // Plant a fresh test-pending file alongside the lock (same status dir).
+    const statusDir = join(s.dir, ".unity-open-mcp");
+    if (!existsSync(statusDir)) mkdirSync(statusDir, { recursive: true });
+    writeFileSync(join(statusDir, "test-pending-run-abc.json"), "{}");
+
+    const client = new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT);
+    const result = await client.route("unity_open_mcp_validate_edit", {
+      paths: ["Assets"],
+    });
+
+    assert.equal(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.notEqual(body.error.code, "bridge_compile_failed");
+    assert.equal(body.error.code, "bridge_offline");
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
 test("LiveClient: returns bridge_offline (not bridge_compile_failed) when PID is dead", () => {
   // Dead PID → classifyInstance returns "gone", not "dead_bridge". The client
   // must fall back to the original bridge_offline behavior, NOT fail-fast.

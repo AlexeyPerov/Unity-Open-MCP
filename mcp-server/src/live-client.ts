@@ -11,7 +11,7 @@ import {
   readDismissConfig,
   type PollAndDismissOptions,
 } from "./dialog-dismiss.js";
-import { readInstanceLock, classifyInstance, lockPath, isPidAlive } from "./instance-discovery.js";
+import { readInstanceLock, classifyInstance, lockPath, isPidAlive, statusDir, hasRecentPendingTestRun } from "./instance-discovery.js";
 import type { InstanceClassification, InstanceLock } from "./instance-discovery.js";
 import { makeErrorResult } from "./results.js";
 import {
@@ -394,8 +394,7 @@ export class LiveClient implements Router {
     const maxIntervalMs = 1_000;
 
     const resultsPath = join(
-      homedir(),
-      ".unity-open-mcp",
+      statusDir(),
       `test-results-${runId}.json`,
     );
 
@@ -896,6 +895,18 @@ export class LiveClient implements Router {
       return null;
     }
     if (classification !== "dead_bridge") return null;
+
+    // specs/feedback.md — a Unity test run (any mode) can trigger a domain
+    // reload that freezes the heartbeat writer long enough to trip the stale-
+    // heartbeat threshold, flipping the classification to dead_bridge even
+    // though the run will recover. The bridge writes a test-pending-*.json
+    // signal at the start of every run and clears it on finish; if a fresh one
+    // exists, treat the stale heartbeat as a normal reload (return null = keep
+    // waiting) instead of failing fast with bridge_compile_failed, which would
+    // poison every subsequent tool call for the duration of the run.
+    if (hasRecentPendingTestRun()) {
+      return null;
+    }
 
     return {
       content: [

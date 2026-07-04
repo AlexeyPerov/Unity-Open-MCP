@@ -343,6 +343,7 @@ Workflow (CI build prep): `build_get_scenes` → `build_set_scenes` → `build_g
 ## Agent senses (live-only, no batch fallback)
 
 - `**unity_senses_run_tests`** — EditMode + PlayMode test runner with per-test pass/fail. Filter by assembly / namespace / class / method. Set `include_passes: false` on large suites to avoid truncation. **Never fire a second `run_tests` before the first resolves** (no concurrency guard; results interleave).
+  - **Brief reloading window after a run.** A test run (PlayMode especially) can trigger a Unity domain reload that freezes the bridge's heartbeat for a few seconds. The MCP server recognizes an in-flight run and treats that window as a normal reload rather than a dead bridge, so subsequent tools keep waiting instead of failing fast with `bridge_compile_failed`. For robustness, after `run_tests` returns `{status:"started", runId}`, poll the result file (or call `ping` / `editor_status`) once before issuing other tools — the run itself is async and the bridge may still be settling.
   - **Headless / CI alternative.** `run_tests` has no MCP batch form (it needs a live Editor). For headless CI, invoke Unity's CLI directly with `-runTests`. **Omit `-quit`** — with `-quit` the editor exits after the initial asset refresh, *before* the test runner starts, so no tests run and no XML is written despite an exit code of 0. The correct invocation:
     ```
     Unity -batchmode -projectPath <project> -runTests -testPlatform EditMode \

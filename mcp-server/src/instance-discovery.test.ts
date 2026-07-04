@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -16,6 +16,9 @@ import {
   heartbeatAgeMs,
   classifyInstance,
   HEARTBEAT_STALE_MS,
+  statusDir,
+  hasRecentPendingTestRun,
+  TEST_PENDING_TTL_MS,
   type InstanceLock,
 } from "./instance-discovery.js";
 
@@ -407,4 +410,122 @@ test("classifyInstance boundary: just under stale threshold with reloading state
     state: "reloading",
   });
   assert.equal(classifyInstance(justUnder, NOW), "reloading");
+});
+
+// ---------------------------------------------------------------------------
+// statusDir + hasRecentPendingTestRun — test-run dead-bridge suppression
+// ---------------------------------------------------------------------------
+//
+// hasRecentPendingTestRun globs the status dir for test-pending-*.json files
+// written by the bridge at the start of every test run. The dead-bridge
+// emitters use it to keep waiting (treat a stale heartbeat as a normal reload)
+// instead of failing fast when a test run freezes the heartbeat writer.
+
+test("statusDir points at ~/.unity-open-mcp", () => {
+  const sandbox = makeSandbox();
+  try {
+    process.env.HOME = sandbox.dir;
+    process.env.USERPROFILE = sandbox.dir;
+    assert.equal(statusDir(), join(sandbox.dir, ".unity-open-mcp"));
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("hasRecentPendingTestRun: false when no pending file exists", () => {
+  const sandbox = makeSandbox();
+  try {
+    const dir = join(sandbox.dir, ".unity-open-mcp");
+    mkdirSync(dir, { recursive: true });
+    assert.equal(hasRecentPendingTestRun(Date.now(), TEST_PENDING_TTL_MS, dir), false);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("hasRecentPendingTestRun: true when a fresh pending file exists", () => {
+  const sandbox = makeSandbox();
+  try {
+    const dir = join(sandbox.dir, ".unity-open-mcp");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "test-pending-run-abc.json"), "{}");
+    assert.equal(hasRecentPendingTestRun(Date.now(), TEST_PENDING_TTL_MS, dir), true);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("hasRecentPendingTestRun: ignores non-pending files in the status dir", () => {
+  const sandbox = makeSandbox();
+  try {
+    const dir = join(sandbox.dir, ".unity-open-mcp");
+    mkdirSync(dir, { recursive: true });
+    // A results file and an unrelated file must not count as a pending run.
+    writeFileSync(join(dir, "test-results-run-abc.json"), "{}");
+    writeFileSync(join(dir, "instances.json"), "{}");
+    writeFileSync(join(dir, "readme.txt"), "nope");
+    assert.equal(hasRecentPendingTestRun(Date.now(), TEST_PENDING_TTL_MS, dir), false);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("hasRecentPendingTestRun: false when the only pending file is older than the TTL", () => {
+  const sandbox = makeSandbox();
+  try {
+    const dir = join(sandbox.dir, ".unity-open-mcp");
+    mkdirSync(dir, { recursive: true });
+    const now = Date.now();
+    // mtime is backdated to just past the TTL — a stale leftover.
+    const stalePath = join(dir, "test-pending-run-stale.json");
+    writeFileSync(stalePath, "{}");
+    const ageMs = TEST_PENDING_TTL_MS + 1_000;
+    const past = new Date(now - ageMs);
+    utimesSync(stalePath, past, past);
+    assert.equal(hasRecentPendingTestRun(now, TEST_PENDING_TTL_MS, dir), false);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("hasRecentPendingTestRun: true when at least one of several pending files is fresh", () => {
+  const sandbox = makeSandbox();
+  try {
+    const dir = join(sandbox.dir, ".unity-open-mcp");
+    mkdirSync(dir, { recursive: true });
+    const now = Date.now();
+    // One stale, one fresh — the fresh one wins.
+    const stalePath = join(dir, "test-pending-run-stale.json");
+    writeFileSync(stalePath, "{}");
+    const past = new Date(now - (TEST_PENDING_TTL_MS + 5_000));
+    utimesSync(stalePath, past, past);
+    writeFileSync(join(dir, "test-pending-run-fresh.json"), "{}");
+    assert.equal(hasRecentPendingTestRun(now, TEST_PENDING_TTL_MS, dir), true);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("hasRecentPendingTestRun: TTL boundary — exactly at TTL counts as recent", () => {
+  const sandbox = makeSandbox();
+  try {
+    const dir = join(sandbox.dir, ".unity-open-mcp");
+    mkdirSync(dir, { recursive: true });
+    const now = Date.now();
+    const path = join(dir, "test-pending-run-edge.json");
+    writeFileSync(path, "{}");
+    const edge = new Date(now - TEST_PENDING_TTL_MS);
+    utimesSync(path, edge, edge);
+    assert.equal(hasRecentPendingTestRun(now, TEST_PENDING_TTL_MS, dir), true);
+  } finally {
+    cleanupSandbox(sandbox);
+  }
+});
+
+test("hasRecentPendingTestRun: returns false (fail-safe) when the dir is missing", () => {
+  // A nonexistent dir must not throw nor mask a genuine dead bridge.
+  assert.equal(
+    hasRecentPendingTestRun(Date.now(), TEST_PENDING_TTL_MS, "/nonexistent-dir-xyz"),
+    false,
+  );
 });

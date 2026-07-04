@@ -20,7 +20,7 @@
 // "no runtime deps beyond MCP SDK" rule (mcp-server/AGENTS.md) holds.
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -88,14 +88,75 @@ export function computePort(projectPath: string): number {
   return PORT_RANGE_START + Number(prefix % BigInt(PORT_RANGE_SIZE));
 }
 
+/**
+ * Base scratch directory shared by the bridge and the MCP server
+ * (`~/.unity-open-mcp`). Mirrors the C# `TestRunnerService.StatusDir`. Holds
+ * the `instances/` subdirectory (per-project locks) and the bridge's
+ * `test-pending-*.json` / `test-results-*.json` scratch files.
+ */
+export function statusDir(): string {
+  return join(homedir(), ".unity-open-mcp");
+}
+
 /** Directory holding one lock file per running bridge instance. */
 export function instancesDir(): string {
-  return join(homedir(), ".unity-open-mcp", "instances");
+  return join(statusDir(), "instances");
 }
 
 /** Path to this project's instance lock file. */
 export function lockPath(projectPath: string): string {
   return join(instancesDir(), `${projectHash(projectPath)}.json`);
+}
+
+/**
+ * Default TTL for considering a `test-pending-*.json` file "recent." A pending
+ * file older than this is treated as a stale leftover from a crashed/abandoned
+ * run and does NOT suppress the dead-bridge classification. Generous enough to
+ * outlast a slow PlayMode domain reload + ILPP pass; short enough that a
+ * genuinely dead bridge is surfaced promptly once a run is no longer active.
+ */
+export const TEST_PENDING_TTL_MS = 300_000; // 5 minutes
+
+/**
+ * Whether a `test-pending-*.json` file written within `ttlMs` exists in the
+ * status directory. The bridge writes one such file at the start of every test
+ * run (RunTestsTool.MarkPending, all modes) and deletes it in the run's
+ * onFinished callback (ClearPending). Its existence therefore signals "a test
+ * run is in flight" — used by the dead-bridge emitters to keep waiting (treat
+ * the stale heartbeat as a normal reload) instead of failing fast with
+ * `bridge_compile_failed`, because Unity's TestRunnerApi can freeze the
+ * heartbeat writer during a domain reload long enough to trip the stale-
+ * heartbeat threshold. Never throws: any fs error returns false (fail safe —
+ * a missing/unreadable signal must not mask a genuine dead bridge).
+ *
+ * @param nowMs   Current time (injectable for tests). Defaults to Date.now().
+ * @param ttlMs   Max age of a pending file to count as recent.
+ *                Defaults to {@link TEST_PENDING_TTL_MS}.
+ * @param dir     Status directory to scan (injectable for tests). Defaults to
+ *                {@link statusDir}.
+ */
+export function hasRecentPendingTestRun(
+  nowMs: number = Date.now(),
+  ttlMs: number = TEST_PENDING_TTL_MS,
+  dir: string = statusDir(),
+): boolean {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    if (!entry.startsWith("test-pending-") || !entry.endsWith(".json")) continue;
+    let mtimeMs: number;
+    try {
+      mtimeMs = statSync(join(dir, entry)).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (nowMs - mtimeMs <= ttlMs) return true;
+  }
+  return false;
 }
 
 /**

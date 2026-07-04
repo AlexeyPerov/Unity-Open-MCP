@@ -40,10 +40,18 @@ namespace UnityOpenMcpBridge.TestRunner
             }
             catch { }
 
-            if (play_mode)
-            {
-                TestRunnerState.MarkPending(run_id, assembly_name, test_namespace, test_class, test_method, include_passes);
-            }
+            // MarkPending writes the on-disk test-pending-<runId>.json signal for
+            // ALL modes (not just PlayMode). For PlayMode it survives the domain
+            // reload TestRunnerApi triggers, letting OnAfterAssemblyReload
+            // reattach callbacks (TestRunnerState.cs). For EditMode (which does
+            // not reload) it doubles as the MCP-server signal that suppresses the
+            // dead-bridge classification during the brief post-run window —
+            // without it, an EditMode run that nudges a recompile freezes the
+            // heartbeat writer long enough for classifyInstance to flip to
+            // dead_bridge and poison every subsequent tool call (feedback entry).
+            // ClearPending in the onFinished callback below is unconditional for
+            // the same reason.
+            TestRunnerState.MarkPending(run_id, assembly_name, test_namespace, test_class, test_method, include_passes);
 
             // specs/feedback.md 2026-07-03 — TestRunnerApi.Execute is the
             // blocking call that wedged the bridge: EditMode runs execute
@@ -77,8 +85,8 @@ namespace UnityOpenMcpBridge.TestRunner
                 onFinished: _ =>
                 {
                     if (api != null) Object.DestroyImmediate(api);
-                    if (playMode)
-                        TestRunnerState.ClearPending(runId);
+                    // Unconditional for all modes — see MarkPending note above.
+                    TestRunnerState.ClearPending(runId);
                     TestRunnerService.WriteResultsFile(runId, mode, results, includePasses);
                 });
 

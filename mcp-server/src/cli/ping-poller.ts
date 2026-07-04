@@ -12,6 +12,7 @@ import type { LiveClient } from "../live-client.js";
 import {
   readInstanceLock,
   classifyInstance,
+  hasRecentPendingTestRun,
 } from "../instance-discovery.js";
 
 /** Poll outcome. `ready` true ⇒ exit 0; false ⇒ the caller exits non-zero. */
@@ -131,6 +132,15 @@ export async function pollUntilReady(
         classification = null;
       }
       if (classification === "dead_bridge") {
+        // specs/feedback.md — a Unity test run (any mode) can freeze the
+        // heartbeat writer long enough to flip the classification to
+        // dead_bridge even though the run will recover. The bridge writes a
+        // test-pending-*.json signal for every run; if a fresh one exists,
+        // keep polling (treat as a normal reload) instead of failing fast.
+        if (hasRecentPendingTestRun()) {
+          await sleep(Math.min(opts.intervalMs, Math.max(0, deadline - now())));
+          continue;
+        }
         return {
           ready: false,
           status: "dead_bridge",

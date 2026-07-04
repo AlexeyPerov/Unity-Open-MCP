@@ -212,6 +212,54 @@ test("pollUntilReady: fail-fast on dead_bridge when projectPath resolves a stale
   }
 });
 
+test("pollUntilReady: does NOT fail-fast dead_bridge when a fresh test-pending file exists", async () => {
+  // specs/feedback.md — a Unity test run can freeze the heartbeat writer long
+  // enough to flip the classification to dead_bridge. When a fresh
+  // test-pending-*.json signal exists, the poller must keep waiting instead of
+  // failing fast. With a short timeout here, the wait loop exhausts and returns
+  // timeout — the point is it does NOT return dead_bridge.
+  const projectPath = "/fake/project/for/test-run-dead-bridge";
+  const hash = projectHash(projectPath);
+  const statusDir = join(homedir(), ".unity-open-mcp");
+  const instancesDir = join(statusDir, "instances");
+  if (!existsSync(instancesDir)) mkdirSync(instancesDir, { recursive: true });
+  const lockPath = join(instancesDir, `${hash}.json`);
+  const pendingPath = join(statusDir, "test-pending-run-polltest.json");
+  const lockExisted = existsSync(lockPath);
+  const pendingExisted = existsSync(pendingPath);
+  writeFileSync(lockPath, JSON.stringify({
+    pid: process.pid,
+    port: 29999,
+    projectPath,
+    projectHash: hash,
+    startedAt: "2000-01-01T00:00:00.000Z",
+    updatedAt: "2000-01-01T00:00:00.000Z",
+    heartbeatAt: "2000-01-01T00:00:00.000Z",
+    state: "idle",
+    isPlaying: false,
+    isCompiling: false,
+    bridgeVersion: "0.1.0",
+    unityVersion: "6000.0.0f1",
+  }));
+  writeFileSync(pendingPath, "{}"); // fresh mtime → within TTL
+
+  try {
+    const clock = makeFakeClock(0);
+    const outcome = await pollUntilReady(
+      fakeLive(),
+      projectPath,
+      scriptPoll([OFFLINE_RESULT]),
+      { ...makeOpts(clock), timeoutMs: 500 },
+    );
+    assert.equal(outcome.ready, false);
+    assert.notEqual(outcome.status, "dead_bridge");
+    assert.equal(outcome.status, "timeout");
+  } finally {
+    if (!lockExisted) { try { rmSync(lockPath, { force: true }); } catch { /* best effort */ } }
+    if (!pendingExisted) { try { rmSync(pendingPath, { force: true }); } catch { /* best effort */ } }
+  }
+});
+
 test("pollUntilReady: skips dead-bridge check when projectPath is undefined", async () => {
   const clock = makeFakeClock(0);
   const outcome = await pollUntilReady(
