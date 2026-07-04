@@ -1,4 +1,3 @@
-#pragma warning disable CS0618
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -9,6 +8,7 @@ using System.Text;
 using UnityOpenMcpBridge.MetaTools;
 using UnityEditor;
 using UnityEngine;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.TypedTools
 {
@@ -485,7 +485,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append("{\"object\":{");
             sb.Append("\"name\":\"").Append(OutputSerializer.EscapeJsonString(target.name));
             sb.Append("\",\"type\":\"").Append(OutputSerializer.EscapeJsonString(target.GetType().FullName));
-            sb.Append("\",\"instanceId\":").Append(target.GetInstanceID());
+            sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(target));
             var assetPath = AssetDatabase.GetAssetPath(target);
             sb.Append(",\"assetPath\":").Append(string.IsNullOrEmpty(assetPath) ? "null"
                 : "\"" + OutputSerializer.EscapeJsonString(assetPath) + "\"");
@@ -714,7 +714,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append("{\"status\":\"ok\",\"assetPath\":\"").Append(OutputSerializer.EscapeJsonString(normalized));
             sb.Append("\",\"name\":\"").Append(OutputSerializer.EscapeJsonString(instance.name));
             sb.Append("\",\"type\":\"").Append(OutputSerializer.EscapeJsonString(type.FullName));
-            sb.Append("\",\"instanceId\":").Append(instance.GetInstanceID());
+            sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(instance));
             sb.Append(",\"fieldsApplied\":").Append(modified.Count);
             sb.Append(",\"applied\":");
             AppendStringArray(sb, modified);
@@ -812,7 +812,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 sb.Append("\",\"name\":\"").Append(OutputSerializer.EscapeJsonString(
                     System.IO.Path.GetFileNameWithoutExtension(path)));
                 sb.Append("\",\"type\":\"").Append(OutputSerializer.EscapeJsonString(assetType));
-                sb.Append("\",\"instanceId\":").Append(mainAsset != null ? mainAsset.GetInstanceID() : 0);
+                sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(mainAsset));
                 sb.Append('}');
                 emitted++;
             }
@@ -830,10 +830,10 @@ namespace UnityOpenMcpBridge.TypedTools
         // object_get_data and object_modify.
         private static UnityEngine.Object ResolveObject(string body)
         {
-            var instanceId = JsonBody.GetInt(body, "instance_id", 0);
+            var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj != null) return obj;
             }
             var assetPath = JsonBody.GetString(body, "asset_path");
@@ -1075,7 +1075,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 var idRaw = JsonBody.GetRawValue("{\"v\":" + raw + "}", "v");
                 if (!string.IsNullOrEmpty(idRaw)
                     && int.TryParse(idRaw.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
-                    return EditorUtility.InstanceIDToObject(id);
+                    return InstanceId.ToObject(id);
                 throw new FormatException("object_reference value must be {\"path\": \"...\"}, {\"asset_path\": \"...\"}, {\"instance_id\": N}, or null.");
             }
 

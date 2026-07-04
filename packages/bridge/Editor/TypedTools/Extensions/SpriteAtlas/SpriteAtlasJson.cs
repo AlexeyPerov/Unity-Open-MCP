@@ -11,7 +11,6 @@
 // define, no sub-asmdef defineConstraints. The `2d` tool group is still hidden
 // from ListTools until the session activates it via manage_tools (group
 // visibility is a session concern, independent of compile-gating).
-#pragma warning disable CS0618
 using System.Text;
 
 namespace UnityOpenMcpBridge.Extensions.SpriteAtlas

@@ -10,6 +10,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
 {
@@ -104,7 +105,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_set_heights",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"heights\":[[0.5]]}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
@@ -122,7 +123,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_paint_layer",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"layer_index\":0,\"alphamap\":[[1]]}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
@@ -140,7 +141,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_place_trees",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"tree_prototype_index\":0," +
                     "\"instances\":[{\"position\":\"0.5,0.5\"}]}");
                 AssertErrorEnvelope(result, "paths_hint_required");
@@ -159,7 +160,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_set_neighbors",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
             finally
@@ -200,7 +201,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_set_heights",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"heights\":[[0.5]],\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "component_not_found");
             }
@@ -219,7 +220,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
                 // Ragged array — row 0 has 2 cols, row 1 has 1.
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_set_heights",
-                    "{\"instance_id\":" + terrain.gameObject.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(terrain.gameObject) +
                     ",\"heights\":[[0.5,0.5],[0.5]]," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "invalid_heights_array");
@@ -239,7 +240,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
                 // 129x129 heightmap; writing 2 cells starting at 128 overflows.
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_set_heights",
-                    "{\"instance_id\":" + terrain.gameObject.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(terrain.gameObject) +
                     ",\"x_offset\":128,\"y_offset\":128,\"heights\":[[0.5,0.5],[0.5,0.5]]," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "region_out_of_bounds");
@@ -258,7 +259,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_place_trees",
-                    "{\"instance_id\":" + terrain.gameObject.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(terrain.gameObject) +
                     ",\"tree_prototype_index\":0," +
                     "\"instances\":[{\"position\":\"0.5,0.5\"}]," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
@@ -279,8 +280,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_set_neighbors",
-                    "{\"instance_id\":" + terrain.gameObject.GetInstanceID() +
-                    ",\"top_instance_id\":" + notTerrain.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(terrain.gameObject) +
+                    ",\"top_instance_id\":" +InstanceId.Of(notTerrain) +
                     ",\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "neighbor_not_terrain");
             }
@@ -318,7 +319,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
                 sb.Append(']');
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_set_heights",
-                    "{\"instance_id\":" + terrain.gameObject.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(terrain.gameObject) +
                     ",\"heights\":" + sb +
                     ",\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "invalid_heights_array");
@@ -352,7 +353,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
                 StringAssert.Contains("\"assetWritten\":false", result.Output);
                 var id = ExtractInstanceId(result.Output);
                 Assert.AreNotEqual(0, id);
-                var go = EditorUtility.InstanceIDToObject(id) as GameObject;
+                var go = InstanceId.ToObject(id) as GameObject;
                 Assert.IsNotNull(go);
                 var terrain = go.GetComponent<Terrain>();
                 Assert.IsNotNull(terrain);
@@ -363,7 +364,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
                 var id = ExtractInstanceId(result.Output);
                 if (id != 0)
                 {
-                    var go = EditorUtility.InstanceIDToObject(id) as GameObject;
+                    var go = InstanceId.ToObject(id) as GameObject;
                     if (go != null) Object.DestroyImmediate(go);
                 }
             }
@@ -404,7 +405,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
             try
             {
                 // 3x3 region of 0.5 (and one out-of-range value to test clamp).
-                var body = "{\"instance_id\":" + terrain.gameObject.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(terrain.gameObject) +
                            ",\"x_offset\":10,\"y_offset\":20," +
                            "\"heights\":[[0.5,0.6,0.7],[1.5,-0.1,0.3],[0.2,0.4,0.8]]," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
@@ -441,7 +442,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
             var terrain = CreateTestTerrain("TerrainPaintLayerRoundTrip");
             try
             {
-                var body = "{\"instance_id\":" + terrain.gameObject.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(terrain.gameObject) +
                            ",\"layer_index\":0,\"x_offset\":0,\"y_offset\":0," +
                            "\"alphamap\":[[1,0.5],[0.25,0.75]]," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
@@ -476,7 +477,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
                 if (UnityEditor.AssetDatabase.LoadMainAssetAtPath(LayerPath) != null)
                     UnityEditor.AssetDatabase.DeleteAsset(LayerPath);
 
-                var body = "{\"instance_id\":" + terrain.gameObject.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(terrain.gameObject) +
                            ",\"layer_index\":0,\"alphamap\":[[1]]," +
                            "\"layer_path\":\"" + LayerPath + "\"," +
                            "\"paths_hint\":[\"Assets/T.unity\",\"" + LayerPath + "\"]}";
@@ -512,7 +513,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
                 UnityEditor.PrefabUtility.SaveAsPrefabAsset(prefabSrc, PrefabPath);
                 Object.DestroyImmediate(prefabSrc);
 
-                var body = "{\"instance_id\":" + terrain.gameObject.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(terrain.gameObject) +
                            ",\"tree_prototype_index\":0," +
                            "\"prototype_prefab_path\":\"" + PrefabPath + "\"," +
                            "\"instances\":[" +
@@ -551,8 +552,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
             try
             {
                 // Wire the right neighbor.
-                var body = "{\"instance_id\":" + host.gameObject.GetInstanceID() +
-                           ",\"right_instance_id\":" + right.gameObject.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(host.gameObject) +
+                           ",\"right_instance_id\":" +InstanceId.Of(right.gameObject) +
                            ",\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_set_neighbors", body);
@@ -561,7 +562,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
                 Assert.AreEqual(right, host.rightNeighbor);
 
                 // Clear the right neighbor (omit the resolver).
-                var clearBody = "{\"instance_id\":" + host.gameObject.GetInstanceID() +
+                var clearBody = "{\"instance_id\":" +InstanceId.Of(host.gameObject) +
                                 ",\"paths_hint\":[\"Assets/T.unity\"]}";
                 var clearResult = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_terrain_set_neighbors", clearBody);

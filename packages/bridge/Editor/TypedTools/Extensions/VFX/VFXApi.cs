@@ -18,7 +18,6 @@
 // VisualEffectAssetInfo surface (name / bounds / culling) are stable; the
 // editor graph model is internal and varies more.
 #if UNITY_OPEN_MCP_EXT_VFX
-#pragma warning disable CS0618
 using System;
 using System.Collections;
 using System.Collections.Generic;

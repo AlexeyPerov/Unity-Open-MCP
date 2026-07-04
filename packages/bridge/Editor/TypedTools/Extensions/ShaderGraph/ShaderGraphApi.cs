@@ -19,7 +19,6 @@
 // read path (BuildGraphSummary) parses the .shadergraph file directly and is
 // the most robust across versions.
 #if UNITY_OPEN_MCP_EXT_SHADERGRAPH
-#pragma warning disable CS0618
 using System;
 using System.Collections;
 using System.Collections.Generic;

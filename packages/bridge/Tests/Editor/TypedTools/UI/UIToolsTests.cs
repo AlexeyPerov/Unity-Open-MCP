@@ -22,6 +22,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.UI
 {
@@ -134,7 +135,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_ui_element_add",
-                    "{\"parent_instance_id\":" + parent.GetInstanceID() +
+                    "{\"parent_instance_id\":" +InstanceId.Of(parent) +
                     ",\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "missing_parameter");
             }
@@ -172,7 +173,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_ui_element_add",
-                    "{\"parent_instance_id\":" + parent.GetInstanceID() +
+                    "{\"parent_instance_id\":" +InstanceId.Of(parent) +
                     ",\"element_type\":\"Image\"," +
                     "\"sprite_path\":\"Assets/Does/Not/Exist.png\"," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
@@ -193,7 +194,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_ui_element_add",
-                    "{\"parent_instance_id\":" + parent.GetInstanceID() +
+                    "{\"parent_instance_id\":" +InstanceId.Of(parent) +
                     ",\"element_type\":\"NotARealElement\"," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "invalid_element_type");
@@ -213,7 +214,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_ui_layout_group_add",
-                    "{\"instance_id\":" + parent.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(parent) +
                     ",\"layout_type\":\"DiagonalLayoutGroup\"," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "invalid_layout_type");
@@ -232,7 +233,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_ui_element_modify",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"component_type\":\"Button\"," +
                     "\"fields_json\":\"[]\"," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
@@ -260,7 +261,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             var go = new GameObject("UICanvasHost", typeof(RectTransform));
             try
             {
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"render_mode\":\"ScreenSpaceOverlay\"," +
                            "\"sorting_order\":5," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
@@ -306,7 +307,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             go.AddComponent<Canvas>();
             try
             {
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_ui_canvas_add", body);
@@ -336,7 +337,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
                 typeof(RectTransform), typeof(Canvas));
             try
             {
-                var body = "{\"parent_instance_id\":" + parent.GetInstanceID() +
+                var body = "{\"parent_instance_id\":" +InstanceId.Of(parent) +
                            ",\"element_type\":\"Text\",\"element_name\":\"Label\"," +
                            "\"text\":\"Hello\",\"color\":\"1,1,1,1\"," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
@@ -365,7 +366,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
                 typeof(RectTransform), typeof(Canvas));
             try
             {
-                var body = "{\"parent_instance_id\":" + parent.GetInstanceID() +
+                var body = "{\"parent_instance_id\":" +InstanceId.Of(parent) +
                            ",\"element_type\":\"Image\"," +
                            "\"color\":\"1,0,0,1\"," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
@@ -394,7 +395,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
                 typeof(RectTransform), typeof(Canvas));
             try
             {
-                var body = "{\"parent_instance_id\":" + parent.GetInstanceID() +
+                var body = "{\"parent_instance_id\":" +InstanceId.Of(parent) +
                            ",\"element_type\":\"Button\"," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch(
@@ -419,7 +420,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
                 typeof(RectTransform), typeof(Canvas));
             try
             {
-                var body = "{\"parent_instance_id\":" + parent.GetInstanceID() +
+                var body = "{\"parent_instance_id\":" +InstanceId.Of(parent) +
                            ",\"element_type\":\"TMP_Text\",\"text\":\"Hello\"," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch(
@@ -457,7 +458,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
                 typeof(RectTransform), typeof(Canvas));
             try
             {
-                var body = "{\"instance_id\":" + parent.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(parent) +
                            ",\"layout_type\":\"VerticalLayoutGroup\"," +
                            "\"padding\":\"5,10,15,20\",\"spacing\":\"4,4\"," +
                            "\"child_alignment\":\"MiddleCenter\"," +
@@ -490,7 +491,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
                 typeof(RectTransform), typeof(Canvas));
             try
             {
-                var body = "{\"instance_id\":" + parent.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(parent) +
                            ",\"layout_type\":\"GridLayoutGroup\"," +
                            "\"spacing\":\"10,20\"," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
@@ -521,7 +522,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             btn.interactable = true;
             try
             {
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"component_type\":\"Button\"," +
                            "\"fields_json\":\"[{\\\"field\\\":\\\"interactable\\\"," +
                            "\\\"value\\\":false,\\\"type\\\":\\\"bool\\\"}]\"," +
@@ -548,7 +549,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             var img = go.GetComponent<Image>();
             try
             {
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"component_type\":\"Image\"," +
                            "\"fields_json\":\"[{\\\"field\\\":\\\"color\\\"," +
                            "\\\"value\\\":\\\"0,0,1,1\\\",\\\"type\\\":\\\"color\\\"}]\"," +
@@ -573,7 +574,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             var text = go.AddComponent<Text>();
             try
             {
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"component_type\":\"Text\"," +
                            "\"fields_json\":\"[{\\\"field\\\":\\\"text\\\"," +
                            "\\\"value\\\":\\\"Updated\\\",\\\"type\\\":\\\"string\\\"}]\"," +
@@ -598,7 +599,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UI
             var le = go.AddComponent<LayoutElement>();
             try
             {
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"component_type\":\"LayoutElement\"," +
                            "\"fields_json\":\"[" +
                            "{\\\"field\\\":\\\"preferredWidth\\\",\\\"value\\\":200,\\\"type\\\":\\\"float\\\"}," +

@@ -17,6 +17,7 @@ using UnityOpenMcpBridge.Extensions.Navigation;
 // NavMesh components).
 using NavMeshSurface = Unity.AI.Navigation.NavMeshSurface;
 using NavMeshModifier = Unity.AI.Navigation.NavMeshModifier;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.Navigation
 {
@@ -117,7 +118,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Navigation
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_navigation_agent_set_destination",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
                 Assert.IsFalse(result.Success);
@@ -141,7 +142,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Navigation
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_navigation_surface_add",
-                    "{\"instance_id\":" + host.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(host) +
                     ",\"agent_type\":\"Humanoid\",\"collect_objects\":\"All\"" +
                     ",\"paths_hint\":[\"Assets/NavTest.unity\"]}");
 
@@ -165,7 +166,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Navigation
             try
             {
                 var hint = ",\"paths_hint\":[\"Assets/NavTest.unity\"]}";
-                var idField = "{\"instance_id\":" + host.GetInstanceID();
+                var idField = "{\"instance_id\":" +InstanceId.Of(host);
 
                 var first = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_navigation_surface_add", idField + hint);
@@ -198,7 +199,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Navigation
                 // included without extra setup.
                 var add = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_navigation_surface_add",
-                    "{\"instance_id\":" + host.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(host) +
                     ",\"collect_objects\":\"All\"" +
                     ",\"paths_hint\":[\"Assets/NavBake.unity\"]}");
                 Assert.IsNotNull(add);
@@ -206,7 +207,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Navigation
 
                 var bake = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_navigation_surface_bake",
-                    "{\"instance_id\":" + host.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(host) +
                     ",\"paths_hint\":[\"Assets/NavBake.unity\"]}");
                 Assert.IsNotNull(bake);
                 Assert.IsTrue(bake.Success, bake.ErrorMessage ?? bake.Output);
@@ -267,7 +268,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Navigation
 
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_navigation_get",
-                    "{\"instance_id\":" + host.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(host) + "}");
                 Assert.IsNotNull(result);
                 Assert.IsTrue(result.Success, result.ErrorMessage ?? result.Output);
                 StringAssert.Contains("\"type\":\"NavMeshSurface\"", result.Output);
@@ -318,7 +319,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Navigation
 
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_navigation_modify",
-                    "{\"instance_id\":" + host.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(host) +
                     ",\"component_type\":\"NavMeshAgent\"" +
                     ",\"fields_json\":\"[{\\\"field\\\":\\\"speed\\\",\\\"value\\\":5.5,\\\"type\\\":\\\"float\\\"}]\"" +
                     ",\"paths_hint\":[\"Assets/NavTest.unity\"]}");
@@ -342,7 +343,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Navigation
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_navigation_modify",
-                    "{\"instance_id\":" + host.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(host) +
                     ",\"fields_json\":\"[]\"" +
                     ",\"paths_hint\":[\"Assets/NavTest.unity\"]}");
                 Assert.IsNotNull(result);
@@ -363,7 +364,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Navigation
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_navigation_modify",
-                    "{\"instance_id\":" + host.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(host) +
                     ",\"component_type\":\"NavMeshSurface\"" +
                     ",\"fields_json\":\"[{\\\"field\\\":\\\"agentTypeID\\\",\\\"value\\\":1}]\"" +
                     ",\"paths_hint\":[\"Assets/NavTest.unity\"]}");

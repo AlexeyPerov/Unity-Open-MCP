@@ -1,4 +1,3 @@
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -8,6 +7,7 @@ using UnityEngine.ProBuilder;
 using UnityEngine.ProBuilder.MeshOperations;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpExtensions.ProBuilder
 {
@@ -112,7 +112,7 @@ namespace UnityOpenMcpExtensions.ProBuilder
             var sb = new StringBuilder(220);
             sb.Append("\"shape\":{");
             sb.Append("\"name\":").Append(ProBuilderJson.Esc(go.name)).Append(',');
-            sb.Append("\"instanceId\":").Append(go.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"shapeType\":").Append(ProBuilderJson.Esc(shape.ToString())).Append(',');
             sb.Append("\"path\":").Append(ProBuilderJson.Esc(ProBuilderTargets.BuildPath(go))).Append(',');
             sb.Append("\"faceCount\":").Append(mesh.faceCount).Append(',');
@@ -159,7 +159,7 @@ namespace UnityOpenMcpExtensions.ProBuilder
             var sb = new StringBuilder(512);
             sb.Append("{\"status\":\"ok\",\"mesh\":{");
             sb.Append("\"name\":").Append(ProBuilderJson.Esc(host.name)).Append(',');
-            sb.Append("\"instanceId\":").Append(host.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
             sb.Append("\"path\":").Append(ProBuilderJson.Esc(ProBuilderTargets.BuildPath(host))).Append(',');
             sb.Append("\"faceCount\":").Append(mesh.faceCount).Append(',');
             sb.Append("\"vertexCount\":").Append(mesh.vertexCount).Append(',');

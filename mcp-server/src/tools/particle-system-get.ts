@@ -4,7 +4,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // particle system extension pack. Read-only, gate-free.
 const targetSchema = {
   instance_id: {
-    type: "integer",
+    type: ["string", "integer"],
     default: 0,
     description: "Host GameObject instance ID. Highest priority resolver.",
   },

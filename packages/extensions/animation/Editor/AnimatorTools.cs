@@ -1,4 +1,3 @@
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -8,6 +7,7 @@ using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpExtensions.Animation
 {
@@ -124,7 +124,7 @@ namespace UnityOpenMcpExtensions.Animation
             sb.Append("{\"status\":\"ok\",\"controller\":{");
             sb.Append("\"name\":").Append(AnimationJson.Esc(controller.name)).Append(',');
             sb.Append("\"assetPath\":").Append(AnimationJson.Esc(AnimationJson.Normalize(asset_path))).Append(',');
-            sb.Append("\"instanceId\":").Append(controller.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(controller)).Append(',');
 
             // Parameters.
             sb.Append("\"parameters\":[");

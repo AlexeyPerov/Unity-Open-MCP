@@ -24,7 +24,7 @@ export const objectModify: Tool = {
     required: ["fields", "paths_hint"],
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Instance ID of a live UnityEngine.Object. Highest priority resolver.",
       },

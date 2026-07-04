@@ -8,13 +8,13 @@
 // The `#if` below is belt-and-suspenders — it documents the gate at the source
 // level and keeps the file buildable if it is ever moved out of the gated asmdef.
 #if UNITY_OPEN_MCP_EXT_NAVIGATION
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEditor;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Navigation
 {
@@ -73,7 +73,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             // instance_id wins.
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj is GameObject go) return go;
             }
 

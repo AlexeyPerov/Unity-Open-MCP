@@ -10,12 +10,12 @@
 // defineConstraints. The `constraints` tool group is still hidden from
 // ListTools until the session activates it via unity_open_mcp_manage_tools
 // (group visibility is a session concern, independent of compile-gating).
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEditor;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Constraints
 {
@@ -71,7 +71,7 @@ namespace UnityOpenMcpBridge.Extensions.Constraints
             // instance_id wins.
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj is GameObject go) return go;
             }
 

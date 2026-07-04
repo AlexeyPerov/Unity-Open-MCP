@@ -33,7 +33,6 @@
 // Naming: `unity_senses_memory_snapshot_capture` (snake_case, sense-prefixed
 // because it pairs with the senses profiler family).
 #if UNITY_OPEN_MCP_EXT_MEMORYPROFILER
-#pragma warning disable CS0618
 using System.Globalization;
 using System.IO;
 using System.Text;

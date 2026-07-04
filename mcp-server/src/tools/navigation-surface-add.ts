@@ -7,7 +7,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // host by instance_id > path > name (same model as gameobject_* / component_*).
 const targetSchema = {
   instance_id: {
-    type: "integer",
+    type: ["string", "integer"],
     default: 0,
     description: "Host GameObject instance ID. Highest priority resolver.",
   },

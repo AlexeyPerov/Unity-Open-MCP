@@ -6,7 +6,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // LODGroup reports added:false (configuration still applied).
 const targetSchema = {
   instance_id: {
-    type: "integer",
+    type: ["string", "integer"],
     default: 0,
     description: "Host GameObject instance ID. Highest priority resolver.",
   },

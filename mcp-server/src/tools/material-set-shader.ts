@@ -18,7 +18,7 @@ export const materialSetShader: Tool = {
         description: "Material asset path (.mat). Highest priority resolver.",
       },
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Instance ID of a scene GameObject whose Renderer.sharedMaterial is mutated, OR the Material instance directly.",
       },

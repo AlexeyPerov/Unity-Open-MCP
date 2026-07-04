@@ -27,13 +27,13 @@
 // tools). Both prefixes fold into one `constraints` group because the two
 // concerns are small and closely related (level-of-detail is a rendering-side
 // "constraint" on which meshes draw).
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Animations;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Constraints
 {
@@ -174,7 +174,7 @@ namespace UnityOpenMcpBridge.Extensions.Constraints
             sb.Append("\"constraint\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
             sb.Append("\"type\":").Append(ConstraintsJson.Esc(type.Name)).Append(',');
-            sb.Append("\"instanceId\":").Append((constraint as Component).GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson((constraint as Component))).Append(',');
             sb.Append("\"path\":").Append(ConstraintsJson.Esc(ConstraintsTargets.BuildPath(host))).Append(',');
             sb.Append("\"constraintActive\":").Append(constraint.constraintActive ? "true" : "false").Append(',');
             sb.Append("\"sourceCount\":").Append(constraint.sourceCount).Append(',');
@@ -303,7 +303,7 @@ namespace UnityOpenMcpBridge.Extensions.Constraints
             var sb = new StringBuilder(280);
             sb.Append("\"lodGroup\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(group.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(group)).Append(',');
             sb.Append("\"path\":").Append(ConstraintsJson.Esc(ConstraintsTargets.BuildPath(host))).Append(',');
             sb.Append("\"fadeMode\":").Append(ConstraintsJson.Esc(group.fadeMode.ToString())).Append(',');
             sb.Append("\"animateCrossFading\":").Append(group.animateCrossFading ? "true" : "false").Append(',');
@@ -453,7 +453,7 @@ namespace UnityOpenMcpBridge.Extensions.Constraints
             if (hint.StartsWith("iid:") &&
                 int.TryParse(hint.Substring(4), out var iid) && iid != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(iid);
+                var obj = InstanceId.ToObject(iid);
                 if (obj is GameObject go) return go;
                 return null;
             }

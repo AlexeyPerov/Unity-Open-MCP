@@ -22,6 +22,7 @@ using UnityEngine;
 using UnityEngine.Tilemaps;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.Extensions.Tilemap;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.Tilemap
 {
@@ -162,7 +163,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Tilemap
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_tilemap_set_tile",
-                    "{\"instance_id\":" + go.GetInstanceID() + "," +
+                    "{\"instance_id\":" +InstanceId.Of(go) + "," +
                     "\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
                 Assert.IsTrue(result.Success);
@@ -182,7 +183,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Tilemap
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_tilemap_set_tile",
-                    "{\"instance_id\":" + go.GetInstanceID() + "," +
+                    "{\"instance_id\":" +InstanceId.Of(go) + "," +
                     "\"tile_asset_path\":\"Assets/Foo.asset\"," +
                     "\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
@@ -219,7 +220,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Tilemap
 
             var grid = tempGrid.GetComponent<Grid>();
             var tilemap = tempGrid.GetComponentInChildren<Tilemap>();
-            int tilemapId = tilemap.gameObject.GetInstanceID();
+            int tilemapId =InstanceId.Of(tilemap.gameObject);
 
             var result = BridgeToolRegistry.TryDispatch(
                 "unity_open_mcp_tilemap_set_tile",
@@ -243,7 +244,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Tilemap
             CreateTileAsset();
 
             var tilemap = tempGrid.GetComponentInChildren<Tilemap>();
-            int tilemapId = tilemap.gameObject.GetInstanceID();
+            int tilemapId =InstanceId.Of(tilemap.gameObject);
 
             var result = BridgeToolRegistry.TryDispatch(
                 "unity_open_mcp_tilemap_box_fill",
@@ -309,7 +310,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Tilemap
             StringAssert.Contains("\"status\":\"ok\"", result.Output);
 
             var id = ExtractInt(result.Output, "gridInstanceId");
-            tempGrid = EditorUtility.InstanceIDToObject(id) as GameObject;
+            tempGrid = InstanceId.ToObject(id) as GameObject;
             Assert.IsNotNull(tempGrid);
             Assert.IsNotNull(tempGrid.GetComponent<Grid>());
             Assert.IsNotNull(tempGrid.GetComponentInChildren<Tilemap>());

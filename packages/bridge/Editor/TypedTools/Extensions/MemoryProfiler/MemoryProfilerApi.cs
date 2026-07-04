@@ -24,7 +24,6 @@
 // with Unity 6. The callback shape `Action<string, bool>` (path, success) is
 // stable across both the new and legacy namespaces.
 #if UNITY_OPEN_MCP_EXT_MEMORYPROFILER
-#pragma warning disable CS0618
 using System;
 using System.IO;
 using System.Reflection;

@@ -15,13 +15,13 @@
 // fallback policy). The reflective escape hatch below (SplinesModify) targets
 // Spline-level serialized fields; it is not a version-detection layer.
 #if UNITY_OPEN_MCP_EXT_SPLINES
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEditor;
 using Unity.Mathematics;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Splines
 {
@@ -84,7 +84,7 @@ namespace UnityOpenMcpBridge.Extensions.Splines
         {
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj is GameObject go) return go;
             }
 

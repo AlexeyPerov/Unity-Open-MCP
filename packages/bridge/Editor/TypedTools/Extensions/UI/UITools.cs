@@ -15,20 +15,22 @@
 //                             Graphic color/raycastTarget, LayoutElement
 //                             preferred sizes).
 //
-// The UnityEngine.UI / Canvas / EventSystem types live in the built-in UI
-// module and are present in every Unity install (uGUI ships with the engine),
-// so this domain ships UNGATED — no UNITY_OPEN_MCP_EXT_UI define. TextMesh Pro
+// Unity 6 decoupled uGUI from the engine into the optional com.unity.ugui
+// package, so this domain is GATED on that package's presence via the
+// com_unity_ugui define Unity sets automatically when ugui is installed. When
+// ugui is absent the file compiles to an empty namespace and the tools are
+// simply unavailable (returns tool_not_found at call time). TextMesh Pro
 // (TMP_Text) is OPTIONAL and detected at call time via reflection; when an
 // agent requests element_type=TMP_Text and TMP is absent, the tool returns a
 // structured `tmp_package_required` error instead of a silent legacy-Text
-// fallback. The tools compile regardless (no compile-time TMP reference).
+// fallback.
 //
 // The `ui` tool group is still hidden from ListTools until the session
 // activates it via unity_open_mcp_manage_tools (group visibility is a session
 // concern, independent of compile-gating).
 //
 // Naming: `unity_open_mcp_ui_<action>` (snake_case domain prefix).
-#pragma warning disable CS0618
+#if UNITY_OPEN_MCP_EXT_UI
 using System.Linq;
 using System.Text;
 using UnityEditor;
@@ -37,6 +39,7 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.UI
 {
@@ -140,7 +143,7 @@ namespace UnityOpenMcpBridge.Extensions.UI
             sb.Append("\"canvas\":{");
             sb.Append("\"added\":").Append(addedCanvas ? "true" : "false").Append(',');
             sb.Append("\"createdRoot\":").Append(createdRoot ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(canvas.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(canvas)).Append(',');
             sb.Append("\"name\":").Append(UIJson.Esc(host.name)).Append(',');
             sb.Append("\"path\":").Append(UIJson.Esc(UITargets.BuildPath(host))).Append(',');
             sb.Append("\"renderMode\":").Append(UIJson.Esc(canvas.renderMode.ToString())).Append(',');
@@ -255,7 +258,7 @@ namespace UnityOpenMcpBridge.Extensions.UI
             sb.Append("\"element\":{");
             sb.Append("\"name\":").Append(UIJson.Esc(go.name)).Append(',');
             sb.Append("\"type\":").Append(UIJson.Esc(element_type)).Append(',');
-            sb.Append("\"instanceId\":").Append(go.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"path\":").Append(UIJson.Esc(UITargets.BuildPath(go))).Append(',');
             sb.Append("\"parentPath\":").Append(UIJson.Esc(UITargets.BuildPath(parent))).Append(',');
             sb.Append("\"addedComponents\":").Append(addedComponents.ToString());
@@ -391,9 +394,9 @@ namespace UnityOpenMcpBridge.Extensions.UI
             sb.Append("\"type\":").Append(UIJson.Esc(groupType.Name)).Append(',');
             // Either the grid group or the HV group is non-null (the other
             // branch assigned it). Resolve the instanceId from whichever is set.
-            int instanceId = 0;
-            if (gridGroup != null) instanceId = gridGroup.GetInstanceID();
-            else if (hvGroup != null) instanceId = hvGroup.GetInstanceID();
+            long instanceId = 0;
+            if (gridGroup != null) instanceId =InstanceId.Of(gridGroup);
+            else if (hvGroup != null) instanceId =InstanceId.Of(hvGroup);
             sb.Append("\"instanceId\":").Append(instanceId).Append(',');
             sb.Append("\"path\":").Append(UIJson.Esc(UITargets.BuildPath(host)));
             sb.Append('}');
@@ -1022,3 +1025,9 @@ namespace UnityOpenMcpBridge.Extensions.UI
                 "No GameObject resolved. Address by instance_id > path > name.");
     }
 }
+#else // !UNITY_OPEN_MCP_EXT_UI — uGUI package not installed; the UI tools
+      // compile to an empty namespace and are reported as tool_not_found at
+      // call time. (The asmdef's defineConstraints excludes this assembly
+      // entirely when com.unity.ugui is absent, so this #else is a backstop.)
+namespace UnityOpenMcpBridge.Extensions.UI { }
+#endif

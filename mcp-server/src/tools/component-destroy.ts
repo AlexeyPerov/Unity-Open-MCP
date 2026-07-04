@@ -22,7 +22,7 @@ export const componentDestroy: Tool = {
           "allows multiples, only the first match is removed per call.",
       },
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Host GameObject instance ID. Highest priority resolver.",
       },

@@ -30,7 +30,6 @@
 // tiling hint pointing the agent at x_offset / y_offset region writes.
 //
 // Naming: `unity_open_mcp_terrain_<action>` (snake_case domain prefix).
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -38,6 +37,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Terrain
 {
@@ -187,9 +187,9 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
             sb.Append("\"terrain\":{");
             sb.Append("\"created\":true,");
             sb.Append("\"name\":").Append(TerrainJson.Esc(go.name)).Append(',');
-            sb.Append("\"instanceId\":").Append(go.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"path\":").Append(TerrainJson.Esc(TerrainTargets.BuildPath(go))).Append(',');
-            sb.Append("\"terrainDataInstanceId\":").Append(td.GetInstanceID()).Append(',');
+            sb.Append("\"terrainDataInstanceId\":").Append(InstanceId.ToJson(td)).Append(',');
             sb.Append("\"size\":").Append(Vec3(td.size)).Append(',');
             sb.Append("\"heightmapResolution\":").Append(td.heightmapResolution).Append(',');
             sb.Append("\"alphamapResolution\":").Append(td.alphamapResolution).Append(',');

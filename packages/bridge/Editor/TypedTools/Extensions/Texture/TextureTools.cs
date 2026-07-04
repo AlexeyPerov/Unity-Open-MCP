@@ -27,7 +27,6 @@
 // ListTools until the session activates it via manage_tools.
 //
 // Naming: `unity_open_mcp_texture_<action>` (snake_case domain prefix).
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
@@ -39,6 +38,7 @@ using UnityOpenMcpBridge;
 // `UnityEngine.Texture` type name, so bare `Texture` resolves to the
 // namespace. Alias the type so call sites read naturally.
 using Texture = UnityEngine.Texture;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Texture
 {
@@ -246,7 +246,7 @@ namespace UnityOpenMcpBridge.Extensions.Texture
                 sb.Append(",\"isReadable\":").Append(readableTex.isReadable ? "true" : "false");
             else
                 sb.Append(",\"isReadable\":null");
-            sb.Append(",\"instanceId\":").Append(tex.GetInstanceID());
+            sb.Append(",\"instanceId\":").Append(InstanceId.ToJson(tex));
             return TextureJson.Ok(sb.ToString());
         }
 
@@ -327,8 +327,8 @@ namespace UnityOpenMcpBridge.Extensions.Texture
             sb.Append(",\"alphaIsTransparency\":").Append(importer.alphaIsTransparency ? "true" : "false");
             sb.Append(",\"spriteImportMode\":").Append(TextureJson.Esc(importer.spriteImportMode.ToString()));
             sb.Append(",\"spritePixelsPerUnit\":").Append(Num(importer.spritePixelsPerUnit));
-            sb.Append(",\"normalmap\":").Append(importer.normalmap ? "true" : "false");
-            if (importer.normalmap)
+            sb.Append(",\"normalmap\":").Append(importer.textureType == TextureImporterType.NormalMap ? "true" : "false");
+            if (importer.textureType == TextureImporterType.NormalMap)
             {
                 sb.Append(",\"normalmapFilter\":").Append(TextureJson.Esc(importer.normalmapFilter.ToString()));
                 sb.Append(",\"convertToNormalmap\":").Append(importer.convertToNormalmap ? "true" : "false");

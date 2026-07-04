@@ -8,7 +8,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // spatialBlend + adds spatialize and 3D min/max distance.
 const targetSchema = {
   instance_id: {
-    type: "integer",
+    type: ["string", "integer"],
     default: 0,
     description: "Host GameObject instance ID. Highest priority resolver.",
   },

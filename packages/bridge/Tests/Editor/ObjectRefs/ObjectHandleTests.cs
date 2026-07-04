@@ -61,7 +61,7 @@ namespace UnityOpenMcpBridge.Tests
             var go = new GameObject("TestHandle_Resolve_GO");
             try
             {
-                var instanceId = go.GetInstanceID();
+                var instanceId =InstanceId.Of(go);
                 var resolved = ObjectHandle.Resolve(
                     instanceId, "UnityEngine.GameObject", go.name, null, null, null,
                     out var error);
@@ -118,7 +118,7 @@ namespace UnityOpenMcpBridge.Tests
             var go = new GameObject("TestHandle_BareInt_GO");
             try
             {
-                var id = go.GetInstanceID().ToString();
+                var id =InstanceId.Of(go).ToString();
                 var resolved = ObjectHandle.ResolveJson(id, out var error);
 
                 Assert.IsNotNull(resolved, "Bare integer should be treated as instance ID");

@@ -1,4 +1,3 @@
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -7,6 +6,7 @@ using UnityEditor;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpExtensions.Animation
 {
@@ -127,7 +127,7 @@ namespace UnityOpenMcpExtensions.Animation
             sb.Append("{\"status\":\"ok\",\"clip\":{");
             sb.Append("\"name\":").Append(AnimationJson.Esc(clip.name)).Append(',');
             sb.Append("\"assetPath\":").Append(AnimationJson.Esc(AnimationJson.Normalize(asset_path))).Append(',');
-            sb.Append("\"instanceId\":").Append(clip.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(clip)).Append(',');
             sb.Append("\"length\":").Append(clip.length.ToString("R", CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"frameRate\":").Append(clip.frameRate.ToString("R", CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"wrapMode\":").Append(AnimationJson.Esc(clip.wrapMode.ToString())).Append(',');

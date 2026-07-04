@@ -22,7 +22,7 @@ export const objectGetData: Tool = {
     type: "object",
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description:
           "Instance ID of a live UnityEngine.Object (scene GameObject/Component or asset " +

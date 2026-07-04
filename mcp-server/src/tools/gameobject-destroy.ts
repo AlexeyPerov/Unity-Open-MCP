@@ -13,7 +13,7 @@ export const gameobjectDestroy: Tool = {
     required: ["paths_hint"],
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Target GameObject instance ID. Highest priority resolver.",
       },

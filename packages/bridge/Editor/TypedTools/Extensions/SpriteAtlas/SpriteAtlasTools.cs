@@ -31,7 +31,6 @@
 // can round-trip without instance ids.
 //
 // Naming: `unity_open_mcp_spriteatlas_<action>` (snake_case domain prefix).
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
@@ -40,7 +39,14 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 using U2D = UnityEditor.U2D;
+using UnityOpenMcpBridge.ObjectRefs;
 
+// SpriteAtlasAsset's settings getters/setters (SetIncludeInBuild,
+// GetPackingSettings, GetTextureSettings, GetPlatformSettings, ...) are
+// deprecated in Unity 6 in favor of SpriteAtlasImporter. The importer path is
+// preferred; the Asset methods survive only as a fallback for older Unity and
+// emit CS0618 there. Suppress that warning for the fallback call sites.
+#pragma warning disable CS0618
 namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
 {
     // M20 Plan 9 / T20.9.1 — SpriteAtlas tools. Registry-discovered via
@@ -95,14 +101,23 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
             internalCreate.Invoke(null, new object[] { asset });
 
             asset.name = System.IO.Path.GetFileNameWithoutExtension(normalized.Path);
-            asset.SetIncludeInBuild(include_in_build);
 
             U2D.SpriteAtlasAsset.Save(asset, normalized.Path);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
+            // include_in_build moved from SpriteAtlasAsset to SpriteAtlasImporter
+            // (the Asset method is deprecated). Apply after save so the importer
+            // exists for the asset path.
+            var importer = UnityEditor.AssetImporter.GetAtPath(normalized.Path) as UnityEditor.U2D.SpriteAtlasImporter;
+            if (importer != null)
+            {
+                importer.includeInBuild = include_in_build;
+                importer.SaveAndReimport();
+            }
+
             var loaded = AssetDatabase.LoadAssetAtPath<UnityEngine.U2D.SpriteAtlas>(normalized.Path);
-            int instanceId = loaded != null ? loaded.GetInstanceID() : 0;
+            long instanceId = loaded != null ? InstanceId.Of(loaded) : 0;
 
             var sb = new StringBuilder(160);
             sb.Append("\"path\":").Append(SpriteAtlasJson.Esc(normalized.Path));
@@ -343,6 +358,12 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
             var asset = LoadAtlasAsset(asset_path);
             if (asset.Error != null) return asset.Error;
 
+            // SpriteAtlasAsset's settings getters/setters are deprecated in
+            // favor of SpriteAtlasImporter (Unity 6). Resolve the importer once;
+            // fall back to the Asset methods when the importer is unavailable
+            // (older Unity).
+            var importer = UnityEditor.AssetImporter.GetAtPath(asset.Path) as UnityEditor.U2D.SpriteAtlasImporter;
+
             var applied = new StringBuilder(256);
             var unknown = new StringBuilder(256);
             applied.Append('[');
@@ -356,7 +377,8 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
             {
                 if (TryParseBool(includeRaw, out var b))
                 {
-                    asset.Asset.SetIncludeInBuild(b);
+                    if (importer != null) importer.includeInBuild = b;
+                    else asset.Asset.SetIncludeInBuild(b);
                     if (!firstApplied) applied.Append(',');
                     firstApplied = false;
                     applied.Append("{\"field\":\"include_in_build\",\"value\":").Append(b ? "true" : "false").Append('}');
@@ -373,7 +395,9 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
             var packingJson = ExtractObject(settings_json, "packing");
             if (!string.IsNullOrEmpty(packingJson))
             {
-                var packing = asset.Asset.GetPackingSettings();
+                var packing = importer != null
+                    ? importer.packingSettings
+                    : asset.Asset.GetPackingSettings();
                 var (packingOutcomes, packingBoxed) = PatchStruct(packingJson, packing, new Dictionary<string, string>
                 {
                     { "blockOffset", "int" },
@@ -404,14 +428,19 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
                     }
                 }
                 if (HasAnyPackingEntry(packingJson))
-                    asset.Asset.SetPackingSettings(packing);
+                {
+                    if (importer != null) importer.packingSettings = packing;
+                    else asset.Asset.SetPackingSettings(packing);
+                }
             }
 
             // texture
             var textureJson = ExtractObject(settings_json, "texture");
             if (!string.IsNullOrEmpty(textureJson))
             {
-                var texture = asset.Asset.GetTextureSettings();
+                var texture = importer != null
+                    ? importer.textureSettings
+                    : asset.Asset.GetTextureSettings();
                 var (textureOutcomes, textureBoxed) = PatchStruct(textureJson, texture, new Dictionary<string, string>
                 {
                     // maxTextureSize is intentionally absent — it has no C#
@@ -443,14 +472,27 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
                     }
                 }
                 if (HasAnyTextureEntry(textureJson))
-                    asset.Asset.SetTextureSettings(texture);
+                {
+                    if (importer != null) importer.textureSettings = texture;
+                    else asset.Asset.SetTextureSettings(texture);
+                }
             }
 
             applied.Append(']');
             unknown.Append(']');
 
-            U2D.SpriteAtlasAsset.Save(asset.Asset, asset.Path);
-            AssetDatabase.SaveAssets();
+            // When the importer path was used, SaveAndReimport persists the
+            // settings changes (importer mutations are not written by
+            // SpriteAtlasAsset.Save). Fall back to the Asset save otherwise.
+            if (importer != null)
+            {
+                importer.SaveAndReimport();
+            }
+            else
+            {
+                U2D.SpriteAtlasAsset.Save(asset.Asset, asset.Path);
+                AssetDatabase.SaveAssets();
+            }
 
             var sb = new StringBuilder(360);
             sb.Append("\"applied\":").Append(applied);
@@ -635,10 +677,16 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
 
         private static void BuildAtlasState(U2D.SpriteAtlasAsset asset, string path, StringBuilder sb)
         {
+            // SpriteAtlasAsset's settings getters are deprecated in favor of
+            // SpriteAtlasImporter (Unity 6). Resolve the importer; fall back to
+            // the Asset methods on older Unity where the importer is absent.
+            var importer = UnityEditor.AssetImporter.GetAtPath(path) as UnityEditor.U2D.SpriteAtlasImporter;
+
             sb.Append("\"path\":").Append(SpriteAtlasJson.Esc(path));
             sb.Append(",\"name\":").Append(SpriteAtlasJson.Esc(asset.name));
             sb.Append(",\"isVariant\":").Append(asset.isVariant ? "true" : "false");
-            sb.Append(",\"includeInBuild\":").Append(asset.IsIncludeInBuild() ? "true" : "false");
+            sb.Append(",\"includeInBuild\":").Append(
+                (importer != null ? importer.includeInBuild : asset.IsIncludeInBuild()) ? "true" : "false");
 
             // Packables
             var packables = GetPackables(asset);
@@ -653,7 +701,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
             sb.Append(",\"packableCount\":").Append(packables.Count);
 
             // Packing
-            var ps = asset.GetPackingSettings();
+            var ps = importer != null ? importer.packingSettings : asset.GetPackingSettings();
             sb.Append(",\"packing\":{");
             sb.Append("\"blockOffset\":").Append(ps.blockOffset).Append(',');
             sb.Append("\"padding\":").Append(ps.padding).Append(',');
@@ -663,7 +711,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
             sb.Append('}');
 
             // Texture
-            var ts = asset.GetTextureSettings();
+            var ts = importer != null ? importer.textureSettings : asset.GetTextureSettings();
             sb.Append(",\"texture\":{");
             sb.Append("\"maxTextureSize\":").Append(ts.maxTextureSize).Append(',');
             sb.Append("\"anisoLevel\":").Append(ts.anisoLevel).Append(',');
@@ -674,7 +722,7 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
             sb.Append('}');
 
             // Default platform settings
-            var pls = asset.GetPlatformSettings("");
+            var pls = importer != null ? importer.GetPlatformSettings("") : asset.GetPlatformSettings("");
             sb.Append(",\"platformDefault\":{");
             sb.Append("\"overridden\":").Append(pls.overridden ? "true" : "false").Append(',');
             sb.Append("\"maxTextureSize\":").Append(pls.maxTextureSize).Append(',');

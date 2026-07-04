@@ -26,7 +26,6 @@
 // domain prefix — note the underscore split vs the package name, matching
 // the rest of the catalog's word boundary convention).
 #if UNITY_OPEN_MCP_EXT_SHADERGRAPH
-#pragma warning disable CS0618
 using System.Text;
 
 namespace UnityOpenMcpBridge.Extensions.ShaderGraph

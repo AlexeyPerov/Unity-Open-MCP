@@ -22,7 +22,6 @@
 //
 // Naming: `unity_open_mcp_timeline_<action>` (snake_case domain prefix).
 #if UNITY_OPEN_MCP_EXT_TIMELINE
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEditor;
@@ -30,6 +29,7 @@ using UnityEngine.Playables;
 using UnityEngine.Timeline;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Timeline
 {
@@ -95,7 +95,7 @@ namespace UnityOpenMcpBridge.Extensions.Timeline
             var sb = new StringBuilder(160);
             sb.Append("\"timeline\":{");
             sb.Append("\"assetPath\":").Append(TimelineJson.Esc(asset_path)).Append(',');
-            sb.Append("\"instanceId\":").Append(asset.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(asset)).Append(',');
             sb.Append("\"frameRate\":").Append(asset.editorSettings.frameRate).Append(',');
             sb.Append("\"trackCount\":0");
             sb.Append('}');
@@ -331,7 +331,7 @@ namespace UnityOpenMcpBridge.Extensions.Timeline
 
             var sb = new StringBuilder(160);
             sb.Append("\"director\":{");
-            sb.Append("\"instanceId\":").Append(director.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(director)).Append(',');
             sb.Append("\"gameObjectPath\":").Append(TimelineJson.Esc(TimelineTargets.BuildPath(host))).Append(',');
             sb.Append("\"assetPath\":").Append(TimelineJson.Esc(AssetDatabase.GetAssetPath(asset))).Append(',');
             sb.Append("\"playOnAwake\":").Append(autoplay ? "true" : "false");
@@ -451,7 +451,7 @@ namespace UnityOpenMcpBridge.Extensions.Timeline
             if (!string.IsNullOrEmpty(assetPath))
                 return AssetDatabase.LoadAssetAtPath<TimelineAsset>(assetPath);
             if (instanceId != 0)
-                return EditorUtility.InstanceIDToObject(instanceId) as TimelineAsset;
+                return InstanceId.ToObject(instanceId) as TimelineAsset;
             return null;
         }
 

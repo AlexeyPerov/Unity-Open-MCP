@@ -23,7 +23,7 @@ export const selectionSet: Tool = {
     type: "object",
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description:
           "Scene GameObject / Component instance id to select. Single-target " +

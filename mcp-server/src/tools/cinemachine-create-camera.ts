@@ -30,7 +30,7 @@ export const cinemachineCreateCamera: Tool = {
         description: "Camera priority (higher wins the Brain's active slot).",
       },
       follow_instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         description: "Optional Follow target GameObject instance id.",
       },
       follow_path: {
@@ -38,7 +38,7 @@ export const cinemachineCreateCamera: Tool = {
         description: "Optional Follow target hierarchy path (used when follow_instance_id is 0).",
       },
       look_at_instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         description: "Optional Look At target GameObject instance id.",
       },
       look_at_path: {

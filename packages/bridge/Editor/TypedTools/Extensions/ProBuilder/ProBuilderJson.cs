@@ -4,12 +4,12 @@
 // the gate rationale. Ported verbatim (logic, JSON schema) from the former
 // standalone extension pack — only the namespace changed.
 #if UNITY_OPEN_MCP_EXT_PROBUILDER
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEditor;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.ProBuilder
 {
@@ -70,7 +70,7 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilder
         {
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj is GameObject go) return go;
             }
 

@@ -4,9 +4,8 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityOpenMcpBridge.ObjectRefs;
 
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
-#pragma warning disable CS0618
 namespace UnityOpenMcpBridge.Spatial
 {
     // M10 Plan 3 T3.5 — Spatial query meta-tool (non-mutating).
@@ -65,7 +64,7 @@ namespace UnityOpenMcpBridge.Spatial
             string layer = null,
             bool query_triggers = false,
             // bounds / ground_check / nearest target
-            int instance_id = 0,
+            long instance_id = 0,
             string path = null,
             string name = null,
             bool include_children = true,
@@ -134,7 +133,7 @@ namespace UnityOpenMcpBridge.Spatial
                 sb.Append("\"point\":").Append(Vec3Json(hit.point)).Append(',');
                 sb.Append("\"normal\":").Append(Vec3Json(hit.normal)).Append(',');
                 sb.Append("\"distance\":").Append(Num(hit.distance)).Append(',');
-                sb.Append("\"instanceId\":").Append(go.GetInstanceID()).Append(',');
+                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
                 sb.Append("\"gameObject\":").Append(Esc(go.name)).Append(',');
                 sb.Append("\"path\":").Append(Esc(GetPath(go))).Append(',');
                 sb.Append("\"collider\":").Append(Esc(hit.collider.GetType().Name));
@@ -205,7 +204,7 @@ namespace UnityOpenMcpBridge.Spatial
                 shown++;
                 var go = c.gameObject;
                 sb.Append('{');
-                sb.Append("\"instanceId\":").Append(go.GetInstanceID()).Append(',');
+                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
                 sb.Append("\"gameObject\":").Append(Esc(go.name)).Append(',');
                 sb.Append("\"path\":").Append(Esc(GetPath(go))).Append(',');
                 sb.Append("\"collider\":").Append(Esc(c.GetType().Name)).Append(',');
@@ -218,7 +217,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ bounds ============================
 
-        private string DoBounds(int instanceId, string pathStr, string nameStr, bool includeChildren)
+        private string DoBounds(long instanceId, string pathStr, string nameStr, bool includeChildren)
         {
             Physics.SyncTransforms();
 
@@ -234,7 +233,7 @@ namespace UnityOpenMcpBridge.Spatial
             var sb = new StringBuilder(512);
             sb.Append('{');
             sb.Append("\"action\":\"bounds\",");
-            sb.Append("\"instanceId\":").Append(go.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"name\":").Append(Esc(go.name)).Append(',');
             sb.Append("\"path\":").Append(Esc(GetPath(go))).Append(',');
             sb.Append("\"includeChildren\":").Append(includeChildren ? "true" : "false").Append(',');
@@ -250,7 +249,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ ground_check ============================
 
-        private string DoGround(int instanceId, string pathStr, string nameStr, string pointStr,
+        private string DoGround(long instanceId, string pathStr, string nameStr, string pointStr,
             string directionStr, float maxDistance, string layerName)
         {
             Physics.SyncTransforms();
@@ -300,7 +299,7 @@ namespace UnityOpenMcpBridge.Spatial
             sb.Append("\"normal\":").Append(Vec3Json(hit.normal)).Append(',');
             sb.Append("\"distance\":").Append(Num(hit.distance)).Append(',');
             sb.Append("\"surface\":").Append(Esc(surface.name)).Append(',');
-            sb.Append("\"surfaceId\":").Append(surface.GetInstanceID()).Append(',');
+            sb.Append("\"surfaceId\":").Append(InstanceId.ToJson(surface)).Append(',');
             sb.Append("\"surfacePath\":").Append(Esc(GetPath(surface)));
             sb.Append('}');
             return sb.ToString();
@@ -308,7 +307,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ nearest ============================
 
-        private string DoNearest(int instanceId, string pathStr, string nameStr, string pointStr,
+        private string DoNearest(long instanceId, string pathStr, string nameStr, string pointStr,
             int maxCount, string componentFilter, string tagFilter)
         {
             Vector3 from;
@@ -355,7 +354,7 @@ namespace UnityOpenMcpBridge.Spatial
                 if (shown > 0) sb.Append(',');
                 shown++;
                 sb.Append('{');
-                sb.Append("\"instanceId\":").Append(go.GetInstanceID()).Append(',');
+                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
                 sb.Append("\"name\":").Append(Esc(go.name)).Append(',');
                 sb.Append("\"path\":").Append(Esc(GetPath(go))).Append(',');
                 sb.Append("\"distance\":").Append(Num(dist)).Append(',');
@@ -383,7 +382,7 @@ namespace UnityOpenMcpBridge.Spatial
 
         // ============================ target resolution ============================
 
-        private static GameObject ResolveTarget(int instanceId, string pathStr, string nameStr)
+        private static GameObject ResolveTarget(long instanceId, string pathStr, string nameStr)
         {
             if (instanceId != 0)
             {
@@ -406,7 +405,7 @@ namespace UnityOpenMcpBridge.Spatial
             return null;
         }
 
-        private static GameObject FindByInstanceId(int instanceId)
+        private static GameObject FindByInstanceId(long instanceId)
         {
             for (var i = 0; i < SceneManager.sceneCount; i++)
             {
@@ -421,9 +420,9 @@ namespace UnityOpenMcpBridge.Spatial
             return null;
         }
 
-        private static GameObject FindInHierarchyById(GameObject go, int instanceId)
+        private static GameObject FindInHierarchyById(GameObject go, long instanceId)
         {
-            if (go.GetInstanceID() == instanceId) return go;
+            if (InstanceId.Of(go) == instanceId) return go;
             foreach (Transform child in go.transform)
             {
                 var found = FindInHierarchyById(child.gameObject, instanceId);

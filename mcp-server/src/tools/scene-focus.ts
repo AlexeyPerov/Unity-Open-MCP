@@ -17,7 +17,7 @@ export const sceneFocus: Tool = {
     required: ["paths_hint"],
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Instance ID of the target GameObject (canonical address).",
       },

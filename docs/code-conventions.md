@@ -6,42 +6,67 @@ every call site.
 
 ## Instance IDs
 
-Unity 6000.4 deprecates the int instance-ID APIs and marks them
-`[Obsolete]`:
+Unity 6000.0+ introduced `UnityEngine.EntityId` (an opaque struct) and marked
+the int instance-ID APIs `[Obsolete]`:
 
 - `Object.GetInstanceID()` → `Object.GetEntityId()`
-- `EditorUtility.InstanceIDToObject(int)` → `EntityIdToObject(...)`
+- `EditorUtility.InstanceIDToObject(int)` → `EditorUtility.EntityIdToObject(EntityId)`
 
-The replacement APIs only exist on Unity 6000.4 and newer, while the packages
-declare a minimum of 2022.3 LTS (`packages/*/package.json` `"unity": "2022.3"`),
-so a blind search-and-replace would not compile on the supported floor.
+Unity 6000.5 escalated the diagnostic from CS0618 (warning) to CS0619 (error)
+and widened `EntityId` from 4 to 8 bytes. The int APIs can no longer be used on
+6000.5+ at all (no pragma suppresses CS0619).
 
-More importantly, `GetEntityId()` returns **different values** than the int
-instance ID. The bridge's JSON object-handle contract — the `objectId` /
-`gameObjectId` / `instanceId` fields agents read out of every snapshot and pass
-back into mutating tools — is built on the **stable int instance ID**. Handles
-produced today must keep round-tripping against that contract, so the
-deprecated int APIs are used deliberately wherever a JSON handle is serialized
-or resolved.
+The bridge keeps the agent-facing instance-ID contract but routes every read
+and resolve through one central, version-gated helper so the `#if` lives in one
+audited place:
 
-The canonical home for that contract is
-[`packages/bridge/Editor/ObjectRefs/ObjectHandle.cs`](../packages/bridge/Editor/ObjectRefs/ObjectHandle.cs);
-the typed-tool and extension files that emit or consume instance IDs follow the
-same rule.
+[`packages/bridge/Editor/ObjectRefs/InstanceId.cs`](../packages/bridge/Editor/ObjectRefs/InstanceId.cs)
+
+```csharp
+InstanceId.Of(obj)        // long — the raw id (any Unity version)
+InstanceId.ToJson(obj)    // string — the JSON form: "12345" (quoted, lossless)
+InstanceId.ToObject(id)   // Object — resolve a long id (any Unity version)
+```
+
+**JSON wire format: STRING.** The `instanceId` / `objectId` / `gameObjectId`
+fields are serialized as quoted JSON strings (e.g. `"568105589213726936"`), not
+bare numbers. This is required because Unity 6000.5 widened `EntityId` to 8
+bytes — values exceed JS `Number.MAX_SAFE_INTEGER` (2^53) and would lose
+precision if serialized as JSON numbers. The parser
+(`JsonBody.GetLongFlexible`) accepts both the canonical string form and a bare
+number for backward compatibility with older clients.
+
+Under the hood, on `UNITY_6000_0_OR_NEWER` the helper calls
+`EntityId.ToULong(obj.GetEntityId())` (returns `ulong`, cast to `long`) and
+`EditorUtility.EntityIdToObject(FromULong((ulong)id))`; on older Unity it
+falls back to `GetInstanceID()` (int, widened to long) /
+`InstanceIDToObject((int)id)`.
 
 ### How this shows up in the source
 
-Every file that touches the deprecated APIs carries a one-line pointer and a
-pragma suppression at the top, e.g.:
+Every typed tool and extension that emits or consumes an instanceId field uses
+`InstanceId.Of(...)` / `InstanceId.ToObject(...)` and carries a
+`using UnityOpenMcpBridge.ObjectRefs;`. The helper is `public` so the
+companion extension packs (separate assemblies referencing the bridge) share
+the same path. Do not call `GetInstanceID()` / `InstanceIDToObject()` /
+`GetEntityId()` / `EntityIdToObject()` directly outside the helper — the
+version gating and the int↔EntityId round-trip must stay centralised.
 
-```csharp
-// Deliberate use of deprecated GetInstanceID() — see docs/code-conventions.md §Instance IDs.
-#pragma warning disable CS0618
-```
+The canonical JSON-handle contract lives in
+[`packages/bridge/Editor/ObjectRefs/ObjectHandle.cs`](../packages/bridge/Editor/ObjectRefs/ObjectHandle.cs);
+the typed-tool and extension files that emit or consume instance IDs follow the
+same rule via the helper.
 
-The suppression is intentional. Do not "fix" these by swapping to
-`GetEntityId()` / `EntityIdToObject()` — that would silently change the values
-in the agent-facing JSON and break round-tripping.
+### History
+
+The bridge previously suppressed CS0618 (and, briefly, CS0619) with pragmas and
+kept calling the deprecated int APIs directly. Unity 6000.5's CS0619 escalation
+made that untenable, AND the 8-byte EntityId widening meant the int contract
+itself was lossy. The migration to the version-gated `InstanceId` helper (long
+internally, string on the wire) was completed across all ~96 call sites in
+`packages/bridge/Editor/` + `packages/extensions/`. The pre-migration design
+and constraints are documented in
+[`specs/backlog/new-unity.md`](../specs/backlog/new-unity.md).
 
 ## Namespace/type shadowing
 

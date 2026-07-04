@@ -5,7 +5,7 @@ import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
-import { editorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES } from "./unity-log.js";
+import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES } from "./unity-log.js";
 import { summarizeProjectHealth } from "./project-health.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
@@ -593,7 +593,11 @@ export class ToolRouter implements Router {
         ? Math.min(Math.floor(args.tail_bytes), 1048576)
         : DEFAULT_LOG_TAIL_BYTES;
 
-    const logPath = editorLogPath();
+    // Resolve the authoritative Editor.log. Unity 6000.5+ writes a
+    // project-relative log (<project>/Logs/Editor.log); the global per-user
+    // log is stale there. resolveEditorLogPath prefers the project-relative
+    // log when it exists and falls back to the global log for older Unity.
+    const logPath = resolveEditorLogPath(this.projectPath);
     const tail = readLogTail(logPath, tailBytes);
 
     if (tail.error) {

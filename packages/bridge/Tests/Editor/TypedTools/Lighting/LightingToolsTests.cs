@@ -8,6 +8,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
 {
@@ -122,7 +123,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_light_add",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
             finally
@@ -140,7 +141,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                 go.AddComponent<Light>();
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_light_set",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
             finally
@@ -158,7 +159,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                 go.AddComponent<Light>();
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_light_modify",
-                    "{\"instance_id\":" + go.GetInstanceID() + ",\"fields_json\":\"[]\"}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + ",\"fields_json\":\"[]\"}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
             finally
@@ -176,7 +177,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                 go.AddComponent<ReflectionProbe>();
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_reflection_probe_bake",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
             finally
@@ -215,7 +216,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_light_set",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"intensity\":2.0,\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "component_not_found");
             }
@@ -233,7 +234,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_reflection_probe_get",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 AssertErrorEnvelope(result, "component_not_found");
             }
             finally
@@ -252,7 +253,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
             var go = new GameObject("LightRoundTrip");
             try
             {
-                var addBody = "{\"instance_id\":" + go.GetInstanceID() +
+                var addBody = "{\"instance_id\":" +InstanceId.Of(go) +
                               ",\"light_type\":\"Directional\",\"intensity\":1.0," +
                               "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var add = BridgeToolRegistry.TryDispatch("unity_open_mcp_light_add", addBody);
@@ -265,7 +266,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                 Assert.AreEqual(LightType.Directional, light.type);
 
                 // Set color + intensity via the typed mutator.
-                var setBody = "{\"instance_id\":" + go.GetInstanceID() +
+                var setBody = "{\"instance_id\":" +InstanceId.Of(go) +
                               ",\"color\":[1,0,0,1],\"intensity\":3.5," +
                               "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var set = BridgeToolRegistry.TryDispatch("unity_open_mcp_light_set", setBody);
@@ -287,7 +288,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
             var go = new GameObject("LightSpot");
             try
             {
-                var addBody = "{\"instance_id\":" + go.GetInstanceID() +
+                var addBody = "{\"instance_id\":" +InstanceId.Of(go) +
                               ",\"light_type\":\"Spot\",\"spot_angle\":45.0," +
                               "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var add = BridgeToolRegistry.TryDispatch("unity_open_mcp_light_add", addBody);
@@ -312,7 +313,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
             try
             {
                 go.AddComponent<Light>();
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch("unity_open_mcp_light_add", body);
                 Assert.IsTrue(result.Success, result.ErrorMessage ?? result.Output);
@@ -337,7 +338,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                 var light = go.AddComponent<Light>();
                 var fieldsJson = "[{\"field\":\"intensity\",\"value\":4.5,\"type\":\"float\"}," +
                                  "{\"field\":\"type\",\"value\":\"Point\",\"type\":\"string\"}]";
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"fields_json\":\"" + JsonEscape(fieldsJson) + "\"," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var mod = BridgeToolRegistry.TryDispatch("unity_open_mcp_light_modify", body);
@@ -362,7 +363,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                 go.AddComponent<Light>();
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_light_modify",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "missing_parameter");
             }
@@ -381,7 +382,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                 go.AddComponent<Light>();
                 var fieldsJson = "[{\"field\":\"bogusField\",\"value\":1,\"type\":\"int\"}," +
                                  "{\"field\":\"intensity\",\"value\":2.0,\"type\":\"float\"}]";
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"fields_json\":\"" + JsonEscape(fieldsJson) + "\"," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch("unity_open_mcp_light_modify", body);
@@ -410,7 +411,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                 var probe = go.AddComponent<ReflectionProbe>();
                 probe.resolution = 256;
                 probe.hdr = true;
-                var body = "{\"instance_id\":" + go.GetInstanceID() + "}";
+                var body = "{\"instance_id\":" +InstanceId.Of(go) + "}";
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_reflection_probe_get", body);
                 Assert.IsTrue(result.Success, result.ErrorMessage ?? result.Output);
@@ -433,7 +434,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                 go.AddComponent<ReflectionProbe>();
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_reflection_probe_bake",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"bake_mode\":\"nope\",\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "invalid_bake_mode");
             }
@@ -452,7 +453,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                 go.AddComponent<ReflectionProbe>();
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_reflection_probe_bake",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"bake_mode\":\"custom\",\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "missing_parameter");
             }
@@ -469,7 +470,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
             try
             {
                 go.AddComponent<ReflectionProbe>();
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"bake_mode\":\"realtime\",\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_reflection_probe_bake", body);
@@ -496,7 +497,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
                     UnityEditor.AssetDatabase.DeleteAsset(CubemapPath);
 
                 go.AddComponent<ReflectionProbe>();
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"bake_mode\":\"custom\",\"target_path\":\"" + CubemapPath + "\"," +
                            "\"paths_hint\":[\"Assets/T.unity\",\"" + CubemapPath + "\"]}";
                 var result = BridgeToolRegistry.TryDispatch(

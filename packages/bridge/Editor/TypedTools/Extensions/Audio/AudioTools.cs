@@ -26,13 +26,13 @@
 // Naming: `unity_open_mcp_audio_<action>` / `unity_open_mcp_audio_mixer_<action>`
 // (snake_case domain prefix). The two mixer tools share the `audio` group with
 // the source/listener tools.
-#pragma warning disable CS0618
 using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Audio;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Audio
 {
@@ -327,7 +327,7 @@ namespace UnityOpenMcpBridge.Extensions.Audio
                 if (i > 0) sb.Append(',');
                 var l = listeners[i];
                 sb.Append('{');
-                sb.Append("\"instanceId\":").Append(l.GetInstanceID()).Append(',');
+                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(l)).Append(',');
                 sb.Append("\"name\":").Append(AudioJson.Esc(l.gameObject.name)).Append(',');
                 sb.Append("\"path\":").Append(AudioJson.Esc(AudioTargets.BuildPath(l.gameObject))).Append(',');
                 sb.Append("\"enabled\":").Append(l.enabled ? "true" : "false");
@@ -411,7 +411,7 @@ namespace UnityOpenMcpBridge.Extensions.Audio
             var sb = new StringBuilder(320);
             sb.Append("\"source\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(source.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(source)).Append(',');
             sb.Append("\"clip\":").Append(source.clip != null
                 ? AudioJson.Esc(source.clip.name) : "\"\"").Append(',');
             sb.Append("\"clipPath\":").Append(source.clip != null

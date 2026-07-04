@@ -12,6 +12,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Animations;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
 {
@@ -91,7 +92,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_constraint_add",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"constraint_type\":\"AimConstraint\"}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
@@ -109,7 +110,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_lod_group_configure",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
             finally
@@ -126,7 +127,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_lod_add_level",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
             finally
@@ -157,7 +158,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_constraint_add",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "missing_parameter");
             }
@@ -175,7 +176,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_constraint_add",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"constraint_type\":\"LookAtConstraint\"," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "invalid_constraint_type");
@@ -194,7 +195,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_constraint_add",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"constraint_type\":\"PositionConstraint\"," +
                     "\"source_path\":\"Does/Not/Exist\"," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
@@ -214,7 +215,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_lod_add_level",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "component_not_found");
             }
@@ -232,7 +233,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_lod_group_configure",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"fade_mode\":\"Bogus\"," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "invalid_fade_mode");
@@ -254,9 +255,9 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             var source = new GameObject("AimSource");
             try
             {
-                var body = "{\"instance_id\":" + host.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(host) +
                            ",\"constraint_type\":\"AimConstraint\"," +
-                           "\"source_instance_id\":" + source.GetInstanceID() +
+                           "\"source_instance_id\":" +InstanceId.Of(source) +
                            ",\"weight\":0.5,\"constraint_active\":true," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch(
@@ -289,7 +290,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             try
             {
                 host.AddComponent<AimConstraint>();
-                var body = "{\"instance_id\":" + host.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(host) +
                            ",\"constraint_type\":\"AimConstraint\"," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch(
@@ -325,9 +326,9 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
                     var host = new GameObject("ConstraintHost_" + typeName);
                     try
                     {
-                        var body = "{\"instance_id\":" + host.GetInstanceID() +
+                        var body = "{\"instance_id\":" +InstanceId.Of(host) +
                                    ",\"constraint_type\":\"" + typeName + "\"," +
-                                   "\"source_instance_id\":" + source.GetInstanceID() +
+                                   "\"source_instance_id\":" +InstanceId.Of(source) +
                                    ",\"constraint_active\":true," +
                                    "\"paths_hint\":[\"Assets/T.unity\"]}";
                         var result = BridgeToolRegistry.TryDispatch(
@@ -365,7 +366,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             var host = new GameObject("LodHost");
             try
             {
-                var body = "{\"instance_id\":" + host.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(host) +
                            ",\"fade_mode\":\"CrossFade\",\"animate_cross_fading\":true," +
                            "\"lod_count\":3,\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch(
@@ -395,7 +396,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             try
             {
                 host.AddComponent<LODGroup>();
-                var body = "{\"instance_id\":" + host.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(host) +
                            ",\"lod_count\":2,\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_lod_group_configure", body);
@@ -429,14 +430,14 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
                 const string mesh2Path = "LodAddHost/LodMesh1";
 
                 // First configure a LODGroup with 1 level.
-                var configBody = "{\"instance_id\":" + host.GetInstanceID() +
+                var configBody = "{\"instance_id\":" +InstanceId.Of(host) +
                                  ",\"lod_count\":1,\"paths_hint\":[\"Assets/T.unity\"]}";
                 var config = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_lod_group_configure", configBody);
                 Assert.IsTrue(config.Success, config.ErrorMessage ?? config.Output);
 
                 // Replace level 0 with mesh1 (in-place).
-                var addBody0 = "{\"instance_id\":" + host.GetInstanceID() +
+                var addBody0 = "{\"instance_id\":" +InstanceId.Of(host) +
                                ",\"index\":0,\"screen_relative_transition_height\":0.6," +
                                "\"renderers\":[\"" + mesh1Path + "\"]," +
                                "\"paths_hint\":[\"Assets/T.unity\"]}";
@@ -447,7 +448,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
                 StringAssert.Contains("\"rendererCount\":1", add0.Output);
 
                 // Append a new level 1 with mesh2.
-                var addBody1 = "{\"instance_id\":" + host.GetInstanceID() +
+                var addBody1 = "{\"instance_id\":" +InstanceId.Of(host) +
                                ",\"index\":1,\"screen_relative_transition_height\":0.2," +
                                "\"renderers\":[\"" + mesh2Path + "\"]," +
                                "\"paths_hint\":[\"Assets/T.unity\"]}";
@@ -480,7 +481,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
             try
             {
                 host.AddComponent<LODGroup>();
-                var body = "{\"instance_id\":" + host.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(host) +
                            ",\"index\":5,\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_lod_add_level", body);

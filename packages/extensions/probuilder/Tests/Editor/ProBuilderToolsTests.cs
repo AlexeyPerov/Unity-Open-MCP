@@ -1,10 +1,10 @@
-#pragma warning disable CS0618
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.ProBuilder;
 using UnityOpenMcpBridge;
 using UnityOpenMcpExtensions.ProBuilder;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpExtensions.ProBuilder.Tests
 {
@@ -120,7 +120,7 @@ namespace UnityOpenMcpExtensions.ProBuilder.Tests
 
                 // Pull the instance id out of the response and get_mesh_info.
                 var id = ExtractInt(create.Output, "instanceId");
-                created = EditorUtility.InstanceIDToObject(id) as GameObject;
+                created = InstanceId.ToObject(id) as GameObject;
                 Assert.IsNotNull(created, "Created GameObject must resolve by instance id.");
                 Assert.IsNotNull(created.GetComponent<ProBuilderMesh>());
 
@@ -149,7 +149,7 @@ namespace UnityOpenMcpExtensions.ProBuilder.Tests
                     "{\"shape_type\":\"Cube\",\"paths_hint\":[\"Assets/PBTest.unity\"]}");
                 Assert.IsTrue(create.Success, create.ErrorMessage ?? create.Output);
                 var id = ExtractInt(create.Output, "instanceId");
-                created = EditorUtility.InstanceIDToObject(id) as GameObject;
+                created = InstanceId.ToObject(id) as GameObject;
                 Assert.IsNotNull(created);
                 var mesh = created.GetComponent<ProBuilderMesh>();
                 int originalFaceCount = mesh.faceCount;
@@ -182,7 +182,7 @@ namespace UnityOpenMcpExtensions.ProBuilder.Tests
                     "{\"shape_type\":\"Cube\",\"paths_hint\":[\"Assets/PBTest.unity\"]}");
                 Assert.IsTrue(create.Success);
                 var id = ExtractInt(create.Output, "instanceId");
-                created = EditorUtility.InstanceIDToObject(id) as GameObject;
+                created = InstanceId.ToObject(id) as GameObject;
                 Assert.IsNotNull(created);
                 var mesh = created.GetComponent<ProBuilderMesh>();
                 int originalFaceCount = mesh.faceCount; // 6 for a Cube
@@ -218,7 +218,7 @@ namespace UnityOpenMcpExtensions.ProBuilder.Tests
                     "{\"shape_type\":\"Cube\",\"paths_hint\":[\"Assets/PBTest.unity\"]}");
                 Assert.IsTrue(create.Success);
                 var id = ExtractInt(create.Output, "instanceId");
-                created = EditorUtility.InstanceIDToObject(id) as GameObject;
+                created = InstanceId.ToObject(id) as GameObject;
 
                 var extrudeBody = "{\"instance_id\":" + id + "," +
                                   "\"face_indices\":[999]," +
@@ -246,7 +246,7 @@ namespace UnityOpenMcpExtensions.ProBuilder.Tests
                     "{\"shape_type\":\"Cube\",\"paths_hint\":[\"Assets/PBTest.unity\"]}");
                 Assert.IsTrue(create.Success);
                 var id = ExtractInt(create.Output, "instanceId");
-                created = EditorUtility.InstanceIDToObject(id) as GameObject;
+                created = InstanceId.ToObject(id) as GameObject;
 
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_probuilder_extrude",
@@ -271,7 +271,7 @@ namespace UnityOpenMcpExtensions.ProBuilder.Tests
                     "{\"shape_type\":\"Cube\",\"paths_hint\":[\"Assets/PBTest.unity\"]}");
                 Assert.IsTrue(create.Success);
                 var id = ExtractInt(create.Output, "instanceId");
-                created = EditorUtility.InstanceIDToObject(id) as GameObject;
+                created = InstanceId.ToObject(id) as GameObject;
 
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_probuilder_extrude",
@@ -294,7 +294,7 @@ namespace UnityOpenMcpExtensions.ProBuilder.Tests
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_probuilder_get_mesh_info",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("component_not_found", result.ErrorCode);
             }

@@ -14,7 +14,6 @@
 // Naming: tool ids follow `unity_open_mcp_timeline_<action>` (snake_case
 // domain prefix).
 #if UNITY_OPEN_MCP_EXT_TIMELINE
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEditor;
@@ -22,6 +21,7 @@ using UnityEngine.Playables;
 using UnityEngine.Timeline;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Timeline
 {
@@ -75,7 +75,7 @@ namespace UnityOpenMcpBridge.Extensions.Timeline
         {
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj is GameObject go) return go;
             }
 

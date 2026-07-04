@@ -2,6 +2,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using UnityOpenMcpBridge.TypedTools;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests
 {
@@ -93,7 +94,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var r = PrefabTools.ResolveInstance(
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 Assert.IsFalse(r.Ok);
                 Assert.AreEqual("not_a_prefab", r.Result.ErrorCode);
             }

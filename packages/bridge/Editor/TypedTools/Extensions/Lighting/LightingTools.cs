@@ -31,7 +31,6 @@
 //
 // Naming: `unity_open_mcp_light_<action>` / `unity_open_mcp_reflection_probe_<action>`
 // / `unity_open_mcp_skybox_<action>` (snake_case domain prefix).
-#pragma warning disable CS0618
 using System.Globalization;
 using System.Reflection;
 using System.Text;
@@ -39,6 +38,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Lighting
 {
@@ -409,7 +409,7 @@ namespace UnityOpenMcpBridge.Extensions.Lighting
 
             var sb = new StringBuilder(320);
             sb.Append("\"probe\":{");
-            sb.Append("\"instanceId\":").Append(probe.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(probe)).Append(',');
             sb.Append("\"mode\":").Append(LightingJson.Esc(probe.mode.ToString())).Append(',');
             sb.Append("\"resolution\":").Append(probe.resolution).Append(',');
             sb.Append("\"hdr\":").Append(probe.hdr ? "true" : "false").Append(',');
@@ -542,7 +542,7 @@ namespace UnityOpenMcpBridge.Extensions.Lighting
             var sb = new StringBuilder(260);
             sb.Append("\"light\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(light.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(light)).Append(',');
             sb.Append("\"type\":").Append(LightingJson.Esc(light.type.ToString())).Append(',');
             sb.Append("\"color\":").Append(Color4(light.color)).Append(',');
             sb.Append("\"intensity\":").Append(Num(light.intensity)).Append(',');

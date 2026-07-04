@@ -2,6 +2,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using UnityOpenMcpBridge.TypedTools;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests
 {
@@ -14,7 +15,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Add(
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("missing_parameter", result.ErrorCode);
             }
@@ -28,7 +29,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Add(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"component_types\":[\"__DefinitelyNotAType__\"]}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 StringAssert.Contains("\"errors\":", result.Output);
@@ -45,7 +46,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Add(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"component_types\":[\"UnityEngine.Rigidbody\"]}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 Assert.IsNotNull(go.GetComponent<Rigidbody>());
@@ -61,7 +62,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Add(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"component_types\":[\"BoxCollider\"]}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 Assert.IsNotNull(go.GetComponent<BoxCollider>());
@@ -77,7 +78,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Destroy(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"component_types\":[\"UnityEngine.BoxCollider\"]}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 Assert.IsNull(go.GetComponent<BoxCollider>());
@@ -93,7 +94,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Get(
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("missing_parameter", result.ErrorCode);
             }
@@ -107,7 +108,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Get(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"type_name\":\"UnityEngine.Transform\"}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 StringAssert.Contains("\"type\":\"UnityEngine.Transform\"", result.Output);
@@ -125,7 +126,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Get(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"type_name\":\"UnityEngine.Transform\",\"max_fields\":1,\"include_properties\":false}");
                 Assert.IsTrue(result.Success);
                 // Only one field should be emitted (count = 1).
@@ -141,7 +142,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Get(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"type_name\":\"__Nope__\"}");
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("type_not_found", result.ErrorCode);
@@ -156,7 +157,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"type_name\":\"UnityEngine.Transform\"}");
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("missing_parameter", result.ErrorCode);
@@ -171,7 +172,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"type_name\":\"UnityEngine.Transform\"," +
                     "\"fields\":[{\"path\":\"__NoSuchField__\",\"value\":1}]}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
@@ -188,7 +189,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = ComponentsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"type_name\":\"UnityEngine.Transform\"," +
                     "\"fields\":[{\"path\":\"m_LocalPosition\",\"value\":[5,6,7]}]}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);

@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, openSync, closeSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, openSync, closeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   editorLogsDir,
   editorLogPath,
+  projectEditorLogPath,
+  resolveEditorLogPath,
   readLogTail,
   DEFAULT_LOG_TAIL_BYTES,
 } from "./unity-log.js";
@@ -49,6 +51,46 @@ test("editorLogsDir resolves the Linux unity3d folder via XDG_CONFIG_HOME", () =
 test("editorLogPath appends Editor.log to the resolved dir", () => {
   assert.ok(editorLogPath("darwin").endsWith("Editor.log"));
   assert.ok(editorLogPath("darwin").endsWith(join("Unity", "Editor.log")));
+});
+
+// ---------------------------------------------------------------------------
+// projectEditorLogPath / resolveEditorLogPath — Unity 6000.5+ project log
+// ---------------------------------------------------------------------------
+
+test("projectEditorLogPath resolves <project>/Logs/Editor.log", () => {
+  const p = projectEditorLogPath("/Users/me/MyProject");
+  assert.equal(p, join("/Users/me/MyProject", "Logs", "Editor.log"));
+});
+
+test("projectEditorLogPath returns null when projectPath is null/undefined/empty", () => {
+  assert.equal(projectEditorLogPath(null), null);
+  assert.equal(projectEditorLogPath(undefined), null);
+  assert.equal(projectEditorLogPath(""), null);
+});
+
+test("resolveEditorLogPath prefers the project-relative log when it exists", () => {
+  // Create a fake project with a Logs/Editor.log; the resolver must pick it
+  // over the global log.
+  const project = mkdtempSync(join(tmpdir(), "proj-"));
+  mkdirSync(join(project, "Logs"));
+  writeFileSync(join(project, "Logs", "Editor.log"), "project log content");
+
+  const resolved = resolveEditorLogPath(project, "darwin");
+  assert.equal(resolved, join(project, "Logs", "Editor.log"));
+});
+
+test("resolveEditorLogPath falls back to the global log when the project log is absent", () => {
+  // A project dir with no Logs/Editor.log → resolver returns the global path.
+  const project = mkdtempSync(join(tmpdir(), "proj-"));
+  // No Logs/ folder created → project log does not exist.
+  const resolved = resolveEditorLogPath(project, "darwin");
+  assert.equal(resolved, editorLogPath("darwin"));
+});
+
+test("resolveEditorLogPath falls back to the global log when projectPath is null", () => {
+  // No project context (e.g. the tool was called without --project) → global.
+  const resolved = resolveEditorLogPath(null, "darwin");
+  assert.equal(resolved, editorLogPath("darwin"));
 });
 
 // ---------------------------------------------------------------------------

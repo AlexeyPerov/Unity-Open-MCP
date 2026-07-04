@@ -21,7 +21,7 @@ export const uiLayoutGroupAdd: Tool = {
     required: ["layout_type", "paths_hint"],
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Parent GameObject instance ID. Highest priority resolver.",
       },

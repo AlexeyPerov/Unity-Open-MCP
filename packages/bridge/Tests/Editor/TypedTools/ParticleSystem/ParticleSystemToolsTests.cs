@@ -10,6 +10,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
 {
@@ -125,7 +126,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_particle_system_get",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 AssertErrorEnvelope(result, "component_not_found");
             }
             finally
@@ -145,7 +146,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
             try
             {
                 go.AddComponent<ParticleSystem>();
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"include_main\":true,\"include_emission\":true}";
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_particle_system_get", body);
@@ -170,7 +171,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
             {
                 var ps = go.AddComponent<ParticleSystem>();
                 // Bump from the default (1000) to a known value.
-                var modifyBody = "{\"instance_id\":" + go.GetInstanceID() +
+                var modifyBody = "{\"instance_id\":" +InstanceId.Of(go) +
                                  ",\"module\":\"main\"," +
                                  "\"fields_json\":\"{\\\"maxParticles\\\":5000,\\\"loop\\\":false}\"," +
                                  "\"paths_hint\":[\"Assets/PSTest.unity\"]}";
@@ -186,7 +187,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
                 // Verify the read side reflects it.
                 var get = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_particle_system_get",
-                    "{\"instance_id\":" + go.GetInstanceID() + ",\"include_main\":true}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + ",\"include_main\":true}");
                 Assert.IsTrue(get.Success);
                 StringAssert.Contains("\"maxParticles\":5000", get.Output);
             }
@@ -203,7 +204,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
             try
             {
                 var ps = go.AddComponent<ParticleSystem>();
-                var modifyBody = "{\"instance_id\":" + go.GetInstanceID() +
+                var modifyBody = "{\"instance_id\":" +InstanceId.Of(go) +
                                  ",\"module\":\"emission\"," +
                                  "\"fields_json\":\"{\\\"rateOverTime\\\":42.0,\\\"enabled\\\":true}\"," +
                                  "\"paths_hint\":[\"Assets/PSTest.unity\"]}";
@@ -233,7 +234,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
                 go.AddComponent<ParticleSystem>();
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_particle_system_modify",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"module\":\"not_a_module\"," +
                     "\"fields_json\":\"{}\"," +
                     "\"paths_hint\":[\"Assets/PSTest.unity\"]}");
@@ -254,7 +255,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
                 go.AddComponent<ParticleSystem>();
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_particle_system_modify",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"module\":\"main\"," +
                     "\"fields_json\":\"not an object\"," +
                     "\"paths_hint\":[\"Assets/PSTest.unity\"]}");
@@ -278,7 +279,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
                 // can iterate on the valid subset.
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_particle_system_modify",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"module\":\"main\"," +
                     "\"fields_json\":\"{\\\"maxParticles\\\":200,\\\"bogusField\\\":1}\"," +
                     "\"paths_hint\":[\"Assets/PSTest.unity\"]}");

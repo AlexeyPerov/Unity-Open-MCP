@@ -1,4 +1,3 @@
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -6,6 +5,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.TypedTools
 {
@@ -365,7 +365,7 @@ namespace UnityOpenMcpBridge.TypedTools
         // view axis. Mutating (it moves the editor camera + sets Selection).
         public static ToolDispatchResult Focus(string body)
         {
-            var instanceId = JsonBody.GetInt(body, "instance_id", 0);
+            var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             var path = JsonBody.GetString(body, "path");
             var name = JsonBody.GetString(body, "name");
             var target = TypedTargets.ResolveGameObject(instanceId, path, name);
@@ -420,7 +420,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
             var sb = new StringBuilder(160);
             sb.Append("{\"status\":\"ok\",\"focused\":true,");
-            sb.Append("\"instanceId\":").Append(target.GetInstanceID());
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(target));
             sb.Append(",\"name\":\"").Append(TypedTargets.Esc(target.name)).Append("\"");
             sb.Append(",\"path\":\"").Append(TypedTargets.Esc(TypedTargets.HierarchyPath(target))).Append("\"");
             sb.Append(",\"pivot\":");
@@ -573,7 +573,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append("{\"name\":\"").Append(TypedTargets.Esc(go.name)).Append("\"");
             if (detail == DetailLevel.Verbose)
             {
-                sb.Append(",\"instanceId\":").Append(go.GetInstanceID());
+                sb.Append(",\"instanceId\":").Append(InstanceId.ToJson(go));
             }
             if (detail >= DetailLevel.Normal)
             {
@@ -593,7 +593,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 var c = comps[i];
                 sb.Append("{\"name\":\"").Append(TypedTargets.Esc(c == null ? "<missing>" : c.GetType().Name));
                 sb.Append("\",\"fullName\":\"").Append(TypedTargets.Esc(c == null ? "" : c.GetType().FullName));
-                sb.Append("\",\"instanceId\":").Append(c == null ? 0 : c.GetInstanceID()).Append('}');
+                sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(c)).Append('}');
             }
             sb.Append(']');
 

@@ -1,4 +1,3 @@
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -6,6 +5,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.TypedTools
 {
@@ -143,7 +143,7 @@ namespace UnityOpenMcpBridge.TypedTools
             // Targeted lookup (instance_id / path / name) short-circuits to a
             // single-object result when it resolves, so an agent can use Find
             // as the canonical "acquire a handle" tool.
-            var instanceId = JsonBody.GetInt(body, "instance_id", 0);
+            var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             var path = JsonBody.GetString(body, "path");
             var name = JsonBody.GetString(body, "name");
             if (instanceId != 0 || !string.IsNullOrEmpty(path) || !string.IsNullOrEmpty(name))
@@ -238,7 +238,7 @@ namespace UnityOpenMcpBridge.TypedTools
             // Resolve the target with name_target so `name` stays free for
             // the new value. Falls back to `name` when name_target is unset
             // so callers without a rename still work via the standard key.
-            var instanceId = JsonBody.GetInt(body, "instance_id", 0);
+            var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             var path = JsonBody.GetString(body, "path");
             var nameTarget = JsonBody.GetString(body, "name_target");
             var resolveName = string.IsNullOrEmpty(nameTarget)
@@ -591,7 +591,7 @@ namespace UnityOpenMcpBridge.TypedTools
             var go = resolved.GameObject;
 
             var parentPath = JsonBody.GetString(body, "parent_path");
-            var parentInstanceId = JsonBody.GetInt(body, "parent_instance_id", 0);
+            var parentInstanceId = JsonBody.GetLongFlexible(body, "parent_instance_id", 0);
             var worldPositionStays = JsonBody.GetBool(body, "world_position_stays", true);
 
             GameObject parentGo = null;
@@ -649,7 +649,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         public static InstanceResolve ResolveInstance(string body)
         {
-            var instanceId = JsonBody.GetInt(body, "instance_id", 0);
+            var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             var path = JsonBody.GetString(body, "path");
             var name = JsonBody.GetString(body, "name");
 
@@ -746,7 +746,7 @@ namespace UnityOpenMcpBridge.TypedTools
         {
             var t = go.transform;
             var sb = new StringBuilder(256);
-            sb.Append("{\"instanceId\":").Append(go.GetInstanceID());
+            sb.Append("{\"instanceId\":").Append(InstanceId.ToJson(go));
             sb.Append(",\"name\":\"").Append(TypedTargets.Esc(go.name));
             sb.Append("\",\"path\":\"").Append(TypedTargets.Esc(TypedTargets.HierarchyPath(go)));
             sb.Append("\",\"active\":").Append(go.activeInHierarchy ? "true" : "false");
@@ -763,7 +763,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 var c = comps[i];
                 sb.Append("{\"name\":\"").Append(TypedTargets.Esc(c == null ? "<missing>" : c.GetType().Name));
                 sb.Append("\",\"fullName\":\"").Append(TypedTargets.Esc(c == null ? "" : c.GetType().FullName));
-                sb.Append("\",\"instanceId\":").Append(c == null ? 0 : c.GetInstanceID()).Append("}");
+                sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(c)).Append("}");
             }
             sb.Append("]}");
             return sb.ToString();

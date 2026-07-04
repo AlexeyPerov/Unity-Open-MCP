@@ -20,6 +20,7 @@ using UnityEngine.Playables;
 using UnityEngine.Timeline;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.Extensions.Timeline;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.Timeline
 {
@@ -183,7 +184,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Timeline
 
             var result = BridgeToolRegistry.TryDispatch(
                 "unity_open_mcp_timeline_director_bind",
-                "{\"instance_id\":" + tempDirectorHost.GetInstanceID() + "," +
+                "{\"instance_id\":" +InstanceId.Of(tempDirectorHost) + "," +
                 "\"asset_path\":\"" + tempAssetPath + "\"," +
                 "\"paths_hint\":[\"Assets/TimelineTest.unity\",\"" + tempAssetPath + "\"]}");
             Assert.IsNotNull(result);

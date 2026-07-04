@@ -2,6 +2,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using UnityOpenMcpBridge.TypedTools;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests
 {
@@ -110,7 +111,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Destroy(
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 Assert.IsTrue(go == null); // DestroyImmediate nulls the ref in EditMode.
             }
@@ -127,7 +128,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Duplicate(
-                    "{\"instance_id\":" + original.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(original) + "}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 StringAssert.Contains("\"action\":\"duplicated\"", result.Output);
                 var clone = GameObject.Find("__MCPTest_GO_DupSource");
@@ -158,7 +159,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Find(
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 Assert.IsTrue(result.Success);
                 StringAssert.Contains("\"count\":1", result.Output);
                 StringAssert.Contains("\"path\":\"__MCPTest_GO_Find\"", result.Output);
@@ -197,7 +198,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("missing_parameter", result.ErrorCode);
             }
@@ -225,7 +226,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() + ",\"tag\":\"__DefinitelyNotATag__\"}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + ",\"tag\":\"__DefinitelyNotATag__\"}");
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("invalid_tag", result.ErrorCode);
             }
@@ -239,7 +240,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() + ",\"layer\":\"99\"}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + ",\"layer\":\"99\"}");
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("invalid_layer", result.ErrorCode);
             }
@@ -253,7 +254,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"position\":\"1,2,3\",\"rotation\":\"0,90,0\",\"scale\":\"2,2,2\"}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 Assert.AreEqual(new Vector3(1, 2, 3), go.transform.position);
@@ -272,7 +273,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"gameObjectDiffs\":{\"name\":\"__MCPTest_GO_DiffRenameDone\"}}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 Assert.AreEqual("__MCPTest_GO_DiffRenameDone", go.name);
@@ -291,7 +292,7 @@ namespace UnityOpenMcpBridge.Tests
             {
                 rb.mass = 1f;
                 var result = GameObjectsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"jsonPatchesPerGameObject\":{\"Rigidbody\":{\"mass\":2.5}}}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 Assert.AreEqual(2.5f, rb.mass, 0.0001f, "jsonPatch should update Rigidbody.mass via reflection.");
@@ -312,7 +313,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"pathPatchesPerGameObject\":{\"__MCPTest_GO_PathChild\":{\"active\":false}}}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 Assert.IsFalse(child.activeSelf, "pathPatch should deactivate the child.");
@@ -336,7 +337,7 @@ namespace UnityOpenMcpBridge.Tests
             {
                 rb.mass = 1f;
                 var result = GameObjectsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"jsonPatchesPerGameObject\":{\"Rigidbody\":{\"mass\":3.0}}" +
                     ",\"pathPatchesPerGameObject\":{\"__MCPTest_GO_ThreeChild\":{\"active\":false}}" +
                     ",\"gameObjectDiffs\":{\"layer\":2}}");
@@ -363,7 +364,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"jsonPatchesPerGameObject\":{\"Rigidbody\":{\"mass\":4.0,\"__NopeField__\":1}}}");
                 // mass applied → status ok; bad field recorded in errors[], not fatal.
                 Assert.IsTrue(result.Success, result.ErrorMessage);
@@ -380,7 +381,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.Modify(
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"jsonPatchesPerGameObject\":{\"Rigidbody\":{\"mass\":1.0}}}");
                 // No Rigidbody on the GO → recorded in jsonPatches.failed. Nothing
                 // else applied, so status in the output JSON is "error", but the
@@ -399,7 +400,7 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.SetParent(
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("missing_parameter", result.ErrorCode);
             }
@@ -416,8 +417,8 @@ namespace UnityOpenMcpBridge.Tests
             {
                 // Try to make parent a child of child (cycle).
                 var result = GameObjectsTools.SetParent(
-                    "{\"instance_id\":" + parent.GetInstanceID() +
-                    ",\"parent_instance_id\":" + child.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(parent) +
+                    ",\"parent_instance_id\":" +InstanceId.Of(child) + "}");
                 Assert.IsFalse(result.Success);
                 Assert.AreEqual("invalid_parameter", result.ErrorCode);
             }
@@ -436,8 +437,8 @@ namespace UnityOpenMcpBridge.Tests
             try
             {
                 var result = GameObjectsTools.SetParent(
-                    "{\"instance_id\":" + child.GetInstanceID() +
-                    ",\"parent_instance_id\":" + parent.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(child) +
+                    ",\"parent_instance_id\":" +InstanceId.Of(parent) + "}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
                 Assert.AreEqual(parent.transform, child.transform.parent);
             }

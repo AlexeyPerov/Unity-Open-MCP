@@ -8,7 +8,6 @@
 // Unity install, so this domain ships UNGATED — no UNITY_OPEN_MCP_EXT_2D
 // define. The `2d` tool group (shared with SpriteAtlas) is still hidden from
 // ListTools until the session activates it via manage_tools.
-#pragma warning disable CS0618
 using System.Text;
 
 namespace UnityOpenMcpBridge.Extensions.Texture

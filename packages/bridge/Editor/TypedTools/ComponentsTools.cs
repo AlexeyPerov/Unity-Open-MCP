@@ -1,10 +1,10 @@
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
+using UnityOpenMcpBridge.ObjectRefs;
 
 
 namespace UnityOpenMcpBridge.TypedTools
@@ -67,7 +67,7 @@ namespace UnityOpenMcpBridge.TypedTools
                     errors.Add($"Component '{rawType}' was not added (it may disallow multiples and already exist).");
                     continue;
                 }
-                added.Add($"{type.FullName}#{comp.GetInstanceID()}");
+                added.Add($"{type.FullName}#{InstanceId.Of(comp)}");
             }
 
             if (added.Count > 0)
@@ -144,7 +144,7 @@ namespace UnityOpenMcpBridge.TypedTools
             var sb = new StringBuilder(1024);
             sb.Append("{\"type\":\"").Append(TypedTargets.Esc(component.GetType().FullName));
             sb.Append("\",\"name\":\"").Append(TypedTargets.Esc(component.GetType().Name));
-            sb.Append("\",\"instanceId\":").Append(component.GetInstanceID());
+            sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(component));
             sb.Append(",\"enabled\":").Append(IsEnabled(component) ? "true" : "false");
 
             var so = new SerializedObject(component);
@@ -437,10 +437,10 @@ namespace UnityOpenMcpBridge.TypedTools
             // component_instance_id is a separate key from instance_id so a
             // single body can resolve both the host GameObject (instance_id)
             // and a specific component on it (component_instance_id).
-            var componentInstanceId = JsonBody.GetInt(body, "component_instance_id", 0);
+            var componentInstanceId = JsonBody.GetLongFlexible(body, "component_instance_id", 0);
             if (componentInstanceId != 0)
             {
-                var found = EditorUtility.InstanceIDToObject(componentInstanceId) as Component;
+                var found = InstanceId.ToObject(componentInstanceId) as Component;
                 if (found == null || found.gameObject != go)
                 {
                     error = ToolDispatchResult.Fail("component_not_found",
@@ -560,7 +560,7 @@ namespace UnityOpenMcpBridge.TypedTools
                         var sb = new StringBuilder(96);
                         sb.Append("{\"name\":\"").Append(TypedTargets.Esc(obj.name));
                         sb.Append("\",\"type\":\"").Append(TypedTargets.Esc(obj.GetType().FullName));
-                        sb.Append("\",\"instanceId\":").Append(obj.GetInstanceID()).Append("}");
+                        sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(obj)).Append("}");
                         return sb.ToString();
                     }
                 case SerializedPropertyType.LayerMask:
@@ -690,7 +690,7 @@ namespace UnityOpenMcpBridge.TypedTools
                         if (!string.IsNullOrEmpty(idStr)
                             && int.TryParse(idStr.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
                         {
-                            sp.objectReferenceValue = EditorUtility.InstanceIDToObject(id);
+                            sp.objectReferenceValue = InstanceId.ToObject(id);
                             break;
                         }
                         throw new System.FormatException("object_reference value must be {\"path\": \"...\"}, {\"asset_path\": \"...\"}, {\"instance_id\": N}, or null.");
@@ -812,7 +812,7 @@ namespace UnityOpenMcpBridge.TypedTools
                         var sb = new StringBuilder(96);
                         sb.Append("{\"name\":\"").Append(TypedTargets.Esc(uo.name));
                         sb.Append("\",\"type\":\"").Append(TypedTargets.Esc(uo.GetType().FullName));
-                        sb.Append("\",\"instanceId\":").Append(uo.GetInstanceID()).Append("}");
+                        sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(uo)).Append("}");
                         return sb.ToString();
                     }
                 default:

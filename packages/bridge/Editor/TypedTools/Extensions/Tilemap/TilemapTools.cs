@@ -25,13 +25,13 @@
 //
 // Naming: `unity_open_mcp_tilemap_<action>` (snake_case domain prefix).
 #if UNITY_OPEN_MCP_EXT_TILEMAP
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEditor;
 using UnityEngine.Tilemaps;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Tilemap
 {
@@ -109,9 +109,9 @@ namespace UnityOpenMcpBridge.Extensions.Tilemap
             var tilemap = tilemapGo.GetComponent<Tilemap>();
             var sb = new StringBuilder(200);
             sb.Append("\"tilemap\":{");
-            sb.Append("\"gridInstanceId\":").Append(grid.GetInstanceID()).Append(',');
+            sb.Append("\"gridInstanceId\":").Append(InstanceId.ToJson(grid)).Append(',');
             sb.Append("\"gridPath\":").Append(TilemapJson.Esc(TilemapTargets.BuildPath(grid))).Append(',');
-            sb.Append("\"tilemapInstanceId\":").Append(tilemapGo.GetInstanceID()).Append(',');
+            sb.Append("\"tilemapInstanceId\":").Append(InstanceId.ToJson(tilemapGo)).Append(',');
             sb.Append("\"tilemapPath\":").Append(TilemapJson.Esc(TilemapTargets.BuildPath(tilemapGo))).Append(',');
             sb.Append("\"cellBounds\":").Append(TilemapJson.Vec3Int(tilemap.cellBounds.size));
             sb.Append('}');
@@ -313,7 +313,7 @@ namespace UnityOpenMcpBridge.Extensions.Tilemap
             var sb = new StringBuilder(160);
             sb.Append("\"tileAsset\":{");
             sb.Append("\"assetPath\":").Append(TilemapJson.Esc(asset_path)).Append(',');
-            sb.Append("\"instanceId\":").Append(tile.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(tile)).Append(',');
             sb.Append("\"name\":").Append(TilemapJson.Esc(tile.name)).Append(',');
             sb.Append("\"sprite\":").Append(TilemapJson.Esc(tile.sprite != null ? tile.sprite.name : ""));
             sb.Append('}');
@@ -392,7 +392,7 @@ namespace UnityOpenMcpBridge.Extensions.Tilemap
             var sb = new StringBuilder(160);
             sb.Append("\"ruleTile\":{");
             sb.Append("\"assetPath\":").Append(TilemapJson.Esc(asset_path)).Append(',');
-            sb.Append("\"instanceId\":").Append(ruleTile.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(ruleTile)).Append(',');
             sb.Append("\"name\":").Append(TilemapJson.Esc(ruleTile.name));
             sb.Append('}');
             return TilemapJson.Ok(sb.ToString());

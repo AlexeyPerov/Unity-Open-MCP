@@ -1,9 +1,9 @@
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEditor;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpExtensions.ProBuilder
 {
@@ -60,11 +60,11 @@ namespace UnityOpenMcpExtensions.ProBuilder
     // the same addressing they learned for gameobject_* / component_*.
     static class ProBuilderTargets
     {
-        public static GameObject Resolve(int instanceId, string path, string name)
+        public static GameObject Resolve(long instanceId, string path, string name)
         {
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj is GameObject go) return go;
             }
 

@@ -15,7 +15,7 @@ export const gameobjectSetParent: Tool = {
     required: ["paths_hint"],
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Child GameObject instance ID. Highest priority resolver.",
       },
@@ -28,7 +28,7 @@ export const gameobjectSetParent: Tool = {
         description: "Child GameObject name (first match). Lowest priority resolver.",
       },
       parent_instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description:
           "New parent GameObject instance ID. Takes precedence over parent_path when both are set.",

@@ -9,7 +9,6 @@
 // contracts) from the former standalone extension pack at
 // packages/extensions/animation — only the namespace changed.
 #if UNITY_OPEN_MCP_EXT_ANIMATION
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -19,6 +18,7 @@ using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Animation
 {
@@ -135,7 +135,7 @@ namespace UnityOpenMcpBridge.Extensions.Animation
             sb.Append("{\"status\":\"ok\",\"controller\":{");
             sb.Append("\"name\":").Append(AnimationJson.Esc(controller.name)).Append(',');
             sb.Append("\"assetPath\":").Append(AnimationJson.Esc(AnimationJson.Normalize(asset_path))).Append(',');
-            sb.Append("\"instanceId\":").Append(controller.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(controller)).Append(',');
 
             // Parameters.
             sb.Append("\"parameters\":[");

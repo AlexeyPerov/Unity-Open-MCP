@@ -18,6 +18,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.Extensions.Cinemachine;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.Cinemachine
 {
@@ -158,7 +159,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Cinemachine
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_cinemachine_set_lens",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
                 Assert.IsTrue(result.Success);
@@ -185,7 +186,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Cinemachine
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_cinemachine_set_body",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
                 Assert.IsTrue(result.Success);
@@ -228,7 +229,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Cinemachine
 
                 var brain = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_cinemachine_brain_ensure",
-                    "{\"instance_id\":" + brainHost.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(brainHost) +
                     ",\"paths_hint\":[\"Assets/CinemachineTest.unity\"]}");
                 Assert.IsNotNull(brain);
                 Assert.IsTrue(brain.Success, brain.ErrorMessage ?? brain.Output);
@@ -245,7 +246,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Cinemachine
 
                 var id = ExtractInt(create.Output, "instanceId");
                 Assert.AreNotEqual(0, id);
-                camera = EditorUtility.InstanceIDToObject(id) as GameObject;
+                camera = InstanceId.ToObject(id) as GameObject;
                 Assert.IsNotNull(camera);
 
                 // Set lens.

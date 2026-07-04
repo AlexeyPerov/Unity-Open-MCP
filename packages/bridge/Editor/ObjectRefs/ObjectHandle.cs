@@ -6,8 +6,6 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-// Deliberate use of deprecated GetInstanceID() / EditorUtility.InstanceIDToObject() — see docs/code-conventions.md §Instance IDs.
-#pragma warning disable CS0618
 namespace UnityOpenMcpBridge.ObjectRefs
 {
     /// <summary>
@@ -52,7 +50,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
 
             var sb = new StringBuilder(128);
             sb.Append('{');
-            sb.Append('"').Append(ObjectIdKey).Append("\":").Append(obj.GetInstanceID());
+            sb.Append('"').Append(ObjectIdKey).Append("\":").Append(InstanceId.ToJson(obj));
             sb.Append(",\"").Append(TypeKey).Append("\":\"").Append(Escape(obj.GetType().FullName)).Append('"');
             sb.Append(",\"").Append(NameKey).Append("\":\"").Append(Escape(obj.name)).Append('"');
 
@@ -79,7 +77,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
                 var parentPath = GetHierarchyPath(parentGo);
                 if (!string.IsNullOrEmpty(parentPath))
                     sb.Append(",\"").Append(GameObjectPathKey).Append("\":\"").Append(Escape(parentPath)).Append('"');
-                sb.Append(",\"").Append(GameObjectIdKey).Append("\":").Append(parentGo.GetInstanceID());
+                sb.Append(",\"").Append(GameObjectIdKey).Append("\":").Append(InstanceId.ToJson(parentGo));
             }
 
             sb.Append('}');
@@ -92,7 +90,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
         /// with agent-actionable guidance when all locators fail.
         /// </summary>
         public static UnityEngine.Object Resolve(
-            int instanceId,
+            long instanceId,
             string typeName,
             string name,
             string path,
@@ -100,12 +98,12 @@ namespace UnityOpenMcpBridge.ObjectRefs
             string assetGuid,
             out string error,
             string gameObjectPath = null,
-            int gameObjectId = 0)
+            long gameObjectId = 0)
         {
             // 1. Canonical instance ID — fast, but invalidated by domain reload.
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj != null)
                 {
                     error = null;
@@ -162,7 +160,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             {
                 GameObject parent = null;
                 if (gameObjectId != 0)
-                    parent = EditorUtility.InstanceIDToObject(gameObjectId) as GameObject;
+                    parent = InstanceId.ToObject(gameObjectId) as GameObject;
                 if (parent == null && !string.IsNullOrEmpty(gameObjectPath))
                     parent = FindByPath(gameObjectPath);
 
@@ -205,14 +203,14 @@ namespace UnityOpenMcpBridge.ObjectRefs
 
             // Bare integer → instance ID shorthand.
             var trimmed = handleJson.Trim();
-            if (int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var bareId))
+            if (long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var bareId))
             {
                 return Resolve(bareId, null, null, null, null, null, out error);
             }
 
-            var instanceId = JsonBody.GetInt(handleJson, ObjectIdKey, 0);
+            var instanceId = JsonBody.GetLongFlexible(handleJson, ObjectIdKey, 0);
             if (instanceId == 0)
-                instanceId = JsonBody.GetInt(handleJson, "instanceId", 0);
+                instanceId = JsonBody.GetLongFlexible(handleJson, "instanceId", 0);
 
             var typeName = JsonBody.GetString(handleJson, TypeKey);
             if (typeName == null)
@@ -223,7 +221,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             var assetPath = JsonBody.GetString(handleJson, AssetPathKey);
             var assetGuid = JsonBody.GetString(handleJson, AssetGuidKey);
             var gameObjectPath = JsonBody.GetString(handleJson, GameObjectPathKey);
-            var gameObjectId = JsonBody.GetInt(handleJson, GameObjectIdKey, 0);
+            var gameObjectId = JsonBody.GetLongFlexible(handleJson, GameObjectIdKey, 0);
 
             return Resolve(instanceId, typeName, name, path, assetPath, assetGuid,
                 out error, gameObjectPath, gameObjectId);
@@ -239,7 +237,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
             return trimmed.StartsWith("{") && trimmed.Contains(ObjectIdKey);
         }
 
-        private static string BuildStaleHandleError(int instanceId, string typeName)
+        private static string BuildStaleHandleError(long instanceId, string typeName)
         {
             var sb = new StringBuilder(256);
             sb.Append("Object handle is stale or invalid");

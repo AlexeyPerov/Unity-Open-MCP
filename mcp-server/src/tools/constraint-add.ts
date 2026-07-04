@@ -8,7 +8,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // model as gameobject_* / component_*). Param shape: type + source + activate.
 const targetSchema = {
   instance_id: {
-    type: "integer",
+    type: ["string", "integer"],
     default: 0,
     description: "Host GameObject instance ID. Highest priority resolver.",
   },
@@ -64,7 +64,7 @@ export const constraintAdd: Tool = {
         description: "Source GameObject hierarchy path (its Transform is taken). Optional.",
       },
       source_instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Source GameObject instance ID. Highest priority source resolver.",
       },

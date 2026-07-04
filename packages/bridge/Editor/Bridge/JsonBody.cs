@@ -136,6 +136,25 @@ namespace UnityOpenMcpBridge
         }
 
         /// <summary>
+        /// Parse an instance-ID-shaped field that may arrive as a JSON number
+        /// OR a JSON string (the canonical form on Unity 6000.5+, where the
+        /// 8-byte EntityId exceeds JS Number.MAX_SAFE_INTEGER and is serialized
+        /// as a quoted string for lossless round-trip). Returns the parsed
+        /// long, or <paramref name="defaultValue"/> when missing/unparseable.
+        /// </summary>
+        public static long GetLongFlexible(string json, string key, long defaultValue = 0)
+        {
+            var raw = GetRawValue(json, key);
+            if (raw == null) return defaultValue;
+            var s = raw.Trim();
+            // Strip surrounding quotes if present (JSON string form).
+            if (s.Length >= 2 && s[0] == '"' && s[s.Length - 1] == '"')
+                s = s.Substring(1, s.Length - 2);
+            if (long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var val)) return val;
+            return defaultValue;
+        }
+
+        /// <summary>
         /// Returns the raw JSON string for each element of an array value whose
         /// elements are objects (e.g. <c>[{"a":1},{"b":2}]</c>). Each returned
         /// string is the inner object text (without surrounding whitespace) and

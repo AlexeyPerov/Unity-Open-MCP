@@ -22,7 +22,6 @@
 //
 // Naming: `unity_open_mcp_splines_<action>` (snake_case domain prefix).
 #if UNITY_OPEN_MCP_EXT_SPLINES
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEditor;
@@ -30,6 +29,7 @@ using Unity.Mathematics;
 using UnityEngine.Splines;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Splines
 {
@@ -118,7 +118,7 @@ namespace UnityOpenMcpBridge.Extensions.Splines
 
             var sb = new StringBuilder(160);
             sb.Append("\"container\":{");
-            sb.Append("\"instanceId\":").Append(go.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(go)).Append(',');
             sb.Append("\"path\":").Append(SplinesJson.Esc(SplinesTargets.BuildPath(go))).Append(',');
             sb.Append("\"splineCount\":").Append(container.Splines.Count).Append(',');
             sb.Append("\"closed\":").Append(closed ? "true" : "false");

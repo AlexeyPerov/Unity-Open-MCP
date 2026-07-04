@@ -14,7 +14,7 @@ export const prefabApply: Tool = {
     required: ["paths_hint"],
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Instance ID of the prefab instance to apply (canonical address).",
       },

@@ -1,10 +1,10 @@
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpExtensions.ParticleSystemExt
 {
@@ -74,7 +74,7 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
             var sb = new StringBuilder(1024);
             sb.Append("{\"status\":\"ok\",\"particleSystem\":{");
             sb.Append("\"name\":").Append(ParticleSystemJson.Esc(ps.gameObject.name)).Append(',');
-            sb.Append("\"instanceId\":").Append(ps.gameObject.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(ps.gameObject)).Append(',');
             AppendRuntimeState(sb, ps);
 
             // Emit an optional module. Each call seeds a leading comma so the
@@ -270,13 +270,13 @@ namespace UnityOpenMcpExtensions.ParticleSystemExt
         // Resolve helpers
         // =====================================================================
 
-        private static ParticleSystem ResolvePs(int instanceId, string path, string name, out string errorEnvelope)
+        private static ParticleSystem ResolvePs(long instanceId, string path, string name, out string errorEnvelope)
         {
             errorEnvelope = null;
             GameObject host = null;
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj is GameObject goById) host = goById;
             }
             if (host == null && !string.IsNullOrEmpty(path))

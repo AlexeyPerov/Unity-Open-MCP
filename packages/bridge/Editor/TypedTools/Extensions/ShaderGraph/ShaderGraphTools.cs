@@ -30,7 +30,6 @@
 //
 // Naming: `unity_open_mcp_shader_graph_<action>` (snake_case domain prefix).
 #if UNITY_OPEN_MCP_EXT_SHADERGRAPH
-#pragma warning disable CS0618
 using System.Text;
 using UnityEditor;
 using UnityEngine;

@@ -1,7 +1,7 @@
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.TypedTools
 {
@@ -11,7 +11,7 @@ namespace UnityOpenMcpBridge.TypedTools
     // target address vocabulary across the typed surface.
     public static class TypedTargets
     {
-        public static GameObject ResolveGameObject(int instanceId, string path, string name)
+        public static GameObject ResolveGameObject(long instanceId, string path, string name)
         {
             if (instanceId != 0)
             {
@@ -31,7 +31,7 @@ namespace UnityOpenMcpBridge.TypedTools
             return null;
         }
 
-        public static GameObject FindByInstanceId(int instanceId)
+        public static GameObject FindByInstanceId(long instanceId)
         {
             for (var i = 0; i < SceneManager.sceneCount; i++)
             {
@@ -46,9 +46,9 @@ namespace UnityOpenMcpBridge.TypedTools
             return null;
         }
 
-        private static GameObject FindInHierarchyById(GameObject go, int instanceId)
+        private static GameObject FindInHierarchyById(GameObject go, long instanceId)
         {
-            if (go.GetInstanceID() == instanceId) return go;
+            if (InstanceId.Of(go) == instanceId) return go;
             foreach (Transform child in go.transform)
             {
                 var found = FindInHierarchyById(child.gameObject, instanceId);

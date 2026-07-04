@@ -80,7 +80,7 @@ export const spatialQuery: Tool = {
           "[raycast / overlap] Include trigger colliders. Default ignores them.",
       },
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description:
           "[bounds / ground_check / nearest] Target GameObject instance ID " +

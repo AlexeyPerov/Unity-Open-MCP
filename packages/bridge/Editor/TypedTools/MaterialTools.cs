@@ -1,10 +1,10 @@
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.TypedTools
 {
@@ -67,7 +67,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append("{\"status\":\"ok\",\"path\":\"").Append(TypedTargets.Esc(normalized));
             sb.Append("\",\"name\":\"").Append(TypedTargets.Esc(material.name));
             sb.Append("\",\"shader\":\"").Append(TypedTargets.Esc(shader.name));
-            sb.Append("\",\"instanceId\":").Append(material.GetInstanceID().ToString(CultureInfo.InvariantCulture));
+            sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(material).ToString(CultureInfo.InvariantCulture));
             sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
@@ -243,10 +243,10 @@ namespace UnityOpenMcpBridge.TypedTools
                 return new ResolveResult { Ok = true, Material = mat };
             }
 
-            int instanceId = JsonBody.GetInt(body, "instance_id", 0);
+            long instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj is Material directMat)
                     return new ResolveResult { Ok = true, Material = directMat };
 
@@ -314,7 +314,7 @@ namespace UnityOpenMcpBridge.TypedTools
                         var sb = new StringBuilder(96);
                         sb.Append("{\"name\":\"").Append(TypedTargets.Esc(tex.name));
                         sb.Append("\",\"path\":\"").Append(TypedTargets.Esc(texPath));
-                        sb.Append("\",\"instanceId\":").Append(tex.GetInstanceID().ToString(CultureInfo.InvariantCulture));
+                        sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(tex).ToString(CultureInfo.InvariantCulture));
                         sb.Append('}');
                         return sb.ToString();
                     }

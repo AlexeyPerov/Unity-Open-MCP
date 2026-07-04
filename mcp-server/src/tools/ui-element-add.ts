@@ -22,7 +22,7 @@ export const uiElementAdd: Tool = {
     required: ["element_type", "paths_hint"],
     properties: {
       parent_instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Parent GameObject instance ID. Highest priority resolver.",
       },

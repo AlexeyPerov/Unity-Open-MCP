@@ -23,7 +23,7 @@ export const componentAdd: Tool = {
           "or a bare class name. Example: [\"UnityEngine.Rigidbody\", \"UnityEngine.BoxCollider\"].",
       },
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Host GameObject instance ID. Highest priority resolver.",
       },

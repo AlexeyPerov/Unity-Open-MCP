@@ -11,7 +11,7 @@ export const prefabGetOverrides: Tool = {
     type: "object",
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Instance ID of the prefab instance (canonical address).",
       },

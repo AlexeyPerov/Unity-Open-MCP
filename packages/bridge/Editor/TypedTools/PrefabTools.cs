@@ -1,9 +1,9 @@
-#pragma warning disable CS0618
 using System.Text;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.TypedTools
 {
@@ -67,7 +67,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
             var sb = new StringBuilder(192);
             sb.Append("{\"status\":\"ok\",\"prefabAssetPath\":\"").Append(TypedTargets.Esc(prefabAssetPath));
-            sb.Append("\",\"instanceId\":").Append(instance.GetInstanceID());
+            sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(instance));
             sb.Append(",\"name\":\"").Append(TypedTargets.Esc(instance.name));
             sb.Append("\",\"path\":\"").Append(TypedTargets.Esc(TypedTargets.HierarchyPath(instance)));
             sb.Append("\"}");
@@ -85,7 +85,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("invalid_paths",
                     $"prefab_asset_path must start with 'Assets/' and end with '.prefab': '{normalized}'.");
 
-            var instanceId = JsonBody.GetInt(body, "instance_id", 0);
+            var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             var path = JsonBody.GetString(body, "path");
             var name = JsonBody.GetString(body, "name");
             var connect = JsonBody.GetBool(body, "connect", true);
@@ -118,8 +118,8 @@ namespace UnityOpenMcpBridge.TypedTools
             var sb = new StringBuilder(192);
             sb.Append("{\"status\":\"ok\",\"path\":\"").Append(TypedTargets.Esc(normalized));
             sb.Append("\",\"name\":\"").Append(TypedTargets.Esc(prefab.name));
-            sb.Append("\",\"instanceId\":").Append(prefab.GetInstanceID());
-            sb.Append(",\"sourceInstanceId\":").Append(sourceGo.GetInstanceID());
+            sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(prefab));
+            sb.Append(",\"sourceInstanceId\":").Append(InstanceId.ToJson(sourceGo));
             sb.Append(",\"isPrefabInstance\":").Append(PrefabUtility.IsPartOfPrefabInstance(sourceGo) ? "true" : "false");
             sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
@@ -293,7 +293,7 @@ namespace UnityOpenMcpBridge.TypedTools
                     if (i > 0) sb.Append(',');
                     var ac = added[i];
                     sb.Append("{\"component\":\"").Append(TypedTargets.Esc(ac.instanceComponent.GetType().Name));
-                    sb.Append("\",\"instanceId\":").Append(ac.instanceComponent.GetInstanceID()).Append("}");
+                    sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(ac.instanceComponent)).Append("}");
                 }
             }
             sb.Append("]");
@@ -346,7 +346,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
         public static InstanceResolve ResolveInstance(string body)
         {
-            var instanceId = JsonBody.GetInt(body, "instance_id", 0);
+            var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             var path = JsonBody.GetString(body, "path");
             var name = JsonBody.GetString(body, "name");
 
@@ -394,7 +394,7 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(",\"isInstance\":").Append(isInstance ? "true" : "false");
             sb.Append(",\"isRoot\":").Append(isRoot ? "true" : "false");
             sb.Append(",\"hasOverrides\":").Append(hasOverrides ? "true" : "false");
-            sb.Append(",\"instanceId\":").Append(go.GetInstanceID());
+            sb.Append(",\"instanceId\":").Append(InstanceId.ToJson(go));
             sb.Append(",\"sourcePath\":\"").Append(TypedTargets.Esc(sourcePath));
             sb.Append("\",\"sourceName\":\"").Append(TypedTargets.Esc(sourceName)).Append("\"}");
             return sb.ToString();

@@ -5,7 +5,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // paths_hint is the host scene path.
 const targetSchema = {
   instance_id: {
-    type: "integer",
+    type: ["string", "integer"],
     default: 0,
     description: "Host Terrain GameObject instance ID. Highest priority resolver.",
   },

@@ -10,7 +10,6 @@
 // defineConstraints. The `terrain` tool group is still hidden from ListTools
 // until the session activates it via unity_open_mcp_manage_tools (group
 // visibility is a session concern, independent of compile-gating).
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -22,6 +21,7 @@ using Object = UnityEngine.Object;
 // `UnityEngine.Terrain` type name, so bare `Terrain` resolves to the
 // namespace. Alias the type so call sites read naturally.
 using Terrain = UnityEngine.Terrain;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Terrain
 {
@@ -82,7 +82,7 @@ namespace UnityOpenMcpBridge.Extensions.Terrain
             // instance_id wins.
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj is GameObject go) return go;
             }
 

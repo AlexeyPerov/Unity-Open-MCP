@@ -20,7 +20,7 @@ export const prefabCreate: Tool = {
         description: "Destination prefab asset path. Must start with 'Assets/' and end with '.prefab'.",
       },
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Instance ID of the scene GameObject to convert (canonical address).",
       },

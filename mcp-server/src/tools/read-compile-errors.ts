@@ -1,7 +1,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-// Offline, filesystem-only tool: reads the tail of Unity's platform Editor.log
-// and extracts BOTH C# compiler errors AND package / assembly-level red flags.
+// Offline, filesystem-only tool: reads the tail of Unity's Editor.log and
+// extracts BOTH C# compiler errors AND package / assembly-level red flags.
 // The one recovery channel that works when the bridge assembly itself has
 // failed to compile — in that state every in-bridge channel (read_console,
 // editor_status) is dead with it, and compile_check can't run either (the
@@ -10,6 +10,14 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // AND assembly-resolution failures AND Package Manager notices to Editor.log
 // regardless of bridge health, so this tool retrieves them without touching
 // Unity or the bridge.
+//
+// Log resolution: Unity 6000.5+ moved the Editor.log to a project-relative
+// path (<project>/Logs/Editor.log) and stops writing to the global per-user
+// log. The tool prefers the project-relative log when it exists (using the
+// --project path) and falls back to the global per-user log for older Unity
+// versions. This matters most when the Editor is in Safe Mode with a broken
+// bridge: the global log is stale there, and only the project-relative log
+// carries the current compile errors.
 //
 // Response fields:
 //   - status: "compile_failed" | "project_unhealthy" | "no_errors_found"

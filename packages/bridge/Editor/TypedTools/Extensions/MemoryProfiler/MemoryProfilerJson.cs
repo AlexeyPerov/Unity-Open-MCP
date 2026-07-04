@@ -27,7 +27,6 @@
 // Naming: tool id is `unity_senses_memory_snapshot_capture` (snake_case,
 // sense-prefixed because it pairs with the senses profiler family).
 #if UNITY_OPEN_MCP_EXT_MEMORYPROFILER
-#pragma warning disable CS0618
 using System.Text;
 
 namespace UnityOpenMcpBridge.Extensions.MemoryProfiler

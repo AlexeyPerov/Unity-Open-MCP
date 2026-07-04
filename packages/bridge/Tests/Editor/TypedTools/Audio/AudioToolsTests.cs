@@ -18,6 +18,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Audio;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.Audio
 {
@@ -118,7 +119,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Audio
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_audio_source_add",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
             finally
@@ -136,7 +137,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Audio
                 go.AddComponent<AudioSource>();
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_audio_source_modify",
-                    "{\"instance_id\":" + go.GetInstanceID() + "}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + "}");
                 AssertErrorEnvelope(result, "paths_hint_required");
             }
             finally
@@ -175,7 +176,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Audio
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_audio_source_modify",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"volume\":0.5,\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "component_not_found");
             }
@@ -193,7 +194,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Audio
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_audio_source_add",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"clip_path\":\"Assets/Does/Not/Exist.wav\"," +
                     "\"paths_hint\":[\"Assets/T.unity\"]}");
                 AssertErrorEnvelope(result, "asset_not_found");
@@ -259,7 +260,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Audio
             try
             {
                 // Add a 3D-ish source with volume 0.8 and spatial blend 1.
-                var addBody = "{\"instance_id\":" + go.GetInstanceID() +
+                var addBody = "{\"instance_id\":" +InstanceId.Of(go) +
                               ",\"volume\":0.8,\"spatial_blend\":1.0,\"pitch\":1.2," +
                               "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var add = BridgeToolRegistry.TryDispatch("unity_open_mcp_audio_source_add", addBody);
@@ -275,7 +276,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Audio
                 Assert.AreEqual(1.2f, source.pitch);
 
                 // Modify volume + spatial blend via the typed mutator.
-                var modBody = "{\"instance_id\":" + go.GetInstanceID() +
+                var modBody = "{\"instance_id\":" +InstanceId.Of(go) +
                               ",\"volume\":0.5,\"spatial_blend\":0.3," +
                               "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var mod = BridgeToolRegistry.TryDispatch("unity_open_mcp_audio_source_modify", modBody);
@@ -299,7 +300,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Audio
             try
             {
                 go.AddComponent<AudioSource>();
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch("unity_open_mcp_audio_source_add", body);
                 Assert.IsTrue(result.Success, result.ErrorMessage ?? result.Output);
@@ -318,7 +319,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Audio
             try
             {
                 go.AddComponent<AudioSource>();
-                var body = "{\"instance_id\":" + go.GetInstanceID() +
+                var body = "{\"instance_id\":" +InstanceId.Of(go) +
                            ",\"min_distance\":2.0,\"max_distance\":50.0," +
                            "\"paths_hint\":[\"Assets/T.unity\"]}";
                 var result = BridgeToolRegistry.TryDispatch("unity_open_mcp_audio_source_modify", body);

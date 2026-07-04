@@ -32,7 +32,7 @@ export const consoleLog: Tool = {
           "'error' → Debug.LogError (shows a red entry + stack). Defaults to 'log'.",
       },
       context_instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description:
           "Optional GameObject/Component instance id to attach as the log " +

@@ -5,7 +5,6 @@
 // tool ids, JSON schema, gate contracts) from the former standalone extension
 // pack at packages/extensions/navigation — only the namespace changed.
 #if UNITY_OPEN_MCP_EXT_NAVIGATION
-#pragma warning disable CS0618
 using System.Text;
 using UnityEngine;
 using UnityEngine.AI;
@@ -24,6 +23,7 @@ using NavMeshLink = Unity.AI.Navigation.NavMeshLink;
 using NavMeshModifier = Unity.AI.Navigation.NavMeshModifier;
 using NavMeshModifierVolume = Unity.AI.Navigation.NavMeshModifierVolume;
 using CollectObjects = Unity.AI.Navigation.CollectObjects;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Navigation
 {
@@ -95,7 +95,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             var sb = new StringBuilder(160);
             sb.Append("\"surface\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(surface.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(surface)).Append(',');
             sb.Append("\"agentType\":").Append(NavigationJson.Esc(surface.agentTypeID.ToString())).Append(',');
             sb.Append("\"collectObjects\":").Append(NavigationJson.Esc(surface.collectObjects.ToString()));
             sb.Append('}');
@@ -195,7 +195,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             sb.Append("\"hasNavMeshData\":").Append(data != null ? "true" : "false");
             if (data != null)
             {
-                sb.Append(",\"navMeshDataInstanceId\":").Append(data.GetInstanceID());
+                sb.Append(",\"navMeshDataInstanceId\":").Append(InstanceId.ToJson(data));
             }
             return NavigationJson.Ok(sb.ToString());
         }
@@ -248,7 +248,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             var sb = new StringBuilder(140);
             sb.Append("\"modifier\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(mod.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(mod)).Append(',');
             sb.Append("\"area\":").Append(NavigationJson.Esc(area)).Append(',');
             sb.Append("\"ignoreFromBuild\":").Append(ignore ? "true" : "false").Append(',');
             sb.Append("\"overrideArea\":").Append(override_area ? "true" : "false");
@@ -300,7 +300,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             var sb = new StringBuilder(180);
             sb.Append("\"volume\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(vol.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(vol)).Append(',');
             sb.Append("\"area\":").Append(NavigationJson.Esc(area)).Append(',');
             sb.Append("\"size\":").Append(Vec3(vol.size)).Append(',');
             sb.Append("\"center\":").Append(Vec3(vol.center));
@@ -362,7 +362,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             var sb = new StringBuilder(220);
             sb.Append("\"link\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(link.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(link)).Append(',');
             sb.Append("\"startPosition\":").Append(Vec3(link.startPoint)).Append(',');
             sb.Append("\"endPosition\":").Append(Vec3(link.endPoint)).Append(',');
             sb.Append("\"width\":").Append(link.width).Append(',');
@@ -427,7 +427,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             var sb = new StringBuilder(220);
             sb.Append("\"agent\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
-            sb.Append("\"instanceId\":").Append(agent.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(agent)).Append(',');
             sb.Append("\"radius\":").Append(agent.radius).Append(',');
             sb.Append("\"height\":").Append(agent.height).Append(',');
             sb.Append("\"speed\":").Append(agent.speed).Append(',');
@@ -566,7 +566,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             var sb = new StringBuilder(512);
             sb.Append("{\"status\":\"ok\",\"target\":{");
             sb.Append("\"name\":").Append(NavigationJson.Esc(host.name)).Append(',');
-            sb.Append("\"instanceId\":").Append(host.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(host)).Append(',');
             sb.Append("\"path\":").Append(NavigationJson.Esc(BuildPath(host))).Append(',');
             sb.Append("\"components\":[");
 
@@ -577,7 +577,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             {
                 first = AppendComma(sb, first);
                 sb.Append("{\"type\":\"NavMeshSurface\",")
-                  .Append("\"instanceId\":").Append(surface.GetInstanceID()).Append(',')
+                  .Append("\"instanceId\":").Append(InstanceId.ToJson(surface)).Append(',')
                   .Append("\"agentType\":").Append(surface.agentTypeID).Append(',')
                   .Append("\"collectObjects\":").Append(NavigationJson.Esc(surface.collectObjects.ToString())).Append(',')
                   .Append("\"layerMask\":").Append(surface.layerMask.value).Append(',')
@@ -591,7 +591,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             {
                 first = AppendComma(sb, first);
                 sb.Append("{\"type\":\"NavMeshAgent\",")
-                  .Append("\"instanceId\":").Append(agent.GetInstanceID()).Append(',')
+                  .Append("\"instanceId\":").Append(InstanceId.ToJson(agent)).Append(',')
                   .Append("\"radius\":").Append(agent.radius).Append(',')
                   .Append("\"height\":").Append(agent.height).Append(',')
                   .Append("\"speed\":").Append(agent.speed).Append(',')
@@ -608,7 +608,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             {
                 first = AppendComma(sb, first);
                 sb.Append("{\"type\":\"NavMeshLink\",")
-                  .Append("\"instanceId\":").Append(link.GetInstanceID()).Append(',')
+                  .Append("\"instanceId\":").Append(InstanceId.ToJson(link)).Append(',')
                   .Append("\"startPosition\":").Append(Vec3(link.startPoint)).Append(',')
                   .Append("\"endPosition\":").Append(Vec3(link.endPoint)).Append(',')
                   .Append("\"width\":").Append(link.width).Append(',')
@@ -623,7 +623,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             {
                 first = AppendComma(sb, first);
                 sb.Append("{\"type\":\"NavMeshModifier\",")
-                  .Append("\"instanceId\":").Append(mod.GetInstanceID()).Append(',')
+                  .Append("\"instanceId\":").Append(InstanceId.ToJson(mod)).Append(',')
                   .Append("\"area\":").Append(mod.area).Append(',')
                   .Append("\"ignoreFromBuild\":").Append(mod.ignoreFromBuild ? "true" : "false").Append(',')
                   .Append("\"overrideArea\":").Append(mod.overrideArea ? "true" : "false")
@@ -635,7 +635,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
             {
                 first = AppendComma(sb, first);
                 sb.Append("{\"type\":\"NavMeshModifierVolume\",")
-                  .Append("\"instanceId\":").Append(vol.GetInstanceID()).Append(',')
+                  .Append("\"instanceId\":").Append(InstanceId.ToJson(vol)).Append(',')
                   .Append("\"area\":").Append(vol.area).Append(',')
                   .Append("\"size\":").Append(Vec3(vol.size)).Append(',')
                   .Append("\"center\":").Append(Vec3(vol.center))
@@ -1027,7 +1027,7 @@ namespace UnityOpenMcpBridge.Extensions.Navigation
                 var c = all[i];
                 sb.Append('{');
                 sb.Append("\"name\":").Append(NavigationJson.Esc(c.gameObject.name)).Append(',');
-                sb.Append("\"instanceId\":").Append(c.GetInstanceID()).Append(',');
+                sb.Append("\"instanceId\":").Append(InstanceId.ToJson(c)).Append(',');
                 sb.Append("\"path\":").Append(NavigationJson.Esc(BuildPath(c.gameObject)));
                 if (extra != null)
                 {

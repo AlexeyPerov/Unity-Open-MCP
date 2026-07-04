@@ -6,7 +6,6 @@
 // contracts) from the former standalone extension pack — only the namespace
 // changed.
 #if UNITY_OPEN_MCP_EXT_ANIMATION
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -15,6 +14,7 @@ using UnityEditor;
 using UnityEditorInternal;
 using UnityEngine;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.Animation
 {
@@ -135,7 +135,7 @@ namespace UnityOpenMcpBridge.Extensions.Animation
             sb.Append("{\"status\":\"ok\",\"clip\":{");
             sb.Append("\"name\":").Append(AnimationJson.Esc(clip.name)).Append(',');
             sb.Append("\"assetPath\":").Append(AnimationJson.Esc(AnimationJson.Normalize(asset_path))).Append(',');
-            sb.Append("\"instanceId\":").Append(clip.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(clip)).Append(',');
             sb.Append("\"length\":").Append(clip.length.ToString("R", CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"frameRate\":").Append(clip.frameRate.ToString("R", CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"wrapMode\":").Append(AnimationJson.Esc(clip.wrapMode.ToString())).Append(',');

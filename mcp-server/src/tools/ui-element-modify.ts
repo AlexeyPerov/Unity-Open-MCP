@@ -24,7 +24,7 @@ export const uiElementModify: Tool = {
     required: ["component_type", "fields_json", "paths_hint"],
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Host GameObject instance ID. Highest priority resolver.",
       },

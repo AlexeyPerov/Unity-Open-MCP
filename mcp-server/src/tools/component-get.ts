@@ -15,7 +15,7 @@ export const componentGet: Tool = {
     type: "object",
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Host GameObject instance ID. Highest priority resolver.",
       },
@@ -34,14 +34,14 @@ export const componentGet: Tool = {
           "component_instance_id. Ignored when component_instance_id is set.",
       },
       component_instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description:
           "Specific Component instance ID (for types that allow multiples). Takes precedence " +
           "over type_name when set.",
       },
       max_fields: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 100,
         minimum: 1,
         description: "Max fields+properties returned; remaining count is reported in 'truncated'.",

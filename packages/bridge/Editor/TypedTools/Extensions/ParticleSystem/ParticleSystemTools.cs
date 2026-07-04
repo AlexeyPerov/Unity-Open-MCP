@@ -9,13 +9,13 @@
 // from the former standalone extension pack at
 // packages/extensions/particlesystem — only the namespace changed.
 #if UNITY_OPEN_MCP_EXT_PARTICLESYSTEM
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Extensions.ParticleSystem
 {
@@ -85,7 +85,7 @@ namespace UnityOpenMcpBridge.Extensions.ParticleSystem
             var sb = new StringBuilder(1024);
             sb.Append("{\"status\":\"ok\",\"particleSystem\":{");
             sb.Append("\"name\":").Append(ParticleSystemJson.Esc(ps.gameObject.name)).Append(',');
-            sb.Append("\"instanceId\":").Append(ps.gameObject.GetInstanceID()).Append(',');
+            sb.Append("\"instanceId\":").Append(InstanceId.ToJson(ps.gameObject)).Append(',');
             AppendRuntimeState(sb, ps);
 
             // Emit an optional module. Each call seeds a leading comma so the
@@ -287,7 +287,7 @@ namespace UnityOpenMcpBridge.Extensions.ParticleSystem
             GameObject host = null;
             if (instanceId != 0)
             {
-                var obj = EditorUtility.InstanceIDToObject(instanceId);
+                var obj = InstanceId.ToObject(instanceId);
                 if (obj is GameObject goById) host = goById;
             }
             if (host == null && !string.IsNullOrEmpty(path))

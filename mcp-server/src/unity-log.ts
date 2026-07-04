@@ -9,6 +9,12 @@
 // bridge health. This module resolves that path per-OS (porting the logic from
 // hub/src-tauri/src/config/logs.rs) and reads a bounded tail.
 //
+// Unity 6000.5 moved the Editor.log to a PROJECT-RELATIVE path
+// (<project>/Logs/Editor.log) and stops writing to the global per-user log.
+// resolveEditorLogPath() prefers the project-relative log when it exists, so
+// the tool reads the authoritative log on both old (global-only) and new
+// (project-relative) Unity versions without a version check.
+//
 // No runtime deps beyond node built-ins (mcp-server/AGENTS.md).
 
 import { existsSync, openSync, readSync, fstatSync, closeSync } from "node:fs";
@@ -50,11 +56,55 @@ export function editorLogsDir(
   }
 }
 
-/** Resolve the live Editor.log file path for the current platform. */
+/** Resolve the global (per-user) Editor.log file path for the current platform. */
 export function editorLogPath(
   platform: UnityLogPlatform = process.platform as UnityLogPlatform,
 ): string {
   return join(editorLogsDir(platform), "Editor.log");
+}
+
+/**
+ * Resolve the project-relative Editor.log path Unity 6000.5+ writes
+ * (`<project>/Logs/Editor.log`). Returns null when no project path is given.
+ */
+export function projectEditorLogPath(
+  projectPath: string | null | undefined,
+): string | null {
+  if (!projectPath) return null;
+  return join(projectPath, "Logs", "Editor.log");
+}
+
+/**
+ * Pick the authoritative Editor.log to read for compile-error extraction.
+ *
+ * Unity 6000.5+ redirects the Editor.log to a project-relative path
+ * (`<project>/Logs/Editor.log`) and stops writing to the global per-user log.
+ * On those versions the global file is stale (left over from pre-6000.5
+ * sessions) and reading it returns "0 errors" even when the Editor is in Safe
+ * Mode with real compile errors.
+ *
+ * Resolution order (no version check needed — just prefer whichever log is
+ * available, with the project log winning ties):
+ *   1. project-relative `<project>/Logs/Editor.log` — when it exists
+ *   2. global `editorLogPath()` — fallback for pre-6000.5 Unity
+ *
+ * When the project path is unknown (no `--project`), or the project-relative
+ * log doesn't exist, the global log is used as before.
+ */
+export function resolveEditorLogPath(
+  projectPath: string | null | undefined,
+  platform: UnityLogPlatform = process.platform as UnityLogPlatform,
+): string {
+  const project = projectEditorLogPath(projectPath);
+  const global = editorLogPath(platform);
+  if (project && existsSync(project)) {
+    // Prefer the project-relative log when it exists. On 6000.5+ this is the
+    // only authoritative log; on older Unity it may not exist (fall through to
+    // global). Ties (both exist) go to the project log because 6000.5 writes
+    // there even if the global file lingers from an older version.
+    return project;
+  }
+  return global;
 }
 
 /** Default tail size. Bounded so a multi-MB log can't blow up the tool

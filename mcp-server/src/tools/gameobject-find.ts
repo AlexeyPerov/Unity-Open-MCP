@@ -17,7 +17,7 @@ export const gameobjectFind: Tool = {
     type: "object",
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description:
           "Targeted mode: GameObject instance ID. When set (or path/name set), returns a single " +

@@ -21,6 +21,7 @@ using UnityEngine;
 using UnityEngine.Splines;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.Extensions.Splines;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests.Extensions.Splines
 {
@@ -130,7 +131,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Splines
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_splines_add_knot",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
                 Assert.IsTrue(result.Success);
@@ -150,7 +151,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Splines
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_splines_add_knot",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"position\":\"0,0,0\"" +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
@@ -172,7 +173,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Splines
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_splines_set_tangent_mode",
-                    "{\"instance_id\":" + go.GetInstanceID() +
+                    "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"tangent_mode\":\"NotAMode\"" +
                     ",\"paths_hint\":[\"Assets/NoScene.unity\"]}");
                 Assert.IsNotNull(result);
@@ -208,7 +209,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Splines
                 var id = ExtractInt(create.Output, "instanceId");
                 Assert.AreNotEqual(0, id, "Container should report an instance id.");
 
-                created = EditorUtility.InstanceIDToObject(id) as GameObject;
+                created = InstanceId.ToObject(id) as GameObject;
                 Assert.IsNotNull(created, "Created GameObject should resolve by id.");
                 Assert.IsNotNull(created.GetComponent<SplineContainer>());
 
@@ -250,7 +251,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.Splines
             {
                 var result = BridgeToolRegistry.TryDispatch(
                     "unity_open_mcp_splines_evaluate",
-                    "{\"instance_id\":" + go.GetInstanceID() + ",\"t\":0.5}");
+                    "{\"instance_id\":" +InstanceId.Of(go) + ",\"t\":0.5}");
                 Assert.IsNotNull(result);
                 Assert.IsTrue(result.Success);
                 StringAssert.Contains("spline_too_short", result.Output);

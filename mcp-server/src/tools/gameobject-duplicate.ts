@@ -15,7 +15,7 @@ export const gameobjectDuplicate: Tool = {
     required: ["paths_hint"],
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Source GameObject instance ID. Highest priority resolver.",
       },

@@ -17,7 +17,7 @@ export const componentModify: Tool = {
     required: ["fields", "paths_hint"],
     properties: {
       instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description: "Host GameObject instance ID. Highest priority resolver.",
       },
@@ -36,7 +36,7 @@ export const componentModify: Tool = {
           "component_instance_id. Ignored when component_instance_id is set.",
       },
       component_instance_id: {
-        type: "integer",
+        type: ["string", "integer"],
         default: 0,
         description:
           "Specific Component instance ID. Takes precedence over type_name when set.",

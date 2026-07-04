@@ -1,9 +1,9 @@
-#pragma warning disable CS0618
 using System.Collections.Generic;
 using System.Text;
 using UnityEditor;
 using UnityEditorInternal;
 using UnityEngine;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.TypedTools
 {
@@ -82,10 +82,10 @@ namespace UnityOpenMcpBridge.TypedTools
             }
             else
             {
-                int instanceId = JsonBody.GetInt(body, "context_instance_id", 0);
+                long instanceId = JsonBody.GetLongFlexible(body, "context_instance_id", 0);
                 if (instanceId != 0)
                 {
-                    context = EditorUtility.InstanceIDToObject(instanceId);
+                    context = InstanceId.ToObject(instanceId);
                     if (context == null)
                         return ToolDispatchResult.Fail("context_not_found",
                             $"No live object with instance_id={instanceId} to attach as log context.");
@@ -118,7 +118,7 @@ namespace UnityOpenMcpBridge.TypedTools
             if (context != null)
             {
                 sb.Append(",\"context\":{\"name\":\"").Append(Esc(context.name));
-                sb.Append("\",\"instanceId\":").Append(context.GetInstanceID());
+                sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(context));
                 sb.Append(",\"type\":\"").Append(Esc(context.GetType().Name)).Append("\"}");
             }
             sb.Append(",\"note\":\"Surface in the next unity_senses_read_console / pull_events call.\"}");
@@ -597,7 +597,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 // If the caller supplied none of the resolver fields at all,
                 // treat it as "clear" (empty array); otherwise it's a failed
                 // resolution (null).
-                int instanceId = JsonBody.GetInt(body, "instance_id", 0);
+                long instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
                 var path = JsonBody.GetString(body, "path");
                 var name = JsonBody.GetString(body, "name");
                 var assetPath = JsonBody.GetString(body, "asset_path");
@@ -615,9 +615,9 @@ namespace UnityOpenMcpBridge.TypedTools
             if (!string.IsNullOrEmpty(assetPath))
                 return AssetDatabase.LoadAssetAtPath<Object>(assetPath);
 
-            int instanceId = JsonBody.GetInt(body, "instance_id", 0);
+            long instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             if (instanceId != 0)
-                return EditorUtility.InstanceIDToObject(instanceId);
+                return InstanceId.ToObject(instanceId);
 
             var path = JsonBody.GetString(body, "path");
             if (!string.IsNullOrEmpty(path))
@@ -651,7 +651,7 @@ namespace UnityOpenMcpBridge.TypedTools
             var sb = new StringBuilder(96);
             sb.Append('{');
             sb.Append("\"name\":\"").Append(Esc(obj.name ?? "")).Append("\"");
-            sb.Append(",\"instanceId\":").Append(obj.GetInstanceID());
+            sb.Append(",\"instanceId\":").Append(InstanceId.ToJson(obj));
             sb.Append(",\"type\":\"").Append(Esc(obj.GetType().Name)).Append("\"");
             sb.Append(",\"fullName\":\"").Append(Esc(obj.GetType().FullName ?? "")).Append("\"");
             var path = AssetDatabase.GetAssetPath(obj);

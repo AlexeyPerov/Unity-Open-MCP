@@ -21,7 +21,6 @@
 // Naming: tool ids follow `unity_open_mcp_vfx_<action>` (snake_case domain
 // prefix).
 #if UNITY_OPEN_MCP_EXT_VFX
-#pragma warning disable CS0618
 using System.Text;
 
 namespace UnityOpenMcpBridge.Extensions.VFX
