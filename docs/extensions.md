@@ -12,7 +12,7 @@ step.
 | Navigation (NavMesh) | `com.unity.ai.navigation` | `UNITY_OPEN_MCP_EXT_NAVIGATION` | `packages/bridge/Editor/TypedTools/Extensions/Navigation/` |
 | Input System | `com.unity.inputsystem` | `UNITY_OPEN_MCP_EXT_INPUTSYSTEM` | `.../Extensions/InputSystem/` |
 | ProBuilder | `com.unity.probuilder` | `UNITY_OPEN_MCP_EXT_PROBUILDER` | `.../Extensions/ProBuilder/` |
-| Particle System | `UnityEngine.ParticleSystemModule` (built-in) | `UNITY_OPEN_MCP_EXT_PARTICLESYSTEM` | `.../Extensions/ParticleSystem/` |
+| Particle System | built-in (`UnityEngine.ParticleSystem`) | *(none — ungated)* | `.../Extensions/ParticleSystem/` |
 | Animation | `com.unity.modules.animation` (built-in) | `UNITY_OPEN_MCP_EXT_ANIMATION` | `.../Extensions/Animation/` |
 | Splines | `com.unity.splines` | `UNITY_OPEN_MCP_EXT_SPLINES` | `.../Extensions/Splines/` |
 | Lighting | built-in (`Light` / `ReflectionProbe` / `RenderSettings` / `Lightmapping`) | *(none — ungated)* | `.../Extensions/Lighting/` |
@@ -165,10 +165,10 @@ API split spans a class rename (no compile-time symbol can bridge both). The
 `CinemachineVersion` layer in `CinemachineJson.cs` detects the installed major
 at call time and returns `cinemachine_3x_required` (when 2.x is installed) or
 `cinemachine_package_required` (when the package is absent). The
-**compile-gated** domains are Nav, Input, ProBuilder, Particles, Animation,
-Splines, Timeline, Tilemap, ShaderGraph, VFX, MemoryProfiler, and UI (each
-gated on its optional Unity package via the self-contained per-sub-asmdef
-gate described above). The **ungated** domains — Lighting, Audio,
+**compile-gated** domains are Nav, Input, ProBuilder, Animation, Splines,
+Timeline, Tilemap, ShaderGraph, VFX, MemoryProfiler, and UI (each gated on
+its optional Unity package via the self-contained per-sub-asmdef gate
+described above). The **ungated** domains — Lighting, Audio, ParticleSystem,
 Constraints & LOD, Terrain, SpriteAtlas, Texture — ship unconditionally
 because their types are part of the core engine modules present in every
 Unity install.

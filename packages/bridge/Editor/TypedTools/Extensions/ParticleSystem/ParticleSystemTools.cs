@@ -1,14 +1,16 @@
 // M18 Plan 3 — Particle System (UnityEngine.ParticleSystemModule, built-in)
 // embedded domain tools.
 //
-// Compile-gated by UNITY_OPEN_MCP_EXT_PARTICLESYSTEM. The owning sub-asmdef
-// (com.alexeyperov.unity-open-mcp-bridge.ParticleSystem.Editor) carries
-// `defineConstraints: ["UNITY_OPEN_MCP_EXT_PARTICLESYSTEM"]`; the bridge root
-// asmdef sets the define via `versionDefines` when the built-in module is
-// present. Ported verbatim (logic, tool ids, JSON schema, gate contracts)
-// from the former standalone extension pack at
-// packages/extensions/particlesystem — only the namespace changed.
-#if UNITY_OPEN_MCP_EXT_PARTICLESYSTEM
+// UNGATED: UnityEngine.ParticleSystem is a core engine module present in
+// every Unity install, so this domain ships unconditionally (like Audio /
+// Constraints / Lighting / Terrain). The former UNITY_OPEN_MCP_EXT_PARTICLESYSTEM
+// compile-gate never resolved — versionDefines cannot match a bare engine
+// module name like "UnityEngine.ParticleSystemModule" — so the gate was
+// removed and the source compiles directly. The C# namespace is `...Particles`
+// (not `...ParticleSystem`) to avoid colliding with the UnityEngine.ParticleSystem
+// type for unqualified references. Ported verbatim (logic, tool ids, JSON
+// schema, gate contracts) from the former standalone extension pack at
+// packages/extensions/particlesystem.
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -17,7 +19,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.ParticleSystem
+namespace UnityOpenMcpBridge.Extensions.Particles
 {
     // M16 Plan 10 / T6.6.9 → M18 Plan 3 — Particle System embedded tools.
     //
@@ -1053,4 +1055,3 @@ namespace UnityOpenMcpBridge.Extensions.ParticleSystem
             => $"[{c.r},{c.g},{c.b},{c.a}]";
     }
 }
-#endif

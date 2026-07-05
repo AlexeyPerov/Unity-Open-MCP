@@ -1,18 +1,17 @@
 // M18 Plan 3 — Particle System embedded domain tools EditMode tests.
 //
 // Ported from packages/extensions/particlesystem/Tests/Editor (former
-// standalone extension pack). Gated by UNITY_OPEN_MCP_EXT_PARTICLESYSTEM via
-// the owning test asmdef's defineConstraints, so the suite only compiles +
-// runs when the ParticleSystem module is present (it is a built-in engine
-// module, so this is effectively always true on a modern Unity install).
-#if UNITY_OPEN_MCP_EXT_PARTICLESYSTEM
+// standalone extension pack). UNGATED: ParticleSystem is a core engine
+// module present in every modern Unity install, so the suite always
+// compiles + runs. The namespace is `...Particles` to avoid the
+// UnityEngine.ParticleSystem type collision (see ParticleSystemTools.cs).
 #pragma warning disable CS0618
 using NUnit.Framework;
 using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
+namespace UnityOpenMcpBridge.Tests.Extensions.Particles
 {
     public class ParticleSystemToolsTests
     {
@@ -295,4 +294,3 @@ namespace UnityOpenMcpBridge.Tests.Extensions.ParticleSystem
         }
     }
 }
-#endif

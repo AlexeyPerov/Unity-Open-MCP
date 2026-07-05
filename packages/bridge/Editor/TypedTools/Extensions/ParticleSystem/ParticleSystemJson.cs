@@ -1,14 +1,14 @@
 // M18 Plan 3 — Particle System (UnityEngine.ParticleSystemModule, built-in)
 // embedded domain tools.
 //
-// Compile-gated by UNITY_OPEN_MCP_EXT_PARTICLESYSTEM. See
-// ParticleSystemTools.cs for the gate rationale. Ported verbatim (logic, JSON
-// schema) from the former standalone extension pack — only the namespace
-// changed.
-#if UNITY_OPEN_MCP_EXT_PARTICLESYSTEM
+// UNGATED: see ParticleSystemTools.cs for the rationale (core engine module,
+// always present, former compile-gate never resolved). The namespace is
+// `...Particles` to avoid the UnityEngine.ParticleSystem type collision.
+// Ported verbatim (logic, JSON schema) from the former standalone extension
+// pack — only the namespace changed.
 using System.Text;
 
-namespace UnityOpenMcpBridge.Extensions.ParticleSystem
+namespace UnityOpenMcpBridge.Extensions.Particles
 {
     // Shared helpers for the Particle System embedded domain tools.
     //
@@ -60,4 +60,3 @@ namespace UnityOpenMcpBridge.Extensions.ParticleSystem
         public static string Vec4(UnityEngine.Vector4 v) => $"[{v.x},{v.y},{v.z},{v.w}]";
     }
 }
-#endif
