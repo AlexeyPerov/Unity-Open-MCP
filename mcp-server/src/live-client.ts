@@ -518,10 +518,22 @@ export class LiveClient implements Router {
       // gate path always does (BuildMutationEnvelope). The DIRECT_RESPONSE_TOOLS
       // set is now only the inlineImage-unwrap allowlist (capture_inline), kept
       // for that one special-case transform, not for shape routing.
-      const parsed = (await res.json().catch(() => null)) as Record<
-        string,
-        unknown
-      > | null;
+      //
+      // Capture the raw text first so the unparsable-body branch below can
+      // distinguish an EMPTY body (the signature of a compile-reload tool that
+      // triggered a domain reload mid-response — the bridge tore down its HTTP
+      // socket and the in-flight body was lost) from a SUBSTANTIAL-but-corrupt
+      // body (e.g. an execute_csharp snippet whose OutputSerializer output was
+      // truncated by a TypeLoadException). The reload case is a likely-success
+      // outcome; the corruption case is a real error. See specs/feedback.md
+      // 2026-07-05 (reload) + 2026-07-03-c (corruption).
+      const rawText = await res.text();
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        parsed = JSON.parse(rawText) as Record<string, unknown>;
+      } catch {
+        parsed = null;
+      }
 
       // capture_inline returns an `inlineImage` base64 PNG field. Unwrap it into
       // an MCP image content block alongside a text metadata block
@@ -558,7 +570,7 @@ export class LiveClient implements Router {
         };
       }
 
-      // Malformed bridge body — res.json() rejected (parsed === null) on what
+      // Malformed bridge body — JSON.parse rejected (parsed === null) on what
       // should be a 200 OK application/json response. The bridge's two response
       // shapes (BuildGateEnvelope, BuildDirectToolErrorJson) are always valid
       // JSON, so a parse failure means the response was corrupted in transit or
@@ -576,7 +588,67 @@ export class LiveClient implements Router {
       // 2026-07-03-c). Surface a structured error instead so the failure is
       // visible and annotateCompileVerify (gated on !result.isError) never
       // annotates a body that lost its mutation block.
+      //
+      // Compile-reload special case (specs/feedback.md 2026-07-05 entry): for
+      // tools with the restart_then_settle lifecycle, an EMPTY (or near-empty)
+      // body on a 200 OK is the signature of a SUCCESSFUL mutation that
+      // triggered a domain reload mid-response — the bridge tore down its HTTP
+      // socket for the reload, the in-flight response was lost, and the agent
+      // observes a body that is empty or truncated to a few bytes. The
+      // mutation almost certainly committed (reimport_package,
+      // asmdef_create/modify, package_add/remove, … all commit before the
+      // reload). Returning bridge_response_unparsable here would frame a
+      // successful operation as corruption. Instead surface a typed
+      // triggered_reload outcome that tells the agent to verify post-state
+      // rather than suspect a corrupt response.
+      //
+      // The reload vs. corruption split keys off rawText length: a torn-down
+      // socket delivers zero or a handful of bytes (no Content-Length / chunk
+      // completing), while an OutputSerializer corruption leaves a substantial
+      // half-written envelope. A SUBSTANTIAL unparseable body on a
+      // compile-reload tool is STILL treated as corruption (the original
+      // 2026-07-03-c contract) — that path keeps bridge_response_unparsable.
       if (parsed == null) {
+        const isEmptyLikeReload = rawText.trim().length === 0;
+        if (isEmptyLikeReload && lifecycleFor(toolName).class === "compile-reload") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  status: "triggered_reload",
+                  // The bridge returned 200 (the mutation reached the
+                  // dispatcher and the response was started) but the body was
+                  // empty — the hallmark of a domain reload tearing down the
+                  // socket mid-response. The mutation very likely committed;
+                  // treat this as "verify post-state" rather than "response
+                  // corrupt, retry".
+                  triggeredReload: true,
+                  message:
+                    `Bridge returned HTTP 200 for '${toolName}' with an empty ` +
+                    `response body. '${toolName}' is a compile-reload tool, so ` +
+                    `this is the expected signature of a mutation that triggered ` +
+                    `a domain reload mid-response — the bridge tore down its HTTP ` +
+                    `socket for the reload and the in-flight response was lost ` +
+                    `before any bytes were written. The mutation very likely ` +
+                    `committed (compile-reload tools commit before the reload ` +
+                    `begins). Do NOT treat this as corruption and do NOT retry ` +
+                    `blindly (that would re-run the mutation). Verify post-state: ` +
+                    `call unity_open_mcp_editor_status / bridge_status to confirm ` +
+                    `the reload settled, then unity_open_mcp_read_compile_errors ` +
+                    `to confirm there are no compile errors.`,
+                  agentNextSteps: [
+                    "Poll unity_open_mcp_editor_status / bridge_status until the bridge reports running and not compiling.",
+                    "Call unity_open_mcp_read_compile_errors to confirm the recompiled assembly has no CSxxxx errors (note: if the response carries staleLogSuspected, force a recompile via reimport_package / compile_check first).",
+                    "Do NOT retry the original call — the mutation likely committed before the reload. Verify the effect via the appropriate read tool instead.",
+                  ],
+                  _route: { route: "live", outcome: "triggered_reload" },
+                }),
+              },
+            ],
+            isError: false,
+          };
+        }
         return makeErrorResult({
           code: "bridge_response_unparsable",
           message:

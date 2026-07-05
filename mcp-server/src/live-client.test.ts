@@ -914,14 +914,15 @@ test("envelope shape: mutation body with newErrors is an error", async () => {
 
 // ----- Malformed bridge body (specs/feedback.md entry 2026-07-03-c) -----
 //
-// When the bridge returns HTTP 200 with a body that is NOT valid JSON (the case
-// that motivated the fix: an execute_csharp snippet whose OutputSerializer
-// output was corrupted by a TypeLoadException mid-walk, interpolated raw into
-// the gate envelope), res.json() rejects. Previously postTool's direct-body
-// fallback silently degraded to isError:false with an empty `{}` — a fake
-// success. For compile-reload tools, annotateCompileVerify (gated on
-// !result.isError) then stamped `_compileVerify` onto the `{}`, producing a
-// malformed envelope `{"_compileVerify":{...}}` with NO `mutation` object —
+// When the bridge returns HTTP 200 with a body that is NOT valid JSON AND has
+// substantial content (the case that motivated the fix: an execute_csharp
+// snippet whose OutputSerializer output was corrupted by a TypeLoadException
+// mid-walk, interpolated raw into the gate envelope), JSON.parse rejects.
+// Previously postTool's direct-body fallback silently degraded to
+// isError:false with an empty `{}` — a fake success. For compile-reload
+// tools, annotateCompileVerify (gated on !result.isError) then stamped
+// `_compileVerify` onto the `{}`, producing a malformed envelope
+// `{"_compileVerify":{...}}` with NO `mutation` object —
 // violating the documented contract. The fix: surface a structured
 // `bridge_response_unparsable` error instead so the failure is visible and the
 // annotation never runs on a body that lost its mutation block.
@@ -1067,6 +1068,223 @@ test("malformed body: direct-body tool with valid JSON still succeeds (regressio
     assert.equal(result.isError, false, "valid direct body must still succeed");
     const body = JSON.parse((result.content[0] as { text: string }).text);
     assert.deepEqual(body.tags, ["Untagged", "Player"]);
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+// ----- Empty body on a compile-reload tool (specs/feedback.md 2026-07-05) -----
+//
+// The reload-vs-corruption split: a compile-reload tool that triggers a domain
+// reload mid-response tears down the bridge's HTTP socket, so the agent
+// observes HTTP 200 with an EMPTY body (no Content-Length / chunk completing).
+// The mutation almost certainly committed (reimport_package / asmdef_* /
+// package_add all commit before the reload), so framing this as
+// bridge_response_unparsable would mislead the agent into suspecting
+// corruption. Instead surface a typed triggered_reload outcome that tells the
+// agent to verify post-state rather than retry blindly.
+
+test("empty body on compile-reload tool surfaces as triggered_reload, not unparsable", async () => {
+  // reimport_package is a compile-reload tool. The bridge returns 200 with an
+  // EMPTY body (the signature of a domain reload tearing down the socket
+  // mid-response). postTool must surface triggered_reload (isError:false), not
+  // bridge_response_unparsable — the mutation likely committed.
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      // Empty body — the hallmark of a socket torn down mid-response.
+      res.end("");
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_reimport_package", {
+      package_id: "com.alexeyperov.unity-open-mcp-bridge",
+    });
+    assert.equal(
+      result.isError,
+      false,
+      "empty body on a compile-reload tool is triggered_reload, not an error",
+    );
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.status, "triggered_reload");
+    assert.equal(body.triggeredReload, true);
+    assert.equal(body._route.outcome, "triggered_reload");
+    // The hint must tell the agent NOT to retry blindly (it would re-run the
+    // mutation) and to verify post-state instead.
+    assert.ok(
+      body.message.includes("do NOT retry blindly"),
+      "message must warn against a blind retry",
+    );
+    assert.ok(
+      body.agentNextSteps.some((s: string) => s.includes("editor_status")),
+      "agentNextSteps must point at editor_status / bridge_status",
+    );
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("empty body on NON-compile-reload tool still surfaces as bridge_response_unparsable", async () => {
+  // The reload split is gated on lifecycle === compile-reload. A read-only
+  // tool whose body is empty is genuine corruption (the bridge should always
+  // return a body for these), so it must still surface the unparsable-body
+  // error.
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      res.end("");
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_editor_get_tags", {});
+    assert.equal(
+      result.isError,
+      true,
+      "empty body on a non-compile-reload tool is genuine corruption",
+    );
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_response_unparsable");
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("whitespace-only body on compile-reload tool still counts as triggered_reload", async () => {
+  // A torn-down socket can deliver a stray newline or whitespace before the
+  // connection drops. The reload detector must treat whitespace-only as empty
+  // (trim before the length check) so the agent still gets triggered_reload.
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      res.end("\n  \n");
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_asmdef_modify", {
+      asset_path: "Assets/test.asmdef",
+      add_references: ["Test"],
+      paths_hint: ["Assets/test.asmdef"],
+    });
+    assert.equal(result.isError, false, "whitespace-only body trims to empty");
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.status, "triggered_reload");
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("substantial corrupt body on compile-reload tool STILL surfaces as unparsable", async () => {
+  // The 2026-07-03-c contract is preserved: a SUBSTANTIAL unparseable body on
+  // a compile-reload tool is still treated as corruption (OutputSerializer
+  // failure / truncated envelope), NOT triggered_reload. Only an empty body
+  // is the reload signature.
+  const s = makeSandbox();
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      // Substantial corrupt body — half-written envelope from a serialization
+      // failure. NOT the empty-body reload signature.
+      res.end('{"mutation":{"success":true,"output":{"broken":');
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_execute_csharp", {
+      code: "return 1;",
+    });
+    assert.equal(
+      result.isError,
+      true,
+      "substantial corrupt body is still an error, even on a compile-reload tool",
+    );
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_response_unparsable");
     await bridge.close();
   } finally {
     disposeSandbox(s);

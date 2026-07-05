@@ -49,7 +49,12 @@ export const readCompileErrors: Tool = {
     "current Editor. Works even when the bridge assembly itself is broken, " +
     "because it reads the log file the Editor writes independently of the " +
     "bridge. Check `unhealthy` first; when true, scan `headline` for a " +
-    "one-line triage then drill into `errors` and `issues`.",
+    "one-line triage then drill into `errors` and `issues`. When the response " +
+    "carries `staleLogSuspected: true`, the cited source files were edited " +
+    "more recently than Editor.log — the error block may reference on-disk " +
+    "code you have already fixed (Unity's incremental compiler no-op'd the " +
+    "recompile). Force a genuine recompile via unity_open_mcp_reimport_package " +
+    "(local package) or unity_open_mcp_compile_check before trusting the errors.",
   inputSchema: {
     type: "object",
     properties: {

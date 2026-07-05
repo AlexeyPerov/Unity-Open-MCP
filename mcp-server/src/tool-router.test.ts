@@ -8,6 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -551,6 +552,73 @@ test("route: read_asset is routed via the compressible path (offline hit, no liv
     // compressible results are tagged _route=live by the router wrapper even
     // when the source was offline (the wrapper does not inspect the body).
     assert.equal(routeOf(result), "live");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// read_compile_errors — offline Editor.log reader (specs/feedback.md
+// 2026-07-05 entry adds staleLogSuspected when a cited source file is newer
+// than Editor.log).
+// ---------------------------------------------------------------------------
+
+test("route: read_compile_errors attaches staleLogSuspected when a cited source is newer than the log", async () => {
+  // Real-shaped scenario: the log was written at t=1000, but the agent edited
+  // Assets/Scripts/Bridge.cs at t=2000 (after fixing the namespace the log
+  // still complains about). The router must surface staleLogSuspected so the
+  // agent knows to force a recompile before trusting the stale errors.
+  await withTmp("router-rce-stale-", async (tmp) => {
+    await mkdir(join(tmp, "Logs"), { recursive: true });
+    await mkdir(join(tmp, "Assets", "Scripts"), { recursive: true });
+    const logPath = join(tmp, "Logs", "Editor.log");
+    const srcPath = join(tmp, "Assets", "Scripts", "Bridge.cs");
+    // Write a log with a CS0118 error citing the now-fixed source file.
+    await writeFile(
+      logPath,
+      "Assets/Scripts/Bridge.cs(10,14): error CS0118: " +
+        "'ParticleSystem' is a namespace but is used like a type\n",
+    );
+    await writeFile(srcPath, "namespace Fixed {}");
+    utimesSync(logPath, new Date(1000_000), new Date(1000_000));
+    utimesSync(srcPath, new Date(2000_000), new Date(2000_000));
+
+    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    assert.equal(result.isError, false);
+    assert.equal(body.status, "compile_failed");
+    assert.equal(body.errorCount, 1);
+    assert.equal(body.staleLogSuspected, true);
+    assert.ok(typeof body.staleLogHint === "string" && body.staleLogHint.length > 0);
+    assert.ok(Array.isArray(body.staleLogNewerFiles));
+    assert.deepEqual(body.staleLogNewerFiles, ["Assets/Scripts/Bridge.cs"]);
+  });
+});
+
+test("route: read_compile_errors omits staleLogSuspected when the log is fresher than the sources", async () => {
+  // Healthy case: the log was written AFTER the latest source edit (a fresh
+  // compile just produced these errors). Must NOT attach the stale flag —
+  // these errors are current and the agent should trust + fix them.
+  await withTmp("router-rce-fresh-", async (tmp) => {
+    await mkdir(join(tmp, "Logs"), { recursive: true });
+    await mkdir(join(tmp, "Assets", "Scripts"), { recursive: true });
+    const logPath = join(tmp, "Logs", "Editor.log");
+    const srcPath = join(tmp, "Assets", "Scripts", "Bridge.cs");
+    await writeFile(
+      logPath,
+      "Assets/Scripts/Bridge.cs(10,14): error CS0118: still broken\n",
+    );
+    await writeFile(srcPath, "namespace Still.Broken {}");
+    utimesSync(srcPath, new Date(1000_000), new Date(1000_000));
+    utimesSync(logPath, new Date(2000_000), new Date(2000_000));
+
+    const router = makeRouter(makeFakeLive(), makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route("unity_open_mcp_read_compile_errors", {});
+    const body = parseBody(result);
+
+    assert.equal(body.status, "compile_failed");
+    assert.equal(body.staleLogSuspected, undefined,
+      "fresh log must not carry the stale flag");
   });
 });
 

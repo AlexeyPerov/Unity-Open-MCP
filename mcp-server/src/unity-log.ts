@@ -17,7 +17,7 @@
 //
 // No runtime deps beyond node built-ins (mcp-server/AGENTS.md).
 
-import { existsSync, openSync, readSync, fstatSync, closeSync } from "node:fs";
+import { existsSync, openSync, readSync, fstatSync, closeSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -181,4 +181,129 @@ export function readLogTail(
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Stale-log detection (specs/feedback.md 2026-07-05 entry).
+//
+// read_compile_errors reads a tail of Editor.log. When an assembly is in a
+// failed-compile state, AssetDatabase.Refresh performs an incremental no-op
+// (Unity sees no import change) and never rewrites the log's error block, so
+// the most recent CSxxxx block in Editor.log can be STALE — referencing an
+// on-disk namespace/symbol that has already been fixed. The agent then trusts
+// the stale errors as if they were current and burns cycles chasing a
+// problem it already solved.
+//
+// Mitigation: compare the mtime of the source files cited by the parsed
+// compiler errors against the mtime of Editor.log itself. If ANY cited
+// source file is newer than the log (the file was edited after the log's
+// most recent write), the log's most-recent error block predates the latest
+// fix and the errors may no longer apply. The router attaches a
+// `staleLogSuspected` flag + a recovery hint so the agent knows to force a
+// recompile via reimport_package / compile_check before trusting the result.
+// ---------------------------------------------------------------------------
+
+export interface StaleLogResult {
+  /** True when at least one cited source file is newer than Editor.log. */
+  staleLogSuspected: boolean;
+  /** Editor.log mtime in epoch ms, when readable. */
+  logMtimeMs?: number;
+  /**
+   * Cited source files (project-relative) whose mtime is newer than the log.
+   * Bounded — the agent does not need every offender, just enough to confirm
+   * the diagnosis and start a recompile.
+   */
+  newerFiles: string[];
+  /** One-line agent-facing recovery hint. Empty when not stale. */
+  hint: string;
+}
+
+/** Upper bound on the number of newer files reported. The list is evidence,
+ *  not an exhaustive roster — keeping it small avoids a giant payload when
+ *  many files were touched together (e.g. a solution-wide rename). */
+const MAX_NEWER_FILES = 5;
+
+/**
+ * Decide whether the Editor.log at `logPath` is likely stale relative to the
+ * on-disk source files cited by the parsed compiler errors.
+ *
+ * The decision is conservative — it only flags staleness when ALL of:
+ *   - the log file exists and has a readable mtime,
+ *   - at least one cited source file resolves under `projectRoot` and exists,
+ *   - that source file's mtime is strictly newer than the log's mtime.
+ *
+ * Returns `staleLogSuspected: false` (no hint) whenever the comparison cannot
+ * be made (no project root, no log, no cited files, all cited files outside
+ * the project). Never throws.
+ *
+ * Paths in `citedFiles` may be Unity-style asset locators
+ * (`Assets/Foo.cs(10,14)`) or already-stripped paths (`Assets/Foo.cs`); this
+ * helper strips a trailing `(...)` locator and accepts both forms.
+ */
+export function detectStaleLog(
+  logPath: string,
+  citedFiles: ReadonlyArray<string>,
+  projectRoot: string | null | undefined,
+): StaleLogResult {
+  const empty: StaleLogResult = {
+    staleLogSuspected: false,
+    newerFiles: [],
+    hint: "",
+  };
+  if (!projectRoot) return empty;
+
+  let logMtimeMs: number | undefined;
+  try {
+    if (!existsSync(logPath)) return empty;
+    logMtimeMs = statSync(logPath).mtimeMs;
+  } catch {
+    return empty;
+  }
+  if (logMtimeMs === undefined) return empty;
+
+  const newerFiles: string[] = [];
+  for (const raw of citedFiles) {
+    if (newerFiles.length >= MAX_NEWER_FILES) break;
+    if (!raw) continue;
+    // Strip a trailing Unity asset locator `(line,col)` if present. The
+    // structured compiler-error extractor already separates file from line,
+    // but defensive stripping keeps this helper callable on raw strings too.
+    const paren = raw.lastIndexOf("(");
+    const rel = (paren >= 0 ? raw.slice(0, paren) : raw).trim();
+    if (!rel) continue;
+    // Only inspect paths that resolve inside the project root. Editor.log
+    // sometimes cites files under Library/Temp or a package cache; their
+    // mtimes are not under the agent's control and would produce noise.
+    const abs = join(projectRoot, rel);
+    if (!abs.startsWith(projectRoot)) continue;
+    let fileMtimeMs: number;
+    try {
+      if (!existsSync(abs)) continue;
+      fileMtimeMs = statSync(abs).mtimeMs;
+    } catch {
+      continue;
+    }
+    // Strictly newer: an equal mtime means the log was rewritten at the same
+    // instant the file was saved (a fresh compile just finished writing both)
+    // — that is the OPPOSITE of stale, so the > keeps it out of the flag.
+    if (fileMtimeMs > logMtimeMs) {
+      newerFiles.push(rel);
+    }
+  }
+
+  if (newerFiles.length === 0) {
+    return { staleLogSuspected: false, logMtimeMs, newerFiles: [], hint: "" };
+  }
+  return {
+    staleLogSuspected: true,
+    logMtimeMs,
+    newerFiles,
+    hint:
+      "Editor.log appears stale — at least one cited source file was edited " +
+      "after the log's most recent write (Unity's incremental compiler likely " +
+      "no-op'd a recompile of the broken assembly, so the error block may no " +
+      "longer apply). Force a genuine recompile before trusting these errors: " +
+      "call unity_open_mcp_reimport_package on the affected local package, or " +
+      "unity_open_mcp_compile_check to spawn a fresh headless recompile.",
+  };
 }

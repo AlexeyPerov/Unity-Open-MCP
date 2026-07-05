@@ -5,7 +5,7 @@ import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
-import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES } from "./unity-log.js";
+import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog } from "./unity-log.js";
 import { summarizeProjectHealth } from "./project-health.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
@@ -650,6 +650,25 @@ export class ToolRouter implements Router {
         ? "compile_failed"
         : "project_unhealthy"
       : "no_errors_found";
+
+    // specs/feedback.md 2026-07-05 — stale-log detection. When an assembly is
+    // stuck in a failed-compile state, AssetDatabase.Refresh no-ops and the
+    // log's most-recent CSxxxx block can reference on-disk source that has
+    // ALREADY been fixed. Compare each cited source file's mtime against the
+    // log's mtime; if any source file is newer, attach staleLogSuspected so
+    // the agent knows to force a recompile (reimport_package / compile_check)
+    // before trusting the errors. Only run this when there are errors to
+    // check — a clean log is by definition not stale.
+    let staleLog: ReturnType<typeof detectStaleLog> | undefined;
+    if (errors.length > 0) {
+      const stale = detectStaleLog(
+        logPath,
+        errors.map((e) => e.file),
+        this.projectPath,
+      );
+      if (stale.staleLogSuspected) staleLog = stale;
+    }
+
     return {
       content: [
         {
@@ -666,6 +685,16 @@ export class ToolRouter implements Router {
             issueCount: health.issues.length,
             logPath,
             tailBytes: tail.bytes,
+            // Present ONLY when at least one cited source file is newer than
+            // Editor.log — the log's most-recent error block may be stale and
+            // the agent should force a recompile before trusting the errors.
+            ...(staleLog
+              ? {
+                  staleLogSuspected: true,
+                  staleLogHint: staleLog.hint,
+                  staleLogNewerFiles: staleLog.newerFiles,
+                }
+              : {}),
             _source: "offline",
           }),
         },
