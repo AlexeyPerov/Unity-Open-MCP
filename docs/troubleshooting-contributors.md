@@ -58,6 +58,31 @@ Unity's save prompt. Until dismissed, live tools return **`main_thread_blocked`*
    unload `InitTestScene*`) after Band G and **preflights** editor reachability
    before Band A.
 
+## `Main` scene modal after full test (Band C)
+
+**Symptom:** After a full test run, Unity shows **"Scene(s) Have Been Modified"**
+for **`Main`** (not `InitTestScene*`).
+
+**Why:** When additive `FT_Scene` creation or activation fails, the Band C
+GameObject chain runs in **`Main.unity`**. Failed or incomplete destroy steps
+leave fixture objects (`FT_*`, `GateTestCube`, Cinemachine `CM *`) in the
+hierarchy and Main stays **dirty in memory**. Finalize used to call
+`saveAllDirtyScenes`, which could try to persist that junk — or leave Main dirty
+if save failed or a modal blocked the bridge.
+
+**Recovery:**
+
+1. Click **Don't Save** (usual choice for the demo project).
+2. Re-run the suite — finalize now calls **`revertMainSceneIfDirty`** (removes
+   `FT_*` / `GateTestCube` / `CM *` roots from Main and clears the dirty flag
+   without saving to disk).
+3. If the hierarchy still looks wrong after dismissing the modal, quit Unity and
+   `git checkout -- demo/Assets/Scenes/Main.unity` — do **not** revert scene
+   files while Unity has them open (external-modification modal).
+
+**Note:** `--auto-revert` only restores tracked **ProjectSettings** — it does
+**not** revert scene files by design.
+
 ## Full test suite (`scripts/mcp-full-test.mjs`)
 
 - Requires `mcp-server/dist/index.js` built and a live Unity Editor with the
@@ -66,11 +91,32 @@ Unity's save prompt. Until dismissed, live tools return **`main_thread_blocked`*
   bridge port).
 - Sets `UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1` and
   `UNITY_OPEN_MCP_DIALOG_POLICY=cancel` in the child env.
+- **Preflight** dismisses modals, closes `InitTestScene*`, and discards dirty
+  **Main** state from a prior wedged run.
+- **Finalize** (after Band C or G) repeats that hygiene; Main is excluded from
+  auto-save unless you pass **`--save-main`** (debug only).
 - Band G (`run_tests`) is isolated last — it blocks the test runner and can
   leave the bridge in a brief post-run degraded window.
+- JSON reports include an **`isolation`** block:
+  `ft_scene_created`, `ft_scene_active`, `active_scene_at_teardown`,
+  `main_dirty_at_finalize`.
+
+### macOS Accessibility (automation hosts)
+
+Dialog auto-dismiss runs in the **`node` subprocess** that executes
+`run-tool`, not necessarily the Cursor IDE process. Grant Accessibility to the
+**host that actually runs the test command**:
+
+| How you run the suite | Grant Accessibility to |
+|---|---|
+| Cursor integrated terminal / agent | **Cursor** (and sometimes **Cursor Helper**) |
+| External Terminal / iTerm | **Terminal** or **iTerm** |
+| CI / scripted `node` | The CI runner binary or **`node`** itself |
+
+See [Dialog policy → macOS Accessibility](dialog-policy.md#macos-accessibility-required-for-auto-dismiss).
 
 ```bash
-node scripts/mcp-full-test.mjs --project /absolute/path/to/demo
+node scripts/mcp-full-test.mjs --project /absolute/path/to/demo --json-out /tmp/mcp-full-test-report.json
 ```
 
 ## Related docs

@@ -260,6 +260,16 @@ test("MACOS_DISMISS_APPLESCRIPT: back-compat constant is the default-policy scri
   );
 });
 
+test("macosDismissAppleScript: dismisses unsaved-scene sheets when opt-in is set", () => {
+  const script = macosDismissAppleScript({
+    ...DEFAULT_PROBE_OPTS,
+    allowUnsavedSceneDismiss: true,
+    policy: "cancel",
+  });
+  assert.ok(script.includes("sheets of w"), "must probe window sheets");
+  assert.ok(script.includes("Don't Save"), "cancel policy clicks Don't Save");
+});
+
 test("macosDismissAppleScript: dismisses launch-errors / non_matching_editor / auto_graphics_api under default policy", () => {
   const script = macosDismissAppleScript(DEFAULT_PROBE_OPTS);
   assert.ok(script.includes("dismissed:Focus:launch_errors"));

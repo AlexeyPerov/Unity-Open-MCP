@@ -62,6 +62,8 @@ const FT_SPRITEATLAS = `${FT}/FT_Atlas.spriteatlas`;
 const FT_TERRAIN_DATA_HINT = `${FT}/FT_Terrain.asset`;
 const HINT = [FT]; // shared paths_hint sentinel for in-scene mutations
 const SCENE_HINT = [FT_SCENE_ASSET];
+const MAIN_SCENE_PATH = "Assets/Scenes/Main.unity";
+const MAIN_SCENE_HINT = [MAIN_SCENE_PATH];
 
 // ---------------------------------------------------------------------------
 // arg parsing
@@ -75,6 +77,7 @@ function parseArgs(argv) {
     list: false,
     noCleanup: false,
     autoRevert: false,
+    saveMain: false,
     jsonOut: null,
     timeoutMs: 120_000,
   };
@@ -86,6 +89,7 @@ function parseArgs(argv) {
     else if (a === "--list") opts.list = true;
     else if (a === "--no-cleanup") opts.noCleanup = true;
     else if (a === "--auto-revert") opts.autoRevert = true;
+    else if (a === "--save-main") opts.saveMain = true;
     else if (a === "--json-out") opts.jsonOut = argv[++i];
     else if (a === "--timeout-ms") opts.timeoutMs = Number(argv[++i]);
     else if (a === "--help" || a === "-h") {
@@ -115,6 +119,8 @@ Options:
                           the setters mutated. Does NOT revert scene files
                           (rewriting a scene on disk while Unity has it open
                           triggers an undismissable modal).
+  --save-main            Allow finalize to save Main.unity when dirty (debug only;
+                          default is to discard in-memory Main changes).
   --json-out <file>      Write a machine-readable report to <file>
   --timeout-ms <n>       Per-step timeout (default 120000; raised internally
                          for recompile-heavy steps)
@@ -227,6 +233,18 @@ function classify(step, parsed) {
 // Dig into a nested object by dotted path.
 function pluck(obj, path) {
   return path.split(".").reduce((acc, k) => (acc && typeof acc === "object" ? acc[k] : undefined), obj);
+}
+
+/** Merge gameobject_find hits into ctx handles (cube/sphere/dup/prefab). */
+function applyFindObjectsToCtx(r, ctx) {
+  const objects = r.objects ?? [];
+  for (const o of objects) {
+    if (o.instanceId == null) continue;
+    if (o.name === "FT_Cube") ctx.cubeId = o.instanceId;
+    if (o.name === "FT_Sphere") ctx.sphereId = o.instanceId;
+    if (o.name === "FT_Renamed") ctx.cubeDupId = o.instanceId;
+    if (o.name === "GateTestCube") ctx.prefabInstanceId = o.instanceId;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -452,13 +470,28 @@ function buildSuite() {
     setup: "empty",
     mode: "additive",
     paths_hint: SCENE_HINT,
-  }, { gate: true, expect: "tolerate", tolerate: ["create_failed"] });
+  }, {
+    gate: true,
+    expect: "tolerate",
+    tolerate: ["create_failed"],
+    after: (r, ctx) => { ctx.ftSceneCreated = r.mutation?.success === true; },
+  });
 
   // scene_set_active only valid if FT_Scene was created; tolerate scene_not_found.
   s("scene_set_active", "C", "unity_open_mcp_scene_set_active", {
     name: "FT_Scene",
     paths_hint: SCENE_HINT,
-  }, { gate: true, expect: "tolerate", tolerate: ["scene_not_found"] });
+  }, {
+    gate: true,
+    expect: "tolerate",
+    tolerate: ["scene_not_found"],
+    after: (r, ctx) => {
+      ctx.ftSceneActive = r.mutation?.success === true;
+      if (ctx.ftSceneCreated && !ctx.ftSceneActive) {
+        ctx.ftSceneIsolationWarning = "FT_Scene created but scene_set_active failed — GO chain runs in the active scene";
+      }
+    },
+  });
 
   // --- GameObject lifecycle chain (cube → dup → modify → parent → component → destroy) ---
   s("gameobject_create_cube", "C", "unity_open_mcp_gameobject_create", {
@@ -519,11 +552,6 @@ function buildSuite() {
   s("selection_set", "C", "unity_open_mcp_selection_set", {
     resolveArgs: (ctx) => ({ instance_id: ctx.cubeId }),
   });
-  // Undo/redo early in the GO chain — before prefab/material/script work piles
-  // onto the stack. Running these immediately before destroy invalidates the
-  // captured instance IDs and breaks gameobject_destroy_* cleanup.
-  s("editor_undo", "C", "unity_open_mcp_editor_undo");
-  s("editor_redo", "C", "unity_open_mcp_editor_redo");
   s("console_log", "C", "unity_open_mcp_console_log", { message: "FT: full-test marker" });
   s("console_clear", "C", "unity_open_mcp_console_clear");
   s("editor_set_state_stop", "C", "unity_open_mcp_editor_set_state", { state: "stop" });
@@ -664,9 +692,20 @@ function buildSuite() {
   s("profiler_stop", "C", "unity_open_mcp_profiler_stop", {}, { expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
   s("profiler_clear_data", "C", "unity_open_mcp_profiler_clear_data");
 
+  // Re-acquire cube handle before focus (name-only lookup can fail after the
+  // prefab/script/build block even when the instance_id from create still works).
+  s("gameobject_find_refresh_pre_focus", "C", "unity_open_mcp_gameobject_find", {
+    name: "FT_Cube",
+  }, {
+    after: (r, ctx) => {
+      const id = pluck(r, "objects.0.instanceId");
+      if (id != null) ctx.cubeId = id;
+    },
+  });
+
   // --- sceneview focus + camera ---
   s("scene_focus", "C", "unity_open_mcp_scene_focus", {
-    resolveArgs: () => ({ name: "FT_Cube", paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.cubeId, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("sceneview_set_camera", "C", "unity_open_mcp_sceneview_set_camera", {
     position: { x: 0, y: 5, z: -10 }, rotation: { x: 30, y: 0, z: 0 }, paths_hint: SCENE_HINT,
@@ -796,16 +835,45 @@ function buildSuite() {
     menu_path: "Assets/Refresh", paths_hint: HINT,
   }, { gate: true, expect: "gate" });
 
+  // Re-resolve handles before destroy — domain reload / long chain can stale
+  // name-based lookup while cached instance_ids still work mid-chain.
+  s("gameobject_find_refresh_pre_destroy", "C", "unity_open_mcp_gameobject_find", {
+    name_contains: "FT_",
+    max_results: 30,
+  }, {
+    after: (r, ctx) => { applyFindObjectsToCtx(r, ctx); },
+  });
+  s("gameobject_find_gate_test_cube", "C", "unity_open_mcp_gameobject_find", {
+    name: "GateTestCube",
+  }, {
+    after: (r, ctx) => {
+      const id = pluck(r, "objects.0.instanceId");
+      if (id != null) ctx.prefabInstanceId = id;
+    },
+  });
+
   // --- GameObject destroy (cleanup of the chain GOs) ---
+  s("gameobject_destroy_renamed", "C", "unity_open_mcp_gameobject_destroy", {
+    resolveArgs: (ctx) => ({ instance_id: ctx.cubeDupId, paths_hint: SCENE_HINT }),
+  }, { gate: true, expect: "tolerate", tolerate: ["gameobject_not_found"] });
   s("gameobject_destroy_cube", "C", "unity_open_mcp_gameobject_destroy", {
-    resolveArgs: () => ({ name: "FT_Cube", paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.cubeId, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("gameobject_destroy_sphere", "C", "unity_open_mcp_gameobject_destroy", {
-    resolveArgs: () => ({ name: "FT_Sphere", paths_hint: SCENE_HINT }),
+    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("gameobject_destroy_prefab_inst", "C", "unity_open_mcp_gameobject_destroy", {
     resolveArgs: (ctx) => ({ instance_id: ctx.prefabInstanceId, paths_hint: SCENE_HINT }),
-  }, { gate: true, expect: "gate" });
+  }, { gate: true, expect: "tolerate", tolerate: ["gameobject_not_found"] });
+  s("gameobject_destroy_terrain", "C", "unity_open_mcp_gameobject_destroy", {
+    resolveArgs: (ctx) => ({ instance_id: ctx.terrainId, paths_hint: SCENE_HINT }),
+  }, { gate: true, expect: "tolerate", tolerate: ["gameobject_not_found"] });
+  s("gameobject_destroy_canvas", "C", "unity_open_mcp_gameobject_destroy", {
+    resolveArgs: (ctx) => ({ instance_id: ctx.canvasId, paths_hint: SCENE_HINT }),
+  }, { gate: true, expect: "tolerate", tolerate: ["gameobject_not_found"] });
+  s("gameobject_destroy_vcam", "C", "unity_open_mcp_gameobject_destroy", {
+    resolveArgs: (ctx) => ({ instance_id: ctx.vcamId, paths_hint: SCENE_HINT }),
+  }, { gate: true, expect: "tolerate", tolerate: ["gameobject_not_found"] });
 
   // --- scene save / unload (only valid if FT_Scene was created; tolerate).
   // NOTE: when FT_Scene couldn't be created additively (untitled-scene limit),
@@ -820,6 +888,10 @@ function buildSuite() {
   // (the post-delete refresh can hit the serialization bug); cleanup() is the
   // safety net and also removes the orphan .meta. ---
   s("assets_delete_ft_root", "C", "unity_open_mcp_assets_delete", { paths: [FT_FOLDER], paths_hint: [FT_FOLDER] }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable", "asset_not_found"] });
+
+  // --- editor undo/redo probes (after destroy — must not invalidate destroy IDs) ---
+  s("editor_undo", "C", "unity_open_mcp_editor_undo");
+  s("editor_redo", "C", "unity_open_mcp_editor_redo");
 
   // --- editor_clear_history: run LAST in band C (irreversible; clears the undo stack) ---
   s("editor_clear_history", "C", "unity_open_mcp_editor_clear_history", { paths_hint: SCENE_HINT }, { gate: true, expect: "gate" });
@@ -973,38 +1045,131 @@ function dismissBlockingModals(runEnv) {
       policy: cfg.policy,
       allowProjectUpgrade: cfg.allowProjectUpgrade,
       allowUnsavedSceneDismiss: cfg.allowUnsavedSceneDismiss,
+      log: (line) => console.error(line),
     });
   `;
   try {
     execFileSync(process.execPath, ["--input-type=module", "-e", script], {
       encoding: "utf8",
-      stdio: ["ignore", "ignore", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
       timeout: 15_000,
       env: runEnv,
     });
-  } catch {
-    // best-effort — Accessibility permission may be missing on some hosts
+  } catch (err) {
+    const msg = (err.stderr ?? err.message ?? "").toString().trim();
+    if (msg) process.stderr.write(`${msg}\n`);
   }
 }
 
-/** Tear down InitTestScene* leftovers from run_tests and dismiss save modals. */
-function finalizeEditorState(project, runEnv) {
+/** Close dirty InitTestScene* temp scenes via the bridge (no save prompt when not dirty). */
+function closeInitTestScenes(project, runEnv) {
+  return invokeTool(
+    project,
+    "unity_open_mcp_execute_csharp",
+    {
+      code: [
+        "var closed = new List<string>();",
+        "for (int i = UnityEngine.SceneManagement.SceneManager.sceneCount - 1; i >= 0; i--) {",
+        "  var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);",
+        "  if (!scene.IsValid() || !scene.isLoaded) continue;",
+        "  if (!scene.name.StartsWith(\"InitTestScene\")) continue;",
+        "  UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene, false);",
+        "  UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, removeScene: true);",
+        "  closed.Add(scene.name);",
+        "}",
+        "return new { status = \"ok\", closed = closed.ToArray() };",
+      ].join("\n"),
+      usings: ["UnityEngine.SceneManagement", "UnityEditor.SceneManagement"],
+      paths_hint: MAIN_SCENE_HINT,
+    },
+    60_000,
+    runEnv,
+  );
+}
+
+/** Remove FT_* fixture GOs from Main and clear its dirty flag (no disk save). */
+function revertMainSceneIfDirty(project, runEnv) {
+  return invokeTool(
+    project,
+    "unity_open_mcp_execute_csharp",
+    {
+      code: [
+        "var removed = new List<string>();",
+        "var cleared = false;",
+        "UnityEngine.SceneManagement.Scene main = default;",
+        "for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++) {",
+        "  var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);",
+        "  if (scene.path == \"Assets/Scenes/Main.unity\") { main = scene; break; }",
+        "}",
+        "if (!main.IsValid() || !main.isLoaded) {",
+        "  var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();",
+        "  if (active.path == \"Assets/Scenes/Main.unity\" || active.name == \"Main\") main = active;",
+        "}",
+        "if (main.IsValid() && main.isLoaded) {",
+        "  foreach (var root in main.GetRootGameObjects()) {",
+        "    if (root.name.StartsWith(\"FT_\") || root.name == \"GateTestCube\" || root.name.StartsWith(\"CM \")",
+        "        || root.name == \"Terrain\" || root.name == \"Canvas\") {",
+        "      UnityEngine.Object.DestroyImmediate(root);",
+        "      removed.Add(root.name);",
+        "    }",
+        "  }",
+        "  UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(main, false);",
+        "  cleared = true;",
+        "}",
+        "var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();",
+        "return new { status = \"ok\", removed = removed.ToArray(), cleared, activeScene = activeScene.name, activePath = activeScene.path };",
+      ].join("\n"),
+      usings: ["UnityEngine", "UnityEngine.SceneManagement", "UnityEditor.SceneManagement"],
+      paths_hint: MAIN_SCENE_HINT,
+    },
+    60_000,
+    runEnv,
+  );
+}
+
+function isMainSceneEntry(scene, excludePaths) {
+  if (!excludePaths) return false;
+  const path = scene?.path;
+  const name = scene?.name;
+  if (path && excludePaths.has(path)) return true;
+  if (name === "Main" && excludePaths.has(MAIN_SCENE_PATH)) return true;
+  return false;
+}
+
+function collectIsolationState(project, runEnv, ctx) {
+  const dirty = invokeTool(project, "unity_open_mcp_scene_get_dirty_summary", {}, 15_000, runEnv);
+  const scenes = dirty?.result?.scenes ?? [];
+  const mainDirty = scenes.some((s) => isMainSceneEntry(s, new Set([MAIN_SCENE_PATH])) && s.isDirty);
+  const active = invokeTool(
+    project,
+    "unity_open_mcp_execute_csharp",
+    {
+      code: "var s = UnityEngine.SceneManagement.SceneManager.GetActiveScene(); return new { name = s.name, path = s.path };",
+      usings: ["UnityEngine.SceneManagement"],
+      paths_hint: MAIN_SCENE_HINT,
+    },
+    15_000,
+    runEnv,
+  );
+  return {
+    ft_scene_created: ctx.ftSceneCreated === true,
+    ft_scene_active: ctx.ftSceneActive === true,
+    ft_scene_isolation_warning: ctx.ftSceneIsolationWarning ?? null,
+    active_scene_at_teardown: active?.result?.mutation?.output?.name ?? null,
+    active_scene_path_at_teardown: active?.result?.mutation?.output?.path ?? null,
+    main_dirty_at_finalize: mainDirty,
+  };
+}
+
+/** Tear down InitTestScene* leftovers and discard Main dirty state without saving. */
+function finalizeEditorState(project, runEnv, options = {}) {
+  const excludeMain = options.excludeMain !== false;
   dismissBlockingModals(runEnv);
-  const list = invokeTool(project, "unity_open_mcp_scene_list_opened", {}, 30_000, runEnv);
-  const scenes = list?.result?.scenes ?? [];
-  for (const sc of scenes) {
-    const name = sc?.name ?? "";
-    if (!name.startsWith("InitTestScene")) continue;
-    invokeTool(
-      project,
-      "unity_open_mcp_scene_unload",
-      { name, paths_hint: ["Assets/Scenes/Main.unity"] },
-      30_000,
-      runEnv,
-    );
-    dismissBlockingModals(runEnv);
-  }
-  saveAllDirtyScenes(project, runEnv);
+  closeInitTestScenes(project, runEnv);
+  revertMainSceneIfDirty(project, runEnv);
+  dismissBlockingModals(runEnv);
+  const excludePaths = excludeMain ? new Set([MAIN_SCENE_PATH]) : null;
+  saveAllDirtyScenes(project, runEnv, 30_000, excludePaths);
   dismissBlockingModals(runEnv);
 }
 
@@ -1027,13 +1192,14 @@ function invokeTool(project, tool, args, timeoutMs, runEnv) {
   }
 }
 
-function saveAllDirtyScenes(project, runEnv, timeoutMs = 30_000) {
+function saveAllDirtyScenes(project, runEnv, timeoutMs = 30_000, excludePaths = null) {
   const parsed = invokeTool(project, "unity_open_mcp_scene_get_dirty_summary", {}, timeoutMs, runEnv);
   if (!parsed || parsed.isError === true) return 0;
   const scenes = parsed.result?.scenes ?? [];
   let saved = 0;
   for (const scene of scenes) {
     if (!scene?.isDirty) continue;
+    if (isMainSceneEntry(scene, excludePaths)) continue;
     const path = scene.path;
     const name = scene.name;
     const saveArgs = path
@@ -1266,13 +1432,17 @@ function main() {
   // click Don't Save manually once.
   console.log("--- preflight ---");
   dismissBlockingModals(runEnv);
+  closeInitTestScenes(opts.project, runEnv);
+  revertMainSceneIfDirty(opts.project, runEnv);
+  dismissBlockingModals(runEnv);
   const preflight = invokeTool(opts.project, "unity_open_mcp_editor_status", {}, 15_000, runEnv);
   const preCode = preflight?.result?.error?.code;
   if (preflight?.isError === true && preCode === "main_thread_blocked") {
     console.error("");
-    console.error("Unity main thread is blocked by a modal dialog (likely unsaved InitTestScene*).");
+    console.error("Unity main thread is blocked by a modal dialog (likely unsaved scene changes).");
     console.error("Click \"Don't Save\" in the Unity Editor, or grant Accessibility permission");
-    console.error("to your terminal/node so UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS can auto-click.");
+    console.error("to the app that runs `node` (Cursor, Terminal, iTerm, …) — see");
+    console.error("docs/dialog-policy.md#macos-accessibility-required-for-auto-dismiss.");
     console.error("Then re-run this script.");
     process.exit(2);
   }
@@ -1319,6 +1489,9 @@ function main() {
         // best-effort handoff; downstream steps fail loudly if missing
       }
     }
+    if (ctx.ftSceneIsolationWarning && step.label === "scene_set_active") {
+      process.stdout.write(`  ⚠ ${ctx.ftSceneIsolationWarning}\n`);
+    }
     const mark = out.ok ? "✓" : "✗";
     const ms = String(out.ms).padStart(6);
     process.stdout.write(`${mark} ${step.label.padEnd(34)} ${ms}ms  ${out.detail ?? out.error}\n`);
@@ -1326,15 +1499,22 @@ function main() {
 
   process.removeListener("SIGINT", onSigInt);
 
-  // Post-suite: dismiss any save modal and unload InitTestScene* temp scenes
-  // left by run_tests (Band G). Without this, Unity stays wedged on "Scene(s)
-  // Have Been Modified" because InitTestScene has no on-disk path (auto-save
-  // skips it) and the title did not match the dismiss fragment list until fixed.
-  if (!opts.band || opts.band.includes("G")) {
+  const ranBandC = !opts.band || opts.band.includes("C");
+  const ranBandG = !opts.band || opts.band.includes("G");
+  let isolation = null;
+
+  // Post-suite: dismiss save modals, unload InitTestScene*, discard Main dirty state.
+  if (ranBandC || ranBandG) {
     console.log("");
     console.log("--- finalize ---");
-    finalizeEditorState(opts.project, runEnv);
-    process.stdout.write(`✓ ${"editor finalize (dismiss + InitTestScene cleanup)".padEnd(34)}        done\n`);
+    finalizeEditorState(opts.project, runEnv, { excludeMain: !opts.saveMain });
+    if (ranBandC) {
+      isolation = collectIsolationState(opts.project, runEnv, ctx);
+      if (isolation.main_dirty_at_finalize) {
+        process.stdout.write(`  ⚠ Main still dirty after finalize — dismiss any modal manually\n`);
+      }
+    }
+    process.stdout.write(`✓ ${"editor finalize (dismiss + scene cleanup)".padEnd(34)}        done\n`);
   }
 
   // Always attempt cleanup of the temp fixture root unless --no-cleanup.
@@ -1369,6 +1549,7 @@ function main() {
       project: opts.project,
       ranAt: new Date().toISOString(),
       summary: { pass, fail, total: selected.length, bandSummary },
+      isolation,
       skips: opts.band || opts.only ? [] : SKIPS,
       steps: results,
     };

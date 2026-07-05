@@ -497,22 +497,32 @@ end run
 
 /** AppleScript block: match unsaved-scene title fragments and click a named button. */
 function unsavedSceneMacOsClickBlock(buttonLabels: readonly string[]): string {
-  // Use human-readable title substrings — AppleScript `contains` is case-
-  // insensitive but does NOT strip punctuation, so normalized fragments like
-  // "sceneshavebeenmodified" never match "Scene(s) Have Been Modified".
-  const titleChecks = [
+  const textFrags = [
     "Have Been Modified",
     "Unsaved changes",
     "Save Changes",
     "Do you want to save",
     "save the changes you made",
-  ]
-    .map((f) => `wt contains "${f}"`)
-    .join(" or ");
-  const labelChecks = buttonLabels
-    .map(
-      (label) => `
-            repeat with btn in buttons of w
+  ];
+  const titleMatch = (varName: string) =>
+    textFrags.map((f) => `${varName} contains "${f}"`).join(" or ");
+  const staticTextScan = (container: string, flagVar: string) => `
+            repeat with st in static texts of ${container}
+              try
+                set tx to (value of st) as text
+              on error
+                set tx to ""
+              end try
+              if ${textFrags.map((f) => `tx contains "${f}"`).join(" or ")} then
+                set ${flagVar} to true
+                exit repeat
+              end if
+            end repeat`;
+  const clickButtons = (container: string) =>
+    buttonLabels
+      .map(
+        (label) => `
+            repeat with btn in buttons of ${container}
               try
                 set bt to (title of btn) as text
               on error
@@ -524,12 +534,29 @@ function unsavedSceneMacOsClickBlock(buttonLabels: readonly string[]): string {
                 return "dismissed:${label}:unsaved_scene_changes"
               end if
             end repeat`,
-    )
-    .join("");
+      )
+      .join("");
   return `
-          if (${titleChecks}) then
-            ${labelChecks}
-          end if`;
+          -- Top-level window title (some Unity versions).
+          if (${titleMatch("wt")}) then
+            ${clickButtons("w")}
+          end if
+          -- Unity 6 save prompt is usually a sheet on the main Editor window.
+          try
+            repeat with s in sheets of w
+              set sheetMatched to false
+              try
+                set stitle to (title of s) as text
+                if ${titleMatch("stitle")} then set sheetMatched to true
+              end try
+              if not sheetMatched then
+                ${staticTextScan("s", "sheetMatched")}
+              end if
+              if sheetMatched then
+                ${clickButtons("s")}
+              end if
+            end repeat
+          end try`;
 }
 
 /**
