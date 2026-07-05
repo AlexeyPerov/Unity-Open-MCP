@@ -184,6 +184,7 @@ On unattended machines, configure startup modal handling via
 
 ## Related docs
 
+- [Troubleshooting](troubleshooting.md) — bridge start failures and connectivity recovery
 - [Dialog policy](dialog-policy.md)
 - [Wizard setup](wizard-setup.md)
 - [Development setup](development-setup.md) — local checkout, contributor and maintainer workflows.

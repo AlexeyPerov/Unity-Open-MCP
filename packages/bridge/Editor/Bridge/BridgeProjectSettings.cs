@@ -60,6 +60,11 @@ namespace UnityOpenMcpBridge
         // BridgeRequestQueue.
         public bool fairQueueEnabled = true;
         public int fairQueueReadsPerFrame = 5;
+
+        // When true, RestartThenSettle tools auto-save loaded dirty scenes before
+        // the scene_dirty guard would refuse — prevents Unity's native save modal
+        // from blocking automation. Off by default; enable for demo/CI projects.
+        public bool autoSaveDirtyScenes = false;
     }
 
     public static class BridgeProjectSettings

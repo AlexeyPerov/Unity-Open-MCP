@@ -324,6 +324,8 @@ namespace UnityOpenMcpBridge
                 EditorGUILayout.HelpBox(_lastPingResult, _lastPingMessageType);
             }
 
+            DrawPortInUseRecoveryIfNeeded();
+
             BridgeGUIUtilities.HorizontalLine(8, 6);
 
             DrawMcpConnectivitySection();
@@ -390,6 +392,11 @@ namespace UnityOpenMcpBridge
                 try
                 {
                     BridgeHttpServer.Start();
+                    if (!BridgeHttpServer.IsRunning && !string.IsNullOrEmpty(BridgeHttpServer.LastStartError))
+                    {
+                        _lastPingResult = $"Start failed: {BridgeHttpServer.LastStartError}";
+                        _lastPingMessageType = MessageType.Error;
+                    }
                 }
                 catch (Exception e)
                 {
@@ -445,6 +452,22 @@ namespace UnityOpenMcpBridge
             }
 
             EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawPortInUseRecoveryIfNeeded()
+        {
+            if (BridgeHttpServer.IsRunning)
+                return;
+
+            var startError = BridgeHttpServer.LastStartError;
+            if (!BridgeStartRecovery.IsPortInUseError(startError))
+                return;
+
+            EditorGUILayout.Space(4);
+            var projectPath = BridgeSession.ProjectPath ?? BridgeHttpServer.GetProjectPathForPort();
+            EditorGUILayout.HelpBox(
+                BridgeStartRecovery.FormatPortInUseRecovery(projectPath, BridgeHttpServer.Port),
+                MessageType.Info);
         }
 
         private void DrawLocalPing()
@@ -2436,6 +2459,7 @@ namespace UnityOpenMcpBridge
             ("README", "README.md", "Project overview, feature set, and quick links."),
             ("Wizard setup", "docs/wizard-setup.md", "Recommended onboarding flow via Unity Hub Pro."),
             ("Manual setup", "docs/manual-setup.md", "Direct MCP setup and client config snippets."),
+            ("Troubleshooting", "docs/troubleshooting.md", "Bridge start failures, zombie listeners, and connectivity recovery."),
             ("Development setup", "docs/development-setup.md", "Local checkout, contributor and maintainer workflows."),
             ("Architecture", "docs/architecture.md", "Repository structure and cross-package boundaries."),
             ("Bridge HTTP API", "docs/api/bridge-http.md", "Bridge endpoints, envelopes, /ping, and remote bind."),

@@ -44,11 +44,37 @@ namespace UnityOpenMcpBridge
         private static volatile bool _running;
         private static int _port;
 
+        // M26 Plan 4 — bounded in-process recovery when bind fails with
+        // "address already in use" (zombie listener / OS release lag).
+        private const int PortBindRetryAttempts = 5;
+        private const int PortBindRetryDelayMs = 100;
+
         public static int Port => _port;
         public static bool IsRunning => _running;
 
         static BridgeHttpServer()
         {
+            // The bridge HTTP listener only makes sense in the interactive
+            // Editor — it is the MCP server's live entry point. Unity also
+            // loads this assembly in child processes it spawns for asset
+            // import / background work (AssetImportWorker*, launched with
+            // -batchMode -parentPid). Those workers used to run Start() from
+            // this [InitializeOnLoad] ctor and bind the project's deterministic
+            // port; the main Editor then could not bind ("Address already in
+            // use"), its heartbeat never restarted, and the MCP server
+            // classified the instance as dead_bridge while /ping still
+            // succeeded against the worker's listener — a confusing
+            // false-positive that recurred frequently under heavy automation
+            // (mcp-full-test, CI). The deliberate headless path
+            // (BridgeBatchEntry, -executeMethod) never relies on this listener,
+            // so skipping it in every batch-mode process is safe.
+            if (IsWorkerOrBatchProcess)
+            {
+                UnityEngine.Debug.Log(
+                    $"[Unity Open MCP Bridge] Skipping listener in batch/worker process ({WorkerProcessName()}).");
+                return;
+            }
+
             BridgeToolRegistry.Scan();
             BridgeResourceRegistry.Scan();
 
@@ -57,6 +83,34 @@ namespace UnityOpenMcpBridge
 
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             EditorApplication.quitting += OnQuitting;
+        }
+
+        // True when this process is NOT the interactive Editor — i.e. Unity
+        // launched it with -batchMode (covers AssetImportWorker children on
+        // both Unity 2022.3 and Unity 6; -parentPid is Unity-6-only and can't
+        // be the sole signal because the bridge floor is 2022.3). The
+        // deliberate BridgeBatchEntry headless run is also -batchmode, but it
+        // is -executeMethod-driven and exits on its own — it never depends on
+        // the [InitializeOnLoad] listener, so gating it out here is harmless.
+        internal static bool IsWorkerOrBatchProcess =>
+            UnityEngine.Application.isBatchMode;
+
+        // Best-effort label for the skip log line. Reads -name <n> from the
+        // command line; falls back to "batch" when absent.
+        private static string WorkerProcessName()
+            => ReadNameArg(Environment.GetCommandLineArgs());
+
+        // Pure arg parser extracted so the EditMode test can exercise it without
+        // mutating the process command line. Returns the value after the first
+        // -name token, or "batch" when absent / no value follows.
+        internal static string ReadNameArg(string[] args)
+        {
+            if (args == null) return "batch";
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] == "-name") return args[i + 1];
+            }
+            return "batch";
         }
 
         // Domain reload: stop the listener but KEEP the instance lock on disk.
@@ -69,7 +123,8 @@ namespace UnityOpenMcpBridge
         // to detect a dead bridge and fail fast instead of hanging on /ping.
         // On a normal reload, Start() runs again after the reload and Acquire()
         // overwrites this lock with fresh state.
-        private static void OnBeforeAssemblyReload() => Stop(releaseLock: false);
+        private static void OnBeforeAssemblyReload() =>
+            ForceStopListener(releaseLock: false, logStopped: false);
 
         // Graceful editor quit: full release — delete the lock so a stale entry
         // doesn't linger for a closed editor.
@@ -135,8 +190,14 @@ namespace UnityOpenMcpBridge
             return "unity-open-mcp-unknown-project";
         }
 
+        // Set when Start() fails (bind refusal or listener exception). Cleared on
+        // success. Surfaced on the bridge Status tab so operators see recovery
+        // steps instead of only a Console LogError.
+        public static string LastStartError { get; private set; }
+
         public static void Start()
         {
+            LastStartError = null;
             if (_running) return;
 
             // M14 T5.4 — resolve the bind address through the policy. Remote
@@ -148,6 +209,7 @@ namespace UnityOpenMcpBridge
             var bindDecision = BridgeBindAddress.Decide(bindAddress, BridgeAuthPolicy.GetDefault());
             if (!bindDecision.Allowed)
             {
+                LastStartError = bindDecision.RefusalReason;
                 UnityEngine.Debug.LogError(
                     $"[Unity Open MCP Bridge] Refusing to start: {bindDecision.RefusalReason}");
                 _running = false;
@@ -155,6 +217,64 @@ namespace UnityOpenMcpBridge
                 return;
             }
             var effectiveBind = bindDecision.ResolvedAddress;
+
+            Exception lastFailure = null;
+            for (var attempt = 0; attempt <= PortBindRetryAttempts; attempt++)
+            {
+                if (attempt > 0)
+                {
+                    ForceStopListener(releaseLock: false, logStopped: false);
+                    Thread.Sleep(PortBindRetryDelayMs * attempt);
+                    UnityEngine.Debug.LogWarning(
+                        $"[Unity Open MCP Bridge] Port {_port} in use — in-process recovery attempt " +
+                        $"{attempt}/{PortBindRetryAttempts}...");
+                }
+
+                if (TryStartListener(effectiveBind, out var failure))
+                {
+                    if (attempt > 0)
+                    {
+                        UnityEngine.Debug.Log(
+                            $"[Unity Open MCP Bridge] Listener recovered on port {_port} " +
+                            $"after {attempt} retry attempt(s).");
+                    }
+                    return;
+                }
+
+                lastFailure = failure;
+                if (failure == null || !BridgeStartRecovery.IsPortInUseError(failure.Message))
+                    break;
+            }
+
+            LastStartError = lastFailure?.Message ?? "Unknown listener start failure.";
+            UnityEngine.Debug.LogError(
+                $"[Unity Open MCP Bridge] Failed to start listener: {LastStartError}");
+            _running = false;
+            BridgeSession.SetConnected(false);
+
+            // Defense in depth: when Start fails after a domain reload, the
+            // lock on disk is frozen at state="reloading" with a heartbeatAt
+            // from before the reload. The MCP server reads that stale-heartbeat
+            // + live-PID signature as dead_bridge even though this Editor is
+            // alive (just unable to bind — e.g. a foreign process holds the
+            // port). If we already hold a lock from a prior successful Start in
+            // this process, restart the heartbeat so the lock advances and the
+            // classification reflects reality (idle, not stuck reloading). We
+            // deliberately do NOT mint a new lock here — the contract is to
+            // never advertise a port nothing is listening on (Acquire rewrites
+            // port/pid), and we have no listener to back it.
+            if (BridgeInstanceLock.IsAcquired)
+            {
+                BridgeHeartbeat.Start();
+            }
+        }
+
+        // Bind the HTTP listener, start the worker thread, and publish the
+        // instance lock + heartbeat. Cleans up partial state on failure.
+        private static bool TryStartListener(string effectiveBind, out Exception failure)
+        {
+            failure = null;
+            CleanupPartialListener();
 
             try
             {
@@ -183,13 +303,46 @@ namespace UnityOpenMcpBridge
                     ? " (remote — authMode required)"
                     : "";
                 UnityEngine.Debug.Log($"[Unity Open MCP Bridge] Listening on http://{effectiveBind}:{_port}/{bindNote}");
+                return true;
             }
             catch (System.Exception e)
             {
-                UnityEngine.Debug.LogError($"[Unity Open MCP Bridge] Failed to start listener: {e.Message}");
+                failure = e;
+                CleanupPartialListener();
                 _running = false;
                 BridgeSession.SetConnected(false);
+                return false;
             }
+        }
+
+        // Tear down listener + heartbeat regardless of _running. Used on domain
+        // reload, manual Stop, and port-in-use recovery. Lock retention follows
+        // releaseLock (false on reload/recovery, true on graceful quit).
+        internal static void ForceStopListener(bool releaseLock, bool logStopped)
+        {
+            _running = false;
+            BridgeSession.SetConnected(false);
+
+            try { BridgeHeartbeat.Stop(); } catch { }
+            if (releaseLock)
+            {
+                try { BridgeInstanceLock.Release(); } catch { }
+            }
+
+            CleanupPartialListener();
+
+            if (logStopped)
+                UnityEngine.Debug.Log("[Unity Open MCP Bridge] Stopped.");
+        }
+
+        private static void CleanupPartialListener()
+        {
+            try { _listener?.Stop(); } catch { }
+            try { _listener?.Close(); } catch { }
+            _listener = null;
+
+            try { _listenerThread?.Join(2000); } catch { }
+            _listenerThread = null;
         }
 
         public static void Stop() => Stop(releaseLock: true);
@@ -200,38 +353,10 @@ namespace UnityOpenMcpBridge
         // (graceful quit) deletes it.
         private static void Stop(bool releaseLock)
         {
-            if (!_running) return;
-            _running = false;
-            BridgeSession.SetConnected(false);
+            if (!_running && _listener == null && _listenerThread == null && !BridgeHeartbeat.IsRunning)
+                return;
 
-            // Stop the heartbeat first so it can't rewrite the lock after a
-            // release. When releaseLock is false (domain reload), the heartbeat
-            // has already forced a "reloading" write before this method runs.
-            try { BridgeHeartbeat.Stop(); } catch { }
-            if (releaseLock)
-            {
-                try { BridgeInstanceLock.Release(); } catch { }
-            }
-
-            try
-            {
-                _listener?.Stop();
-            }
-            catch (System.Exception e)
-            {
-                UnityEngine.Debug.LogWarning($"[Unity Open MCP Bridge] Error stopping listener: {e.Message}");
-            }
-
-            _listener = null;
-
-            try
-            {
-                _listenerThread?.Join(2000);
-            }
-            catch { }
-
-            _listenerThread = null;
-            UnityEngine.Debug.Log("[Unity Open MCP Bridge] Stopped.");
+            ForceStopListener(releaseLock, logStopped: true);
         }
 
         private static void ListenLoop()
@@ -848,6 +973,11 @@ namespace UnityOpenMcpBridge
             if (SceneDirtyGuard.AppliesTo(toolName, body))
             {
                 var guard = SceneDirtyGuard.Check();
+                if (!guard.Allowed && SceneDirtyAutoSave.IsEnabled)
+                {
+                    SceneDirtyAutoSave.TrySaveAllDirty(out _, out _);
+                    guard = SceneDirtyGuard.Check();
+                }
                 if (!guard.Allowed)
                 {
                     return new GateDispatchResult

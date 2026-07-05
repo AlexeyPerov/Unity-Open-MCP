@@ -55,6 +55,7 @@ Optional: install extension packs for domain-specific workflows: [Extensions](do
 
 - [Architecture](docs/architecture.md) — repository boundaries and runtime flow.
 - [Dialog policy](docs/dialog-policy.md) — startup modal auto-dismiss and `UNITY_OPEN_MCP_DIALOG_POLICY`.
+- [Troubleshooting](docs/troubleshooting.md) — bridge start failures, zombie listeners, and connectivity recovery.
 - [Skills](docs/skills.md) — agent playbooks (`SKILL.md`) shipped into a project.
 - [API index](docs/api.md) — contract documentation map.
 - [Bridge HTTP API](docs/api/bridge-http.md) — bridge endpoints and envelopes.

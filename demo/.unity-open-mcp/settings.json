@@ -12,5 +12,6 @@
     "editorSettleCapMs": 5000,
     "restartSettleCapMs": 60000,
     "fairQueueEnabled": true,
-    "fairQueueReadsPerFrame": 5
+    "fairQueueReadsPerFrame": 5,
+    "autoSaveDirtyScenes": true
 }

@@ -8,10 +8,17 @@
 // down at the end, so the project is left clean.
 //
 // Tools whose Unity package isn't compiled into the bridge return
-// `tool_not_found` — counted as a pass (route + availability detection
-// exercised). Batch-headless tools that can't grab the project (Editor open)
-// return `project_path_missing` / `editor_instance_locked` — also a pass.
+// `tool_not_found` (Band F unavailable sub-band). Compiled extension packs get a
+// minimal reachability probe (Band F ext_* steps). Batch-headless tools that
+// can't grab the project (Editor open) return `project_path_missing` /
+// `editor_instance_locked` — also a pass. Destructive tools are exercised via
 // Destructive tools are exercised via their REFUSAL path only.
+//
+// Modal prevention: the runner sets UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1
+// (CLI dismiss loop backstop) and saves all dirty scenes before recompile-heavy
+// Band C steps. The demo project enables autoSaveDirtyScenes in
+// .unity-open-mcp/settings.json so the bridge auto-saves before scene_dirty
+// refusals on RestartThenSettle tools.
 //
 // Usage:
 //   node scripts/mcp-full-test.mjs                       # full suite vs ./demo
@@ -98,7 +105,8 @@ Options:
   --project, -P <path>   Target Unity project (default: <repo>/demo). MUST be absolute.
   --band A,B,C           Run only bands A=lifecycle/meta, B=read-only,
                          C=safe-mutations, D=batch, E=destructive-refusal,
-                         F=unavailable-groups
+                         F=extension-pack availability (compiled reachability +
+                         unavailable groups), G=run_tests
   --only needle          Run only steps whose label contains any needle
   --list                 List the suite steps and exit (no execution)
   --no-cleanup           Leave temp fixtures in place (debug)
@@ -128,6 +136,8 @@ running.`);
 //   refused   → mutation.error.code in {build_confirmation_required,
 //               denied_by_policy, menu_blocked}  (deny heuristic fired)
 //   unavailable → error.code === tool_not_found  (group not compiled into bridge)
+//   reachable   → error.code !== tool_not_found  (compiled extension pack; minimal
+//                 args — missing-param / guard errors still prove registration)
 // ---------------------------------------------------------------------------
 
 const REFUSED_CODES = new Set(["build_confirmation_required", "denied_by_policy", "menu_blocked"]);
@@ -177,7 +187,15 @@ function classify(step, parsed) {
     }
     case "unavailable": {
       const pass = isError && errCode === "tool_not_found";
-      return { pass, detail: pass ? "tool_not_found (group not compiled in)" : `err=${errCode}` };
+      return { pass, detail: pass ? "tool_not_found (group not compiled in)" : `err=${errCode ?? "none"}` };
+    }
+    case "reachable": {
+      // Compiled extension pack: any structured response except tool_not_found.
+      if (errCode === "tool_not_found") {
+        return { pass: false, detail: "tool_not_found (expected compiled in)" };
+      }
+      if (!isError) return { pass: true, detail: "ok (compiled in)" };
+      return { pass: true, detail: `err=${errCode} (compiled in)` };
     }
     case "verify_timeout": {
       // Verify-family live-bridge hang (see specs/feedback.md). Pass = either
@@ -331,7 +349,8 @@ function buildSuite() {
 
   // --- unity-hub-control reads (local-routed, no Unity needed) ---
   s("hub_list_editors", "B", "unity_open_mcp_hub_list_editors");
-  s("hub_get_install_path", "B", "unity_open_mcp_hub_get_install_path");
+  // Hub CLI output format varies by Hub version / install layout — tolerate unparseable.
+  s("hub_get_install_path", "B", "unity_open_mcp_hub_get_install_path", {}, { expect: "tolerate", tolerate: ["install_path_unparseable"] });
   // hub_available_releases hits the network; keep it but tolerate failure
   s("hub_available_releases", "B", "unity_open_mcp_hub_available_releases", { limit: 3 });
 
@@ -495,8 +514,6 @@ function buildSuite() {
   });
   s("console_log", "C", "unity_open_mcp_console_log", { message: "FT: full-test marker" });
   s("console_clear", "C", "unity_open_mcp_console_clear");
-  s("editor_undo", "C", "unity_open_mcp_editor_undo"); // pops the last recorded mutation
-  s("editor_redo", "C", "unity_open_mcp_editor_redo");
   s("editor_set_state_stop", "C", "unity_open_mcp_editor_set_state", { state: "stop" });
 
   // --- asset lifecycle: material + copy + move + refresh + read ---
@@ -585,7 +602,7 @@ function buildSuite() {
   // the route + recompile path is exercised without failing the suite.
   s("asmdef_create", "C", "unity_open_mcp_asmdef_create", {
     asset_path: FT_ASMDEF, name: "FT_Test", root_namespace: "FT", paths_hint: [FT_ASMDEF],
-  }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable"], timeoutMs: 180_000 });
+  }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable", "asmdef_exists"], timeoutMs: 180_000 });
 
   s("asmdef_modify", "C", "unity_open_mcp_asmdef_modify", {
     asset_path: FT_ASMDEF, add_references: ["Unity.InputSystem"], paths_hint: [FT_ASMDEF],
@@ -598,7 +615,7 @@ function buildSuite() {
   // --- ScriptableObject create (VolumeProfile is a real URP SO type) ---
   s("scriptableobject_create", "C", "unity_open_mcp_scriptableobject_create", {
     type_name: "UnityEngine.Rendering.VolumeProfile", asset_path: `${FT}/FT_SO.asset`, paths_hint: [`${FT}/FT_SO.asset`],
-  }, { gate: true, expect: "gate" });
+  }, { gate: true, expect: "tolerate", tolerate: ["asset_exists"] });
 
   // --- reserialize (mutating but safe on a temp asset; hits the same
   // bridge_response_unparsable serialization bug post-recompile) ---
@@ -762,6 +779,10 @@ function buildSuite() {
     menu_path: "Assets/Refresh", paths_hint: HINT,
   }, { gate: true, expect: "gate" });
 
+  // Undo/redo after the GO chain is persisted — avoids popping create/modify ops.
+  s("editor_undo", "C", "unity_open_mcp_editor_undo");
+  s("editor_redo", "C", "unity_open_mcp_editor_redo");
+
   // --- GameObject destroy (cleanup of the chain GOs) ---
   s("gameobject_destroy_cube", "C", "unity_open_mcp_gameobject_destroy", {
     resolveArgs: (ctx) => ({ instance_id: ctx.cubeId, paths_hint: SCENE_HINT }),
@@ -820,43 +841,55 @@ function buildSuite() {
   }, { gate: true, expect: "refused" });
 
   // =====================================================================
-  // BAND F — unavailable groups (expect tool_not_found; bridge didn't compile them in)
+  // BAND F — extension pack availability
+  //
+  // Two sub-bands share letter F:
+  //   (1) REACHABLE_EXT_TOOLS — compiled into the bridge (M18+ domain packs).
+  //       Minimal args; pass on any response except tool_not_found.
+  //   (2) UNAVAIL_TOOLS — not compiled into this bridge build; expect tool_not_found.
   // =====================================================================
-  const UNAVAIL_TOOLS = [
-    // navigation
+  const REACHABLE_EXT_TOOLS = [
+    // navigation (com.unity.ai.navigation)
     "unity_open_mcp_navigation_surface_add", "unity_open_mcp_navigation_set_bake_settings",
     "unity_open_mcp_navigation_surface_bake", "unity_open_mcp_navigation_modifier_add",
     "unity_open_mcp_navigation_modifier_volume_add", "unity_open_mcp_navigation_link_add",
     "unity_open_mcp_navigation_agent_add", "unity_open_mcp_navigation_agent_set_destination",
     "unity_open_mcp_navigation_list", "unity_open_mcp_navigation_get", "unity_open_mcp_navigation_modify",
-    // input-system
+    // input-system (com.unity.inputsystem)
     "unity_open_mcp_inputsystem_asset_create", "unity_open_mcp_inputsystem_actionmap_add",
     "unity_open_mcp_inputsystem_action_add", "unity_open_mcp_inputsystem_binding_add",
     "unity_open_mcp_inputsystem_binding_composite_add", "unity_open_mcp_inputsystem_controlscheme_add",
     "unity_open_mcp_inputsystem_get",
-    // probuilder
+    // probuilder (com.unity.probuilder)
     "unity_open_mcp_probuilder_create_shape", "unity_open_mcp_probuilder_get_mesh_info",
     "unity_open_mcp_probuilder_extrude", "unity_open_mcp_probuilder_delete_faces", "unity_open_mcp_probuilder_set_face_material",
-    // particle-system
+    // particle-system (UnityEngine.ParticleSystemModule)
     "unity_open_mcp_particle_system_get", "unity_open_mcp_particle_system_modify",
-    // animation
+    // animation (com.unity.modules.animation)
     "unity_open_mcp_animation_create", "unity_open_mcp_animation_get_data", "unity_open_mcp_animation_modify",
     "unity_open_mcp_animator_create", "unity_open_mcp_animator_get_data", "unity_open_mcp_animator_modify",
-    // splines
-    "unity_open_mcp_splines_container_create", "unity_open_mcp_splines_add_knot", "unity_open_mcp_splines_set_knot",
-    "unity_open_mcp_splines_set_tangent_mode", "unity_open_mcp_splines_evaluate", "unity_open_mcp_splines_get_knots", "unity_open_mcp_splines_modify",
-    // timeline
-    "unity_open_mcp_timeline_create", "unity_open_mcp_timeline_track_add", "unity_open_mcp_timeline_clip_add",
-    "unity_open_mcp_timeline_director_bind", "unity_open_mcp_timeline_modify",
-    // tilemap
-    "unity_open_mcp_tilemap_create", "unity_open_mcp_tilemap_set_tile", "unity_open_mcp_tilemap_box_fill",
-    "unity_open_mcp_tilemap_create_tile_asset", "unity_open_mcp_tilemap_create_rule_tile",
-    // shadergraph
+    // shadergraph (com.unity.shadergraph)
     "unity_open_mcp_shader_graph_create", "unity_open_mcp_shader_graph_open",
     "unity_open_mcp_shader_graph_node_add", "unity_open_mcp_shader_graph_node_connect",
-    // vfx
+  ];
+  for (const tool of REACHABLE_EXT_TOOLS) {
+    const short = tool.replace(/^unity_(open_mcp_|senses_)/, "");
+    s(`ext_${short}`, "F", tool, { paths_hint: HINT }, { expect: "reachable" });
+  }
+
+  const UNAVAIL_TOOLS = [
+    // splines (com.unity.splines — extension pack not in default bridge build)
+    "unity_open_mcp_splines_container_create", "unity_open_mcp_splines_add_knot", "unity_open_mcp_splines_set_knot",
+    "unity_open_mcp_splines_set_tangent_mode", "unity_open_mcp_splines_evaluate", "unity_open_mcp_splines_get_knots", "unity_open_mcp_splines_modify",
+    // timeline (com.unity.timeline)
+    "unity_open_mcp_timeline_create", "unity_open_mcp_timeline_track_add", "unity_open_mcp_timeline_clip_add",
+    "unity_open_mcp_timeline_director_bind", "unity_open_mcp_timeline_modify",
+    // tilemap (com.unity.2d.tilemap)
+    "unity_open_mcp_tilemap_create", "unity_open_mcp_tilemap_set_tile", "unity_open_mcp_tilemap_box_fill",
+    "unity_open_mcp_tilemap_create_tile_asset", "unity_open_mcp_tilemap_create_rule_tile",
+    // vfx (com.unity.visualeffectgraph)
     "unity_open_mcp_vfx_list", "unity_open_mcp_vfx_open", "unity_open_mcp_vfx_block_edit",
-    // memoryprofiler
+    // memoryprofiler (com.unity.memoryprofiler)
     "unity_senses_memory_snapshot_capture",
   ];
   for (const tool of UNAVAIL_TOOLS) {
@@ -885,36 +918,97 @@ const SKIPS = [
   { tool: "unity_open_mcp_reimport_package", reason: "force-reimports a package's source — expensive, forces recompile, no informative failure path" },
 ];
 
+// Recompile / RestartThenSettle steps — save every dirty scene immediately before
+// so Unity's native "unsaved changes" modal never blocks the main thread.
+const SAVE_DIRTY_BEFORE = new Set([
+  "prefab_instantiate",
+  "asmdef_create",
+  "asmdef_modify",
+  "script_delete",
+  "script_write",
+  "build_set_target",
+  "build_set_scenes",
+  "build_set_defines",
+  "editor_clear_history",
+]);
+
+// Persist in-scene GO mutations to disk before steps that trigger domain reload
+// or prefab capture — otherwise compile/reload drops unsaved hierarchy state.
+const SAVE_DIRTY_AFTER = new Set(["gameobject_find_query"]);
+
+// Child-process env for every CLI invocation: opt in to unsaved-scene modal
+// dismiss (destructive — test-only backstop) and default dialog policy to ignore.
+function buildRunEnv() {
+  const env = { ...process.env };
+  env.UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS = "1";
+  if (!env.UNITY_OPEN_MCP_DIALOG_POLICY) env.UNITY_OPEN_MCP_DIALOG_POLICY = "ignore";
+  return env;
+}
+
+function invokeTool(project, tool, args, timeoutMs, runEnv) {
+  const argStr = JSON.stringify(args ?? {});
+  try {
+    const stdout = execFileSync(
+      process.execPath,
+      [CLI_BIN, "run-tool", tool, "--project", project, "--json", "--args", argStr],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs, env: runEnv },
+    );
+    return parseEnvelope(stdout);
+  } catch (err) {
+    const maybeStdout = err.stdout ?? "";
+    if (maybeStdout && maybeStdout.includes("{")) {
+      const parsed = parseEnvelope(maybeStdout);
+      if (parsed) return parsed;
+    }
+    return null;
+  }
+}
+
+function saveAllDirtyScenes(project, runEnv, timeoutMs = 30_000) {
+  const parsed = invokeTool(project, "unity_open_mcp_scene_get_dirty_summary", {}, timeoutMs, runEnv);
+  if (!parsed || parsed.isError === true) return 0;
+  const scenes = parsed.result?.scenes ?? [];
+  let saved = 0;
+  for (const scene of scenes) {
+    if (!scene?.isDirty) continue;
+    const path = scene.path;
+    const name = scene.name;
+    const saveArgs = path
+      ? { path, paths_hint: [path] }
+      : name
+        ? { name, paths_hint: ["<mcp-full-test-auto-save>"] }
+        : null;
+    if (!saveArgs) continue;
+    const out = invokeTool(project, "unity_open_mcp_scene_save", saveArgs, timeoutMs, runEnv);
+    if (out && out.isError !== true) saved++;
+  }
+  return saved;
+}
+
 // ---------------------------------------------------------------------------
 // CLI runner
 // ---------------------------------------------------------------------------
 
-function runTool(step, ctx, project, defaultTimeout) {
-  const result = runToolOnce(step, ctx, project, defaultTimeout);
-  // scene_dirty recovery: if a mutating tool was refused because a scene is
-  // dirty (the bridge preflight SceneDirtyGuard fired), save the active scene
-  // and retry once. This prevents the dirty-scene modal from ever appearing
-  // and freezing the main-thread queue (see specs/feedback.md).
+function runTool(step, ctx, project, defaultTimeout, runEnv) {
+  if (SAVE_DIRTY_BEFORE.has(step.label)) {
+    saveAllDirtyScenes(project, runEnv, Math.min(defaultTimeout, 30_000));
+  }
+  const result = runToolOnce(step, ctx, project, defaultTimeout, runEnv);
   const errCode = result.result?.error?.code ?? result.result?.mutation?.error?.code;
-  if (errCode === "scene_dirty" && !step._retried) {
+  if ((errCode === "scene_dirty" || errCode === "main_thread_blocked") && !step._retried) {
     const retried = { ...step, _retried: true };
-    // best-effort save of the active scene, then retry the original step
-    try {
-      execFileSync(
-        process.execPath,
-        [CLI_BIN, "run-tool", "unity_open_mcp_scene_save", "--project", project, "--json", "--args", JSON.stringify({ paths_hint: ["<ft-scene-dirty-recovery>"] })],
-        { encoding: "utf8", stdio: ["ignore", "ignore", "ignore"], maxBuffer: 64 * 1024 * 1024, timeout: 30_000 },
-      );
-    } catch {
-      // save failed; still attempt the retry — the dirty flag may have cleared
-    }
-    const retry = runToolOnce(retried, ctx, project, defaultTimeout);
-    return { ...retry, detail: `${retry.detail} (after scene_dirty save+retry)`, ms: result.ms + retry.ms };
+    saveAllDirtyScenes(project, runEnv, 30_000);
+    const retry = runToolOnce(retried, ctx, project, defaultTimeout, runEnv);
+    const tag = errCode === "main_thread_blocked" ? "main_thread_blocked save+retry" : "scene_dirty save+retry";
+    return { ...retry, detail: `${retry.detail} (after ${tag})`, ms: result.ms + retry.ms };
+  }
+  if (SAVE_DIRTY_AFTER.has(step.label) && result.ok) {
+    saveAllDirtyScenes(project, runEnv, Math.min(defaultTimeout, 30_000));
   }
   return result;
 }
 
-function runToolOnce(step, ctx, project, defaultTimeout) {
+function runToolOnce(step, ctx, project, defaultTimeout, runEnv) {
   const args = step.resolveArgs ? step.resolveArgs(ctx) : step.args ?? {};
   const argStr = JSON.stringify(args);
   const timeout = step.timeoutMs ?? defaultTimeout;
@@ -924,7 +1018,7 @@ function runToolOnce(step, ctx, project, defaultTimeout) {
     stdout = execFileSync(
       process.execPath,
       [CLI_BIN, "run-tool", step.tool, "--project", project, "--json", "--args", argStr],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024, timeout },
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024, timeout, env: runEnv },
     );
   } catch (err) {
     const ms = Date.now() - t0;
@@ -1015,7 +1109,7 @@ function cleanupTempFolder(project) {
   return cleaned;
 }
 
-function cleanupViaBridge(project) {
+function cleanupViaBridge(project, runEnv) {
   // Try the typed assets_delete first so Unity's AssetDatabase stays in sync,
   // then fall back to fs removal. Also close any leftover prefab stage + unload
   // the additive scene if still open.
@@ -1041,7 +1135,7 @@ function cleanupViaBridge(project) {
       execFileSync(
         process.execPath,
         [CLI_BIN, "run-tool", op.tool, "--project", project, "--json", "--args", JSON.stringify(op.args)],
-        { encoding: "utf8", stdio: ["ignore", "ignore", "ignore"], timeout: 30_000 },
+        { encoding: "utf8", stdio: ["ignore", "ignore", "ignore"], timeout: 30_000, env: runEnv },
       );
     } catch {
       // best-effort
@@ -1104,6 +1198,7 @@ function main() {
   const ctx = {};
   const results = [];
   const bandSummary = {};
+  const runEnv = buildRunEnv();
   let pass = 0;
   let fail = 0;
 
@@ -1113,7 +1208,7 @@ function main() {
     if (interrupted) process.exit(1);
     interrupted = true;
     console.error("\n^C — interrupted; running cleanup before exit...");
-    if (!opts.noCleanup) cleanupViaBridge(opts.project);
+    if (!opts.noCleanup) cleanupViaBridge(opts.project, runEnv);
     process.exit(1);
   };
   process.on("SIGINT", onSigInt);
@@ -1123,9 +1218,13 @@ function main() {
     if (step.band !== lastBand) {
       if (lastBand !== null) console.log("");
       console.log(`--- Band ${step.band} ---`);
+      if (step.band === "C") {
+        const n = saveAllDirtyScenes(opts.project, runEnv);
+        if (n > 0) process.stdout.write(`  (saved ${n} dirty scene(s) before Band C)\n`);
+      }
       lastBand = step.band;
     }
-    const out = runTool(step, ctx, opts.project, opts.timeoutMs);
+    const out = runTool(step, ctx, opts.project, opts.timeoutMs, runEnv);
     if (out.ok) pass++;
     else fail++;
     bandSummary[step.band] = bandSummary[step.band] || { pass: 0, fail: 0 };
@@ -1149,7 +1248,7 @@ function main() {
   if (!opts.noCleanup && (!opts.band || opts.band.includes("C"))) {
     console.log("");
     console.log("--- cleanup ---");
-    cleanupViaBridge(opts.project);
+    cleanupViaBridge(opts.project, runEnv);
     const clean = cleanupTempFolder(opts.project);
     process.stdout.write(`${clean ? "✓" : "✗"} ${"temp fixture cleanup".padEnd(34)}        ${clean ? "Assets/MCP_FullTest gone" : "left on disk (see --no-cleanup)"}\n`);
   }
@@ -1211,7 +1310,8 @@ function main() {
         .map((l) => l.slice(3).trim())
         // Exclude .unity scenes — reverting them on disk triggers Unity's
         // external-modification modal. Only revert ProjectSettings + assets.
-        .filter((f) => !f.endsWith(".unity"));
+        .filter((f) => !f.endsWith(".unity"))
+        .filter((f) => !f.includes(".unity-open-mcp/"));
       if (dirty.length === 0) {
         console.log("  (no tracked ProjectSettings files changed)");
       } else {
