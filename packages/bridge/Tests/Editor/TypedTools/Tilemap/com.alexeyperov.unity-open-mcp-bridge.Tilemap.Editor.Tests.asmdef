@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Tilemap.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Tilemap",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.TilemapExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.Tilemap.Editor",

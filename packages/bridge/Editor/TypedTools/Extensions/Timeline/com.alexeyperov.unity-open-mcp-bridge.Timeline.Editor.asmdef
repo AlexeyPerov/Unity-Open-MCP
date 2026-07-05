@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Timeline.Editor",
-  "rootNamespace": "UnityOpenMcpBridge.Extensions.Timeline",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.TimelineExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "Unity.Timeline",

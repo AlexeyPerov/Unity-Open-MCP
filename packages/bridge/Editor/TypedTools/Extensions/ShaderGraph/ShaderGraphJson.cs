@@ -28,7 +28,7 @@
 #if UNITY_OPEN_MCP_EXT_SHADERGRAPH
 using System.Text;
 
-namespace UnityOpenMcpBridge.Extensions.ShaderGraph
+namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
 {
     // Shared helpers for the ShaderGraph embedded domain tools.
     //

@@ -23,7 +23,7 @@
 #if UNITY_OPEN_MCP_EXT_VFX
 using System.Text;
 
-namespace UnityOpenMcpBridge.Extensions.VFX
+namespace UnityOpenMcpBridge.Extensions.VFXExt
 {
     // Shared helpers for the VFX Graph embedded domain tools.
     //

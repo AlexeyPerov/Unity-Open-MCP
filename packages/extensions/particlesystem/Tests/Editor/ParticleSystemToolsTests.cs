@@ -4,7 +4,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpExtensions.ParticleSystemExt.Tests
+namespace UnityOpenMcpExtensions.ParticlesExt.Tests
 {
     public class ParticleSystemToolsTests
     {

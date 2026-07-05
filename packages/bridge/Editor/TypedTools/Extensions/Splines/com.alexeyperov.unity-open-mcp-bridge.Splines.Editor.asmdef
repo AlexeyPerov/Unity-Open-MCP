@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Splines.Editor",
-  "rootNamespace": "UnityOpenMcpBridge.Extensions.Splines",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.SplinesExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "Unity.Splines",

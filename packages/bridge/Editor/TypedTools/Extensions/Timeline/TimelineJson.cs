@@ -23,7 +23,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Timeline
+namespace UnityOpenMcpBridge.Extensions.TimelineExt
 {
     // Shared helpers for the Timeline embedded domain tools.
     //

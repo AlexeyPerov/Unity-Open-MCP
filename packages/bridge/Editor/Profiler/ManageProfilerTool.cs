@@ -7,7 +7,7 @@ using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.Profiling;
 
-namespace UnityOpenMcpBridge.Profiler
+namespace UnityOpenMcpBridge.ProfilerExt
 {
     // M10 Plan 3 T3.4 — Profiler meta-tools (non-mutating).
     //
@@ -166,7 +166,7 @@ namespace UnityOpenMcpBridge.Profiler
                 }
 
                 // Fully qualified: the unqualified 'Profiler' identifier resolves
-                // to this file's own namespace (UnityOpenMcpBridge.Profiler), not
+                // to this file's own namespace (UnityOpenMcpBridge.ProfilerExt), not
                 // the static UnityEngine.Profiling.Profiler type, so it must be
                 // written out in full to avoid CS0234.
                 long allocated = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong();

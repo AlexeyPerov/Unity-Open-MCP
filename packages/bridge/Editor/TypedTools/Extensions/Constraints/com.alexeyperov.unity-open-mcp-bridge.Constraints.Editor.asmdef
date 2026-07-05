@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Constraints.Editor",
-  "rootNamespace": "UnityOpenMcpBridge.Extensions.Constraints",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.ConstraintsExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor"
   ],

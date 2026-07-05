@@ -8,8 +8,10 @@ asset kind).
 Ported in M18 Plan 3 from the former standalone extension pack at
 `packages/extensions/animation/` (now frozen). Logic, tool IDs, JSON schema,
 and gate contracts are unchanged from the legacy pack — only the namespace
-moved (`UnityOpenMcpExtensions.Animation` →
-`UnityOpenMcpBridge.Extensions.Animation`).
+moved (`UnityOpenMcpExtensions.AnimationExt` →
+`UnityOpenMcpBridge.Extensions.AnimationExt`). The `Ext` suffix avoids
+colliding with the `UnityEngine.Animation` type for unqualified references
+and IDE autocomplete.
 
 ## Compile gate
 

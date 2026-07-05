@@ -13,7 +13,7 @@
 // visibility is a session concern, independent of compile-gating).
 using System.Text;
 
-namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
+namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
 {
     static class SpriteAtlasJson
     {

@@ -5,7 +5,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpExtensions.Animation
+namespace UnityOpenMcpExtensions.AnimationExt
 {
     // M16 Plan 10 — shared helpers for the Animation extension pack.
     //

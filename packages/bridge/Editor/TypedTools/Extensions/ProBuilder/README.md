@@ -7,8 +7,9 @@ extrude faces, delete faces, set face material.
 Ported in M18 Plan 3 from the former standalone extension pack at
 `packages/extensions/probuilder/` (now frozen). Logic, tool IDs, JSON schema,
 and gate contracts are unchanged from the legacy pack — only the namespace
-moved (`UnityOpenMcpExtensions.ProBuilder` →
-`UnityOpenMcpBridge.Extensions.ProBuilder`).
+moved (`UnityOpenMcpExtensions.ProBuilderExt` →
+`UnityOpenMcpBridge.Extensions.ProBuilderExt`). The `Ext` suffix avoids
+colliding with the `UnityEngine.ProBuilder` namespace in IDE autocomplete.
 
 ## Compile gate
 

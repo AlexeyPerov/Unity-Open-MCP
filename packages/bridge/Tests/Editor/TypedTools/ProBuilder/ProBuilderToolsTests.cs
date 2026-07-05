@@ -12,10 +12,10 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.ProBuilder;
 using UnityOpenMcpBridge;
-using UnityOpenMcpBridge.Extensions.ProBuilder;
+using UnityOpenMcpBridge.Extensions.ProBuilderExt;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.ProBuilder
+namespace UnityOpenMcpBridge.Tests.Extensions.ProBuilderExt
 {
     public class ProBuilderToolsTests
     {

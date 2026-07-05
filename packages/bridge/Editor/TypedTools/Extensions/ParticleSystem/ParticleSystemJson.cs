@@ -2,13 +2,14 @@
 // embedded domain tools.
 //
 // UNGATED: see ParticleSystemTools.cs for the rationale (core engine module,
-// always present, former compile-gate never resolved). The namespace is
-// `...Particles` to avoid the UnityEngine.ParticleSystem type collision.
+// always present, former compile-gate never resolved). The namespace uses the
+// `Ext` suffix (`...ParticlesExt`) to avoid the UnityEngine.ParticleSystem
+// type collision.
 // Ported verbatim (logic, JSON schema) from the former standalone extension
 // pack — only the namespace changed.
 using System.Text;
 
-namespace UnityOpenMcpBridge.Extensions.Particles
+namespace UnityOpenMcpBridge.Extensions.ParticlesExt
 {
     // Shared helpers for the Particle System embedded domain tools.
     //

@@ -15,7 +15,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Audio
+namespace UnityOpenMcpBridge.Extensions.AudioExt
 {
     // Shared JSON envelope + escape helpers. Mirrors LightingJson /
     // NavigationJson so each embedded domain has a self-contained helper it

@@ -25,7 +25,7 @@ using UnityEditor;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 
-namespace UnityOpenMcpBridge.Extensions.Cinemachine
+namespace UnityOpenMcpBridge.Extensions.CinemachineExt
 {
     [BridgeToolType]
     public static class CinemachineTools

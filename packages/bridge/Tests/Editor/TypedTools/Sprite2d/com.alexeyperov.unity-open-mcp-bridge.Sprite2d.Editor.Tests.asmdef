@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Sprite2d.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Sprite2d",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Sprite2dExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.SpriteAtlas.Editor",

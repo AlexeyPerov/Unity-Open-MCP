@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpExtensions.ParticleSystemExt
+namespace UnityOpenMcpExtensions.ParticlesExt
 {
     // M16 Plan 10 / T6.6.9 — Particle System extension pack.
     //

@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.VFX.Editor",
-  "rootNamespace": "UnityOpenMcpBridge.Extensions.VFX",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.VFXExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "Unity.VisualEffectGraph.Editor"

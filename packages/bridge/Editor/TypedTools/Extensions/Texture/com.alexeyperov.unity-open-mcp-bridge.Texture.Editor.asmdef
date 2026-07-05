@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Texture.Editor",
-  "rootNamespace": "UnityOpenMcpBridge.Extensions.Texture",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.TextureExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor"
   ],

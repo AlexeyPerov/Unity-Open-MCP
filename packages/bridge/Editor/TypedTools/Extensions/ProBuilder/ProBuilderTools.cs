@@ -19,7 +19,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.ProBuilder
+namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
 {
     // M16 Plan 10 / T6.6.5 → M18 Plan 3 — ProBuilder embedded tools.
     //

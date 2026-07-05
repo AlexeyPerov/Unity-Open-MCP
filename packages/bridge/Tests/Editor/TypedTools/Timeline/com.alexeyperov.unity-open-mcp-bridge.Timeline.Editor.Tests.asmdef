@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Timeline.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Timeline",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.TimelineExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.Timeline.Editor",

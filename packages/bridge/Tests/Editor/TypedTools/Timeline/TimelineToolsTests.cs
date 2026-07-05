@@ -19,10 +19,10 @@ using UnityEngine;
 using UnityEngine.Playables;
 using UnityEngine.Timeline;
 using UnityOpenMcpBridge;
-using UnityOpenMcpBridge.Extensions.Timeline;
+using UnityOpenMcpBridge.Extensions.TimelineExt;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Timeline
+namespace UnityOpenMcpBridge.Tests.Extensions.TimelineExt
 {
     public class TimelineToolsTests
     {

@@ -12,7 +12,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpBridge.Extensions.Animation
+namespace UnityOpenMcpBridge.Extensions.AnimationExt
 {
     // Shared helpers for the Animation embedded domain tools.
     //

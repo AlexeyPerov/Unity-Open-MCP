@@ -9,7 +9,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpExtensions.Animation
+namespace UnityOpenMcpExtensions.AnimationExt
 {
     // M16 Plan 10 / T6.6.10 — AnimatorController half of the Animation
     // extension pack.

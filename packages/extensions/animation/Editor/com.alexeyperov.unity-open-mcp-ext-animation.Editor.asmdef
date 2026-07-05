@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-ext-animation.Editor",
-  "rootNamespace": "UnityOpenMcpExtensions.Animation",
+  "rootNamespace": "UnityOpenMcpExtensions.AnimationExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor"
   ],

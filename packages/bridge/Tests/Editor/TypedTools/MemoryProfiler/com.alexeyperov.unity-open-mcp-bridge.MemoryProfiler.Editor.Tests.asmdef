@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.MemoryProfiler.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.MemoryProfiler",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.MemoryProfilerExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.MemoryProfiler.Editor",

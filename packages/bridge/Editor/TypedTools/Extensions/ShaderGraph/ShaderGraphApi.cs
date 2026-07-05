@@ -30,7 +30,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpBridge.Extensions.ShaderGraph
+namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
 {
     // Reflection wrapper over UnityEditor.ShaderGraph. All members are static
     // and best-effort; failures surface as (false, errorCode) tuples.

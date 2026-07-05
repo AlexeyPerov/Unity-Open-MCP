@@ -20,10 +20,10 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Splines;
 using UnityOpenMcpBridge;
-using UnityOpenMcpBridge.Extensions.Splines;
+using UnityOpenMcpBridge.Extensions.SplinesExt;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Splines
+namespace UnityOpenMcpBridge.Tests.Extensions.SplinesExt
 {
     public class SplinesToolsTests
     {

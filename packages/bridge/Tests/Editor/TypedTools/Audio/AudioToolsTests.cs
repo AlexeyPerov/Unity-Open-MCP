@@ -20,7 +20,7 @@ using UnityEngine.Audio;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Audio
+namespace UnityOpenMcpBridge.Tests.Extensions.AudioExt
 {
     public class AudioToolsTests
     {

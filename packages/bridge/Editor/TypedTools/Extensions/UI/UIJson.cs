@@ -22,7 +22,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.UI
+namespace UnityOpenMcpBridge.Extensions.UIExt
 {
     // Shared JSON envelope + escape helpers. Mirrors AudioJson / LightingJson
     // so each embedded domain has a self-contained helper it can evolve

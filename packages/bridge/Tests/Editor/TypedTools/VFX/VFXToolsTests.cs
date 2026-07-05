@@ -36,7 +36,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.VFX
+namespace UnityOpenMcpBridge.Tests.Extensions.VFXExt
 {
     public class VFXToolsTests
     {

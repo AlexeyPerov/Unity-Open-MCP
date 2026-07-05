@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace UnityOpenMcpExtensions.ParticleSystemExt
+namespace UnityOpenMcpExtensions.ParticlesExt
 {
     // M16 Plan 10 — shared helpers for the Particle System extension pack.
     //

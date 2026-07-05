@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Cinemachine.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Cinemachine",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.CinemachineExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.Cinemachine.Editor",

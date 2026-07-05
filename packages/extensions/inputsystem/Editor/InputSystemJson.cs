@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpExtensions.InputSystem
+namespace UnityOpenMcpExtensions.InputSystemExt
 {
     // M16 Plan 10 — shared helpers for the Input System extension pack.
     //

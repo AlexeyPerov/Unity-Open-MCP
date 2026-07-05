@@ -20,7 +20,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Animation
+namespace UnityOpenMcpBridge.Extensions.AnimationExt
 {
     // M16 Plan 10 / T6.6.10 → M18 Plan 3 — AnimatorController half of the
     // Animation embedded tools.

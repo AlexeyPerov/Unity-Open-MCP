@@ -44,7 +44,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.UI
+namespace UnityOpenMcpBridge.Extensions.UIExt
 {
     // M20 Plan 3 / T20.3.2 — UI tools. Registry-discovered via [BridgeToolType]
     // + [BridgeTool]. All four tools are mutating (canvas / element / layout
@@ -1032,5 +1032,5 @@ namespace UnityOpenMcpBridge.Extensions.UI
       // compile to an empty namespace and are reported as tool_not_found at
       // call time. (The asmdef's defineConstraints excludes this assembly
       // entirely when com.unity.ugui is absent, so this #else is a backstop.)
-namespace UnityOpenMcpBridge.Extensions.UI { }
+namespace UnityOpenMcpBridge.Extensions.UIExt { }
 #endif

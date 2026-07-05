@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.ShaderGraph.Editor",
-  "rootNamespace": "UnityOpenMcpBridge.Extensions.ShaderGraph",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.ShaderGraphExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "Unity.ShaderGraph.Editor"

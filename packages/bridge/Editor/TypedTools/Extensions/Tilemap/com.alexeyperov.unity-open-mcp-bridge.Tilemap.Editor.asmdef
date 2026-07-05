@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Tilemap.Editor",
-  "rootNamespace": "UnityOpenMcpBridge.Extensions.Tilemap",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.TilemapExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "UnityEngine.TileMapModule"

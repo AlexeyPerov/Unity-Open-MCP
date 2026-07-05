@@ -6,7 +6,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpExtensions.Navigation
+namespace UnityOpenMcpExtensions.NavigationExt
 {
     // M16 Plan 10 — shared helpers for the Navigation (NavMesh) extension
     // pack. Target resolution, JSON envelope builders, and the typed baking

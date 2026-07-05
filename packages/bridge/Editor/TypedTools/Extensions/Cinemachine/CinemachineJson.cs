@@ -24,7 +24,7 @@ using UnityEditor;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 
-namespace UnityOpenMcpBridge.Extensions.Cinemachine
+namespace UnityOpenMcpBridge.Extensions.CinemachineExt
 {
     // Shared helpers for the Cinemachine reflection-gated domain tools.
     //

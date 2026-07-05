@@ -21,10 +21,10 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 using UnityOpenMcpBridge;
-using UnityOpenMcpBridge.Extensions.Tilemap;
+using UnityOpenMcpBridge.Extensions.TilemapExt;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Tilemap
+namespace UnityOpenMcpBridge.Tests.Extensions.TilemapExt
 {
     public class TilemapToolsTests
     {

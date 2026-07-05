@@ -40,7 +40,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpBridge.Extensions.MemoryProfiler
+namespace UnityOpenMcpBridge.Extensions.MemoryProfilerExt
 {
     [BridgeToolType]
     public static class MemorySnapshotCaptureTool

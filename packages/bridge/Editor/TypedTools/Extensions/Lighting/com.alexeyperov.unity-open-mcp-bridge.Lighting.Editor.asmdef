@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Lighting.Editor",
-  "rootNamespace": "UnityOpenMcpBridge.Extensions.Lighting",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.LightingExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor"
   ],

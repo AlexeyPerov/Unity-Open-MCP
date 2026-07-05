@@ -10,7 +10,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Animation
+namespace UnityOpenMcpBridge.Tests.Extensions.AnimationExt
 {
     public class AnimationToolsTests
     {

@@ -29,7 +29,7 @@
 #if UNITY_OPEN_MCP_EXT_MEMORYPROFILER
 using System.Text;
 
-namespace UnityOpenMcpBridge.Extensions.MemoryProfiler
+namespace UnityOpenMcpBridge.Extensions.MemoryProfilerExt
 {
     // Shared helpers for the Memory Profiler embedded domain tool.
     //

@@ -18,7 +18,7 @@ using NavMeshModifierVolume = Unity.AI.Navigation.NavMeshModifierVolume;
 using CollectObjects = Unity.AI.Navigation.CollectObjects;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpExtensions.Navigation
+namespace UnityOpenMcpExtensions.NavigationExt
 {
     // M16 Plan 10 / T6.6.2 — NavMesh (AI Navigation) extension pack.
     //

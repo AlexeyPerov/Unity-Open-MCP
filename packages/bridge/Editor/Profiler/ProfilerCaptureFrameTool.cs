@@ -8,7 +8,7 @@ using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.Profiling;
 
-namespace UnityOpenMcpBridge.Profiler
+namespace UnityOpenMcpBridge.ProfilerExt
 {
     // M20 Plan 1 / T20.1.4 — single-frame deep profiler capture.
     //

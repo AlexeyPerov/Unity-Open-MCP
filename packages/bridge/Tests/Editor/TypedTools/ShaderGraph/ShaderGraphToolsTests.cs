@@ -34,7 +34,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraph
+namespace UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt
 {
     public class ShaderGraphToolsTests
     {

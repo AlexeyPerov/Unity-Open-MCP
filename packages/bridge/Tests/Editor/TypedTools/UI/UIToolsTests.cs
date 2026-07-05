@@ -24,7 +24,7 @@ using UnityEngine.EventSystems;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.UI
+namespace UnityOpenMcpBridge.Tests.Extensions.UIExt
 {
     public class UIToolsTests
     {

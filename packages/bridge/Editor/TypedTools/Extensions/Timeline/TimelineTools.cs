@@ -31,7 +31,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Timeline
+namespace UnityOpenMcpBridge.Extensions.TimelineExt
 {
     [BridgeToolType]
     public static class TimelineTools

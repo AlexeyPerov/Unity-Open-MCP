@@ -10,7 +10,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Lighting
+namespace UnityOpenMcpBridge.Tests.Extensions.LightingExt
 {
     public class LightingToolsTests
     {

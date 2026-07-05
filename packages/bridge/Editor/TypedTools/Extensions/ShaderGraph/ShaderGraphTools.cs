@@ -36,7 +36,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 
-namespace UnityOpenMcpBridge.Extensions.ShaderGraph
+namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
 {
     [BridgeToolType]
     public static class ShaderGraphTools

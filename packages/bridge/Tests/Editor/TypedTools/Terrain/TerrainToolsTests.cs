@@ -12,7 +12,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Terrain
+namespace UnityOpenMcpBridge.Tests.Extensions.TerrainExt
 {
     public class TerrainToolsTests
     {

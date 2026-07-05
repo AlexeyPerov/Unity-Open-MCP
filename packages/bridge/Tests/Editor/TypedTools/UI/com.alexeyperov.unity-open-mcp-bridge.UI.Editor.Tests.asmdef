@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.UI.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.UI",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.UIExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.UI.Editor",

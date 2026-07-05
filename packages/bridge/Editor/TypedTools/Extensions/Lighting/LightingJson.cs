@@ -15,7 +15,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Lighting
+namespace UnityOpenMcpBridge.Extensions.LightingExt
 {
     // Shared JSON envelope + escape helpers. Mirrors NavigationJson so each
     // embedded domain has a self-contained helper it can evolve independently.

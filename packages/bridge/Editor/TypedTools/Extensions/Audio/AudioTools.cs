@@ -34,7 +34,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Audio
+namespace UnityOpenMcpBridge.Extensions.AudioExt
 {
     // M20 Plan 3 / T20.3.1 — Audio tools. Registry-discovered via
     // [BridgeToolType] + [BridgeTool]. Mutating tools declare IsMutating = true

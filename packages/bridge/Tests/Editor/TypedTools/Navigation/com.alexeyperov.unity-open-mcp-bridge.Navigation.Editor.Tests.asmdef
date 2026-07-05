@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Navigation.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Navigation",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.NavigationExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.Navigation.Editor",

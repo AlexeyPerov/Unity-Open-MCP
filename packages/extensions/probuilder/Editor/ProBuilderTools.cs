@@ -9,7 +9,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpExtensions.ProBuilder
+namespace UnityOpenMcpExtensions.ProBuilderExt
 {
     // M16 Plan 10 / T6.6.5 — ProBuilder extension pack.
     //

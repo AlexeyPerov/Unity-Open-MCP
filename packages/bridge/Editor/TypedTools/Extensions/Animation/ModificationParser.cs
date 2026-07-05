@@ -9,7 +9,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 
-namespace UnityOpenMcpBridge.Extensions.Animation
+namespace UnityOpenMcpBridge.Extensions.AnimationExt
 {
     // Modification DTOs + JSON parser shared by AnimationClipTools.Modify and
     // AnimatorTools.Modify.

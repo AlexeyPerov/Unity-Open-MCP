@@ -7,8 +7,8 @@ inside the bridge. Two tools on a scene `ParticleSystem` component: get
 Ported in M18 Plan 3 from the former standalone extension pack at
 `packages/extensions/particlesystem/` (now frozen). Logic, tool IDs, JSON
 schema, and gate contracts are unchanged from the legacy pack — only the
-namespace moved (`UnityOpenMcpExtensions.ParticleSystemExt` →
-`UnityOpenMcpBridge.Extensions.Particles`).
+namespace moved (`UnityOpenMcpExtensions.ParticlesExt` →
+`UnityOpenMcpBridge.Extensions.ParticlesExt`).
 
 ## Compile gate
 
@@ -19,10 +19,10 @@ compile-gate never resolved — `versionDefines` cannot match a bare engine
 module name like `UnityEngine.ParticleSystemModule` — so the gate was removed
 and the source compiles directly.
 
-The C# namespace is `UnityOpenMcpBridge.Extensions.Particles` (not `...ParticleSystem`)
-to avoid colliding with the `UnityEngine.ParticleSystem` type for unqualified
-references. The assembly name keeps `ParticleSystem` for tool-id stability
-(`unity_open_mcp_particle_system_*`).
+The C# namespace is `UnityOpenMcpBridge.Extensions.ParticlesExt`. The
+`Ext` suffix avoids colliding with the `UnityEngine.ParticleSystem` type for
+unqualified references and IDE autocomplete. The assembly name keeps
+`ParticleSystem` for tool-id stability (`unity_open_mcp_particle_system_*`).
 
 ## Tool group
 

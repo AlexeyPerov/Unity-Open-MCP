@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.SpriteAtlas.Editor",
-  "rootNamespace": "UnityOpenMcpBridge.Extensions.SpriteAtlas",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.SpriteAtlasExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor"
   ],

@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 
-namespace UnityOpenMcpExtensions.Animation
+namespace UnityOpenMcpExtensions.AnimationExt
 {
     // M16 Plan 10 — modification DTOs + JSON parser shared by
     // AnimationClipTools.Modify and AnimatorTools.Modify.

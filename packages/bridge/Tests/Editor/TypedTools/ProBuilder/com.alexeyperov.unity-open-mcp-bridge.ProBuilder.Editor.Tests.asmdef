@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.ProBuilder.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.ProBuilder",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.ProBuilderExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.ProBuilder.Editor",

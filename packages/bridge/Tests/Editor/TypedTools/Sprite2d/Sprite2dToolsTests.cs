@@ -7,10 +7,10 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
-using UnityOpenMcpBridge.Extensions.SpriteAtlas;
-using UnityOpenMcpBridge.Extensions.Texture;
+using UnityOpenMcpBridge.Extensions.SpriteAtlasExt;
+using UnityOpenMcpBridge.Extensions.TextureExt;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Sprite2d
+namespace UnityOpenMcpBridge.Tests.Extensions.Sprite2dExt
 {
     public class Sprite2dToolsTests
     {

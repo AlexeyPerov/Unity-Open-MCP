@@ -14,7 +14,7 @@ using UnityEngine.Animations;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Constraints
+namespace UnityOpenMcpBridge.Tests.Extensions.ConstraintsExt
 {
     public class ConstraintsToolsTests
     {

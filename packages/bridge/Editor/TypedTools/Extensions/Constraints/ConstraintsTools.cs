@@ -35,7 +35,7 @@ using UnityEngine.Animations;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Constraints
+namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
 {
     // M20 Plan 3 / T20.3.3 — Constraints & LOD tools. Registry-discovered via
     // [BridgeToolType] + [BridgeTool]. All three tools are mutating (constraint

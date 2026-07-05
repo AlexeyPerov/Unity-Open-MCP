@@ -31,7 +31,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Splines
+namespace UnityOpenMcpBridge.Extensions.SplinesExt
 {
     [BridgeToolType]
     public static class SplinesTools

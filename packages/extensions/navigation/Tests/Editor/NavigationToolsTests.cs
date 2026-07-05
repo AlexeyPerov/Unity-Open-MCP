@@ -2,7 +2,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityOpenMcpBridge;
-using UnityOpenMcpExtensions.Navigation;
+using UnityOpenMcpExtensions.NavigationExt;
 // Alias the AI Navigation package types explicitly — see NavigationTools.cs
 // for the rationale (CS0104 ambiguity with the deprecated UnityEngine.AI
 // NavMesh components).
@@ -10,7 +10,7 @@ using NavMeshSurface = Unity.AI.Navigation.NavMeshSurface;
 using NavMeshModifier = Unity.AI.Navigation.NavMeshModifier;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpExtensions.Navigation.Tests
+namespace UnityOpenMcpExtensions.NavigationExt.Tests
 {
     public class NavigationToolsTests
     {

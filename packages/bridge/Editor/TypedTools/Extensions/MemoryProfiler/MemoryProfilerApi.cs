@@ -32,7 +32,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpBridge.Extensions.MemoryProfiler
+namespace UnityOpenMcpBridge.Extensions.MemoryProfilerExt
 {
     // Reflection wrapper over the Memory Profiler capture API. All members are
     // static and best-effort; failures surface as (false, errorCode) tuples.

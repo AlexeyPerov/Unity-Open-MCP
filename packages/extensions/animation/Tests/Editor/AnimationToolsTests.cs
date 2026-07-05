@@ -5,7 +5,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpExtensions.Animation.Tests
+namespace UnityOpenMcpExtensions.AnimationExt.Tests
 {
     public class AnimationToolsTests
     {

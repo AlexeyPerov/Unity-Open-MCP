@@ -11,7 +11,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.ProBuilder
+namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
 {
     // Shared helpers for the ProBuilder embedded domain tools.
     //

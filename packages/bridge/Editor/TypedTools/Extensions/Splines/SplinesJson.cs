@@ -23,7 +23,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Splines
+namespace UnityOpenMcpBridge.Extensions.SplinesExt
 {
     // Shared helpers for the Splines embedded domain tools.
     //

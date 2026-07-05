@@ -17,10 +17,10 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
-using UnityOpenMcpBridge.Extensions.Cinemachine;
+using UnityOpenMcpBridge.Extensions.CinemachineExt;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Cinemachine
+namespace UnityOpenMcpBridge.Tests.Extensions.CinemachineExt
 {
     public class CinemachineToolsTests
     {

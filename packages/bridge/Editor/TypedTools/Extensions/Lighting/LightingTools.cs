@@ -40,7 +40,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Lighting
+namespace UnityOpenMcpBridge.Extensions.LightingExt
 {
     // M20 Plan 2 — Lighting tools. Registry-discovered via [BridgeToolType] +
     // [BridgeTool]. Mutating tools declare IsMutating = true and accept a

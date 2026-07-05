@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Terrain.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Terrain",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.TerrainExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.Terrain.Editor",

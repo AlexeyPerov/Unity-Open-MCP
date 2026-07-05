@@ -16,7 +16,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Navigation
+namespace UnityOpenMcpBridge.Extensions.NavigationExt
 {
     // Shared helpers for the Navigation (NavMesh) embedded domain tools.
     // Target resolution, JSON envelope builders, and the typed baking helpers

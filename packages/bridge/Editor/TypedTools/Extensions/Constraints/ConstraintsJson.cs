@@ -17,7 +17,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Constraints
+namespace UnityOpenMcpBridge.Extensions.ConstraintsExt
 {
     // Shared JSON envelope + escape helpers. Mirrors AudioJson / LightingJson /
     // UIJson so each embedded domain has a self-contained helper it can evolve

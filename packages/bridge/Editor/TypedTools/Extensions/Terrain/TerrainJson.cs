@@ -17,13 +17,9 @@ using UnityEngine;
 using UnityEditor;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
-// The enclosing namespace `UnityOpenMcpBridge.Extensions.Terrain` shadows the
-// `UnityEngine.Terrain` type name, so bare `Terrain` resolves to the
-// namespace. Alias the type so call sites read naturally.
-using Terrain = UnityEngine.Terrain;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Terrain
+namespace UnityOpenMcpBridge.Extensions.TerrainExt
 {
     // Shared JSON envelope + escape helpers. Mirrors ConstraintsJson /
     // LightingJson / AudioJson so each embedded domain has a self-contained

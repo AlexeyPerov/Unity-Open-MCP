@@ -47,7 +47,7 @@ using UnityOpenMcpBridge.ObjectRefs;
 // preferred; the Asset methods survive only as a fallback for older Unity and
 // emit CS0618 there. Suppress that warning for the fallback call sites.
 #pragma warning disable CS0618
-namespace UnityOpenMcpBridge.Extensions.SpriteAtlas
+namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
 {
     // M20 Plan 9 / T20.9.1 — SpriteAtlas tools. Registry-discovered via
     // [BridgeToolType] + [BridgeTool]. Mutating tools declare IsMutating = true

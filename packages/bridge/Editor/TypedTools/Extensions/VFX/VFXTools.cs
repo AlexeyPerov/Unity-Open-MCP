@@ -37,7 +37,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 
-namespace UnityOpenMcpBridge.Extensions.VFX
+namespace UnityOpenMcpBridge.Extensions.VFXExt
 {
     [BridgeToolType]
     public static class VFXTools

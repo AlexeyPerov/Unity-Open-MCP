@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.InputSystem.Editor",
-  "rootNamespace": "UnityOpenMcpBridge.Extensions.InputSystem",
+  "rootNamespace": "UnityOpenMcpBridge.Extensions.InputSystemExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "Unity.InputSystem"

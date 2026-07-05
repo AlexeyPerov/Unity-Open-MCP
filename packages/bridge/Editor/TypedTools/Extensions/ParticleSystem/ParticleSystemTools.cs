@@ -6,9 +6,10 @@
 // Constraints / Lighting / Terrain). The former UNITY_OPEN_MCP_EXT_PARTICLESYSTEM
 // compile-gate never resolved — versionDefines cannot match a bare engine
 // module name like "UnityEngine.ParticleSystemModule" — so the gate was
-// removed and the source compiles directly. The C# namespace is `...Particles`
-// (not `...ParticleSystem`) to avoid colliding with the UnityEngine.ParticleSystem
-// type for unqualified references. Ported verbatim (logic, tool ids, JSON
+// removed and the source compiles directly. The C# namespace is
+// `...ParticlesExt` (the `Ext` suffix avoids colliding with the
+// UnityEngine.ParticleSystem type for unqualified references and IDE
+// autocomplete). Ported verbatim (logic, tool ids, JSON
 // schema, gate contracts) from the former standalone extension pack at
 // packages/extensions/particlesystem.
 using System.Collections.Generic;
@@ -19,7 +20,7 @@ using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Particles
+namespace UnityOpenMcpBridge.Extensions.ParticlesExt
 {
     // M16 Plan 10 / T6.6.9 → M18 Plan 3 — Particle System embedded tools.
     //

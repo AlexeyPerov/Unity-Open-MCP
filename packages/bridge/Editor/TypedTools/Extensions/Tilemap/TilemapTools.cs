@@ -33,7 +33,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Tilemap
+namespace UnityOpenMcpBridge.Extensions.TilemapExt
 {
     [BridgeToolType]
     public static class TilemapTools

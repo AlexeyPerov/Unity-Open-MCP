@@ -15,7 +15,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpBridge.Extensions.InputSystem
+namespace UnityOpenMcpBridge.Extensions.InputSystemExt
 {
     // M16 Plan 10 / T6.6.4 → M18 Plan 3 — Input System embedded tools.
     //

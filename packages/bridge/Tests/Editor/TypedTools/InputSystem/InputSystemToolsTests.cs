@@ -9,9 +9,9 @@
 using NUnit.Framework;
 using UnityEditor;
 using UnityOpenMcpBridge;
-using UnityOpenMcpBridge.Extensions.InputSystem;
+using UnityOpenMcpBridge.Extensions.InputSystemExt;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.InputSystem
+namespace UnityOpenMcpBridge.Tests.Extensions.InputSystemExt
 {
     public class InputSystemToolsTests
     {

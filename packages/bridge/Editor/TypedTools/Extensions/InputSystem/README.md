@@ -7,8 +7,9 @@ action-map/action/binding/composite/control-scheme add + get.
 Ported in M18 Plan 3 from the former standalone extension pack at
 `packages/extensions/inputsystem/` (now frozen). Logic, tool IDs, JSON schema,
 and gate contracts are unchanged from the legacy pack — only the namespace
-moved (`UnityOpenMcpExtensions.InputSystem` →
-`UnityOpenMcpBridge.Extensions.InputSystem`).
+moved (`UnityOpenMcpExtensions.InputSystemExt` →
+`UnityOpenMcpBridge.Extensions.InputSystemExt`). The `Ext` suffix avoids
+colliding with the `UnityEngine.InputSystem` namespace in IDE autocomplete.
 
 ## Compile gate
 

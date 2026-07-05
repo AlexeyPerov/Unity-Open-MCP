@@ -10,7 +10,7 @@
 // ListTools until the session activates it via manage_tools.
 using System.Text;
 
-namespace UnityOpenMcpBridge.Extensions.Texture
+namespace UnityOpenMcpBridge.Extensions.TextureExt
 {
     static class TextureJson
     {

@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.ShaderGraph.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.ShaderGraph",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.ShaderGraphExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.ShaderGraph.Editor",

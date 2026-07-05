@@ -12,7 +12,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpBridge.Extensions.InputSystem
+namespace UnityOpenMcpBridge.Extensions.InputSystemExt
 {
     // Shared helpers for the Input System embedded domain tools.
     //

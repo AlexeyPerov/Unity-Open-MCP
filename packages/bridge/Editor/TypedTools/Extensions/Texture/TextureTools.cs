@@ -34,13 +34,9 @@ using System.Text;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge;
-// The enclosing namespace `UnityOpenMcpBridge.Extensions.Texture` shadows the
-// `UnityEngine.Texture` type name, so bare `Texture` resolves to the
-// namespace. Alias the type so call sites read naturally.
-using Texture = UnityEngine.Texture;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Texture
+namespace UnityOpenMcpBridge.Extensions.TextureExt
 {
     // M20 Plan 9 / T20.9.1 — Texture import tools. Registry-discovered via
     // [BridgeToolType] + [BridgeTool]. set_import / reimport declare

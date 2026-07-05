@@ -1,6 +1,6 @@
 {
   "name": "com.alexeyperov.unity-open-mcp-bridge.Audio.Editor.Tests",
-  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.Audio",
+  "rootNamespace": "UnityOpenMcpBridge.Tests.Extensions.AudioExt",
   "references": [
     "com.alexeyperov.unity-open-mcp-bridge.Editor",
     "com.alexeyperov.unity-open-mcp-bridge.Audio.Editor",

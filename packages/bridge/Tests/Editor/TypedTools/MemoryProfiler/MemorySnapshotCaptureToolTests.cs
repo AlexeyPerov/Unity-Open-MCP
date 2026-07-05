@@ -29,7 +29,7 @@
 using NUnit.Framework;
 using UnityOpenMcpBridge;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.MemoryProfiler
+namespace UnityOpenMcpBridge.Tests.Extensions.MemoryProfilerExt
 {
     public class MemorySnapshotCaptureToolTests
     {

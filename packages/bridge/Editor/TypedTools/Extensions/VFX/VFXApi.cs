@@ -31,7 +31,7 @@ using UnityEngine.VFX;
 using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 
-namespace UnityOpenMcpBridge.Extensions.VFX
+namespace UnityOpenMcpBridge.Extensions.VFXExt
 {
     // Reflection wrapper over Unity.VisualEffectGraph. All members are static
     // and best-effort; failures surface as (false, errorCode) tuples.

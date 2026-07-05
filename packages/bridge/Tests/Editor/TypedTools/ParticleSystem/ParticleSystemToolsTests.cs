@@ -3,15 +3,16 @@
 // Ported from packages/extensions/particlesystem/Tests/Editor (former
 // standalone extension pack). UNGATED: ParticleSystem is a core engine
 // module present in every modern Unity install, so the suite always
-// compiles + runs. The namespace is `...Particles` to avoid the
-// UnityEngine.ParticleSystem type collision (see ParticleSystemTools.cs).
+// compiles + runs. The namespace uses the `Ext` suffix
+// (`...ParticlesExt`) to avoid the UnityEngine.ParticleSystem type
+// collision (see ParticleSystemTools.cs).
 #pragma warning disable CS0618
 using NUnit.Framework;
 using UnityEngine;
 using UnityOpenMcpBridge;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Tests.Extensions.Particles
+namespace UnityOpenMcpBridge.Tests.Extensions.ParticlesExt
 {
     public class ParticleSystemToolsTests
     {

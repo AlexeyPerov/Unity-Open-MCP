@@ -39,7 +39,7 @@ using UnityOpenMcpBridge;
 using Object = UnityEngine.Object;
 using UnityOpenMcpBridge.ObjectRefs;
 
-namespace UnityOpenMcpBridge.Extensions.Terrain
+namespace UnityOpenMcpBridge.Extensions.TerrainExt
 {
     // M20 Plan 4 / T20.4 — Terrain tools. Registry-discovered via
     // [BridgeToolType] + [BridgeTool]. All five tools are mutating (creating a
