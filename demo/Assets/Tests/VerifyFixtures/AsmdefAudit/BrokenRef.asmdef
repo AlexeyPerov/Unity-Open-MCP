@@ -1,4 +1,0 @@
-{
-    "name": "BrokenRef.Asmdef",
-    "references": ["This.Assembly.Does.Not.Exist"]
-}
