@@ -435,6 +435,25 @@ export function macosDismissAppleScript(opts: DismissProbeOptions): string {
   // blocked by default; even with the opt-in the per-button Windows path is
   // the safer surface for it.
   const dismissesSceneModified = preferenceTokensForPolicy("scene_modified_externally", opts.policy, opts.allowProjectUpgrade) !== null;
+  const unsavedTokens = opts.allowUnsavedSceneDismiss
+    ? preferenceTokensForPolicy(
+        "unsaved_scene_changes",
+        opts.policy,
+        opts.allowProjectUpgrade,
+        true,
+      )
+    : null;
+  const unsavedButtonLabels =
+    unsavedTokens === null
+      ? []
+      : unsavedTokens.map((t) => {
+          if (t === "dontsave" || t === "dontsaveall") return "Don't Save";
+          if (t === "save" || t === "saveall" || t === "savechanges") return "Save";
+          if (t === "no") return "Don't Save";
+          if (t === "yes" || t === "ok") return "Save";
+          if (t === "cancel" || t === "close" || t === "quit") return "Cancel";
+          return t;
+        });
   return `
 on run
   try
@@ -454,14 +473,13 @@ on run
           if (wt contains "Upgrade") and (wt contains "Project") then
             return "blocked:" & "project_upgrade"
           end if
-          -- specs/feedback.md 2026-07-03 — Unsaved scene changes: destructive
-          -- under every policy (data loss either way). When the opt-in is OFF
-          -- (the default), report blocked so the stall surfaces with a clear
-          -- diagnosis instead of timing out. When ON, fall through to the
-          -- generic path below (the focused button is usually Save).
+          -- Unsaved scene changes: blocked unless the dedicated opt-in is set.
           if ${(opts.allowUnsavedSceneDismiss ? "false" : "true")} then
-            ${DIALOG_TITLE_FRAGMENTS.unsaved_scene_changes.map((f) => `if wt contains "${f}" then return "blocked:" & "unsaved_scene_changes"`).join("\n            ")}
+            if wt contains "Have Been Modified" or wt contains "Unsaved changes" or wt contains "Save Changes" then return "blocked:" & "unsaved_scene_changes"
           end if
+          ${opts.allowUnsavedSceneDismiss && unsavedButtonLabels.length > 0
+            ? unsavedSceneMacOsClickBlock(unsavedButtonLabels)
+            : ""}
           ${launchFrags.map((f) => fragmentCheck(f, "launch_errors", dismissesLaunch)).join("\n          ")}
           ${nonMatchFrags.map((f) => fragmentCheck(f, "non_matching_editor", dismissesNonMatch)).join("\n          ")}
           ${graphicsFrags.map((f) => fragmentCheck(f, "auto_graphics_api", dismissesGraphics)).join("\n          ")}
@@ -475,6 +493,43 @@ on run
   end try
 end run
 `;
+}
+
+/** AppleScript block: match unsaved-scene title fragments and click a named button. */
+function unsavedSceneMacOsClickBlock(buttonLabels: readonly string[]): string {
+  // Use human-readable title substrings — AppleScript `contains` is case-
+  // insensitive but does NOT strip punctuation, so normalized fragments like
+  // "sceneshavebeenmodified" never match "Scene(s) Have Been Modified".
+  const titleChecks = [
+    "Have Been Modified",
+    "Unsaved changes",
+    "Save Changes",
+    "Do you want to save",
+    "save the changes you made",
+  ]
+    .map((f) => `wt contains "${f}"`)
+    .join(" or ");
+  const labelChecks = buttonLabels
+    .map(
+      (label) => `
+            repeat with btn in buttons of w
+              try
+                set bt to (title of btn) as text
+              on error
+                set bt to ""
+              end try
+              if bt is "${label}" or bt contains "${label}" then
+                set frontmost to true
+                click btn
+                return "dismissed:${label}:unsaved_scene_changes"
+              end if
+            end repeat`,
+    )
+    .join("");
+  return `
+          if (${titleChecks}) then
+            ${labelChecks}
+          end if`;
 }
 
 /**

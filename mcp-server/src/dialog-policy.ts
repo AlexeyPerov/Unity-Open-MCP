@@ -198,6 +198,10 @@ export const DIALOG_TITLE_FRAGMENTS: Readonly<Record<DialogKind, readonly string
     "savethechanges",
     "savemodifiedscenes",
     "doyouwanttosave",
+    // Unity 6 EditMode test runner: "Scene(s) Have Been Modified" when closing
+    // a dirty InitTestScene* temp scene (no on-disk path — auto-save skips it).
+    "sceneshavebeenmodified",
+    "havebeenmodified",
   ],
 };
 

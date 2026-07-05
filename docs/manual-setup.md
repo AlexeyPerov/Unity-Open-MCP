@@ -181,6 +181,11 @@ On unattended machines, configure startup modal handling via
   [Dialog policy](dialog-policy.md).
 - **"nothing happens" but no error:** double-check `UNITY_PROJECT_PATH` is an
   **absolute** path to the project root and contains no trailing slash or typos.
+- **macOS — modal auto-dismiss does nothing:** grant **Accessibility** to the
+  app that runs `node` (Terminal, your IDE, etc.) in **System Settings →
+  Privacy & Security → Accessibility**, then restart the MCP client. Required
+  for any agent host — not Cursor-specific. See
+  [Dialog policy → macOS Accessibility](dialog-policy.md#macos-accessibility-required-for-auto-dismiss).
 
 ## Related docs
 

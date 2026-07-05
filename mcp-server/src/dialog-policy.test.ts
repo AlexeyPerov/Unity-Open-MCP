@@ -81,6 +81,10 @@ test("classifyDialogTitle: matches every known kind via its real Unity title", (
     classifyDialogTitle("Unsaved changes to scene"),
     "unsaved_scene_changes",
   );
+  assert.equal(
+    classifyDialogTitle("Scene(s) Have Been Modified"),
+    "unsaved_scene_changes",
+  );
 });
 
 test("classifyDialogTitle: legacy launch-errors titles still classify as launch_errors", () => {

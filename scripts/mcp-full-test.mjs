@@ -39,11 +39,12 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve, isAbsolute } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 const CLI_BIN = resolve(REPO_ROOT, "mcp-server", "dist", "index.js");
+const DISMISS_MOD = pathToFileURL(resolve(REPO_ROOT, "mcp-server", "dist", "dialog-dismiss.js")).href;
 const DEFAULT_PROJECT = resolve(REPO_ROOT, "demo");
 
 // Temp fixture root — everything mutating lives under here and is deleted at
@@ -337,7 +338,13 @@ function buildSuite() {
   s("build_get_scenes", "B", "unity_open_mcp_build_get_scenes");
   s("build_get_defines", "B", "unity_open_mcp_build_get_defines");
   s("settings_get_player", "B", "unity_open_mcp_settings_get_player");
-  s("settings_get_quality", "B", "unity_open_mcp_settings_get_quality");
+  s("settings_get_quality", "B", "unity_open_mcp_settings_get_quality", {}, {
+    after: (r, ctx) => {
+      const current = pluck(r, "currentLevel") ?? 0;
+      // Pick a different index so set_quality_level is a real switch (not a no-op).
+      ctx.qualityAlternate = current === 0 ? 1 : 0;
+    },
+  });
   s("settings_get_physics", "B", "unity_open_mcp_settings_get_physics");
   s("settings_get_lighting", "B", "unity_open_mcp_settings_get_lighting");
   s("settings_get_time", "B", "unity_open_mcp_settings_get_time");
@@ -512,6 +519,11 @@ function buildSuite() {
   s("selection_set", "C", "unity_open_mcp_selection_set", {
     resolveArgs: (ctx) => ({ instance_id: ctx.cubeId }),
   });
+  // Undo/redo early in the GO chain — before prefab/material/script work piles
+  // onto the stack. Running these immediately before destroy invalidates the
+  // captured instance IDs and breaks gameobject_destroy_* cleanup.
+  s("editor_undo", "C", "unity_open_mcp_editor_undo");
+  s("editor_redo", "C", "unity_open_mcp_editor_redo");
   s("console_log", "C", "unity_open_mcp_console_log", { message: "FT: full-test marker" });
   s("console_clear", "C", "unity_open_mcp_console_clear");
   s("editor_set_state_stop", "C", "unity_open_mcp_editor_set_state", { state: "stop" });
@@ -628,7 +640,12 @@ function buildSuite() {
   // settings setters require a non-empty fields array of {key, value}; use real
   // keys confirmed via the getters, set to current values (no-op mutation).
   s("settings_set_quality", "C", "unity_open_mcp_settings_set_quality", { fields: [{ key: "pixelLightCount", value: 1 }], paths_hint: ["ProjectSettings/QualitySettings.asset"] }, { gate: true, expect: "gate" });
-  s("settings_set_quality_level", "C", "unity_open_mcp_settings_set_quality_level", { quality_level: 5, paths_hint: ["ProjectSettings/QualitySettings.asset"] }, { gate: true, expect: "gate" });
+  s("settings_set_quality_level", "C", "unity_open_mcp_settings_set_quality_level", {
+    resolveArgs: (ctx) => ({
+      quality_level: ctx.qualityAlternate ?? 0,
+      paths_hint: ["ProjectSettings/QualitySettings.asset"],
+    }),
+  }, { gate: true, expect: "gate" });
   s("settings_set_physics", "C", "unity_open_mcp_settings_set_physics", { fields: [{ key: "bounceThreshold", value: 2 }], paths_hint: ["ProjectSettings/DynamicsManager.asset"] }, { gate: true, expect: "gate" });
   s("settings_set_time", "C", "unity_open_mcp_settings_set_time", { fields: [{ key: "maximumDeltaTime", value: 0.333 }], paths_hint: ["ProjectSettings/TimeManager.asset"] }, { gate: true, expect: "gate" });
   // prefs are gate-free flat-body tools (return {status, saved}, not mutation.success) → expect "ok"
@@ -649,7 +666,7 @@ function buildSuite() {
 
   // --- sceneview focus + camera ---
   s("scene_focus", "C", "unity_open_mcp_scene_focus", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.cubeId, paths_hint: SCENE_HINT }),
+    resolveArgs: () => ({ name: "FT_Cube", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("sceneview_set_camera", "C", "unity_open_mcp_sceneview_set_camera", {
     position: { x: 0, y: 5, z: -10 }, rotation: { x: 30, y: 0, z: 0 }, paths_hint: SCENE_HINT,
@@ -779,16 +796,12 @@ function buildSuite() {
     menu_path: "Assets/Refresh", paths_hint: HINT,
   }, { gate: true, expect: "gate" });
 
-  // Undo/redo after the GO chain is persisted — avoids popping create/modify ops.
-  s("editor_undo", "C", "unity_open_mcp_editor_undo");
-  s("editor_redo", "C", "unity_open_mcp_editor_redo");
-
   // --- GameObject destroy (cleanup of the chain GOs) ---
   s("gameobject_destroy_cube", "C", "unity_open_mcp_gameobject_destroy", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.cubeId, paths_hint: SCENE_HINT }),
+    resolveArgs: () => ({ name: "FT_Cube", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("gameobject_destroy_sphere", "C", "unity_open_mcp_gameobject_destroy", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, paths_hint: SCENE_HINT }),
+    resolveArgs: () => ({ name: "FT_Sphere", paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
   s("gameobject_destroy_prefab_inst", "C", "unity_open_mcp_gameobject_destroy", {
     resolveArgs: (ctx) => ({ instance_id: ctx.prefabInstanceId, paths_hint: SCENE_HINT }),
@@ -929,6 +942,8 @@ const SAVE_DIRTY_BEFORE = new Set([
   "build_set_target",
   "build_set_scenes",
   "build_set_defines",
+  "settings_set_quality",
+  "settings_set_quality_level",
   "editor_clear_history",
 ]);
 
@@ -937,12 +952,60 @@ const SAVE_DIRTY_BEFORE = new Set([
 const SAVE_DIRTY_AFTER = new Set(["gameobject_find_query"]);
 
 // Child-process env for every CLI invocation: opt in to unsaved-scene modal
-// dismiss (destructive — test-only backstop) and default dialog policy to ignore.
+// dismiss (destructive — test-only backstop) and prefer Don't Save on those
+// modals so InitTestScene* temp scenes from run_tests do not wedge the editor.
 function buildRunEnv() {
   const env = { ...process.env };
   env.UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS = "1";
-  if (!env.UNITY_OPEN_MCP_DIALOG_POLICY) env.UNITY_OPEN_MCP_DIALOG_POLICY = "ignore";
+  env.UNITY_OPEN_MCP_DIALOG_POLICY = "cancel";
   return env;
+}
+
+/** Poll OS dialogs (unsaved-scene, launch-errors, …) — best-effort sync wrapper. */
+function dismissBlockingModals(runEnv) {
+  const script = `
+    import { pollAndDismissDialogs, readDismissConfig } from ${JSON.stringify(DISMISS_MOD)};
+    const cfg = readDismissConfig(process.env);
+    if (!cfg.enabled) process.exit(0);
+    await pollAndDismissDialogs({
+      timeoutMs: 10_000,
+      intervalMs: 500,
+      policy: cfg.policy,
+      allowProjectUpgrade: cfg.allowProjectUpgrade,
+      allowUnsavedSceneDismiss: cfg.allowUnsavedSceneDismiss,
+    });
+  `;
+  try {
+    execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+      encoding: "utf8",
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: 15_000,
+      env: runEnv,
+    });
+  } catch {
+    // best-effort — Accessibility permission may be missing on some hosts
+  }
+}
+
+/** Tear down InitTestScene* leftovers from run_tests and dismiss save modals. */
+function finalizeEditorState(project, runEnv) {
+  dismissBlockingModals(runEnv);
+  const list = invokeTool(project, "unity_open_mcp_scene_list_opened", {}, 30_000, runEnv);
+  const scenes = list?.result?.scenes ?? [];
+  for (const sc of scenes) {
+    const name = sc?.name ?? "";
+    if (!name.startsWith("InitTestScene")) continue;
+    invokeTool(
+      project,
+      "unity_open_mcp_scene_unload",
+      { name, paths_hint: ["Assets/Scenes/Main.unity"] },
+      30_000,
+      runEnv,
+    );
+    dismissBlockingModals(runEnv);
+  }
+  saveAllDirtyScenes(project, runEnv);
+  dismissBlockingModals(runEnv);
 }
 
 function invokeTool(project, tool, args, timeoutMs, runEnv) {
@@ -1195,10 +1258,29 @@ function main() {
   console.log(`  steps:   ${selected.length}`);
   console.log("");
 
+  const runEnv = buildRunEnv();
+
+  // Preflight: try to dismiss a wedging modal (unsaved InitTestScene*, etc.)
+  // before the suite starts. On macOS this needs Accessibility permission for
+  // the node binary — without it, dismiss is best-effort and you may need to
+  // click Don't Save manually once.
+  console.log("--- preflight ---");
+  dismissBlockingModals(runEnv);
+  const preflight = invokeTool(opts.project, "unity_open_mcp_editor_status", {}, 15_000, runEnv);
+  const preCode = preflight?.result?.error?.code;
+  if (preflight?.isError === true && preCode === "main_thread_blocked") {
+    console.error("");
+    console.error("Unity main thread is blocked by a modal dialog (likely unsaved InitTestScene*).");
+    console.error("Click \"Don't Save\" in the Unity Editor, or grant Accessibility permission");
+    console.error("to your terminal/node so UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS can auto-click.");
+    console.error("Then re-run this script.");
+    process.exit(2);
+  }
+  process.stdout.write(`✓ ${"editor reachable".padEnd(34)}        ok\n\n`);
+
   const ctx = {};
   const results = [];
   const bandSummary = {};
-  const runEnv = buildRunEnv();
   let pass = 0;
   let fail = 0;
 
@@ -1243,6 +1325,17 @@ function main() {
   }
 
   process.removeListener("SIGINT", onSigInt);
+
+  // Post-suite: dismiss any save modal and unload InitTestScene* temp scenes
+  // left by run_tests (Band G). Without this, Unity stays wedged on "Scene(s)
+  // Have Been Modified" because InitTestScene has no on-disk path (auto-save
+  // skips it) and the title did not match the dismiss fragment list until fixed.
+  if (!opts.band || opts.band.includes("G")) {
+    console.log("");
+    console.log("--- finalize ---");
+    finalizeEditorState(opts.project, runEnv);
+    process.stdout.write(`✓ ${"editor finalize (dismiss + InitTestScene cleanup)".padEnd(34)}        done\n`);
+  }
 
   // Always attempt cleanup of the temp fixture root unless --no-cleanup.
   if (!opts.noCleanup && (!opts.band || opts.band.includes("C"))) {

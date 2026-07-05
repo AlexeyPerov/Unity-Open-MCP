@@ -74,7 +74,10 @@ package by replacing the `npx` command with a direct node launch:
 
 Optional startup-dialog env vars (`UNITY_OPEN_MCP_DIALOG_POLICY`, project-upgrade
 and unsaved-scene opt-ins, dismiss timeouts) apply the same way — see
-[Dialog policy](dialog-policy.md).
+[Dialog policy](dialog-policy.md). On **macOS**, auto-dismiss also needs a
+one-time **Accessibility** grant for the app that runs `node` (Terminal, IDE,
+CI runner, etc.) — see
+[Dialog policy → macOS Accessibility](dialog-policy.md#macos-accessibility-required-for-auto-dismiss).
 
 ## 3) Optional Unity domain dependencies
 
@@ -216,5 +219,6 @@ fork then point their clients at the forked package name
 - [Manual setup](manual-setup.md)
 - [Wizard setup](wizard-setup.md)
 - [Extensions](extensions.md)
+- [Contributor troubleshooting](troubleshooting-contributors.md) — test suites, worker-listener collisions, InitTestScene modals
 - [Bridge HTTP API](api/bridge-http.md)
 - [MCP tools API](api/mcp-tools.md)

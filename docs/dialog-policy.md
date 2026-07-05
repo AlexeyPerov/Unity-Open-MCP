@@ -65,11 +65,39 @@ from "operator chose manual for this run").
 
 Windows performs precise per-button selection (Win32 `BM_CLICK` on the
 policy-chosen button). macOS and Linux/X11 press the **focused** (default)
-button via `key code 36` / `Return`, which under the default policies is the
-safe choice; both platforms detect and **block** a project-upgrade dialog
-rather than clicking. Linux requires `xdotool` (X11 only — Wayland is
-unsupported); macOS requires an Accessibility permission for the terminal /
-`node` binary (System Settings → Privacy & Security → Accessibility).
+button via `key code 36` / `Return` for most safe dialogs; **unsaved scene
+changes** uses explicit per-button selection on macOS when the opt-in is set
+(see [macOS Accessibility](#macos-accessibility-required-for-auto-dismiss)).
+Linux requires `xdotool` (X11 only — Wayland is unsupported).
+
+## macOS Accessibility (required for auto-dismiss)
+
+On macOS, dialog auto-dismiss drives Unity modals through **AppleScript**
+(`osascript` → System Events). **System Settings → Privacy & Security →
+Accessibility** must allow the process that actually runs the MCP server — the
+host that executes `node` / `unity-open-mcp`, for example:
+
+| Host | What to enable in Accessibility |
+| --- | --- |
+| Terminal / iTerm / Warp | That terminal app |
+| Cursor, VS Code, Zed, or another IDE | That IDE (hosts the MCP client, which spawns `node`) |
+| Claude Code, OpenCode, or other CLI agents | The terminal or wrapper app that launches the agent |
+| CI or custom scripts | The runner app or `node` binary, if macOS prompts for it |
+
+This is **not Cursor-specific** — any MCP client or shell that spawns the server
+needs the grant for OS-level clicks to work.
+
+**Without Accessibility:** the dismiss loop logs *"Not authorized to send Apple
+events to System Events"* (or similar). Launch-error and steady-state modals
+must be dismissed by hand; agents see **`main_thread_blocked`** until you click
+the dialog.
+
+**One-time setup:** add the host app → toggle on → restart the agent or MCP
+client so the next `node` child inherits the permission context.
+
+**Applies when:** default launch-error dismiss is on (always, unless
+`UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` or `manual` policy), or when
+`UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1` is set for unsaved-scene modals.
 
 ## Related docs
 
