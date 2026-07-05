@@ -6,7 +6,7 @@ box-fill, create tile asset, create rule tile.
 
 ## Compile gate (two layers + an inner guard)
 
-Three layers (see `docs/extensions.md` §Embedded domain model):
+Three layers (see `docs/contributing/extensions.md` §Embedded domain model):
 
 1. The bridge root asmdef
    (`packages/bridge/Editor/com.alexeyperov.unity-open-mcp-bridge.Editor.asmdef`)

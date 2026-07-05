@@ -34,7 +34,7 @@ For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-too
 | Weak asset visibility and cross-reference context | Asset intelligence tools for structured read/search, reserialize flows, and reference analysis |
 | Tooling breaks when Unity/editor runtime is unavailable | Live bridge + batch fallback + offline readers where possible |
 | Generic tools miss Unity-specific workflows | Typed tool surface for scenes, GameObjects, components, packages, build settings, profiler, and project settings |
-| Domain workflows require custom setup | Extension packs load by package presence and surface as per-session tool groups |
+| Domain workflows require custom setup | Domain tools embed in the bridge, compile when the Unity package is present, and surface as per-session tool groups |
 
 ## Quick setup
 
@@ -49,7 +49,7 @@ Use any of this options:
 2. If you prefer manual setup: see [Manual setup](docs/manual-setup.md).
 3. If prefer cloning this repo and working with it directly: see [Development setup](docs/development-setup.md). Fits contributor workflow.
 
-Optional: install extension packs for domain-specific workflows: [Extensions](docs/extensions.md).
+Domain tools (NavMesh, Input System, ProBuilder, lighting, Shader Graph, …) are embedded in the bridge — see [Extensions](docs/extensions.md) for the catalog and activation steps.
 
 ## Documentation
 
@@ -63,6 +63,7 @@ Optional: install extension packs for domain-specific workflows: [Extensions](do
 - [Code conventions](docs/code-conventions.md) — non-obvious C# decisions (instance IDs, namespace aliasing).
 - [Versioning](docs/versioning.md) — how the shared server/bridge/verify version and the Hub app version are managed, bumped, and kept in sync; the runtime compatibility check.
 - [CI templates](docs/ci/README.md) — GitHub Actions / GitLab CI templates for health checks, verify scans, and regression gates in standard CI.
+- [Contributing — extensions](docs/contributing/extensions.md) — embedded domain gates, wiring checklist, community packs.
 
 > Would like to see other MCP options? See the [MCP tools for Unity comparison](docs/mcp-tools-comparison.md) — a side-by-side feature matrix of Unity Open MCP and the other MCP tools / AI assistants in the space.
 

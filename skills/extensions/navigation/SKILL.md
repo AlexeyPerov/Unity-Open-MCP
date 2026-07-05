@@ -1,15 +1,22 @@
 # Unity Open MCP — Navigation (NavMesh) Extension
 
-Skill for AI agents driving NavMesh / AI Navigation in a Unity project through the `unity-open-mcp` MCP server + the **Navigation extension pack** (`com.alexeyperov.unity-open-mcp-ext-navigation`).
+Skill for AI agents driving NavMesh / AI Navigation in a Unity project through the `unity-open-mcp` MCP server.
 
-> This pack is **opt-in**. Its tools only resolve when the project's `Packages/manifest.json` includes the navigation extension package. If a tool returns `tool_not_found`, the pack is not installed — surface the manifest line from the bridge window's Extensions tab or the Hub AI Setup wizard.
+> This domain is **embedded** in the bridge and **opt-in**. Its tools compile in
+> only when the project has `com.unity.ai.navigation` installed (the bridge sets
+> the `UNITY_OPEN_MCP_EXT_NAVIGATION` define automatically). Its tool group is
+> **hidden** from `ListTools` until the connected session activates it.
 
 ## Preconditions
 
 - Unity Editor is open with the target project.
 - `unity_open_mcp_ping` returns `connected: true`.
-- The navigation extension pack is installed (see the bridge window's **Extensions** tab; `navigation_list` returns `tool_not_found` otherwise).
-- The Unity project has `com.unity.ai.navigation` (NavMesh Components) available.
+- The project has `com.unity.ai.navigation` installed. If `capabilities` reports
+  the `navigation` group as `available: false`, install the package and let the
+  bridge recompile.
+- The `navigation` tool group is activated — call
+  `unity_open_mcp_manage_tools(action="activate", group="navigation")` before
+  invoking any `navigation_*` tool. Fresh sessions start with only `core` visible.
 
 ## Tool prefix
 

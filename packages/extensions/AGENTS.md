@@ -16,7 +16,7 @@ The five **shipped** domains (navigation, inputsystem, probuilder, particlesyste
 - **Retention:** The folders are **retained, not deleted**, so any pinned manifest that still references a `file:../../packages/extensions/<domain>` (or git-pinned) copy continues to resolve. New first-party domains go into `packages/bridge/Editor/TypedTools/Extensions/`, never here.
 - **Duplicate-registration guard:** A project that keeps a legacy pack installed **and** the embedded bridge copy active will register the same tool ids twice. `BridgeToolRegistry` keeps the first-registered entry and records the collision (`DuplicateToolNames` / `DuplicateCount` after each `Scan()`), emitting a non-fatal `Debug.LogWarning`. The dogfood demo project migrated off the legacy packs in M18 Plan 6; the only remaining reference to these copies is this deprecation safety net.
 - **Default onboarding:** The Hub wizard **never** installs legacy ext packs — it installs only the bridge + verify packages plus opt-in Unity domain packages (`com.unity.ai.navigation`, …). There is no wizard path that installs `com.alexeyperov.unity-open-mcp-ext-*` for a shipped domain.
-- **Scope of this folder going forward:** This is the home for **third-party / community** domain packs and the `template/` scaffold. See `docs/extensions.md` §Embedded domain model.
+- **Scope of this folder going forward:** This is the home for **third-party / community** domain packs and the `template/` scaffold. See `docs/contributing/extensions.md` §Embedded domain model.
 
 ## Package shape
 
@@ -57,7 +57,7 @@ Every pack must update four core surfaces **in the same task** so the pack is di
    - C#: `packages/bridge/Editor/UI/ExtensionCatalog.cs`
    - TS: `hub/src/lib/services/extensions.ts`
 
-See `docs/extensions.md` §Authoring a new pack for the full checklist.
+See `docs/contributing/extensions.md` §Community domain packs for the full checklist.
 
 ## Verification
 

@@ -100,8 +100,7 @@ Unity package is present. Add the Unity dependencies you want under
 
 Particle System and Animation are built-in Unity modules — no manifest entry is
 needed, the tools compile in as soon as the module is enabled in the Editor.
-See [extensions.md](extensions.md) for the full domain catalog and the
-define-symbol model.
+See [extensions.md](extensions.md) for the domain catalog and activation steps.
 
 ## 4) Launch Unity and verify
 
@@ -125,8 +124,8 @@ that are not shipped with the bridge. The shipped domains (Nav, Input,
 ProBuilder, Particles, Animation) are embedded in the bridge and **must not**
 also be installed as separate `com.alexeyperov.unity-open-mcp-ext-*` packs —
 that would double-register tool IDs. See
-[extensions.md](extensions.md#legacy--community-domain-packs-advanced-path) for
-the community-pack contract.
+[contributing/extensions.md](contributing/extensions.md) for the community-pack
+contract.
 
 To install a community pack, add its UPM id under `dependencies`:
 
@@ -219,6 +218,7 @@ fork then point their clients at the forked package name
 - [Manual setup](manual-setup.md)
 - [Wizard setup](wizard-setup.md)
 - [Extensions](extensions.md)
+- [Contributing — extensions](contributing/extensions.md)
 - [Contributor troubleshooting](troubleshooting-contributors.md) — test suites, worker-listener collisions, InitTestScene modals
 - [Bridge HTTP API](api/bridge-http.md)
 - [MCP tools API](api/mcp-tools.md)

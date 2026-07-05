@@ -33,7 +33,7 @@ Rules for `packages/bridge/` — the Unity Editor HTTP bridge (`com.alexeyperov.
 
 ## Embedded domain tools (M18)
 
-- Shipped domain tools (Nav, Input, ProBuilder, Particles, Animation) live under `Editor/TypedTools/Extensions/<Domain>/`, **not** in `packages/extensions/`. See `docs/extensions.md` §Embedded domain model.
+- Shipped domain tools (Nav, Input, ProBuilder, Particles, Animation) live under `Editor/TypedTools/Extensions/<Domain>/`, **not** in `packages/extensions/`. See `docs/contributing/extensions.md` §Embedded domain model.
 - **Compile-gating is mandatory.** The bridge root asmdef (`com.alexeyperov.unity-open-mcp-bridge.Editor.asmdef`) declares one `versionDefines` entry per shipped domain that maps the Unity package/module to `UNITY_OPEN_MCP_EXT_<DOMAIN>`. Each domain lives in its own sub-asmdef with `defineConstraints: ["UNITY_OPEN_MCP_EXT_<DOMAIN>"]` and a reference to the domain package — the sub-asmdef only compiles when the dependency is present, so a project with zero optional Unity domain packages still compiles cleanly.
 - **No runtime reflection probing** for shipped domains. When the dependency is absent, the tools are simply not compiled in; the capability surface reports `available: false (dependency missing: <package>)`. Reflection is reserved for version-split APIs only (Cinemachine 2.x/3.x in M18 Plan 7) and must document the split + minimum version.
 - **No manual Player Settings scripting-define writes.** The wizard must not write `UNITY_OPEN_MCP_EXT_*` symbols — they come exclusively from the asmdef `versionDefines`.

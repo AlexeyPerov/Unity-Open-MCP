@@ -15,7 +15,7 @@ and IDE autocomplete.
 
 ## Compile gate
 
-Two-layer gate (see `docs/extensions.md` §Embedded domain model):
+Two-layer gate (see `docs/contributing/extensions.md` §Embedded domain model):
 
 1. The bridge root asmdef
    (`packages/bridge/Editor/com.alexeyperov.unity-open-mcp-bridge.Editor.asmdef`)

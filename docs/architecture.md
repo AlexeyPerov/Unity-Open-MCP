@@ -12,7 +12,7 @@ A fifth part, the **Validation Suite**, is a standalone desktop app for guided m
 ## Repository map
 
 - `mcp-server/` — MCP stdio server, tool registry, routing.
-- `packages/bridge/` — Unity HTTP bridge and typed tool handlers. Shipped domain tools live under `Editor/TypedTools/Extensions/` and compile-gate on their Unity dependency (see [Extensions](extensions.md)).
+- `packages/bridge/` — Unity HTTP bridge and typed tool handlers. Shipped domain tools live under `Editor/TypedTools/Extensions/` and compile-gate on their Unity dependency (see [Contributing — extensions](contributing/extensions.md)).
 - `packages/verify/` — validation rules and fixes used by gate flows.
 - `hub/` — desktop app (Tauri + SvelteKit).
 - `validation-suite/` — standalone Tauri + SvelteKit app that runs manual validation scenarios. Engine-neutral orchestration lives in `validation-suite/packages/core/`; engine specifics (paths, CLI, companions) are declared in bundled engine profiles (`engine-profiles/unity.json`). The suite has no code boundary with `hub/` — it ships standalone and invokes the engine via the MCP CLI as a subprocess.
@@ -65,3 +65,4 @@ See [versioning.md](versioning.md) for the full policy.
 - [MCP tools API](api/mcp-tools.md)
 - [Bridge HTTP API](api/bridge-http.md)
 - [Extensions](extensions.md)
+- [Contributing — extensions](contributing/extensions.md)

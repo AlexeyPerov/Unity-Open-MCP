@@ -11,7 +11,7 @@
 //
 // Splines is compile-gate-only (single stable API across com.unity.splines
 // 1.x and 2.x). No reflection probing for version detection — reflection is
-// reserved for the Cinemachine 2.x/3.x split (see docs/extensions.md §Reflection
+// reserved for the Cinemachine 2.x/3.x split (see docs/contributing/extensions.md §Reflection
 // fallback policy). The reflective escape hatch below (SplinesModify) targets
 // Spline-level serialized fields; it is not a version-detection layer.
 #if UNITY_OPEN_MCP_EXT_SPLINES

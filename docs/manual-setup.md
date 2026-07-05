@@ -75,7 +75,7 @@ Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation) are
 }
 ```
 
-Particle System and Animation are built-in Unity modules — no manifest entry is needed, the tools compile in as soon as the module is enabled in the Editor. See [extensions.md](extensions.md) for the full domain catalog and the define-symbol model.
+Particle System and Animation are built-in Unity modules — no manifest entry is needed, the tools compile in as soon as the module is enabled in the Editor. See [extensions.md](extensions.md) for the domain catalog and activation steps.
 
 ### Optional dependencies (in-Editor)
 

@@ -1,14 +1,22 @@
 # Unity Open MCP — ProBuilder Extension
 
-Skill for AI agents driving Unity ProBuilder in a project through the `unity-open-mcp` MCP server + the **ProBuilder extension pack** (`com.alexeyperov.unity-open-mcp-ext-probuilder`).
+Skill for AI agents driving Unity ProBuilder in a project through the `unity-open-mcp` MCP server.
 
-> This pack is **opt-in**. Its tools only resolve when the project's `Packages/manifest.json` includes the probuilder extension package AND the Unity project has `com.unity.probuilder` installed. If a tool returns `tool_not_found`, the pack is not installed — surface the manifest line from the bridge window's Extensions tab or the Hub AI Setup wizard.
+> This domain is **embedded** in the bridge and **opt-in**. Its tools compile in
+> only when the project has `com.unity.probuilder` installed (the bridge sets
+> the `UNITY_OPEN_MCP_EXT_PROBUILDER` define automatically). Its tool group is
+> **hidden** from `ListTools` until the connected session activates it.
 
 ## Preconditions
 
 - Unity Editor is open with the target project.
 - `unity_open_mcp_ping` returns `connected: true`.
-- The probuilder extension pack is installed (see the bridge window's **Extensions** tab; `probuilder_get_mesh_info` returns `tool_not_found` otherwise).
+- The project has `com.unity.probuilder` installed. If `capabilities` reports
+  the `probuilder` group as `available: false`, install the package and let the
+  bridge recompile.
+- The `probuilder` tool group is activated — call
+  `unity_open_mcp_manage_tools(action="activate", group="probuilder")` before
+  invoking any `probuilder_*` tool. Fresh sessions start with only `core` visible.
 - The Unity project has `com.unity.probuilder` available.
 
 ## Tool prefix

@@ -1,14 +1,21 @@
 # Unity Open MCP — Animation Extension
 
-Skill for AI agents driving Unity AnimationClip and AnimatorController assets in a project through the `unity-open-mcp` MCP server + the **Animation extension pack** (`com.alexeyperov.unity-open-mcp-ext-animation`).
+Skill for AI agents driving Unity AnimationClip and AnimatorController assets in a project through the `unity-open-mcp` MCP server.
 
-> This pack is **opt-in**. Its tools only resolve when the project's `Packages/manifest.json` includes the animation extension package. AnimationClip + AnimatorController are built-in Unity modules — no extra Unity package is needed. If a tool returns `tool_not_found`, the pack is not installed — surface the manifest line from the bridge window's Extensions tab or the Hub AI Setup wizard.
+> This domain is **embedded** in the bridge and **opt-in**. Its tools compile in
+> when the built-in animation module is present (the bridge sets
+> `UNITY_OPEN_MCP_EXT_ANIMATION` automatically — no extra Unity package is
+> needed). Its tool group is **hidden** from `ListTools` until the connected
+> session activates it.
 
 ## Preconditions
 
 - Unity Editor is open with the target project.
 - `unity_open_mcp_ping` returns `connected: true`.
-- The animation extension pack is installed (see the bridge window's **Extensions** tab; `animation_get_data` returns `tool_not_found` otherwise).
+- The `animation` tool group is activated — call
+  `unity_open_mcp_manage_tools(action="activate", group="animation")` before
+  invoking any `animation_*` or `animator_*` tool. Fresh sessions start with
+  only `core` visible.
 
 ## Tool prefixes
 

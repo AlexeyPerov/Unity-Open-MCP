@@ -2465,7 +2465,7 @@ namespace UnityOpenMcpBridge
             ("Bridge HTTP API", "docs/api/bridge-http.md", "Bridge endpoints, envelopes, /ping, and remote bind."),
             ("MCP tools API", "docs/api/mcp-tools.md", "Tool catalog, route policy, and gate behavior."),
             ("MCP resources API", "docs/api/resources.md", "Resource URIs and payloads."),
-            ("Extensions", "docs/extensions.md", "Embedded domain tools (compile-gated) and community packs."),
+            ("Extensions", "docs/extensions.md", "Domain catalog and activation (embedded tools + community packs)."),
             ("Skills", "docs/skills.md", "Agent playbooks shipped into a project."),
             ("Code conventions", "docs/code-conventions.md", "Non-obvious C# decisions (instance IDs, namespaces)."),
         };

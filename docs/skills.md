@@ -65,4 +65,4 @@ The runtime tool `unity_open_mcp_generate_skill` (`{ "write": true }`) regenerat
 
 - Skills are **agent-facing** — they live inside game projects and are read by the AI agent.
 - These docs (`docs/`) are **human-facing** — read by you.
-- For the full tool catalog and route policy, see [MCP tools API](api/mcp-tools.md). For extension pack install details, see [Extensions](extensions.md).
+- For the full tool catalog and route policy, see [MCP tools API](api/mcp-tools.md). For domain catalog and activation, see [Extensions](extensions.md).
