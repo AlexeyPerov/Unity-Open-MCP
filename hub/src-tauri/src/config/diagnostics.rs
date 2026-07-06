@@ -216,6 +216,7 @@ use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile, Settings};
                 package_manifest_path: None,
                 migrate_source_folder: None,
                 line_count_stats: None,
+                ai_setup_wizard: None,
             }],
         };
         let json = serde_json::to_string_pretty(&p).unwrap();

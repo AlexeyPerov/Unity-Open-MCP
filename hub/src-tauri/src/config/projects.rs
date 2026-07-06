@@ -217,6 +217,7 @@ pub fn add_project(
         package_manifest_path,
         migrate_source_folder: None,
         line_count_stats: None,
+        ai_setup_wizard: None,
     };
 
     let mut projects = state.projects.lock().unwrap().clone();
@@ -629,6 +630,7 @@ mod tests {
             package_manifest_path: None,
             migrate_source_folder: None,
             line_count_stats: None,
+            ai_setup_wizard: None,
         }
     }
 

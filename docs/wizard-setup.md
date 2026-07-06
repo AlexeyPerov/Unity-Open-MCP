@@ -32,6 +32,8 @@ For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md)
 5. Restart your MCP client.
 6. Run a Unity MCP call to confirm connectivity.
 
+Wizard choices (MCP client, package toggles, bridge port, and other form fields) are remembered **per project** when you reopen the wizard; you always start again at Step 1.
+
 ![plot](../screenshots/hub-ai-buttons.png)
 
 ## Wizard steps

@@ -235,11 +235,10 @@
   let pkgAuthorUrl = $state("");
   let pkgIncludeExtras = $state(true);
   // M4 Plan 2 (M4-4 / M4-5): AI Setup wizard. The wizard's own state
-  // lives entirely inside `AiSetupWizard.svelte`; the Projects tab
-  // only owns the "open / close" handle and the live project
-  // pointer. Wizard progress is never written to `projects.json`
-  // (questions-4 Q11 = A) — reopening the modal always restarts at
-  // Step 1 by way of the wizard's local `$state`.
+  // lives inside `AiSetupWizard.svelte`; the Projects tab only owns
+  // the "open / close" handle and the live project pointer. User-edited
+  // wizard form fields persist per project in `projects.json`
+  // (`aiSetupWizard`); step navigation always restarts at Step 1.
   let aiSetupWizardProjectId = $state<string | null>(null);
 
   const UNSAFE_RE = /[\n\r\0`$|&;<>]/;
@@ -4305,6 +4304,7 @@
         name: aiSetupProject.name,
         path: aiSetupProject.path,
         unityVersion: aiSetupProject.unityVersion,
+        aiSetupWizard: aiSetupProject.aiSetupWizard,
       }}
       onClose={closeAiSetup}
     />

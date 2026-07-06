@@ -176,6 +176,7 @@ pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
             package_manifest_path: None,
             migrate_source_folder: None,
             line_count_stats: None,
+            ai_setup_wizard: None,
         });
     }
 

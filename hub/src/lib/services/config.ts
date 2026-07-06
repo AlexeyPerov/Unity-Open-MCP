@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { McpClientId } from "./ai_toolkit";
 
 export interface LaunchSettings {
   mode: string;
@@ -196,6 +197,26 @@ export interface LineCountStats {
   details: string;
 }
 
+/** Per-project AI Setup wizard form draft (persisted in `projects.json`). */
+export interface AiSetupWizardDraft {
+  useLocalCheckout?: boolean;
+  useGlobalInstall?: boolean;
+  toolkitRoot?: string;
+  mcpIndexOverride?: string;
+  installBridge?: boolean;
+  installVerify?: boolean;
+  packageVersionPin?: string;
+  packageCustomUrl?: string;
+  useLocalPackages?: boolean;
+  selectedUnityDomainDeps?: string[];
+  upgradeAcknowledged?: boolean;
+  showDiff?: boolean;
+  mcpClient?: McpClientId;
+  cursorProjectScope?: boolean;
+  bridgePort?: string;
+  skillOverwriteAck?: boolean;
+}
+
 export interface ProjectEntry {
   id: string;
   name: string;
@@ -277,6 +298,10 @@ export interface ProjectEntry {
    * save).
    */
   defaultBuildTarget?: string;
+  /** Per-project AI Setup wizard form draft (MCP client, toggles,
+   *  ports, …). Omitted until the user edits wizard fields. Step
+   *  index is not stored. */
+  aiSetupWizard?: AiSetupWizardDraft;
 }
 
 export interface ProjectsFile {

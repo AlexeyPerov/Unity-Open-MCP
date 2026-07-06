@@ -16,6 +16,7 @@
    */
   import { onMount } from "svelte";
   import { S } from "$lib/state.svelte";
+  import { projectsStore } from "$lib/state/projects.svelte";
   import { settingsStore } from "$lib/state/settings.svelte";
   import {
     bridgePortFromString,
@@ -51,7 +52,15 @@
     type SkillCopyPlan,
     type SkillCopyResult,
     type ToolkitValidation,
+    type AiSetupWizardDraft,
   } from "$lib/services/config";
+  import {
+    collectAiSetupWizardDraft,
+    hydrateAiSetupWizardDraft,
+    isEmptyDraft,
+    serializeDraftSnapshot,
+    type AiSetupWizardDraftSnapshot,
+  } from "$lib/services/ai_setup_wizard_draft";
   import {
     BRIDGE_PACKAGE_ID,
     VERIFY_PACKAGE_ID,
@@ -182,11 +191,23 @@
       name: string;
       path: string;
       unityVersion: string | null | undefined;
+      aiSetupWizard?: AiSetupWizardDraft;
     };
     onClose: () => void;
   }
 
   let { project, onClose }: Props = $props();
+
+  // Stable for the wizard session. Parent re-renders from draft persist pass
+  // a fresh `project` object each time; reading `project.path` inside `$effect`
+  // would restart every async planner on each save.
+  // svelte-ignore state_referenced_locally
+  const wizardProjectId = project.id;
+  // svelte-ignore state_referenced_locally
+  const wizardProjectPath = project.path;
+
+  let wizardClosed = $state(false);
+  let detectionGeneration = 0;
 
   let currentStep = $state<StepId>("step1");
 
@@ -219,6 +240,7 @@
   // `rootPath` is already saved so existing M4 onboarding keeps resolving
   // to the local launch command without a forced migration.
   let useLocalCheckout = $state(false);
+  let useGlobalInstall = $state(false);
 
   // Step 3 — packages state.
   let installBridge = $state(true);
@@ -325,18 +347,134 @@
   const STEP5_TOTAL_BUDGET_MS = 120_000;
   const STEP5_POLL_INTERVAL_MS = 2_000;
   const STEP5_PING_TIMEOUT_MS = 5_000;
+  const DRAFT_PERSIST_DEBOUNCE_MS = 400;
+
+  let draftPersistReady = $state(false);
+  let lastPersistedDraftJson = $state("");
+  let draftPersistTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+
+  function draftSnapshot(): AiSetupWizardDraftSnapshot {
+    return {
+      useLocalCheckout,
+      useGlobalInstall,
+      toolkitRoot,
+      mcpIndexOverride,
+      installBridge,
+      installVerify,
+      packageVersionPin,
+      packageCustomUrl,
+      useLocalPackages,
+      selectedUnityDomainDeps,
+      upgradeAcknowledged,
+      showDiff,
+      mcpClient,
+      cursorProjectScope,
+      bridgePort,
+      skillOverwriteAck,
+    };
+  }
+
+  function applyHydratedForm(
+    state: ReturnType<typeof hydrateAiSetupWizardDraft>,
+  ) {
+    useLocalCheckout = state.useLocalCheckout;
+    useGlobalInstall = state.useGlobalInstall;
+    toolkitRoot = state.toolkitRoot;
+    mcpIndexOverride = state.mcpIndexOverride;
+    installBridge = state.installBridge;
+    installVerify = state.installVerify;
+    packageVersionPin = state.packageVersionPin;
+    packageCustomUrl = state.packageCustomUrl;
+    useLocalPackages = state.useLocalPackages;
+    selectedUnityDomainDeps = new Set(state.selectedUnityDomainDeps);
+    upgradeAcknowledged = state.upgradeAcknowledged;
+    showDiff = state.showDiff;
+    mcpClient = state.mcpClient;
+    cursorProjectScope = state.cursorProjectScope;
+    bridgePort = state.bridgePort;
+    skillOverwriteAck = state.skillOverwriteAck;
+  }
+
+  function hydrateFromProject() {
+    const entry = projectsStore.find(wizardProjectId);
+    const hydrated = hydrateAiSetupWizardDraft(
+      entry ?? project,
+      settingsStore.aiToolkit,
+    );
+    applyHydratedForm(hydrated);
+    toolkitRootDirty = false;
+    lastPersistedDraftJson = serializeDraftSnapshot(draftSnapshot());
+  }
+
+  async function persistAiSetupWizardDraft() {
+    if (!draftPersistReady || wizardClosed) return;
+    const snapshot = draftSnapshot();
+    const serialized = serializeDraftSnapshot(snapshot);
+    if (serialized === lastPersistedDraftJson) return;
+
+    const draft = collectAiSetupWizardDraft(snapshot);
+    const stored = projectsStore.find(wizardProjectId);
+    if (!stored) return;
+
+    const updated = {
+      ...stored,
+      aiSetupWizard: isEmptyDraft(draft) ? undefined : draft,
+    };
+
+    try {
+      await projectsStore.update(updated);
+      lastPersistedDraftJson = serialized;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      S.appendErrorLog(`save AI Setup wizard draft failed: ${msg}`);
+    }
+  }
+
+  function scheduleDraftPersist() {
+    if (!draftPersistReady || wizardClosed) return;
+    if (draftPersistTimer) clearTimeout(draftPersistTimer);
+    draftPersistTimer = setTimeout(() => {
+      draftPersistTimer = null;
+      void persistAiSetupWizardDraft();
+    }, DRAFT_PERSIST_DEBOUNCE_MS);
+  }
+
+  function flushDraftPersist() {
+    if (draftPersistTimer) {
+      clearTimeout(draftPersistTimer);
+      draftPersistTimer = null;
+    }
+    void persistAiSetupWizardDraft();
+  }
+
+  async function clearPersistedDraft() {
+    const stored = projectsStore.find(wizardProjectId);
+    if (!stored) return;
+    if (stored.aiSetupWizard) {
+      try {
+        await projectsStore.update({ ...stored, aiSetupWizard: undefined });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        S.appendErrorLog(`clear AI Setup wizard draft failed: ${msg}`);
+        return;
+      }
+    }
+    hydrateFromProject();
+  }
 
   onMount(() => {
-    const stored = settingsStore.aiToolkit;
-    toolkitRoot = stored.rootPath ?? "";
-    mcpIndexOverride = stored.mcpIndexOverride ?? "";
-    // Auto-enable the local-checkout toggle when a toolkit root is
-    // already persisted (M4 back-compat). The default onboarding path
-    // for a fresh install is `npx`; a returning user who cloned the
-    // repo keeps their local launch command without a forced migration.
-    useLocalCheckout = stored.useLocalCheckout ?? (toolkitRoot.trim().length > 0);
-    toolkitRootDirty = false;
-    void refreshDetection();
+    hydrateFromProject();
+    draftPersistReady = true;
+    return () => {
+      if (!wizardClosed) flushDraftPersist();
+    };
+  });
+
+  $effect(() => {
+    if (!draftPersistReady || wizardClosed) return;
+    const serialized = serializeDraftSnapshot(draftSnapshot());
+    if (serialized === lastPersistedDraftJson) return;
+    scheduleDraftPersist();
   });
 
   function currentStepIndex(): number {
@@ -400,8 +538,6 @@
   // escape hatch), then the toggle picks local vs npx, then the global
   // install option refines npx → global. Kept as a function so Step 4's
   // two `$effect` blocks re-read it on every form-state change.
-  let useGlobalInstall = $state(false);
-
   function effectiveLaunchMode(): McpLaunchModeWire {
     if (mcpIndexOverride.trim().length > 0) return "localOverride";
     if (useLocalCheckout) return "local";
@@ -471,8 +607,21 @@
     }
   }
 
-  function cancelWizard() {
+  function closeWizard() {
+    if (wizardClosed) return;
+    wizardClosed = true;
+    detectionGeneration += 1;
+    detectionLoading = false;
+    if (draftPersistTimer) {
+      clearTimeout(draftPersistTimer);
+      draftPersistTimer = null;
+    }
+    void persistAiSetupWizardDraft();
     onClose();
+  }
+
+  function cancelWizard() {
+    closeWizard();
   }
 
   function isLastFormStep(): boolean {
@@ -534,10 +683,13 @@
   }
 
   async function refreshDetection() {
+    if (wizardClosed) return;
+    const gen = ++detectionGeneration;
     detectionLoading = true;
     detectionError = null;
     try {
-      const next = await detectProjectState(project.path);
+      const next = await detectProjectState(wizardProjectPath);
+      if (wizardClosed || gen !== detectionGeneration) return;
       detection = next;
       // Surface a small confirmation so the user sees the refresh did
       // something (Re-detect is otherwise silent when nothing changed).
@@ -548,12 +700,15 @@
         detectToastTimer = null;
       }, 2200);
     } catch (e) {
+      if (wizardClosed || gen !== detectionGeneration) return;
       const msg = e instanceof Error ? e.message : String(e);
       detectionError = `detection failed: ${msg}`;
       detection = null;
       S.appendErrorLog(detectionError);
     } finally {
-      detectionLoading = false;
+      if (!wizardClosed && gen === detectionGeneration) {
+        detectionLoading = false;
+      }
     }
   }
 
@@ -641,13 +796,16 @@
     }
   });
 
-  // Re-detect project on every Step 1 entry so the table reflects
-  // the latest manifest state. Plan 5's Step 5 /ping will mutate
-  // `bridgeStatus` here in a later plan.
+  // Re-detect project on every Step 1 / Done entry so the table reflects
+  // the latest manifest state. Cancel in-flight work when the step changes
+  // or the wizard closes so stale results cannot block the UI.
   $effect(() => {
-    if (currentStep === "step1" || currentStep === "done") {
-      void refreshDetection();
-    }
+    if (currentStep !== "step1" && currentStep !== "done") return;
+    void refreshDetection();
+    return () => {
+      detectionGeneration += 1;
+      detectionLoading = false;
+    };
   });
 
   function manifestHasLocalEntries(deps: Record<string, string> | undefined): boolean {
@@ -692,7 +850,7 @@
     void (async () => {
       try {
         const plan = await planManifestMerge({
-          projectPath: project.path,
+          projectPath: wizardProjectPath,
           toolkitRoot,
           installBridge,
           installVerify,
@@ -764,7 +922,7 @@
   // (computed server-side in Rust); a valid override wins. Surfaced in
   // `resolvedBridgePort` so the UI and Step 5 always use the real number.
   $effect(() => {
-    const projectPath = project.path;
+    const projectPath = wizardProjectPath;
     const override = bridgePortFromString(bridgePort);
     if (!projectPath) {
       resolvedBridgePort = null;
@@ -791,7 +949,7 @@
   // with a stale path so the UI can surface a focused
   // `mcpPathInvalid` error rather than a blank preview.
   $effect(() => {
-    const projectPath = project.path;
+    const projectPath = wizardProjectPath;
     const root = toolkitRoot;
     const client = mcpClient;
     const projectScope = cursorProjectScope;
@@ -858,7 +1016,7 @@
   $effect(() => {
     if (currentStep !== "step4b" && currentStep !== "done") return;
     const root = toolkitRoot;
-    const projectPath = project.path;
+    const projectPath = wizardProjectPath;
     const client = mcpClient;
     if (!projectPath || !root) {
       skillPlan = null;
@@ -1050,7 +1208,7 @@
   async function writeMcpConfigClick() {
     if (!canWriteMcpConfig() || mcpWriting) return;
     const root = toolkitRoot;
-    const projectPath = project.path;
+    const projectPath = wizardProjectPath;
     const mode = effectiveLaunchMode();
     // Local modes need a toolkit root to resolve the on-disk index; the
     // npm modes (npx / global) write the published-binary launch command
@@ -1099,7 +1257,7 @@
   async function copySkillFilesClick() {
     if (skillCopying) return;
     const root = toolkitRoot;
-    const projectPath = project.path;
+    const projectPath = wizardProjectPath;
     if (!projectPath || !root || !skillPlan) return;
     const hasExisting = skillPlan.targets.some((t) => t.exists);
     if (hasExisting && !skillOverwriteAck) {
@@ -1140,7 +1298,7 @@
     mergeError = null;
     try {
       const result = await writeManifestMerge({
-        projectPath: project.path,
+        projectPath: wizardProjectPath,
         toolkitRoot,
         installBridge,
         installVerify,
@@ -1210,7 +1368,7 @@
     let launched = false;
     try {
       const result = await launchForVerify({
-        projectId: project.id,
+        projectId: wizardProjectId,
         bridgePort: overridePort ?? 0,
         theme: (settingsStore.current?.theme as "dark" | "light" | "system" | undefined) ?? "system",
       });
@@ -1529,12 +1687,8 @@
   }
 
   function reRunWizard() {
-    // Reset the per-step state to Step 1 without touching the
-    // persisted settings (toolkit root + MCP override stay
-    // pre-filled in Step 2). Per questions-4 Q11 = A, no
-    // wizard progress is persisted, so the next entry would
-    // already start at Step 1 — this function just makes the
-    // reset explicit and immediate.
+    // Reset transient per-step state to Step 1. Form fields reload from
+    // global settings + defaults after clearing the per-project draft.
     resetStep5State();
     mcpWriteResult = null;
     mcpWriteError = null;
@@ -1550,6 +1704,7 @@
     skillOverwriteAck = false;
     step5BridgeStatus = { kind: "notChecked" };
     currentStep = "step1";
+    void clearPersistedDraft();
     void refreshDetection();
   }
 
@@ -1570,7 +1725,7 @@
     clearError = null;
     clearResult = null;
     try {
-      const result = await clearAiSetup(project.path);
+      const result = await clearAiSetup(wizardProjectPath);
       clearResult = result;
       // Refresh the live snapshot so Step 1 / Done reflect the cleared
       // state, and reset the transient Step 4/4b/5 state so stale
@@ -1582,6 +1737,7 @@
       skillError = null;
       resetStep5State();
       void refreshDetection();
+      void clearPersistedDraft();
       const clearedConfigs = result.clientConfigsCleared.filter((c) => c.removed).length;
       const summary =
         result.errors.length > 0
@@ -1680,7 +1836,7 @@
   });
 
   function handleClose() {
-    onClose();
+    closeWizard();
   }
 
   // --- Step 1 derived display helpers -------------------------------
@@ -1839,6 +1995,10 @@
 
           {#if detectionLoading && !detection}
             <p class="wiz-hint">Detecting project…</p>
+            <p class="wiz-hint wiz-hint-muted">
+              You can close the wizard anytime with Cancel, Escape, or the ×
+              button — detection will stop in the background.
+            </p>
           {/if}
           {#if detectionError}
             <p class="wiz-hint wiz-hint-warn">{detectionError}</p>
@@ -2756,10 +2916,11 @@
 
           <p class="wiz-desc">
             The checklist below is computed from
-            the live project state — no per-step progress is
-            persisted, so re-running the
-            wizard always restarts at Step 1 and the Done screen
-            always reflects the latest on-disk manifest. The
+            the live project state. Wizard form choices are saved per
+            project, but step navigation always restarts at Step 1 when
+            you reopen the wizard. Re-run or Clear AI Setup resets those
+            saved choices. The Done screen always reflects the latest
+            on-disk manifest. The
             bridge <code>/ping</code> row carries the Step 5
             result; the live detection snapshot below it shows
             the freshest manifest / MCP heuristic the wizard
@@ -3324,6 +3485,10 @@
   .wiz-hint-ok { color: #4ade80; }
   .wiz-hint-warn { color: var(--hub-error-fg); }
   .wiz-hint-info { color: #22d3ee; }
+  .wiz-hint-muted {
+    color: var(--hub-text-muted);
+    font-size: 0.85em;
+  }
 
   .wiz-fingerprints {
     list-style: none;

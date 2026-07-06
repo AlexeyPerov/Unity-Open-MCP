@@ -268,6 +268,7 @@ fn build_entry(dir: &Path, kind: ProjectKind) -> ProjectEntry {
         package_manifest_path,
         migrate_source_folder: None,
         line_count_stats: None,
+        ai_setup_wizard: None,
     }
 }
 

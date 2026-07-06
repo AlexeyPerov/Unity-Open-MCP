@@ -1027,6 +1027,7 @@ mod tests {
                 package_manifest_path: None,
                 migrate_source_folder: None,
                 line_count_stats: None,
+                ai_setup_wizard: None,
             },
             unity_version: "6000.0.1f1".to_string(),
             bundle_version: "1.0.1".to_string(),

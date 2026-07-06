@@ -279,6 +279,7 @@ pub fn create_package(
             .map(|s| s.to_string()),
         migrate_source_folder: None,
         line_count_stats: None,
+        ai_setup_wizard: None,
     };
 
     // Duplicate check (canonicalized path).

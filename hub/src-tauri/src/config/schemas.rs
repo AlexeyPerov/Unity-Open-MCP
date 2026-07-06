@@ -280,6 +280,63 @@ pub struct ProjectsFile {
     pub projects: Vec<ProjectEntry>,
 }
 
+/// Per-project AI Setup wizard form draft. Persisted in `projects.json`
+/// so field choices (MCP client, package toggles, bridge port, …) survive
+/// Hub restarts. Step navigation is not stored — the wizard always reopens
+/// at Step 1 with these values pre-filled.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSetupWizardDraft {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub use_local_checkout: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub use_global_install: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub toolkit_root: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mcp_index_override: String,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub install_bridge: bool,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub install_verify: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub package_version_pin: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub package_custom_url: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub use_local_packages: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub selected_unity_domain_deps: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub upgrade_acknowledged: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub show_diff: bool,
+    #[serde(default = "default_mcp_client", skip_serializing_if = "is_default_mcp_client")]
+    pub mcp_client: String,
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub cursor_project_scope: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub bridge_port: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub skill_overwrite_ack: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
+fn default_mcp_client() -> String {
+    "cursor".to_string()
+}
+
+fn is_default_mcp_client(v: &str) -> bool {
+    v == "cursor"
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectEntry {
@@ -382,6 +439,11 @@ pub struct ProjectEntry {
     /// by the git-popup auto-calc path. `None` until first run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_count_stats: Option<LineCountStats>,
+    /// Per-project AI Setup wizard form draft (MCP client, toggles,
+    /// ports, …). `None` until the user edits wizard fields for this
+    /// project. Step index is not stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_setup_wizard: Option<AiSetupWizardDraft>,
 }
 
 /// The four kinds of folder the hub tracks. Ordering follows the
@@ -799,6 +861,7 @@ mod tests {
                 package_manifest_path: None,
                 migrate_source_folder: None,
                 line_count_stats: None,
+                ai_setup_wizard: None,
             }],
         };
         let json = serde_json::to_string_pretty(&original).unwrap();
@@ -869,6 +932,7 @@ mod tests {
             package_manifest_path: None,
             migrate_source_folder: None,
             line_count_stats: None,
+            ai_setup_wizard: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(!json.contains("unityVersion"));
@@ -890,6 +954,7 @@ mod tests {
         // serialize when `None` so legacy on-disk files stay compact.
         assert!(!json.contains("renderPipeline"));
         assert!(!json.contains("defaultBuildTarget"));
+        assert!(!json.contains("aiSetupWizard"));
     }
 
     #[test]
@@ -1004,6 +1069,7 @@ mod tests {
                 package_manifest_path: None,
                 migrate_source_folder: None,
                 line_count_stats: None,
+                ai_setup_wizard: None,
             };
             let json = serde_json::to_string(&entry).unwrap();
             let restored: ProjectEntry = serde_json::from_str(&json).unwrap();
@@ -1028,6 +1094,20 @@ mod tests {
         }"#;
         let restored: Settings = serde_json::from_str(legacy).unwrap();
         assert_eq!(restored.line_count_auto_calc_threshold_mb, 30);
+    }
+
+    #[test]
+    fn project_entry_ai_setup_wizard_defaults_to_none_for_legacy_json() {
+        // Pre-wizard-persistence entries have no `aiSetupWizard` field.
+        // The deserializer must default to `None` so legacy projects
+        // keep working and the wizard hydrates from global settings.
+        let legacy = r#"{
+            "id": "abc",
+            "name": "Proj",
+            "path": "/p"
+        }"#;
+        let entry: ProjectEntry = serde_json::from_str(legacy).unwrap();
+        assert!(entry.ai_setup_wizard.is_none());
     }
 
     #[test]
