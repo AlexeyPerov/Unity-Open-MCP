@@ -19,6 +19,7 @@ import type { BridgeEventStream, PullResult } from "./event-stream.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ToolSessionState } from "./tool-session-state.js";
 import { DEFAULT_ENABLED_GROUPS } from "./capabilities/tool-groups.js";
+import { setUnityProcessScannerForTest } from "./running-unity.js";
 
 // The default-active group set is the single source of truth in
 // `capabilities/tool-groups.ts` (the catalog's `defaultEnabled: true`
@@ -1188,6 +1189,118 @@ test("route: bridge_status is registered in ALL_TOOLS and always-visible", async
     visible.includes("unity_open_mcp_bridge_status"),
     "bridge_status is always-visible (no group assignment)",
   );
+});
+
+// ---------------------------------------------------------------------------
+// M27 Plan 1 — cold Safe Mode detection (no lock + live Unity process).
+//
+// When Unity launches straight into Safe Mode, the bridge's
+// [InitializeOnLoad] never runs and no instance lock is written.
+// classifyInstance(null) → "gone", which pre-fix folded into the generic
+// "stopped". The cold-Safe-Mode branch scans for a live Unity process whose
+// -projectPath matches this project; a match reuses the dead_bridge status
+// token + recoveryHint so the agent gets the same read_compile_errors
+// recovery path as the mid-session dead-bridge case.
+//
+// The scanner is injected via setUnityProcessScannerForTest so no real
+// ps / PowerShell process is spawned.
+// ---------------------------------------------------------------------------
+
+test("route: bridge_status returns dead_bridge for cold Safe Mode (no lock + live Unity process)", async () => {
+  await withTmp("router-bstatus-coldsafe-", async (tmp) => {
+    await setupProject(tmp);
+    // No lock file planted → classifyInstance returns "gone".
+    const restore = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 4242, projectPath: tmp }];
+      },
+    });
+    try {
+      // Ping unreachable (the bridge never compiled → no listener).
+      const live = makePingFakeLive({ pingBody: null, available: false });
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+      const result = await router.route("unity_open_mcp_bridge_status", {});
+      const body = parseBody(result);
+      assert.equal(result.isError, false, "dead_bridge is not an error");
+      assert.equal(body.status, "dead_bridge");
+      assert.equal(body.ready, false);
+      // classification is still "gone" — the lock IS absent. The cold-Safe-
+      // Mode branch reuses the dead_bridge STATUS token without lying about
+      // the lock classification.
+      assert.equal(body.classification, "gone");
+      const instance = body.instance as {
+        classification: string;
+        unityProcessPid?: number;
+      };
+      assert.equal(instance.classification, "gone");
+      assert.equal(instance.unityProcessPid, 4242);
+      const hint = body.recoveryHint as { tool: string; reason: string } | null;
+      assert.ok(hint !== null, "cold Safe Mode surfaces a recoveryHint");
+      assert.equal(hint.tool, "unity_open_mcp_read_compile_errors");
+      assert.ok(
+        typeof body.nextStep === "string" && body.nextStep.includes("read_compile_errors"),
+        "cold Safe Mode nextStep points at read_compile_errors",
+      );
+    } finally {
+      restore();
+    }
+  });
+});
+
+test("route: bridge_status still returns stopped when no lock AND no Unity process (genuine offline)", async () => {
+  // Regression guard: the cold-Safe-Mode scan must not flip a genuine "Unity
+  // is not running" state into dead_bridge. No lock + no matching process →
+  // the pre-feature "stopped" answer stands.
+  await withTmp("router-bstatus-genuine-stop-", async (tmp) => {
+    await setupProject(tmp);
+    const restore = setUnityProcessScannerForTest({
+      scan() {
+        return [];
+      },
+    });
+    try {
+      const live = makePingFakeLive({ pingBody: null, available: false });
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+      const result = await router.route("unity_open_mcp_bridge_status", {});
+      const body = parseBody(result);
+      assert.equal(body.status, "stopped");
+      const instance = body.instance as {
+        classification: string;
+        unityProcessPid?: number;
+      };
+      assert.equal(instance.classification, "gone");
+      assert.equal(instance.unityProcessPid, undefined);
+      assert.equal(body.recoveryHint, null);
+    } finally {
+      restore();
+    }
+  });
+});
+
+test("route: bridge_status cold Safe Mode — Unity process for a DIFFERENT project does not trigger dead_bridge", async () => {
+  // False-positive guard: the scanner must match THIS project's path, not any
+  // running Unity. A Unity process editing another project must leave the
+  // status at "stopped".
+  await withTmp("router-bstatus-other-project-", async (tmp) => {
+    await setupProject(tmp);
+    const restore = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 555, projectPath: "/some/other/project" }];
+      },
+    });
+    try {
+      const live = makePingFakeLive({ pingBody: null, available: false });
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+      const result = await router.route("unity_open_mcp_bridge_status", {});
+      const body = parseBody(result);
+      assert.equal(body.status, "stopped");
+    } finally {
+      restore();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

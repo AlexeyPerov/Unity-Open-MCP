@@ -52,6 +52,10 @@ The single most common agent mistake is misclassifying Unity's state. Follow thi
 
 ### Step 1 — Is Unity running at all?
 
+**Preferred — let the server tell you.** Call `unity_open_mcp_bridge_status` (or any live tool / `ping`). It scans for a live Unity process matching this project and reports `dead_bridge` with a `recoveryHint` → `read_compile_errors` when Unity is in **cold Safe Mode** (launched into Safe Mode before the bridge ever wrote an instance lock). Likewise, live tools and `ping` return `bridge_compile_failed` with the same recovery guidance in that case. If you see either, **go directly to Step 4** — no manual `ps` needed.
+
+**Manual fallback** (Linux, or Unity opened without `-projectPath` — both are known blind spots of the auto-scan):
+
 ```bash
 cat ~/.unity-open-mcp/instances/*.json 2>/dev/null
 ps aux | grep -i "Unity.app/Contents/MacOS/Unity" | grep -v grep     # macOS

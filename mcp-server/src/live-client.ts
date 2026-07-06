@@ -13,6 +13,7 @@ import {
 } from "./dialog-dismiss.js";
 import { readInstanceLock, classifyInstance, lockPath, isPidAlive, statusDir, hasRecentPendingTestRun } from "./instance-discovery.js";
 import type { InstanceClassification, InstanceLock } from "./instance-discovery.js";
+import { findUnityForProject } from "./running-unity.js";
 import { makeErrorResult } from "./results.js";
 import {
   checkBridgeCompat,
@@ -311,6 +312,15 @@ export class LiveClient implements Router {
         isError: false,
       };
     } catch {
+      // M27 Plan 1 — ping is the first probe many agents use to decide
+      // whether to call read_compile_errors. Before returning a generic
+      // bridge_offline, check the cold Safe Mode signature (no lock + a live
+      // Unity process for this project) so the agent gets the same
+      // bridge_compile_failed recovery hint as the mid-session dead-bridge
+      // path. Without this an agent hitting ping first would see only
+      // bridge_offline and have to guess.
+      const coldSafeMode = this.coldSafeModeResult();
+      if (coldSafeMode) return coldSafeMode;
       return makeErrorResult({
         code: "bridge_offline",
         message: `Bridge is not reachable at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
@@ -791,6 +801,15 @@ export class LiveClient implements Router {
         // Re-probe also failed — fall through to the offline error below.
       }
 
+      // M27 Plan 1 — before declaring a generic bridge_offline, check the
+      // cold Safe Mode signature: no lock (bridge never compiled) + a live
+      // Unity process for this project. A match surfaces the same
+      // bridge_compile_failed shape as the mid-session dead-bridge path so
+      // the agent gets the read_compile_errors recovery hint instead of a
+      // generic offline error it would have to guess past.
+      const coldSafeMode = this.coldSafeModeResult();
+      if (coldSafeMode) return coldSafeMode;
+
       return makeErrorResult({
         code: "bridge_offline",
         message: `Bridge is not reachable at ${this.baseUrl}. ${buildOfflineHint(this.projectPath)}`,
@@ -883,6 +902,14 @@ export class LiveClient implements Router {
       }
     }
     void operation; // log-only parameter, reserved for future telemetry
+    // M27 Plan 1 — before declaring a generic bridge_offline, check the cold
+    // Safe Mode signature. handleTransientOffline is the shared recovery
+    // exhaustion point for both the ping and POST paths; surfacing
+    // bridge_compile_failed here covers tool POSTs that never reached the
+    // bridge (no listener, no lock, Unity in Safe Mode) without each caller
+    // having to repeat the scan.
+    const coldSafeMode = this.coldSafeModeResult();
+    if (coldSafeMode) return coldSafeMode;
     const retryMsg = `Bridge is not reachable at ${this.baseUrl} after ${maxAttempts} retries. ${buildOfflineHint(this.projectPath)}`;
     return makeErrorResult({
       code: "bridge_offline",
@@ -995,6 +1022,70 @@ export class LiveClient implements Router {
                 "errors from Unity's Editor.log, fix the cited file/line, then " +
                 "trigger a recompile (e.g. a no-op edit + focus Unity, or " +
                 "unity_open_mcp_compile_check once the source compiles).",
+            },
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  /**
+   * M27 Plan 1 — cold Safe Mode detection. The mirror of
+   * {@link deadBridgeResult} for the no-lock case. When Unity launches
+   * straight into Safe Mode, the bridge's `[InitializeOnLoad]` never runs, so
+   * no instance lock is written and {@link classifyInstance} returns `gone` —
+   * the same classification as "Unity is not running." Without a positive
+   * signal the agent cannot tell that `read_compile_errors` is the right next
+   * step; it gets a generic `bridge_offline` and must guess.
+   *
+   * This method scans for a live Unity process whose `-projectPath` references
+   * this project. A match is a strong positive signal of cold Safe Mode (the
+   * only other case that produces no lock + a live Unity process is "bridge
+   * toolbar off", which shares the same recovery — check compile errors /
+   * enable the bridge). Returns the SAME `bridge_compile_failed` shape as
+   * {@link deadBridgeResult} so the agent-facing contract is identical to the
+   * mid-session dead-bridge path; returns null when no Unity process matches
+   * (genuine offline — the caller falls back to `bridge_offline`).
+   *
+   * Like {@link deadBridgeResult} this is cheap to call repeatedly: the scan
+   * is the only new cost, and it runs only when classification is `gone`
+   * (lock absent or PID dead) — never on the happy path or during a reload.
+   */
+  private coldSafeModeResult(): CallToolResult | null {
+    if (!this.projectPath) return null;
+    let classification;
+    try {
+      classification = classifyInstance(readInstanceLock(this.projectPath));
+    } catch {
+      return null;
+    }
+    // Only the no-lock / dead-PID case is a candidate for cold Safe Mode. A
+    // live lock with a stale heartbeat is the mid-session dead-bridge path —
+    // handled by deadBridgeResult, not here.
+    if (classification !== "gone") return null;
+    const proc = findUnityForProject(this.projectPath);
+    if (!proc) return null;
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            error: {
+              code: "bridge_compile_failed",
+              message:
+                "Unity is running but the bridge is unreachable and no " +
+                "instance lock was found — Unity likely launched straight " +
+                "into Safe Mode (the bridge assembly failed to compile from " +
+                "a cold start, so [InitializeOnLoad] never wrote a lock). " +
+                "The HTTP listener will not return until the C# error is " +
+                "fixed. Call unity_open_mcp_read_compile_errors to retrieve " +
+                "the compiler errors from Unity's Editor.log, fix the cited " +
+                "file/line, then trigger a recompile (e.g. a no-op edit + " +
+                "focus Unity, or unity_open_mcp_compile_check once the " +
+                "source compiles). If Unity is NOT in safe mode, the bridge " +
+                "toolbar toggle may be off — open the bridge window (Unity " +
+                "menu: Tools/Unity Open MCP Bridge) and confirm it is started.",
             },
           }),
         },

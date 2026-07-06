@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { PingCache } from "./ping-cache.js";
 import { LiveClient, shouldRetryPostAfterFailure } from "./live-client.js";
 import { projectHash } from "./instance-discovery.js";
+import { setUnityProcessScannerForTest } from "./running-unity.js";
 import type { PollAndDismissOptions } from "./dialog-dismiss.js";
 
 interface CapturedDismiss {
@@ -381,6 +382,117 @@ test("LiveClient: returns bridge_offline (not bridge_compile_failed) when PID is
       },
     );
   } finally {
+    disposeSandbox(s);
+  }
+});
+
+// ----- M27 Plan 1 — cold Safe Mode (no lock + live Unity process) -----
+//
+// When Unity launches straight into Safe Mode, no instance lock is written
+// (the bridge's [InitializeOnLoad] never ran). classifyInstance(null) →
+// "gone", which pre-fix folded into the generic bridge_offline. The
+// coldSafeModeResult scan reuses the bridge_compile_failed shape so the agent
+// gets the read_compile_errors recovery hint instead of guessing.
+
+const COLD_SAFE_PROJECT = "/test/ColdSafeGame";
+
+test("LiveClient: tool call with no lock + live Unity process returns bridge_compile_failed (cold Safe Mode)", async () => {
+  // No lock planted → classifyInstance returns "gone". The scanner fake
+  // reports a Unity process for this project → coldSafeModeResult kicks in.
+  const s = makeSandbox();
+  const restore = setUnityProcessScannerForTest({
+    scan() {
+      return [{ pid: 7777, projectPath: COLD_SAFE_PROJECT }];
+    },
+  });
+  try {
+    // No bridge stub at all — /ping ECONNREFUSED.
+    const client = new LiveClient(1, new PingCache(), undefined, COLD_SAFE_PROJECT);
+    const result = await client.route("unity_open_mcp_validate_edit", {
+      paths: ["Assets"],
+    });
+    assert.equal(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_compile_failed");
+    assert.ok(
+      body.error.message.includes("read_compile_errors"),
+      "cold Safe Mode error points at read_compile_errors",
+    );
+    assert.ok(
+      body.error.message.includes("Safe Mode"),
+      "cold Safe Mode error names Safe Mode explicitly",
+    );
+  } finally {
+    restore();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient: ping with no lock + live Unity process returns bridge_compile_failed (cold Safe Mode)", async () => {
+  // ping is the first probe many agents use. It must surface the same
+  // recovery hint as a tool call, not a generic bridge_offline.
+  const s = makeSandbox();
+  const restore = setUnityProcessScannerForTest({
+    scan() {
+      return [{ pid: 8888, projectPath: COLD_SAFE_PROJECT }];
+    },
+  });
+  try {
+    const client = new LiveClient(1, new PingCache(), undefined, COLD_SAFE_PROJECT);
+    const result = await client.route("unity_open_mcp_ping", {});
+    assert.equal(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_compile_failed");
+  } finally {
+    restore();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient: no lock + no Unity process still returns bridge_offline (genuine offline)", async () => {
+  // Regression guard: the cold-Safe-Mode scan must not flip a genuine "Unity
+  // is not running" state into bridge_compile_failed.
+  const s = makeSandbox();
+  const restore = setUnityProcessScannerForTest({
+    scan() {
+      return [];
+    },
+  });
+  try {
+    const client = new LiveClient(1, new PingCache(), undefined, COLD_SAFE_PROJECT);
+    const result = await client.route("unity_open_mcp_validate_edit", {
+      paths: ["Assets"],
+    });
+    assert.equal(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_offline");
+  } finally {
+    restore();
+    disposeSandbox(s);
+  }
+});
+
+test("LiveClient: mid-session dead bridge (lock + stale heartbeat) unchanged by cold Safe Mode scan", async () => {
+  // Regression guard for the mid-session dead-bridge path. A live PID + stale
+  // heartbeat classifies as "dead_bridge" (not "gone"), so coldSafeModeResult
+  // returns null and the existing deadBridgeResult fast-path still fires.
+  const s = makeSandbox();
+  const restore = setUnityProcessScannerForTest({
+    scan() {
+      return [{ pid: 4321, projectPath: DEAD_BRIDGE_PROJECT }];
+    },
+  });
+  try {
+    plantLock(s, DEAD_BRIDGE_PROJECT, process.pid, 60_000, "reloading");
+    const client = new LiveClient(1, new PingCache(), undefined, DEAD_BRIDGE_PROJECT);
+    const result = await client.route("unity_open_mcp_validate_edit", {
+      paths: ["Assets"],
+    });
+    assert.equal(result.isError, true);
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_compile_failed");
+  } finally {
+    restore();
     disposeSandbox(s);
   }
 });

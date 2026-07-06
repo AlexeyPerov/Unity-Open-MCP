@@ -34,7 +34,14 @@ export const bridgeStatus: Tool = {
     "but the listener did not respond — usually a transient domain-reload " +
     "window; retry shortly), or `dead_bridge` (Unity process " +
     "alive but the bridge assembly failed to recompile, so /ping will " +
-    "never recover; call unity_open_mcp_read_compile_errors). " +
+    "never recover; call unity_open_mcp_read_compile_errors). A " +
+    "`dead_bridge` status also covers the COLD Safe Mode case — Unity " +
+    "launched straight into Safe Mode before the bridge's " +
+    "[InitializeOnLoad] ever wrote an instance lock (classification is " +
+    "`gone` but a live Unity process for this project was found via the " +
+    "process scan; the `instance.unityProcessPid` field carries the PID). " +
+    "The recovery path is identical: call " +
+    "unity_open_mcp_read_compile_errors. " +
     "Also surfaces a top-level `classification` field " +
     "(healthy | reloading | dead_bridge | gone) mirroring the instance " +
     "lock, and a structured `recoveryHint` ({ tool, reason }) that is " +

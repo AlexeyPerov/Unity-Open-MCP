@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { projectHash } from "../instance-discovery.js";
+import { setUnityProcessScannerForTest } from "../running-unity.js";
 
 import {
   pollUntilReady,
@@ -269,6 +270,63 @@ test("pollUntilReady: skips dead-bridge check when projectPath is undefined", as
     { ...makeOpts(clock), timeoutMs: 500 },
   );
   assert.equal(outcome.status, "timeout");
+});
+
+// ---------------------------------------------------------------------------
+// M27 Plan 1 — cold Safe Mode fail-fast (no lock + live Unity process).
+// ---------------------------------------------------------------------------
+
+test("pollUntilReady: fail-fast dead_bridge for cold Safe Mode (no lock + live Unity process)", async () => {
+  // No lock planted → classifyInstance returns "gone". The scanner fake
+  // reports a Unity process for this project → the cold-Safe-Mode branch
+  // fires and returns dead_bridge (not timeout) so the operator gets the
+  // read_compile_errors hint.
+  const projectPath = "/fake/project/for/cold-safe-mode";
+  const restore = setUnityProcessScannerForTest({
+    scan() {
+      return [{ pid: 31337, projectPath }];
+    },
+  });
+  try {
+    const clock = makeFakeClock(0);
+    const outcome = await pollUntilReady(
+      fakeLive(),
+      projectPath,
+      scriptPoll([OFFLINE_RESULT]),
+      makeOpts(clock),
+    );
+    assert.equal(outcome.ready, false);
+    assert.equal(outcome.status, "dead_bridge");
+    assert.match(outcome.reason, /Safe Mode/i);
+    assert.match(outcome.reason, /read_compile_errors/);
+  } finally {
+    restore();
+  }
+});
+
+test("pollUntilReady: cold Safe Mode — no Unity process still times out (no false dead_bridge)", async () => {
+  // Regression guard: the scan must match THIS project. An empty scan keeps
+  // the pre-feature timeout behavior — the cold-Safe-Mode branch does not
+  // fire for a genuine "Unity not running" state.
+  const projectPath = "/fake/project/for/cold-safe-mode-no-proc";
+  const restore = setUnityProcessScannerForTest({
+    scan() {
+      return [];
+    },
+  });
+  try {
+    const clock = makeFakeClock(0);
+    const outcome = await pollUntilReady(
+      fakeLive(),
+      projectPath,
+      scriptPoll([OFFLINE_RESULT]),
+      { ...makeOpts(clock), timeoutMs: 500 },
+    );
+    assert.notEqual(outcome.status, "dead_bridge");
+    assert.equal(outcome.status, "timeout");
+  } finally {
+    restore();
+  }
 });
 
 // ---------------------------------------------------------------------------

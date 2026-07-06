@@ -14,6 +14,7 @@ import {
   classifyInstance,
   hasRecentPendingTestRun,
 } from "../instance-discovery.js";
+import { findUnityForProject } from "../running-unity.js";
 
 /** Poll outcome. `ready` true ⇒ exit 0; false ⇒ the caller exits non-zero. */
 export interface PollOutcome {
@@ -151,6 +152,26 @@ export async function pollUntilReady(
             "(safe mode / compile errors). Run 'unity-open-mcp run-tool " +
             "unity_open_mcp_read_compile_errors --json' to retrieve the " +
             "compiler errors, fix them, then re-run wait-for-ready.",
+        };
+      }
+      // M27 Plan 1 — cold Safe Mode: no lock (bridge never compiled) + a live
+      // Unity process for this project. Same recovery as mid-session
+      // dead_bridge — /ping will never come up until the C# error is fixed.
+      // Without this branch the poll would spin to `timeout` with no hint that
+      // read_compile_errors is the right next step.
+      if (classification === "gone" && findUnityForProject(projectPath)) {
+        return {
+          ready: false,
+          status: "dead_bridge",
+          lastPing,
+          elapsedMs: now() - start,
+          reason:
+            "Unity is running but the bridge is unreachable and no instance " +
+            "lock was found — Unity likely launched straight into Safe Mode " +
+            "(the bridge assembly failed to compile from a cold start). Run " +
+            "'unity-open-mcp run-tool unity_open_mcp_read_compile_errors " +
+            "--json' to retrieve the compiler errors, fix them, then re-run " +
+            "wait-for-ready.",
         };
       }
     }

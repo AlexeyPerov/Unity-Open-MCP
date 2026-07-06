@@ -20,6 +20,7 @@ import { generateSkill } from "./skill/generate-skill.js";
 import { knownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
+import { findUnityForProject } from "./running-unity.js";
 import {
   listInstalledEditors,
   fetchAvailableReleases,
@@ -1211,6 +1212,12 @@ export class ToolRouter implements Router {
   //   /ping reachable, compiling=true          → "compiling"
   //   /ping reachable, connected=true          → "running"
   //   /ping UNreachable + Unity running        → "unreachable" (T-fix-3)
+  //   no lock + /ping UNreachable + Unity proc → "dead_bridge" (M27 Plan 1,
+  //                                              cold Safe Mode — reuses the
+  //                                              dead_bridge status token +
+  //                                              recoveryHint; the instance
+  //                                              sub-object carries
+  //                                              `unityProcessPid`)
   //   otherwise (offline / toolbar off / gone) → "stopped"
   //
   // "stopped" intentionally folds two indistinguishable cases from the
@@ -1259,6 +1266,24 @@ export class ToolRouter implements Router {
     // also indicates Unity is up.
     const lockPidAlive = lock !== null && isPidAlive(lock.pid);
 
+    // M27 Plan 1 — cold Safe Mode detection. When the lock is absent
+    // (classification "gone") AND the ping is unreachable, the bridge's
+    // [InitializeOnLoad] may have never run at all — Unity launched straight
+    // into Safe Mode (bridge assembly failed to compile from a cold start) and
+    // no lock was ever written. Before this fix that state folded into the
+    // generic "stopped", hiding the recovery path (read_compile_errors works
+    // even with the bridge dead — it reads Editor.log offline). Scan for a live
+    // Unity process whose -projectPath references this project; a match is a
+    // strong positive signal of cold Safe Mode and reuses the existing
+    // dead_bridge status token + recoveryHint (no new status). The scan only
+    // runs in this narrow branch (no lock + unreachable) so the happy path and
+    // the reload-window path never pay the ps/PowerShell cost.
+    let unityProcessPid: number | null = null;
+    if (classification === "gone" && !pingReachable) {
+      const proc = findUnityForProject(this.projectPath);
+      if (proc) unityProcessPid = proc.pid;
+    }
+
     let status: "running" | "compiling" | "stopped" | "dead_bridge" | "unreachable";
     if (classification === "dead_bridge") {
       status = "dead_bridge";
@@ -1266,6 +1291,12 @@ export class ToolRouter implements Router {
       status = "compiling";
     } else if (connected) {
       status = "running";
+    } else if (!pingReachable && unityProcessPid !== null) {
+      // M27 Plan 1 — cold Safe Mode: no lock (bridge never compiled) + a live
+      // Unity process for this project. Reuse the dead_bridge status token so
+      // the existing recoveryHint + nextStep (read_compile_errors) applies
+      // unchanged. Operators get a `unityProcessPid` to confirm the diagnosis.
+      status = "dead_bridge";
     } else if (!pingReachable && (classification === "reloading" || lockPidAlive)) {
       // Unity is running but the listener didn't respond — transient (reload
       // window) or toolbar-off. Surface as unreachable so it isn't masked by
@@ -1297,6 +1328,10 @@ export class ToolRouter implements Router {
         lockPath: lockOnDisk,
         classification,
         lock: lock ? summarizeBridgeStatusLock(lock) : null,
+        // M27 Plan 1 — PID of the live Unity process for this project, when
+        // the cold-Safe-Mode scan matched one. Omitted (absent) when no scan
+        // ran (happy path / reload window) or when the scan found no match.
+        ...(unityProcessPid !== null ? { unityProcessPid } : {}),
       },
       ping: pingReachable
         ? {
