@@ -60,7 +60,15 @@
     isEmptyDraft,
     serializeDraftSnapshot,
     type AiSetupWizardDraftSnapshot,
+    type AiSetupWizardFormState,
   } from "$lib/services/ai_setup_wizard_draft";
+  import {
+    WIZARD_PRESETS,
+    applyPresetToForm,
+    presetById,
+    type PresetId,
+    type WizardPreset,
+  } from "$lib/services/wizard_presets";
   import {
     BRIDGE_PACKAGE_ID,
     VERIFY_PACKAGE_ID,
@@ -96,9 +104,18 @@
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
-  type StepId = "step1" | "step2" | "step3" | "step4" | "step4b" | "step5" | "done";
+  type StepId =
+    | "step0"
+    | "step1"
+    | "step2"
+    | "step3"
+    | "step4"
+    | "step4b"
+    | "step5"
+    | "done";
 
   const STEP_ORDER: StepId[] = [
+    "step0",
     "step1",
     "step2",
     "step3",
@@ -109,9 +126,10 @@
   ];
 
   const STEP_TITLES: Record<StepId, string> = {
+    step0: "Setup preset",
     step1: "Project detection",
-    step2: "Install Unity packages",
-    step3: "MCP server source",
+    step2: "MCP server source",
+    step3: "Unity packages",
     step4: "Configure AI client",
     step4b: "Agent skill (optional)",
     step5: "Launch Unity and verify bridge",
@@ -209,7 +227,12 @@
   let wizardClosed = $state(false);
   let detectionGeneration = 0;
 
-  let currentStep = $state<StepId>("step1");
+  let currentStep = $state<StepId>("step0");
+
+  // Step 0 — preset picker. `selectedPresetId` is the persisted choice
+  // (empty = Custom / skip). Selecting a card hydrates the relevant form
+  // fields immediately so Steps 1–5 reflect the choice on entry.
+  let selectedPresetId = $state<string>("");
 
   // Step 1 — detection snapshot. Refreshed on mount and on every
   // entry to Step 1 / Done so the UI matches live disk state.
@@ -371,6 +394,7 @@
       cursorProjectScope,
       bridgePort,
       skillOverwriteAck,
+      selectedPresetId,
     };
   }
 
@@ -393,6 +417,7 @@
     cursorProjectScope = state.cursorProjectScope;
     bridgePort = state.bridgePort;
     skillOverwriteAck = state.skillOverwriteAck;
+    selectedPresetId = state.selectedPresetId;
   }
 
   function hydrateFromProject() {
@@ -491,6 +516,9 @@
 
   function canGoNext(): boolean {
     switch (currentStep) {
+      case "step0":
+        // Step 1 (preset picker) always passes — no gate.
+        return true;
       case "step1":
         return isProjectReady();
       case "step2":
@@ -582,12 +610,30 @@
     return isManifestReady();
   }
 
+  // Team CI preset advertises `skillEnabled: false` — CI agents typically
+  // don't need a desktop skill file, so the wizard auto-skips the Agent
+  // skill step when that preset is active.
+  function shouldSkipSkillStep(): boolean {
+    return (
+      selectedPresetId === "team-ci" &&
+      presetById(selectedPresetId).values.skillEnabled === false
+    );
+  }
+
   function nextStep() {
     if (!canGoNext()) return;
     const i = currentStepIndex();
-    if (i < STEP_ORDER.length - 1) {
-      currentStep = STEP_ORDER[i + 1];
+    if (i >= STEP_ORDER.length - 1) return;
+    let next = STEP_ORDER[i + 1];
+    // Auto-skip the optional Agent skill step for presets that disable it.
+    if (next === "step4b" && shouldSkipSkillStep()) {
+      S.appendDrawerLog(
+        `AI Setup: auto-skipped Agent skill step for ${project.name} (Team CI preset)`,
+      );
+      const after = STEP_ORDER.indexOf("step5");
+      if (after > i) next = STEP_ORDER[after];
     }
+    currentStep = next;
   }
 
   // Free navigation: jump straight to any step from the progress list.
@@ -597,6 +643,34 @@
   // peek at a later step."
   function jumpToStep(id: StepId) {
     currentStep = id;
+  }
+
+  // Step 0 — apply a preset to the wizard form. Selecting a card both
+  // records the choice (`selectedPresetId`, persisted in the draft) and
+  // hydrates the relevant fields immediately so Steps 1–5 reflect the
+  // choice on entry. Re-selecting on Back navigation re-applies the
+  // preset's values in full (the simpler branch from the plan).
+  function selectPreset(id: PresetId) {
+    selectedPresetId = id;
+    const preset = presetById(id);
+    const patch = applyPresetToForm(preset) as Partial<AiSetupWizardFormState>;
+    if (patch.useLocalCheckout !== undefined) {
+      onUseLocalCheckoutChange(patch.useLocalCheckout);
+    }
+    if (patch.useGlobalInstall !== undefined) useGlobalInstall = patch.useGlobalInstall;
+    if (patch.useLocalPackages !== undefined) {
+      useLocalPackages = patch.useLocalPackages;
+      useLocalPackagesTouched = true;
+    }
+    if (patch.installBridge !== undefined) installBridge = patch.installBridge;
+    if (patch.installVerify !== undefined) installVerify = patch.installVerify;
+    if (patch.selectedUnityDomainDeps !== undefined) {
+      selectedUnityDomainDeps = new Set(patch.selectedUnityDomainDeps);
+    }
+    if (patch.mcpClient !== undefined) mcpClient = patch.mcpClient;
+    S.appendDrawerLog(
+      `AI Setup: applied "${preset.label}" preset for ${project.name}`,
+    );
   }
 
   function backStep() {
@@ -1687,8 +1761,9 @@
   }
 
   function reRunWizard() {
-    // Reset transient per-step state to Step 1. Form fields reload from
-    // global settings + defaults after clearing the per-project draft.
+    // Reset transient per-step state to Step 0 (preset picker). Form
+    // fields reload from global settings + defaults after clearing the
+    // per-project draft.
     resetStep5State();
     mcpWriteResult = null;
     mcpWriteError = null;
@@ -1702,8 +1777,9 @@
     skillResult = null;
     skillError = null;
     skillOverwriteAck = false;
+    selectedPresetId = "";
     step5BridgeStatus = { kind: "notChecked" };
-    currentStep = "step1";
+    currentStep = "step0";
     void clearPersistedDraft();
     void refreshDetection();
   }
@@ -1795,6 +1871,9 @@
   // prerequisites are already satisfied light up immediately.
   function stepPassing(id: StepId): boolean {
     switch (id) {
+      case "step0":
+        // Preset picker has no readiness check — always neutral.
+        return false;
       case "step1":
         return isProjectReady();
       case "step2":
@@ -1857,6 +1936,122 @@
     if (h.zcodeGlobal) clients.push("ZCode (global)");
     if (h.zcodeProject) clients.push("ZCode (project)");
     return `yes (${clients.join(", ")})`;
+  }
+
+  // Diagnostics-first panel (Step 1, project detection). Reuses the live
+  // detection + node probe + Step 5 ping result — no new Tauri command.
+  // Each row carries a one-line remediation hint so the user can act on a
+  // failure without reading the full detection table.
+  interface DiagRow {
+    id: string;
+    label: string;
+    ok: boolean;
+    /** When `true` the row is informational (not a pass/fail gate). */
+    info?: boolean;
+    detail?: string;
+    remediation?: string;
+  }
+
+  function diagnosticsRows(): DiagRow[] {
+    const rows: DiagRow[] = [];
+    const d = detection;
+    // Project layout + Unity version.
+    rows.push({
+      id: "unity-project",
+      label: "Valid Unity project layout",
+      ok: !!d?.isValidUnityProject,
+      remediation: d?.isValidUnityProject
+        ? undefined
+        : "Add the project via the Projects tab; the folder needs Assets/ and ProjectSettings/.",
+    });
+    rows.push({
+      id: "unity-version",
+      label: "Unity version meets minimum (2022.3 LTS)",
+      ok: !!d?.meetsMinUnityVersion,
+      detail: d?.unityVersion ?? "unknown",
+      remediation: d?.meetsMinUnityVersion
+        ? undefined
+        : "Install Unity 2022.3 LTS or newer from the Installs tab.",
+    });
+    // Node.js.
+    rows.push({
+      id: "node",
+      label: `Node.js ${nodeProbe?.requiredMajor ?? 18}+`,
+      ok: !!nodeProbe?.ok,
+      detail: nodeProbe?.version ?? (nodeProbing ? "probing…" : "not detected"),
+      remediation: nodeProbe?.ok
+        ? undefined
+        : "Install the LTS from https://nodejs.org/ and restart the Hub.",
+    });
+    // Manifest writable.
+    rows.push({
+      id: "manifest-writable",
+      label: "Writable Packages/manifest.json",
+      ok: !!d?.manifestWritable,
+      remediation: d?.manifestWritable
+        ? undefined
+        : "Check write permissions on the project's Packages/ folder.",
+    });
+    // Packages installed (informational — installed on Step 3).
+    rows.push({
+      id: "bridge-installed",
+      label: "Bridge package installed",
+      ok: !!d?.bridgeInstalled,
+      info: true,
+      remediation: d?.bridgeInstalled
+        ? undefined
+        : "Install the bridge on the Unity packages step.",
+    });
+    rows.push({
+      id: "verify-installed",
+      label: "Verify package installed",
+      ok: !!d?.verifyInstalled,
+      info: true,
+      remediation: d?.verifyInstalled
+        ? undefined
+        : "Install verify on the Unity packages step.",
+    });
+    // MCP configured (informational — configured on Step 4).
+    const mcpAny = !!d?.mcpConfigured && (() => {
+      const h = d!.mcpConfigured;
+      return h.cursor || h.claudeDesktop || h.opencodeGlobal ||
+        h.opencodeProject || h.zcodeGlobal || h.zcodeProject;
+    })();
+    rows.push({
+      id: "mcp-configured",
+      label: "MCP client configured",
+      ok: mcpAny,
+      info: true,
+      remediation: mcpAny
+        ? undefined
+        : "Configure an MCP client on the Configure AI client step.",
+    });
+    // Bridge reachable — only when Step 5 has run.
+    if (step5BridgeStatus.kind !== "notChecked" || step5LaunchPid !== null) {
+      rows.push({
+        id: "bridge-reachable",
+        label: "Bridge reachable (/ping)",
+        ok: step5BridgeStatus.kind === "ok",
+        info: true,
+        detail:
+          step5BridgeStatus.kind === "ok"
+            ? "connected"
+            : step5BridgeStatus.kind === "failed"
+              ? step5BridgeStatus.message
+              : "pending",
+        remediation:
+          step5BridgeStatus.kind === "ok"
+            ? undefined
+            : "Run the Launch and verify step; check the launch log for errors.",
+      });
+    }
+    return rows;
+  }
+
+  function diagTone(row: DiagRow): "ok" | "warn" | "muted" {
+    if (row.info && row.ok) return "ok";
+    if (row.info && !row.ok) return "muted";
+    return row.ok ? "ok" : "warn";
   }
 
   // --- Step 3 derived display helpers -------------------------------
@@ -1983,15 +2178,94 @@
       {#if clearError}
         <div class="wiz-block wiz-block-error" role="alert">{clearError}</div>
       {/if}
-      {#if currentStep === "step1"}
+      {#if currentStep === "step0"}
         <section class="wiz-section">
           <p class="wiz-desc">
-            Step 1 detects the current state of the project. The
-            detection is re-run on every Step 1 entry so the
+            Pick a preset to pre-fill the rest of the wizard, or choose
+            <strong>Custom / skip</strong> to configure every step manually.
+            Presets are starting points, not locks — you can change any
+            field on later steps. The recommended preset covers most users.
+          </p>
+
+          <div class="wiz-preset-grid" role="radiogroup" aria-label="Setup preset">
+            {#each WIZARD_PRESETS as preset (preset.id)}
+              <button
+                type="button"
+                class="wiz-preset{selectedPresetId === preset.id ? ' wiz-preset-selected' : ''}{preset.recommended ? ' wiz-preset-recommended' : ''}"
+                role="radio"
+                aria-checked={selectedPresetId === preset.id}
+                title={preset.tooltip}
+                onclick={() => selectPreset(preset.id)}
+              >
+                <div class="wiz-preset-head">
+                  <strong>{preset.label}</strong>
+                  {#if preset.recommended}
+                    <span class="wiz-preset-badge">Recommended</span>
+                  {/if}
+                </div>
+                <p class="wiz-preset-desc">{preset.description}</p>
+                {#if preset.id === "secure-remote"}
+                  <small class="wiz-preset-note">
+                    Token auth, remote bind, and restricted tool groups are
+                    configured on the bridge window after onboarding.
+                  </small>
+                {/if}
+                {#if preset.id === "team-ci"}
+                  <small class="wiz-preset-note">
+                    Configure token auth on the bridge for headless CI use.
+                  </small>
+                {/if}
+              </button>
+            {/each}
+          </div>
+
+          {#if selectedPresetId && selectedPresetId !== "custom"}
+            <p class="wiz-hint wiz-hint-ok">
+              Applied the <strong>{presetById(selectedPresetId).label}</strong>
+              preset. Steps 2–7 now reflect its defaults — adjust any field
+              as needed. Pick <strong>Custom / skip</strong> to clear the
+              pre-fills.
+            </p>
+          {/if}
+        </section>
+      {:else if currentStep === "step1"}
+        <section class="wiz-section">
+          <p class="wiz-desc">
+            Step 2 detects the current state of the project and runs a
+            diagnostics pass. The detection is re-run on every entry so the
             values below always reflect the on-disk manifest and
             <code>ProjectVersion.txt</code>; the Done screen
             re-uses the same snapshot.
           </p>
+
+          <div class="wiz-diag-block">
+            <div class="wiz-diag-head">
+              <span class="wiz-label">Diagnostics</span>
+              <Button
+                variant="secondary"
+                onclick={() => { void refreshDetection(); void runNodeProbe(); }}
+                disabled={detectionLoading || nodeProbing}
+                title="Re-run project detection + Node probe"
+              >
+                {detectionLoading || nodeProbing ? "Checking…" : "Run diagnostics"}
+              </Button>
+            </div>
+            <ul class="wiz-diag" aria-label="Project diagnostics">
+              {#each diagnosticsRows() as row (row.id)}
+                {@const tone = diagTone(row)}
+                <li class="wiz-diag-row wiz-diag-{tone}">
+                  <span class="wiz-diag-icon" aria-hidden="true">
+                    {#if tone === "ok"}✓{:else if tone === "warn"}✗{:else}·{/if}
+                  </span>
+                  <span class="wiz-diag-label">{row.label}</span>
+                  {#if row.detail}<span class="wiz-diag-detail">{row.detail}</span>{/if}
+                  {#if !row.ok && row.remediation}
+                    <small class="wiz-diag-fix">{row.remediation}</small>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          </div>
 
           {#if detectionLoading && !detection}
             <p class="wiz-hint">Detecting project…</p>
@@ -2165,9 +2439,9 @@
                 <strong>Use local checkout</strong> —
                 <small>
                   Point at a cloned <code>unity-open-mcp</code> monorepo instead of the
-                  published npm package. Step 4 then launches
-                  <code>node &lt;root&gt;/mcp-server/dist/index.js</code>, and Step 2
-                  package installs + skill copy use the toolkit root.
+                  published npm package. The Configure AI client step then launches
+                  <code>node &lt;root&gt;/mcp-server/dist/index.js</code>, and the
+                  Unity packages + skill copy steps use the toolkit root.
                 </small>
               </span>
             </label>
@@ -2177,7 +2451,7 @@
                 <span>
                   <strong>Use a global install</strong> —
                   <small>
-                    Step 4 launches the bare <code>unity-open-mcp</code> binary
+                    The Configure AI client step launches the bare <code>unity-open-mcp</code> binary
                     (assumes <code>npm i -g unity-open-mcp</code>) instead of
                     <code>npx -y unity-open-mcp@latest</code>.
                   </small>
@@ -2265,7 +2539,7 @@
               />
               <p class="wiz-hint">
                 Leave empty to use <code>{toolkitRoot || "<toolkit>"}/mcp-server/dist/index.js</code>.
-                Step 2 package URLs and skill copy always use the
+                Unity packages step URLs and skill copy always use the
                 toolkit root regardless of this override.
               </p>
             </div>
@@ -2274,7 +2548,7 @@
       {:else if currentStep === "step3"}
         <section class="wiz-section">
           <p class="wiz-desc">
-            Step 3 adds bridge + verify packages to the project's
+            This step adds bridge + verify packages to the project's
             <code>Packages/manifest.json</code>. Domain tools (NavMesh,
             Input System, ProBuilder, Particle System, Animation) are
             <strong>bundled with the bridge</strong> — they activate
@@ -2438,7 +2712,7 @@
               </p>
             {:else if !toolkitRoot.trim() || !toolkitValidation?.ok}
               <p class="wiz-hint wiz-hint-warn">
-                Validate the toolkit root in Step 3 first.
+                Validate the toolkit root on the MCP server source step first.
               </p>
             {:else if mergePlanning && !mergePlan}
               <p class="wiz-hint">Planning merge…</p>
@@ -2540,16 +2814,16 @@
                 ? "Skip to MCP client config"
                 : "Validate the toolkit root and resolve manifest blocks first"}
             >
-              Skip to Step 4
+              Skip to MCP client config
             </Button>
           </div>
         </section>
       {:else if currentStep === "step4"}
         <section class="wiz-section">
           <p class="wiz-desc">
-            Step 4 writes a <code>unity-open-mcp</code> MCP server
+            This step writes a <code>unity-open-mcp</code> MCP server
             entry to your client config. The launch command comes from your
-            Step 3 choice — <code>npx -y unity-open-mcp@latest</code> by
+            MCP server source choice — <code>npx -y unity-open-mcp@latest</code> by
             default, or <code>node &lt;root&gt;/mcp-server/dist/index.js</code>
             when <strong>Use local checkout</strong> is on. The wizard calls
             the Rust planner on every form-state change so the live preview
@@ -2624,7 +2898,7 @@
             {:else if !mcpPlan}
               <p class="wiz-hint wiz-hint-warn">
                 {#if useLocalCheckout}
-                  Set and validate the toolkit root in Step 3 to generate a config.
+                  Set and validate the toolkit root on the MCP server source step to generate a config.
                 {:else}
                   Waiting for the planner — the default <code>npx</code> launch
                   command needs no toolkit root.
@@ -2738,7 +3012,7 @@
             The wizard copies the template from
             <code>{toolkitRoot || "<toolkit>"}/skills/unity-open-mcp/SKILL.md</code>
             into the project-relative skill folder(s) for the MCP client you
-            picked in Step 4 (<strong>{mcpClientLabel(mcpClient)}</strong>).
+            picked on the Configure AI client step (<strong>{mcpClientLabel(mcpClient)}</strong>).
             Paths are derived from a single manifest
             (<code>skills/client-paths.json</code>), so ZCode writes
             <code>.agents/skills/</code> and Cursor writes
@@ -2761,7 +3035,7 @@
             {:else if skillPlan.targets.length === 0}
               <p class="wiz-hint wiz-hint-warn">
                 No skill folder is mapped for <strong>{mcpClientLabel(mcpClient)}</strong>.
-                Use the **Skip** button to continue, or pick a different MCP client in Step 4.
+                Use the **Skip** button to continue, or pick a different MCP client on the Configure AI client step.
               </p>
             {:else}
               <ul class="wiz-fingerprints" aria-label="Agent skill copy targets">
@@ -2829,7 +3103,7 @@
       {:else if currentStep === "step5"}
         <section class="wiz-section">
           <p class="wiz-desc">
-            Step 5 launches Unity with the bridge port pinned via
+            This step launches Unity with the bridge port pinned via
             <code>-UNITY_OPEN_MCP_BRIDGE_PORT={step5BridgePort ?? resolvedBridgePort ?? "auto"}</code>
             and polls the bridge HTTP <code>/ping</code> endpoint
             for up to 120 s. The wizard never spawns a separate
@@ -2917,11 +3191,11 @@
           <p class="wiz-desc">
             The checklist below is computed from
             the live project state. Wizard form choices are saved per
-            project, but step navigation always restarts at Step 1 when
-            you reopen the wizard. Re-run or Clear AI Setup resets those
-            saved choices. The Done screen always reflects the latest
-            on-disk manifest. The
-            bridge <code>/ping</code> row carries the Step 5
+            project, but step navigation always restarts at the preset
+            picker when you reopen the wizard. Re-run or Clear AI Setup
+            resets those saved choices. The Done screen always reflects the
+            latest on-disk manifest. The
+            bridge <code>/ping</code> row carries the launch + verify
             result; the live detection snapshot below it shows
             the freshest manifest / MCP heuristic the wizard
             could read.
@@ -3046,9 +3320,8 @@
             <p class="wiz-hint">
               The Advanced BYO-bridge section is intentionally
               hidden in v1 (it will be re-enabled after
-              the batch criteria are met). Step 6 baseline
-              creation is also deferred; the wizard renders
-              only Steps 1-5 plus this Done screen.
+              the batch criteria are met). Baseline creation is also
+              deferred; the wizard renders only Steps 1–7 plus this Done screen.
             </p>
           </div>
 
@@ -3083,7 +3356,7 @@
                 </div>
               {:else if skillPlan.targets.length === 0}
                 <p class="wiz-hint wiz-hint-warn">
-                  No skill targets are mapped for the selected client. Pick a different MCP client in Step 4 or use the Manual option to install into all known client folders.
+                  No skill targets are mapped for the selected client. Pick a different MCP client on the Configure AI client step or use the Manual option to install into all known client folders.
                 </p>
               {:else}
                 <ul class="wiz-fingerprints" aria-label="Skill copy targets">
@@ -3300,7 +3573,7 @@
     margin: 0;
     padding: 0.6rem 1.25rem 0.7rem;
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(7, 1fr);
     gap: 0.5rem;
     border-bottom: 1px solid var(--hub-border-light);
   }
@@ -3907,8 +4180,152 @@
     background: var(--hub-selected) !important;
   }
 
+  /* --- Step 0 — preset picker ----------------------------------------- */
+  .wiz-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+
+  .wiz-preset {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--hub-border-light);
+    border-radius: 8px;
+    background: var(--hub-card);
+    color: var(--hub-text);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    transition: border-color 0.12s ease, background 0.12s ease;
+  }
+
+  .wiz-preset:hover {
+    border-color: var(--hub-border-hover);
+  }
+
+  .wiz-preset:focus-visible {
+    outline: 2px solid var(--hub-accent);
+    outline-offset: 1px;
+  }
+
+  .wiz-preset-selected {
+    border-color: var(--hub-accent);
+    background: rgba(92, 124, 250, 0.1);
+  }
+
+  .wiz-preset-recommended {
+    border-color: var(--hub-success);
+  }
+
+  .wiz-preset-head {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .wiz-preset-head strong {
+    font-size: 0.88rem;
+    color: var(--hub-text-bright);
+  }
+
+  .wiz-preset-badge {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    color: #bbf7d0;
+    background: rgba(74, 222, 128, 0.16);
+    border: 1px solid rgba(74, 222, 128, 0.35);
+  }
+
+  .wiz-preset-desc {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: var(--hub-text-muted);
+  }
+
+  .wiz-preset-note {
+    font-size: 0.7rem;
+    color: var(--hub-text-dim);
+    line-height: 1.35;
+  }
+
+  /* --- Step 1 — diagnostics panel ------------------------------------- */
+  .wiz-diag-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--hub-border-light);
+    border-radius: 6px;
+    background: var(--hub-card);
+  }
+
+  .wiz-diag-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .wiz-diag {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .wiz-diag-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: auto auto;
+    align-items: baseline;
+    gap: 0 0.4rem;
+    padding: 0.3rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: var(--hub-text);
+    background: var(--hub-bg);
+  }
+
+  .wiz-diag-row .wiz-diag-fix {
+    grid-column: 2 / span 2;
+    grid-row: 2;
+    font-size: 0.72rem;
+    color: var(--hub-text-muted);
+    margin-top: 0.1rem;
+  }
+
+  .wiz-diag-icon {
+    font-weight: 700;
+    width: 1rem;
+    text-align: center;
+  }
+
+  .wiz-diag-ok .wiz-diag-icon { color: #4ade80; }
+  .wiz-diag-warn .wiz-diag-icon { color: var(--hub-error-fg); }
+  .wiz-diag-warn { background: rgba(248, 113, 113, 0.06); }
+  .wiz-diag-muted .wiz-diag-icon { color: var(--hub-text-dim); }
+
+  .wiz-diag-detail {
+    font-size: 0.72rem;
+    color: var(--hub-text-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
   @media (max-width: 720px) {
-    .wiz-progress { grid-template-columns: repeat(3, 1fr); }
+    .wiz-progress { grid-template-columns: repeat(4, 1fr); }
+    .wiz-preset-grid { grid-template-columns: 1fr; }
     .wiz-radio-grid { grid-template-columns: 1fr; }
     .wiz-footer { flex-wrap: wrap; }
     .wiz-footer-clear { width: 100%; justify-content: flex-start; }

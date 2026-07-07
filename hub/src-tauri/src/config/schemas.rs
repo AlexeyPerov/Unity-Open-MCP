@@ -319,6 +319,12 @@ pub struct AiSetupWizardDraft {
     pub bridge_port: String,
     #[serde(default, skip_serializing_if = "is_false")]
     pub skill_overwrite_ack: bool,
+    /// Step 1 preset picker choice (e.g. `"regular-npm"`, `"contributor"`,
+    /// `"custom"`). Empty / missing resolves to the Custom / skip preset so
+    /// legacy `projects.json` files stay loadable without a migration.
+    /// `#[serde(default)]` keeps pre-M27 drafts deserializing cleanly.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub selected_preset_id: String,
 }
 
 fn is_false(v: &bool) -> bool {

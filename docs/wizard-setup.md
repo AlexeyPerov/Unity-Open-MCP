@@ -28,19 +28,33 @@ For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md)
 1. **Install Unity Hub Pro** if you haven't (see [unity-hub-pro.md](unity-hub-pro.md)).
 2. Open Unity Hub Pro and add your Unity project.
 3. Click the **AI** action for that project. The button turns **green** when the agent is already installed and configured for that project; otherwise it is amber/blue and opens the wizard.
-4. Complete the wizard steps.
-5. Restart your MCP client.
-6. Run a Unity MCP call to confirm connectivity.
+4. Pick a setup preset (or **Custom / skip**) on Step 1.
+5. Complete the wizard steps.
+6. Restart your MCP client.
+7. Run a Unity MCP call to confirm connectivity.
 
-Wizard choices (MCP client, package toggles, bridge port, and other form fields) are remembered **per project** when you reopen the wizard; you always start again at Step 1.
+Wizard choices (preset, MCP client, package toggles, bridge port, and other form fields) are remembered **per project** when you reopen the wizard; you always start again at the preset picker.
 
 ![plot](../screenshots/hub-ai-buttons.png)
 
 ## Wizard steps
 
-The wizard shows a clickable progress strip at the top. Segments turn **green** when their checks already pass, so you can see at a glance which steps still need attention. You can click any segment to jump to that step; Back/Next still move sequentially.
+The wizard shows a clickable progress strip at the top. Segments turn **green** when their checks already pass, so you can see at a glance which steps still need attention. You can click any segment to jump to that step; Back/Next still move sequentially. The wizard has seven steps plus a Done screen.
 
-### Step 1 — Project detection
+### Step 1 — Setup preset (optional)
+
+Pick a preset to pre-fill the rest of the wizard, or choose **Custom / skip** to configure every step manually. Presets are starting points, not locks — you can change any field on later steps.
+
+| Preset | Best for | Pre-fills |
+|---|---|---|
+| **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@latest`; bridge + verify from published sources; domain deps off; skill on |
+| **Contributor (local checkout)** | Monorepo contributors hacking on bridge / verify / MCP server | Local checkout + `file:` packages from the clone; domain deps off; skill on. Build `mcp-server/` first (see [Development setup](development-setup.md)) |
+| **Solo dev** | Fastest fully-tooled local agent loop | `npx`; bridge + verify + NavMesh + Input System + ProBuilder; **Cursor** pre-selected; skill on |
+| **Team CI** | Headless CI automation | Global npm install; **Manual / CLI snippet** client; skill skipped; configure token auth on the bridge for CI |
+| **Secure / remote** | Non-localhost bridge access with restricted mutations | Published sources; skill on. Token auth, remote bind, and restricted tool groups are bridge-side controls — configure them from the bridge window after onboarding |
+| **Custom / skip** | Anyone who wants the wizard's built-in defaults | No pre-fills — identical to the manual flow |
+
+### Step 2 — Project detection + diagnostics
 
 - Valid Unity project layout
 - Unity version detection (minimum 2022.3 LTS; Unity 6+ recommended)
@@ -49,11 +63,13 @@ The wizard shows a clickable progress strip at the top. Segments turn **green** 
 - Existing bridge/verify package check
 - Existing MCP config check
 
+A **Diagnostics** panel at the top runs the same checks in a one-click-remediation list (green check / red cross). Each failing row carries a short hint on how to fix it. Use **Run diagnostics** to re-run project detection + the Node probe on demand.
+
 This step is the environment gate: the **Next** button is disabled until the project is valid, meets the minimum Unity version, has a writable manifest, and Node.js 18+ is detected. **Re-detect** refreshes the snapshot from disk and shows a confirmation when it completes.
 
 ![plot](../screenshots/hub-wizard-1.png)
 
-### Step 2 — MCP server source
+### Step 3 — MCP server source
 
 Choose how the `unity-open-mcp` server is launched. Not sure? Leave it on the
 default — `npx` downloads and runs the latest version automatically, no extra
@@ -73,7 +89,7 @@ npm run build
 
 ![plot](../screenshots/hub-wizard-2.png)
 
-### Step 3 — Unity packages
+### Step 4 — Unity packages
 
 - Install or upgrade bridge and verify packages
 - Optional: install Unity domain dependencies (NavMesh, Input System, ProBuilder) that activate the bundled domain tools
@@ -87,7 +103,7 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 
 ![plot](../screenshots/hub-wizard-3.png)[mcp-tools.md](api/mcp-tools.md)
 
-### Step 4 — MCP client config
+### Step 5 — MCP client config
 
 - Choose a client preset. Each option has a tooltip describing the config format and other popular agents that share it (for example, Cursor and Claude Desktop share the `mcpServers` JSON shape; OpenCode uses `mcp` + `$schema`; ZCode uses `mcp.servers` + `type:stdio` with skills under `.agents/skills/`).
 - Review the generated config preview
@@ -95,14 +111,16 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 
 ![plot](../screenshots/hub-wizard-4.png)
 
-### Step 5 — Agent skill (optional)
+### Step 6 — Agent skill (optional)
 
 - Copy `SKILL.md` for your selected client
 - Optional overwrite with backup
 
+The **Team CI** preset auto-skips this step — CI agents typically don't need a desktop skill file.
+
 ![plot](../screenshots/hub-wizard-5.png)
 
-### Step 6 — Launch and verify
+### Step 7 — Launch and verify
 
 - Launch Unity
 - Wait for compile and bridge readiness
@@ -110,7 +128,7 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 
 While waiting, the MCP server auto-dismisses common Unity startup modals (Safe
 Mode, version mismatch, and similar) per `UNITY_OPEN_MCP_DIALOG_POLICY`. If
-Step 6 stalls on a modal, see [Dialog policy](dialog-policy.md).
+Step 7 stalls on a modal, see [Dialog policy](dialog-policy.md).
 
 ![plot](../screenshots/hub-wizard-6.png)
 
@@ -127,18 +145,18 @@ A `.bak` backup is created next to each changed file. Per-target failures are re
 ## Troubleshooting
 
 - **AI action missing on a project row:** re-check the project path and that
-  Unity version detection passed in Step 1.
-- **Package install disabled (Next greyed out):** resolve the Step 1 environment
+  Unity version detection passed in Step 2.
+- **Package install disabled (Next greyed out):** resolve the Step 2 environment
   checks first — the project must meet the minimum Unity version, have Node.js
   18+, and a writable `Packages/manifest.json`.
 - **Tools unavailable in the client after finishing:** restart the client. Most
   MCP clients only read their config at startup.
-- **Bridge unavailable in Step 6:** verify the project path is right, Unity
+- **Bridge unavailable in Step 7:** verify the project path is right, Unity
   actually launched, and finished compiling. The health check runs while Unity is
   running. If a startup modal blocks progress (Safe Mode, project upgrade),
   see [Dialog policy](dialog-policy.md).
 - **Re-detect does nothing:** it refreshes the on-disk snapshot only — bridge
-  reachability is checked in Step 6 while Unity is running.
+  reachability is checked in Step 7 while Unity is running.
 - **npx first run looks slow:** expected — the server downloads on first launch.
 
 ## Related docs

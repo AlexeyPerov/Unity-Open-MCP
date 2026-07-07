@@ -215,6 +215,10 @@ export interface AiSetupWizardDraft {
   cursorProjectScope?: boolean;
   bridgePort?: string;
   skillOverwriteAck?: boolean;
+  /** Step 1 preset picker choice (e.g. `"regular-npm"`, `"contributor"`,
+   *  `"custom"`). Empty / undefined resolves to the Custom / skip preset
+   *  so legacy drafts stay loadable. */
+  selectedPresetId?: string;
 }
 
 export interface ProjectEntry {

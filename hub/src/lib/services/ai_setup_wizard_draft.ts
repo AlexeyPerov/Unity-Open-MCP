@@ -25,6 +25,7 @@ export const EMPTY_AI_SETUP_WIZARD_DRAFT: Readonly<AiSetupWizardDraft> = {
   cursorProjectScope: true,
   bridgePort: "",
   skillOverwriteAck: false,
+  selectedPresetId: "",
 };
 
 /** Hydrated wizard form values after merge precedence. */
@@ -45,6 +46,8 @@ export interface AiSetupWizardFormState {
   cursorProjectScope: boolean;
   bridgePort: string;
   skillOverwriteAck: boolean;
+  /** Step 1 preset id (empty = Custom / skip). */
+  selectedPresetId: string;
 }
 
 export interface AiSetupWizardDraftSnapshot {
@@ -64,6 +67,7 @@ export interface AiSetupWizardDraftSnapshot {
   cursorProjectScope: boolean;
   bridgePort: string;
   skillOverwriteAck: boolean;
+  selectedPresetId: string;
 }
 
 function globalToolkitDefaults(settings: AiToolkitSettings): Pick<
@@ -107,6 +111,7 @@ export function hydrateAiSetupWizardDraft(
       saved?.cursorProjectScope ?? empty.cursorProjectScope!,
     bridgePort: saved?.bridgePort ?? empty.bridgePort!,
     skillOverwriteAck: saved?.skillOverwriteAck ?? empty.skillOverwriteAck!,
+    selectedPresetId: saved?.selectedPresetId ?? empty.selectedPresetId!,
   };
 }
 
@@ -131,6 +136,7 @@ export function collectAiSetupWizardDraft(
     cursorProjectScope: state.cursorProjectScope,
     bridgePort: state.bridgePort,
     skillOverwriteAck: state.skillOverwriteAck,
+    selectedPresetId: state.selectedPresetId,
   };
 }
 
