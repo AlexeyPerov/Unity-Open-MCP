@@ -1,0 +1,76 @@
+{
+  "id": "m27-wizard-preset-solo-dev",
+  "title": "Onboarding wizard preset picker — solo-dev preset walks a new project to a working bridge",
+  "milestone": "m27",
+  "engineId": "unity",
+  "order": 2,
+  "requirementLevel": "optional",
+  "tags": ["m27", "wizard", "plan-2", "onboarding", "preset"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Hub app running (npm run tauri dev in hub/). A Unity project with NO prior unity-open-mcp config (a fresh demo clone, or delete .unity-open-mcp/ + Packages/manifest.json unity-open-mcp entry before starting). The Unity Editor should NOT be open on the project yet — the wizard launches it."
+    },
+    {
+      "id": "open-wizard",
+      "type": "manual",
+      "title": "Open the onboarding wizard and pick the solo-dev preset",
+      "body": "In the Hub app, open the project. When the onboarding wizard appears, choose the 'Solo developer' preset. The preset selects: bridge auto-start, core + diagnostics + asset-intelligence groups on, no Hub CLI integration, auto-save dirty scenes enabled."
+    },
+    {
+      "id": "expected-preset",
+      "type": "expected",
+      "title": "Expected outcomes (preset applied)",
+      "items": [
+        "The wizard writes .unity-open-mcp/settings.json with autoSaveDirtyScenes=true and the preset's default group set",
+        "The wizard offers to install the bridge package into the project (or detects it already installed)",
+        "The wizard offers to launch the Unity Editor on the project",
+        "No Hub CLI steps are shown (solo-dev preset skips Hub integration)"
+      ]
+    },
+    {
+      "id": "prompt-launch",
+      "type": "agent_prompt",
+      "title": "Launch the Editor and confirm the bridge comes up",
+      "tool": "unity_open_mcp_ping",
+      "payload": {}
+    },
+    {
+      "id": "expected-bridge-up",
+      "type": "expected",
+      "title": "Expected outcomes (bridge up after wizard)",
+      "items": [
+        "ping returns isError:false within ~30s of the Editor launching",
+        "editor_status shows isPlaying:false, isCompiling:false",
+        "bridge_status returns running (not stopped/dead_bridge)",
+        "capabilities kind:tools lists the preset's default groups (core, gate-and-verify, asset-intelligence, typed-editor, diagnostics)"
+      ]
+    },
+    {
+      "id": "cleanup",
+      "type": "setup",
+      "title": "Reset the project config (so the scenario is re-runnable)",
+      "actions": [
+        { "action": "fs_delete", "paths": [".unity-open-mcp/settings.json"] }
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (ping + editor_status + bridge_status envelopes)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "cleanup": { "actions": [{ "action": "fs_delete", "paths": [".unity-open-mcp/settings.json"] }] }
+    },
+    "note": "Optional scenario. The wizard preset picker is Hub UI; the post-wizard bridge-up confirmation is agent-driven (ping + editor_status + bridge_status). Re-runnable after deleting .unity-open-mcp/settings.json."
+  }
+}

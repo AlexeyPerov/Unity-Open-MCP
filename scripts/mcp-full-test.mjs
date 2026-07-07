@@ -37,14 +37,39 @@
 // (relative paths hash to a different bridge port).
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { dirname, resolve, isAbsolute } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+
+import {
+  REPO_ROOT,
+  CLI_BIN,
+  REFUSED_CODES,
+  LOCKED_CODES,
+  TIMEOUT_CODE,
+  STEP_META_KEYS,
+  classify,
+  pluck,
+  parseEnvelope,
+  parseCommonArgs,
+  makeStepBuilder,
+  buildRunEnv,
+  dismissBlockingModals,
+  invokeTool,
+  saveAllDirtyScenes,
+  runToolOnce,
+  runTool as runToolLib,
+  isMainSceneEntry,
+  closeInitTestScenes,
+  revertMainSceneIfDirty,
+  collectIsolationState,
+  finalizeEditorState,
+  cleanupTempFolder,
+  cleanupViaBridge,
+  applyFindObjectsToCtx,
+} from "./mcp-test-lib.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(__dirname, "..");
-const CLI_BIN = resolve(REPO_ROOT, "mcp-server", "dist", "index.js");
-const DISMISS_MOD = pathToFileURL(resolve(REPO_ROOT, "mcp-server", "dist", "dialog-dismiss.js")).href;
 const DEFAULT_PROJECT = resolve(REPO_ROOT, "demo");
 
 // Temp fixture root — everything mutating lives under here and is deleted at
@@ -69,7 +94,7 @@ const MAIN_SCENE_PATH = "Assets/Scenes/Main.unity";
 const MAIN_SCENE_HINT = [MAIN_SCENE_PATH];
 
 // ---------------------------------------------------------------------------
-// arg parsing
+// arg parsing (S0 keeps its own: --auto-revert / --save-main are suite-specific)
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
@@ -135,120 +160,11 @@ running.`);
 }
 
 // ---------------------------------------------------------------------------
-// expect classifier
-//
-// Each step is { label, band, tool, args?, expect?, gate?, resolveArgs?, after?,
-// timeoutMs? }. `expect` defaults to "ok". Pass is derived as:
-//   ok        → !isError
-//   gate      → mutation.success && (gate.delta.newErrors === 0)
-//   locked    → ok OR error.code in {project_path_missing, editor_instance_locked,
-//               unity_not_discovered, batch_failed}  (batch can't run w/ Editor open)
-//   refused   → mutation.error.code in {build_confirmation_required,
-//               denied_by_policy, menu_blocked}  (deny heuristic fired)
-//   unavailable → error.code === tool_not_found  (group not compiled into bridge)
-//   reachable   → error.code !== tool_not_found  (compiled extension pack; minimal
-//                 args — missing-param / guard errors still prove registration)
+// expect classifier + pluck + applyFindObjectsToCtx — imported from
+// mcp-test-lib.mjs (shared with S1–S5). See there for the full pass-mode table.
 // ---------------------------------------------------------------------------
 
-const REFUSED_CODES = new Set(["build_confirmation_required", "denied_by_policy", "menu_blocked"]);
-const LOCKED_CODES = new Set([
-  "project_path_missing",
-  "editor_instance_locked",
-  "unity_not_discovered",
-  "batch_failed",
-  "compile_check_failed",
-]);
-// Known issue (see specs/feedback.md 2026-07-03): the live-bridge verify-rule
-// path hangs and hits the bridge's 30s internal limit. We tolerate that
-// timeout for the verify-family tools so the rest of the suite can run; the
-// timeout itself is the finding, surfaced in the report.
-const TIMEOUT_CODE = "timeout";
 
-function classify(step, parsed) {
-  const isError = parsed.isError === true;
-  const result = parsed.result ?? {};
-  const errCode = result.error?.code ?? result.mutation?.error?.code;
-  const route = result._route?.route;
-
-  switch (step.expect) {
-    case "ok":
-      return { pass: !isError, detail: isError ? `err=${errCode}` : "ok" };
-    case "gate": {
-      const mut = result.mutation ?? {};
-      const newErrors = result.gate?.delta?.newErrors;
-      const gateClean = typeof newErrors !== "number" || newErrors === 0;
-      const pass = mut.success === true && gateClean;
-      return {
-        pass,
-        detail: `mutation.success=${mut.success} gate.newErrors=${newErrors ?? "n/a"}${mut.error ? " err=" + mut.error.code : ""}`,
-      };
-    }
-    case "locked": {
-      // Batch tools: pass if either they ran OR they reported a known
-      // "can't run because Editor has the project" / env-missing code, OR the
-      // tool isn't registered in the live bridge at all (scan_all/baseline/
-      // regression are batch-only and return tool_not_found via the live route).
-      const pass = !isError || LOCKED_CODES.has(errCode) || errCode === "tool_not_found";
-      return { pass, detail: isError ? `err=${errCode} (route=${route}, expected)` : "ran" };
-    }
-    case "refused": {
-      const pass = isError && REFUSED_CODES.has(errCode);
-      return { pass, detail: pass ? `refused: ${errCode}` : `expected refusal, got err=${errCode}` };
-    }
-    case "unavailable": {
-      const pass = isError && errCode === "tool_not_found";
-      return { pass, detail: pass ? "tool_not_found (group not compiled in)" : `err=${errCode ?? "none"}` };
-    }
-    case "reachable": {
-      // Compiled extension pack: any structured response except tool_not_found.
-      if (errCode === "tool_not_found") {
-        return { pass: false, detail: "tool_not_found (expected compiled in)" };
-      }
-      if (!isError) return { pass: true, detail: "ok (compiled in)" };
-      return { pass: true, detail: `err=${errCode} (compiled in)` };
-    }
-    case "verify_timeout": {
-      // Verify-family live-bridge hang (see specs/feedback.md). Pass = either
-      // the tool actually returned, OR it hit the bridge 30s timeout. Any
-      // OTHER error is a real failure.
-      if (!isError) return { pass: true, detail: "ok (verify returned)" };
-      const pass = errCode === TIMEOUT_CODE;
-      return { pass, detail: pass ? "bridge 30s timeout (KNOWN ISSUE — see specs/feedback.md)" : `err=${errCode}` };
-    }
-    case "ok_or_timeout": {
-      // Tolerate either a clean response OR a CLI timeout (the tool was reached;
-      // the hang is itself the signal). The runner marks timeouts with a sentinel.
-      const pass = !isError || parsed._ft_timeout === true;
-      return { pass, detail: parsed._ft_timeout ? "timed out (tolerated)" : "ok" };
-    }
-    case "tolerate": {
-      // Pass on a clean response OR any error code in step.tolerate (known tool
-      // bugs we still want to exercise + report, without failing the suite).
-      const tol = new Set(step.tolerate ?? []);
-      const pass = !isError || tol.has(errCode);
-      return { pass, detail: isError ? `err=${errCode} (tolerated)` : "ok" };
-    }
-    default:
-      return { pass: !isError, detail: isError ? `err=${errCode}` : "ok" };
-  }
-}
-
-// Dig into a nested object by dotted path.
-function pluck(obj, path) {
-  return path.split(".").reduce((acc, k) => (acc && typeof acc === "object" ? acc[k] : undefined), obj);
-}
-
-/** Merge gameobject_find hits into ctx handles (cube/sphere/dup/prefab). */
-function applyFindObjectsToCtx(r, ctx) {
-  const objects = r.objects ?? [];
-  for (const o of objects) {
-    if (o.instanceId == null) continue;
-    if (o.name === "FT_Cube") ctx.cubeId = o.instanceId;
-    if (o.name === "FT_Sphere") ctx.sphereId = o.instanceId;
-    if (o.name === "FT_Renamed") ctx.cubeDupId = o.instanceId;
-    if (o.name === "GateTestCube") ctx.prefabInstanceId = o.instanceId;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // suite definition
@@ -260,24 +176,7 @@ function applyFindObjectsToCtx(r, ctx) {
 // ---------------------------------------------------------------------------
 
 function buildSuite() {
-  const steps = [];
-
-  // helper to push
-  // Step builder. The 4th arg is normally the tool's input args. But many
-  // chained steps pass ONLY step-meta (resolveArgs/after/gate/expect/timeoutMs/
-  // tolerate) and no static args — historically those were written as
-  // s(label, band, tool, { resolveArgs, ... }, { gate, ... }). To support both
-  // shapes transparently: if the 4th arg contains any step-meta key, treat it
-  // as extra (step metadata) and leave args empty; otherwise it's the args.
-  const STEP_META_KEYS = new Set(["resolveArgs", "after", "gate", "expect", "timeoutMs", "tolerate", "_retried"]);
-  const s = (label, band, tool, arg4, extra = {}) => {
-    if (arg4 && typeof arg4 === "object" && Object.keys(arg4).some((k) => STEP_META_KEYS.has(k))) {
-      // 4th arg is step-meta (e.g. { resolveArgs, after }) — merge into step.
-      steps.push({ label, band, tool, args: undefined, ...arg4, ...extra });
-    } else {
-      steps.push({ label, band, tool, args: arg4, ...extra });
-    }
-  };
+  const { s, steps } = makeStepBuilder();
 
   // =====================================================================
   // BAND A — lifecycle & meta
@@ -1058,356 +957,6 @@ const SAVE_DIRTY_BEFORE = new Set([
 // or prefab capture — otherwise compile/reload drops unsaved hierarchy state.
 const SAVE_DIRTY_AFTER = new Set(["gameobject_find_query"]);
 
-// Child-process env for every CLI invocation: opt in to unsaved-scene modal
-// dismiss (destructive — test-only backstop) and prefer Don't Save on those
-// modals so InitTestScene* temp scenes from run_tests do not wedge the editor.
-function buildRunEnv() {
-  const env = { ...process.env };
-  env.UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS = "1";
-  env.UNITY_OPEN_MCP_DIALOG_POLICY = "cancel";
-  return env;
-}
-
-/** Poll OS dialogs (unsaved-scene, launch-errors, …) — best-effort sync wrapper. */
-function dismissBlockingModals(runEnv) {
-  const script = `
-    import { pollAndDismissDialogs, readDismissConfig } from ${JSON.stringify(DISMISS_MOD)};
-    const cfg = readDismissConfig(process.env);
-    if (!cfg.enabled) process.exit(0);
-    await pollAndDismissDialogs({
-      timeoutMs: 10_000,
-      intervalMs: 500,
-      policy: cfg.policy,
-      allowProjectUpgrade: cfg.allowProjectUpgrade,
-      allowUnsavedSceneDismiss: cfg.allowUnsavedSceneDismiss,
-      log: (line) => console.error(line),
-    });
-  `;
-  try {
-    execFileSync(process.execPath, ["--input-type=module", "-e", script], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 15_000,
-      env: runEnv,
-    });
-  } catch (err) {
-    const msg = (err.stderr ?? err.message ?? "").toString().trim();
-    if (msg) process.stderr.write(`${msg}\n`);
-  }
-}
-
-/** Close dirty InitTestScene* temp scenes via the bridge (no save prompt when not dirty). */
-function closeInitTestScenes(project, runEnv) {
-  return invokeTool(
-    project,
-    "unity_open_mcp_execute_csharp",
-    {
-      code: [
-        "var closed = new List<string>();",
-        "for (int i = UnityEngine.SceneManagement.SceneManager.sceneCount - 1; i >= 0; i--) {",
-        "  var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);",
-        "  if (!scene.IsValid() || !scene.isLoaded) continue;",
-        "  if (!scene.name.StartsWith(\"InitTestScene\")) continue;",
-        "  UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene, false);",
-        "  UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, removeScene: true);",
-        "  closed.Add(scene.name);",
-        "}",
-        "return new { status = \"ok\", closed = closed.ToArray() };",
-      ].join("\n"),
-      usings: ["UnityEngine.SceneManagement", "UnityEditor.SceneManagement"],
-      paths_hint: MAIN_SCENE_HINT,
-    },
-    60_000,
-    runEnv,
-  );
-}
-
-/** Remove FT_* fixture GOs from Main and clear its dirty flag (no disk save). */
-function revertMainSceneIfDirty(project, runEnv) {
-  return invokeTool(
-    project,
-    "unity_open_mcp_execute_csharp",
-    {
-      code: [
-        "var removed = new List<string>();",
-        "var cleared = false;",
-        "UnityEngine.SceneManagement.Scene main = default;",
-        "for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++) {",
-        "  var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);",
-        "  if (scene.path == \"Assets/Scenes/Main.unity\") { main = scene; break; }",
-        "}",
-        "if (!main.IsValid() || !main.isLoaded) {",
-        "  var active = UnityEngine.SceneManagement.SceneManager.GetActiveScene();",
-        "  if (active.path == \"Assets/Scenes/Main.unity\" || active.name == \"Main\") main = active;",
-        "}",
-        "if (main.IsValid() && main.isLoaded) {",
-        "  foreach (var root in main.GetRootGameObjects()) {",
-        "    if (root.name.StartsWith(\"FT_\") || root.name == \"GateTestCube\" || root.name.StartsWith(\"CM \")",
-        "        || root.name == \"Terrain\" || root.name == \"Canvas\") {",
-        "      UnityEngine.Object.DestroyImmediate(root);",
-        "      removed.Add(root.name);",
-        "    }",
-        "  }",
-        "  UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(main, false);",
-        "  cleared = true;",
-        "}",
-        "var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();",
-        "return new { status = \"ok\", removed = removed.ToArray(), cleared, activeScene = activeScene.name, activePath = activeScene.path };",
-      ].join("\n"),
-      usings: ["UnityEngine", "UnityEngine.SceneManagement", "UnityEditor.SceneManagement"],
-      paths_hint: MAIN_SCENE_HINT,
-    },
-    60_000,
-    runEnv,
-  );
-}
-
-function isMainSceneEntry(scene, excludePaths) {
-  if (!excludePaths) return false;
-  const path = scene?.path;
-  const name = scene?.name;
-  if (path && excludePaths.has(path)) return true;
-  if (name === "Main" && excludePaths.has(MAIN_SCENE_PATH)) return true;
-  return false;
-}
-
-function collectIsolationState(project, runEnv, ctx) {
-  const dirty = invokeTool(project, "unity_open_mcp_scene_get_dirty_summary", {}, 15_000, runEnv);
-  const scenes = dirty?.result?.scenes ?? [];
-  const mainDirty = scenes.some((s) => isMainSceneEntry(s, new Set([MAIN_SCENE_PATH])) && s.isDirty);
-  const active = invokeTool(
-    project,
-    "unity_open_mcp_execute_csharp",
-    {
-      code: "var s = UnityEngine.SceneManagement.SceneManager.GetActiveScene(); return new { name = s.name, path = s.path };",
-      usings: ["UnityEngine.SceneManagement"],
-      paths_hint: MAIN_SCENE_HINT,
-    },
-    15_000,
-    runEnv,
-  );
-  return {
-    ft_scene_created: ctx.ftSceneCreated === true,
-    ft_scene_active: ctx.ftSceneActive === true,
-    ft_scene_isolation_warning: ctx.ftSceneIsolationWarning ?? null,
-    active_scene_at_teardown: active?.result?.mutation?.output?.name ?? null,
-    active_scene_path_at_teardown: active?.result?.mutation?.output?.path ?? null,
-    main_dirty_at_finalize: mainDirty,
-  };
-}
-
-/** Tear down InitTestScene* leftovers and discard Main dirty state without saving. */
-function finalizeEditorState(project, runEnv, options = {}) {
-  const excludeMain = options.excludeMain !== false;
-  dismissBlockingModals(runEnv);
-  closeInitTestScenes(project, runEnv);
-  revertMainSceneIfDirty(project, runEnv);
-  dismissBlockingModals(runEnv);
-  const excludePaths = excludeMain ? new Set([MAIN_SCENE_PATH]) : null;
-  saveAllDirtyScenes(project, runEnv, 30_000, excludePaths);
-  dismissBlockingModals(runEnv);
-}
-
-function invokeTool(project, tool, args, timeoutMs, runEnv) {
-  const argStr = JSON.stringify(args ?? {});
-  try {
-    const stdout = execFileSync(
-      process.execPath,
-      [CLI_BIN, "run-tool", tool, "--project", project, "--json", "--args", argStr],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs, env: runEnv },
-    );
-    return parseEnvelope(stdout);
-  } catch (err) {
-    const maybeStdout = err.stdout ?? "";
-    if (maybeStdout && maybeStdout.includes("{")) {
-      const parsed = parseEnvelope(maybeStdout);
-      if (parsed) return parsed;
-    }
-    return null;
-  }
-}
-
-function saveAllDirtyScenes(project, runEnv, timeoutMs = 30_000, excludePaths = null) {
-  const parsed = invokeTool(project, "unity_open_mcp_scene_get_dirty_summary", {}, timeoutMs, runEnv);
-  if (!parsed || parsed.isError === true) return 0;
-  const scenes = parsed.result?.scenes ?? [];
-  let saved = 0;
-  for (const scene of scenes) {
-    if (!scene?.isDirty) continue;
-    if (isMainSceneEntry(scene, excludePaths)) continue;
-    const path = scene.path;
-    const name = scene.name;
-    const saveArgs = path
-      ? { path, paths_hint: [path] }
-      : name
-        ? { name, paths_hint: ["<mcp-full-test-auto-save>"] }
-        : null;
-    if (!saveArgs) continue;
-    const out = invokeTool(project, "unity_open_mcp_scene_save", saveArgs, timeoutMs, runEnv);
-    if (out && out.isError !== true) saved++;
-  }
-  return saved;
-}
-
-// ---------------------------------------------------------------------------
-// CLI runner
-// ---------------------------------------------------------------------------
-
-function runTool(step, ctx, project, defaultTimeout, runEnv) {
-  if (SAVE_DIRTY_BEFORE.has(step.label)) {
-    saveAllDirtyScenes(project, runEnv, Math.min(defaultTimeout, 30_000));
-  }
-  const result = runToolOnce(step, ctx, project, defaultTimeout, runEnv);
-  const errCode = result.result?.error?.code ?? result.result?.mutation?.error?.code;
-  if ((errCode === "scene_dirty" || errCode === "main_thread_blocked") && !step._retried) {
-    const retried = { ...step, _retried: true };
-    saveAllDirtyScenes(project, runEnv, 30_000);
-    const retry = runToolOnce(retried, ctx, project, defaultTimeout, runEnv);
-    const tag = errCode === "main_thread_blocked" ? "main_thread_blocked save+retry" : "scene_dirty save+retry";
-    return { ...retry, detail: `${retry.detail} (after ${tag})`, ms: result.ms + retry.ms };
-  }
-  if (SAVE_DIRTY_AFTER.has(step.label) && result.ok) {
-    saveAllDirtyScenes(project, runEnv, Math.min(defaultTimeout, 30_000));
-  }
-  return result;
-}
-
-function runToolOnce(step, ctx, project, defaultTimeout, runEnv) {
-  const args = step.resolveArgs ? step.resolveArgs(ctx) : step.args ?? {};
-  const argStr = JSON.stringify(args);
-  const timeout = step.timeoutMs ?? defaultTimeout;
-  const t0 = Date.now();
-  let stdout;
-  try {
-    stdout = execFileSync(
-      process.execPath,
-      [CLI_BIN, "run-tool", step.tool, "--project", project, "--json", "--args", argStr],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024, timeout, env: runEnv },
-    );
-  } catch (err) {
-    const ms = Date.now() - t0;
-    // Detect a CLI timeout robustly: execFileSync sets err.killed=true when it
-    // kills the child on timeout, but a child that exits with ETIMEDOUT (e.g.
-    // the bridge's own timeout surfaced as a non-zero exit) sets err.code
-    // instead. Match either signal.
-    const isTimeout =
-      err.killed === true ||
-      /timeout/i.test(err.message || "") ||
-      /timed?out/i.test(String(err.code || "")) ||
-      err.code === "ETIMEDOUT";
-    // A non-zero exit from the CLI still prints a JSON envelope to stdout in
-    // most cases; if execFileSync threw because of timeout or exit code, try
-    // to recover the envelope from err.stdout.
-    const maybeStdout = err.stdout ?? "";
-    if (maybeStdout && maybeStdout.includes("{")) {
-      const parsed = parseEnvelope(maybeStdout);
-      if (parsed) {
-        if (isTimeout) parsed._ft_timeout = true;
-        const { pass, detail } = classify(step, parsed);
-        return { ok: pass, ms, detail, result: parsed.result ?? {}, raw: parsed };
-      }
-    }
-    if (isTimeout && step.expect === "ok_or_timeout") {
-      return { ok: true, ms, detail: `timed out after ${timeout}ms (tolerated)`, result: {}, raw: { _ft_timeout: true } };
-    }
-    const reason = isTimeout ? `timeout after ${timeout}ms` : `CLI failed: ${err.code ?? err.message}`;
-    return { ok: false, ms, error: reason, raw: "" };
-  }
-  const ms = Date.now() - t0;
-  const parsed = parseEnvelope(stdout);
-  if (!parsed) {
-    return { ok: false, ms, error: "no JSON envelope in CLI stdout", raw: stdout.slice(-400) };
-  }
-  const { pass, detail } = classify(step, parsed);
-  return { ok: pass, ms, detail, result: parsed.result ?? {}, raw: parsed };
-}
-
-function parseEnvelope(stdout) {
-  try {
-    return JSON.parse(stdout);
-  } catch {
-    const start = stdout.indexOf("{");
-    if (start < 0) return null;
-    let depth = 0;
-    let end = -1;
-    for (let i = start; i < stdout.length; i++) {
-      if (stdout[i] === "{") depth++;
-      else if (stdout[i] === "}") {
-        depth--;
-        if (depth === 0) { end = i; break; }
-      }
-    }
-    if (end > start) {
-      try {
-        return JSON.parse(stdout.slice(start, end + 1));
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// cleanup (always runs)
-// ---------------------------------------------------------------------------
-
-function cleanupTempFolder(project) {
-  // Best-effort on-disk removal of Assets/MCP_FullTest (+ the orphan .meta +
-  // any Unity-auto-renamed "MCP_FullTest N" siblings) so a half-run can't leave
-  // artifacts behind. The orphan .meta matters: Unity's AssetDatabase caches
-  // folder existence by .meta, so a leftover MCP_FullTest.meta makes the next
-  // assets_create_folder silently rename to "MCP_FullTest 1" and report
-  // created:[] — desyncing the bridge from disk.
-  const assetsDir = resolve(project, "Assets");
-  let cleaned = true;
-  let entries = [];
-  try { entries = readdirSync(assetsDir); } catch { return false; }
-  for (const entry of entries) {
-    // match "MCP_FullTest", "MCP_FullTest.meta", "MCP_FullTest 1", "MCP_FullTest 1.meta", ...
-    if (/^MCP_FullTest(\s+\d+)?(\.meta)?$/.test(entry)) {
-      try { rmSync(resolve(assetsDir, entry), { recursive: true, force: true }); }
-      catch { cleaned = false; }
-    }
-  }
-  return cleaned;
-}
-
-function cleanupViaBridge(project, runEnv) {
-  // Try the typed assets_delete first so Unity's AssetDatabase stays in sync,
-  // then fall back to fs removal. Also close any leftover prefab stage + unload
-  // the additive scene if still open.
-  const ops = [
-    {
-      label: "assets_delete FT root",
-      tool: "unity_open_mcp_assets_delete",
-      args: { paths: [FT_FOLDER], paths_hint: [FT_FOLDER] },
-    },
-    {
-      label: "prefab_close (safety)",
-      tool: "unity_open_mcp_prefab_close",
-      args: { save: false },
-    },
-    {
-      label: "scene_unload FT (safety)",
-      tool: "unity_open_mcp_scene_unload",
-      args: { name: "FT_Scene", paths_hint: SCENE_HINT },
-    },
-  ];
-  for (const op of ops) {
-    try {
-      execFileSync(
-        process.execPath,
-        [CLI_BIN, "run-tool", op.tool, "--project", project, "--json", "--args", JSON.stringify(op.args)],
-        { encoding: "utf8", stdio: ["ignore", "ignore", "ignore"], timeout: 30_000, env: runEnv },
-      );
-    } catch {
-      // best-effort
-    }
-  }
-  cleanupTempFolder(project);
-}
-
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -1511,7 +1060,7 @@ function main() {
       }
       lastBand = step.band;
     }
-    const out = runTool(step, ctx, opts.project, opts.timeoutMs, runEnv);
+    const out = runToolLib(step, ctx, opts.project, opts.timeoutMs, runEnv, { saveDirtyBefore: SAVE_DIRTY_BEFORE, saveDirtyAfter: SAVE_DIRTY_AFTER });
     if (out.ok) pass++;
     else fail++;
     bandSummary[step.band] = bandSummary[step.band] || { pass: 0, fail: 0 };

@@ -119,6 +119,36 @@ See [Dialog policy → macOS Accessibility](dialog-policy.md#macos-accessibility
 node scripts/mcp-full-test.mjs --project /absolute/path/to/demo --json-out /tmp/mcp-full-test-report.json
 ```
 
+## MCP test suite catalog
+
+The full test surface is split into seven suites. Each owns a distinct
+environment + pass-criteria tier; together they cover every registered tool
+with at least one strict owner. The per-tool → suite mapping lives in the
+generated coverage matrix (re-run `node scripts/gen-mcp-coverage-matrix.mjs`
+when tools ship).
+
+| ID | Script | Environment | Role |
+|---|---|---|---|
+| **S0** | `scripts/mcp-full-test.mjs` | Live Editor + bridge; `demo/` | Reachability smoke — every tool called once |
+| **S1** | `scripts/mcp-behavior.mjs` | Live Editor + bridge; `Assets/MCP_BehaviorTest/` | Strict success paths, gate semantics, checkpoint/fix chains |
+| **S2** | `scripts/mcp-headless.mjs` | Editor **closed** on target project | Batch spawn, offline reads, batch meta-tools |
+| **S3** | `scripts/mcp-protocol.mjs` | MCP stdio server process | `tools/list`, `list_changed` notification, route spot-checks |
+| **S4** | `scripts/mcp-extensions.mjs` | Live Editor + bridge | Extension-pack success chains when groups compiled in |
+| **S5** | `scripts/mcp-sandbox.mjs` | Temp project clone (never mutates `demo/`) | Package lifecycle, Hub mutators, destructive build |
+| **S6** | `validation-suite/scenarios/unity/m27/*.json` | Validation Suite app + human/agent steps | Onboarding flows, `batch_execute`, client auto-config |
+
+All `scripts/mcp-*.mjs` suites share `scripts/mcp-test-lib.mjs` (arg parsing,
+expect classifier, CLI runner, scene hygiene, cleanup). Common flags:
+`--project <abs>` (required), `--list`, `--json-out`, `--only`, `--band`,
+`--no-cleanup`, `--timeout-ms`. Each suite documents its prerequisites in its
+header comment.
+
+**S0** is the fast reachability layer — it proves every tool is registered and
+routed, tolerating known tool bugs. **S1–S5** are the strict behavioral layers:
+a failure there is a real regression. **S6** covers flows that need a human or
+MCP client (Hub UI, Validation Suite app). Run order + CI tiers are wired by
+the orchestrator (`scripts/mcp-test-all.mjs`).
+
 ## Related docs
 
 - [Troubleshooting](troubleshooting.md) — user-facing recovery

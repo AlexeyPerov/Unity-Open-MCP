@@ -1,0 +1,84 @@
+{
+  "id": "m27-wizard-diagnostics-remediation",
+  "title": "Onboarding wizard doctor — diagnostics-first onboarding detects and remediates a broken state",
+  "milestone": "m27",
+  "engineId": "unity",
+  "order": 3,
+  "requirementLevel": "optional",
+  "tags": ["m27", "wizard", "plan-2", "onboarding", "diagnostics", "remediation"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Hub app running. A Unity project in a deliberately broken state: the bridge package is installed but the bridge assembly is NOT compiled (e.g. delete Library/ScriptAssemblies/*.dll or introduce a compile error in a project script). The Unity Editor may be open (showing compile errors) or closed. This scenario validates the wizard's diagnostics-first path: it runs the doctor, classifies the failure, and offers remediation."
+    },
+    {
+      "id": "break-project",
+      "type": "setup",
+      "title": "Put the project into a broken-bridge state",
+      "actions": [
+        { "action": "fs_patch", "path": "Assets/Scripts/BreakCompile.cs", "patches": [{ "op": "write_file", "content": "public class BreakCompile { void Bad() { this is not valid C#; } }" }] }
+      ]
+    },
+    {
+      "id": "open-wizard",
+      "type": "manual",
+      "title": "Open the onboarding wizard — diagnostics-first path",
+      "body": "In the Hub app, open the project. The wizard runs its doctor check before showing preset options. Observe the diagnostics panel: it should classify the failure as 'bridge compile failure' (not 'Unity not running' or 'package missing')."
+    },
+    {
+      "id": "expected-diagnosis",
+      "type": "expected",
+      "title": "Expected outcomes (diagnosis)",
+      "items": [
+        "The doctor surfaces a 'compile failure' diagnosis (not a generic 'bridge offline')",
+        "The diagnosis names the offending script file (BreakCompile.cs) and the CS error code/line",
+        "The wizard offers a remediation action: 'Open the script in your editor' or 'Delete the broken script'",
+        "The preset picker is deferred until the bridge is healthy (diagnostics-first)"
+      ]
+    },
+    {
+      "id": "prompt-remediate",
+      "type": "agent_prompt",
+      "title": "Remediate — delete the broken script and confirm the bridge recovers",
+      "tool": "unity_open_mcp_script_delete",
+      "payload": { "file_paths": ["Assets/Scripts/BreakCompile.cs"], "paths_hint": ["Assets/Scripts/BreakCompile.cs"] }
+    },
+    {
+      "id": "expected-recovery",
+      "type": "expected",
+      "title": "Expected outcomes (recovery)",
+      "items": [
+        "script_delete returns mutation.success:true",
+        "After the recompile settles (~5-15s), ping returns isError:false",
+        "read_compile_errors returns unhealthy:false (no CS errors)",
+        "The wizard advances to the preset picker (bridge is now healthy)"
+      ]
+    },
+    {
+      "id": "cleanup",
+      "type": "setup",
+      "title": "Ensure the broken script is gone",
+      "actions": [
+        { "action": "fs_delete", "paths": ["Assets/Scripts/BreakCompile.cs", "Assets/Scripts/BreakCompile.cs.meta"] }
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (script_delete + ping + read_compile_errors envelopes)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "cleanup": { "actions": [{ "action": "fs_delete", "paths": ["Assets/Scripts/BreakCompile.cs", "Assets/Scripts/BreakCompile.cs.meta"] }] }
+    },
+    "note": "Optional scenario. The wizard diagnostics-first path is Hub UI; the remediation + recovery confirmation is agent-driven (script_delete + ping + read_compile_errors). Validates the doctor's failure classification (compile failure vs offline vs missing package) and the deferred-preset-picker UX."
+  }
+}

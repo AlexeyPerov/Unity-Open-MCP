@@ -1,0 +1,77 @@
+{
+  "id": "m27-generate-skill-no-bridge",
+  "title": "Generate project skill without a live Unity bridge (offline skill authoring)",
+  "milestone": "m27",
+  "engineId": "unity",
+  "order": 4,
+  "requirementLevel": "optional",
+  "tags": ["m27", "generate_skill", "plan-3", "skill", "offline"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "The Unity Editor is CLOSED (no bridge running). mcp-server/dist/index.js is built. The target project exists on disk (the skill generator reads project state from files, not a live bridge). This scenario validates that generate_skill works without a live Unity connection — it composes the template playbook with a project-specific inventory section and writes the file to the client skill directory."
+    },
+    {
+      "id": "prompt-generate",
+      "type": "agent_prompt",
+      "title": "Generate the project skill (write:true, no bridge)",
+      "tool": "unity_open_mcp_generate_skill",
+      "payload": { "write": true, "clients": ["claude"], "include_workflow": true }
+    },
+    {
+      "id": "expected-skill-written",
+      "type": "expected",
+      "title": "Expected outcomes (skill file written)",
+      "items": [
+        "generate_skill returns isError:false (no bridge required — it routes local)",
+        "The response reports the skill file path (under the client skill directory, e.g. .claude/skills/unity-open-mcp/SKILL.md)",
+        "The written SKILL.md contains the project inventory section: Unity version, installed packages, available tools, key MonoBehaviour/ScriptableObject types",
+        "The written SKILL.md contains the mutate→gate→fix workflow playbook (when include_workflow:true)",
+        "No 'bridge offline' or 'editor not running' error — generate_skill is local-routed"
+      ]
+    },
+    {
+      "id": "prompt-verify",
+      "type": "agent_prompt",
+      "title": "Read back the written skill to confirm content",
+      "tool": "unity_open_mcp_script_read",
+      "payload": { "file_path": ".claude/skills/unity-open-mcp/SKILL.md", "max_lines": 50 }
+    },
+    {
+      "id": "expected-content",
+      "type": "expected",
+      "title": "Expected outcomes (content verified)",
+      "items": [
+        "script_read returns the first 50 lines of the skill file",
+        "The content includes a project inventory header (Unity version + package list)",
+        "The content is clean of internal references (no specs/ paths, no milestone IDs, no reference-project names)"
+      ]
+    },
+    {
+      "id": "cleanup",
+      "type": "setup",
+      "title": "Remove the generated skill (so the scenario is re-runnable)",
+      "actions": [
+        { "action": "fs_delete", "paths": [".claude/skills/unity-open-mcp/SKILL.md"] }
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (generate_skill + script_read envelopes)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "cleanup": { "actions": [{ "action": "fs_delete", "paths": [".claude/skills/unity-open-mcp/SKILL.md"] }] }
+    },
+    "note": "Optional scenario. generate_skill is local-routed (no bridge dependency) — this validates the offline authoring path and the template/inventory merge. The cleanup deletes the written skill so the scenario is re-runnable; in real use the skill persists."
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "id": "m27-client-auto-config-matrix",
+  "title": "AI client auto-config — configure + detect across a sample of MCP clients",
+  "milestone": "m27",
+  "engineId": "unity",
+  "order": 5,
+  "requirementLevel": "optional",
+  "tags": ["m27", "client-config", "plan-5", "auto-config", "matrix"],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "The Hub app running. At least two AI clients installed from the supported set (Claude Code, Cursor, Windsurf, Cline, Roo Code, Gemini CLI, etc.). The skills/client-paths.json manifest is present (the canonical client catalog + skill install paths + mcpClientMapping). This scenario validates that the Hub auto-configures the MCP server connection + skill install path for each detected client, and that the configuration is correct (right command, right project path, right skill directory)."
+    },
+    {
+      "id": "open-config",
+      "type": "manual",
+      "title": "Open the AI client configuration panel",
+      "body": "In the Hub app, open the project and navigate to the AI Client configuration panel. The panel should show a list of detected clients (those installed on this machine). For each, a 'Configure' button writes the MCP server config + skill path."
+    },
+    {
+      "id": "expected-detect",
+      "type": "expected",
+      "title": "Expected outcomes (client detection)",
+      "items": [
+        "The panel lists at least the clients installed on this machine (e.g. Claude Code, Cursor)",
+        "Each detected client shows its skill install path (from skills/client-paths.json)",
+        "Each detected client shows the MCP server command it will use (node mcp-server/dist/index.js with UNITY_PROJECT_PATH env)",
+        "Clients not installed are listed but greyed out / marked 'not detected'"
+      ]
+    },
+    {
+      "id": "prompt-configure",
+      "type": "agent_prompt",
+      "title": "Configure one client (Claude Code) and verify the config file",
+      "tool": "unity_open_mcp_generate_skill",
+      "payload": { "write": true, "clients": ["claude"] }
+    },
+    {
+      "id": "expected-config-written",
+      "type": "expected",
+      "title": "Expected outcomes (config + skill written)",
+      "items": [
+        "generate_skill writes SKILL.md to the Claude skill directory (from skills/client-paths.json)",
+        "The MCP server config is written to the Claude config file (e.g. ~/.claude/claude_desktop_config.json or the project .mcp.json)",
+        "The config entry uses the correct command (node), the correct server path (mcp-server/dist/index.js), and sets UNITY_PROJECT_PATH to the project's absolute path",
+        "The config entry includes the bridge port env var OR relies on instance discovery (no hardcoded wrong port)"
+      ]
+    },
+    {
+      "id": "prompt-verify-client-list",
+      "type": "agent_prompt",
+      "title": "Verify the manifest covers the expected client set",
+      "tool": "unity_open_mcp_script_read",
+      "payload": { "file_path": "skills/client-paths.json", "max_lines": 80 }
+    },
+    {
+      "id": "expected-manifest",
+      "type": "expected",
+      "title": "Expected outcomes (manifest coverage)",
+      "items": [
+        "client-paths.json lists ≥13 skill-target clients (the full supported set)",
+        "The mcpClientMapping section covers ≥14 agent variants (the expanded McpClientId enum)",
+        "Each client entry has a skillInstallPath (or skill directory) + an mcpConfigPath",
+        "No client entry references an internal specs/ path or milestone ID"
+      ]
+    },
+    {
+      "id": "cleanup",
+      "type": "setup",
+      "title": "Remove the generated skill (config files are left for the operator to inspect)",
+      "actions": [
+        { "action": "fs_delete", "paths": [".claude/skills/unity-open-mcp/SKILL.md"] }
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (generate_skill + script_read envelopes) + the Hub panel screenshot"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "cleanup": { "actions": [{ "action": "fs_delete", "paths": [".claude/skills/unity-open-mcp/SKILL.md"] }] }
+    },
+    "note": "Optional scenario. The client detection + config-write is Hub UI; the skill-write + manifest-verify is agent-driven. The skills/client-paths.json manifest landed in Plan 5 (folded into the existing manifest, not a separate hub/client-catalog.json). Covers a sample of clients — full 14+ client matrix is the Plan 5 EditMode test suite."
+  }
+}
