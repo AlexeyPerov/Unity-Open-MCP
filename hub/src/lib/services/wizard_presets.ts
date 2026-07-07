@@ -17,21 +17,11 @@
 import type { McpClientId } from "./ai_toolkit";
 import type { AiSetupWizardFormState } from "./ai_setup_wizard_draft";
 
-/** UPM ids of the Unity domain dependencies the Solo dev preset enables.
- *  Kept inline (not imported from extensions.ts) so the preset catalog has
- *  no runtime dependencies and stays pure-data + pure-function. */
-const SOLO_DEV_DOMAIN_DEPS: readonly string[] = [
-  "com.unity.ai.navigation",
-  "com.unity.inputsystem",
-  "com.unity.probuilder",
-];
-
 /** Preset identifier. `"custom"` is the skip / no-pre-fill entry. */
 export type PresetId =
   | "custom"
   | "regular-npm"
   | "contributor"
-  | "solo-dev"
   | "team-ci"
   | "secure-remote";
 
@@ -102,24 +92,6 @@ export const WIZARD_PRESETS: readonly WizardPreset[] = [
       installBridge: true,
       installVerify: true,
       selectedUnityDomainDeps: [],
-      skillEnabled: true,
-    },
-  },
-  {
-    id: "solo-dev",
-    label: "Solo dev",
-    description:
-      "Fastest path to a fully tooled local agent loop — common domain deps on, Cursor pre-selected.",
-    tooltip:
-      "MCP server: npx -y unity-open-mcp@latest. Packages: bridge + verify + NavMesh + Input System + ProBuilder. Client: Cursor. Skill: on. Localhost only, no auth.",
-    values: {
-      useLocalCheckout: false,
-      useGlobalInstall: false,
-      useLocalPackages: false,
-      installBridge: true,
-      installVerify: true,
-      selectedUnityDomainDeps: [...SOLO_DEV_DOMAIN_DEPS],
-      mcpClient: "cursor",
       skillEnabled: true,
     },
   },

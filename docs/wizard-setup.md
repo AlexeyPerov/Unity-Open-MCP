@@ -50,7 +50,6 @@ Pick a preset to pre-fill the rest of the wizard, or choose **Custom / skip** to
 |---|---|---|
 | **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@0.4.1`; bridge + verify from published sources; domain deps off; skill on |
 | **Contributor (local checkout)** | Monorepo contributors hacking on bridge / verify / MCP server | Local checkout + `file:` packages from the clone; domain deps off; skill on. Build `mcp-server/` first (see [Development setup](development-setup.md)) |
-| **Solo dev** | Fastest fully-tooled local agent loop | `npx`; bridge + verify + NavMesh + Input System + ProBuilder; **Cursor** pre-selected; skill on |
 | **Team CI** | Headless CI automation | Global npm install; **Manual / CLI snippet** client; skill skipped; configure token auth on the bridge for CI |
 | **Secure / remote** | Non-localhost bridge access with restricted mutations | Published sources; skill on. Token auth, remote bind, and restricted tool groups are bridge-side controls — configure them from the bridge window after onboarding |
 | **Custom / skip** | Anyone who wants the wizard's built-in defaults | No pre-fills — identical to the manual flow |

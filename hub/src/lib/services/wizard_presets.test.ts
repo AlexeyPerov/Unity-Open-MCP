@@ -13,13 +13,12 @@ import {
 const EXPECTED_IDS: PresetId[] = [
   "regular-npm",
   "contributor",
-  "solo-dev",
   "team-ci",
   "secure-remote",
   "custom",
 ];
 
-test("catalog ships exactly the six documented presets in display order", () => {
+test("catalog ships exactly the five documented presets in display order", () => {
   assert.deepEqual(
     WIZARD_PRESETS.map((p) => p.id),
     EXPECTED_IDS,
@@ -41,7 +40,7 @@ test("every preset has a non-empty label, description, and tooltip", () => {
 });
 
 test("presetById returns the matching preset", () => {
-  assert.equal(presetById("solo-dev").id, "solo-dev");
+  assert.equal(presetById("contributor").id, "contributor");
   assert.equal(presetById("team-ci").id, "team-ci");
 });
 
@@ -77,26 +76,6 @@ test("contributor pre-fills local checkout + local packages", () => {
   assert.equal(form.installBridge, true);
   assert.equal(form.installVerify, true);
   assert.deepEqual(form.selectedUnityDomainDeps, []);
-});
-
-test("solo-dev pre-fills the three common domain deps + Cursor", () => {
-  const form = applyPresetToForm(presetById("solo-dev"));
-  assert.equal(form.useLocalCheckout, false);
-  assert.equal(form.installBridge, true);
-  assert.equal(form.installVerify, true);
-  assert.deepEqual(form.selectedUnityDomainDeps, [
-    "com.unity.ai.navigation",
-    "com.unity.inputsystem",
-    "com.unity.probuilder",
-  ]);
-  assert.equal(form.mcpClient, "cursor");
-});
-
-test("solo-dev selectedUnityDomainDeps is a fresh array per call (no shared ref)", () => {
-  const a = applyPresetToForm(presetById("solo-dev")).selectedUnityDomainDeps;
-  const b = applyPresetToForm(presetById("solo-dev")).selectedUnityDomainDeps;
-  assert.notEqual(a, b);
-  assert.deepEqual(a, b);
 });
 
 test("team-ci pre-fills global install + manual client", () => {

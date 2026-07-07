@@ -193,7 +193,7 @@ fn migrate_replace_only(
         }
 
         match (srcs.and_then(|v| v.first()), dsts.and_then(|v| v.first())) {
-            (Some((src_rel, src_abs)), Some((dst_rel, dst_abs))) => {
+            (Some((_src_rel, src_abs)), Some((dst_rel, dst_abs))) => {
                 // 1:1 basename match — overwrite the package file.
                 if skip_meta && basename.ends_with(".meta") {
                     *skipped_meta += 1;

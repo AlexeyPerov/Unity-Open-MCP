@@ -5,7 +5,7 @@
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.alexeyperov.unity-open-mcp-verify": "0.1.0"
+        "com.alexeyperov.unity-open-mcp-verify": "0.4.1"
       }
     },
     "com.alexeyperov.unity-open-mcp-verify": {

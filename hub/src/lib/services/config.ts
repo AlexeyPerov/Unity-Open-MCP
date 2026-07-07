@@ -1787,6 +1787,10 @@ export interface SkillCopyTarget {
   relativePath: string;
   sourcePath: string | null;
   exists: boolean;
+  /** `true` when the target exists and matches the source skill
+   *  byte-for-byte — a copy would be a no-op. Mirrors the MCP config
+   *  step's `already up to date` signal. */
+  upToDate: boolean;
 }
 
 export interface SkillCopyPlan {

@@ -1260,6 +1260,12 @@ pub struct SkillCopyTarget {
     pub source_path: Option<String>,
     /// `true` when the target file already exists on disk.
     pub exists: bool,
+    /// `true` when the target exists and its bytes match the source
+    /// skill file byte-for-byte — i.e. copying would be a no-op. The
+    /// wizard renders an "already up to date" tag in that case, mirroring
+    /// the MCP config step. Always `false` when the target or source is
+    /// missing.
+    pub up_to_date: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1397,13 +1403,31 @@ fn build_skill_target(
     source: Option<&Path>,
 ) -> SkillCopyTarget {
     let target_path = project.join(relative);
+    let exists = target_path.exists();
+    // "Up to date" mirrors the MCP config step: a copy would be a no-op
+    // when the target exists and matches the source byte-for-byte. We
+    // read both files here (cheap — the skill file is a single small
+    // markdown doc) so the plan answers the question without a separate
+    // command. Missing source or read errors leave it `false`.
+    let up_to_date = match (exists, source) {
+        (true, Some(src)) => matches_opt(src, &target_path).unwrap_or(false),
+        _ => false,
+    };
     SkillCopyTarget {
         kind: kind.to_string(),
         target_path: target_path.to_string_lossy().into_owned(),
         relative_path: relative.to_string(),
         source_path: source.map(|p| p.to_string_lossy().into_owned()),
-        exists: target_path.exists(),
+        exists,
+        up_to_date,
     }
+}
+
+/// Returns `true` when `a` and `b` both exist and have identical bytes.
+/// Any IO error (missing file, permission) collapses to `None` so the
+/// caller can treat it as "not up to date" rather than failing the plan.
+fn matches_opt(a: &Path, b: &Path) -> Option<bool> {
+    Some(std::fs::read(a).ok()?.eq(&std::fs::read(b).ok()?))
 }
 
 fn resolve_source_skill(

@@ -1,6 +1,7 @@
 import {
   loadProjects,
   saveProjects,
+  type AiSetupWizardDraft,
   type ProjectEntry,
   type ProjectsFile,
   type Settings,
@@ -93,6 +94,29 @@ class ProjectsStore {
     );
     this.projects = next;
     await this.persist(next);
+  }
+
+  /**
+   * Update only the `aiSetupWizard` draft field on a single project,
+   * without replacing the `projects` array identity.
+   *
+   * The wizard debounces its draft-save on every form field change; routing
+   * that through `update()` reassigns `this.projects` (a new array), which
+   * re-runs every `$derived`/row in ProjectsTab and re-passes a fresh
+   * `project` prop to the wizard mid-interaction — destabilizing its event
+   * bindings (clicks stop having an effect right after preset selection).
+   * No grid row or derived consumes `aiSetupWizard`, so mutating the field
+   * in place persists the draft for crash-recovery without churning the
+   * rest of the UI. `undefined` clears the field (omit from `projects.json`).
+   */
+  async updateDraftOnly(
+    id: string,
+    draft: AiSetupWizardDraft | undefined,
+  ): Promise<void> {
+    const entry = this.projects.find((p) => p.id === id);
+    if (!entry) return;
+    entry.aiSetupWizard = draft;
+    await this.persist();
   }
 
   add(entry: ProjectEntry): void {

@@ -328,13 +328,17 @@
 
   let { project, onClose }: Props = $props();
 
-  // Stable for the wizard session. Parent re-renders from draft persist pass
-  // a fresh `project` object each time; reading `project.path` inside `$effect`
-  // would restart every async planner on each save.
+  // Stable for the wizard session. The parent re-renders and may pass a
+  // fresh `project` object when the projects store updates; reading
+  // `wizardProjectPath` / `wizardProjectName` inside `$effect` or template would
+  // restart every async planner and destabilize event bindings on each
+  // save. Capture the session-stable fields once.
   // svelte-ignore state_referenced_locally
   const wizardProjectId = project.id;
   // svelte-ignore state_referenced_locally
   const wizardProjectPath = project.path;
+  // svelte-ignore state_referenced_locally
+  const wizardProjectName = project.name;
 
   let wizardClosed = $state(false);
   let detectionGeneration = 0;
@@ -501,8 +505,14 @@
   const DRAFT_PERSIST_DEBOUNCE_MS = 400;
 
   let draftPersistReady = $state(false);
-  let lastPersistedDraftJson = $state("");
-  let draftPersistTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+  // Plain (non-reactive) bookkeeping: these drive the debounced draft
+  // persist dedup and are never rendered or read by any `$derived`.
+  // Keeping them out of the reactive graph avoids re-running the
+  // persistence `$effect` on every save (the effect reads
+  // `lastPersistedDraftJson` to dedup; if it were `$state`, each persist
+  // would re-trigger the effect, churning the component).
+  let lastPersistedDraftJson = "";
+  let draftPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
   function draftSnapshot(): AiSetupWizardDraftSnapshot {
     return {
@@ -569,13 +579,15 @@
     const stored = projectsStore.find(wizardProjectId);
     if (!stored) return;
 
-    const updated = {
-      ...stored,
-      aiSetupWizard: isEmptyDraft(draft) ? undefined : draft,
-    };
-
+    // Route through `updateDraftOnly` (in-place field mutation) rather than
+    // `update()` (full array replacement). The draft is only consumed on
+    // next mount via `hydrateFromProject`; replacing the whole `projects`
+    // array on every debounced save re-renders the grid and re-passes a
+    // fresh `project` prop to this wizard, which destabilizes its event
+    // bindings mid-interaction.
+    const next = isEmptyDraft(draft) ? undefined : draft;
     try {
-      await projectsStore.update(updated);
+      await projectsStore.updateDraftOnly(wizardProjectId, next);
       lastPersistedDraftJson = serialized;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -605,7 +617,7 @@
     if (!stored) return;
     if (stored.aiSetupWizard) {
       try {
-        await projectsStore.update({ ...stored, aiSetupWizard: undefined });
+        await projectsStore.updateDraftOnly(wizardProjectId, undefined);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         S.appendErrorLog(`clear AI Setup wizard draft failed: ${msg}`);
@@ -756,7 +768,7 @@
     // Auto-skip the optional Agent skill step for presets that disable it.
     if (next === "step4b" && shouldSkipSkillStep()) {
       S.appendDrawerLog(
-        `AI Setup: auto-skipped Agent skill step for ${project.name} (Team CI preset)`,
+        `AI Setup: auto-skipped Agent skill step for ${wizardProjectName} (Team CI preset)`,
       );
       const after = STEP_ORDER.indexOf("step5");
       if (after > i) next = STEP_ORDER[after];
@@ -797,7 +809,7 @@
     }
     if (patch.mcpClient !== undefined) mcpClient = patch.mcpClient;
     S.appendDrawerLog(
-      `AI Setup: applied "${preset.label}" preset for ${project.name}`,
+      `AI Setup: applied "${preset.label}" preset for ${wizardProjectName}`,
     );
   }
 
@@ -1517,8 +1529,8 @@
         : "MCP config already up to date — no write needed";
       S.appendDrawerLog(
         result.wouldWrite
-          ? `AI Setup: wrote MCP config to ${result.targetPath} for ${project.name}`
-          : `AI Setup: MCP config already up to date for ${project.name}`
+          ? `AI Setup: wrote MCP config to ${result.targetPath} for ${wizardProjectName}`
+          : `AI Setup: MCP config already up to date for ${wizardProjectName}`
       );
       // Refresh Step 1 detection so the Done screen reflects
       // the freshly-merged MCP heuristic flag.
@@ -1534,17 +1546,27 @@
     }
   }
 
+  // Whether any target differs from its source — i.e. a copy would
+  // actually change bytes. Targets that already match the source are
+  // treated as "already up to date" and never need overwrite confirmation.
+  function skillPlanHasDiffering(): boolean {
+    return skillPlan?.targets.some((t) => t.exists && !t.upToDate) ?? false;
+  }
+
   async function copySkillFilesClick() {
     if (skillCopying) return;
     const root = toolkitRoot;
     const projectPath = wizardProjectPath;
     if (!projectPath || !root || !skillPlan) return;
-    const hasExisting = skillPlan.targets.some((t) => t.exists);
-    if (hasExisting && !skillOverwriteAck) {
+    const needsOverwrite = skillPlanHasDiffering();
+    // Only files that differ from the source need overwrite confirmation.
+    // Targets that already match are "already up to date" and the writer
+    // skips them — no ack required.
+    if (needsOverwrite && !skillOverwriteAck) {
       skillError = {
         kind: "overwriteNotConfirmed",
         message:
-          "One or more target files already exist. Check the overwrite box to replace them.",
+          "One or more target files already exist and differ from the source. Check the overwrite box to replace them.",
       };
       return;
     }
@@ -1559,7 +1581,7 @@
       const result = await copySkillFiles(params, skillOverwriteAck);
       skillResult = result;
       S.appendDrawerLog(
-        `AI Setup: copied ${result.copied.length} skill file(s), skipped ${result.skipped.length} for ${project.name}`
+        `AI Setup: copied ${result.copied.length} skill file(s), skipped ${result.skipped.length} for ${wizardProjectName}`
       );
     } catch (e) {
       skillError = toSkillCopyError(e);
@@ -1642,7 +1664,7 @@
       const result = await generateProjectSkill(params);
       skillGenResult = result;
       S.appendDrawerLog(
-        `AI Setup: generated project skill for ${project.name} — ${result.targets.length} target(s), Unity ${result.unityVersion}`
+        `AI Setup: generated project skill for ${wizardProjectName} — ${result.targets.length} target(s), Unity ${result.unityVersion}`
       );
     } catch (e) {
       skillGenError = toGenerateSkillError(e);
@@ -1673,7 +1695,7 @@
       });
       mergeResult = result;
       S.appendDrawerLog(
-        `AI Setup: ${summarizeChanges(result.changes)} in ${project.name}`
+        `AI Setup: ${summarizeChanges(result.changes)} in ${wizardProjectName}`
       );
       // Refresh detection so the Done screen reflects the
       // freshly-installed packages.
@@ -1746,7 +1768,7 @@
         compile: "running",
       };
       S.appendDrawerLog(
-        `AI Setup: launched Unity (pid ${result.pid}) with bridge port ${result.bridgePort} for ${project.name}`,
+        `AI Setup: launched Unity (pid ${result.pid}) with bridge port ${result.bridgePort} for ${wizardProjectName}`,
       );
       // Phase 2 — poll the bridge `/ping` endpoint every
       // STEP5_POLL_INTERVAL_MS until the bridge responds 200
@@ -1861,7 +1883,7 @@
     if (!step5Running) return;
     step5DeadlineAt = Date.now();
     S.appendDrawerLog(
-      `AI Setup: user stopped Step 5 verification for ${project.name}`,
+      `AI Setup: user stopped Step 5 verification for ${wizardProjectName}`,
     );
   }
 
@@ -1870,7 +1892,7 @@
     resetStep5State();
     step5BridgeStatus = { kind: "notChecked" };
     S.appendDrawerLog(
-      `AI Setup: skipped Step 5 verify for ${project.name} — wizard marked incomplete on Done`,
+      `AI Setup: skipped Step 5 verify for ${wizardProjectName} — wizard marked incomplete on Done`,
     );
   }
 
@@ -1878,7 +1900,7 @@
   // decision so the Done-screen summary is consistent.
   function skipSkillStep() {
     S.appendDrawerLog(
-      `AI Setup: skipped Agent skill copy for ${project.name} (${mcpClientLabel(mcpClient)})`,
+      `AI Setup: skipped Agent skill copy for ${wizardProjectName} (${mcpClientLabel(mcpClient)})`,
     );
     nextStep();
   }
@@ -1940,13 +1962,13 @@
   }
 
   function openProjectFolder() {
-    if (!project.path) return;
-    void openPath(project.path);
+    if (!wizardProjectPath) return;
+    void openPath(wizardProjectPath);
   }
 
   function revealProjectFolder() {
-    if (!project.path) return;
-    void revealItemInDir(project.path);
+    if (!wizardProjectPath) return;
+    void revealItemInDir(wizardProjectPath);
   }
 
   async function openMcpConfigTarget() {
@@ -2130,32 +2152,32 @@
   }
 
   function openInCursor() {
-    if (!project.path) return;
+    if (!wizardProjectPath) return;
     // The Hub doesn't track a Cursor install path; the
     // `code`-style CLI behavior on macOS / Linux is to launch
     // Cursor with the project folder. We use the OS opener so
     // the platform decides how to handle the .app / .exe
     // association — same approach as the regular project
     // toolbar's "Open" action.
-    void openPath(project.path);
+    void openPath(wizardProjectPath);
   }
 
   function openInOpencode() {
-    if (!project.path) return;
+    if (!wizardProjectPath) return;
     // OpenCode's TUI is CLI-first; opening the project folder
     // via the OS opener is the lowest-friction path that does
     // not require us to ship an OpenCode install detection
     // step in M4. A future M7+ task can wire `opencode <path>`
     // once we have an OpenCode install probe.
-    void openPath(project.path);
+    void openPath(wizardProjectPath);
   }
 
   let canOpenInCursor = $derived(
-    mcpClient === "cursor" && Boolean(project.path),
+    mcpClient === "cursor" && Boolean(wizardProjectPath),
   );
   let canOpenInOpencode = $derived(
     (mcpClient === "opencode-global" || mcpClient === "opencode-project") &&
-      Boolean(project.path),
+      Boolean(wizardProjectPath),
   );
 
   // Re-render the wizard's progress segments. We highlight the
@@ -2413,8 +2435,8 @@
         <h2 id="wiz-title" class="wiz-title">
           {stepLabel(currentStep)}
         </h2>
-        <span class="wiz-subtitle" title={project.path}>
-          {project.name} · {project.path}
+        <span class="wiz-subtitle" title={wizardProjectPath}>
+          {wizardProjectName} · {wizardProjectPath}
         </span>
       </div>
       <button
@@ -2486,7 +2508,7 @@
             {#each WIZARD_PRESETS as preset (preset.id)}
               <button
                 type="button"
-                class="wiz-preset{selectedPresetId === preset.id ? ' wiz-preset-selected' : ''}{preset.recommended ? ' wiz-preset-recommended' : ''}"
+                class="wiz-preset{selectedPresetId === preset.id ? ' wiz-preset-selected' : ''}"
                 role="radio"
                 aria-checked={selectedPresetId === preset.id}
                 title={preset.tooltip}
@@ -2596,7 +2618,7 @@
               <dl class="wiz-summary">
                 <div>
                   <dt>Project name</dt>
-                  <dd>{detection.name || project.name}</dd>
+                  <dd>{detection.name || wizardProjectName}</dd>
                 </div>
                 <div>
                   <dt>Path</dt>
@@ -3178,7 +3200,7 @@
                 <input type="checkbox" bind:checked={cursorProjectScope} />
                 <span>
                   <strong>Use project-scoped config</strong> —
-                  <small>write to <code>{project.path}/.cursor/mcp.json</code> instead of <code>~/.cursor/mcp.json</code>.</small>
+                  <small>write to <code>{wizardProjectPath}/.cursor/mcp.json</code> instead of <code>~/.cursor/mcp.json</code>.</small>
                 </span>
               </label>
             </div>
@@ -3359,18 +3381,25 @@
             {:else}
               <ul class="wiz-fingerprints" aria-label="Agent skill copy targets">
                 {#each skillPlan.targets as target (target.targetPath)}
-                  {@const tone = target.exists ? "warn" : "ok"}
+                  {@const needsOverwrite = target.exists && !target.upToDate}
+                  {@const tone = needsOverwrite ? "warn" : "ok"}
                   <li class="wiz-fp wiz-fp-{tone}">
                     <span class="wiz-fp-name">
                       <code>{target.relativePath}</code>
                     </span>
                     <span class="wiz-fp-status">
-                      {#if target.exists}exists — will be overwritten only with confirmation{:else}will create{/if}
+                      {#if target.upToDate}
+                        already up to date — no write needed
+                      {:else if target.exists}
+                        exists — will be overwritten only with confirmation
+                      {:else}
+                        will create
+                      {/if}
                     </span>
                   </li>
                 {/each}
               </ul>
-              {#if skillPlan.targets.some((t) => t.exists)}
+              {#if skillPlan.targets.some((t) => t.exists && !t.upToDate)}
                 <label class="wiz-toggle wiz-toggle-confirm">
                   <input type="checkbox" bind:checked={skillOverwriteAck} />
                   <span>
@@ -3378,6 +3407,15 @@
                     <small>The targets above already exist; the wizard will back them up to <code>*.bak</code> and replace them only when this is checked.</small>
                   </span>
                 </label>
+              {/if}
+              {#if skillPlan.targets.length > 0 && skillPlan.targets.every((t) => !t.exists || t.upToDate) && skillPlan.targets.some((t) => t.upToDate)}
+                <div class="wiz-block wiz-block-ok" role="status">
+                  <strong>Already up to date.</strong>
+                  The existing skill file(s) already match the toolkit
+                  template — no copy or backup is needed. Use
+                  <strong>Generate project skill</strong> to produce a
+                  project-specific file instead.
+                </div>
               {/if}
             {/if}
           {/if}
@@ -3570,7 +3608,7 @@
             <div>
               <dt>Project</dt>
               <dd>
-                {detection?.name ?? project.name} · {detection?.path ?? project.path}
+                {detection?.name ?? wizardProjectName} · {detection?.path ?? wizardProjectPath}
               </dd>
             </div>
             <div>
@@ -3658,10 +3696,10 @@
           <div class="wiz-field">
             <span class="wiz-label">Links</span>
             <div class="wiz-actions-row">
-              <Button variant="secondary" onclick={openProjectFolder} disabled={!project.path}>
+              <Button variant="secondary" onclick={openProjectFolder} disabled={!wizardProjectPath}>
                 Open project folder
               </Button>
-              <Button variant="secondary" onclick={revealProjectFolder} disabled={!project.path}>
+              <Button variant="secondary" onclick={revealProjectFolder} disabled={!wizardProjectPath}>
                 Reveal in Finder / Explorer
               </Button>
               <Button
@@ -4700,10 +4738,9 @@
     background: rgba(92, 124, 250, 0.1);
   }
 
-  .wiz-preset-recommended {
-    border-color: var(--hub-success);
-  }
-
+  /* The "Recommended" badge is the only marker on the recommended card —
+     no green border highlight, since a tinted border made it ambiguous
+     which preset is actually selected (selection uses the accent border). */
   .wiz-preset-head {
     display: flex;
     align-items: center;
