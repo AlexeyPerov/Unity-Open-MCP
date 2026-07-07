@@ -8,7 +8,7 @@ namespace UnityOpenMcpBridge
     {
         public static string ProjectPath => _projectPath;
         public static string UnityVersion => _unityVersion;
-        public static string BridgeVersion => "0.4.1";
+        public static string BridgeVersion => "0.5.0";
         public static bool IsCompiling => _isCompiling;
         public static bool IsPlaying => _isPlaying;
         public static string Mode => "live";

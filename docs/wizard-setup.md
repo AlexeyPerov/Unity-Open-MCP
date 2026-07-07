@@ -48,7 +48,7 @@ Pick a preset to pre-fill the rest of the wizard, or choose **Custom / skip** to
 
 | Preset | Best for | Pre-fills |
 |---|---|---|
-| **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@0.4.1`; bridge + verify from published sources; domain deps off; skill on |
+| **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@0.5.0`; bridge + verify from published sources; domain deps off; skill on |
 | **Contributor (local checkout)** | Monorepo contributors hacking on bridge / verify / MCP server | Local checkout + `file:` packages from the clone; domain deps off; skill on. Build `mcp-server/` first (see [Development setup](development-setup.md)) |
 | **Team CI** | Headless CI automation | Global npm install; **Manual / CLI snippet** client; skill skipped; configure token auth on the bridge for CI |
 | **Secure / remote** | Non-localhost bridge access with restricted mutations | Published sources; skill on. Token auth, remote bind, and restricted tool groups are bridge-side controls — configure them from the bridge window after onboarding |
@@ -75,9 +75,9 @@ This step is the environment gate: the **Next** button is disabled until the pro
 
 Choose how the `unity-open-mcp` server is launched. Not sure? Leave it on the
 default — `npx` downloads and runs the server at the pinned version
-(`unity-open-mcp@0.4.1`), which matches the bridge and verify packages.
+(`unity-open-mcp@0.5.0`), which matches the bridge and verify packages.
 
-- default: `npx -y unity-open-mcp@0.4.1` ← recommended for most users
+- default: `npx -y unity-open-mcp@0.5.0` ← recommended for most users
 - optional: global install (`npm i -g unity-open-mcp`) — installs once, then the client launches it directly.
 - optional: local checkout path (only if you cloned the `unity-open-mcp` monorepo to hack on it).
 
