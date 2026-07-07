@@ -697,11 +697,17 @@ pub fn clear_ai_setup_at(project_path: &str, home: &Path) -> ClearAiSetupResult 
 
 /// Tauri command. Best-effort across all artifacts; per-target failures
 /// are collected into `errors` rather than aborting the whole pass.
+///
+/// Runs on the blocking pool (via `spawn_blocking`) so the manifest
+/// rewrite + per-config-file merges (each an atomic write + `fsync`)
+/// cannot stall the WebView main thread on a slow/cloud-synced volume.
 #[tauri::command]
-pub fn clear_ai_setup(project_path: String) -> Result<ClearAiSetupResult, String> {
+pub async fn clear_ai_setup(project_path: String) -> Result<ClearAiSetupResult, String> {
     let home = dirs::home_dir()
         .ok_or_else(|| "Cannot resolve the home directory.".to_string())?;
-    Ok(clear_ai_setup_at(&project_path, &home))
+    tauri::async_runtime::spawn_blocking(move || clear_ai_setup_at(&project_path, &home))
+        .await
+        .map_err(|e| format!("clear_ai_setup task failed: {e}"))
 }
 
 #[cfg(test)]

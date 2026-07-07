@@ -128,9 +128,25 @@ pub fn parse_override(raw: &str) -> Option<u16> {
 /// uses the result to launch Unity + poll `/ping`. Keeps the hash formula
 /// in one place (Rust) and gives the UI a single source of truth — no TS
 /// copy of the formula.
+///
+/// Runs on the blocking pool for consistency with the rest of the wizard
+/// command set (sync handlers occupy the WebView main thread). The SHA-256
+/// computation is fast and CPU-bound, so this never hangs in practice —
+/// the async wrapper is about keeping the whole wizard surface off the
+/// main thread, not about a known slow path here.
 #[tauri::command]
-pub fn resolve_bridge_port(project_path: String, override_port: Option<u16>) -> u16 {
-    resolve_port(&project_path, override_port)
+pub async fn resolve_bridge_port(
+    project_path: String,
+    override_port: Option<u16>,
+) -> u16 {
+    tauri::async_runtime::spawn_blocking(move || resolve_port(&project_path, override_port))
+        .await
+        .unwrap_or_else(|_| {
+            // JoinError (pool panic) — effectively unreachable. Fall back
+            // to the range start so the wizard's port field renders a sane
+            // placeholder; the real value is recomputed on any launch.
+            PORT_RANGE_START as u16
+        })
 }
 
 #[cfg(test)]

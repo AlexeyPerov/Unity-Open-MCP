@@ -52,8 +52,17 @@ pub async fn load_settings(state: State<'_, AppState>) -> Result<Settings, Strin
 }
 
 #[tauri::command]
-pub fn save_settings(state: State<AppState>, settings: Settings) -> Result<(), String> {
-    persistence::save_settings(&settings).map_err(|e| e.to_string())?;
+pub async fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
+    // Mirror `load_settings`: offload the disk write (atomic tmp + `fsync`
+    // + rename) to the blocking pool so a slow/cloud-synced config volume
+    // cannot stall the WebView main thread. The Mutex clone-update stays
+    // on the async task. `spawn_blocking` needs an owned `Settings`; the
+    // caller's value is cloned for the disk write and moved into the guard.
+    let disk = settings.clone();
+    tauri::async_runtime::spawn_blocking(move || persistence::save_settings(&disk))
+        .await
+        .map_err(|e| format!("save_settings task failed: {e}"))?
+        .map_err(|e| e.to_string())?;
     let mut guard = state.settings.lock().unwrap();
     *guard = settings;
     Ok(())
@@ -83,8 +92,15 @@ pub async fn load_projects(state: State<'_, AppState>) -> Result<ProjectsFile, S
 }
 
 #[tauri::command]
-pub fn save_projects(state: State<AppState>, projects: ProjectsFile) -> Result<(), String> {
-    persistence::save_projects(&projects).map_err(|e| e.to_string())?;
+pub async fn save_projects(state: State<'_, AppState>, projects: ProjectsFile) -> Result<(), String> {
+    // Mirror `save_settings` / `load_projects`: the atomic write (tmp +
+    // `fsync` + rename of projects.json) runs on the blocking pool so the
+    // wizard's draft-persistence path cannot freeze the UI on a slow disk.
+    let disk = projects.clone();
+    tauri::async_runtime::spawn_blocking(move || persistence::save_projects(&disk))
+        .await
+        .map_err(|e| format!("save_projects task failed: {e}"))?
+        .map_err(|e| e.to_string())?;
     let mut guard = state.projects.lock().unwrap();
     *guard = projects;
     Ok(())

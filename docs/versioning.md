@@ -156,9 +156,12 @@ The generated targets, mapped to their sources:
 |---|---|---|
 | `mcp-server/package.json` | `version` | read at runtime by the server |
 | `packages/bridge/package.json` | `version` | what Unity Package Manager shows |
+| `packages/bridge/package.json` | `dependencies[verify]` | bridge depends on verify at the same version so a git-URL install of both resolves |
 | `packages/verify/package.json` | `version` | what Unity Package Manager shows |
 | `packages/bridge/Editor/Bridge/BridgeSession.cs` | `BridgeVersion` constant | reported by `/ping` |
 | `packages/bridge/Editor/Bridge/BridgeHttpServer.cs` | `/ping` 503 fallback literal | pre-init body, before `BridgeSession` is ready |
+| `docs/manual-setup.md` | `#bridge-v` / `#verify-v` git-URL pins | UPM install snippets reference the version tags; kept current by the sync script |
+| `docs/manual-setup.md`, `docs/wizard-setup.md`, `mcp-server/README.md`, `docs/api/mcp-tools.md`, `docs/ci/**/*.yml` | `unity-open-mcp@<ver>` npm pins | the server shares the trio version, so every `npx … @<ver>` snippet is generated from `version.json` |
 
 **From `hub/version.json` →**
 
@@ -168,7 +171,7 @@ The generated targets, mapped to their sources:
 | `hub/src-tauri/Cargo.toml` | `version` |
 | `hub/package.json` | `version` |
 
-The deprecated extension packages under `packages/extensions/*` are intentionally **not** synced — they're legacy pins kept at `0.1.0` for compatibility, and new domain tools live inside the bridge. The root `package.json` is a private marker (`0.0.0`) and is also not touched.
+The deprecated extension packages under `packages/extensions/*` are intentionally **not** synced — they're legacy pins kept at `0.1.0` for compatibility, and new domain tools live inside the bridge. (They install via `file:` from a local checkout, never via the public git URL, so the stale pin doesn't block resolution.) The root `package.json` is a private marker (`0.0.0`) and is also not touched.
 
 ## Bumping the shared version
 
@@ -258,7 +261,7 @@ node scripts/sync-version.mjs --check --hub
 | `hub-v*` (e.g. `hub-v0.3.0`) | The Unity Hub Pro desktop app | `hub-release.yml` | GitHub Release (installers) |
 | `bridge-v*` / `verify-v*` | (Convention) git-URL install pins for the Unity packages | — (no workflow) | n/a — users pin in their manifest |
 
-The `bridge-v*`/`verify-v*` tags have no workflow because the Unity packages aren't published to a registry; they exist purely so users can pin a known-good version in their `Packages/manifest.json` git URL. If you cut a trio release as `v0.5.2`, also tag the same commit `bridge-v0.5.2` and `verify-v0.5.2` so the git-URL pins resolve.
+The `bridge-v*`/`verify-v*` tags have no workflow because the Unity packages aren't published to a registry; they exist purely so users can pin a known-good version in their `Packages/manifest.json` git URL. A trio release needs **three tags on the same commit**: `v0.5.2` (publishes the npm server, which the `unity-open-mcp@<ver>` pins in the setup docs resolve to), plus `bridge-v0.5.2` and `verify-v0.5.2` (which the UPM git-URL pins resolve to). The sync script's `bump`/`set` output prints the exact `git tag … && git push …` line for all three. The setup docs reference these tags, and the sync script keeps them current with `version.json`, so a missing tag means the documented install fails to resolve.
 
 ## Pre-1.0 semver convention
 

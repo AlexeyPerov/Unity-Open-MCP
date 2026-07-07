@@ -66,6 +66,29 @@ function setJsonVersion(body, v) {
   );
 }
 
+// Rewrites a single entry in a package.json `dependencies` object to the new
+// version. Used for inter-package pins that must track the trio version — e.g.
+// the bridge depends on verify at the same version so a git-URL install of both
+// resolves (Unity reads "0.4.1" as >=0.4.1 <0.5.0 for 0.x, so an exact pin is
+// the only form that satisfies when both are installed via git URL).
+/** @param {string} body @param {string} dep @param {string} v */
+function setJsonDependencyVersion(body, dep, v) {
+  const re = new RegExp(`("${dep}"\\s*:\\s*")[^"]*(")`);
+  return body.replace(re, (_, pre, post) => `${pre}${v}${post}`);
+}
+
+// Rewrites every `unity-open-mcp@<X.Y.Z>` pin in a doc to the new version.
+// Only matches a numeric suffix — `@latest` and the bare package name
+// (`npm i -g unity-open-mcp`) are left untouched, so the script manages only
+// docs that have already been pinned and never auto-converts @latest.
+/** @param {string} body @param {string} v */
+function replaceNpmPin(body, v) {
+  return body.replace(
+    /(unity-open-mcp@)\d+\.\d+\.\d+/g,
+    (_, pre) => `${pre}${v}`,
+  );
+}
+
 // Bridge C# constant — kept in sync with packages/bridge/package.json so /ping
 // reports the package version rather than a hand-edited literal.
 const TRIO_TARGETS = [
@@ -80,6 +103,17 @@ const TRIO_TARGETS = [
     kind: "json",
     description: "bridge Unity package.json",
     replace: (b, v) => setJsonVersion(b, v),
+  },
+  {
+    file: "packages/bridge/package.json",
+    kind: "json-dep",
+    description: "bridge → verify dependency pin (must match trio for git-URL install)",
+    replace: (b, v) =>
+      setJsonDependencyVersion(
+        b,
+        "com.alexeyperov.unity-open-mcp-verify",
+        v,
+      ),
   },
   {
     file: "packages/verify/package.json",
@@ -106,6 +140,55 @@ const TRIO_TARGETS = [
         /(bridgeVersion\\":\\")[^\\]*(\\")/,
         (_, pre, post) => `${pre}${v}${post}`,
       ),
+  },
+  {
+    file: "docs/manual-setup.md",
+    kind: "md-git",
+    description: "manual-setup.md git-URL install pins (#bridge-v / #verify-v)",
+    replace: (b, v) =>
+      b
+        .replace(/(#bridge-v)\d+\.\d+\.\d+/g, `$1${v}`)
+        .replace(/(#verify-v)\d+\.\d+\.\d+/g, `$1${v}`),
+  },
+  // npm package pins — the unity-open-mcp server shares the trio version, so
+  // the @<version> suffix in every install snippet is generated from
+  // version.json too. Add a target here for any doc that shows a pinned
+  // `npx -y unity-open-mcp@<ver>` or `npx unity-open-mcp@<ver>` invocation.
+  {
+    file: "docs/manual-setup.md",
+    kind: "md-npm",
+    description: "manual-setup.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/wizard-setup.md",
+    kind: "md-npm",
+    description: "wizard-setup.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "mcp-server/README.md",
+    kind: "md-npm",
+    description: "mcp-server/README.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/api/mcp-tools.md",
+    kind: "md-npm",
+    description: "docs/api/mcp-tools.md npm server pin (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/ci/github-actions/unity-verify.yml",
+    kind: "md-npm",
+    description: "GitHub Actions CI template npm pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/ci/gitlab-ci/unity-verify.yml",
+    kind: "md-npm",
+    description: "GitLab CI template npm pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
   },
 ];
 
@@ -207,6 +290,23 @@ function extractVersion(body, kind) {
   }
   if (kind === "toml") {
     const m = body.match(/^version\s*=\s*"([^"]+)"/m);
+    return m ? m[1] : undefined;
+  }
+  if (kind === "md-git") {
+    // First #bridge-v<X.Y.Z> pin in the doc (manual-setup.md git-URL examples).
+    const m = body.match(/#bridge-v(\d+\.\d+\.\d+)/);
+    return m ? m[1] : undefined;
+  }
+  if (kind === "md-npm") {
+    // First unity-open-mcp@<X.Y.Z> pin in the doc (npm install examples).
+    const m = body.match(/unity-open-mcp@(\d+\.\d+\.\d+)/);
+    return m ? m[1] : undefined;
+  }
+  if (kind === "json-dep") {
+    // The bridge → verify dependency pin (com.alexeyperov.unity-open-mcp-verify).
+    const m = body.match(
+      /"com\.alexeyperov\.unity-open-mcp-verify"\s*:\s*"([^"]+)"/,
+    );
     return m ? m[1] : undefined;
   }
   // json
@@ -314,6 +414,17 @@ if (isBump || isSet) {
   } else {
     console.log(`  git add -A && git commit -m "chore: bump to ${next}"`);
     console.log(`  git tag v${next} && git push origin v${next}`);
+    // The trio release needs three tags on the same commit: v* (triggers
+    // npm-publish.yml) plus bridge-v* / verify-v* so the UPM git-URL install
+    // pins documented in manual-setup.md resolve. See docs/versioning.md
+    // §Release channels and tag namespaces.
+    console.log(
+      `\nTags to create for this trio release (all on the same commit):`,
+    );
+    console.log(`  v${next}          — triggers npm-publish.yml (publishes the MCP server)`);
+    console.log(`  bridge-v${next}   — resolves the bridge UPM git-URL pin in manual-setup.md`);
+    console.log(`  verify-v${next}   — resolves the verify UPM git-URL pin in manual-setup.md`);
+    console.log(`\n  git tag v${next} bridge-v${next} verify-v${next} && git push origin v${next} bridge-v${next} verify-v${next}`);
   }
   process.exit(0);
 }

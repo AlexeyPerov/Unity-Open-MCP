@@ -465,9 +465,36 @@ impl ManifestError {
 /// project's manifest. The wizard Step 1 calls this on mount and
 /// the Done screen calls it again on entry so its checklist
 /// always reflects the latest on-disk state.
+///
+/// Runs on a blocking pool thread (via `spawn_blocking`) so a slow /
+/// networked / cloud-synced project volume cannot stall the WebView's
+/// main thread; sync `#[tauri::command]` handlers run on the main
+/// thread in Tauri v2, which is why this is `async`.
 #[tauri::command]
-pub fn detect_project_state(project_path: String) -> ProjectState {
-    detect_project_state_at(&PathBuf::from(&project_path))
+pub async fn detect_project_state(project_path: String) -> ProjectState {
+    let path = PathBuf::from(&project_path);
+    tauri::async_runtime::spawn_blocking(move || detect_project_state_at(&path))
+        .await
+        .unwrap_or_else(|_| ProjectState {
+            path: project_path.clone(),
+            name: PathBuf::from(&project_path)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            is_valid_unity_project: false,
+            unity_version: None,
+            meets_min_unity_version: false,
+            meets_recommended_unity_version: false,
+            manifest_present: false,
+            bridge_installed: false,
+            verify_installed: false,
+            mcp_configured: McpConfigHeuristic::default(),
+            any_skill_installed: false,
+            manifest_writable: false,
+            has_spaces_in_path: project_path.contains(' '),
+            bridge_status: BridgeStatusKind::NotChecked,
+            unity_domain_deps: Vec::new(),
+        })
 }
 
 /// Tauri command: read and parse `Packages/manifest.json`.
@@ -476,62 +503,76 @@ pub fn detect_project_state(project_path: String) -> ProjectState {
 /// parsed) a `parse_error` string the UI surfaces inline.
 ///
 /// No file is written.
+///
+/// Runs on a blocking pool thread (via `spawn_blocking`) for the same
+/// reason as [`detect_project_state`]: keep filesystem reads off the
+/// WebView's main thread.
 #[tauri::command]
-pub fn read_manifest(project_path: String) -> ManifestRead {
-    let project = PathBuf::from(&project_path);
-    let manifest_path = project.join("Packages").join("manifest.json");
-    if !manifest_path.exists() {
-        return ManifestRead {
-            project_path: project_path.clone(),
+pub async fn read_manifest(project_path: String) -> ManifestRead {
+    let path = PathBuf::from(&project_path);
+    tauri::async_runtime::spawn_blocking(move || read_manifest_inner(&path))
+        .await
+        .unwrap_or_else(|_| ManifestRead {
+            project_path,
             present: false,
             readable: false,
-            parse_error: None,
+            parse_error: Some("manifest read cancelled".to_string()),
             raw: None,
             dependencies: BTreeMap::new(),
-        };
-    }
-    let content = match fs::read_to_string(&manifest_path) {
-        Ok(s) => s,
-        Err(e) => {
-            return ManifestRead {
-                project_path: project_path.clone(),
-                present: true,
-                readable: false,
-                parse_error: Some(format!("cannot read manifest: {}", e)),
-                raw: None,
-                dependencies: BTreeMap::new(),
-            };
-        }
-    };
-    let value: Value = match serde_json::from_str(&content) {
-        Ok(v) => v,
-        Err(e) => {
-            return ManifestRead {
-                project_path: project_path.clone(),
-                present: true,
-                readable: true,
-                parse_error: Some(format!("invalid JSON: {}", e)),
-                raw: None,
-                dependencies: BTreeMap::new(),
-            };
-        }
-    };
-    let dependencies = extract_dependencies(&value);
-    ManifestRead {
-        project_path: project_path.clone(),
-        present: true,
-        readable: true,
-        parse_error: None,
-        raw: Some(value),
-        dependencies,
-    }
+        })
 }
 
 /// Tauri command: compute a merge plan without writing anything.
 /// The wizard Step 3 calls this whenever the form state changes
 /// so the diff preview is always live.
 #[tauri::command]
-pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
+pub async fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
+    // Snapshot the project_path before `params` is moved into the pool
+    // task so the JoinError fallback (pool panic — essentially never)
+    // can still build a coherent empty plan keyed to the right project.
+    let project_path = params.project_path.clone();
+    tauri::async_runtime::spawn_blocking(move || plan_manifest_merge_at(&params))
+        .await
+        .unwrap_or_else(|_| ManifestMergePlan {
+            project_path: project_path.clone(),
+            derived_urls: DerivedPackageUrls {
+                toolkit_root: String::new(),
+                git_remote: String::new(),
+                bridge: PackageInstallEntry {
+                    id: String::new(),
+                    url: String::new(),
+                    tag: String::new(),
+                    package_path: String::new(),
+                },
+                verify: PackageInstallEntry {
+                    id: String::new(),
+                    url: String::new(),
+                    tag: String::new(),
+                    package_path: String::new(),
+                },
+                unity_domain_deps: Vec::new(),
+            },
+            changes: Vec::new(),
+            proposed_dependencies: BTreeMap::new(),
+            manifest_read: ManifestRead {
+                project_path,
+                present: false,
+                readable: false,
+                parse_error: Some("plan cancelled".to_string()),
+                raw: None,
+                dependencies: BTreeMap::new(),
+            },
+            has_upgrades: false,
+            use_local_packages: false,
+            manifest_uses_local_packages: false,
+        })
+}
+
+/// Sync inner implementation. Kept separate from the `#[tauri::command]`
+/// wrapper so unit tests can call it directly without a Tauri runtime,
+/// and so the async wrapper can offload it to the blocking pool (sync
+/// command handlers run on the WebView main thread in Tauri v2).
+pub(crate) fn plan_manifest_merge_at(params: &ManifestMergeParams) -> ManifestMergePlan {
     let read = read_manifest_inner(&PathBuf::from(&params.project_path));
     let derived = derive_package_urls(
         &params.project_path,
@@ -588,7 +629,7 @@ pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
         &params.unity_domain_deps,
     );
     ManifestMergePlan {
-        project_path: params.project_path,
+        project_path: params.project_path.clone(),
         derived_urls: derived,
         changes,
         proposed_dependencies: proposed,
@@ -609,8 +650,19 @@ pub fn plan_manifest_merge(params: ManifestMergeParams) -> ManifestMergePlan {
 /// and returns a [`ManifestWriteResult`] with the new
 /// `dependencies` map.
 #[tauri::command]
-pub fn write_manifest_merge(
+pub async fn write_manifest_merge(
     params: ManifestMergeParams,
+) -> Result<ManifestWriteResult, ManifestError> {
+    tauri::async_runtime::spawn_blocking(move || write_manifest_merge_at(&params))
+        .await
+        .map_err(|e| ManifestError::new("writeFailed", format!("task failed: {e}")))?
+}
+
+/// Sync inner implementation — see [`plan_manifest_merge_at`] for why
+/// the command body is split this way. Performs the manifest read,
+/// backup, and atomic write.
+pub(crate) fn write_manifest_merge_at(
+    params: &ManifestMergeParams,
 ) -> Result<ManifestWriteResult, ManifestError> {
     let project = PathBuf::from(&params.project_path);
     let assets = project.join("Assets");
@@ -753,7 +805,7 @@ pub fn write_manifest_merge(
         // Nothing to write — return a no-op result so the UI
         // surfaces a clean "already installed" message.
         return Ok(ManifestWriteResult {
-            project_path: params.project_path,
+            project_path: params.project_path.clone(),
             manifest_path: manifest_path.to_string_lossy().into_owned(),
             backup_path,
             changes,
@@ -802,7 +854,7 @@ pub fn write_manifest_merge(
 
     let dependencies = extract_dependencies(&value);
     Ok(ManifestWriteResult {
-        project_path: params.project_path,
+        project_path: params.project_path.clone(),
         manifest_path: manifest_path.to_string_lossy().into_owned(),
         backup_path,
         changes,
@@ -1890,7 +1942,7 @@ mod tests {
                 (VERIFY_PACKAGE_ID, &derived.verify.url),
             ],
         );
-        let plan = plan_manifest_merge(ManifestMergeParams {
+        let plan = plan_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: true,
@@ -1917,7 +1969,7 @@ mod tests {
                 "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.5.0",
             )],
         );
-        let plan = plan_manifest_merge(ManifestMergeParams {
+        let plan = plan_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: true,
@@ -1950,7 +2002,7 @@ mod tests {
                 ("com.unity.ide.visualstudio", "2.0.22"),
             ],
         );
-        let result = write_manifest_merge(ManifestMergeParams {
+        let result = write_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: true,
@@ -1982,7 +2034,7 @@ mod tests {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
         // No existing manifest at all.
-        let result = write_manifest_merge(ManifestMergeParams {
+        let result = write_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: true,
@@ -2052,7 +2104,7 @@ mod tests {
     fn plan_manifest_merge_includes_selected_unity_domain_deps_in_changes() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
-        let plan = plan_manifest_merge(ManifestMergeParams {
+        let plan = plan_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: false,
@@ -2080,7 +2132,7 @@ mod tests {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
         write_manifest(dir.path(), &[(nav_dep().id.as_str(), nav_dep().version.as_str())]);
-        let plan = plan_manifest_merge(ManifestMergeParams {
+        let plan = plan_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: false,
@@ -2104,7 +2156,7 @@ mod tests {
             dir.path(),
             &[("com.unity.ide.rider", "3.0.36")],
         );
-        let result = write_manifest_merge(ManifestMergeParams {
+        let result = write_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: false,
@@ -2136,7 +2188,7 @@ mod tests {
             dir.path(),
             &[(nav_dep().id.as_str(), "1.0.0")],
         );
-        let err = write_manifest_merge(ManifestMergeParams {
+        let err = write_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: false,
@@ -2163,7 +2215,7 @@ mod tests {
                 "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.5.0",
             )],
         );
-        let err = write_manifest_merge(ManifestMergeParams {
+        let err = write_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: true,
@@ -2193,7 +2245,7 @@ mod tests {
         let path = dir.path().join("Packages").join("manifest.json");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, "{ not valid json ").unwrap();
-        let err = write_manifest_merge(ManifestMergeParams {
+        let err = write_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: true,
@@ -2211,7 +2263,7 @@ mod tests {
     #[test]
     fn write_manifest_merge_refuses_non_unity_project() {
         let dir = tempdir().unwrap();
-        let result = write_manifest_merge(ManifestMergeParams {
+        let result = write_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: true,
@@ -2229,7 +2281,7 @@ mod tests {
     fn write_manifest_merge_uses_version_pin_for_both_packages() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
-        let result = write_manifest_merge(ManifestMergeParams {
+        let result = write_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: true,
@@ -2265,7 +2317,7 @@ mod tests {
                 (VERIFY_PACKAGE_ID, &derived.verify.url),
             ],
         );
-        let result = write_manifest_merge(ManifestMergeParams {
+        let result = write_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: true,
@@ -2347,7 +2399,7 @@ mod tests {
                 (VERIFY_PACKAGE_ID, &derived.verify.url),
             ],
         );
-        let plan = plan_manifest_merge(ManifestMergeParams {
+        let plan = plan_manifest_merge_at(&ManifestMergeParams {
             project_path: project.to_string_lossy().into_owned(),
             toolkit_root: toolkit.to_string_lossy().into_owned(),
             install_bridge: true,
@@ -2375,7 +2427,7 @@ mod tests {
                 (VERIFY_PACKAGE_ID, "file:../../packages/verify"),
             ],
         );
-        let plan = plan_manifest_merge(ManifestMergeParams {
+        let plan = plan_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
             toolkit_root: "/repos/uai".to_string(),
             install_bridge: true,

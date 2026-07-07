@@ -1123,7 +1123,16 @@
   // optional override changes. Blank override → the per-project hash
   // (computed server-side in Rust); a valid override wins. Surfaced in
   // `resolvedBridgePort` so the UI and Step 5 always use the real number.
+  // Guarded to the steps that actually display/use the port (Step 4's
+  // "Auto-derived" hint and Step 5's launch) so opening the wizard on
+  // Step 0–3 does not fire an extra invoke on mount.
   $effect(() => {
+    if (
+      currentStep !== "step4" &&
+      currentStep !== "step5" &&
+      currentStep !== "done"
+    )
+      return;
     const projectPath = wizardProjectPath;
     const override = bridgePortFromString(bridgePort);
     if (!projectPath) {
@@ -1151,6 +1160,18 @@
   // with a stale path so the UI can surface a focused
   // `mcpPathInvalid` error rather than a blank preview.
   $effect(() => {
+    // The MCP config preview is only rendered on Step 4 / Step 5 / Done.
+    // Guard the effect so opening the wizard on Step 0 (preset picker)
+    // and navigating Steps 1–3 does not fire `plan_mcp_config` on mount
+    // — that command reads the MCP client config file off disk and used
+    // to run on the WebView main thread, freezing the wizard before the
+    // async conversion landed.
+    if (
+      currentStep !== "step4" &&
+      currentStep !== "step5" &&
+      currentStep !== "done"
+    )
+      return;
     const projectPath = wizardProjectPath;
     const root = toolkitRoot;
     const client = mcpClient;

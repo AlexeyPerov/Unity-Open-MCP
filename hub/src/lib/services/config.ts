@@ -1,6 +1,32 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { McpClientId } from "./ai_toolkit";
 
+/**
+ * Race a promise against a timeout so a hung Tauri backend command can
+ * never leave the UI spinning forever. The wizard's Step 1 environment
+ * checks (project detection, Node probe) run on a blocking pool thread
+ * with their own server-side deadlines; this is the client-side backstop
+ * — if a future regression reintroduces a main-thread block, the invoke
+ * rejects with a clear message and the wizard surfaces it via its
+ * existing error paths instead of freezing on "Detecting project…".
+ */
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 export interface LaunchSettings {
   mode: string;
   rememberLastSelection: boolean;
@@ -1441,11 +1467,19 @@ export interface NodeProbe {
 export async function validateToolkitRoot(
   path: string
 ): Promise<ToolkitValidation> {
-  return invoke<ToolkitValidation>("validate_toolkit_root", { path });
+  return withTimeout(
+    invoke<ToolkitValidation>("validate_toolkit_root", { path }),
+    15_000,
+    "validate_toolkit_root"
+  );
 }
 
 export async function checkNodeVersion(): Promise<NodeProbe> {
-  return invoke<NodeProbe>("check_node_version");
+  return withTimeout(
+    invoke<NodeProbe>("check_node_version"),
+    10_000,
+    "check_node_version"
+  );
 }
 
 /**
@@ -1523,7 +1557,11 @@ export interface UnityDomainDepState {
 export async function detectProjectState(
   projectPath: string
 ): Promise<ProjectState> {
-  return invoke<ProjectState>("detect_project_state", { projectPath });
+  return withTimeout(
+    invoke<ProjectState>("detect_project_state", { projectPath }),
+    20_000,
+    "detect_project_state"
+  );
 }
 
 /**

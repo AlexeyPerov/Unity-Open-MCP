@@ -48,7 +48,7 @@ Pick a preset to pre-fill the rest of the wizard, or choose **Custom / skip** to
 
 | Preset | Best for | Pre-fills |
 |---|---|---|
-| **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@latest`; bridge + verify from published sources; domain deps off; skill on |
+| **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@0.4.1`; bridge + verify from published sources; domain deps off; skill on |
 | **Contributor (local checkout)** | Monorepo contributors hacking on bridge / verify / MCP server | Local checkout + `file:` packages from the clone; domain deps off; skill on. Build `mcp-server/` first (see [Development setup](development-setup.md)) |
 | **Solo dev** | Fastest fully-tooled local agent loop | `npx`; bridge + verify + NavMesh + Input System + ProBuilder; **Cursor** pre-selected; skill on |
 | **Team CI** | Headless CI automation | Global npm install; **Manual / CLI snippet** client; skill skipped; configure token auth on the bridge for CI |
@@ -66,6 +66,8 @@ Pick a preset to pre-fill the rest of the wizard, or choose **Custom / skip** to
 
 A **Diagnostics** panel at the top runs the same checks in a one-click-remediation list (green check / red cross). Each failing row carries a short hint on how to fix it. Use **Run diagnostics** to re-run project detection + the Node probe on demand.
 
+Detection and the Node probe run off the UI thread and are bounded by timeouts, so a slow disk or a hung `node --version` spawn surfaces a real error instead of freezing the wizard. You can always close the wizard with **Cancel**, **Escape**, or the **×** button — detection stops in the background.
+
 This step is the environment gate: the **Next** button is disabled until the project is valid, meets the minimum Unity version, has a writable manifest, and Node.js 18+ is detected. **Re-detect** refreshes the snapshot from disk and shows a confirmation when it completes.
 
 ![plot](../screenshots/hub-wizard-1.png)
@@ -73,10 +75,10 @@ This step is the environment gate: the **Next** button is disabled until the pro
 ### Step 3 — MCP server source
 
 Choose how the `unity-open-mcp` server is launched. Not sure? Leave it on the
-default — `npx` downloads and runs the latest version automatically, no extra
-install step.
+default — `npx` downloads and runs the server at the pinned version
+(`unity-open-mcp@0.4.1`), which matches the bridge and verify packages.
 
-- default: `npx -y unity-open-mcp@latest` ← recommended for most users
+- default: `npx -y unity-open-mcp@0.4.1` ← recommended for most users
 - optional: global install (`npm i -g unity-open-mcp`) — installs once, then the client launches it directly.
 - optional: local checkout path (only if you cloned the `unity-open-mcp` monorepo to hack on it).
 
@@ -102,7 +104,7 @@ After onboarding, you can add or remove Unity domain dependencies at any time fr
 
 For the contributor / community-pack `file:` workflow, see [Development setup](development-setup.md).
 
-![plot](../screenshots/hub-wizard-3.png)[mcp-tools.md](api/mcp-tools.md)
+![plot](../screenshots/hub-wizard-3.png)
 
 ### Step 5 — MCP client config
 

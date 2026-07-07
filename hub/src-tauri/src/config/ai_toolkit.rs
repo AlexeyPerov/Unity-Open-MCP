@@ -7,6 +7,8 @@
 //! authoritative contract.
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -123,6 +125,16 @@ pub struct NodeProbe {
 /// here so the spec, the wizard copy, and the validator all agree.
 pub const MIN_NODE_MAJOR: u32 = 18;
 
+/// Hard deadline for the `node --version` probe. The spawn is
+/// `node --version`, which normally returns in well under a second;
+/// a hang here (corporate security tool intercepting the spawn, a
+/// broken nvm/fnm/volta shim, macOS Gatekeeper re-checking the
+/// binary in a packaged `.app`) previously blocked the wizard's
+/// main thread indefinitely. The probe now spawns the child and
+/// polls `try_wait` against this deadline, killing the child on
+/// timeout so the wizard surfaces a real error instead of freezing.
+const NODE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Validate a candidate toolkit root. The candidate is considered
 /// valid when the path resolves to a directory and every required
 /// fingerprint exists with the expected kind. The returned
@@ -229,32 +241,94 @@ pub fn probe_node() -> NodeProbe {
             cmd.env("PATH", bin_str.into_owned());
         }
     }
-    let output = cmd.output();
+    // Pipe stdout/stderr so we can read them ourselves; the child is
+    // spawned and polled against `NODE_PROBE_TIMEOUT` instead of using
+    // the blocking `Command::output()`, which would hang forever if the
+    // spawn is intercepted (Gatekeeper, AV, a broken shim). On timeout
+    // the child is killed and reaped so no zombie lingers.
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
 
-    match output {
-        Err(e) => NodeProbe {
+    let mut child = match cmd.spawn() {
+        Err(e) => {
+            return NodeProbe {
+                ok: false,
+                version: None,
+                major: None,
+                required_major: MIN_NODE_MAJOR,
+                error: Some(format!("node not found on PATH ({})", e)),
+            };
+        }
+        Ok(c) => c,
+    };
+
+    let deadline = Instant::now() + NODE_PROBE_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    // Kill and reap so the hung child does not outlive
+                    // the probe. `kill` is best-effort; `wait` blocks
+                    // only until the OS reaps the killed process.
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break None;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return NodeProbe {
+                    ok: false,
+                    version: None,
+                    major: None,
+                    required_major: MIN_NODE_MAJOR,
+                    error: Some(format!("node --version wait failed: {}", e)),
+                };
+            }
+        }
+    };
+
+    // Drain stdout/stderr after the child has exited. Reading from the
+    // piped handles now cannot block because the process is dead/done.
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = std::io::Read::read_to_string(&mut out, &mut stdout);
+    }
+    if let Some(mut err) = child.stderr.take() {
+        let _ = std::io::Read::read_to_string(&mut err, &mut stderr);
+    }
+
+    match status {
+        None => NodeProbe {
             ok: false,
             version: None,
             major: None,
             required_major: MIN_NODE_MAJOR,
-            error: Some(format!("node not found on PATH ({})", e)),
+            error: Some(format!(
+                "node --version did not respond within {}s; check your Node install or PATH",
+                NODE_PROBE_TIMEOUT.as_secs()
+            )),
         },
-        Ok(out) if !out.status.success() => {
-            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Some(status) if !status.success() => {
+            let stderr = stderr.trim().to_string();
             NodeProbe {
                 ok: false,
                 version: None,
                 major: None,
                 required_major: MIN_NODE_MAJOR,
                 error: Some(if stderr.is_empty() {
-                    format!("node --version exited with {:?}", out.status.code())
+                    format!("node --version exited with {:?}", status.code())
                 } else {
                     stderr
                 }),
             }
         }
-        Ok(out) => {
-            let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        Some(_) => {
+            let raw = stdout.trim().to_string();
             let (version, major) = parse_node_version(&raw);
             let ok = major.map(|m| m >= MIN_NODE_MAJOR).unwrap_or(false);
             let error = if ok {
@@ -319,17 +393,41 @@ pub fn toolkit_failure_summary(validation: &ToolkitValidation) -> Option<String>
 /// edits the path. Pure function — does not mutate `settings.json`.
 /// Persisting the validated root is the caller's responsibility
 /// (see `aiToolkit.rootPath` in `schemas::AiToolkitSettings`).
+///
+/// Runs the filesystem checks on a blocking pool thread (via
+/// `spawn_blocking`) so a slow disk cannot stall the WebView's main
+/// thread; sync `#[tauri::command]` handlers run on the main thread
+/// in Tauri v2, which is why this is `async`.
 #[tauri::command]
-pub fn validate_toolkit_root(path: String) -> ToolkitValidation {
-    validate_toolkit_root_at(&PathBuf::from(path))
+pub async fn validate_toolkit_root(path: String) -> ToolkitValidation {
+    tauri::async_runtime::spawn_blocking(move || validate_toolkit_root_at(&PathBuf::from(path)))
+        .await
+        .unwrap_or_else(|_| ToolkitValidation {
+            ok: false,
+            root: None,
+            fingerprints: Vec::new(),
+            mcp_dist_missing: false,
+        })
 }
 
 /// Tauri command: probe `PATH` for `node` and report the major
 /// version. The wizard Step 2 calls this on entry and on retry
 /// after the user installs Node. Pure function.
+///
+/// Runs on a blocking pool thread so the spawned `node --version`
+/// (and its [`NODE_PROBE_TIMEOUT`] deadline) cannot stall the
+/// WebView's main thread.
 #[tauri::command]
-pub fn check_node_version() -> NodeProbe {
-    probe_node()
+pub async fn check_node_version() -> NodeProbe {
+    tauri::async_runtime::spawn_blocking(probe_node)
+        .await
+        .unwrap_or_else(|_| NodeProbe {
+            ok: false,
+            version: None,
+            major: None,
+            required_major: MIN_NODE_MAJOR,
+            error: Some("node probe cancelled".to_string()),
+        })
 }
 
 #[cfg(test)]

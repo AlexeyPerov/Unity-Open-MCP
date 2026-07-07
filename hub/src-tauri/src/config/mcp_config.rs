@@ -35,12 +35,25 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use std::process::Stdio;
+use std::time::{Duration, Instant};
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use super::wizard::claude_desktop_config_path;
 use crate::config::ai_toolkit::derived_mcp_index_path;
 use crate::config::bridge_port::{parse_override, resolve_port};
+
+/// Hard deadline for the `node`-based skill generation spawn. The
+/// generate-skill tool loads the MCP server, reads the project, and
+/// writes one SKILL.md per target — heavier than `node --version`,
+/// but still bounded. A hang here (corporate security tool, broken
+/// node shim, a wedged MCP-server boot) previously blocked the
+/// wizard's main thread indefinitely via the sync command. The spawn
+/// now polls `try_wait` against this deadline and kills the child on
+/// timeout, surfacing a real error instead.
+const GENERATE_SKILL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Local alias for [`derived_mcp_index_path`]. The wizard Step 4
 /// also needs to validate the path against the toolkit
@@ -362,7 +375,9 @@ impl McpConfigError {
 /// override path, bridge port) changes so the diff is
 /// always live.
 #[tauri::command]
-pub fn plan_mcp_config(params: McpConfigParams) -> Result<McpConfigPlan, McpConfigError> {
+pub async fn plan_mcp_config(params: McpConfigParams) -> Result<McpConfigPlan, McpConfigError> {
+    // Resolve home before spawning so the error path does not have to
+    // cross the thread boundary (the pool task returns the inner result).
     let home = match dirs::home_dir() {
         Some(h) => h,
         None => {
@@ -372,7 +387,9 @@ pub fn plan_mcp_config(params: McpConfigParams) -> Result<McpConfigPlan, McpConf
             ));
         }
     };
-    plan_mcp_config_at(&params, &home)
+    tauri::async_runtime::spawn_blocking(move || plan_mcp_config_at(&params, &home))
+        .await
+        .map_err(|e| McpConfigError::new("planFailed", format!("task failed: {e}")))?
 }
 
 /// Tauri command: apply the merge. Refuses when:
@@ -388,7 +405,7 @@ pub fn plan_mcp_config(params: McpConfigParams) -> Result<McpConfigPlan, McpConf
 /// when one existed and the merge actually mutates the
 /// `unity-open-mcp` entry.
 #[tauri::command]
-pub fn write_mcp_config(
+pub async fn write_mcp_config(
     params: McpConfigParams,
 ) -> Result<McpConfigWriteResult, McpConfigError> {
     let home = match dirs::home_dir() {
@@ -400,7 +417,9 @@ pub fn write_mcp_config(
             ));
         }
     };
-    write_mcp_config_at(&params, &home)
+    tauri::async_runtime::spawn_blocking(move || write_mcp_config_at(&params, &home))
+        .await
+        .map_err(|e| McpConfigError::new("writeFailed", format!("task failed: {e}")))?
 }
 
 fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfigPlan, McpConfigError> {
@@ -1300,8 +1319,10 @@ impl SkillCopyError {
 /// touching any file. The wizard calls this to render
 /// the per-target preview + "file exists" status.
 #[tauri::command]
-pub fn plan_skill_copy(params: SkillCopyParams) -> Result<SkillCopyPlan, SkillCopyError> {
-    plan_skill_copy_at(&params)
+pub async fn plan_skill_copy(params: SkillCopyParams) -> Result<SkillCopyPlan, SkillCopyError> {
+    tauri::async_runtime::spawn_blocking(move || plan_skill_copy_at(&params))
+        .await
+        .map_err(|e| SkillCopyError::new("planFailed", format!("task failed: {e}")))?
 }
 
 /// Tauri command: apply the skill copy. For each target in
@@ -1312,11 +1333,13 @@ pub fn plan_skill_copy(params: SkillCopyParams) -> Result<SkillCopyPlan, SkillCo
 /// an explicit confirmation) before passing
 /// `overwrite_existing = true`.
 #[tauri::command]
-pub fn copy_skill_files(
+pub async fn copy_skill_files(
     params: SkillCopyParams,
     overwrite_existing: bool,
 ) -> Result<SkillCopyResult, SkillCopyError> {
-    copy_skill_files_at(&params, overwrite_existing)
+    tauri::async_runtime::spawn_blocking(move || copy_skill_files_at(&params, overwrite_existing))
+        .await
+        .map_err(|e| SkillCopyError::new("copyFailed", format!("task failed: {e}")))?
 }
 
 fn plan_skill_copy_at(params: &SkillCopyParams) -> Result<SkillCopyPlan, SkillCopyError> {
@@ -1603,8 +1626,21 @@ fn truncate_inventory_preview(skill: &str) -> String {
 /// validation + capture style of `write_mcp_config_at` /
 /// `copy_skill_files_at`.
 #[tauri::command]
-pub fn generate_project_skill(
+pub async fn generate_project_skill(
     params: GenerateSkillParams,
+) -> Result<GenerateSkillResult, GenerateSkillError> {
+    tauri::async_runtime::spawn_blocking(move || generate_project_skill_at(&params))
+        .await
+        .map_err(|e| GenerateSkillError::new("spawnFailed", format!("task failed: {e}")))?
+}
+
+/// Sync inner implementation — see [`plan_manifest_merge_at`] in
+/// `wizard.rs` for why the command body is split this way. Spawns
+/// `node` to run the MCP server's `unity_open_mcp_generate_skill`
+/// tool, polling `try_wait` against [`GENERATE_SKILL_TIMEOUT`] so a
+/// wedged boot is killed and reported instead of blocking forever.
+pub(crate) fn generate_project_skill_at(
+    params: &GenerateSkillParams,
 ) -> Result<GenerateSkillResult, GenerateSkillError> {
     let project = PathBuf::from(&params.project_path);
     if !project.is_dir() {
@@ -1654,41 +1690,101 @@ pub fn generate_project_skill(
     let args_json = build_generate_skill_args_json(&client_keys);
 
     // Spawn node with PATH enrichment (mirrors probe_node / run_project_sync_version).
-    let output = crate::config::command_runner::node_command()
-        .arg(&index_path)
+    // The child is spawned with piped stdio and polled against a deadline
+    // instead of using the blocking `Command::output()`, which would hang
+    // forever if the MCP server boot is wedged. On timeout the child is
+    // killed and reaped.
+    let mut cmd = crate::config::command_runner::node_command();
+    cmd.arg(&index_path)
         .args(["run-tool", "unity_open_mcp_generate_skill"])
         .arg("--args")
         .arg(&args_json)
         .arg("--json")
         .arg("--project")
         .arg(&params.project_path)
-        .output()
-        .map_err(|e| {
-            GenerateSkillError::new(
-                "spawnFailed",
-                format!("failed to spawn node for skill generation: {}", e),
-            )
-        })?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| {
+        GenerateSkillError::new(
+            "spawnFailed",
+            format!("failed to spawn node for skill generation: {}", e),
+        )
+    })?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut msg = String::new();
-        if !stderr.trim().is_empty() {
-            msg.push_str(stderr.trim());
-        }
-        if !stdout.trim().is_empty() {
-            if !msg.is_empty() {
-                msg.push(' ');
+    let deadline = Instant::now() + GENERATE_SKILL_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break None;
+                }
+                std::thread::sleep(Duration::from_millis(100));
             }
-            msg.push_str(stdout.trim());
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(GenerateSkillError::new(
+                    "spawnFailed",
+                    format!("node wait failed: {}", e),
+                ));
+            }
         }
-        if msg.is_empty() {
-            msg = format!("node exited with status {}", output.status);
-        }
-        return Err(GenerateSkillError::new("cliError", msg));
+    };
+
+    // Drain stdout/stderr after the child has settled. The piped handles
+    // cannot block now — the process is done or killed.
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = std::io::Read::read_to_string(&mut out, &mut stdout);
+    }
+    if let Some(mut err) = child.stderr.take() {
+        let _ = std::io::Read::read_to_string(&mut err, &mut stderr);
     }
 
+    let output = match status {
+        None => {
+            return Err(GenerateSkillError::new(
+                "spawnFailed",
+                format!(
+                    "skill generation did not complete within {}s; check the MCP server boot or node install",
+                    GENERATE_SKILL_TIMEOUT.as_secs()
+                ),
+            ));
+        }
+        Some(status) if !status.success() => {
+            let mut msg = String::new();
+            if !stderr.trim().is_empty() {
+                msg.push_str(stderr.trim());
+            }
+            if !stdout.trim().is_empty() {
+                if !msg.is_empty() {
+                    msg.push(' ');
+                }
+                msg.push_str(stdout.trim());
+            }
+            if msg.is_empty() {
+                msg = format!("node exited with status {}", status);
+            }
+            return Err(GenerateSkillError::new("cliError", msg));
+        }
+        Some(status) => {
+            // success — fall through with the drained stdout. `status`
+            // is bound here as `ExitStatus` (this arm only matches when
+            // the earlier `!status.success()` guard did not).
+            std::process::Output {
+                status,
+                stdout: stdout.into_bytes(),
+                stderr: stderr.into_bytes(),
+            }
+        }
+    };
+
+    // `output` is only constructed in the success arm above (failure and
+    // timeout already returned), so its stdout is the tool's JSON result.
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: Value = serde_json::from_str(stdout.trim()).map_err(|e| {
         GenerateSkillError::new(
@@ -2707,7 +2803,7 @@ mod tests {
             mcp_index_override: String::new(),
             mcp_client: McpClientId::Cursor,
         };
-        let err = generate_project_skill(params).expect_err("should error");
+        let err = generate_project_skill_at(&params).expect_err("should error");
         assert_eq!(err.kind, "notAUnityProject");
     }
 
@@ -2725,7 +2821,7 @@ mod tests {
             mcp_index_override: String::new(),
             mcp_client: McpClientId::Cursor,
         };
-        let err = generate_project_skill(params).expect_err("should error");
+        let err = generate_project_skill_at(&params).expect_err("should error");
         assert_eq!(err.kind, "mcpPathInvalid");
     }
 
@@ -2764,7 +2860,7 @@ mod tests {
             mcp_index_override: String::new(),
             mcp_client: McpClientId::Cursor,
         };
-        let err = generate_project_skill(params).expect_err("should error");
+        let err = generate_project_skill_at(&params).expect_err("should error");
         assert_eq!(err.kind, "noClientTargets");
     }
 

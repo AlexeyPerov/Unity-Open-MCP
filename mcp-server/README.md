@@ -30,7 +30,7 @@ Edit `~/.cursor/mcp.json` (Cursor) or your Claude Desktop MCP config file:
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@latest"],
+      "args": ["-y", "unity-open-mcp@0.4.1"],
       "env": {
         "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
       }
@@ -48,7 +48,7 @@ Edit `~/.config/opencode/opencode.json`:
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@latest"],
+      "command": ["npx", "-y", "unity-open-mcp@0.4.1"],
       "enabled": true,
       "environment": {
         "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
@@ -66,7 +66,7 @@ For a project-scoped config, put the same `mcp.unity-open-mcp` block in
 ```bash
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/path/to/your/unity/project \
-  -- npx -y unity-open-mcp@latest
+  -- npx -y unity-open-mcp@0.4.1
 ```
 
 > **Bridge port.** The bridge HTTP port is **derived from the project path**
@@ -127,10 +127,13 @@ for the full option reference.
 
 ## Version pinning
 
-The default `npx -y unity-open-mcp@latest` always fetches the latest published
-version on first run. To pin a specific version, change the version suffix in
-your client config (for example `unity-open-mcp@0.2.0`) or install a specific
-version globally.
+The snippets above pin the server to `unity-open-mcp@0.4.1` so it stays in
+lockstep with the bridge and verify packages, which share the same version
+number. To move to a newer release, bump the version in your client config and
+your Unity `manifest.json` together — see
+[Versioning](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/versioning.md).
+If you prefer to always run the newest published server, replace the pinned
+version with `@latest`.
 
 ## Documentation
 
