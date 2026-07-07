@@ -482,6 +482,12 @@ const TOOL_CATEGORY: Record<string, string> = {
   unity_open_mcp_hub_install_modules: "unity-hub-control",
   unity_open_mcp_hub_get_install_path: "unity-hub-control",
   unity_open_mcp_hub_set_install_path: "unity-hub-control",
+  // M27 Plan 4 — batch_execute is a core meta-tool (always visible, live-only).
+  // One HTTP round trip runs many typed tools sequentially inside the open
+  // Editor, wrapped in a single batch-level gate + one undo group. NOT
+  // headless batchCapable (not in BATCH_TOOL_NAMES) — there is no batch spawn
+  // fallback; the live bridge must be up.
+  unity_open_mcp_batch_execute: "core",
 };
 
 function categoryFor(toolName: string): string {

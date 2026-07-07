@@ -65,6 +65,12 @@ namespace UnityOpenMcpBridge
         // the scene_dirty guard would refuse — prevents Unity's native save modal
         // from blocking automation. Off by default; enable for demo/CI projects.
         public bool autoSaveDirtyScenes = false;
+
+        // M27 Plan 4 — `batch_execute` nested-command cap. Default 25 (Coplay
+        // parity), hard max 100. Clamped on load/write; out-of-range values on
+        // disk fall back to the default. Governs how many typed tool calls one
+        // `unity_open_mcp_batch_execute` invocation may carry.
+        public int batchExecuteMaxCommands = 25;
     }
 
     public static class BridgeProjectSettings
@@ -138,6 +144,8 @@ namespace UnityOpenMcpBridge
                     _data.editorSettleCapMs = ClampSettleCap(_data.editorSettleCapMs, DefaultEditorSettleCapMs);
                     _data.restartSettleCapMs = ClampSettleCap(_data.restartSettleCapMs, DefaultRestartSettleCapMs);
                     _data.fairQueueReadsPerFrame = ClampFairQueueReads(_data.fairQueueReadsPerFrame);
+                    // M27 Plan 4 — clamp the batch_execute nested-command cap.
+                    _data.batchExecuteMaxCommands = ClampBatchExecuteMaxCommands(_data.batchExecuteMaxCommands);
                 }
             }
             catch (Exception e)
@@ -394,6 +402,13 @@ namespace UnityOpenMcpBridge
         public const int MaxFairQueueReadsPerFrame = 50;
         public const int DefaultFairQueueReadsPerFrame = 5;
 
+        // M27 Plan 4 — batch_execute nested-command cap clamps. Default 25
+        // (Coplay parity), hard max 100. Out-of-range values fall back to the
+        // default rather than being rejected.
+        public const int MinBatchExecuteMaxCommands = 1;
+        public const int MaxBatchExecuteMaxCommands = 100;
+        public const int DefaultBatchExecuteMaxCommands = 25;
+
         public static int VerifyCacheTtlSeconds
         {
             get
@@ -444,6 +459,14 @@ namespace UnityOpenMcpBridge
         {
             if (value < MinFairQueueReadsPerFrame) return DefaultFairQueueReadsPerFrame;
             if (value > MaxFairQueueReadsPerFrame) return MaxFairQueueReadsPerFrame;
+            return value;
+        }
+
+        // M27 Plan 4 — clamp the batch_execute nested-command cap into range.
+        private static int ClampBatchExecuteMaxCommands(int value)
+        {
+            if (value < MinBatchExecuteMaxCommands) return DefaultBatchExecuteMaxCommands;
+            if (value > MaxBatchExecuteMaxCommands) return MaxBatchExecuteMaxCommands;
             return value;
         }
 
@@ -505,6 +528,27 @@ namespace UnityOpenMcpBridge
             {
                 if (!_loaded) Load();
                 _data.fairQueueReadsPerFrame = ClampFairQueueReads(value);
+            }
+        }
+
+        // M27 Plan 4 — batch_execute nested-command cap. BatchExecuteTool reads
+        // this to reject oversized batches; the Settings tab exposes it with a
+        // tooltip. Clamped to [1, 100]; out-of-range falls back to the default.
+        public static int BatchExecuteMaxCommands
+        {
+            get
+            {
+                if (!_loaded) Load();
+                return ClampBatchExecuteMaxCommands(_data.batchExecuteMaxCommands);
+            }
+            set
+            {
+                if (!_loaded) Load();
+                var clamped = ClampBatchExecuteMaxCommands(value);
+                if (_data.batchExecuteMaxCommands == clamped) return;
+                _data.batchExecuteMaxCommands = clamped;
+                Save();
+                try { Changed?.Invoke(); } catch { }
             }
         }
 

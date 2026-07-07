@@ -231,6 +231,17 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
       "only then unity_open_mcp_execute_csharp / invoke_method with the verified API",
     ],
   },
+  {
+    name: "batch-setup",
+    task:
+      "Bundle multi-step setup (create objects + materials + assignments) into one round trip.",
+    steps: [
+      "unity_open_mcp_batch_execute — one call, many typed tools (gameobject_create × N, material_create × M, ...)",
+      "scope paths_hint to the union of every nested scope (scene paths, asset paths)",
+      "prefer per-tool arrays (component_modify.fields[], gameobject_modify multi-surface) when a single tool already batches",
+      "read gate.delta ONCE at the end — the whole sequence shares one gate cycle + one undo group",
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------

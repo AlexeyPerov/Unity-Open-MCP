@@ -51,6 +51,18 @@ const FIXTURE_TOOLS: Tool[] = [
     description: "List every verify rule (implemented + planned).",
     inputSchema: { type: "object", properties: {} },
   },
+  // M27 Plan 4 — batch_execute fixture. The capabilities builder must classify
+  // it batchCapable:false (NOT in BATCH_TOOL_NAMES — live-only sequential invoke)
+  // and surface its scene-dirty lifecycle. Lives in the `core` category.
+  {
+    name: "unity_open_mcp_batch_execute",
+    description: "Run many typed tools sequentially inside the open Editor.",
+    inputSchema: {
+      type: "object",
+      required: ["commands", "paths_hint"],
+      properties: {},
+    },
+  },
 ];
 
 const FIXTURE_BATCH_NAMES: ReadonlySet<string> = new Set([
@@ -462,6 +474,35 @@ test("batch capability flag reflects the injected allow-list", () => {
   const ping = caps.tools.find((t) => t.name === "unity_open_mcp_ping");
   assert.ok(ping);
   assert.equal(ping!.batchCapable, false);
+
+  // M27 Plan 4 — batch_execute must be batchCapable:false (NOT headless). It is
+  // live-only: one HTTP round trip runs many typed tools sequentially inside
+  // the open Editor. It must NOT appear in BATCH_TOOL_NAMES (no spawn fallback).
+  const batchExecute = caps.tools.find(
+    (t) => t.name === "unity_open_mcp_batch_execute",
+  );
+  assert.ok(batchExecute, "unity_open_mcp_batch_execute must be discoverable");
+  assert.equal(
+    batchExecute!.batchCapable,
+    false,
+    "batch_execute must NOT be headless batchCapable — it is live-only",
+  );
+  assert.equal(batchExecute!.routePolicy, "live");
+  assert.equal(batchExecute!.category, "core");
+});
+
+test("batch_execute lifecycle is scene-dirty with a note", () => {
+  const caps = buildCapabilities(DEPS);
+  const batchExecute = caps.tools.find(
+    (t) => t.name === "unity_open_mcp_batch_execute",
+  );
+  assert.ok(batchExecute);
+  assert.equal(batchExecute!.lifecycle, "scene-dirty");
+  assert.ok(
+    typeof batchExecute!.lifecycleNote === "string" &&
+      batchExecute!.lifecycleNote!.length > 0,
+    "batch_execute must carry a lifecycle note explaining the batch gate + undo group",
+  );
 });
 
 test("route policy is assigned per tool", () => {

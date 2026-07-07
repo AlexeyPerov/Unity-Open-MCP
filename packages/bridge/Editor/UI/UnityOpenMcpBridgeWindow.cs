@@ -1980,6 +1980,8 @@ namespace UnityOpenMcpBridge
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawVerifyCacheSection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
+            DrawBatchLimitsSection();
+            BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawSettingsStorageSection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawSettingsPassiveBatchHint();
@@ -2243,6 +2245,42 @@ namespace UnityOpenMcpBridge
             }
         }
 
+        // M27 Plan 4 — batch_execute nested-command cap. Exposes the
+        // batchExecuteMaxCommands project setting (default 25, hard max 100)
+        // so an operator can tune it from the Settings tab. Mirrors the
+        // Coplay parity knob (configurable in the Editor UI).
+        private void DrawBatchLimitsSection()
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Batch execute", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox(
+                "Maximum number of nested tool calls one `unity_open_mcp_batch_execute` invocation " +
+                "may carry. One HTTP round trip runs the sequence sequentially inside the open Editor, " +
+                "wrapped in a single batch-level gate + undo group. Range " +
+                $"{BridgeProjectSettings.MinBatchExecuteMaxCommands}–" +
+                $"{BridgeProjectSettings.MaxBatchExecuteMaxCommands}, " +
+                $"default {BridgeProjectSettings.DefaultBatchExecuteMaxCommands}.",
+                MessageType.None);
+
+            var prev = BridgeProjectSettings.BatchExecuteMaxCommands;
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Max commands per batch", GUILayout.Width(160));
+            var next = EditorGUILayout.IntField(prev);
+            EditorGUILayout.EndHorizontal();
+            // IntField allows arbitrary values; the setter clamps.
+            if (next != prev)
+            {
+                BridgeProjectSettings.BatchExecuteMaxCommands = next;
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Effective", GUILayout.Width(160));
+            EditorGUILayout.LabelField(
+                $"{BridgeProjectSettings.BatchExecuteMaxCommands}",
+                EditorStyles.miniLabel);
+            EditorGUILayout.EndHorizontal();
+        }
+
         private void DrawSettingsStorageSection()
         {
             EditorGUILayout.Space(4);
@@ -2270,6 +2308,7 @@ namespace UnityOpenMcpBridge
                 "  - menuDenyPatterns: string[] (regex; non-empty overrides defaults)\n" +
                 "  - auditLogEnabled: bool\n" +
                 "  - verifyCacheTtlSeconds: int (15–3600; verify health snapshot TTL)\n" +
+                "  - batchExecuteMaxCommands: int (1–100; nested-command cap for batch_execute)\n" +
                 "Future fields can extend this schema in place without breaking v1 readers.",
                 MessageType.None);
         }

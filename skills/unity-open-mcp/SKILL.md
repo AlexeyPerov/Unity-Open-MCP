@@ -404,6 +404,18 @@ Raw Unity data is large. Prefer the cheap, structured reads before reaching for 
 - **Missing checkpoint is non-blocking.** If `delta` (or `mutation_explain` with a `checkpoint_id`) references a checkpoint that is gone (evicted, or lost to a reload), the call returns success with `"unavailable": true` + `agentNextSteps` rather than an error. Treat it as "no baseline to delta against" and fall back to `validate_edit` / `scan_paths` on the relevant paths. It does not block the workflow.
 - **Clear from the editor.** The Bridge window → Gate tab → Checkpoint history has a "Clear history" button (two-click confirm) that empties the session ring buffer. It touches nothing on disk and leaves gate-run history intact.
 
+### Batch multiple mutations into one call (`batch_execute`)
+
+When you need to set up many things at once (spawn N objects + materials + assignments), one `**unity_open_mcp_batch_execute`** call runs the whole sequence in a single HTTP round trip, cutting latency and token cost. The batch is **strictly safer than sequential calls**: the WHOLE sequence shares ONE gate cycle (one checkpoint → all steps → one validate/delta) and ONE undo group.
+
+- **When to use.** Multi-step setup where each step is independent and typed (create 3 cubes + 3 materials + assign). Prefer the per-tool array surfaces (`component_modify.fields[]`, `gameobject_modify` multi-surface) when a *single* tool already batches — `batch_execute` is for bundling *different* tools.
+- **Always pass `paths_hint`.** The batch is mutating; scope `paths_hint` to the union of every path the nested steps touch (scene paths, asset paths). Required.
+- **Prefer typed tools inside the batch.** Each `commands[i]` carries a full tool id + its `params` (omit `paths_hint`/`gate` per step — the batch owns those for the sequence). Nested meta-tools (`execute_csharp`, `invoke_method`, `execute_menu`) and `batch_execute` itself are **blocked** in v1 — use them as single top-level calls.
+- **`fail_fast: true` (default) stops on the first failure**; later entries are `skipped` (not executed). Set `fail_fast: false` to run every step and collect per-step errors.
+- **Read `gate.delta` ONCE at the end** — the batch-level gate reports new issues introduced by the whole sequence. Partial-failure note: v1 does NOT roll back successful steps when a later step fails (same as the competitor); undo the whole batch with a single `editor_undo` if needed.
+- **Limits.** 25 commands default, 100 hard max (`batchExecuteMaxCommands` in `.unity-open-mcp/settings.json`). `parallel: true` is accepted but ignored (Unity API is main-thread; sequential only).
+- **Response shape:** `batch.results[]` carries `{ index, tool, status }` per step (`success`/`failed`/`skipped`) with `output` on success and `error` on failure.
+
 ### find_references before delete
 
 Before deleting or moving an asset, call `**find_references*`* to see who depends on it. Offline-first (no live bridge needed for text-serialized assets).

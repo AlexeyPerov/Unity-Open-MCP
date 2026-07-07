@@ -35,6 +35,13 @@ namespace UnityOpenMcpBridge
             // ----- EditorSettle: wait for asset refresh + serialization -----
             { "unity_open_mcp_apply_fix",        LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_reserialize",      LifecyclePolicy.EditorSettle },
+            // M27 Plan 4 — batch_execute. A batch of scene/asset mutations
+            // settles on asset refresh / serialization; the batch tool itself
+            // does not force a domain reload (the v1 deny-list blocks the
+            // power tools that could — execute_csharp / invoke_method /
+            // execute_menu / script_write are not invokable as nested steps).
+            // EditorSettle covers the heaviest allowed nested op.
+            { "unity_open_mcp_batch_execute",    LifecyclePolicy.EditorSettle },
             // M16 Plan 1 — typed asset/material/prefab mutators. They touch
             // Assets/ (write .mat/.prefab, refresh AssetDatabase, mutate scene
             // instances). None of them recompile editor scripts, so they wait

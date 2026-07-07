@@ -1,0 +1,130 @@
+{
+  "id": "m27-batch-execute-setup",
+  "title": "batch_execute runs many typed tools in one round trip with a batch-level gate",
+  "milestone": "m27",
+  "engineId": "unity",
+  "order": 1,
+  "requirementLevel": "recommended",
+  "tags": ["m27", "batch_execute", "plan-4", "gate"],
+  "automatedCoverage": [
+    "BatchExecuteToolTests.Execute_ThreeGameObjects_AllSucceed",
+    "BatchExecuteToolTests.Execute_FailFastTrue_StopsOnFirstFailure",
+    "BatchExecuteToolTests.Execute_FailFastFalse_RunsAllAndCollectsErrors",
+    "BatchExecuteToolTests.Execute_OverLimit_ReturnsBatchTooManyCommands",
+    "BatchExecuteToolTests.Execute_DenyListedNestedTool_ReturnsBatchToolNotInvokable"
+  ],
+  "steps": [
+    {
+      "id": "info",
+      "type": "info",
+      "title": "Prerequisites",
+      "body": "Live Editor + bridge running on the demo project. The active scene should be one you are willing to mutate transiently (the scenario creates and then destroys GameObjects). The batch_execute tool ships in the `core` group — no manage_tools activation needed. This scenario is the runnable confidence pass for the M27 Plan 4 batch gate; the per-step dispatch + deny-list + fail_fast semantics are asserted by BatchExecuteToolTests."
+    },
+    {
+      "id": "prompt-happy",
+      "type": "agent_prompt",
+      "title": "Run a 3-step batch (create 2 cubes + 1 material) in one round trip",
+      "tool": "unity_open_mcp_batch_execute",
+      "payload": {
+        "commands": [
+          { "tool": "unity_open_mcp_gameobject_create", "params": { "name": "M27_Batch_Cube_A", "primitive_type": "Cube", "position": "0,2,0" } },
+          { "tool": "unity_open_mcp_gameobject_create", "params": { "name": "M27_Batch_Cube_B", "primitive_type": "Cube", "position": "2,2,0" } },
+          { "tool": "unity_open_mcp_material_create", "params": { "asset_path": "Assets/MCP_FullTest/M27_Batch_Mat.mat", "shader_name": "Standard" } }
+        ],
+        "paths_hint": ["Assets/Scenes/Main.unity", "Assets/MCP_FullTest/M27_Batch_Mat.mat"],
+        "fail_fast": true,
+        "gate": "enforce"
+      }
+    },
+    {
+      "id": "expected-happy",
+      "type": "expected",
+      "title": "Expected outcomes (happy path)",
+      "items": [
+        "mutation.success is true",
+        "batch.callSuccessCount is 3 and batch.callFailureCount is 0",
+        "batch.results[] has three entries, each status:\"success\" and carrying the nested tool's output (instanceId / assetPath)",
+        "gate.validation.passed is true and gate.delta.newErrors is 0 (one gate cycle for the whole batch)",
+        "the Batch tab in the bridge window shows the run with three Done entries",
+        "a single editor_undo reverts all three creations (one undo group for the batch)"
+      ]
+    },
+    {
+      "id": "prompt-failfast",
+      "type": "agent_prompt",
+      "title": "Run a 3-step batch where step 1 fails (fail_fast:true default)",
+      "tool": "unity_open_mcp_batch_execute",
+      "payload": {
+        "commands": [
+          { "tool": "unity_open_mcp_gameobject_create", "params": { "name": "M27_Batch_OK" } },
+          { "tool": "unity_open_mcp_gameobject_create", "params": { "name": "" } },
+          { "tool": "unity_open_mcp_gameobject_create", "params": { "name": "M27_Batch_Skipped" } }
+        ],
+        "paths_hint": ["Assets/Scenes/Main.unity"]
+      }
+    },
+    {
+      "id": "expected-failfast",
+      "type": "expected",
+      "title": "Expected outcomes (fail_fast abort)",
+      "items": [
+        "mutation.success is false (one step failed)",
+        "batch.callSuccessCount is 1, batch.callFailureCount is 1",
+        "batch.results[0].status is \"success\", batch.results[1].status is \"failed\" with error.code \"missing_parameter\"",
+        "batch.results[2].status is \"skipped\" — the third step was NOT executed (no M27_Batch_Skipped GameObject exists)",
+        "agentNextSteps explains the partial-failure semantics + single editor_undo recovery"
+      ]
+    },
+    {
+      "id": "prompt-deny",
+      "type": "agent_prompt",
+      "title": "Attempt to nest a blocked power tool (execute_csharp)",
+      "tool": "unity_open_mcp_batch_execute",
+      "payload": {
+        "commands": [
+          { "tool": "unity_open_mcp_execute_csharp", "params": { "code": "return 1;" } }
+        ],
+        "paths_hint": ["Assets/Scenes/Main.unity"]
+      }
+    },
+    {
+      "id": "expected-deny",
+      "type": "expected",
+      "title": "Expected outcomes (deny-list)",
+      "items": [
+        "mutation.success is false",
+        "error.code is \"batch_tool_not_invokable\" — the whole batch is rejected before any step runs (clean rejection, no partial state)",
+        "error.message names execute_csharp and explains it must be a single top-level call"
+      ]
+    },
+    {
+      "id": "cleanup",
+      "type": "setup",
+      "title": "Clean up the batch-created GameObjects + material",
+      "actions": [
+        { "action": "tool_call", "tool": "unity_open_mcp_gameobject_destroy", "payload": { "name": "M27_Batch_Cube_A", "paths_hint": ["Assets/Scenes/Main.unity"] } },
+        { "action": "tool_call", "tool": "unity_open_mcp_gameobject_destroy", "payload": { "name": "M27_Batch_Cube_B", "paths_hint": ["Assets/Scenes/Main.unity"] } },
+        { "action": "tool_call", "tool": "unity_open_mcp_gameobject_destroy", "payload": { "name": "M27_Batch_OK", "paths_hint": ["Assets/Scenes/Main.unity"] } },
+        { "action": "fs_delete", "paths": ["Assets/MCP_FullTest/M27_Batch_Mat.mat"] }
+      ]
+    },
+    {
+      "id": "actual",
+      "type": "actual",
+      "title": "Paste the agent output (raw envelopes)"
+    },
+    {
+      "id": "done",
+      "type": "mark_done",
+      "title": "Mark this test complete"
+    }
+  ],
+  "reset": {
+    "afterStep": {
+      "cleanup": {
+        "actions": [{ "action": "fs_delete", "paths": ["Assets/MCP_FullTest/M27_Batch_Mat.mat"] }]
+      }
+    },
+    "note": "Recommended scenario. The batch gate + fail_fast + deny-list contract is asserted by BatchExecuteToolTests; this runnable pass validates the live end-to-end round trip + the Batch tab progress + the single-undo-group recovery on a real Editor."
+  }
+}

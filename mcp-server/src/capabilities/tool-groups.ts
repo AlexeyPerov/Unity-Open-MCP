@@ -412,6 +412,10 @@ assign("core", [
   "unity_open_mcp_execute_menu",
   "unity_open_mcp_find_members",
   "unity_open_mcp_editor_status",
+  // M27 Plan 4 — batch_execute is a core meta-tool (always visible). Live-only:
+  // one HTTP round trip runs many typed tools sequentially inside the open
+  // Editor. NOT headless batchCapable (no batch spawn fallback).
+  "unity_open_mcp_batch_execute",
 ]);
 
 // --- gate-and-verify --------------------------------------------------------

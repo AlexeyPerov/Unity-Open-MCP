@@ -32,6 +32,12 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_execute_csharp",
             "unity_open_mcp_invoke_method",
             "unity_open_mcp_execute_menu",
+            // M27 Plan 4 — live batch_execute meta-tool. Runs many nested typed
+            // tools sequentially inside the open Editor; classified as mutating
+            // (the batch can include scene/asset mutators) so paths_hint is
+            // required at the batch level (the union of nested scopes). NOT
+            // headless batchCapable — it is never spawned via -batchmode.
+            "unity_open_mcp_batch_execute",
             "unity_open_mcp_find_members",
             "unity_open_mcp_validate_edit",
             "unity_open_mcp_checkpoint_create",
@@ -376,6 +382,10 @@ namespace UnityOpenMcpBridge
             "unity_open_mcp_execute_csharp",
             "unity_open_mcp_invoke_method",
             "unity_open_mcp_execute_menu",
+            // M27 Plan 4 — batch_execute is mutating (its nested commands can
+            // include scene/asset mutators). paths_hint is required at the
+            // batch level and scopes the single batch-level gate cycle.
+            "unity_open_mcp_batch_execute",
             "unity_open_mcp_apply_fix",
             "unity_open_mcp_reserialize",
             // M16 Plan 1 — typed asset/material/prefab mutators. Each requires

@@ -245,7 +245,51 @@ Batch is intended for non-interactive scenarios and fallback operation.
 
 ### In-Editor Batch tab
 
-The Unity Open MCP bridge window has a **Batch** tab — a read-only view of in-Editor batch runs. While a batch is running it shows live progress (entries pending / running / done / failed / skipped) and per-entry results (tool name, args summary, pass/fail, error text on failure); completed runs are retained in a session ring buffer for inspection. The panel observes batch state only — it does not start or stop batches (that stays with the MCP batch surface and the Hub). It re-renders automatically as entries transition, so no manual refresh is needed. In-memory only, cleared on domain reload.
+The Unity Open MCP bridge window has a **Batch** tab — a read-only view of in-Editor batch runs. While a batch is running it shows live progress (entries pending / running / done / failed / skipped) and per-entry results (tool name, args summary, pass/fail, error text on failure); completed runs are retained in a session ring buffer for inspection. The panel observes batch state only — it does not start or stop batches (that stays with the MCP batch surface and the Hub). It re-renders automatically as entries transition, so no manual refresh is needed. In-memory only, cleared on domain reload. The live `unity_open_mcp_batch_execute` tool feeds this tab — a run appears as it executes, with one entry per nested step.
+
+### Live batch execution: `unity_open_mcp_batch_execute`
+
+Distinct from the headless batch spawn above: one **live HTTP call** runs many typed tools sequentially inside the **already-open** Editor, cutting agent↔Unity round trips for multi-object setup (spawn N cubes + create materials + assign in one call). It is `batchCapable: false` (NOT in `BATCH_TOOL_NAMES`) — there is no headless spawn fallback; the live bridge must be up. It lives in the `core` group (always visible) and routes live-only.
+
+**Contract:**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `commands` | `{ tool: string, params: object }[]` | yes | Each `tool` is a full MCP id. Non-empty. |
+| `fail_fast` | `boolean` | no | Default **`true`**. Stop on first step failure; later entries are `skipped`. |
+| `gate` | `"enforce"\|"warn"\|"off"` | no | Default **`enforce`**. Applies to the **whole batch** (one checkpoint → N steps → one validate/delta). |
+| `paths_hint` | `string[]` | yes | Union of all paths the batch may touch. |
+| `parallel` | `boolean` | no | Default `false`. **Ignored in v1** (Unity API is main-thread; sequential only). |
+
+**Safety model — strictly safer than sequential invoke:**
+
+- **One gate cycle** for the whole batch (one checkpoint → all steps → one validate/delta). The `gate.delta` reports new issues introduced by the entire sequence.
+- **One undo group** — a single `editor_undo` reverts the whole batch.
+- **Partial failure** — v1 does NOT roll back successful steps when a later step fails (same as the competitor). The `agentNextSteps` point at the failed step + fixes. Undo the whole batch if needed.
+- **Deny-list** — `batch_execute`, `compile_check`, `execute_csharp`, `invoke_method`, `execute_menu` cannot be nested (agents use batch for typed tools; the power tools stay single-call). Local-only tools (capabilities, manage_tools, hub_*, etc.) dispatch to `tool_not_found` as a per-step error.
+
+**Limits:** default **25** commands, hard max **100** — configurable in `.unity-open-mcp/settings.json` (`batchExecuteMaxCommands`, clamped 1–100), mirrored in the bridge Settings tab → "Batch execute" section.
+
+**Response shape:**
+
+```json
+{
+  "batch": {
+    "success": true,
+    "callSuccessCount": 3,
+    "callFailureCount": 0,
+    "failFast": true,
+    "results": [
+      { "index": 0, "tool": "unity_open_mcp_gameobject_create", "status": "success", "output": { "…": "…" } },
+      { "index": 1, "tool": "unity_open_mcp_material_create", "status": "failed", "error": { "code": "missing_parameter", "message": "…" } },
+      { "index": 2, "tool": "unity_open_mcp_gameobject_modify", "status": "skipped" }
+    ]
+  },
+  "gate": { "mode": "enforce", "validation": { "passed": true }, "delta": { "newErrors": 0, "resolvedErrors": 0 } },
+  "logs": [],
+  "agentNextSteps": []
+}
+```
 
 ### In-Editor Tools tab token estimate
 

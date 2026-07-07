@@ -60,6 +60,9 @@ const FT_ASMDEF = `${FT}/FT_Test.asmdef`;
 const FT_SCRIPT = `${FT}/FT_Script.cs`;
 const FT_SPRITEATLAS = `${FT}/FT_Atlas.spriteatlas`;
 const FT_TERRAIN_DATA_HINT = `${FT}/FT_Terrain.asset`;
+// M27 Plan 4 — batch_execute creates these GameObjects in one round trip.
+const FT_BATCH_GO_A = "FT_BatchA";
+const FT_BATCH_GO_B = "FT_BatchB";
 const HINT = [FT]; // shared paths_hint sentinel for in-scene mutations
 const SCENE_HINT = [FT_SCENE_ASSET];
 const MAIN_SCENE_PATH = "Assets/Scenes/Main.unity";
@@ -556,6 +559,30 @@ function buildSuite() {
   s("console_clear", "C", "unity_open_mcp_console_clear");
   s("editor_set_state_stop", "C", "unity_open_mcp_editor_set_state", { state: "stop" });
 
+  // M27 Plan 4 — batch_execute: one round trip creates two GameObjects
+  // sequentially inside the open Editor. The whole sequence shares one gate
+  // cycle (one checkpoint → 2 steps → one validate/delta) + one undo group.
+  // Reachability probe — asserts the batch envelope shape + gate ran.
+  s("batch_execute_setup", "C", "unity_open_mcp_batch_execute", {
+    commands: [
+      { tool: "unity_open_mcp_gameobject_create", params: { name: FT_BATCH_GO_A, position: "-2,1,0" } },
+      { tool: "unity_open_mcp_gameobject_create", params: { name: FT_BATCH_GO_B, position: "-4,1,0" } },
+    ],
+    paths_hint: SCENE_HINT,
+  }, {
+    gate: true, expect: "gate",
+    after: (r, ctx) => {
+      // Pluck the per-step instanceIds out of batch.results[].output so the
+      // cleanup pass can destroy them. Defensive: a partial batch (one step
+      // failed) leaves the other GO alive; tolerate in destroy steps below.
+      const results = pluck(r, "batch.results") ?? [];
+      ctx.batchGoAId = pluck(results[0], "output.instanceId") ?? pluck(results[0], "instanceId");
+      ctx.batchGoBId = pluck(results[1], "output.instanceId") ?? pluck(results[1], "instanceId");
+      ctx.batchCreatedGoA = r.mutation?.success === true &&
+        (pluck(r, "batch.callSuccessCount") ?? 0) >= 1;
+    },
+  });
+
   // --- asset lifecycle: material + copy + move + refresh + read ---
   s("material_create", "C", "unity_open_mcp_material_create", {
     asset_path: FT_MAT, shader_name: "Universal Render Pipeline/Lit", paths_hint: [FT_MAT],
@@ -862,6 +889,14 @@ function buildSuite() {
   s("gameobject_destroy_sphere", "C", "unity_open_mcp_gameobject_destroy", {
     resolveArgs: (ctx) => ({ instance_id: ctx.sphereId, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "gate" });
+  // M27 Plan 4 — cleanup the two batch_execute-created GameObjects. Tolerate
+  // gameobject_not_found in case the batch was partial (one step failed).
+  s("gameobject_destroy_batch_a", "C", "unity_open_mcp_gameobject_destroy", {
+    resolveArgs: (ctx) => ({ instance_id: ctx.batchGoAId, paths_hint: SCENE_HINT }),
+  }, { gate: true, expect: "tolerate", tolerate: ["gameobject_not_found"] });
+  s("gameobject_destroy_batch_b", "C", "unity_open_mcp_gameobject_destroy", {
+    resolveArgs: (ctx) => ({ instance_id: ctx.batchGoBId, paths_hint: SCENE_HINT }),
+  }, { gate: true, expect: "tolerate", tolerate: ["gameobject_not_found"] });
   s("gameobject_destroy_prefab_inst", "C", "unity_open_mcp_gameobject_destroy", {
     resolveArgs: (ctx) => ({ instance_id: ctx.prefabInstanceId, paths_hint: SCENE_HINT }),
   }, { gate: true, expect: "tolerate", tolerate: ["gameobject_not_found"] });

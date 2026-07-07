@@ -233,6 +233,20 @@ export const TOOL_LIFECYCLE: Record<string, ToolLifecycle> = {
   "unity_open_mcp_playerprefs_delete": { class: "scene-dirty" },
   "unity_open_mcp_editorprefs_set": { class: "scene-dirty" },
   "unity_open_mcp_editorprefs_delete": { class: "scene-dirty" },
+  // M27 Plan 4 — batch_execute runs many nested typed tools sequentially; a
+  // batch that includes scene/prefab/asset mutators behaves like the heaviest
+  // nested tool. The bridge wraps the whole sequence in one batch-level gate
+  // cycle and a single undo group; the worst-case recovery concern is the
+  // scene-dirty / paths_hint contract of the nested mutators.
+  "unity_open_mcp_batch_execute": {
+    class: "scene-dirty",
+    note:
+      "Runs many nested typed tools sequentially; the batch shares one gate " +
+      "cycle (one checkpoint → N steps → one validate/delta) and one undo " +
+      "group. The recovery concern is the union of the nested tools' " +
+      "scene-dirty / paths_hint contracts. v1 does not roll back successful " +
+      "steps when a later step fails — inspect gate.delta for new issues.",
+  },
 
   // ----- Domain mutators (extension packs) — all scene-dirty ---------------
   // Navigation.

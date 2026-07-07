@@ -1011,16 +1011,37 @@ namespace UnityOpenMcpBridge
             if (toolName == "unity_open_mcp_apply_fix")
                 return ApplyFixGateRunner.Execute(body, gateMode, pathsHint);
 
+            // M27 Plan 4 — batch_execute runs through its own gate runner so
+            // the WHOLE sequence shares ONE gate cycle (one checkpoint → N
+            // nested dispatches → one validate/delta) plus a single undo group.
+            // Reuses GatePolicy internally; the nested steps dispatch via
+            // DispatchTool WITHOUT re-entering HandleToolDispatch (no per-step
+            // queue / auth / paths_hint re-enforcement — the batch owns one
+            // gate scope for the sequence).
+            if (toolName == "unity_open_mcp_batch_execute")
+                return BatchExecuteGateRunner.Execute(body, gateMode, pathsHint);
+
             return GatePolicy.Execute(mode, pathsHint, () => DispatchTool(toolName, body));
         }
 
-        private static ToolDispatchResult DispatchTool(string toolName, string body)
+        // M27 Plan 4 — made internal so BatchExecuteTool can reuse the EXACT same
+        // per-tool dispatch path (the switch below) for each nested command,
+        // without duplicating business logic or re-entering HandleToolDispatch
+        // (which would re-run auth / queue / toggle / paths_hint enforcement).
+        internal static ToolDispatchResult DispatchTool(string toolName, string body)
         {
             return toolName switch
             {
                 "unity_open_mcp_execute_csharp" => ExecuteCSharpTool.Execute(body),
                 "unity_open_mcp_invoke_method" => InvokeMethodTool.Execute(body),
                 "unity_open_mcp_execute_menu" => ExecuteMenuTool.Execute(body),
+                // M27 Plan 4 — live batch_execute. Re-enters DispatchTool for
+                // each nested command (see BatchExecuteTool). The batch-level
+                // gate + undo grouping live in BatchExecuteGateRunner, which is
+                // routed from DispatchWithGateCore BEFORE the generic
+                // GatePolicy.Execute path (one checkpoint → N steps → one
+                // validate/delta for the whole sequence).
+                "unity_open_mcp_batch_execute" => BatchExecuteTool.Execute(body),
                 "unity_open_mcp_find_members" => FindMembersTool.Execute(body),
                 "unity_open_mcp_validate_edit" => ValidateEditTool.Execute(body),
                 "unity_open_mcp_checkpoint_create" => CheckpointCreateTool.Execute(body),

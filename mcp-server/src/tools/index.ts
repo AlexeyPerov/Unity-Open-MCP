@@ -457,6 +457,16 @@ import { hubInstallEditor } from "./hub-install-editor.js";
 import { hubInstallModules } from "./hub-install-modules.js";
 import { hubGetInstallPath } from "./hub-get-install-path.js";
 import { hubSetInstallPath } from "./hub-set-install-path.js";
+// M27 Plan 4 — live `batch_execute` meta-tool. Lives in the `core` group
+// (always visible) but routes live-only (NOT headless batchCapable — it is not
+// in BATCH_TOOL_NAMES). One HTTP round trip runs many typed tools sequentially
+// inside the already-open Editor, wrapped in a single batch-level gate cycle.
+import { batchExecute } from "./batch-execute.js";
+
+// M27 Plan 4 — batch_execute ships as a core meta-tool so agents can always
+// discover it. It is the agent ergonomics counterpart to the M26 headless batch
+// spawn axis (different concern: live sequential invoke vs headless fallback).
+export const M27_PLAN4_TOOLS: Tool[] = [batchExecute];
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -1126,4 +1136,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M20_PLAN7_MEMORYPROFILER_TOOLS,
   ...M20_PLAN9_2D_TOOLS,
   ...M26_PLAN2_HUB_TOOLS,
+  ...M27_PLAN4_TOOLS,
 ];
