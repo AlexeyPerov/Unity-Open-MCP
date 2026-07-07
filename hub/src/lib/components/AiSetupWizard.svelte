@@ -144,36 +144,114 @@
     id: McpClientId;
     label: string;
     kind: "file" | "cli" | "clipboard";
+    /** Category for the grouped picker: IDE-backed agents, CLI
+     *  agents, or the manual/clipboard fallbacks. */
+    category: "ide" | "cli" | "manual";
     /** Tooltip describing the config format family + popular agents
      *  that share it, so users picking one client understand the
      *  format they are committing to. */
     sharedWith?: string;
   }[] = [
+    // --- IDE / editor agents (file-backed) ---
     {
       id: "cursor",
       label: "Cursor",
       kind: "file",
+      category: "ide",
       sharedWith:
-        "Format: mcpServers JSON at ~/.cursor/mcp.json. Shared by: Cursor, Roo Code, Kilo Code, Cline (Cursor-family clients).",
+        "Format: mcpServers JSON at ~/.cursor/mcp.json (global) or .cursor/mcp.json (project).",
     },
     {
       id: "claude-desktop",
       label: "Claude Desktop",
       kind: "file",
+      category: "ide",
       sharedWith:
         "Format: mcpServers JSON (Claude Desktop config). Same envelope as Cursor; shared by Claude Desktop and Cursor.",
     },
     {
-      id: "claude-code",
-      label: "Claude Code (CLI only)",
-      kind: "cli",
+      id: "cline",
+      label: "Cline (VS Code)",
+      kind: "file",
+      category: "ide",
       sharedWith:
-        "CLI-only: renders a `claude mcp add` command (no config file is written). Skill installs to .claude/skills/.",
+        "Format: mcpServers JSON in VS Code globalStorage (cline_mcp_settings.json). Skill installs to .cline/skills/.",
+    },
+    {
+      id: "vscode-copilot",
+      label: "VS Code Copilot",
+      kind: "file",
+      category: "ide",
+      sharedWith:
+        "Format: servers JSON at .vscode/mcp.json (project). Uses the `servers` key, not `mcpServers`.",
+    },
+    {
+      id: "vs-copilot",
+      label: "Visual Studio Copilot",
+      kind: "file",
+      category: "ide",
+      sharedWith: "Format: servers JSON at .vs/mcp.json (project).",
+    },
+    {
+      id: "zoocode",
+      label: "ZooCode",
+      kind: "file",
+      category: "ide",
+      sharedWith:
+        "Format: mcpServers JSON at .roo/mcp.json (project). Skill installs to .roo/skills/.",
+    },
+    {
+      id: "kilo-code",
+      label: "Kilo Code",
+      kind: "file",
+      category: "ide",
+      sharedWith:
+        "Format: mcpServers JSON at .kilocode/mcp.json (project). Skill installs to .kilocode/skills/.",
+    },
+    {
+      id: "rider",
+      label: "Rider (Junie)",
+      kind: "file",
+      category: "ide",
+      sharedWith:
+        "Format: mcpServers JSON at .junie/mcp/mcp.json (project). Skill installs to .junie/skills/.",
+    },
+    {
+      id: "unity-ai",
+      label: "Unity AI",
+      kind: "file",
+      category: "ide",
+      sharedWith: "Format: mcpServers JSON at UserSettings/mcp.json (project).",
+    },
+    {
+      id: "antigravity",
+      label: "Antigravity",
+      kind: "file",
+      category: "ide",
+      sharedWith:
+        "Format: mcpServers JSON at ~/.gemini/antigravity/mcp_config.json (global). Skill installs to .agent/skills/.",
+    },
+    {
+      id: "gemini",
+      label: "Gemini CLI",
+      kind: "file",
+      category: "cli",
+      sharedWith:
+        "Format: mcpServers JSON at .gemini/settings.json (project). Skill installs to .gemini/skills/.",
+    },
+    {
+      id: "codex",
+      label: "Codex",
+      kind: "file",
+      category: "cli",
+      sharedWith:
+        "Format: TOML at .codex/config.toml (project). Emits a [mcp_servers.unity-open-mcp] table.",
     },
     {
       id: "opencode-global",
       label: "OpenCode (global)",
       kind: "file",
+      category: "ide",
       sharedWith:
         "Format: mcp + $schema JSON (~/.config/opencode/opencode.json). Shared by: OpenCode and Opencode.",
     },
@@ -181,6 +259,7 @@
       id: "opencode-project",
       label: "OpenCode (project)",
       kind: "file",
+      category: "ide",
       sharedWith:
         "Format: mcp + $schema JSON (project-local opencode.json). Shared by: OpenCode and Opencode.",
     },
@@ -188,6 +267,7 @@
       id: "zcode-global",
       label: "ZCode (global)",
       kind: "file",
+      category: "ide",
       sharedWith:
         "Format: mcp.servers + type:stdio JSON (~/.zcode/cli/config.json). Skill installs to .agents/skills/. Shared by: ZCode.",
     },
@@ -195,15 +275,43 @@
       id: "zcode-project",
       label: "ZCode (project)",
       kind: "file",
+      category: "ide",
       sharedWith:
         "Format: mcp.servers + type:stdio JSON (project-local .zcode/cli/config.json). Skill installs to .agents/skills/. Shared by: ZCode.",
     },
+    // --- CLI agents ---
+    {
+      id: "claude-code",
+      label: "Claude Code (CLI only)",
+      kind: "cli",
+      category: "cli",
+      sharedWith:
+        "CLI-only: renders a `claude mcp add` command (no config file is written). Skill installs to .claude/skills/.",
+    },
+    {
+      id: "github-copilot-cli",
+      label: "GitHub Copilot CLI",
+      kind: "file",
+      category: "cli",
+      sharedWith:
+        "Format: mcpServers JSON at .mcp.json (project, shared with Claude Code). Run `copilot` from the project root.",
+    },
+    // --- Manual / clipboard fallbacks ---
     {
       id: "manual",
       label: "Manual / copy JSON",
       kind: "clipboard",
+      category: "manual",
       sharedWith:
         "Copy a JSON snippet to paste into any MCP client manually. No file is written by the wizard.",
+    },
+    {
+      id: "custom",
+      label: "Custom / other",
+      kind: "clipboard",
+      category: "manual",
+      sharedWith:
+        "Copy a JSON snippet for any MCP client not listed above. Installs the skill into every known client folder.",
     },
   ];
 
@@ -326,6 +434,11 @@
   let bridgePort = $state("");
   let resolvedBridgePort = $state<number | null>(null);
   let copyToast = $state<string | null>(null);
+  // Step 4 client-picker search filter. Empty shows the full grouped
+  // catalog; typing filters by label / id so the 18-entry list stays
+  // navigable. The selected client is always visible even when it does
+  // not match the filter (so the preview + write actions stay reachable).
+  let mcpClientSearch = $state("");
   let mcpPlan = $state<McpConfigPlan | null>(null);
   let mcpPlanning = $state(false);
   let mcpWriteResult = $state<McpConfigWriteResult | null>(null);
@@ -1166,6 +1279,30 @@
         return "zcodeProject";
       case "manual":
         return "manual";
+      case "cline":
+        return "cline";
+      case "codex":
+        return "codex";
+      case "gemini":
+        return "gemini";
+      case "github-copilot-cli":
+        return "githubCopilotCli";
+      case "kilo-code":
+        return "kiloCode";
+      case "rider":
+        return "rider";
+      case "unity-ai":
+        return "unityAi";
+      case "vscode-copilot":
+        return "vscodeCopilot";
+      case "vs-copilot":
+        return "vsCopilot";
+      case "zoocode":
+        return "zoocode";
+      case "antigravity":
+        return "antigravity";
+      case "custom":
+        return "custom";
     }
   }
 
@@ -1235,6 +1372,36 @@
   function clientKind(id: McpClientId): "file" | "cli" | "clipboard" {
     return MCP_CLIENT_OPTIONS.find((o) => o.id === id)?.kind ?? "file";
   }
+
+  // Filtered + grouped view of the client picker. The search matches
+  // label or id (case-insensitive); the currently-selected client is
+  // always kept visible so the preview/write actions stay reachable.
+  let filteredClientOptions = $derived.by(() => {
+    const q = mcpClientSearch.trim().toLowerCase();
+    if (!q) return MCP_CLIENT_OPTIONS;
+    return MCP_CLIENT_OPTIONS.filter(
+      (o) =>
+        o.label.toLowerCase().includes(q) ||
+        o.id.toLowerCase().includes(q) ||
+        o.id === mcpClient,
+    );
+  });
+
+  const CLIENT_CATEGORY_LABELS: Record<"ide" | "cli" | "manual", string> = {
+    ide: "Editor / IDE agents",
+    cli: "CLI agents",
+    manual: "Manual",
+  };
+
+  // Group the filtered options by category, preserving the catalog order.
+  let groupedClientOptions = $derived.by(() => {
+    const groups: { category: "ide" | "cli" | "manual"; items: typeof MCP_CLIENT_OPTIONS }[] = [];
+    for (const cat of ["ide", "cli", "manual"] as const) {
+      const items = filteredClientOptions.filter((o) => o.category === cat);
+      if (items.length > 0) groups.push({ category: cat, items });
+    }
+    return groups;
+  });
 
   function canWriteMcpConfig(): boolean {
     if (clientKind(mcpClient) !== "file") return false;
@@ -2943,25 +3110,43 @@
           </p>
 
           <div class="wiz-field">
-            <span class="wiz-label">MCP client</span>
-            <div class="wiz-radio-grid" role="radiogroup" aria-label="MCP client">
-              {#each MCP_CLIENT_OPTIONS as opt (opt.id)}
-                <label class="wiz-radio" title={opt.sharedWith}>
-                  <input
-                    type="radio"
-                    name="wiz-mcp-client"
-                    value={opt.id}
-                    bind:group={mcpClient}
-                  />
-                  <span>
-                    <strong>{opt.label}</strong>
-                    <small>
-                      {#if opt.kind === "file"}writes config file{/if}
-                      {#if opt.kind === "cli"}CLI command only{/if}
-                      {#if opt.kind === "clipboard"}copy JSON to clipboard{/if}
-                    </small>
-                  </span>
-                </label>
+            <div class="wiz-label-row">
+              <span class="wiz-label">MCP client</span>
+              <input
+                type="search"
+                class="wiz-input wiz-input-small wiz-client-search"
+                placeholder="Filter clients…"
+                value={mcpClientSearch}
+                oninput={(e) =>
+                  (mcpClientSearch = (e.currentTarget as HTMLInputElement).value)}
+                aria-label="Filter MCP clients"
+              />
+            </div>
+            <div role="radiogroup" aria-label="MCP client">
+              {#each groupedClientOptions as group (group.category)}
+                <div class="wiz-client-group">
+                  <p class="wiz-client-group-label">{CLIENT_CATEGORY_LABELS[group.category]}</p>
+                  <div class="wiz-radio-grid">
+                    {#each group.items as opt (opt.id)}
+                      <label class="wiz-radio" title={opt.sharedWith}>
+                        <input
+                          type="radio"
+                          name="wiz-mcp-client"
+                          value={opt.id}
+                          bind:group={mcpClient}
+                        />
+                        <span>
+                          <strong>{opt.label}</strong>
+                          <small>
+                            {#if opt.kind === "file"}writes config file{/if}
+                            {#if opt.kind === "cli"}CLI command only{/if}
+                            {#if opt.kind === "clipboard"}copy JSON to clipboard{/if}
+                          </small>
+                        </span>
+                      </label>
+                    {/each}
+                  </div>
+                </div>
               {/each}
             </div>
           </div>
@@ -3924,6 +4109,33 @@
     letter-spacing: 0.07em;
     color: var(--hub-text-muted);
     font-weight: 600;
+  }
+
+  .wiz-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .wiz-client-search {
+    width: auto;
+    min-width: 12rem;
+  }
+
+  .wiz-client-group {
+    margin-top: 0.4rem;
+  }
+
+  .wiz-client-group-label {
+    margin: 0 0 0.25rem;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--hub-text-muted);
+    font-weight: 600;
+    opacity: 0.85;
   }
 
   .wiz-input-row {

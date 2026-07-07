@@ -40,7 +40,9 @@ contributor and maintainer workflows), see [development-setup.md](development-se
     fine). Restart your terminal afterwards so the `node`/`npx` commands are on
     your PATH. Verify with `node --version`.
 - **An MCP client that supports stdio MCP servers** — Cursor, Claude Desktop,
-  Claude Code, OpenCode, or ZCode, or any compatible MCP client.
+  Claude Code, OpenCode, ZCode, Cline, Codex, VS Code Copilot, Gemini CLI, or
+  any compatible MCP client. The Hub wizard configures all of these in one
+  click; the snippets below cover the most common manual shapes.
 
 ## 1) Add the Unity packages (Unity side)
 
@@ -130,6 +132,84 @@ What that means:
   - `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` (kill-switch — disables all OS clicks)
   - `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS` (default 30000)
   - `UNITY_OPEN_MCP_DISMISS_INTERVAL_MS` (default 1500)
+
+### Per-client config snippets
+
+The `mcpServers` JSON shape above works for Cursor, Claude Desktop, Cline,
+Gemini CLI, GitHub Copilot CLI, Kilo Code, Rider (Junie), Unity AI, ZooCode,
+and Antigravity. A few clients use a different envelope:
+
+**VS Code Copilot / Visual Studio Copilot** use a `servers` key (not
+`mcpServers`) in a project-local file:
+
+```json
+{
+  "servers": {
+    "unity-open-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "unity-open-mcp@latest"],
+      "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
+    }
+  }
+}
+```
+
+Place it at `.vscode/mcp.json` (VS Code) or `.vs/mcp.json` (Visual Studio).
+
+**OpenCode** nests under `mcp` with `command` as an array and env under
+`environment`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "unity-open-mcp": {
+      "type": "local",
+      "command": ["npx", "-y", "unity-open-mcp@latest"],
+      "enabled": true,
+      "environment": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
+    }
+  }
+}
+```
+
+**ZCode** nests under `mcp.servers` with `type: "stdio"`:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "unity-open-mcp": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "unity-open-mcp@latest"],
+        "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
+      }
+    }
+  }
+}
+```
+
+**Codex** uses TOML in `.codex/config.toml`:
+
+```toml
+[mcp_servers.unity-open-mcp]
+enabled = true
+command = "npx"
+args = ["-y", "unity-open-mcp@latest"]
+
+[mcp_servers.unity-open-mcp.env]
+UNITY_PROJECT_PATH = "/absolute/path/to/project"
+```
+
+**Claude Code** is CLI-only — run this instead of writing a file:
+
+```sh
+claude mcp add unity-open-mcp \
+  --env UNITY_PROJECT_PATH=/absolute/path/to/project \
+  -- npx -y unity-open-mcp@latest
+```
 
 ## 3) Launch Unity and verify
 

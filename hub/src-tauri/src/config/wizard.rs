@@ -141,6 +141,13 @@ pub enum BridgeStatusKind {
 /// when a known client config file exists on disk and contains a
 /// `unity-open-mcp` MCP server entry. Used by Step 1 to surface
 /// "MCP configured?" and by the Done screen checklist.
+///
+/// The original six flags cover the M4 client surface; the
+/// `other_clients` flag is a roll-up for every Ivan-parity client
+/// added in M27 Plan 5 (Cline, Codex, Gemini, GitHub Copilot CLI,
+/// Kilo Code, Rider, Unity AI, VS Code Copilot, VS Copilot, ZooCode,
+/// Antigravity). A single roll-up keeps the wire shape stable while
+/// still surfacing "configured" for any of them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpConfigHeuristic {
@@ -150,12 +157,24 @@ pub struct McpConfigHeuristic {
     pub opencode_project: bool,
     pub zcode_global: bool,
     pub zcode_project: bool,
+    /// `true` when any of the M27 Plan 5 clients has a configured
+    /// `unity-open-mcp` entry. The wizard surfaces this as a single
+    /// "other client" badge; per-client detail is not needed for the
+    /// Step 1 / Done checklist.
+    #[serde(default)]
+    pub other_clients: bool,
 }
 
 impl McpConfigHeuristic {
     /// `true` when any known client has a `unity-open-mcp` entry.
     pub fn any(&self) -> bool {
-        self.cursor || self.claude_desktop || self.opencode_global || self.opencode_project
+        self.cursor
+            || self.claude_desktop
+            || self.opencode_global
+            || self.opencode_project
+            || self.zcode_global
+            || self.zcode_project
+            || self.other_clients
     }
 }
 
@@ -1300,7 +1319,7 @@ fn extract_path_query(url: &str) -> Option<String> {
     path
 }
 
-/// `true` when any of the four known agent-skill `SKILL.md` files
+/// `true` when any of the known agent-skill `SKILL.md` files
 /// exists in the project. The relative paths mirror
 /// `skills/client-paths.json` so detect can run without a toolkit
 /// root; if that manifest ever grows a new skill dir, add it here.
@@ -1310,6 +1329,15 @@ fn any_skill_installed(project: &Path) -> bool {
         ".claude/skills/unity-open-mcp/SKILL.md",
         ".opencode/skills/unity-open-mcp/SKILL.md",
         ".agents/skills/unity-open-mcp/SKILL.md",
+        ".cline/skills/unity-open-mcp/SKILL.md",
+        ".gemini/skills/unity-open-mcp/SKILL.md",
+        ".kilocode/skills/unity-open-mcp/SKILL.md",
+        ".roo/skills/unity-open-mcp/SKILL.md",
+        ".agent/skills/unity-open-mcp/SKILL.md",
+        ".junie/skills/unity-open-mcp/SKILL.md",
+        ".vscode/skills/unity-open-mcp/SKILL.md",
+        ".vs/skills/unity-open-mcp/SKILL.md",
+        ".github/skills/unity-open-mcp/SKILL.md",
     ];
     SKILL_REL_PATHS
         .iter()
@@ -1327,6 +1355,38 @@ fn read_mcp_heuristic(project: &Path) -> McpConfigHeuristic {
     let opencode_project = contains_mcp_key(&project.join("opencode.json"));
     let zcode_global = contains_mcp_key(&home.join(".zcode").join("cli").join("config.json"));
     let zcode_project = contains_mcp_key(&project.join(".zcode").join("cli").join("config.json"));
+    // M27 Plan 5 clients — roll up into `other_clients`. Each path mirrors
+    // the writer's `resolve_target_path` so detect and configure agree.
+    let other_clients = [
+        // Cline (global, VS Code globalStorage).
+        contains_mcp_key(&cline_settings_path(&home)),
+        // Codex (project TOML).
+        contains_mcp_key_toml(&project.join(".codex").join("config.toml")),
+        // Gemini (project).
+        contains_mcp_key(&project.join(".gemini").join("settings.json")),
+        // GitHub Copilot CLI / Claude Code shared project `.mcp.json`.
+        contains_mcp_key(&project.join(".mcp.json")),
+        // Kilo Code (project).
+        contains_mcp_key(&project.join(".kilocode").join("mcp.json")),
+        // Rider / Junie (project).
+        contains_mcp_key(&project.join(".junie").join("mcp").join("mcp.json")),
+        // Unity AI (project UserSettings).
+        contains_mcp_key(&project.join("UserSettings").join("mcp.json")),
+        // VS Code Copilot (project, `servers` key).
+        contains_mcp_key_servers(&project.join(".vscode").join("mcp.json")),
+        // Visual Studio Copilot (project, `servers` key).
+        contains_mcp_key_servers(&project.join(".vs").join("mcp.json")),
+        // ZooCode (project).
+        contains_mcp_key(&project.join(".roo").join("mcp.json")),
+        // Antigravity (global).
+        contains_mcp_key(
+            &home.join(".gemini")
+                .join("antigravity")
+                .join("mcp_config.json"),
+        ),
+    ]
+    .iter()
+    .any(|&f| f);
     McpConfigHeuristic {
         cursor,
         claude_desktop,
@@ -1334,7 +1394,29 @@ fn read_mcp_heuristic(project: &Path) -> McpConfigHeuristic {
         opencode_project,
         zcode_global,
         zcode_project,
+        other_clients,
     }
+}
+
+/// Cline global settings path (VS Code globalStorage). Mirrors
+/// `mcp_config::cline_settings_path` so detect and the writer agree.
+fn cline_settings_path(home: &Path) -> PathBuf {
+    let base = if cfg!(target_os = "macos") {
+        home.join("Library")
+            .join("Application Support")
+            .join("Code")
+    } else if cfg!(target_os = "windows") {
+        dirs::config_dir()
+            .unwrap_or_else(|| home.to_path_buf())
+            .join("Code")
+    } else {
+        home.join(".config").join("Code")
+    };
+    base.join("User")
+        .join("globalStorage")
+        .join("saoudrizwan.claude-dev")
+        .join("settings")
+        .join("cline_mcp_settings.json")
 }
 
 pub fn claude_desktop_config_path(home: &Path) -> PathBuf {
@@ -1395,6 +1477,45 @@ pub fn contains_mcp_key(path: &Path) -> bool {
         }
     }
     false
+}
+
+/// `true` when the JSON file at `path` exists and contains a
+/// `unity-open-mcp` entry under the `servers` key (VS Code Copilot /
+/// Visual Studio Copilot shape — not `mcpServers`).
+fn contains_mcp_key_servers(path: &Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&content) else {
+        return false;
+    };
+    value
+        .get("servers")
+        .and_then(|v| v.as_object())
+        .map(|s| s.contains_key("unity-open-mcp"))
+        .unwrap_or(false)
+}
+
+/// `true` when the TOML file at `path` exists and contains a
+/// `[mcp_servers.unity-open-mcp]` table (Codex shape). Unparsable
+/// files are treated as "not configured".
+fn contains_mcp_key_toml(path: &Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(root) = toml::from_str::<toml::value::Table>(&content) else {
+        return false;
+    };
+    root.get("mcp_servers")
+        .and_then(|v| v.as_table())
+        .map(|s| s.contains_key("unity-open-mcp"))
+        .unwrap_or(false)
 }
 
 fn check_manifest_writable_at(manifest_path: &Path) -> bool {

@@ -1642,7 +1642,21 @@ export type McpClientIdWire =
   | "opencodeProject"
   | "zcodeGlobal"
   | "zcodeProject"
-  | "manual";
+  | "manual"
+  // --- Ivan-parity breadth (M27 Plan 5). Mirrors the Rust
+  //     McpClientId camelCase serialization. ---
+  | "cline"
+  | "codex"
+  | "gemini"
+  | "githubCopilotCli"
+  | "kiloCode"
+  | "rider"
+  | "unityAi"
+  | "vscodeCopilot"
+  | "vsCopilot"
+  | "zoocode"
+  | "antigravity"
+  | "custom";
 
 /**
  * How the MCP server is launched. Mirrors the Rust `McpLaunchMode`
@@ -1753,7 +1767,21 @@ export type McpClientWire =
   | "opencodeProject"
   | "zcodeGlobal"
   | "zcodeProject"
-  | "manual";
+  | "manual"
+  // --- Ivan-parity breadth (M27 Plan 5). Mirrors the Rust
+  //     McpClientId camelCase serialization. ---
+  | "cline"
+  | "codex"
+  | "gemini"
+  | "githubCopilotCli"
+  | "kiloCode"
+  | "rider"
+  | "unityAi"
+  | "vscodeCopilot"
+  | "vsCopilot"
+  | "zoocode"
+  | "antigravity"
+  | "custom";
 
 export interface SkillCopyParamsWire {
   projectPath: string;

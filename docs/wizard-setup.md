@@ -20,8 +20,9 @@ For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md)
   don't have it. The wizard checks this and tells you if it's missing or too old.
 - **Unity Hub Pro** — install it first. See [unity-hub-pro.md](unity-hub-pro.md)
   (download the installer for your OS from the GitHub Releases page).
-- **An MCP client** (Cursor, Claude Desktop, Claude Code, OpenCode, ZCode, or
-  similar) — the AI tool you'll actually drive Unity from.
+- **An MCP client** (Cursor, Claude Desktop, Claude Code, OpenCode, ZCode,
+  Cline, Codex, VS Code Copilot, Gemini CLI, or one of the other supported
+  agents) — the AI tool you'll actually drive Unity from.
 
 ## Quick flow
 
@@ -105,9 +106,26 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 
 ### Step 5 — MCP client config
 
-- Choose a client preset. Each option has a tooltip describing the config format and other popular agents that share it (for example, Cursor and Claude Desktop share the `mcpServers` JSON shape; OpenCode uses `mcp` + `$schema`; ZCode uses `mcp.servers` + `type:stdio` with skills under `.agents/skills/`).
-- Review the generated config preview
-- Write config to the target location (or copy a CLI command / JSON snippet for Claude Code / Manual)
+- Pick a client from the searchable, grouped picker. The catalog covers the
+  common editor/IDE agents (Cursor, Claude Desktop, Cline, VS Code Copilot,
+  Visual Studio Copilot, ZooCode, Kilo Code, Rider/Junie, Unity AI, Antigravity,
+  OpenCode, ZCode), the CLI agents (Claude Code, GitHub Copilot CLI, Gemini CLI,
+  Codex), and Manual / Custom fallbacks.
+- A search box filters the list by name; the selected client is always visible
+  even when it does not match the filter.
+- Each option has a tooltip describing the config format and target path:
+  - Cursor / Claude Desktop / Cline / most editor agents: `mcpServers` JSON
+  - VS Code Copilot / Visual Studio Copilot: `servers` JSON (project `.vscode/mcp.json` / `.vs/mcp.json`)
+  - OpenCode: `mcp` + `$schema` JSON
+  - ZCode: `mcp.servers` + `type:stdio` JSON with skills under `.agents/skills/`
+  - Codex: TOML `[mcp_servers.unity-open-mcp]` table in `.codex/config.toml`
+  - Claude Code: CLI-only — renders a `claude mcp add` command (no file)
+- Review the generated config preview (JSON or TOML, or a CLI command for
+  Claude Code).
+- Write config to the target location (or copy a CLI command / JSON snippet for
+  Claude Code / Manual / Custom). Writes are merge-safe: unrelated keys and
+  sibling MCP servers are preserved, and a `.bak` backup is left next to the
+  original file.
 
 ![plot](../screenshots/hub-wizard-4.png)
 

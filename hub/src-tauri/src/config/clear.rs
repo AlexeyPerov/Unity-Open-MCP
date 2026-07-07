@@ -22,17 +22,30 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::mcp_config::{merge_key_path, McpClientId, McpScope};
+use super::mcp_config::{
+    cline_settings_path, client_format, client_is_global, merge_key_path, ClientFormat,
+    ClientScope, McpClientId, MCP_SERVER_KEY,
+};
 use super::wizard::{claude_desktop_config_path, BRIDGE_PACKAGE_ID, VERIFY_PACKAGE_ID};
 
-/// All four client-relative skill paths the wizard can copy. Mirrors
+/// Every client-relative skill path the wizard can copy. Mirrors
 /// `skills/client-paths.json` so clear runs without a toolkit root;
 /// keep this list in sync if the manifest ever grows a new target.
+/// Generated from the catalog so a new client is picked up here for free.
 const SKILL_REL_PATHS: &[&str] = &[
     ".cursor/skills/unity-open-mcp/SKILL.md",
     ".claude/skills/unity-open-mcp/SKILL.md",
     ".opencode/skills/unity-open-mcp/SKILL.md",
     ".agents/skills/unity-open-mcp/SKILL.md",
+    ".cline/skills/unity-open-mcp/SKILL.md",
+    ".gemini/skills/unity-open-mcp/SKILL.md",
+    ".kilocode/skills/unity-open-mcp/SKILL.md",
+    ".roo/skills/unity-open-mcp/SKILL.md",
+    ".agent/skills/unity-open-mcp/SKILL.md",
+    ".junie/skills/unity-open-mcp/SKILL.md",
+    ".vscode/skills/unity-open-mcp/SKILL.md",
+    ".vs/skills/unity-open-mcp/SKILL.md",
+    ".github/skills/unity-open-mcp/SKILL.md",
 ];
 
 /// `(client, scope, target_path)` triples the clear pass visits. The
@@ -40,68 +53,124 @@ const SKILL_REL_PATHS: &[&str] = &[
 /// the `UNITY_PROJECT_PATH` guard must apply.
 struct ClearTarget {
     client: McpClientId,
-    scope: McpScope,
+    scope: ClientScope,
     path: PathBuf,
 }
 
-fn is_global_scope(scope: McpScope) -> bool {
-    matches!(
-        scope,
-        McpScope::CursorGlobal
-            | McpScope::ClaudeDesktopGlobal
-            | McpScope::OpencodeGlobal
-            | McpScope::ZcodeGlobal
-    )
+fn is_global_scope(scope: ClientScope) -> bool {
+    matches!(scope, ClientScope::Global)
 }
 
-/// Resolve every client config target the writer knows about. Order
-/// matches `super::mcp_config::resolve_target_path`; the two CLI-only
-/// / manual clients (`ClaudeCode`, `Manual`) are intentionally absent
-/// because they have no backing file.
+/// Resolve every client config target the writer knows about, derived
+/// from the catalog. Cursor is special-cased (both global and project
+/// scopes are visited); every other file-backed client visits its
+/// single canonical scope. CLI-only (`ClaudeCode`) and clipboard-only
+/// (`Manual`/`Custom`) clients are intentionally absent — they have no
+/// backing file.
 fn all_client_targets(project_path: &str, home: &Path) -> Vec<ClearTarget> {
     let project = PathBuf::from(project_path);
-    let scope_client = |scope: McpScope, client: McpClientId, path: PathBuf| ClearTarget {
-        client,
-        scope,
-        path,
-    };
-    vec![
-        scope_client(
-            McpScope::CursorGlobal,
-            McpClientId::Cursor,
-            home.join(".cursor").join("mcp.json"),
+    let mut out = Vec::new();
+    // Every file-backed client except Cursor (which has two scopes).
+    for client in FILE_BACKED_CLIENTS {
+        if *client == McpClientId::Cursor {
+            continue;
+        }
+        let scope = if client_is_global(*client) {
+            ClientScope::Global
+        } else {
+            ClientScope::Project
+        };
+        if let Some(path) = resolve_clear_path(client, scope, &project, home) {
+            out.push(ClearTarget {
+                client: *client,
+                scope,
+                path,
+            });
+        }
+    }
+    // Cursor visits both scopes so a global write and a project write
+    // are both cleared in one pass.
+    if let Some(global) = resolve_clear_path(&McpClientId::Cursor, ClientScope::Global, &project, home)
+    {
+        out.push(ClearTarget {
+            client: McpClientId::Cursor,
+            scope: ClientScope::Global,
+            path: global,
+        });
+    }
+    if let Some(proj) = resolve_clear_path(&McpClientId::Cursor, ClientScope::Project, &project, home)
+    {
+        out.push(ClearTarget {
+            client: McpClientId::Cursor,
+            scope: ClientScope::Project,
+            path: proj,
+        });
+    }
+    out
+}
+
+/// Every file-backed client in the catalog. Kept as a const slice so the
+/// clear pass enumerates them without re-deriving from `McpClientId`.
+const FILE_BACKED_CLIENTS: &[McpClientId] = &[
+    McpClientId::Cursor,
+    McpClientId::ClaudeDesktop,
+    McpClientId::OpencodeGlobal,
+    McpClientId::OpencodeProject,
+    McpClientId::ZcodeGlobal,
+    McpClientId::ZcodeProject,
+    McpClientId::Cline,
+    McpClientId::Codex,
+    McpClientId::Gemini,
+    McpClientId::GithubCopilotCli,
+    McpClientId::KiloCode,
+    McpClientId::Rider,
+    McpClientId::UnityAi,
+    McpClientId::VscodeCopilot,
+    McpClientId::VsCopilot,
+    McpClientId::ZooCode,
+    McpClientId::Antigravity,
+];
+
+/// Resolve the on-disk path for a clear target. Mirrors
+/// `mcp_config::resolve_target_path` but lives here so clear runs
+/// without importing the writer's full surface. The two must stay in
+/// sync — a new client added to the writer must appear here too.
+fn resolve_clear_path(
+    client: &McpClientId,
+    scope: ClientScope,
+    project: &Path,
+    home: &Path,
+) -> Option<PathBuf> {
+    match client {
+        McpClientId::Cursor => match scope {
+            ClientScope::Global => Some(home.join(".cursor").join("mcp.json")),
+            ClientScope::Project => Some(project.join(".cursor").join("mcp.json")),
+        },
+        McpClientId::ClaudeDesktop => Some(claude_desktop_config_path(home)),
+        McpClientId::OpencodeGlobal => {
+            Some(home.join(".config").join("opencode").join("opencode.json"))
+        }
+        McpClientId::OpencodeProject => Some(project.join("opencode.json")),
+        McpClientId::ZcodeGlobal => Some(home.join(".zcode").join("cli").join("config.json")),
+        McpClientId::ZcodeProject => Some(project.join(".zcode").join("cli").join("config.json")),
+        McpClientId::Cline => Some(cline_settings_path(home)),
+        McpClientId::Codex => Some(project.join(".codex").join("config.toml")),
+        McpClientId::Gemini => Some(project.join(".gemini").join("settings.json")),
+        McpClientId::GithubCopilotCli => Some(project.join(".mcp.json")),
+        McpClientId::KiloCode => Some(project.join(".kilocode").join("mcp.json")),
+        McpClientId::Rider => Some(project.join(".junie").join("mcp").join("mcp.json")),
+        McpClientId::UnityAi => Some(project.join("UserSettings").join("mcp.json")),
+        McpClientId::VscodeCopilot => Some(project.join(".vscode").join("mcp.json")),
+        McpClientId::VsCopilot => Some(project.join(".vs").join("mcp.json")),
+        McpClientId::ZooCode => Some(project.join(".roo").join("mcp.json")),
+        McpClientId::Antigravity => Some(
+            home.join(".gemini")
+                .join("antigravity")
+                .join("mcp_config.json"),
         ),
-        scope_client(
-            McpScope::CursorProject,
-            McpClientId::Cursor,
-            project.join(".cursor").join("mcp.json"),
-        ),
-        scope_client(
-            McpScope::ClaudeDesktopGlobal,
-            McpClientId::ClaudeDesktop,
-            claude_desktop_config_path(home),
-        ),
-        scope_client(
-            McpScope::OpencodeGlobal,
-            McpClientId::OpencodeGlobal,
-            home.join(".config").join("opencode").join("opencode.json"),
-        ),
-        scope_client(
-            McpScope::OpencodeProject,
-            McpClientId::OpencodeProject,
-            project.join("opencode.json"),
-        ),
-        scope_client(
-            McpScope::ZcodeGlobal,
-            McpClientId::ZcodeGlobal,
-            home.join(".zcode").join("cli").join("config.json"),
-        ),
-        scope_client(
-            McpScope::ZcodeProject,
-            McpClientId::ZcodeProject,
-            project.join(".zcode").join("cli").join("config.json"),
-        ),
-    ]
+        // CLI / clipboard-only clients have no file target.
+        McpClientId::ClaudeCode | McpClientId::Manual | McpClientId::Custom => None,
+    }
 }
 
 /// One client config touched by the clear pass.
@@ -135,7 +204,7 @@ pub struct ClearAiSetupResult {
 }
 
 /// Label for a scope, matching the wizard's "Cursor (global)" style.
-fn scope_label(client: McpClientId, scope: McpScope) -> String {
+fn scope_label(client: McpClientId, scope: ClientScope) -> String {
     let name = match client {
         McpClientId::Cursor => "Cursor",
         McpClientId::ClaudeDesktop => "Claude Desktop",
@@ -143,6 +212,18 @@ fn scope_label(client: McpClientId, scope: McpScope) -> String {
         McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => "OpenCode",
         McpClientId::ZcodeGlobal | McpClientId::ZcodeProject => "ZCode",
         McpClientId::Manual => "Manual",
+        McpClientId::Cline => "Cline",
+        McpClientId::Codex => "Codex",
+        McpClientId::Gemini => "Gemini",
+        McpClientId::GithubCopilotCli => "GitHub Copilot CLI",
+        McpClientId::KiloCode => "Kilo Code",
+        McpClientId::Rider => "Rider (Junie)",
+        McpClientId::UnityAi => "Unity AI",
+        McpClientId::VscodeCopilot => "VS Code Copilot",
+        McpClientId::VsCopilot => "Visual Studio Copilot",
+        McpClientId::ZooCode => "ZooCode",
+        McpClientId::Antigravity => "Antigravity",
+        McpClientId::Custom => "Custom",
     };
     let suffix = if is_global_scope(scope) { "global" } else { "project" };
     format!("{name} ({suffix})")
@@ -285,7 +366,10 @@ fn backup(target: &Path) -> std::io::Result<PathBuf> {
 }
 
 /// Clear one client config target in place. Appends to `result` and
-/// collects non-fatal errors instead of aborting.
+/// collects non-fatal errors instead of aborting. Branches on the
+/// client format: JSON clients go through the JSON merge/prune path;
+/// TOML clients (Codex) parse via the `toml` crate, remove the entry
+/// from the `mcp_servers` table, and re-serialize.
 fn clear_client_target(
     target: &ClearTarget,
     project_path: &str,
@@ -321,7 +405,25 @@ fn clear_client_target(
         });
         return;
     }
-    let mut value: Value = match serde_json::from_str(&content) {
+    // Dispatch on format. TOML (Codex) takes a dedicated path; every
+    // other file-backed client is JSON.
+    match client_format(target.client) {
+        ClientFormat::Toml => clear_toml_target(target, &content, project_path, &label, result),
+        _ => clear_json_target(target, &content, project_path, &label, result),
+    }
+}
+
+/// JSON clear path — shared by every JSON client. Parses, removes the
+/// `unity-open-mcp` leaf at the client's merge key, prunes empty
+/// parents, backs up, and re-writes atomically.
+fn clear_json_target(
+    target: &ClearTarget,
+    content: &str,
+    project_path: &str,
+    label: &str,
+    result: &mut ClearAiSetupResult,
+) {
+    let mut value: Value = match serde_json::from_str(content) {
         Ok(v) => v,
         Err(e) => {
             result.errors.push(format!(
@@ -336,7 +438,7 @@ fn clear_client_target(
     let removed = remove_entry(&mut value, &key_path, project_path, guard);
     if !removed {
         result.client_configs_cleared.push(ClearedClientConfig {
-            label,
+            label: label.to_string(),
             path: target.path.to_string_lossy().into_owned(),
             removed: false,
             backed_up: false,
@@ -344,7 +446,6 @@ fn clear_client_target(
         return;
     }
     prune_empty_along(&mut value, &key_path);
-    // Back up first, then write.
     let backed_up = match backup(&target.path) {
         Ok(b) => {
             let p = b.to_string_lossy().into_owned();
@@ -355,7 +456,6 @@ fn clear_client_target(
                         "{label}: failed to write {}: {e}",
                         target.path.display()
                     ));
-                    // Still surface the backup path so the user can restore.
                     let _ = &p;
                     false
                 }
@@ -370,11 +470,130 @@ fn clear_client_target(
         }
     };
     result.client_configs_cleared.push(ClearedClientConfig {
-        label,
+        label: label.to_string(),
         path: target.path.to_string_lossy().into_owned(),
         removed: true,
         backed_up,
     });
+}
+
+/// TOML clear path (Codex `.codex/config.toml`). Parses the existing
+/// file, removes the `[mcp_servers.unity-open-mcp]` table (subject to
+/// the global `UNITY_PROJECT_PATH` guard), and re-serializes.
+fn clear_toml_target(
+    target: &ClearTarget,
+    content: &str,
+    project_path: &str,
+    label: &str,
+    result: &mut ClearAiSetupResult,
+) {
+    let mut root: toml::value::Table = match toml::from_str(content) {
+        Ok(t) => t,
+        Err(e) => {
+            result.errors.push(format!(
+                "{label}: existing config at {} is not valid TOML: {e}",
+                target.path.display()
+            ));
+            return;
+        }
+    };
+    let guard = is_global_scope(target.scope);
+    let removed = remove_toml_entry(&mut root, project_path, guard);
+    if !removed {
+        result.client_configs_cleared.push(ClearedClientConfig {
+            label: label.to_string(),
+            path: target.path.to_string_lossy().into_owned(),
+            removed: false,
+            backed_up: false,
+        });
+        return;
+    }
+    // Prune an empty mcp_servers table.
+    if let Some(toml::Value::Table(servers)) = root.get("mcp_servers") {
+        if servers.is_empty() {
+            root.remove("mcp_servers");
+        }
+    }
+    let backed_up = match backup(&target.path) {
+        Ok(b) => {
+            let p = b.to_string_lossy().into_owned();
+            let body = toml::to_string_pretty(&toml::Value::Table(root.clone()))
+                .unwrap_or_default();
+            match write_text_atomic(&target.path, &body) {
+                Ok(()) => true,
+                Err(e) => {
+                    result.errors.push(format!(
+                        "{label}: failed to write {}: {e}",
+                        target.path.display()
+                    ));
+                    let _ = &p;
+                    false
+                }
+            }
+        }
+        Err(e) => {
+            result.errors.push(format!(
+                "{label}: cannot create backup at {}: {e}",
+                target.path.display()
+            ));
+            return;
+        }
+    };
+    result.client_configs_cleared.push(ClearedClientConfig {
+        label: label.to_string(),
+        path: target.path.to_string_lossy().into_owned(),
+        removed: true,
+        backed_up,
+    });
+}
+
+/// `true` when a TOML `[mcp_servers.<name>]` entry carries an
+/// `env.UNITY_PROJECT_PATH` matching `project_path`. Absent field →
+/// treat as belonging to this project (clear it).
+fn toml_entry_matches_project(entry: &toml::Value, project_path: &str) -> bool {
+    let Some(env) = entry.get("env").and_then(|e| e.as_table()) else {
+        return true;
+    };
+    match env.get("UNITY_PROJECT_PATH").and_then(|v| v.as_str()) {
+        Some(p) => same_path(p, project_path),
+        None => true,
+    }
+}
+
+/// Remove the `[mcp_servers.unity-open-mcp]` table from `root` when it
+/// matches the project (global files) or unconditionally (project files).
+/// Returns `true` when a removal happened.
+fn remove_toml_entry(root: &mut toml::value::Table, project_path: &str, guard: bool) -> bool {
+    let Some(servers_val) = root.get_mut("mcp_servers") else {
+        return false;
+    };
+    let toml::Value::Table(servers) = servers_val else {
+        return false;
+    };
+    let take = match servers.get(MCP_SERVER_KEY) {
+        Some(entry) => !guard || toml_entry_matches_project(entry, project_path),
+        None => false,
+    };
+    if take {
+        servers.remove(MCP_SERVER_KEY);
+        true
+    } else {
+        false
+    }
+}
+
+/// Atomic text write (tmp + rename), mirroring `write_json_atomic`.
+fn write_text_atomic(target: &Path, body: &str) -> std::io::Result<()> {
+    let tmp_path = match target.extension().and_then(|e| e.to_str()) {
+        Some(ext) => target.with_extension(format!("{ext}.tmp")),
+        None => target.with_extension("tmp"),
+    };
+    {
+        let mut tmp = fs::File::create(&tmp_path)?;
+        tmp.write_all(body.as_bytes())?;
+        tmp.sync_all().ok();
+    }
+    fs::rename(&tmp_path, target)
 }
 
 /// Strip bridge + verify from `Packages/manifest.json`. Preserves all

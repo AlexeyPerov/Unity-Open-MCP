@@ -16,9 +16,29 @@ import {
 // Bundled fallback mirrors the checked-in manifest
 // ---------------------------------------------------------------------------
 
-test("bundled manifest exposes the four canonical client keys", () => {
+test("bundled manifest exposes the canonical + extended client keys", () => {
   const keys = Object.keys(BUNDLED_MANIFEST.clients).sort();
-  assert.deepEqual(keys, ["agents", "claude", "cursor", "opencode"]);
+  // The four M4 canonical keys are always present; M27 Plan 5 adds the
+  // extended Ivan-parity skill targets. The bundled fallback must mirror
+  // the on-disk manifest exactly so a standalone install generates the
+  // same skill paths.
+  for (const k of [
+    "agents",
+    "claude",
+    "cursor",
+    "opencode",
+    "cline",
+    "gemini",
+    "kilocode",
+    "roo",
+    "agent",
+    "junie",
+    "vscode",
+    "vs",
+    "github",
+  ]) {
+    assert.ok(keys.includes(k), `bundled manifest missing client key ${k}`);
+  }
 });
 
 test("bundled manifest maps ZCode to agents and Cursor to cursor", () => {
@@ -74,9 +94,27 @@ test("clientSkillRelativePath throws for an unknown client key", () => {
   );
 });
 
-test("knownClientKeys lists the canonical clients", () => {
+test("knownClientKeys lists the canonical + extended clients", () => {
   const keys = knownClientKeys().sort();
-  assert.deepEqual(keys, ["agents", "claude", "cursor", "opencode"]);
+  // Same expectation as the bundled-manifest test — the on-disk manifest
+  // is the source of truth and the loader must surface every key.
+  for (const k of [
+    "agents",
+    "claude",
+    "cursor",
+    "opencode",
+    "cline",
+    "gemini",
+    "kilocode",
+    "roo",
+    "agent",
+    "junie",
+    "vscode",
+    "vs",
+    "github",
+  ]) {
+    assert.ok(keys.includes(k), `knownClientKeys missing ${k}`);
+  }
 });
 
 // ---------------------------------------------------------------------------

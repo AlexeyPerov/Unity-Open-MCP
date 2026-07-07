@@ -112,17 +112,69 @@ test("MCP_SERVER_KEY is unity-open-mcp (matches Rust AiToolkitSettings conventio
 });
 
 test("mcpClientConfigTarget covers all McpClientId values", () => {
+  // Every variant in the McpClientId union must resolve without falling
+  // through the switch (TypeScript exhaustiveness helps, but the runtime
+  // guard catches a missing case when the union grows).
   const ids: McpClientId[] = [
     "cursor",
     "claude-desktop",
     "claude-code",
     "opencode-global",
     "opencode-project",
+    "zcode-global",
+    "zcode-project",
     "manual",
+    "cline",
+    "codex",
+    "gemini",
+    "github-copilot-cli",
+    "kilo-code",
+    "rider",
+    "unity-ai",
+    "vscode-copilot",
+    "vs-copilot",
+    "zoocode",
+    "antigravity",
+    "custom",
   ];
   for (const id of ids) {
     const t = mcpClientConfigTarget(id, "/home/dev");
     // All targets must have a string mergeKey, even when path is null.
     assert.equal(typeof t.mergeKey, "string");
   }
+});
+
+test("mcpClientConfigTarget resolves codex to .codex/config.toml (project, TOML)", () => {
+  const t = mcpClientConfigTarget("codex", "/home/dev");
+  assert.equal(t.path, ".codex/config.toml");
+  assert.equal(t.scope, "project");
+  assert.equal(t.mergeKey, "mcp_servers.unity-open-mcp");
+});
+
+test("mcpClientConfigTarget resolves vscode-copilot to .vscode/mcp.json with servers key", () => {
+  const t = mcpClientConfigTarget("vscode-copilot", "/home/dev");
+  assert.equal(t.path, ".vscode/mcp.json");
+  assert.equal(t.scope, "project");
+  // VS Code Copilot uses `servers`, NOT `mcpServers`.
+  assert.equal(t.mergeKey, "servers.unity-open-mcp");
+});
+
+test("mcpClientConfigTarget resolves antigravity to global gemini/antigravity path", () => {
+  const t = mcpClientConfigTarget("antigravity", "/home/dev");
+  assert.equal(t.path, "/home/dev/.gemini/antigravity/mcp_config.json");
+  assert.equal(t.scope, "global");
+});
+
+test("mcpClientConfigTarget resolves cline to global scope with mcpServers key", () => {
+  const t = mcpClientConfigTarget("cline", "/home/dev");
+  // OS-specific path resolved in Step 4; the merge key is the Cursor family.
+  assert.equal(t.path, null);
+  assert.equal(t.scope, "global");
+  assert.equal(t.mergeKey, "mcpServers.unity-open-mcp");
+});
+
+test("custom returns null path like manual (clipboard-only)", () => {
+  const t = mcpClientConfigTarget("custom", "/home/dev");
+  assert.equal(t.path, null);
+  assert.equal(t.scope, "none");
 });

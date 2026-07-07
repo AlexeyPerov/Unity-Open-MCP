@@ -103,9 +103,17 @@ pub const MCP_SERVER_KEY: &str = "unity-open-mcp";
 pub const CLIENT_PATHS_MANIFEST_REL: &str = "skills/client-paths.json";
 
 /// Supported MCP client ids. Mirrors `McpClientId` in
-/// `ai_toolkit.ts` and the radio group in `AiSetupWizard.svelte`
-/// Step 4. `claude-code` and `manual` are intentionally not
-/// backed by a writable JSON file.
+/// `ai_toolkit.ts` and the picker in `AiSetupWizard.svelte`
+/// Step 4. `claude-code` is CLI-only (renders a `claude mcp add`
+/// command); `manual` is clipboard-only. Every other variant is
+/// backed by a writable config file (JSON, or TOML for `Codex`).
+///
+/// The catalog covers the Ivan-named client surface (14+ agents)
+/// plus the Open MCP originals. Adding a client is a three-step
+/// change: extend this enum, add a row to every `match` below
+/// (`client_format`, `resolve_target_path`, `merge_key_path`,
+/// `build_entry_json`), and add the skill target to
+/// `skills/client-paths.json`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum McpClientId {
@@ -117,21 +125,78 @@ pub enum McpClientId {
     ZcodeGlobal,
     ZcodeProject,
     Manual,
+    // --- Ivan-parity breadth (M27 Plan 5) ---
+    /// Cline — VS Code globalStorage JSON (`mcpServers`).
+    Cline,
+    /// Codex — project `.codex/config.toml` (`[mcp_servers.*]`).
+    Codex,
+    /// Gemini CLI — project `.gemini/settings.json`.
+    Gemini,
+    /// GitHub Copilot CLI — project `.mcp.json` (stdio, no `type`).
+    GithubCopilotCli,
+    /// Kilo Code — project `.kilocode/mcp.json`.
+    KiloCode,
+    /// Rider (Junie) — project `.junie/mcp/mcp.json`.
+    Rider,
+    /// Unity AI — project `UserSettings/mcp.json`.
+    UnityAi,
+    /// VS Code Copilot — project `.vscode/mcp.json` (`servers` key).
+    VscodeCopilot,
+    /// Visual Studio Copilot — project `.vs/mcp.json` (`servers` key).
+    VsCopilot,
+    /// ZooCode — project `.roo/mcp.json`.
+    ZooCode,
+    /// Antigravity — global `~/.gemini/antigravity/mcp_config.json`.
+    Antigravity,
+    /// Custom — clipboard-only snippet (alias of Manual semantics
+    /// with a different UI affordance; maps to all skill folders).
+    Custom,
 }
 
-/// Per-client scope the wizard writes. The Step 4 UI combines
-/// `McpClientId` with the Cursor project-scope toggle; the
-/// Rust side collapses the pair into this single discriminant
-/// so the planner and writer share one switch.
+/// Config format a client writes. Drives whether the planner / writer
+/// takes the JSON merge path or the Codex TOML path. `CliOnly` and
+/// `ClipboardOnly` never reach the file writer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum McpScope {
-    CursorGlobal,
-    CursorProject,
-    ClaudeDesktopGlobal,
-    OpencodeGlobal,
-    OpencodeProject,
-    ZcodeGlobal,
-    ZcodeProject,
+pub(crate) enum ClientFormat {
+    Json,
+    Toml,
+    CliOnly,
+    ClipboardOnly,
+}
+
+/// The on-disk scope a client targets. Mirrors the old `McpScope` enum
+/// but derived from `McpClientId` (+ the Cursor project toggle) so the
+/// catalog stays the single switch. `Global` applies the
+/// `UNITY_PROJECT_PATH` clear guard; `Project` clears unconditionally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClientScope {
+    Global,
+    Project,
+}
+
+/// Resolve the format family for a client. The TOML branch is currently
+/// Codex-only; every other file-backed client writes JSON.
+pub(crate) fn client_format(client: McpClientId) -> ClientFormat {
+    match client {
+        McpClientId::ClaudeCode => ClientFormat::CliOnly,
+        McpClientId::Manual | McpClientId::Custom => ClientFormat::ClipboardOnly,
+        McpClientId::Codex => ClientFormat::Toml,
+        _ => ClientFormat::Json,
+    }
+}
+
+/// `true` when the client writes a file the user might share across
+/// projects (global home-dir or OS-config-dir target). The clear pass
+/// uses this to decide whether the `UNITY_PROJECT_PATH` guard applies.
+pub(crate) fn client_is_global(client: McpClientId) -> bool {
+    matches!(
+        client,
+        McpClientId::ClaudeDesktop
+            | McpClientId::OpencodeGlobal
+            | McpClientId::ZcodeGlobal
+            | McpClientId::Cline
+            | McpClientId::Antigravity
+    )
 }
 
 /// How the MCP server should be launched. The wizard Step 2
@@ -378,23 +443,40 @@ fn plan_mcp_config_at(params: &McpConfigParams, home: &Path) -> Result<McpConfig
             });
         }
     };
-    let target = resolve_target_path(scope, &params.project_path, home).ok_or_else(|| {
-        McpConfigError::new(
-            "homeMissing",
-            "Cannot resolve the home directory for a global MCP config target.",
-        )
-    })?;
+    let target = resolve_target_path(params.client, scope, &params.project_path, home)
+        .ok_or_else(|| {
+            McpConfigError::new(
+                "homeMissing",
+                "Cannot resolve the home directory for a global MCP config target.",
+            )
+        })?;
     let resolved = resolve_index_for_mode(params)?;
     let resolved_str = resolved.as_deref().unwrap_or(NPM_RESOLVED_LABEL).to_string();
     let file_exists = target.exists();
+    // TOML clients skip JSON parsing (see write_mcp_config_at for the
+    // rationale); the TOML builder reads the raw file itself.
     let (existing_value, existing_keys) = if file_exists {
-        read_existing_config(&target)?
+        match client_format(params.client) {
+            ClientFormat::Toml => (Value::Null, Vec::new()),
+            _ => read_existing_config(&target)?,
+        }
     } else {
         (Value::Null, Vec::new())
     };
     let merged = build_full_config_json(params, &resolved_str, &target, existing_value.clone());
-    let proposed_str = serde_json::to_string_pretty(&merged).unwrap_or_else(|_| merged.to_string());
-    let would_write = !file_exists || merged_differs(&existing_value, &merged, scope);
+    let proposed_str = match client_format(params.client) {
+        ClientFormat::Toml => build_codex_toml(params, &resolved_str, &target, existing_value.clone()),
+        _ => serde_json::to_string_pretty(&merged).unwrap_or_else(|_| merged.to_string()),
+    };
+    let would_write = if matches!(client_format(params.client), ClientFormat::Toml) {
+        !file_exists
+            || match fs::read_to_string(&target) {
+                Ok(existing_text) => existing_text.trim_end() != proposed_str.trim_end(),
+                Err(_) => true,
+            }
+    } else {
+        !file_exists || merged_differs(&existing_value, &merged, params.client, scope)
+    };
     Ok(McpConfigPlan {
         client: params.client,
         target_path: Some(target.to_string_lossy().into_owned()),
@@ -423,12 +505,13 @@ fn write_mcp_config_at(
             ));
         }
     };
-    let target = resolve_target_path(scope, &params.project_path, home).ok_or_else(|| {
-        McpConfigError::new(
-            "homeMissing",
-            "Cannot resolve the home directory for a global MCP config target.",
-        )
-    })?;
+    let target = resolve_target_path(params.client, scope, &params.project_path, home)
+        .ok_or_else(|| {
+            McpConfigError::new(
+                "homeMissing",
+                "Cannot resolve the home directory for a global MCP config target.",
+            )
+        })?;
     let resolved = resolve_index_for_mode(params)?;
     let resolved_str = resolved.as_deref().unwrap_or(NPM_RESOLVED_LABEL).to_string();
     // Hard-block: refuse to write a config that points at a
@@ -452,14 +535,36 @@ fn write_mcp_config_at(
         }
     }
     let file_exists = target.exists();
+    // TOML clients (Codex) skip JSON parsing — the TOML builder reads
+    // the raw file itself and parses via the `toml` crate. For TOML we
+    // only need to know whether the file exists (for the backup + diff
+    // decision); the merge body is computed from raw text.
     let (existing_value, _existing_keys) = if file_exists {
-        read_existing_config(&target)?
+        match client_format(params.client) {
+            ClientFormat::Toml => (Value::Null, Vec::new()),
+            _ => read_existing_config(&target)?,
+        }
     } else {
         (Value::Null, Vec::new())
     };
     let merged = build_full_config_json(params, &resolved_str, &target, existing_value.clone());
-    let proposed_str = serde_json::to_string_pretty(&merged).unwrap_or_else(|_| merged.to_string());
-    let would_write = !file_exists || merged_differs(&existing_value, &merged, scope);
+    let proposed_str = match client_format(params.client) {
+        ClientFormat::Toml => build_codex_toml(params, &resolved_str, &target, existing_value.clone()),
+        _ => serde_json::to_string_pretty(&merged).unwrap_or_else(|_| merged.to_string()),
+    };
+    // For TOML clients, the JSON projection (`merged`) does not reflect
+    // the on-disk TOML; compare the proposed TOML body against the raw
+    // existing text instead. A byte-level diff is conservative — any
+    // change in our entry changes the serialized body.
+    let would_write = if matches!(client_format(params.client), ClientFormat::Toml) {
+        !file_exists
+            || match fs::read_to_string(&target) {
+                Ok(existing_text) => existing_text.trim_end() != proposed_str.trim_end(),
+                Err(_) => true,
+            }
+    } else {
+        !file_exists || merged_differs(&existing_value, &merged, params.client, scope)
+    };
     let mut backup_path = String::new();
     if would_write && file_exists {
         let candidate = target.with_extension(
@@ -488,19 +593,16 @@ fn write_mcp_config_at(
             }
         }
         // Atomic write: tmp + rename. A failure mid-write
-        // leaves the original file untouched.
+        // leaves the original file untouched. The serialized body
+        // is already in `proposed_str` (JSON pretty or Codex TOML).
+        let pretty = match client_format(params.client) {
+            // TOML body already carries its own trailing newline.
+            ClientFormat::Toml => proposed_str.clone(),
+            _ => proposed_str.clone() + "\n",
+        };
         let tmp_path = match target.extension().and_then(|e| e.to_str()) {
             Some(ext) => target.with_extension(format!("{}.tmp", ext)),
             None => target.with_extension("tmp"),
-        };
-        let pretty = match serde_json::to_string_pretty(&merged) {
-            Ok(s) => s + "\n",
-            Err(e) => {
-                return Err(McpConfigError::new(
-                    "serializeFailed",
-                    format!("failed to serialize merged config: {}", e),
-                ));
-            }
         };
         {
             let mut tmp = fs::File::create(&tmp_path).map_err(|e| {
@@ -529,41 +631,75 @@ enum McpScopeSkip {
     Manual,
 }
 
-fn resolve_scope(params: &McpConfigParams) -> Result<McpScope, McpScopeSkip> {
-    match params.client {
-        McpClientId::Cursor => Ok(if params.cursor_project_scope {
-            McpScope::CursorProject
-        } else {
-            McpScope::CursorGlobal
-        }),
-        McpClientId::ClaudeDesktop => Ok(McpScope::ClaudeDesktopGlobal),
-        McpClientId::OpencodeGlobal => Ok(McpScope::OpencodeGlobal),
-        McpClientId::OpencodeProject => Ok(McpScope::OpencodeProject),
-        McpClientId::ZcodeGlobal => Ok(McpScope::ZcodeGlobal),
-        McpClientId::ZcodeProject => Ok(McpScope::ZcodeProject),
-        McpClientId::ClaudeCode => Err(McpScopeSkip::CliOnly),
-        McpClientId::Manual => Err(McpScopeSkip::Manual),
+/// Collapse `(client, cursor_project_scope)` into the on-disk scope.
+/// Cursor is the only client whose project-vs-global choice is a UI
+/// toggle; every other client has a fixed scope from the catalog
+/// (`client_is_global` distinguishes the global-only clients from the
+/// project-only clients).
+fn resolve_scope(params: &McpConfigParams) -> Result<ClientScope, McpScopeSkip> {
+    match client_format(params.client) {
+        ClientFormat::CliOnly => Err(McpScopeSkip::CliOnly),
+        ClientFormat::ClipboardOnly => Err(McpScopeSkip::Manual),
+        ClientFormat::Json | ClientFormat::Toml => {
+            if params.client == McpClientId::Cursor {
+                // Cursor honors the project-scope toggle (default global).
+                Ok(if params.cursor_project_scope {
+                    ClientScope::Project
+                } else {
+                    ClientScope::Global
+                })
+            } else {
+                Ok(if client_is_global(params.client) {
+                    ClientScope::Global
+                } else {
+                    ClientScope::Project
+                })
+            }
+        }
     }
 }
 
-fn resolve_target_path(scope: McpScope, project_path: &str, home: &Path) -> Option<PathBuf> {
-    match scope {
-        McpScope::CursorGlobal => Some(home.join(".cursor").join("mcp.json")),
-        McpScope::CursorProject => Some(
-            PathBuf::from(project_path)
-                .join(".cursor")
-                .join("mcp.json"),
+/// Resolve the on-disk config target for a client. Returns `None` for
+/// CLI/clipboard-only clients (the caller surfaces a snippet instead).
+/// Project-scoped paths are resolved relative to `project_path`; global
+/// paths are resolved under `home` (or the OS config dir for Claude
+/// Desktop / Cline).
+fn resolve_target_path(
+    client: McpClientId,
+    scope: ClientScope,
+    project_path: &str,
+    home: &Path,
+) -> Option<PathBuf> {
+    let project = PathBuf::from(project_path);
+    match client {
+        McpClientId::Cursor => match scope {
+            ClientScope::Global => Some(home.join(".cursor").join("mcp.json")),
+            ClientScope::Project => Some(project.join(".cursor").join("mcp.json")),
+        },
+        McpClientId::ClaudeDesktop => Some(claude_desktop_config_path(home)),
+        McpClientId::OpencodeGlobal => {
+            Some(home.join(".config").join("opencode").join("opencode.json"))
+        }
+        McpClientId::OpencodeProject => Some(project.join("opencode.json")),
+        McpClientId::ZcodeGlobal => Some(home.join(".zcode").join("cli").join("config.json")),
+        McpClientId::ZcodeProject => Some(project.join(".zcode").join("cli").join("config.json")),
+        McpClientId::Cline => Some(cline_settings_path(home)),
+        McpClientId::Codex => Some(project.join(".codex").join("config.toml")),
+        McpClientId::Gemini => Some(project.join(".gemini").join("settings.json")),
+        McpClientId::GithubCopilotCli => Some(project.join(".mcp.json")),
+        McpClientId::KiloCode => Some(project.join(".kilocode").join("mcp.json")),
+        McpClientId::Rider => Some(project.join(".junie").join("mcp").join("mcp.json")),
+        McpClientId::UnityAi => Some(project.join("UserSettings").join("mcp.json")),
+        McpClientId::VscodeCopilot => Some(project.join(".vscode").join("mcp.json")),
+        McpClientId::VsCopilot => Some(project.join(".vs").join("mcp.json")),
+        McpClientId::ZooCode => Some(project.join(".roo").join("mcp.json")),
+        McpClientId::Antigravity => Some(
+            home.join(".gemini")
+                .join("antigravity")
+                .join("mcp_config.json"),
         ),
-        McpScope::ClaudeDesktopGlobal => Some(claude_desktop_config_path(home)),
-        McpScope::OpencodeGlobal => Some(home.join(".config").join("opencode").join("opencode.json")),
-        McpScope::OpencodeProject => Some(PathBuf::from(project_path).join("opencode.json")),
-        McpScope::ZcodeGlobal => Some(home.join(".zcode").join("cli").join("config.json")),
-        McpScope::ZcodeProject => Some(
-            PathBuf::from(project_path)
-                .join(".zcode")
-                .join("cli")
-                .join("config.json"),
-        ),
+        // CLI-only / clipboard-only clients have no file target.
+        McpClientId::ClaudeCode | McpClientId::Manual | McpClientId::Custom => None,
     }
 }
 
@@ -663,25 +799,7 @@ fn launch_command_parts(mode: McpLaunchMode, resolved_index: &str) -> (String, V
 }
 
 fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
-    let mut env = Map::new();
-    env.insert(
-        "UNITY_PROJECT_PATH".to_string(),
-        Value::String(params.unity_project_path.clone()),
-    );
-    // Resolve the bridge port from the project path (the per-project hash
-    // shared with the bridge + MCP server), honoring an explicit override
-    // when the wizard port field is non-blank. A blank field → the computed
-    // port, so the MCP client and the bridge listener always agree. See
-    // `bridge_port.rs`.
-    let port = resolve_port(&params.unity_project_path, parse_override(&params.bridge_port))
-        .to_string();
-    env.insert("UNITY_OPEN_MCP_BRIDGE_PORT".to_string(), Value::String(port));
-    if params.include_unity_path && !params.unity_path.trim().is_empty() {
-        env.insert(
-            "UNITY_PATH".to_string(),
-            Value::String(params.unity_path.trim().to_string()),
-        );
-    }
+    let env = build_env_map(params);
     let (command, args) = launch_command_parts(params.launch_mode, resolved_index);
     let args_value: Value = args.into_iter().map(Value::String).collect();
     match params.client {
@@ -712,7 +830,51 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
             "args": args_value,
             "env": Value::Object(env),
         }),
-        // CLI / manual clients never reach the file writer;
+        // The `type: "stdio"` family — Cline, Codex (when JSON-projected),
+        // Gemini, Kilo Code, Rider, Unity AI, VS Code Copilot, VS Copilot,
+        // ZooCode. Ivan's configurators emit `type:"stdio"` + `command` +
+        // `args` + `env` for this family; some add `disabled:false` /
+        // `enabled:true`, but those are optional defaults so we keep the
+        // minimal shape.
+        McpClientId::Cline
+        | McpClientId::Gemini
+        | McpClientId::KiloCode
+        | McpClientId::Rider
+        | McpClientId::UnityAi
+        | McpClientId::VscodeCopilot
+        | McpClientId::VsCopilot
+        | McpClientId::ZooCode => json!({
+            "type": "stdio",
+            "command": command,
+            "args": args_value,
+            "env": Value::Object(env),
+        }),
+        // Codex's JSON projection (used for the preview when the UI
+        // shows JSON; the on-disk write is TOML via build_codex_toml).
+        // Ivan's Codex envelope: `enabled`, `command`, `args`, env under
+        // `env`. The real file is TOML — see [`build_codex_toml`].
+        McpClientId::Codex => json!({
+            "enabled": true,
+            "command": command,
+            "args": args_value,
+            "env": Value::Object(env),
+        }),
+        // Antigravity uses `disabled:false` + `command` + `args` + `env`,
+        // no `type`.
+        McpClientId::Antigravity => json!({
+            "disabled": false,
+            "command": command,
+            "args": args_value,
+            "env": Value::Object(env),
+        }),
+        // GitHub Copilot CLI: `command` + `args` + `tools:["*"]`, no `type`.
+        McpClientId::GithubCopilotCli => json!({
+            "command": command,
+            "args": args_value,
+            "tools": ["*"],
+            "env": Value::Object(env),
+        }),
+        // CLI / clipboard clients never reach the file writer;
         // they only consume the JSON via the snippet panel.
         _ => json!({
             "command": command,
@@ -722,20 +884,155 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
     }
 }
 
+/// Build the env-var map shared by every envelope. `UNITY_PROJECT_PATH`
+/// and `UNITY_OPEN_MCP_BRIDGE_PORT` are always present; `UNITY_PATH` is
+/// only emitted when the user opted in. Extracted so the Codex TOML
+/// builder can layer the same env into `[mcp_servers.<name>.env]`.
+fn build_env_map(params: &McpConfigParams) -> Map<String, Value> {
+    let mut env = Map::new();
+    env.insert(
+        "UNITY_PROJECT_PATH".to_string(),
+        Value::String(params.unity_project_path.clone()),
+    );
+    let port = resolve_port(&params.unity_project_path, parse_override(&params.bridge_port))
+        .to_string();
+    env.insert("UNITY_OPEN_MCP_BRIDGE_PORT".to_string(), Value::String(port));
+    if params.include_unity_path && !params.unity_path.trim().is_empty() {
+        env.insert(
+            "UNITY_PATH".to_string(),
+            Value::String(params.unity_path.trim().to_string()),
+        );
+    }
+    env
+}
+
+/// Resolve the Cline global settings JSON path (VS Code globalStorage).
+/// OS-specific per Ivan's `ClineConfigurator`:
+/// - macOS: `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
+/// - Windows: `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json`
+/// - Linux: `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
+pub(crate) fn cline_settings_path(home: &Path) -> PathBuf {
+    let base = if cfg!(target_os = "macos") {
+        home.join("Library")
+            .join("Application Support")
+            .join("Code")
+    } else if cfg!(target_os = "windows") {
+        dirs::config_dir()
+            .unwrap_or_else(|| home.to_path_buf())
+            .join("Code")
+    } else {
+        home.join(".config").join("Code")
+    };
+    base.join("User")
+        .join("globalStorage")
+        .join("saoudrizwan.claude-dev")
+        .join("settings")
+        .join("cline_mcp_settings.json")
+}
+
+/// Build the Codex TOML config body for a project `.codex/config.toml`.
+/// Uses the `toml` crate to parse the existing file (when present) into
+/// a `toml::Value`, merge our `[mcp_servers.unity-open-mcp]` table in,
+/// and re-serialize — preserving every unrelated top-level key and every
+/// sibling MCP server. This mirrors Ivan's `TomlAiAgentConfig` merge
+/// semantics (replace only the named entry, keep the rest verbatim).
+///
+/// `existing_json` is the JSON projection the planner built from the
+/// same file; for TOML clients we ignore it and re-parse the raw text
+/// from disk so nested tables round-trip correctly.
+///
+/// The emitted table:
+/// ```toml
+/// [mcp_servers.unity-open-mcp]
+/// enabled = true
+/// command = "npx"
+/// args = ["-y", "unity-open-mcp@latest"]
+///
+/// [mcp_servers.unity-open-mcp.env]
+/// UNITY_PROJECT_PATH = "..."
+/// UNITY_OPEN_MCP_BRIDGE_PORT = "..."
+/// ```
+fn build_codex_toml(
+    params: &McpConfigParams,
+    resolved_index: &str,
+    target: &Path,
+    _existing_json: Value,
+) -> String {
+    // Parse the existing TOML (if any) into a toml::Value so we can
+    // merge without clobbering unrelated keys / servers.
+    let mut root: toml::value::Table = if target.exists() {
+        match fs::read_to_string(target) {
+            Ok(text) if !text.trim().is_empty() => {
+                toml::from_str::<toml::value::Table>(&text).unwrap_or_default()
+            }
+            _ => toml::value::Table::new(),
+        }
+    } else {
+        toml::value::Table::new()
+    };
+
+    // Build the unity-open-mcp entry as a toml::Value.
+    let env = build_env_map(params);
+    let (command, args) = launch_command_parts(params.launch_mode, resolved_index);
+    let mut entry = toml::value::Table::new();
+    entry.insert("enabled".to_string(), toml::Value::Boolean(true));
+    entry.insert("command".to_string(), toml::Value::String(command));
+    let args_arr: toml::value::Array = args
+        .into_iter()
+        .map(toml::Value::String)
+        .collect();
+    entry.insert("args".to_string(), toml::Value::Array(args_arr));
+    if !env.is_empty() {
+        let mut env_table = toml::value::Table::new();
+        for (k, v) in &env {
+            if let Some(s) = v.as_str() {
+                env_table.insert(k.clone(), toml::Value::String(s.to_string()));
+            }
+        }
+        entry.insert("env".to_string(), toml::Value::Table(env_table));
+    }
+
+    // Insert/replace under [mcp_servers.<name>].
+    let mcp_servers = root
+        .entry("mcp_servers".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
+    if let toml::Value::Table(servers) = mcp_servers {
+        servers.insert(MCP_SERVER_KEY.to_string(), toml::Value::Table(entry));
+    }
+
+    toml::to_string_pretty(&toml::Value::Table(root)).unwrap_or_default()
+}
+
 /// The dotted JSON path (relative to the config root) where this
 /// client's `unity-open-mcp` entry lives. Returned as a key-path
 /// vector so it generalizes to clients whose path nests deeper
 /// than two levels — notably ZCode, whose envelope is
 /// `mcp.servers.<name>` (three levels), versus Cursor/Claude
 /// (`mcpServers.<name>`, two levels) and OpenCode
-/// (`mcp.<name>`, two levels). Empty for CLI/Manual clients.
+/// (`mcp.<name>`, two levels). Empty for CLI/clipboard-only clients.
 pub(crate) fn merge_key_path(client: McpClientId) -> Vec<&'static str> {
     match client {
-        McpClientId::Cursor | McpClientId::ClaudeDesktop => vec!["mcpServers", MCP_SERVER_KEY],
+        McpClientId::Cursor
+        | McpClientId::ClaudeDesktop
+        | McpClientId::Cline
+        | McpClientId::GithubCopilotCli
+        | McpClientId::Antigravity
+        | McpClientId::Gemini
+        | McpClientId::KiloCode
+        | McpClientId::Rider
+        | McpClientId::UnityAi
+        | McpClientId::ZooCode => vec!["mcpServers", MCP_SERVER_KEY],
         McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => vec!["mcp", MCP_SERVER_KEY],
         McpClientId::ZcodeGlobal | McpClientId::ZcodeProject => {
             vec!["mcp", "servers", MCP_SERVER_KEY]
         }
+        // VS Code Copilot and Visual Studio Copilot use a `servers` key
+        // (not `mcpServers`) at the project root.
+        McpClientId::VscodeCopilot | McpClientId::VsCopilot => vec!["servers", MCP_SERVER_KEY],
+        // Codex writes TOML; the JSON path is only used for the diff
+        // projection. The real table is `[mcp_servers.<name>]`.
+        McpClientId::Codex => vec!["mcp_servers", MCP_SERVER_KEY],
+        // CLI / clipboard-only clients have no merge key.
         _ => Vec::new(),
     }
 }
@@ -782,14 +1079,16 @@ fn insert_by_path(root: &mut Value, path: &[&str], value: Value) {
 /// file on disk for this client. We compare the parent key's
 /// `unity-open-mcp` child only — unrelated keys and other MCP
 /// servers are not part of the "did we change anything" test.
-fn merged_differs(existing: &Value, merged: &Value, scope: McpScope) -> bool {
-    let key_path: Vec<&str> = match scope {
-        McpScope::CursorGlobal | McpScope::CursorProject | McpScope::ClaudeDesktopGlobal => {
-            vec!["mcpServers", MCP_SERVER_KEY]
-        }
-        McpScope::OpencodeGlobal | McpScope::OpencodeProject => vec!["mcp", MCP_SERVER_KEY],
-        McpScope::ZcodeGlobal | McpScope::ZcodeProject => vec!["mcp", "servers", MCP_SERVER_KEY],
-    };
+/// For TOML clients (Codex) we compare the JSON projection the
+/// builder produced; the on-disk diff is TOML but the leaf
+/// comparison is equivalent.
+fn merged_differs(existing: &Value, merged: &Value, client: McpClientId, _scope: ClientScope) -> bool {
+    let key_path = merge_key_path(client);
+    if key_path.is_empty() {
+        // No merge key → treat any existing content as "differs" so a
+        // clipboard-only client's preview always re-renders.
+        return true;
+    }
     let before = get_by_path(existing, &key_path);
     let after = get_by_path(merged, &key_path);
     before != after
@@ -908,6 +1207,18 @@ fn mcp_client_wire_key(client: McpClientId) -> &'static str {
         McpClientId::ZcodeGlobal => "zcode-global",
         McpClientId::ZcodeProject => "zcode-project",
         McpClientId::Manual => "manual",
+        McpClientId::Cline => "cline",
+        McpClientId::Codex => "codex",
+        McpClientId::Gemini => "gemini",
+        McpClientId::GithubCopilotCli => "github-copilot-cli",
+        McpClientId::KiloCode => "kilo-code",
+        McpClientId::Rider => "rider",
+        McpClientId::UnityAi => "unity-ai",
+        McpClientId::VscodeCopilot => "vscode-copilot",
+        McpClientId::VsCopilot => "vs-copilot",
+        McpClientId::ZooCode => "zoocode",
+        McpClientId::Antigravity => "antigravity",
+        McpClientId::Custom => "custom",
     }
 }
 
@@ -1576,6 +1887,23 @@ mod tests {
             client,
             cursor_project_scope: false,
             launch_mode: McpLaunchMode::Local,
+        }
+    }
+
+    /// Generic params builder for any client (M27 Plan 5 envelopes).
+    /// Uses npx launch mode so no toolkit root validation is required.
+    fn make_client_params(client: McpClientId, project: &Path) -> McpConfigParams {
+        McpConfigParams {
+            project_path: project.to_string_lossy().into_owned(),
+            toolkit_root: String::new(),
+            mcp_index_override: String::new(),
+            unity_project_path: project.to_string_lossy().into_owned(),
+            bridge_port: String::new(),
+            include_unity_path: false,
+            unity_path: String::new(),
+            client,
+            cursor_project_scope: false,
+            launch_mode: McpLaunchMode::Npx,
         }
     }
 
@@ -2438,6 +2766,267 @@ mod tests {
         };
         let err = generate_project_skill(params).expect_err("should error");
         assert_eq!(err.kind, "noClientTargets");
+    }
+
+    // --- M27 Plan 5: new client envelopes -----------------------------------
+
+    #[test]
+    fn plan_codex_targets_project_codex_config_toml() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_client_params(McpClientId::Codex, &project);
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        let target = plan.target_path.expect("codex has a target");
+        assert!(target.ends_with(".codex/config.toml"));
+        // The proposed body is TOML, not JSON.
+        let body = plan.proposed_json.as_deref().unwrap_or("");
+        assert!(body.contains("[mcp_servers.unity-open-mcp]"));
+        assert!(body.contains("enabled = true"));
+        assert!(body.contains("command = \"npx\""));
+        assert!(body.contains("UNITY_PROJECT_PATH"));
+    }
+
+    #[test]
+    fn write_codex_toml_merges_preserving_unrelated_servers() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        fs::create_dir_all(project).unwrap();
+        let codex_dir = project.join(".codex");
+        fs::create_dir_all(&codex_dir).unwrap();
+        // Pre-existing codex config with a sibling server + a top-level key.
+        fs::write(
+            codex_dir.join("config.toml"),
+            "model = \"gpt-5\"\n\n[mcp_servers.other]\ncommand = \"foo\"\n",
+        )
+        .unwrap();
+        let params = make_client_params(McpClientId::Codex, project);
+        let result = write_mcp_config_at(&params, project).unwrap();
+        assert!(result.would_write);
+        let body = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        // The unrelated server survived.
+        assert!(body.contains("[mcp_servers.other]"));
+        // Our entry was added.
+        assert!(body.contains("[mcp_servers.unity-open-mcp]"));
+        // The top-level scalar key survived.
+        assert!(body.contains("model = \"gpt-5\""));
+    }
+
+    #[test]
+    fn plan_cline_targets_vscode_globalstorage() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_client_params(McpClientId::Cline, &project);
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        let target = plan.target_path.expect("cline has a target");
+        assert!(target.contains("globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"));
+        let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+        let entry = proposed
+            .get("mcpServers")
+            .and_then(|m| m.get(MCP_SERVER_KEY))
+            .expect("mcpServers.unity-open-mcp present");
+        assert_eq!(entry.get("type").unwrap(), "stdio");
+        assert_eq!(entry.get("command").unwrap(), "npx");
+    }
+
+    #[test]
+    fn plan_gemini_targets_project_gemini_settings() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_client_params(McpClientId::Gemini, &project);
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        let target = plan.target_path.expect("gemini has a target");
+        assert!(target.ends_with(".gemini/settings.json"));
+        let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+        assert!(proposed
+            .get("mcpServers")
+            .and_then(|m| m.get(MCP_SERVER_KEY))
+            .is_some());
+    }
+
+    #[test]
+    fn plan_vscode_copilot_uses_servers_key() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_client_params(McpClientId::VscodeCopilot, &project);
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        let target = plan.target_path.expect("vscode-copilot has a target");
+        assert!(target.ends_with(".vscode/mcp.json"));
+        let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+        // VS Code Copilot uses `servers`, NOT `mcpServers`.
+        assert!(proposed.get("servers").and_then(|m| m.get(MCP_SERVER_KEY)).is_some());
+        assert!(proposed.get("mcpServers").is_none());
+    }
+
+    #[test]
+    fn plan_vs_copilot_uses_servers_key_under_vs_dir() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_client_params(McpClientId::VsCopilot, &project);
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        let target = plan.target_path.expect("vs-copilot has a target");
+        assert!(target.ends_with(".vs/mcp.json"));
+        let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+        assert!(proposed.get("servers").and_then(|m| m.get(MCP_SERVER_KEY)).is_some());
+    }
+
+    #[test]
+    fn plan_github_copilot_cli_emits_tools_wildcard() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_client_params(McpClientId::GithubCopilotCli, &project);
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        let target = plan.target_path.expect("github-copilot-cli has a target");
+        assert!(target.ends_with(".mcp.json"));
+        let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+        let entry = proposed
+            .get("mcpServers")
+            .and_then(|m| m.get(MCP_SERVER_KEY))
+            .unwrap();
+        // GitHub Copilot CLI carries a `tools:["*"]` hint, no `type`.
+        assert_eq!(entry.get("tools").unwrap(), &json!(["*"]));
+        assert!(entry.get("type").is_none());
+    }
+
+    #[test]
+    fn plan_antigravity_targets_global_gemini_antigravity() {
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_client_params(McpClientId::Antigravity, &project);
+        let plan = plan_mcp_config_at(&params, home).unwrap();
+        let target = plan.target_path.expect("antigravity has a target");
+        assert!(target.contains(".gemini/antigravity/mcp_config.json"));
+        let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+        let entry = proposed
+            .get("mcpServers")
+            .and_then(|m| m.get(MCP_SERVER_KEY))
+            .unwrap();
+        // Antigravity uses `disabled:false`, no `type`.
+        assert_eq!(entry.get("disabled").unwrap(), false);
+        assert!(entry.get("type").is_none());
+    }
+
+    #[test]
+    fn plan_kilocode_rider_unityai_zoocode_all_use_mcp_servers() {
+        // Shared `mcpServers` + `type:stdio` envelope for the Tier B
+        // stdio family — one assertion per client proves the merge key
+        // and envelope are consistent across the catalog.
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        for client in [
+            McpClientId::KiloCode,
+            McpClientId::Rider,
+            McpClientId::UnityAi,
+            McpClientId::ZooCode,
+        ] {
+            let params = make_client_params(client, &project);
+            let plan = plan_mcp_config_at(&params, home).unwrap();
+            let proposed: Value = serde_json::from_str(&plan.proposed_json.unwrap()).unwrap();
+            let entry = proposed
+                .get("mcpServers")
+                .and_then(|m| m.get(MCP_SERVER_KEY))
+                .unwrap_or_else(|| panic!("{:?}: mcpServers.unity-open-mcp missing", client));
+            assert_eq!(
+                entry.get("type").unwrap(),
+                "stdio",
+                "{:?}: type field",
+                client
+            );
+            assert!(entry.get("command").is_some(), "{:?}: command missing", client);
+            assert!(entry.get("env").is_some(), "{:?}: env missing", client);
+        }
+    }
+
+    #[test]
+    fn write_vscode_copilot_merges_under_servers_key() {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        fs::create_dir_all(project).unwrap();
+        let vscode_dir = project.join(".vscode");
+        fs::create_dir_all(&vscode_dir).unwrap();
+        // Pre-existing VS Code mcp.json with an unrelated server under `servers`.
+        fs::write(
+            vscode_dir.join("mcp.json"),
+            r#"{"servers":{"other":{"type":"stdio","command":"x"}}}"#,
+        )
+        .unwrap();
+        let params = make_client_params(McpClientId::VscodeCopilot, project);
+        let result = write_mcp_config_at(&params, project).unwrap();
+        assert!(result.would_write);
+        let written: Value =
+            serde_json::from_str(&fs::read_to_string(vscode_dir.join("mcp.json")).unwrap()).unwrap();
+        let servers = written.get("servers").unwrap().as_object().unwrap();
+        // Unrelated server preserved + our entry added.
+        assert!(servers.contains_key("other"));
+        assert!(servers.contains_key(MCP_SERVER_KEY));
+    }
+
+    #[test]
+    fn clear_removes_codex_toml_entry() {
+        use crate::config::clear::clear_ai_setup_at;
+        let dir = tempdir().unwrap();
+        let home = dir.path();
+        let project = home.join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let codex_dir = project.join(".codex");
+        fs::create_dir_all(&codex_dir).unwrap();
+        // Seed our entry + an unrelated server.
+        fs::write(
+            codex_dir.join("config.toml"),
+            "[mcp_servers.unity-open-mcp]\ncommand = \"npx\"\n\n[mcp_servers.other]\ncommand = \"foo\"\n",
+        )
+        .unwrap();
+        let result = clear_ai_setup_at(project.to_str().unwrap(), home);
+        let body = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        // Our entry removed; the unrelated server survived.
+        assert!(!body.contains("unity-open-mcp"));
+        assert!(body.contains("[mcp_servers.other]"));
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+    }
+
+    #[test]
+    fn mcp_client_wire_key_covers_every_variant() {
+        // Every variant must resolve to a non-empty wire key so the
+        // skill-copy manifest lookup never silently misses a client.
+        for client in [
+            McpClientId::Cursor,
+            McpClientId::ClaudeDesktop,
+            McpClientId::ClaudeCode,
+            McpClientId::OpencodeGlobal,
+            McpClientId::OpencodeProject,
+            McpClientId::ZcodeGlobal,
+            McpClientId::ZcodeProject,
+            McpClientId::Manual,
+            McpClientId::Cline,
+            McpClientId::Codex,
+            McpClientId::Gemini,
+            McpClientId::GithubCopilotCli,
+            McpClientId::KiloCode,
+            McpClientId::Rider,
+            McpClientId::UnityAi,
+            McpClientId::VscodeCopilot,
+            McpClientId::VsCopilot,
+            McpClientId::ZooCode,
+            McpClientId::Antigravity,
+            McpClientId::Custom,
+        ] {
+            assert!(!mcp_client_wire_key(client).is_empty());
+        }
     }
 
 }

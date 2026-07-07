@@ -112,8 +112,11 @@ export function buildOpenCodeMcpEntry(
 }
 
 /** The supported MCP client identifiers. `claude-code` is
- *  CLI-only in M4 — the wizard shows a `claude mcp add` command
- *  instead of writing a config file (questions-4 Q9 = A). */
+ *  CLI-only — the wizard shows a `claude mcp add` command
+ *  instead of writing a config file. `manual` / `custom` are
+ *  clipboard-only. Every other id is backed by a writable config
+ *  file (JSON, or TOML for `codex`). The full catalog covers the
+ *  Ivan-named client surface; see `skills/client-paths.json`. */
 export type McpClientId =
   | "cursor"
   | "claude-desktop"
@@ -122,7 +125,20 @@ export type McpClientId =
   | "opencode-project"
   | "zcode-global"
   | "zcode-project"
-  | "manual";
+  | "manual"
+  // --- Ivan-parity breadth ---
+  | "cline"
+  | "codex"
+  | "gemini"
+  | "github-copilot-cli"
+  | "kilo-code"
+  | "rider"
+  | "unity-ai"
+  | "vscode-copilot"
+  | "vs-copilot"
+  | "zoocode"
+  | "antigravity"
+  | "custom";
 
 /** Per-client config-file path shape. `null` means the client is
  *  CLI-only or not backed by a writable JSON file. */
@@ -148,7 +164,11 @@ export interface McpClientConfigTarget {
  *  Desktop path; the project-scoped paths are resolved relative
  *  to the project root in Step 1. This function returns the
  *  contract shape only; the wizard's Step 4 owns the platform
- *  path resolution and any user toggle for project-scoped writes. */
+ *  path resolution and any user toggle for project-scoped writes.
+ *
+ *  The full catalog (M27 Plan 5) covers the Ivan-named client
+ *  surface. Paths here mirror the Rust `resolve_target_path` so
+ *  the TS preview and the on-disk writer agree. */
 export function mcpClientConfigTarget(
   client: McpClientId,
   homeDir: string
@@ -197,10 +217,78 @@ export function mcpClientConfigTarget(
         mergeKey: "mcp.servers.unity-open-mcp",
       };
     case "manual":
+    case "custom":
       return {
         path: null,
         scope: "none",
         mergeKey: "",
+      };
+    case "cline":
+      // VS Code globalStorage; the OS-specific path is resolved in Step 4.
+      return {
+        path: null,
+        scope: "global",
+        mergeKey: "mcpServers.unity-open-mcp",
+      };
+    case "codex":
+      return {
+        path: ".codex/config.toml",
+        scope: "project",
+        mergeKey: "mcp_servers.unity-open-mcp",
+      };
+    case "gemini":
+      return {
+        path: ".gemini/settings.json",
+        scope: "project",
+        mergeKey: "mcpServers.unity-open-mcp",
+      };
+    case "github-copilot-cli":
+      return {
+        path: ".mcp.json",
+        scope: "project",
+        mergeKey: "mcpServers.unity-open-mcp",
+      };
+    case "kilo-code":
+      return {
+        path: ".kilocode/mcp.json",
+        scope: "project",
+        mergeKey: "mcpServers.unity-open-mcp",
+      };
+    case "rider":
+      return {
+        path: ".junie/mcp/mcp.json",
+        scope: "project",
+        mergeKey: "mcpServers.unity-open-mcp",
+      };
+    case "unity-ai":
+      return {
+        path: "UserSettings/mcp.json",
+        scope: "project",
+        mergeKey: "mcpServers.unity-open-mcp",
+      };
+    case "vscode-copilot":
+      return {
+        path: ".vscode/mcp.json",
+        scope: "project",
+        mergeKey: "servers.unity-open-mcp",
+      };
+    case "vs-copilot":
+      return {
+        path: ".vs/mcp.json",
+        scope: "project",
+        mergeKey: "servers.unity-open-mcp",
+      };
+    case "zoocode":
+      return {
+        path: ".roo/mcp.json",
+        scope: "project",
+        mergeKey: "mcpServers.unity-open-mcp",
+      };
+    case "antigravity":
+      return {
+        path: `${homeDir}/.gemini/antigravity/mcp_config.json`,
+        scope: "global",
+        mergeKey: "mcpServers.unity-open-mcp",
       };
   }
 }

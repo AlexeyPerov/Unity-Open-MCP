@@ -138,6 +138,17 @@ namespace UnityOpenMcpBridge
         [NonSerialized] private MessageType _mcpProbeMessageType = MessageType.None;
         [NonSerialized] private bool _mcpProbeInFlight;
 
+        // "Configure AI client" panel (M27 Plan 5) — generates the MCP
+        // client config snippet for the selected client against the
+        // current project so an operator can copy it without leaving
+        // Unity. The Hub wizard remains the full one-click writer; this
+        // panel mirrors the envelope shapes so the bytes match.
+        [NonSerialized] private bool _configureClientFoldout = false;
+        [NonSerialized] private int _configureClientIndex = 0;
+        [NonSerialized] private string _configureClientSnippet = "";
+        [NonSerialized] private string _configureClientTargetPath = "";
+        [NonSerialized] private bool _configureClientConfigured;
+
         private void OnEnable()
         {
             _currentTab = (BridgeWindowTab)EditorPrefs.GetInt(SelectedTabPref, (int)BridgeWindowTab.Status);
@@ -329,6 +340,10 @@ namespace UnityOpenMcpBridge
             BridgeGUIUtilities.HorizontalLine(8, 6);
 
             DrawMcpConnectivitySection();
+
+            BridgeGUIUtilities.HorizontalLine(8, 6);
+
+            DrawConfigureClientSection();
 
             BridgeGUIUtilities.HorizontalLine(8, 6);
 
@@ -632,6 +647,162 @@ namespace UnityOpenMcpBridge
             }
 
             EditorGUI.indentLevel--;
+        }
+
+        // ---------- Configure AI client (M27 Plan 5) ----------
+        //
+        // Generates the MCP client config snippet for the selected client
+        // against the current project, so an operator can copy it without
+        // leaving Unity. The Hub wizard (Rust) remains the canonical one-click
+        // writer; this panel mirrors the envelope shapes so the bytes match.
+        // See McpClientCatalog for the catalog + envelope builders.
+
+        private void DrawConfigureClientSection()
+        {
+            _configureClientFoldout = EditorGUILayout.Foldout(
+                _configureClientFoldout, "Configure AI client", true);
+            if (!_configureClientFoldout) return;
+
+            EditorGUI.indentLevel++;
+            EditorGUILayout.HelpBox(
+                "Copy the MCP client config snippet for this project into your AI " +
+                "client's config file. The Hub wizard (Unity Hub Pro) writes the file " +
+                "for you in one click; this panel is for configuring a client without " +
+                "leaving Unity. The launch command is `npx -y unity-open-mcp@latest` " +
+                "(or `node <root>/mcp-server/dist/index.js` for a local checkout).",
+                MessageType.None);
+
+            var projectPath = BridgeSession.ProjectPath;
+            var hasProject = !string.IsNullOrEmpty(projectPath);
+            if (!hasProject)
+            {
+                EditorGUILayout.HelpBox("Open a Unity project to configure a client.", MessageType.Warning);
+                EditorGUI.indentLevel--;
+                return;
+            }
+
+            // Clamp the index so a catalog change never produces an out-of-range.
+            var catalog = UnityOpenMcpBridge.Config.McpClientCatalog.Clients;
+            if (_configureClientIndex < 0 || _configureClientIndex >= catalog.Length)
+            {
+                _configureClientIndex = 0;
+            }
+            var displayNames = new string[catalog.Length];
+            for (var i = 0; i < catalog.Length; i++) displayNames[i] = catalog[i].DisplayName;
+            _configureClientIndex = EditorGUILayout.Popup("Client", _configureClientIndex, displayNames);
+            var client = catalog[_configureClientIndex];
+
+            // Resolve the launch command + port for the snippet.
+            var port = InstancePortResolver.ComputePort(projectPath);
+            // The in-Unity panel defaults to the npm launch (no toolkit root
+            // required); a local checkout should be configured via the Hub
+            // wizard where the toolkit root is validated.
+            var command = "npx";
+            var args = new[] { "-y", "unity-open-mcp@latest" };
+
+            // Regenerate the snippet + target path on every repaint so it
+            // always reflects the current client + project.
+            _configureClientSnippet =
+                UnityOpenMcpBridge.Config.McpClientCatalog.BuildSnippet(client, projectPath, port, command, args);
+            _configureClientTargetPath =
+                UnityOpenMcpBridge.Config.McpClientCatalog.ResolveDisplayPath(client, projectPath) ?? "";
+
+            // Configured-state check: read the target file (when file-backed)
+            // and look for our server key under the client's merge key.
+            _configureClientConfigured = ComputeClientConfigured(client, projectPath);
+
+            if (client.IsFileBacked && !string.IsNullOrEmpty(_configureClientTargetPath))
+            {
+                EditorGUILayout.BeginHorizontal();
+                BridgeGUIUtilities.FieldLabel(
+                    "Target",
+                    "Config file this snippet should be merged into. The Hub wizard writes " +
+                    "this file for you; from here, copy the snippet and paste it under the " +
+                    "merge key shown in the snippet.",
+                    120);
+                EditorGUILayout.SelectableLabel(
+                    _configureClientTargetPath,
+                    EditorStyles.textField,
+                    GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.BeginHorizontal();
+                BridgeGUIUtilities.FieldLabel("Configured", "Whether the target file already has a unity-open-mcp entry.", 120);
+                var prev = GUI.color;
+                GUI.color = _configureClientConfigured ? new Color(0.6f, 0.9f, 0.6f) : new Color(1f, 0.85f, 0.5f);
+                GUILayout.Label(_configureClientConfigured ? "yes" : "no", EditorStyles.boldLabel);
+                GUI.color = prev;
+                EditorGUILayout.EndHorizontal();
+            }
+            else if (client.IsCliOnly)
+            {
+                EditorGUILayout.HelpBox(
+                    "Claude Code is CLI-only — copy the `claude mcp add` command below and run it " +
+                    "in a terminal (no config file is written).",
+                    MessageType.Info);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox(
+                    "Manual / custom — copy the snippet below and paste it into your client's " +
+                    "config under the appropriate merge key.",
+                    MessageType.Info);
+            }
+
+            EditorGUILayout.LabelField("Snippet", EditorStyles.miniBoldLabel);
+            EditorGUILayout.SelectableLabel(
+                _configureClientSnippet,
+                EditorStyles.textArea,
+                GUILayout.ExpandHeight(true),
+                GUILayout.MinHeight(110));
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Copy to clipboard", GUILayout.Width(160)))
+            {
+                GUIUtility.systemCopyBuffer = _configureClientSnippet;
+            }
+            if (GUILayout.Button("Open in Unity Hub Pro", GUILayout.Width(180)))
+            {
+                Application.OpenURL("https://github.com/AlexeyPerov/Unity-AI-Hub");
+            }
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.HelpBox(
+                "Unity Hub Pro writes this config in one click with merge-safe backups, " +
+                "scope toggles, and a full 6-step onboarding wizard.",
+                MessageType.None);
+
+            EditorGUI.indentLevel--;
+        }
+
+        /// <summary>
+        /// Best-effort <c>IsConfigured</c> heuristic: returns <c>true</c> when the
+        /// client's target file exists and contains a <c>unity-open-mcp</c> entry
+        /// under the client's merge key (or, for TOML/Codex, the
+        /// <c>[mcp_servers.unity-open-mcp]</c> table). File-read failures default
+        /// to <c>false</c> so a missing or unreadable file never falsely reports
+        /// as configured.
+        /// </summary>
+        private static bool ComputeClientConfigured(UnityOpenMcpBridge.Config.McpClientCatalog.ClientEntry client, string projectPath)
+        {
+            var path = UnityOpenMcpBridge.Config.McpClientCatalog.ResolveDisplayPath(client, projectPath);
+            if (string.IsNullOrEmpty(path)) return false;
+            if (!File.Exists(path)) return false;
+            try
+            {
+                var body = File.ReadAllText(path);
+                if (client.EnvelopeKind == UnityOpenMcpBridge.Config.McpClientCatalog.Envelope.Codex)
+                {
+                    return body.Contains("[mcp_servers.unity-open-mcp]");
+                }
+                // JSON clients: a substring match on the server key is a
+                // good-enough signal (the wizard writes the key verbatim).
+                return body.Contains("\"unity-open-mcp\"");
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         // Probe the MCP server end-to-end by shelling out to its status command.

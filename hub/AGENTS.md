@@ -23,6 +23,39 @@ Rules for `hub/` — the Tauri + SvelteKit desktop application. Inherits root `A
 - New backend commands go in `src-tauri/src/`. Commands must be `#[tauri::command]` and registered in the invoke handler.
 - Commands that touch the filesystem must validate paths and reject traversal outside expected roots.
 
+## MCP client catalog (single source of truth)
+
+The MCP client auto-config surface (wizard Step 4 writer, Clear AI Setup,
+detection heuristic, and the bridge window configure panel) is driven by a
+shared catalog. **Adding a client is a manifest + catalog change, not a
+per-file constant edit.** To add a client:
+
+1. **Skill target** — add the client's project-relative skill path to
+   `skills/client-paths.json` (`clients` map) and map it under
+   `mcpClientMapping` so the skill copy + `generate_skill` pick it up. Also
+   update the `BUNDLED_MANIFEST` in `mcp-server/src/skill/client-paths.ts`
+   (kept in sync by a unit test).
+2. **Rust writer** — add a variant to `McpClientId`
+   (`hub/src-tauri/src/config/mcp_config.rs`) and cover it in every `match`:
+   `client_format`, `client_is_global`, `resolve_target_path`,
+   `merge_key_path`, `build_entry_json`, `mcp_client_wire_key`. TOML clients
+   also need a branch in `build_codex_toml` / `read_existing_config` skip.
+3. **Rust clear + detect** — add the client to
+   `clear.rs::FILE_BACKED_CLIENTS` + `resolve_clear_path` and to
+   `wizard.rs::read_mcp_heuristic` (+ `any_skill_installed` if it ships a
+   skill folder).
+4. **TS preview** — extend `McpClientId` in
+   `hub/src/lib/services/ai_toolkit.ts`, `mcpClientConfigTarget`, the
+   `McpClientIdWire` / `McpClientWire` unions in `config.ts`, and
+   `clientToWire` + `MCP_CLIENT_OPTIONS` in `AiSetupWizard.svelte`.
+5. **Bridge window** — add a row to
+   `packages/bridge/Editor/Config/McpClientCatalog.cs` and (if a new envelope)
+   a branch in `BuildEntryFields`.
+
+The Rust + TS sides must agree byte-for-byte (the wizard preview is asserted
+to match the writer in `mcp_config.rs` tests). Run `cargo test --lib` +
+`npm test` + `npm run check` after a catalog change.
+
 ## UI conventions
 
 - Follow the existing component-per-zone pattern (tabs, popups, drawer). Do not create monolithic single-file UI shells.

@@ -36,6 +36,9 @@ ureq = { version = "2", features = ["tls"], default-features = false }
 # SHA-256 for per-project bridge port derivation (hub/src-tauri/src/config/
 # bridge_port.rs). Mirrors the bridge (C#) and MCP server (TS) port formulas.
 sha2 = "0.10"
+# TOML codec for the Codex `.codex/config.toml` client config (M27 Plan 5).
+# Only used by the mcp_config Codex envelope; every other client writes JSON.
+toml = { version = "0.8", features = ["preserve_order"] }
 
 [dev-dependencies]
 tempfile = "3"
