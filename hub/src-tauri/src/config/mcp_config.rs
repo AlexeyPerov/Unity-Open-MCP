@@ -1163,6 +1163,302 @@ fn copy_skill_files_at(
     })
 }
 
+// --- Generate project skill ------------------------------------------------
+//
+// Surfaces `unity_open_mcp_generate_skill` from the wizard, alongside
+// the template copy. Generate runs the local MCP server CLI
+// (`node <toolkit>/mcp-server/dist/index.js run-tool
+// unity_open_mcp_generate_skill`) with `write: true`, so it composes
+// the template workflow playbook with this project's inventory
+// (Unity version, installed packages, key types) into one SKILL.md
+// per selected client. No live Unity bridge is required — the tool
+// is server-routed and reads the project from disk.
+
+/// Inputs to `generate_project_skill`. Mirrors `SkillCopyParams` plus
+/// the Step 4 `mcp_index_override` escape hatch so the same MCP entry
+/// resolution path is reused.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateSkillParams {
+    pub project_path: String,
+    pub toolkit_root: String,
+    #[serde(default)]
+    pub mcp_index_override: String,
+    pub mcp_client: McpClientId,
+}
+
+/// One client the generator wrote the skill into. Mirrors the
+/// mcp-server `SkillWriteTarget` shape.
+#[derive(Debug, Clone, Serialize)]
+pub struct GenerateSkillTarget {
+    pub client: String,
+    pub relative_path: String,
+    pub absolute_path: String,
+    pub existed: bool,
+}
+
+/// Outcome of `generate_project_skill`. Parses the tool's JSON result
+/// (`result.project` + `result.written`) and carries a bounded preview
+/// of the generated skill so the wizard can show what was written.
+#[derive(Debug, Clone, Serialize)]
+pub struct GenerateSkillResult {
+    pub project_path: String,
+    pub unity_version: String,
+    pub bridge_version: Option<String>,
+    pub verify_version: Option<String>,
+    pub targets: Vec<GenerateSkillTarget>,
+    pub inventory_preview: String,
+}
+
+/// Error surface for `generate_project_skill`. Kinds match the
+/// `SkillCopyError` convention (`{kind,message}`) so the wizard's
+/// `describeSkillCopyError` maps cleanly.
+#[derive(Debug, Clone, Serialize)]
+pub struct GenerateSkillError {
+    pub kind: String,
+    pub message: String,
+}
+
+impl GenerateSkillError {
+    fn new(kind: &str, message: impl Into<String>) -> Self {
+        Self {
+            kind: kind.to_string(),
+            message: message.into(),
+        }
+    }
+}
+
+/// Cap on the inventory preview embedded in the JSON envelope. The
+/// full skill is written to disk; this only bounds the in-response
+/// echo.
+const MAX_INVENTORY_PREVIEW_CHARS: usize = 6000;
+
+/// Derive the manifest client keys for a chosen `McpClientId` (e.g.
+/// `Cursor` → `["cursor"]`, `ZcodeProject` → `["agents"]`). Extracted
+/// from `plan_skill_copy_at` so `generate_project_skill` reuses the
+/// exact same mapping as the template-copy planner.
+fn client_keys_for_mcp_client(
+    manifest: &ClientPathsManifest,
+    client: McpClientId,
+) -> Vec<String> {
+    let wire_key = mcp_client_wire_key(client);
+    manifest
+        .mcp_client_mapping
+        .get(wire_key)
+        .map(|v| {
+            let mut seen = std::collections::BTreeSet::new();
+            v.iter()
+                .filter(|k| {
+                    manifest.clients.contains_key(*k) && seen.insert(k.to_string())
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Build the `--args` JSON blob the CLI forwards to the tool. Exposed
+/// for unit testing (the spawn itself has no Rust mock harness).
+fn build_generate_skill_args_json(client_keys: &[String]) -> String {
+    json!({
+        "write": true,
+        "clients": client_keys,
+        "include_workflow": true,
+    })
+    .to_string()
+}
+
+/// Truncate a skill preview for the JSON envelope, cutting on a line
+/// boundary so the tail note lands cleanly.
+fn truncate_inventory_preview(skill: &str) -> String {
+    if skill.len() <= MAX_INVENTORY_PREVIEW_CHARS {
+        return skill.to_string();
+    }
+    let cut = &skill[..MAX_INVENTORY_PREVIEW_CHARS];
+    let head = match cut.rfind('\n') {
+        Some(i) if i > 0 => &skill[..i],
+        _ => cut,
+    };
+    format!(
+        "{}\n\n… ({} more chars; full content written to disk)",
+        head,
+        skill.len() - head.len()
+    )
+}
+
+/// Tauri command: generate a project-specific skill file by invoking
+/// the local MCP server CLI's `run-tool unity_open_mcp_generate_skill`
+/// subcommand. No live Unity bridge is required. Mirrors the
+/// validation + capture style of `write_mcp_config_at` /
+/// `copy_skill_files_at`.
+#[tauri::command]
+pub fn generate_project_skill(
+    params: GenerateSkillParams,
+) -> Result<GenerateSkillResult, GenerateSkillError> {
+    let project = PathBuf::from(&params.project_path);
+    if !project.is_dir() {
+        return Err(GenerateSkillError::new(
+            "notAUnityProject",
+            "Project path is not a directory.",
+        ));
+    }
+
+    // Resolve + validate the MCP entry, mirroring write_mcp_config_at.
+    let index_path = match resolve_mcp_index_path(&params.toolkit_root, &params.mcp_index_override)
+    {
+        Some(p) => PathBuf::from(p),
+        None => {
+            return Err(GenerateSkillError::new(
+                "mcpPathInvalid",
+                "Cannot resolve the MCP server entry path. Set a toolkit root or mcp index override.",
+            ));
+        }
+    };
+    if !index_path.is_file() {
+        return Err(GenerateSkillError::new(
+            "mcpPathInvalid",
+            format!(
+                "MCP server entry not found at {}. Run `npm run build` in the toolkit's mcp-server/ folder.",
+                index_path.display()
+            ),
+        ));
+    }
+
+    // Derive client keys from the manifest (same path as plan_skill_copy_at).
+    let manifest = load_client_paths_manifest(&params.toolkit_root).map_err(|e| {
+        GenerateSkillError::new(
+            "manifestInvalid",
+            format!("skills/client-paths.json problem: {}", e.message),
+        )
+    })?;
+    let client_keys = client_keys_for_mcp_client(&manifest, params.mcp_client);
+    if client_keys.is_empty() {
+        return Err(GenerateSkillError::new(
+            "noClientTargets",
+            format!(
+                "No skill folder is mapped for the selected MCP client. Pick a different client or use Manual."
+            ),
+        ));
+    }
+    let args_json = build_generate_skill_args_json(&client_keys);
+
+    // Spawn node with PATH enrichment (mirrors probe_node / run_project_sync_version).
+    let output = crate::config::command_runner::node_command()
+        .arg(&index_path)
+        .args(["run-tool", "unity_open_mcp_generate_skill"])
+        .arg("--args")
+        .arg(&args_json)
+        .arg("--json")
+        .arg("--project")
+        .arg(&params.project_path)
+        .output()
+        .map_err(|e| {
+            GenerateSkillError::new(
+                "spawnFailed",
+                format!("failed to spawn node for skill generation: {}", e),
+            )
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut msg = String::new();
+        if !stderr.trim().is_empty() {
+            msg.push_str(stderr.trim());
+        }
+        if !stdout.trim().is_empty() {
+            if !msg.is_empty() {
+                msg.push(' ');
+            }
+            msg.push_str(stdout.trim());
+        }
+        if msg.is_empty() {
+            msg = format!("node exited with status {}", output.status);
+        }
+        return Err(GenerateSkillError::new("cliError", msg));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: Value = serde_json::from_str(stdout.trim()).map_err(|e| {
+        GenerateSkillError::new(
+            "cliError",
+            format!("could not parse run-tool output as JSON: {}", e),
+        )
+    })?;
+
+    if parsed.get("isError").and_then(Value::as_bool) == Some(true) {
+        let detail = parsed
+            .get("result")
+            .and_then(|r| r.get("error"))
+            .and_then(|e| e.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown tool error");
+        return Err(GenerateSkillError::new("toolError", detail.to_string()));
+    }
+
+    let result = parsed.get("result").cloned().unwrap_or(Value::Null);
+    let project_state = result.get("project").cloned().unwrap_or(Value::Null);
+    let unity_version = project_state
+        .get("unityVersion")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let bridge_version = project_state
+        .get("bridgeVersion")
+        .and_then(Value::as_str)
+        .map(String::from);
+    let verify_version = project_state
+        .get("verifyVersion")
+        .and_then(Value::as_str)
+        .map(String::from);
+
+    let mut targets = Vec::new();
+    if let Some(written) = result.get("written").and_then(Value::as_array) {
+        for entry in written {
+            let client = entry
+                .get("client")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let relative_path = entry
+                .get("relativePath")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let existed = entry
+                .get("existed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let absolute_path = if relative_path.is_empty() {
+                String::new()
+            } else {
+                project.join(&relative_path).to_string_lossy().into_owned()
+            };
+            targets.push(GenerateSkillTarget {
+                client,
+                relative_path,
+                absolute_path,
+                existed,
+            });
+        }
+    }
+
+    let inventory_preview = result
+        .get("skill")
+        .and_then(Value::as_str)
+        .map(|s| truncate_inventory_preview(s))
+        .unwrap_or_default();
+
+    Ok(GenerateSkillResult {
+        project_path: params.project_path.clone(),
+        unity_version,
+        bridge_version,
+        verify_version,
+        targets,
+        inventory_preview,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2010,6 +2306,138 @@ mod tests {
         assert_eq!(manifest.mcp_client_mapping["zcode-project"], vec!["agents"]);
         // Cursor maps to `.cursor/skills/`, never Claude.
         assert_eq!(manifest.mcp_client_mapping["cursor"], vec!["cursor"]);
+    }
+
+    // --- generate_project_skill helpers -----------------------------------
+
+    #[test]
+    fn client_keys_for_mcp_client_maps_cursor_and_zcode() {
+        let repo_root = env!("CARGO_MANIFEST_DIR");
+        let manifest_root = Path::new(repo_root)
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("repo root");
+        let manifest =
+            load_client_paths_manifest(&manifest_root.to_string_lossy()).expect("manifest");
+
+        // Cursor → ["cursor"], ZCode (either scope) → ["agents"].
+        assert_eq!(
+            client_keys_for_mcp_client(&manifest, McpClientId::Cursor),
+            vec!["cursor"]
+        );
+        assert_eq!(
+            client_keys_for_mcp_client(&manifest, McpClientId::ZcodeProject),
+            vec!["agents"]
+        );
+        assert_eq!(
+            client_keys_for_mcp_client(&manifest, McpClientId::ZcodeGlobal),
+            vec!["agents"]
+        );
+        // Manual → all four, deduped + ordered as in the manifest.
+        let manual = client_keys_for_mcp_client(&manifest, McpClientId::Manual);
+        assert_eq!(manual.len(), 4);
+        assert!(manual.contains(&"cursor".to_string()));
+        assert!(manual.contains(&"agents".to_string()));
+    }
+
+    #[test]
+    fn build_generate_skill_args_json_carries_write_clients_workflow() {
+        let raw = build_generate_skill_args_json(&["claude".to_string()]);
+        let v: Value = serde_json::from_str(&raw).expect("args json parses");
+        assert_eq!(v["write"], json!(true));
+        assert_eq!(v["include_workflow"], json!(true));
+        assert_eq!(v["clients"], json!(["claude"]));
+    }
+
+    #[test]
+    fn truncate_inventory_preview_keeps_short_strings_verbatim() {
+        let s = "short preview\n";
+        assert_eq!(truncate_inventory_preview(s), s);
+    }
+
+    #[test]
+    fn truncate_inventory_preview_cuts_on_line_boundary_with_tail_note() {
+        // Build a string well past the cap with newline separators so the
+        // line-boundary cut is exercised.
+        let chunk = "line of inventory text\n".repeat(400);
+        let out = truncate_inventory_preview(&chunk);
+        assert!(out.len() < chunk.len() + 200);
+        assert!(out.contains("more chars; full content written to disk"));
+        // The cut lands on a newline (the head ends with a newline, then
+        // the appended blank-line + note).
+        assert!(out.ends_with("disk)"));
+    }
+
+    #[test]
+    fn generate_project_skill_errors_when_project_path_not_a_dir() {
+        let dir = tempdir().unwrap();
+        let toolkit = dir.path().join("toolkit");
+        make_fake_toolkit(&toolkit);
+        let params = GenerateSkillParams {
+            project_path: dir.path().join("does-not-exist").to_string_lossy().into_owned(),
+            toolkit_root: toolkit.to_string_lossy().into_owned(),
+            mcp_index_override: String::new(),
+            mcp_client: McpClientId::Cursor,
+        };
+        let err = generate_project_skill(params).expect_err("should error");
+        assert_eq!(err.kind, "notAUnityProject");
+    }
+
+    #[test]
+    fn generate_project_skill_errors_when_mcp_entry_missing() {
+        let dir = tempdir().unwrap();
+        // Toolkit root exists but has NO mcp-server/dist/index.js.
+        let toolkit = dir.path().join("toolkit");
+        make_fake_skill_manifest(&toolkit);
+        let project = dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let params = GenerateSkillParams {
+            project_path: project.to_string_lossy().into_owned(),
+            toolkit_root: toolkit.to_string_lossy().into_owned(),
+            mcp_index_override: String::new(),
+            mcp_client: McpClientId::Cursor,
+        };
+        let err = generate_project_skill(params).expect_err("should error");
+        assert_eq!(err.kind, "mcpPathInvalid");
+    }
+
+    #[test]
+    fn generate_project_skill_errors_when_no_client_targets_mapped() {
+        // The checked-in manifest maps every McpClientId variant, so
+        // build a synthetic manifest missing the cursor mapping to
+        // exercise the empty-targets guard.
+        let dir = tempdir().unwrap();
+        let toolkit = dir.path().join("toolkit");
+        let mcp_dir = toolkit.join("mcp-server").join("dist");
+        fs::create_dir_all(&mcp_dir).unwrap();
+        fs::write(mcp_dir.join("index.js"), "module.exports = {};").unwrap();
+        let skills_dir = toolkit.join("skills").join("unity-open-mcp");
+        fs::create_dir_all(&skills_dir).unwrap();
+        fs::write(
+            toolkit.join(CLIENT_PATHS_MANIFEST_REL),
+            r#"{
+  "skillId": "unity-open-mcp",
+  "templateRelativePath": "skills/unity-open-mcp/SKILL.md",
+  "clients": {
+    "cursor": { "relativePath": ".cursor/skills/unity-open-mcp/SKILL.md" }
+  },
+  "mcpClientMapping": {
+    "zcode-global": ["agents"]
+  }
+}
+"#,
+        )
+        .unwrap();
+        let project = dir.path().join("project");
+        fs::create_dir_all(&project).unwrap();
+        let params = GenerateSkillParams {
+            project_path: project.to_string_lossy().into_owned(),
+            toolkit_root: toolkit.to_string_lossy().into_owned(),
+            mcp_index_override: String::new(),
+            mcp_client: McpClientId::Cursor,
+        };
+        let err = generate_project_skill(params).expect_err("should error");
+        assert_eq!(err.kind, "noClientTargets");
     }
 
 }

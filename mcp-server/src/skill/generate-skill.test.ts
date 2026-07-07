@@ -7,6 +7,8 @@ import { join } from "node:path";
 import {
   readProjectState,
   generateSkillMarkdown,
+  composeSkillMarkdown,
+  readTemplateWorkflow,
   writeSkillToClients,
   generateSkill,
 } from "./generate-skill.js";
@@ -466,6 +468,132 @@ test("generateSkill is regenerable — produces identical project state across c
       r1.project.monoBehaviours.map((m) => m.name).join(","),
       r2.project.monoBehaviours.map((m) => m.name).join(","),
     );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// composeSkillMarkdown — template + inventory merge
+// ---------------------------------------------------------------------------
+
+const FAKE_TEMPLATE = `# Unity Open MCP
+
+Practical skill for AI agents driving a Unity project.
+
+## Preconditions
+
+- Unity Editor is open.
+- Call \`unity_open_mcp_ping\` first.
+`;
+
+function fixtureState(): import("./generate-skill.js").ProjectState {
+  return {
+    projectName: "MyGame",
+    unityVersion: "6000.0.1f1",
+    packages: [{ id: "com.unity.ugui", version: "2.0.0" }],
+    bridgeVersion: "0.3.0",
+    verifyVersion: "0.3.0",
+    monoBehaviours: [
+      { name: "PlayerController", namespace: "MyGame", filePath: "Assets/Scripts/PlayerController.cs" },
+    ],
+    scriptableObjects: [],
+  };
+}
+
+test("composeSkillMarkdown includes both the template heading and the project-name heading", () => {
+  const caps = buildFixtureCaps();
+  const md = composeSkillMarkdown(fixtureState(), caps, FAKE_TEMPLATE);
+  // Template heading (source of truth for workflow prose).
+  assert.ok(md.includes("# Unity Open MCP"), "template heading must appear");
+  // Project-name heading (the inventory section).
+  assert.ok(md.includes("# Project inventory — MyGame"), "project-name heading must appear");
+  // Template prose is carried verbatim.
+  assert.ok(md.includes("Practical skill for AI agents"));
+  // Project inventory data is appended.
+  assert.ok(md.includes("6000.0.1f1"));
+  assert.ok(md.includes("MyGame.PlayerController"));
+});
+
+test("composeSkillMarkdown separates template and inventory with a divider", () => {
+  const caps = buildFixtureCaps();
+  const md = composeSkillMarkdown(fixtureState(), caps, FAKE_TEMPLATE);
+  assert.ok(md.includes("\n---\n"), "a horizontal rule must separate the two sections");
+});
+
+test("composeSkillMarkdown falls back to full inventory when template is null", () => {
+  const caps = buildFixtureCaps();
+  const md = composeSkillMarkdown(fixtureState(), caps, null);
+  // No template prose.
+  assert.ok(!md.includes("Practical skill for AI agents"));
+  // Full standalone builder output (its own heading + workflow summary).
+  assert.ok(md.includes("# Unity Agent Skill — MyGame"));
+  assert.ok(md.includes("mutate → gate → fix"));
+});
+
+test("composeSkillMarkdown with includeWorkflow=false produces inventory-only even when template is present", () => {
+  const caps = buildFixtureCaps();
+  const md = composeSkillMarkdown(fixtureState(), caps, FAKE_TEMPLATE, {
+    includeWorkflow: false,
+  });
+  assert.ok(!md.includes("Practical skill for AI agents"));
+  assert.ok(md.includes("# Unity Agent Skill — MyGame"));
+});
+
+test("composeSkillMarkdown never references internal specs or milestone IDs", () => {
+  const caps = buildFixtureCaps();
+  const md = composeSkillMarkdown(fixtureState(), caps, FAKE_TEMPLATE);
+  assert.ok(!md.includes("specs/"));
+  assert.ok(!/\bM\d+\b/.test(md));
+});
+
+// ---------------------------------------------------------------------------
+// readTemplateWorkflow — disk I/O
+// ---------------------------------------------------------------------------
+
+test("readTemplateWorkflow returns a non-empty string when the template resolves, or null", async () => {
+  const template = await readTemplateWorkflow();
+  if (template !== null) {
+    assert.ok(template.length > 0);
+    assert.ok(template.includes("Unity Open MCP"));
+  }
+  // null is valid in standalone installs; both paths are covered by
+  // composeSkillMarkdown's fallback.
+});
+
+// ---------------------------------------------------------------------------
+// generateSkill orchestrator — includeWorkflow
+// ---------------------------------------------------------------------------
+
+test("generateSkill composes template + inventory by default (includeWorkflow=true)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "uomcp-skill-"));
+  try {
+    await makeFakeProject(dir);
+    const caps = buildFixtureCaps();
+    const result = await generateSkill(dir, caps, { write: false });
+    // In this repo the template resolves, so the composed output carries
+    // both headings. (If the template could not resolve this still passes
+    // because the fallback's "# Unity Agent Skill" heading is present.)
+    assert.ok(
+      result.skill.includes("# Unity Open MCP") ||
+        result.skill.includes("# Unity Agent Skill"),
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("generateSkill with includeWorkflow=false omits template prose", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "uomcp-skill-"));
+  try {
+    await makeFakeProject(dir);
+    const caps = buildFixtureCaps();
+    const result = await generateSkill(dir, caps, {
+      write: false,
+      includeWorkflow: false,
+    });
+    assert.ok(!result.skill.includes("Practical skill for AI agents"));
+    assert.ok(result.skill.includes("# Unity Agent Skill —"));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

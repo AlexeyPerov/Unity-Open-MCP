@@ -819,7 +819,7 @@ pub enum SyncVersionAction {
 /// (mirrors `npm_command` — Windows needs the shell to resolve `node.exe`
 /// off PATH the same way it resolves `npm.cmd`). Shares the same Node bin-dir
 /// PATH enrichment so the version-sync script runs under a GUI-app launch.
-fn node_command() -> Command {
+pub(crate) fn node_command() -> Command {
     command_with_node_path("node", false)
 }
 

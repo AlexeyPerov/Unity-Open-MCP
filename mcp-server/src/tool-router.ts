@@ -848,6 +848,9 @@ export class ToolRouter implements Router {
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
     const write = args.write === true;
+    // include_workflow defaults to true; explicitly passing false
+    // opts out of the template+inventory merge.
+    const includeWorkflow = args.include_workflow !== false;
     const rawClients = Array.isArray(args.clients) ? args.clients : [];
     // Client allowlist comes from the single-source manifest at
     // `skills/client-paths.json`. Do not add a literal union here.
@@ -870,6 +873,7 @@ export class ToolRouter implements Router {
       const result = await generateSkill(this.projectPath, caps, {
         write,
         clients: clients.length > 0 ? clients : undefined,
+        includeWorkflow,
       });
       return {
         content: [

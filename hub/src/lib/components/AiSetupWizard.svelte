@@ -24,6 +24,7 @@
     clearAiSetup,
     copySkillFiles,
     detectProjectState,
+    generateProjectSkill,
     launchForVerify,
     planManifestMerge,
     planMcpConfig,
@@ -36,6 +37,9 @@
     type BridgePingResult,
     type BridgeStatusKind,
     type ClearAiSetupResult,
+    type GenerateSkillError,
+    type GenerateSkillParamsWire,
+    type GenerateSkillResultWire,
     type LaunchForVerifyError,
     type ManifestError,
     type ManifestMergePlan,
@@ -335,6 +339,17 @@
   let skillCopying = $state(false);
   let skillError = $state<SkillCopyError | null>(null);
   let skillOverwriteAck = $state(false);
+
+  // "Generate project skill" — runs unity_open_mcp_generate_skill via
+  // the local CLI (no live bridge needed) and merges the template
+  // workflow playbook with this project's inventory into the same
+  // client skill dirs the template copy writes. Shares the overwrite
+  // confirmation toggle with the template-copy flow (generate
+  // overwrites the same paths).
+  let skillGenResult = $state<GenerateSkillResultWire | null>(null);
+  let skillGenRunning = $state(false);
+  let skillGenError = $state<GenerateSkillError | null>(null);
+  let skillGenPreviewOpen = $state(false);
 
   // "Clear AI Setup" — destructive inverse of the wizard. The yellow
   // footer button runs it after a confirmation modal; the result is
@@ -1115,6 +1130,9 @@
           }
           skillResult = null;
           skillError = null;
+          skillGenResult = null;
+          skillGenError = null;
+          skillGenPreviewOpen = false;
         }
       } catch (e) {
         if (!cancelled) {
@@ -1362,6 +1380,89 @@
       );
     } finally {
       skillCopying = false;
+    }
+  }
+
+  // "Generate project skill" — runs the local MCP server's
+  // unity_open_mcp_generate_skill tool via the CLI (no live bridge
+  // needed) and writes a project-specific SKILL.md that merges the
+  // template workflow playbook with this project's inventory into the
+  // same client skill dirs. Requires the built MCP server entry
+  // (`mcp-server/dist/index.js`); same prerequisite as the MCP config
+  // step's local launch mode.
+  function toGenerateSkillError(e: unknown): GenerateSkillError {
+    if (e && typeof e === "object" && "kind" in e && "message" in e) {
+      return e as GenerateSkillError;
+    }
+    return { kind: "unknown", message: e instanceof Error ? e.message : String(e) };
+  }
+
+  function describeGenerateSkillError(err: GenerateSkillError): string {
+    switch (err.kind) {
+      case "notAUnityProject":
+        return `Project path is not a directory.`;
+      case "mcpPathInvalid":
+        return `MCP server entry not found. Run \`npm run build\` in the toolkit's mcp-server/ folder. (${err.message})`;
+      case "noClientTargets":
+        return `No skill folder is mapped for the selected client. Pick a different client or use Manual.`;
+      case "spawnFailed":
+        return `Failed to run node: ${err.message}. Check Node.js is installed and on PATH.`;
+      case "cliError":
+        return `Skill generator CLI failed: ${err.message}`;
+      case "toolError":
+        return `Skill generation tool error: ${err.message}`;
+      case "manifestInvalid":
+        return `Skill client-paths manifest problem: ${err.message}.`;
+      default:
+        return `${err.kind}: ${err.message}`;
+    }
+  }
+
+  function canGenerateSkill(): boolean {
+    // Same prerequisite as the MCP config step's local launch mode:
+    // the built MCP entry must resolve. Reuses the existing fingerprint
+    // validation when available.
+    if (!skillPlan || skillPlan.targets.length === 0) return false;
+    if (!toolkitRoot) return false;
+    if (toolkitValidation && !toolkitValidation.ok) return false;
+    return true;
+  }
+
+  async function generateProjectSkillClick() {
+    if (skillGenRunning) return;
+    const root = toolkitRoot;
+    const projectPath = wizardProjectPath;
+    if (!projectPath || !root || !skillPlan) return;
+    const hasExisting = skillPlan.targets.some((t) => t.exists);
+    if (hasExisting && !skillOverwriteAck) {
+      skillGenError = {
+        kind: "overwriteNotConfirmed",
+        message:
+          "One or more target files already exist. Check the overwrite box to replace them.",
+      };
+      return;
+    }
+    skillGenRunning = true;
+    skillGenError = null;
+    try {
+      const params: GenerateSkillParamsWire = {
+        projectPath,
+        toolkitRoot: root,
+        mcpIndexOverride,
+        mcpClient: clientToWire(mcpClient),
+      };
+      const result = await generateProjectSkill(params);
+      skillGenResult = result;
+      S.appendDrawerLog(
+        `AI Setup: generated project skill for ${project.name} — ${result.targets.length} target(s), Unity ${result.unityVersion}`
+      );
+    } catch (e) {
+      skillGenError = toGenerateSkillError(e);
+      S.appendErrorLog(
+        `Skill generation failed: ${describeGenerateSkillError(skillGenError)}`
+      );
+    } finally {
+      skillGenRunning = false;
     }
   }
 
@@ -1777,6 +1878,9 @@
     skillResult = null;
     skillError = null;
     skillOverwriteAck = false;
+    skillGenResult = null;
+    skillGenError = null;
+    skillGenPreviewOpen = false;
     selectedPresetId = "";
     step5BridgeStatus = { kind: "notChecked" };
     currentStep = "step0";
@@ -1811,6 +1915,9 @@
       mcpPlan = null;
       skillResult = null;
       skillError = null;
+      skillGenResult = null;
+      skillGenError = null;
+      skillGenPreviewOpen = false;
       resetStep5State();
       void refreshDetection();
       void clearPersistedDraft();
@@ -3009,10 +3116,16 @@
             <strong>optional</strong>: skip it if you manage skills yourself.
           </p>
           <p class="wiz-hint">
-            The wizard copies the template from
-            <code>{toolkitRoot || "<toolkit>"}/skills/unity-open-mcp/SKILL.md</code>
-            into the project-relative skill folder(s) for the MCP client you
-            picked on the Configure AI client step (<strong>{mcpClientLabel(mcpClient)}</strong>).
+            Two options write to the same project-relative skill folder(s) for
+            the MCP client you picked on the Configure AI client step
+            (<strong>{mcpClientLabel(mcpClient)}</strong>):
+            <strong>Copy skill</strong> installs the template playbook (the same
+            workflow guidance for every project), and
+            <strong>Generate project skill</strong> produces a project-specific
+            file that merges that playbook with this project's inventory (Unity
+            version, installed packages, key MonoBehaviour / ScriptableObject
+            types). Generate needs the built MCP server
+            (<code>mcp-server/dist/index.js</code>); copy does not.
             Paths are derived from a single manifest
             (<code>skills/client-paths.json</code>), so ZCode writes
             <code>.agents/skills/</code> and Cursor writes
@@ -3076,6 +3189,35 @@
             </div>
           {/if}
 
+          {#if skillGenError}
+            <div class="wiz-block wiz-block-error" role="alert">
+              {describeGenerateSkillError(skillGenError)}
+            </div>
+          {/if}
+          {#if skillGenResult}
+            <div class="wiz-block wiz-block-ok" role="status">
+              <strong>Project skill generated.</strong>
+              Wrote {skillGenResult.targets.length} file(s) — Unity {skillGenResult.unityVersion}
+              {#if skillGenResult.bridgeVersion}
+                · bridge {skillGenResult.bridgeVersion}
+              {/if}
+              .
+              <button
+                type="button"
+                class="wiz-link-button"
+                onclick={() => (skillGenPreviewOpen = !skillGenPreviewOpen)}
+              >
+                {skillGenPreviewOpen ? "Hide" : "Show"} preview
+              </button>
+            </div>
+            {#if skillGenPreviewOpen}
+              <details class="wiz-preview" open>
+                <summary>Generated skill preview</summary>
+                <pre>{skillGenResult.inventoryPreview}</pre>
+              </details>
+            {/if}
+          {/if}
+
           <div class="wiz-actions-row">
             <Button
               variant="primary"
@@ -3094,6 +3236,24 @@
               }
             >
               {skillCopying ? "Copying…" : skillResult?.copied.length ? "Copy again" : "Copy skill"}
+            </Button>
+            <Button
+              variant="secondary"
+              onclick={generateProjectSkillClick}
+              disabled={
+                !canGenerateSkill() ||
+                skillGenRunning ||
+                (skillPlan?.targets.some((t) => t.exists) && !skillOverwriteAck)
+              }
+              title={
+                skillPlan?.targets.some((t) => t.exists) && !skillOverwriteAck
+                  ? "Confirm overwrite first"
+                  : !canGenerateSkill()
+                    ? "Build the MCP server (mcp-server/dist/index.js) first"
+                    : "Generate a project-specific skill that merges the playbook with this project's inventory"
+              }
+            >
+              {skillGenRunning ? "Generating…" : skillGenResult?.targets.length ? "Regenerate" : "Generate project skill"}
             </Button>
             <Button variant="secondary" onclick={skipSkillStep}>
               Skip
@@ -3397,7 +3557,63 @@
                   >
                     {skillCopying ? "Copying…" : skillResult?.copied.length ? "Copy again" : "Copy skill files"}
                   </Button>
+                  <Button
+                    variant="secondary"
+                    onclick={generateProjectSkillClick}
+                    disabled={
+                      !canGenerateSkill() ||
+                      skillGenRunning ||
+                      (skillPlan.targets.some((t) => t.exists) && !skillOverwriteAck)
+                    }
+                    title={
+                      skillPlan.targets.some((t) => t.exists) && !skillOverwriteAck
+                        ? "Confirm overwrite first"
+                        : !canGenerateSkill()
+                          ? "Build the MCP server (mcp-server/dist/index.js) first"
+                          : "Generate a project-specific skill that merges the playbook with this project's inventory"
+                    }
+                  >
+                    {skillGenRunning ? "Generating…" : skillGenResult?.targets.length ? "Regenerate skill" : "Generate project skill"}
+                  </Button>
                 </div>
+              {/if}
+            {/if}
+            {#if skillGenError}
+              <div class="wiz-block wiz-block-error" role="alert">
+                {describeGenerateSkillError(skillGenError)}
+              </div>
+            {/if}
+            {#if skillGenResult}
+              <div class="wiz-block wiz-block-ok" role="status">
+                <strong>Project skill generated.</strong>
+                Wrote {skillGenResult.targets.length} file(s) — Unity {skillGenResult.unityVersion}
+                {#if skillGenResult.bridgeVersion}
+                  · bridge {skillGenResult.bridgeVersion}
+                {/if}
+                .
+                <button
+                  type="button"
+                  class="wiz-link-button"
+                  onclick={() => (skillGenPreviewOpen = !skillGenPreviewOpen)}
+                >
+                  {skillGenPreviewOpen ? "Hide" : "Show"} preview
+                </button>
+              </div>
+              {#if skillGenResult.targets.length > 0}
+                <ul class="wiz-fingerprints" aria-label="Generated skill files">
+                  {#each skillGenResult.targets as t (t.absolutePath)}
+                    <li class="wiz-fp wiz-fp-ok">
+                      <span class="wiz-fp-name"><code>{t.relativePath}</code></span>
+                      <span class="wiz-fp-status">{t.existed ? "overwritten" : "created"}</span>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+              {#if skillGenPreviewOpen}
+                <details class="wiz-preview" open>
+                  <summary>Generated skill preview</summary>
+                  <pre>{skillGenResult.inventoryPreview}</pre>
+                </details>
               {/if}
             {/if}
             {#if skillResult}
@@ -3901,6 +4117,41 @@
 
   .wiz-block-ok strong {
     color: #bbf7d0;
+  }
+
+  /* Inline link-styled button used inside result blocks (e.g. "Show preview"). */
+  .wiz-link-button {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  /* Collapsible preview of a generated artifact (skill markdown). */
+  .wiz-preview {
+    margin-top: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.25);
+  }
+  .wiz-preview summary {
+    cursor: pointer;
+    padding: 6px 10px;
+    font-size: 0.85em;
+    opacity: 0.85;
+  }
+  .wiz-preview pre {
+    margin: 0;
+    padding: 10px 12px;
+    max-height: 320px;
+    overflow: auto;
+    font-size: 0.78em;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   /* Amber soft warning — mirrors .wiz-tag-warn tokens. Never blocks;

@@ -1775,6 +1775,12 @@ export interface SkillCopyError {
   message: string;
 }
 
+/** Error surface for `generate_project_skill` — same `{kind,message}` shape. */
+export interface GenerateSkillError {
+  kind: string;
+  message: string;
+}
+
 export async function planSkillCopy(
   params: SkillCopyParamsWire
 ): Promise<SkillCopyPlan> {
@@ -1789,6 +1795,45 @@ export async function copySkillFiles(
     params,
     overwriteExisting,
   });
+}
+
+/**
+ * Wizard "Generate project skill" — invokes the local MCP server's
+ * `unity_open_mcp_generate_skill` tool via the CLI (`run-tool`) with
+ * `write: true`, producing a project-specific SKILL.md that merges the
+ * template workflow playbook with this project's inventory (Unity
+ * version, installed packages, key types). No live Unity bridge is
+ * required. Mirrors the Rust `mcp_config::{GenerateSkillParams,
+ * GenerateSkillResult, GenerateSkillError}` types.
+ */
+export interface GenerateSkillParamsWire {
+  projectPath: string;
+  toolkitRoot: string;
+  mcpIndexOverride: string;
+  mcpClient: McpClientWire;
+}
+
+export interface GenerateSkillTargetWire {
+  client: SkillCopyKind;
+  relativePath: string;
+  absolutePath: string;
+  existed: boolean;
+}
+
+export interface GenerateSkillResultWire {
+  projectPath: string;
+  unityVersion: string;
+  bridgeVersion: string | null;
+  verifyVersion: string | null;
+  targets: GenerateSkillTargetWire[];
+  /** Bounded preview of the generated skill markdown. */
+  inventoryPreview: string;
+}
+
+export async function generateProjectSkill(
+  params: GenerateSkillParamsWire
+): Promise<GenerateSkillResultWire> {
+  return invoke<GenerateSkillResultWire>("generate_project_skill", { params });
 }
 
 /**

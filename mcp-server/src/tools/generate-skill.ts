@@ -36,6 +36,15 @@ export const generateSkill: Tool = {
           `Defaults to ["claude"]. Allowed values: ${clientListDoc}. Each entry writes ` +
           "to the project-relative path declared for that client in skills/client-paths.json.",
       },
+      include_workflow: {
+        type: "boolean",
+        default: true,
+        description:
+          "When true (default), compose the template workflow playbook (the checked-in " +
+          "skills/unity-open-mcp/SKILL.md, the source of truth for agent guidance) with " +
+          "a project-specific inventory section into one file. When false, or when the " +
+          "template cannot be located, emit only the standalone project inventory.",
+      },
     },
     additionalProperties: false,
   },

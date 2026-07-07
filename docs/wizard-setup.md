@@ -113,8 +113,12 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 
 ### Step 6 — Agent skill (optional)
 
-- Copy `SKILL.md` for your selected client
-- Optional overwrite with backup
+The agent skill gives your AI client workflow guidance for the Unity MCP tools — the mutate→gate→fix loop, capabilities-first discovery, and the agent senses (tests, profiler, screenshots). Two options write to the same project-relative skill folder(s) for your selected client (ZCode → `.agents/skills/`, Cursor → `.cursor/skills/`, etc.):
+
+- **Copy skill** — installs the template playbook (`skills/unity-open-mcp/SKILL.md`). The same workflow guidance for every project; no build required.
+- **Generate project skill** — produces a project-specific `SKILL.md` that merges the template playbook with this project's inventory (Unity version, installed packages, key MonoBehaviour / ScriptableObject types). Runs the local MCP server generator without a live Unity bridge; requires the built MCP server entry (`mcp-server/dist/index.js`), the same prerequisite as the local launch mode on the Configure AI client step. The result preview is shown inline.
+
+Both honor an explicit overwrite checkbox; existing files are backed up to `*.bak` before they are replaced. You can copy only, generate only, or both (generate overwrites the same path the copy writes, so confirm the overwrite).
 
 The **Team CI** preset auto-skips this step — CI agents typically don't need a desktop skill file.
 

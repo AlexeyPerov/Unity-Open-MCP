@@ -79,6 +79,7 @@ pub fn run() {
             config::mcp_config::write_mcp_config,
             config::mcp_config::plan_skill_copy,
             config::mcp_config::copy_skill_files,
+            config::mcp_config::generate_project_skill,
             config::clear::clear_ai_setup,
             config::launch_verify::launch_for_verify,
             config::launch_verify::poll_bridge_ping,

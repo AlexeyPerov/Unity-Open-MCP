@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   loadClientPathsManifest,
   clientSkillRelativePath,
   knownClientKeys,
+  resolveTemplateSkillPath,
+  _clearClientPathsCacheForTests,
   BUNDLED_MANIFEST,
 } from "./client-paths.js";
 
@@ -73,4 +77,47 @@ test("clientSkillRelativePath throws for an unknown client key", () => {
 test("knownClientKeys lists the canonical clients", () => {
   const keys = knownClientKeys().sort();
   assert.deepEqual(keys, ["agents", "claude", "cursor", "opencode"]);
+});
+
+// ---------------------------------------------------------------------------
+// Template skill path resolver
+// ---------------------------------------------------------------------------
+
+test("resolveTemplateSkillPath resolves the checked-in template in this repo", () => {
+  // In the test environment the loader walks up from this module and
+  // finds the toolkit root containing skills/client-paths.json, so the
+  // template path must point at the real checked-in SKILL.md.
+  const p = resolveTemplateSkillPath();
+  if (p !== null) {
+    assert.ok(p.endsWith(join("skills", "unity-open-mcp", "SKILL.md")), p);
+    assert.ok(existsSync(p), `template must exist at ${p}`);
+  }
+  // When run outside the repo tree (standalone install), p is null —
+  // both outcomes are valid; the composer degrades gracefully.
+});
+
+test("resolveTemplateSkillPath honors UNITY_OPEN_MCP_TOOLKIT_ROOT", () => {
+  const prev = process.env.UNITY_OPEN_MCP_TOOLKIT_ROOT;
+  _clearClientPathsCacheForTests();
+  try {
+    process.env.UNITY_OPEN_MCP_TOOLKIT_ROOT = "/nonexistent-toolkit-root-xyz";
+    _clearClientPathsCacheForTests();
+    const p = resolveTemplateSkillPath();
+    // The env override points at a dir with no manifest, so the env
+    // branch fails and the resolver falls back to the walk-up which
+    // (in this repo) finds the real toolkit root. That fallback is the
+    // documented behavior: an invalid env override never silently
+    // breaks resolution. We assert the override is *non-authoritative*
+    // by confirming resolution still succeeds (returns a real path)
+    // rather than null.
+    assert.ok(p !== null, "invalid env override falls back to walk-up, not null");
+    assert.ok(p.endsWith(join("skills", "unity-open-mcp", "SKILL.md")), p);
+  } finally {
+    if (prev === undefined) {
+      delete process.env.UNITY_OPEN_MCP_TOOLKIT_ROOT;
+    } else {
+      process.env.UNITY_OPEN_MCP_TOOLKIT_ROOT = prev;
+    }
+    _clearClientPathsCacheForTests();
+  }
 });

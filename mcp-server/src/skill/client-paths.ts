@@ -88,12 +88,22 @@ function tryReadManifest(path: string): ClientPathsManifest | null {
   }
 }
 
-function resolveManifest(): ClientPathsManifest {
+interface ResolvedManifest {
+  manifest: ClientPathsManifest;
+  /**
+   * Absolute toolkit-root directory the manifest was loaded from, when
+   * discovered from disk. `null` for the bundled fallback (no on-disk
+   * toolkit tree to resolve template/asset paths against).
+   */
+  toolkitRoot: string | null;
+}
+
+function resolveManifestWithRoot(): ResolvedManifest {
   // 1. Explicit env override.
   const envRoot = process.env.UNITY_OPEN_MCP_TOOLKIT_ROOT?.trim();
   if (envRoot) {
     const fromEnv = tryReadManifest(join(envRoot, MANIFEST_REL));
-    if (fromEnv) return fromEnv;
+    if (fromEnv) return { manifest: fromEnv, toolkitRoot: envRoot };
   }
   // 2. Walk up from this module's directory looking for the toolkit
   //    root (i.e. a parent dir containing `skills/client-paths.json`).
@@ -101,16 +111,20 @@ function resolveManifest(): ClientPathsManifest {
   for (let i = 0; i < 8; i++) {
     const candidate = join(dir, MANIFEST_REL);
     const m = tryReadManifest(candidate);
-    if (m) return m;
+    if (m) return { manifest: m, toolkitRoot: dir };
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   // 3. Bundled fallback (validated against the manifest by tests).
-  return BUNDLED_MANIFEST;
+  return { manifest: BUNDLED_MANIFEST, toolkitRoot: null };
 }
 
-let cached: ClientPathsManifest | null = null;
+function resolveManifest(): ClientPathsManifest {
+  return resolveManifestWithRoot().manifest;
+}
+
+let cached: ResolvedManifest | null = null;
 
 /**
  * Load the client-paths manifest. Resolution is cached after the
@@ -118,9 +132,47 @@ let cached: ClientPathsManifest | null = null;
  * process).
  */
 export function loadClientPathsManifest(): ClientPathsManifest {
+  return getResolvedManifest().manifest;
+}
+
+/**
+ * Internal: the resolved manifest + the toolkit root it was loaded
+ * from. Cached after the first call.
+ */
+function getResolvedManifest(): ResolvedManifest {
   if (cached) return cached;
-  cached = resolveManifest();
+  cached = resolveManifestWithRoot();
   return cached;
+}
+
+/**
+ * Absolute path to the template skill file
+ * (`<toolkitRoot>/<manifest.templateRelativePath>`), resolved from the
+ * same root discovery that loads `client-paths.json`. Returns `null`
+ * when the toolkit root cannot be found (bundled-fallback / standalone
+ * `mcp-server/` install) so callers can degrade gracefully instead of
+ * guessing a path. Never throws.
+ *
+ * Used by the skill generator to merge the template workflow prose
+ * with the project-specific inventory (the template is the source of
+ * truth for the workflow playbook).
+ */
+export function resolveTemplateSkillPath(): string | null {
+  const { manifest, toolkitRoot } = getResolvedManifest();
+  if (!toolkitRoot) return null;
+  return join(toolkitRoot, manifest.templateRelativePath);
+}
+
+/**
+ * @internal Test-only cache reset. The manifest resolution is cached
+ * for process lifetime (it is immutable in production, where the env
+ * override is set before the process starts). Tests that mutate
+ * `UNITY_OPEN_MCP_TOOLKIT_ROOT` after a prior test already warmed the
+ * cache need this to observe the override. Do not call from runtime
+ * code.
+ */
+export function _clearClientPathsCacheForTests(): void {
+  cached = null;
 }
 
 /**
