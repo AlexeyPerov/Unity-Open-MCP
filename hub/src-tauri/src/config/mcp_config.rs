@@ -116,8 +116,9 @@ pub const MCP_SERVER_KEY: &str = "unity-open-mcp";
 pub const CLIENT_PATHS_MANIFEST_REL: &str = "skills/client-paths.json";
 
 /// Supported MCP client ids. Mirrors `McpClientId` in
-/// `ai_toolkit.ts` and the picker in `AiSetupWizard.svelte`
-/// Step 4. `claude-code` is CLI-only (renders a `claude mcp add`
+/// `ai_toolkit.ts` and the Step 4 picker catalog in
+/// `hub/src/lib/components/wizard/constants.ts`
+/// (`MCP_CLIENT_OPTIONS`). `claude-code` is CLI-only (renders a `claude mcp add`
 /// command); `manual` is clipboard-only. Every other variant is
 /// backed by a writable config file (JSON, or TOML for `Codex`).
 ///

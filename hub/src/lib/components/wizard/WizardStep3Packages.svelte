@@ -15,11 +15,9 @@
   interface Props {
     state: WizardState;
     handlers: WizardHandlers;
-    /** Two-way bound diff-preview <details> open state (persisted in draft). */
-    showDiff?: boolean;
   }
 
-  let { state, handlers, showDiff = $bindable(state.showDiff) }: Props = $props();
+  let { state, handlers }: Props = $props();
 
   // Static catalog snapshot — embedded domains advertised by the wizard.
   // `installable` domains get a toggle; `builtin` ones render as info-only
@@ -243,7 +241,11 @@
           </label>
         {/if}
 
-        <details class="wiz-advanced" bind:open={showDiff}>
+        <details
+          class="wiz-advanced"
+          open={state.showDiff}
+          ontoggle={(e) => handlers.setShowDiff((e.currentTarget as HTMLDetailsElement).open)}
+        >
           <summary>Preview manifest diff</summary>
           <pre class="wiz-codeblock" aria-label="Manifest diff">{state.diffPreviewText}</pre>
           {#if state.mergePlan.derivedUrls.gitRemote}

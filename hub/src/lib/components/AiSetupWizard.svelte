@@ -125,7 +125,13 @@
     toMcpConfigError,
     toSkillCopyError,
   } from "./wizard/error_descriptors.ts";
-  import type { DiagRow, Step5ItemId, Step5ItemState } from "./wizard/state.ts";
+  import type {
+    DiagRow,
+    Step5ItemId,
+    Step5ItemState,
+    WizardHandlers,
+    WizardState,
+  } from "./wizard/state.ts";
 
   interface Props {
     project: {
@@ -1509,7 +1515,10 @@
     }),
   );
 
-  // The state bag passed (read-only) to every step module.
+  // The state bag passed (read-only) to every step module. `satisfies`
+  // enforces the WizardState contract at the declaration site so a missing
+  // or mis-typed field fails the build here rather than only at a step call
+  // site.
   let wizardState = $derived({
     projectId: wizardProjectId,
     projectPath: wizardProjectPath,
@@ -1597,11 +1606,12 @@
     clearError,
     doneOpenInCursor: canOpenInCursor,
     doneOpenInOpencode: canOpenInOpencode,
-  });
+  } satisfies WizardState);
 
   // Handler bag passed to every step module. Stable closures over the
   // reactive state above — re-created on each render is fine because the
-  // steps only invoke them on user interaction.
+  // steps only invoke them on user interaction. `satisfies` enforces the
+  // WizardHandlers contract so a missing/renamed handler fails the build here.
   const handlers = {
     selectPreset: (id: PresetId) => selectPreset(id),
     refreshDetection: () => void refreshDetection(),
@@ -1649,7 +1659,7 @@
     reRunWizard,
     closeWizard,
     onClearAiSetup: () => void onClearAiSetup(),
-  };
+  } satisfies WizardHandlers;
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -1692,7 +1702,7 @@
     {:else if currentStep === "step2"}
       <WizardStep2McpSource state={wizardState} {handlers} />
     {:else if currentStep === "step3"}
-      <WizardStep3Packages state={wizardState} {handlers} bind:showDiff />
+      <WizardStep3Packages state={wizardState} {handlers} />
     {:else if currentStep === "step4"}
       <WizardStep4McpClient state={wizardState} {handlers} />
     {:else if currentStep === "step4b"}

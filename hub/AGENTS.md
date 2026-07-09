@@ -47,7 +47,9 @@ per-file constant edit.** To add a client:
 4. **TS preview** — extend `McpClientId` in
    `hub/src/lib/services/ai_toolkit.ts`, `mcpClientConfigTarget`, the
    `McpClientIdWire` / `McpClientWire` unions in `config.ts`, and
-   `clientToWire` + `MCP_CLIENT_OPTIONS` in `AiSetupWizard.svelte`.
+   `clientToWire` + `MCP_CLIENT_OPTIONS` in
+   `hub/src/lib/components/wizard/constants.ts` (the Step 4 picker catalog
+   consumed by the wizard modules).
 5. **Bridge window** — add a row to
    `packages/bridge/Editor/Config/McpClientCatalog.cs` and (if a new envelope)
    a branch in `BuildEntryFields`.
