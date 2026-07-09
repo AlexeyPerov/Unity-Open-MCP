@@ -33,6 +33,8 @@ import type {
 } from "$lib/services/config";
 import type { McpClientId } from "$lib/services/ai_toolkit";
 import type { DiagRow } from "./diagnostics.ts";
+import type { McpLaunchSourceMode } from "./launch_mode.ts";
+import type { StepId } from "./constants.ts";
 
 // Re-exported so step modules + the orchestrator can import it from one place.
 export type { DiagRow };
@@ -61,6 +63,9 @@ export interface WizardState {
   nodeProbe: NodeProbe | null;
   nodeProbing: boolean;
   diagnostics: DiagRow[];
+  /** Already-configured short-circuit: bridge + verify + MCP client all OK
+   *  on detection. Drives the "You're ready" banner on Preflight. */
+  alreadyConfigured: boolean;
 
   // --- Step 2 — MCP server source ---
   useLocalCheckout: boolean;
@@ -73,6 +78,13 @@ export interface WizardState {
   toolkitError: string | null;
   pickToolkitInFlight: boolean;
   nodeMajor: number | null;
+  /** Plan 2 exclusive launch-source mode (single radio selector). Derived
+   *  from the legacy draft fields by the orchestrator so persisted drafts
+   *  keep working; selecting a mode writes back the legacy fields. */
+  mcpSourceMode: McpLaunchSourceMode;
+  /** Whether the selected mode's inputs are satisfied (local/custom need a
+   *  validated toolkit root). Computed by the orchestrator. */
+  mcpSourceReady: boolean;
 
   // --- Step 3 — packages ---
   installBridge: boolean;
@@ -146,6 +158,13 @@ export interface WizardState {
   clearResult: ClearAiSetupResult | null;
   clearError: string | null;
 
+  // --- Express path (Plan 2 T28.2.4) ---
+  expressActive: boolean;
+  expressRunning: boolean;
+  expressPhase: "idle" | "packages" | "mcp" | "launch" | "done" | "error";
+  expressError: string | null;
+  expressEligible: boolean;
+
   // --- Done-screen derived summaries (precomputed by the orchestrator) ---
   doneOpenInCursor: boolean;
   doneOpenInOpencode: boolean;
@@ -156,6 +175,8 @@ export interface WizardState {
 export interface WizardHandlers {
   // Step 0
   selectPreset: (id: import("../../services/wizard_presets.ts").PresetId) => void;
+  // Navigation — shared by Preflight short-circuit + express path.
+  jumpToStep: (id: StepId) => void;
   // Step 1
   refreshDetection: () => void;
   runNodeProbe: () => void;
@@ -166,6 +187,10 @@ export interface WizardHandlers {
   runToolkitValidation: () => void;
   setMcpIndexOverride: (value: string) => void;
   setUseGlobalInstall: (value: boolean) => void;
+  /** Plan 2 — set the exclusive launch-source mode. Writes back the legacy
+   *  draft fields (`useLocalCheckout`, `useGlobalInstall`, `mcpIndexOverride`)
+   *  so persisted drafts and presets keep working. */
+  setMcpSourceMode: (mode: McpLaunchSourceMode) => void;
   // Step 3
   setInstallBridge: (value: boolean) => void;
   setInstallVerify: (value: boolean) => void;
@@ -203,6 +228,10 @@ export interface WizardHandlers {
   reRunWizard: () => void;
   closeWizard: () => void;
   onClearAiSetup: () => void;
+  // Express path (Plan 2 T28.2.4)
+  enterExpress: () => void;
+  exitExpress: () => void;
+  runExpressSetup: () => void;
 }
 
 // Re-export the service types so step modules can import them from one place.

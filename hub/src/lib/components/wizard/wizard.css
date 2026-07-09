@@ -84,7 +84,9 @@
   margin: 0;
   padding: 0.6rem 1.25rem 0.7rem;
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  /* Plan 2 — core segments only (6). The strip previously advertised 7 peer
+   * segments; optional/advanced steps are now demoted out of the strip. */
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   gap: 0.5rem;
   border-bottom: 1px solid var(--hub-border-light);
 }
@@ -143,6 +145,13 @@
 
 .wiz-seg-current.wiz-seg-passing {
   border-color: var(--hub-success);
+}
+
+/* Plan 2 — an optional/advanced segment shown only because it is the current
+   step (MCP source, Agent skill). Dashed border signals "not part of the
+   core path" while keeping it reachable. */
+.wiz-seg-optional.wiz-seg-current {
+  border-style: dashed;
 }
 
 .wiz-seg-num {
@@ -590,6 +599,35 @@
   margin-top: 0.1rem;
 }
 
+/* Plan 2 — full-width radio option (exclusive mode selector on MCP source
+   step). Stacks the options vertically with the description under the label. */
+.wiz-radio-block {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.4rem;
+  align-items: start;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--hub-border-light);
+  border-radius: 6px;
+  background: var(--hub-card);
+  cursor: pointer;
+  font-size: 0.82rem;
+  margin-bottom: 0.35rem;
+}
+
+.wiz-radio-block:has(input:checked) {
+  border-color: var(--hub-accent);
+  background: rgba(92, 124, 250, 0.08);
+}
+
+.wiz-radio-block small {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--hub-text-muted);
+  margin-top: 0.15rem;
+  line-height: 1.4;
+}
+
 .wiz-codeblock {
   margin: 0;
   padding: 0.6rem 0.7rem;
@@ -895,8 +933,26 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
+/* Plan 2 — express setup panel (Preflight sub-view for the Recommended path). */
+.wiz-express {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.wiz-express-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.wiz-express-title {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--hub-text-bright);
+}
+
 @media (max-width: 720px) {
-  .wiz-progress { grid-template-columns: repeat(4, 1fr); }
   .wiz-preset-grid { grid-template-columns: 1fr; }
   .wiz-radio-grid { grid-template-columns: 1fr; }
   .wiz-footer { flex-wrap: wrap; }

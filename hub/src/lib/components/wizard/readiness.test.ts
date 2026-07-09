@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  isAlreadyConfigured,
   isManifestReady,
+  isMcpSourceModeReady,
   isMcpSourceReady,
   isProjectReady,
   stepPassing,
@@ -382,4 +384,119 @@ test("stepPassing: step5 green when bridge ok", () => {
     true,
   );
   assert.equal(stepPassing("step5", PASSING_INPUT), false);
+});
+
+// ---- isMcpSourceModeReady (Plan 2 exclusive-mode model) ----
+
+test("isMcpSourceModeReady: npx is always ready", () => {
+  assert.equal(
+    isMcpSourceModeReady({ sourceMode: "npx", toolkitValidation: null }),
+    true,
+  );
+});
+
+test("isMcpSourceModeReady: global is always ready", () => {
+  assert.equal(
+    isMcpSourceModeReady({ sourceMode: "global", toolkitValidation: null }),
+    true,
+  );
+});
+
+test("isMcpSourceModeReady: local needs validated toolkit root", () => {
+  assert.equal(
+    isMcpSourceModeReady({ sourceMode: "local", toolkitValidation: null }),
+    false,
+  );
+  assert.equal(
+    isMcpSourceModeReady({
+      sourceMode: "local",
+      toolkitValidation: {
+        ok: false,
+        root: "/r",
+        fingerprints: [],
+        mcpDistMissing: false,
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    isMcpSourceModeReady({
+      sourceMode: "local",
+      toolkitValidation: {
+        ok: true,
+        root: "/r",
+        fingerprints: [],
+        mcpDistMissing: false,
+      },
+    }),
+    true,
+  );
+});
+
+test("isMcpSourceModeReady: custom cannot bypass validation", () => {
+  // The former override path is now a mode that requires the same toolkit
+  // validation as local — custom can no longer skip checks.
+  assert.equal(
+    isMcpSourceModeReady({ sourceMode: "custom", toolkitValidation: null }),
+    false,
+  );
+  assert.equal(
+    isMcpSourceModeReady({
+      sourceMode: "custom",
+      toolkitValidation: {
+        ok: true,
+        root: "/r",
+        fingerprints: [],
+        mcpDistMissing: false,
+      },
+    }),
+    true,
+  );
+});
+
+// ---- isAlreadyConfigured (Plan 2 short-circuit) ----
+
+test("isAlreadyConfigured: false when no detection", () => {
+  assert.equal(isAlreadyConfigured({ detection: null }), false);
+});
+
+test("isAlreadyConfigured: false when bridge missing", () => {
+  assert.equal(
+    isAlreadyConfigured({
+      detection: readyDetection({ bridgeInstalled: false }),
+    }),
+    false,
+  );
+});
+
+test("isAlreadyConfigured: false when verify missing", () => {
+  assert.equal(
+    isAlreadyConfigured({
+      detection: readyDetection({ verifyInstalled: false }),
+    }),
+    false,
+  );
+});
+
+test("isAlreadyConfigured: false when no MCP client configured", () => {
+  // readyDetection ships with all MCP heuristic flags false.
+  assert.equal(isAlreadyConfigured({ detection: readyDetection() }), false);
+});
+
+test("isAlreadyConfigured: true when bridge + verify + MCP client all OK", () => {
+  assert.equal(
+    isAlreadyConfigured({
+      detection: readyDetection({
+        mcpConfigured: {
+          cursor: true,
+          claudeDesktop: false,
+          opencodeGlobal: false,
+          opencodeProject: false,
+          zcodeGlobal: false,
+          zcodeProject: false,
+        },
+      }),
+    }),
+    true,
+  );
 });

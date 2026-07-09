@@ -10,6 +10,7 @@ import type {
   ToolkitValidation,
 } from "../../services/config.ts";
 import { mcpHeuristicAny } from "./diagnostics.ts";
+import type { McpLaunchSourceMode } from "./launch_mode.ts";
 import type { StepId } from "./constants.ts";
 
 /** Inputs that gate Step 1 (project detection readiness). */
@@ -42,6 +43,22 @@ export interface McpSourceReadyInput {
 export function isMcpSourceReady(input: McpSourceReadyInput): boolean {
   if (input.useLocalCheckout && !input.toolkitValidation?.ok) return false;
   return true;
+}
+
+/** Inputs that gate Step 2 under the Plan 2 exclusive-mode model. */
+export interface McpSourceModeReadyInput {
+  /** The exclusive launch-source mode selected on Step 2. */
+  sourceMode: McpLaunchSourceMode;
+  /** Validated toolkit root (only required for local + custom modes). */
+  toolkitValidation: ToolkitValidation | null;
+}
+
+/** Step 2 readiness under the exclusive-mode model. `npx` and `global` need
+ *  nothing; `local` and `custom` both require a validated toolkit root so the
+ *  custom-entrypoint path cannot bypass checks. Pure given the inputs. */
+export function isMcpSourceModeReady(input: McpSourceModeReadyInput): boolean {
+  if (input.sourceMode === "npx" || input.sourceMode === "global") return true;
+  return !!input.toolkitValidation?.ok;
 }
 
 /** Inputs that gate Step 3 (manifest readiness). */
@@ -129,4 +146,21 @@ export function stepPassing(
     case "done":
       return false;
   }
+}
+
+/** Inputs to the already-configured short-circuit check. */
+export interface AlreadyConfiguredInput {
+  detection: ProjectState | null;
+}
+
+/** Whether a project is already fully configured on wizard open: bridge +
+ *  verify packages installed AND an MCP client config already written. When
+ *  true, the Preflight step offers a "You're ready" banner that jumps past
+ *  the Apply steps straight to Verify. Skill state is not part of the gate —
+ *  the skill step is optional. Pure given the live detection. */
+export function isAlreadyConfigured(input: AlreadyConfiguredInput): boolean {
+  const d = input.detection;
+  if (!d) return false;
+  if (!d.bridgeInstalled || !d.verifyInstalled) return false;
+  return !!d.mcpConfigured && mcpHeuristicAny(d.mcpConfigured);
 }

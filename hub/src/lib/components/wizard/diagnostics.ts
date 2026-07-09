@@ -13,6 +13,12 @@ export interface DiagRow {
   ok: boolean;
   /** When `true` the row is informational (not a pass/fail gate). */
   info?: boolean;
+  /** Which group the row belongs to for the Preflight split:
+   *  `"blocking"` rows gate the Next button (true environment failures);
+   *  `"status"` rows report setup state handled on later steps. Defaults to
+   *  `"blocking"` for backwards compatibility — builders opt rows into the
+   *  status group explicitly. */
+  group?: "blocking" | "status";
   detail?: string;
   remediation?: string;
 }
@@ -91,18 +97,20 @@ export function diagnosticsRows(input: DiagnosticsInput): DiagRow[] {
     label: "Bridge package installed",
     ok: !!d?.bridgeInstalled,
     info: true,
+    group: "status",
     remediation: d?.bridgeInstalled
       ? undefined
-      : "Install the bridge on the Unity packages step.",
+      : "Installed on the Unity packages step.",
   });
   rows.push({
     id: "verify-installed",
     label: "Verify package installed",
     ok: !!d?.verifyInstalled,
     info: true,
+    group: "status",
     remediation: d?.verifyInstalled
       ? undefined
-      : "Install verify on the Unity packages step.",
+      : "Installed on the Unity packages step.",
   });
   // MCP configured (informational — configured on Step 4).
   const mcpAny = !!d?.mcpConfigured && mcpHeuristicAny(d.mcpConfigured);
@@ -111,9 +119,10 @@ export function diagnosticsRows(input: DiagnosticsInput): DiagRow[] {
     label: "MCP client configured",
     ok: mcpAny,
     info: true,
+    group: "status",
     remediation: mcpAny
       ? undefined
-      : "Configure an MCP client on the Configure AI client step.",
+      : "Configured on the Configure AI client step.",
   });
   // Bridge reachable — only when Step 5 has run.
   if (
@@ -125,6 +134,7 @@ export function diagnosticsRows(input: DiagnosticsInput): DiagRow[] {
       label: "Bridge reachable (/ping)",
       ok: input.step5BridgeStatus.kind === "ok",
       info: true,
+      group: "status",
       detail:
         input.step5BridgeStatus.kind === "ok"
           ? "connected"
@@ -138,6 +148,21 @@ export function diagnosticsRows(input: DiagnosticsInput): DiagRow[] {
     });
   }
   return rows;
+}
+
+/** Split diagnostics rows into the Preflight ownership groups: true
+ *  environment blockers (gate Next) vs setup-status rows (handled on later
+ *  steps). Pure — safe to unit-test. */
+export function splitDiagnosticsGroups(
+  rows: DiagRow[],
+): { blocking: DiagRow[]; status: DiagRow[] } {
+  const blocking: DiagRow[] = [];
+  const status: DiagRow[] = [];
+  for (const row of rows) {
+    if (row.group === "status") status.push(row);
+    else blocking.push(row);
+  }
+  return { blocking, status };
 }
 
 /** Tone for a diagnostics row. */

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Button from "$lib/components/shell/Button.svelte";
   import type { WizardState, WizardHandlers } from "./state.ts";
+  import type { McpLaunchSourceMode } from "./launch_mode.ts";
 
   interface Props {
     state: WizardState;
@@ -8,63 +9,80 @@
   }
 
   let { state, handlers }: Props = $props();
+
+  // The exclusive launch-source options. Plan 2 collapsed the checkbox stack
+  // + hidden override into one radio selector; only inputs for the selected
+  // mode are shown below it.
+  const MODES: {
+    id: McpLaunchSourceMode;
+    label: string;
+    blurb: string;
+  }[] = [
+    {
+      id: "npx",
+      label: "npx (published npm)",
+      blurb:
+        "Fetches the latest unity-open-mcp from npm on first spawn. No repo clone needed — the default for most users.",
+    },
+    {
+      id: "global",
+      label: "Global install",
+      blurb:
+        "Launches the bare unity-open-mcp binary (assumes npm i -g unity-open-mcp). Stable path for CI images.",
+    },
+    {
+      id: "local",
+      label: "Local checkout",
+      blurb:
+        "Points at a cloned unity-open-mcp monorepo. Packages + skill copy use the toolkit root; the client launches node <root>/mcp-server/dist/index.js.",
+    },
+    {
+      id: "custom",
+      label: "Custom entrypoint (advanced)",
+      blurb:
+        "A specific mcp-server/dist/index.js path. Owns the former override escape hatch — custom is a mode, not a hidden switch.",
+    },
+  ];
 </script>
 
 <section class="wiz-section">
   <p class="wiz-desc">
-    Choose how the <code>unity-open-mcp</code> MCP server is launched.
-    By default the wizard uses the published npm package via
-    <code>npx</code> (no repo clone needed); enable
-    <strong>Use local checkout</strong> to point at a cloned
-    <code>unity-open-mcp</code> monorepo. Project, Unity version, and
-    Node.js checks live on the previous step.
+    Choose how the <code>unity-open-mcp</code> MCP server is launched. Pick
+    one source — only the inputs for your choice are shown. Project, Unity
+    version, and Node.js checks live on the Preflight step.
   </p>
 
   <div class="wiz-field">
     <span class="wiz-label">MCP server source</span>
-    <label class="wiz-toggle">
-      <input
-        type="checkbox"
-        checked={state.useLocalCheckout}
-        onchange={(e) =>
-          handlers.onUseLocalCheckoutChange((e.currentTarget as HTMLInputElement).checked)}
-      />
-      <span>
-        <strong>Use local checkout</strong> —
-        <small>
-          Point at a cloned <code>unity-open-mcp</code> monorepo instead of the
-          published npm package. The Configure AI client step then launches
-          <code>node &lt;root&gt;/mcp-server/dist/index.js</code>, and the
-          Unity packages + skill copy steps use the toolkit root.
-        </small>
-      </span>
-    </label>
-    {#if !state.useLocalCheckout}
-      <label class="wiz-toggle">
-        <input
-          type="checkbox"
-          checked={state.useGlobalInstall}
-          onchange={(e) =>
-            handlers.setUseGlobalInstall((e.currentTarget as HTMLInputElement).checked)}
-        />
-        <span>
-          <strong>Use a global install</strong> —
-          <small>
-            The Configure AI client step launches the bare <code>unity-open-mcp</code> binary
-            (assumes <code>npm i -g unity-open-mcp</code>) instead of
-            <code>npx -y unity-open-mcp@latest</code>.
-          </small>
-        </span>
-      </label>
-      <p class="wiz-hint wiz-hint-ok">
-        Default: the wizard writes <code>npx -y unity-open-mcp@latest</code>
-        as the MCP launch command. Node {state.nodeMajor ?? "≥"}18 fetches the
-        package from npm on first spawn.
+    <div role="radiogroup" aria-label="MCP server source">
+      {#each MODES as mode (mode.id)}
+        <label class="wiz-radio wiz-radio-block" title={mode.blurb}>
+          <input
+            type="radio"
+            name="wiz-mcp-source"
+            value={mode.id}
+            checked={state.mcpSourceMode === mode.id}
+            onchange={() => handlers.setMcpSourceMode(mode.id)}
+          />
+          <span>
+            <strong>{mode.label}</strong>
+            <small>{mode.blurb}</small>
+          </span>
+        </label>
+      {/each}
+    </div>
+    {#if !state.mcpSourceReady}
+      <p class="wiz-hint wiz-hint-warn">
+        {#if state.mcpSourceMode === "local" || state.mcpSourceMode === "custom"}
+          Validate the toolkit root below to continue.
+        {:else}
+          Resolve the blocks on the Preflight step first.
+        {/if}
       </p>
     {/if}
   </div>
 
-  {#if state.useLocalCheckout}
+  {#if state.mcpSourceMode === "local" || state.mcpSourceMode === "custom"}
     <div class="wiz-field">
       <label class="wiz-label" for="wiz-toolkit-root">AI toolkit root</label>
       <div class="wiz-input-row">
@@ -124,10 +142,9 @@
     </div>
   {/if}
 
-  <details class="wiz-advanced">
-    <summary>Advanced — MCP server path override</summary>
+  {#if state.mcpSourceMode === "custom"}
     <div class="wiz-field">
-      <label class="wiz-label" for="wiz-mcp-override">Custom mcp-server/dist/index.js</label>
+      <label class="wiz-label" for="wiz-mcp-override">Custom mcp-server/dist/index.js path</label>
       <input
         id="wiz-mcp-override"
         type="text"
@@ -137,10 +154,11 @@
         oninput={(e) => handlers.setMcpIndexOverride((e.currentTarget as HTMLInputElement).value)}
       />
       <p class="wiz-hint">
-        Leave empty to use <code>{state.toolkitRoot || "<toolkit>"}/mcp-server/dist/index.js</code>.
-        Unity packages step URLs and skill copy always use the
-        toolkit root regardless of this override.
+        The exact entrypoint the client launches. Defaults to
+        <code>{state.toolkitRoot || "<toolkit>"}/mcp-server/dist/index.js</code>
+        when empty; Unity packages step URLs and skill copy always use the
+        toolkit root regardless of this path.
       </p>
     </div>
-  </details>
+  {/if}
 </section>

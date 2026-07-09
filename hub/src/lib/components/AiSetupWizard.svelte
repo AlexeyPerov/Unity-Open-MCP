@@ -105,13 +105,20 @@
     mcpClientLabel,
     type StepId,
   } from "./wizard/constants.ts";
-  import { effectiveLaunchMode } from "./wizard/launch_mode.ts";
+  import {
+    effectiveLaunchMode,
+    resolveLaunchSourceMode,
+    wireModeForSourceMode,
+    type McpLaunchSourceMode,
+  } from "./wizard/launch_mode.ts";
   import {
     diagnosticsRows,
     mcpConfiguredSummary,
   } from "./wizard/diagnostics.ts";
   import {
+    isAlreadyConfigured,
     isManifestReady,
+    isMcpSourceModeReady,
     isMcpSourceReady,
     isProjectReady,
     stepPassing,
@@ -267,6 +274,16 @@
   const STEP5_PING_TIMEOUT_MS = 5_000;
   const DRAFT_PERSIST_DEBOUNCE_MS = 400;
 
+  // Express path (Plan 2 T28.2.4) — runs packages → MCP write → launch/verify
+  // as one sequence for the Recommended preset after a green Preflight. The
+  // full multi-step wizard stays available via Customize / Custom.
+  let expressActive = $state(false);
+  let expressRunning = $state(false);
+  let expressPhase = $state<
+    "idle" | "packages" | "mcp" | "launch" | "done" | "error"
+  >("idle");
+  let expressError = $state<string | null>(null);
+
   let draftPersistReady = $state(false);
   let lastPersistedDraftJson = "";
   let draftPersistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -404,7 +421,10 @@
       case "step1":
         return isProjectReady({ detection, nodeProbe });
       case "step2":
-        return isMcpSourceReady({ useLocalCheckout, toolkitValidation });
+        return isMcpSourceModeReady({
+          sourceMode: mcpSourceMode,
+          toolkitValidation,
+        });
       case "step3":
         return isManifestReady({
           installBridge,
@@ -430,6 +450,38 @@
     }
   }
 
+  /** Plan 2 — set the exclusive launch-source mode. Maps the single selector
+   *  choice back onto the legacy draft fields so persisted drafts + presets
+   *  keep working. Custom mode owns the former override path: setting it
+   *  preserves an existing override, or clears to empty if the user is
+   *  switching into custom fresh (they type the path next). */
+  function setMcpSourceMode(mode: McpLaunchSourceMode) {
+    switch (mode) {
+      case "npx":
+        useLocalCheckout = false;
+        useGlobalInstall = false;
+        mcpIndexOverride = "";
+        break;
+      case "global":
+        useLocalCheckout = false;
+        useGlobalInstall = true;
+        mcpIndexOverride = "";
+        break;
+      case "local":
+        useLocalCheckout = true;
+        useGlobalInstall = false;
+        mcpIndexOverride = "";
+        break;
+      case "custom":
+        // Preserve an existing override path when switching into custom; only
+        // clear the checkout/global flags so effectiveLaunchMode no longer
+        // collapses to local/localOverride by precedence.
+        useLocalCheckout = false;
+        useGlobalInstall = false;
+        break;
+    }
+  }
+
   function canSkipStep3(): boolean {
     if (mergeResult) return true;
     return isManifestReady({
@@ -447,11 +499,26 @@
     );
   }
 
+  /** Plan 2 — the MCP server source step (step2) is optional / advanced. The
+   *  default `npx` mode needs no configuration there, so we auto-skip it on
+   *  Next from Preflight. The step stays reachable via the progress strip
+   *  jump + Customize for users who want npx/global/local/custom. */
+  function shouldSkipMcpSourceStep(): boolean {
+    return mcpSourceMode === "npx";
+  }
+
   function nextStep() {
     if (!canGoNext()) return;
     const i = stepIndex(currentStep);
     if (i >= STEP_ORDER.length - 1) return;
     let next = STEP_ORDER[i + 1];
+    if (next === "step2" && shouldSkipMcpSourceStep()) {
+      S.appendDrawerLog(
+        `AI Setup: auto-skipped MCP server source step for ${wizardProjectName} (npx default)`,
+      );
+      const after = STEP_ORDER.indexOf("step3");
+      if (after > i) next = STEP_ORDER[after];
+    }
     if (next === "step4b" && shouldSkipSkillStep()) {
       S.appendDrawerLog(
         `AI Setup: auto-skipped Agent skill step for ${wizardProjectName} (Team CI preset)`,
@@ -534,6 +601,9 @@
       currentStep = "done";
       return;
     }
+    // Leaving the Preflight step via footer while the express panel is open
+    // collapses the panel back to the diagnostics view.
+    if (expressActive) exitExpress();
     nextStep();
   }
 
@@ -703,7 +773,7 @@
   });
 
   $effect(() => {
-    if (currentStep !== "step3") return;
+    if (currentStep !== "step3" && !expressActive) return;
     if (!toolkitRoot.trim()) return;
     const deps = selectedUnityDepInstalls();
     if (!installBridge && !installVerify && deps.length === 0) {
@@ -754,6 +824,25 @@
     return `${toolkitRoot.replace(/[\\/]+$/, "")}/mcp-server/dist/index.js`;
   });
 
+  // Plan 2 — exclusive launch-source mode. Derived from the legacy draft
+  // fields so a persisted draft hydrates the radio selector correctly. The
+  // handler writes the legacy fields back so presets + draft persistence are
+  // unchanged.
+  let mcpSourceMode = $derived(
+    resolveLaunchSourceMode({
+      mcpIndexOverride,
+      useLocalCheckout,
+      useGlobalInstall,
+    }),
+  );
+
+  let mcpSourceReady = $derived(
+    isMcpSourceModeReady({
+      sourceMode: mcpSourceMode,
+      toolkitValidation,
+    }),
+  );
+
   let resolvedMcpPathValid = $state<boolean | null>(null);
 
   $effect(() => {
@@ -784,7 +873,8 @@
     if (
       currentStep !== "step4" &&
       currentStep !== "step5" &&
-      currentStep !== "done"
+      currentStep !== "done" &&
+      !expressActive
     )
       return;
     const projectPath = wizardProjectPath;
@@ -811,7 +901,8 @@
     if (
       currentStep !== "step4" &&
       currentStep !== "step5" &&
-      currentStep !== "done"
+      currentStep !== "done" &&
+      !expressActive
     )
       return;
     const projectPath = wizardProjectPath;
@@ -1302,6 +1393,131 @@
     );
   }
 
+  /** Plan 2 — whether the express path is offered. Shown on Preflight when the
+   *  Recommended preset is active (or no preset yet), preflight is green, and
+   *  the project is not already fully configured (that case gets its own
+   *  short-circuit banner). The express packages phase needs a toolkit root
+   *  to derive the git remote — when packages are already installed we offer
+   *  express regardless (it skips straight to MCP + verify). */
+  function expressEligible(): boolean {
+    if (expressActive) return false;
+    if (alreadyConfigured) return false;
+    if (
+      selectedPresetId !== "" &&
+      selectedPresetId !== "regular-npm" &&
+      selectedPresetId !== "custom"
+    ) {
+      return false;
+    }
+    if (!isProjectReady({ detection, nodeProbe })) return false;
+    // Need either packages already installed or a toolkit root to install from.
+    const packagesOk =
+      !!detection && detection.bridgeInstalled && detection.verifyInstalled;
+    if (!packagesOk && !toolkitRoot.trim()) return false;
+    return true;
+  }
+
+  /** Enter the express path: render the express confirm panel in place of the
+   *  Preflight diagnostics. The user picks a client then hits Set up. */
+  function enterExpress() {
+    expressActive = true;
+    expressPhase = "idle";
+    expressError = null;
+  }
+
+  function exitExpress() {
+    expressActive = false;
+    if (expressRunning) {
+      expressRunning = false;
+    }
+    expressPhase = "idle";
+    expressError = null;
+  }
+
+  /** Run the express sequence: install packages → write MCP config → launch +
+   *  verify the bridge. Each phase updates `expressPhase` so the panel shows a
+   *  live progress list. On success it lands on the Done screen. */
+  async function runExpressSetup() {
+    if (expressRunning) return;
+    expressRunning = true;
+    expressError = null;
+    try {
+      // Phase 1 — packages.
+      expressPhase = "packages";
+      await runExpressPackages();
+
+      // Phase 2 — MCP config (file clients only; CLI/clipboard just copies).
+      expressPhase = "mcp";
+      if (clientKind(mcpClient) === "file" && canWriteMcpConfig()) {
+        await writeMcpConfigClick();
+      } else if (mcpPreviewText) {
+        await copyMcpJson();
+      }
+
+      // Phase 3 — launch + verify the bridge.
+      expressPhase = "launch";
+      await runStep5Verify();
+
+      expressPhase = step5BridgeStatus.kind === "ok" ? "done" : "error";
+      if (expressPhase === "done") {
+        await persistToolkitRoot();
+        S.appendDrawerLog(
+          `AI Setup: express setup complete for ${wizardProjectName}`,
+        );
+        currentStep = "done";
+        expressActive = false;
+      } else {
+        expressError =
+          "Express setup reached the verify phase but the bridge did not respond. Open the Launch and verify step to retry.";
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      expressError = `Express setup failed during ${expressPhase}: ${msg}`;
+      expressPhase = "error";
+      S.appendErrorLog(expressError);
+    } finally {
+      expressRunning = false;
+    }
+  }
+
+  /** Express packages phase — install the manifest merge if there is something
+   *  to install. If packages are already up to date (or no toolkit root is set
+   *  to derive the git remote), this is a no-op. */
+  async function runExpressPackages() {
+    // Without a toolkit root we cannot derive the git remote for the package
+    // install. If packages are already installed this is fine (nothing to do);
+    // otherwise the express path is not offered (see expressEligible).
+    if (!toolkitRoot.trim()) return;
+    if (!mergePlan) {
+      // The merge plan is computed reactively when step3 is current; force a
+      // plan now so the express path can install even without visiting step3.
+      const deps = selectedUnityDepInstalls();
+      if (!installBridge && !installVerify && deps.length === 0) return;
+      const plan = await planManifestMerge({
+        projectPath: wizardProjectPath,
+        toolkitRoot,
+        installBridge,
+        installVerify,
+        versionPin: packageVersionPin,
+        customUrl: packageCustomUrl,
+        confirmUpgrades: false,
+        useLocalPackages,
+        unityDomainDeps: deps,
+      });
+      mergePlan = plan;
+      upgradeAcknowledged = false;
+    }
+    if (!mergePlan) return;
+    if (mergePlan.hasUpgrades && !upgradeAcknowledged) {
+      // Express never auto-confirms an upgrade — surface it and stop. The user
+      // can finish the upgrade on the Packages step.
+      throw new Error(
+        "a manifest upgrade needs explicit confirmation — open the Unity packages step to acknowledge it.",
+      );
+    }
+    await installManifest();
+  }
+
   function skipSkillStep() {
     S.appendDrawerLog(
       `AI Setup: skipped Agent skill copy for ${wizardProjectName} (${mcpClientLabel(mcpClient)})`,
@@ -1370,6 +1586,10 @@
     skillGenPreviewOpen = false;
     selectedPresetId = "";
     step5BridgeStatus = { kind: "notChecked" };
+    expressActive = false;
+    expressRunning = false;
+    expressPhase = "idle";
+    expressError = null;
     currentStep = "step0";
     void clearPersistedDraft();
     void refreshDetection();
@@ -1441,6 +1661,14 @@
       mergePlan,
       step5BridgeStatus,
     };
+    // Plan 2 — MCP source (step2) and Agent skill (step4b) are optional /
+    // advanced: they stay in the flow but are demoted out of the visible
+    // progress strip so the core path reads as Preset → Preflight → Packages
+    // → Client → Verify → Done.
+    const OPTIONAL_STEPS: ReadonlySet<StepId> = new Set<StepId>([
+      "step2",
+      "step4b",
+    ]);
     return STEP_ORDER.map((id, idx) => {
       const currentIdx = stepIndex(currentStep);
       const state: "done" | "current" | "pending" =
@@ -1451,6 +1679,7 @@
         label: stepLabel(id),
         state,
         passing: stepPassing(id, passingInput),
+        optional: OPTIONAL_STEPS.has(id),
       };
     });
   });
@@ -1464,6 +1693,8 @@
       step5LaunchPid,
     }),
   );
+
+  let alreadyConfigured = $derived(isAlreadyConfigured({ detection }));
 
   let diffPreviewText = $derived.by(() => {
     if (!mergePlan) return "";
@@ -1531,6 +1762,7 @@
     nodeProbe,
     nodeProbing,
     diagnostics,
+    alreadyConfigured,
     useLocalCheckout,
     useGlobalInstall,
     toolkitRoot,
@@ -1541,6 +1773,8 @@
     toolkitError,
     pickToolkitInFlight,
     nodeMajor: nodeProbe?.major ?? null,
+    mcpSourceMode,
+    mcpSourceReady,
     installBridge,
     installVerify,
     installScanner,
@@ -1604,6 +1838,11 @@
     clearInProgress,
     clearResult,
     clearError,
+    expressActive,
+    expressRunning,
+    expressPhase,
+    expressError,
+    expressEligible: expressEligible(),
     doneOpenInCursor: canOpenInCursor,
     doneOpenInOpencode: canOpenInOpencode,
   } satisfies WizardState);
@@ -1614,6 +1853,7 @@
   // WizardHandlers contract so a missing/renamed handler fails the build here.
   const handlers = {
     selectPreset: (id: PresetId) => selectPreset(id),
+    jumpToStep,
     refreshDetection: () => void refreshDetection(),
     runNodeProbe: () => void runNodeProbe(),
     onUseLocalCheckoutChange,
@@ -1622,6 +1862,7 @@
     runToolkitValidation: () => void runToolkitValidation(),
     setMcpIndexOverride: (v: string) => (mcpIndexOverride = v),
     setUseGlobalInstall: (v: boolean) => (useGlobalInstall = v),
+    setMcpSourceMode,
     setInstallBridge: (v: boolean) => (installBridge = v),
     setInstallVerify: (v: boolean) => (installVerify = v),
     onUseLocalPackagesChange,
@@ -1659,6 +1900,9 @@
     reRunWizard,
     closeWizard,
     onClearAiSetup: () => void onClearAiSetup(),
+    enterExpress,
+    exitExpress,
+    runExpressSetup: () => void runExpressSetup(),
   } satisfies WizardHandlers;
 </script>
 
@@ -1716,7 +1960,7 @@
 
   {#snippet footer()}
     <WizardFooter
-      progressLabel={`Step ${stepIndex(currentStep) + 1} of ${STEP_ORDER.length} · ${stepLabel(currentStep)}`}
+      progressLabel={stepLabel(currentStep)}
       canGoBack={canGoBack()}
       canGoNext={canGoNext()}
       isDone={currentStep === "done"}

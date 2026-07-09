@@ -1,7 +1,8 @@
 <script lang="ts">
   import Button from "$lib/components/shell/Button.svelte";
-  import { diagTone } from "./diagnostics.ts";
+  import { diagTone, splitDiagnosticsGroups } from "./diagnostics.ts";
   import { mcpConfiguredSummary } from "./diagnostics.ts";
+  import WizardExpressPanel from "./WizardExpressPanel.svelte";
   import type { WizardState, WizardHandlers } from "./state.ts";
 
   interface Props {
@@ -10,20 +11,63 @@
   }
 
   let { state, handlers }: Props = $props();
+
+  // Preflight splits diagnostics into two ownership groups: true blockers
+  // (gate Next) vs setup-status rows (handled on later steps). `status` rows
+  // are labelled "Not yet" so they read as future work, not same-step failures.
+  let groups = $derived(splitDiagnosticsGroups(state.diagnostics));
+  let hasStatusFailures = $derived(
+    groups.status.some((r) => !r.ok),
+  );
 </script>
 
 <section class="wiz-section">
   <p class="wiz-desc">
-    Step 2 detects the current state of the project and runs a
-    diagnostics pass. The detection is re-run on every entry so the
-    values below always reflect the on-disk manifest and
-    <code>ProjectVersion.txt</code>; the Done screen
-    re-uses the same snapshot.
+    Preflight checks the environment before you continue. The
+    <strong>Blocking</strong> rows below must pass to proceed; the
+    <strong>Setup status</strong> rows report work handled on later steps
+    (they read "Not yet" until then). Detection re-runs on every entry so
+    the values reflect the on-disk manifest and
+    <code>ProjectVersion.txt</code>; the Done screen re-uses this snapshot.
   </p>
+
+  {#if state.alreadyConfigured}
+    <div class="wiz-block wiz-block-ok" role="status">
+      <strong>You're ready.</strong>
+      The bridge, verify, and an MCP client are already configured for this
+      project — you can skip ahead to verify the running bridge.
+      <div class="wiz-actions-row">
+        <Button variant="primary" onclick={() => handlers.jumpToStep("step5")}>
+          Go to Verify
+        </Button>
+        <Button variant="secondary" onclick={() => handlers.jumpToStep("step3")}>
+          Review packages
+        </Button>
+      </div>
+    </div>
+  {:else if state.expressActive}
+    <WizardExpressPanel {state} {handlers} />
+  {:else if state.expressEligible}
+    <div class="wiz-block wiz-block-ok" role="status">
+      <strong>Express setup available.</strong>
+      Your environment checks out — set up the recommended packages, MCP
+      client, and bridge verification in one pass, or continue step by step.
+      <div class="wiz-actions-row">
+        <Button variant="primary" onclick={handlers.enterExpress}>
+          Express setup
+        </Button>
+        <Button variant="secondary" onclick={() => handlers.jumpToStep("step3")}>
+          Step by step
+        </Button>
+      </div>
+    </div>
+  {/if}
+
+  {#if !state.expressActive}
 
   <div class="wiz-diag-block">
     <div class="wiz-diag-head">
-      <span class="wiz-label">Diagnostics</span>
+      <span class="wiz-label">Blocking — must pass to continue</span>
       <Button
         variant="secondary"
         onclick={() => { handlers.refreshDetection(); handlers.runNodeProbe(); }}
@@ -33,8 +77,8 @@
         {state.detectionLoading || state.nodeProbing ? "Checking…" : "Run diagnostics"}
       </Button>
     </div>
-    <ul class="wiz-diag" aria-label="Project diagnostics">
-      {#each state.diagnostics as row (row.id)}
+    <ul class="wiz-diag" aria-label="Blocking environment checks">
+      {#each groups.blocking as row (row.id)}
         {@const tone = diagTone(row)}
         <li class="wiz-diag-row wiz-diag-{tone}">
           <span class="wiz-diag-icon" aria-hidden="true">
@@ -48,6 +92,35 @@
         </li>
       {/each}
     </ul>
+  </div>
+
+  <div class="wiz-diag-block">
+    <div class="wiz-diag-head">
+      <span class="wiz-label">Setup status — handled on later steps</span>
+    </div>
+    <ul class="wiz-diag" aria-label="Setup status (informational)">
+      {#each groups.status as row (row.id)}
+        {@const tone = diagTone(row)}
+        <li class="wiz-diag-row wiz-diag-{tone}">
+          <span class="wiz-diag-icon" aria-hidden="true">
+            {#if tone === "ok"}✓{:else}·{/if}
+          </span>
+          <span class="wiz-diag-label">{row.label}</span>
+          {#if row.detail}<span class="wiz-diag-detail">{row.detail}</span>{/if}
+          {#if row.ok}
+            <small class="wiz-diag-fix">done</small>
+          {:else if row.remediation}
+            <small class="wiz-diag-fix">{row.remediation}</small>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+    {#if hasStatusFailures}
+      <p class="wiz-hint">
+        These rows are <strong>not</strong> blockers — they become green as you
+        complete the packages, client, and verify steps.
+      </p>
+    {/if}
   </div>
 
   {#if state.detectionLoading && !state.detection}
@@ -196,5 +269,6 @@
         {/if}
       </div>
     {/if}
+  {/if}
   {/if}
 </section>

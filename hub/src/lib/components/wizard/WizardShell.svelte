@@ -9,6 +9,10 @@
     label: string;
     state: "done" | "current" | "pending";
     passing: boolean;
+    /** Plan 2 — optional/advanced segments (MCP source, Agent skill) are
+     *  demoted out of the visible progress strip. They are still navigable
+     *  via step flow + Customize, but no longer advertised as peer segments. */
+    optional?: boolean;
   }
 
   interface Props {
@@ -43,6 +47,16 @@
     body,
     footer,
   }: Props = $props();
+
+  // Plan 2 — the visible progress strip shows core segments only. Optional
+  // segments (MCP source, Agent skill) are demoted out of the strip unless
+  // they are the current step, so the user always sees where they are. The
+  // hidden segments are still fully navigable via the step flow.
+  let visibleProgress = $derived(
+    progress.filter(
+      (seg) => !seg.optional || seg.state === "current",
+    ),
+  );
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -80,15 +94,15 @@
     </header>
 
     <ol class="wiz-progress" aria-label="Wizard progress">
-      {#each progress as seg (seg.id)}
+      {#each visibleProgress as seg, displayIdx (seg.id)}
         <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_interactive_supports_focus, a11y_no_noninteractive_element_to_interactive_role -->
         <li
-          class="wiz-seg wiz-seg-{seg.state}{seg.passing ? ' wiz-seg-passing' : ''}"
+          class="wiz-seg wiz-seg-{seg.state}{seg.passing ? ' wiz-seg-passing' : ''}{seg.optional ? ' wiz-seg-optional' : ''}"
           aria-current={seg.state === "current" ? "step" : undefined}
           role="button"
           tabindex="0"
-          aria-label={`Jump to Step ${seg.idx + 1}: ${seg.label}`}
-          title={`Jump to Step ${seg.idx + 1}: ${seg.label}`}
+          aria-label={`Jump to ${seg.label}`}
+          title={`Jump to ${seg.label}`}
           onclick={() => onJumpTo(seg.id)}
           onkeydown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -97,7 +111,7 @@
             }
           }}
         >
-          <span class="wiz-seg-num">{seg.idx + 1}</span>
+          <span class="wiz-seg-num">{displayIdx + 1}</span>
           <span class="wiz-seg-label">{seg.label}</span>
         </li>
       {/each}

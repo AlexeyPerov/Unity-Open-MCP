@@ -5,6 +5,7 @@ import {
   diagTone,
   diagnosticsRows,
   mcpConfiguredSummary,
+  splitDiagnosticsGroups,
   type DiagRow,
 } from "./diagnostics.ts";
 import type { NodeProbe, ProjectState } from "../../services/config.ts";
@@ -193,4 +194,52 @@ test("mcpConfiguredSummary: lists every configured client", () => {
     }),
     "yes (Cursor, OpenCode (global))",
   );
+});
+
+// ---- splitDiagnosticsGroups (Plan 2 Preflight ownership) ----
+
+test("splitDiagnosticsGroups: gate rows are blocking, informational rows are status", () => {
+  const rows = diagnosticsRows({
+    detection: detection(),
+    nodeProbe: okNode(),
+    nodeProbing: false,
+    step5BridgeStatus: { kind: "notChecked" },
+    step5LaunchPid: null,
+  });
+  const { blocking, status } = splitDiagnosticsGroups(rows);
+  // The four true environment gates.
+  const blockingIds = blocking.map((r) => r.id);
+  assert.deepEqual(
+    [...blockingIds].sort(),
+    ["manifest-writable", "node", "unity-project", "unity-version"].sort(),
+  );
+  // The later-step informational rows.
+  const statusIds = status.map((r) => r.id);
+  assert.deepEqual(
+    [...statusIds].sort(),
+    ["bridge-installed", "mcp-configured", "verify-installed"].sort(),
+  );
+});
+
+test("splitDiagnosticsGroups: defaults ungrouped rows to blocking", () => {
+  const { blocking, status } = splitDiagnosticsGroups([
+    { id: "a", label: "a", ok: true },
+    { id: "b", label: "b", ok: false, group: "status" },
+  ]);
+  assert.equal(blocking.length, 1);
+  assert.equal(blocking[0].id, "a");
+  assert.equal(status.length, 1);
+  assert.equal(status[0].id, "b");
+});
+
+test("splitDiagnosticsGroups: bridge-reachable lands in status when present", () => {
+  const rows = diagnosticsRows({
+    detection: detection(),
+    nodeProbe: okNode(),
+    nodeProbing: false,
+    step5BridgeStatus: { kind: "notChecked" },
+    step5LaunchPid: 1,
+  });
+  const { status } = splitDiagnosticsGroups(rows);
+  assert.ok(status.some((r) => r.id === "bridge-reachable"));
 });

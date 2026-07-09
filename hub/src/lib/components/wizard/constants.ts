@@ -27,10 +27,12 @@ export const STEP_ORDER: StepId[] = [
   "done",
 ];
 
-/** User-visible step titles. Plan 2 owns renames; Plan 1 preserves them. */
+/** User-visible step titles. Plan 2 renamed step1 from "Project detection" to
+ *  "Preflight" so the title reflects the ownership model (environment gate, not
+ *  a fixable diagnostic panel). */
 export const STEP_TITLES: Record<StepId, string> = {
   step0: "Setup preset",
-  step1: "Project detection",
+  step1: "Preflight",
   step2: "MCP server source",
   step3: "Unity packages",
   step4: "Configure AI client",
