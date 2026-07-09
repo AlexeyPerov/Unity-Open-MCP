@@ -184,11 +184,16 @@ node scripts/sync-version.mjs bump patch    # or minor / major
 # 2. Review what changed (the script prints each file it touched).
 git diff
 
-# 3. Commit and tag.
+# 3. Commit.
 git add -A
 git commit -m "chore: bump to 0.X.Y"
-git tag v0.X.Y
-git push origin v0.X.Y        # triggers the npm-publish workflow
+
+# 4. Create the release tags. `tags` cross-checks the version against version.json,
+#    then creates v*, bridge-v*, verify-v* on HEAD (annotated, matching existing tags).
+node scripts/sync-version.mjs tags 0.X.Y
+
+# 5. Push to publish.
+git push origin v0.X.Y bridge-v0.X.Y verify-v0.X.Y   # v* triggers the npm-publish workflow
 ```
 
 Pushing the `v*` tag triggers `.github/workflows/npm-publish.yml`, which:
@@ -207,7 +212,9 @@ node scripts/sync-version.mjs bump patch --hub
 
 git add -A
 git commit -m "chore: hub bump to 0.X.Y"
-git tag hub-v0.X.Y
+
+node scripts/sync-version.mjs tags 0.X.Y --hub   # creates hub-v0.X.Y on HEAD
+
 git push origin hub-v0.X.Y     # triggers the hub-release workflow
 ```
 
@@ -215,7 +222,7 @@ The `hub-v*` tag triggers `.github/workflows/hub-release.yml`, which first verif
 
 ### From the Hub app (UI shortcut)
 
-Both bump flows are also drivable from the Unity Hub Pro app itself: open an Open-MCP checkout's project settings and use the **Repo version sync** panel. It runs the same `scripts/sync-version.mjs` with the same grammar — `sync`, `check` (the drift gate), `bump <level>`, or `set <X.Y.Z>`, for either the trio or the Hub line — and streams the script's output live. It writes the same files; it does **not** commit or tag (the Hub never creates git tags). The CLI examples above remain canonical.
+Both bump flows are also drivable from the Unity Hub Pro app itself: open an Open-MCP checkout's project settings and use the **Repo version sync** panel. It runs the same `scripts/sync-version.mjs` with the same grammar — `sync`, `check` (the drift gate), `bump <level>`, or `set <X.Y.Z>`, for either the trio or the Hub line — and streams the script's output live. It writes the same files; it does **not** commit or tag (the Hub never creates git tags — use the CLI `tags` command for that). The CLI examples above remain canonical.
 
 ## Setting an exact version
 
@@ -226,13 +233,14 @@ node scripts/sync-version.mjs set 0.2.0          # trio: version.json + all five
 node scripts/sync-version.mjs set 0.2.0 --hub    # hub:  hub/version.json + all three hub targets
 ```
 
-`set` behaves exactly like `bump` otherwise — it writes the source file and rewrites every generated target — then prints the same commit/tag hint. The target version must be plain `major.minor.patch` (a leading `v` is tolerated and stripped); pre-release/build metadata are not supported. From there, commit and tag exactly as you would after a `bump`:
+`set` behaves exactly like `bump` otherwise — it writes the source file and rewrites every generated target — then prints the same commit/tag hint. The target version must be plain `major.minor.patch` (a leading `v` is tolerated and stripped); pre-release/build metadata are not supported. From there, commit and create the release tags exactly as you would after a `bump`:
 
 ```bash
 git add -A
 git commit -m "chore: bump to 0.2.0"
-git tag v0.2.0            # or hub-v0.2.0 for the Hub
-git push origin v0.2.0
+node scripts/sync-version.mjs tags 0.2.0          # trio: v0.2.0 bridge-v0.2.0 verify-v0.2.0
+#  or: node scripts/sync-version.mjs tags 0.2.0 --hub   # hub: hub-v0.2.0
+git push origin v0.2.0 bridge-v0.2.0 verify-v0.2.0
 ```
 
 ## The CI drift gate
@@ -261,7 +269,24 @@ node scripts/sync-version.mjs --check --hub
 | `hub-v*` (e.g. `hub-v0.3.0`) | The Unity Hub Pro desktop app | `hub-release.yml` | GitHub Release (installers) |
 | `bridge-v*` / `verify-v*` | (Convention) git-URL install pins for the Unity packages | — (no workflow) | n/a — users pin in their manifest |
 
-The `bridge-v*`/`verify-v*` tags have no workflow because the Unity packages aren't published to a registry; they exist purely so users can pin a known-good version in their `Packages/manifest.json` git URL. A trio release needs **three tags on the same commit**: `v0.5.2` (publishes the npm server, which the `unity-open-mcp@<ver>` pins in the setup docs resolve to), plus `bridge-v0.5.2` and `verify-v0.5.2` (which the UPM git-URL pins resolve to). The sync script's `bump`/`set` output prints the exact `git tag … && git push …` line for all three. The setup docs reference these tags, and the sync script keeps them current with `version.json`, so a missing tag means the documented install fails to resolve.
+The `bridge-v*`/`verify-v*` tags have no workflow because the Unity packages aren't published to a registry; they exist purely so users can pin a known-good version in their `Packages/manifest.json` git URL. A trio release needs **three tags on the same commit**: `v0.5.2` (publishes the npm server, which the `unity-open-mcp@<ver>` pins in the setup docs resolve to), plus `bridge-v0.5.2` and `verify-v0.5.2` (which the UPM git-URL pins resolve to). The `tags` subcommand creates all three in one call; the `bump`/`set` output prints the exact invocation. The setup docs reference these tags, and the sync script keeps them current with `version.json`, so a missing tag means the documented install fails to resolve.
+
+## Creating release tags
+
+The `tags` subcommand turns the "three tags on one commit" trio convention (and the single `hub-v*` hub tag) into one command:
+
+```bash
+node scripts/sync-version.mjs tags 0.X.Y          # trio: creates v0.X.Y, bridge-v0.X.Y, verify-v0.X.Y on HEAD
+node scripts/sync-version.mjs tags 0.X.Y --hub    # hub:  creates hub-v0.X.Y on HEAD
+```
+
+It does three things:
+
+1. **Cross-checks the version** against the source file (`version.json` for the trio, `hub/version.json` for the Hub) and refuses if they differ — so a tag can never point at a commit whose committed version disagrees with the tag name (which would fail the publish workflow's preflight anyway).
+2. **Refuses if any tag already exists** — a partial trio tag set is usually a mistake, so it errors out naming the existing tag(s) rather than silently creating the rest.
+3. **Creates annotated tags with empty message bodies** on `HEAD`, matching every existing tag in the repo (`git cat-file -t` → `tag`).
+
+It does **not** push. Pushing `v*` triggers `npm-publish.yml` and pushing `hub-v*` triggers `hub-release.yml` — both irreversible (npm publish, GitHub Release) — so `tags` prints the exact `git push origin …` command for you to run after reviewing. The `bump` and `set` commands print the `tags` invocation as their final "Next" step.
 
 ## Pre-1.0 semver convention
 

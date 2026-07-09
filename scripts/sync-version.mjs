@@ -24,10 +24,14 @@
 //   node scripts/sync-version.mjs bump <level> --hub      # bump hub/version.json + sync hub
 //   node scripts/sync-version.mjs set <X.Y.Z>             # set version.json to <X.Y.Z> + sync trio
 //   node scripts/sync-version.mjs set <X.Y.Z> --hub       # set hub/version.json to <X.Y.Z> + sync hub
+//   node scripts/sync-version.mjs tags <X.Y.Z>            # create v/bridge-v/verify-v tags on HEAD (trio)
+//   node scripts/sync-version.mjs tags <X.Y.Z> --hub      # create hub-v tag on HEAD (hub)
 //
 //   <level> = major | minor | patch
 //   <X.Y.Z> = plain major.minor.patch (a leading "v" is tolerated and stripped);
-//             pre-release/build metadata are not supported.
+//             pre-release/build metadata are not supported. The version passed to
+//             `tags` must match the current source file (version.json / hub/version.json),
+//             so a tag never diverges from what's committed.
 //
 // One bespoke script is the proven minimal pattern; we deliberately avoid
 // changesets/lerna/nx for a repo this size.
@@ -37,6 +41,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -351,6 +356,53 @@ function writeSource(sourceFile, newVersion) {
 }
 
 // ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
+// Tag namespaces (see docs/versioning.md §Release channels and tag namespaces):
+//   trio → v<X.Y.Z> (triggers npm-publish.yml), plus bridge-v<X.Y.Z> and
+//          verify-v<X.Y.Z> so the UPM git-URL install pins resolve.
+//   hub  → hub-v<X.Y.Z> (triggers hub-release.yml).
+// Existing tags are annotated (`git cat-file -t` → `tag`) with empty message
+// bodies; new tags match that convention.
+
+/** @param {string} v @returns {string[]} */
+function trioTagNames(v) {
+  return [`v${v}`, `bridge-v${v}`, `verify-v${v}`];
+}
+
+/** @param {string} v @returns {string[]} */
+function hubTagNames(v) {
+  return [`hub-v${v}`];
+}
+
+/** Runs `git rev-parse --verify --quiet refs/tags/<name>`; true if the tag exists.
+ * @param {string} name */
+function tagExists(name) {
+  try {
+    execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${name}`], {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    // Exit code 0 ⇒ ref resolved ⇒ tag exists.
+    return true;
+  } catch {
+    // Non-zero ⇒ ref did not resolve ⇒ tag does not exist.
+    return false;
+  }
+}
+
+/** Creates annotated tags with empty message bodies on HEAD, matching the
+ *  existing convention. Throws on `git` failure (caller reports and exits).
+ * @param {string[]} names */
+function createTags(names) {
+  // `git tag -a -m "" a b c` creates three annotated tags on HEAD in one call.
+  execFileSync("git", ["tag", "-a", "-m", "", ...names], {
+    cwd: REPO_ROOT,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -359,10 +411,13 @@ const CHECK = argv.includes("--check");
 const HUB = argv.includes("--hub");
 const bumpIdx = argv.indexOf("bump");
 const setIdx = argv.indexOf("set");
+const tagsIdx = argv.indexOf("tags");
 const isBump = bumpIdx !== -1;
 const isSet = setIdx !== -1;
+const isTags = tagsIdx !== -1;
 const bumpLevel = isBump ? argv[bumpIdx + 1] : undefined;
 const setRaw = isSet ? argv[setIdx + 1] : undefined;
+const tagsRaw = isTags ? argv[tagsIdx + 1] : undefined;
 
 if (isBump && !["major", "minor", "patch"].includes(String(bumpLevel))) {
   console.error("Usage: bump <level> where level is major | minor | patch");
@@ -377,18 +432,68 @@ if (isSet && setVersion === undefined) {
   console.error('Usage: set <X.Y.Z> where X.Y.Z is plain major.minor.patch');
   process.exit(2);
 }
-if (isBump && isSet) {
-  console.error("bump and set are mutually exclusive.");
+// `tags` takes the same X.Y.Z shape as `set`.
+const tagsVersion =
+  isTags && typeof tagsRaw === "string" && /^v?\d+\.\d+\.\d+$/.test(tagsRaw)
+    ? tagsRaw.replace(/^v/, "")
+    : undefined;
+if (isTags && tagsVersion === undefined) {
+  console.error('Usage: tags <X.Y.Z> where X.Y.Z is plain major.minor.patch');
   process.exit(2);
 }
-if (CHECK && (isBump || isSet)) {
-  console.error("--check is mutually exclusive with bump and set.");
+const actionCount = [isBump, isSet, isTags].filter(Boolean).length;
+if (actionCount > 1) {
+  console.error("bump, set, and tags are mutually exclusive.");
+  process.exit(2);
+}
+if (CHECK && (isBump || isSet || isTags)) {
+  console.error("--check is mutually exclusive with bump, set, and tags.");
   process.exit(2);
 }
 
 const sourceFile = HUB ? HUB_SOURCE : TRIO_SOURCE;
 const targets = HUB ? HUB_TARGETS : TRIO_TARGETS;
 const label = HUB ? "Hub app" : "shared trio";
+
+// Tags path: create the release tag(s) for the current source version on HEAD.
+// Does not push — pushing v*/hub-v* triggers the irreversible publish/release
+// workflows, so the exact `git push origin ...` command is printed for review.
+if (isTags) {
+  /** @type {string} */
+  const tagsVer = /** @type {string} */ (tagsVersion);
+  const source = readSourceVersion(sourceFile);
+  if (tagsVer !== source) {
+    console.error(
+      `tags: ${tagsVer} does not match ${sourceFile} (${source}). Commit the version bump before tagging.`,
+    );
+    process.exit(2);
+  }
+  const names = HUB ? hubTagNames(tagsVer) : trioTagNames(tagsVer);
+  const existing = names.filter(tagExists);
+  if (existing.length > 0) {
+    console.error(
+      `✖ Refusing to create tags — the following already exist: ${existing.join(", ")}`,
+    );
+    process.exit(1);
+  }
+  try {
+    createTags(names);
+  } catch (e) {
+    console.error(
+      `✖ \`git tag\` failed:${e && typeof e === "object" && "stderr" in e ? `\n${String(e.stderr)}` : ` ${e}`}`,
+    );
+    process.exit(1);
+  }
+  console.log(`Created ${names.length} tag${names.length > 1 ? "s" : ""} on HEAD for ${label} ${tagsVer}:`);
+  for (const n of names) {
+    console.log(`  ${n}`);
+  }
+  console.log(
+    `\nPush to publish (triggers the ${HUB ? "hub-release" : "npm-publish"} workflow):`,
+  );
+  console.log(`  git push origin ${names.join(" ")}`);
+  process.exit(0);
+}
 
 // Bump/set path: update the source first, then sync.
 if (isBump || isSet) {
@@ -407,24 +512,21 @@ if (isBump || isSet) {
   for (const m of missing) {
     console.warn(`  ⚠  missing: ${m.file} (${m.description})`);
   }
-  console.log("\nNext: review the diff, then commit and tag.");
-  if (HUB) {
-    console.log("  git add -A && git commit -m \"chore: hub bump to " + next + "\"");
-    console.log(`  git tag hub-v${next} && git push origin hub-v${next}`);
-  } else {
-    console.log(`  git add -A && git commit -m "chore: bump to ${next}"`);
-    console.log(`  git tag v${next} && git push origin v${next}`);
+  const nextNames = HUB ? hubTagNames(next) : trioTagNames(next);
+  console.log("\nNext: review the diff, commit, then create release tags.");
+  console.log(
+    `  git add -A && git commit -m "chore: ${HUB ? "hub bump" : "bump"} to ${next}"`,
+  );
+  console.log(`  node scripts/sync-version.mjs tags ${next}${HUB ? " --hub" : ""}`);
+  if (!HUB) {
     // The trio release needs three tags on the same commit: v* (triggers
     // npm-publish.yml) plus bridge-v* / verify-v* so the UPM git-URL install
     // pins documented in manual-setup.md resolve. See docs/versioning.md
     // §Release channels and tag namespaces.
-    console.log(
-      `\nTags to create for this trio release (all on the same commit):`,
-    );
-    console.log(`  v${next}          — triggers npm-publish.yml (publishes the MCP server)`);
-    console.log(`  bridge-v${next}   — resolves the bridge UPM git-URL pin in manual-setup.md`);
-    console.log(`  verify-v${next}   — resolves the verify UPM git-URL pin in manual-setup.md`);
-    console.log(`\n  git tag v${next} bridge-v${next} verify-v${next} && git push origin v${next} bridge-v${next} verify-v${next}`);
+    console.log(`\nTags this will create (all on the same commit):`);
+    console.log(`  ${nextNames[0]}          — triggers npm-publish.yml (publishes the MCP server)`);
+    console.log(`  ${nextNames[1]}   — resolves the bridge UPM git-URL pin in manual-setup.md`);
+    console.log(`  ${nextNames[2]}   — resolves the verify UPM git-URL pin in manual-setup.md`);
   }
   process.exit(0);
 }
