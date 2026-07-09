@@ -56,7 +56,7 @@
   </div>
 
   <details class="wiz-advanced">
-    <summary>Advanced package options</summary>
+    <summary>Advanced (optional)</summary>
     <div class="wiz-field">
       <label class="wiz-toggle">
         <input
@@ -76,20 +76,20 @@
       </label>
     </div>
     <div class="wiz-field">
-      <label class="wiz-label" for="wiz-pkg-pin">Package version pin (tag)</label>
+      <label class="wiz-label" for="wiz-pkg-pin">Package version pin (optional)</label>
       <input
         id="wiz-pkg-pin"
         type="text"
         class="wiz-input"
-        placeholder="bridge-v1.0.0"
+        placeholder="bridge-v0.5.0"
         value={state.packageVersionPin}
         disabled={state.useLocalPackages}
         oninput={(e) => handlers.setPackageVersionPin((e.currentTarget as HTMLInputElement).value)}
       />
       <p class="wiz-hint">
-        Applied to both packages. Leave empty to use the
-        default tag from the toolkit root
-        (e.g. <code>bridge-v1.0.0</code>).
+        Override the tag both packages pin to (e.g.
+        <code>bridge-v0.5.0</code>, <code>verify-v0.5.0</code>). Leave
+        empty to install the version matching this Hub build.
       </p>
     </div>
     <div class="wiz-field">

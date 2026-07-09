@@ -29,8 +29,8 @@ For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md)
 1. **Install Unity Hub Pro** if you haven't (see [unity-hub-pro.md](unity-hub-pro.md)).
 2. Open Unity Hub Pro and add your Unity project.
 3. Click the **AI** action for that project. The button turns **green** when the agent is already installed and configured for that project; otherwise it is amber/blue and opens the wizard.
-4. Pick a setup preset (or **Custom / skip**) on Step 1.
-5. Complete the wizard steps.
+4. Pick a setup preset (or **Custom / skip**) on the preset step.
+5. Complete the wizard — the Recommended preset can do everything in one click via **Express setup**.
 6. Restart your MCP client.
 7. Run a Unity MCP call to confirm connectivity.
 
@@ -40,48 +40,50 @@ Wizard choices (preset, MCP client, package toggles, bridge port, and other form
 
 ## Wizard steps
 
-The wizard shows a clickable progress strip at the top. Segments turn **green** when their checks already pass, so you can see at a glance which steps still need attention. You can click any segment to jump to that step; Back/Next still move sequentially. The wizard has seven steps plus a Done screen.
+The wizard shows a clickable progress strip at the top. Segments turn **green** when their checks already pass, so you can see at a glance which steps still need attention. You can click any segment to jump to that step; Back/Next still move sequentially. The recommended path needs no **Advanced (optional)** expansion on any step.
 
-### Step 1 — Setup preset (optional)
+### Preset — Setup preset (optional)
 
-Pick a preset to pre-fill the rest of the wizard, or choose **Custom / skip** to configure every step manually. Presets are starting points, not locks — you can change any field on later steps.
+Pick a preset to pre-fill the rest of the wizard, or choose **Custom / skip** to configure every step manually. Presets are starting points, not locks — you can change any field on later steps. The first viewport shows the three common choices; niche presets are behind **More presets**.
 
 | Preset | Best for | Pre-fills |
 |---|---|---|
 | **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@0.5.0`; bridge + verify from published sources; domain deps off; skill on |
 | **Contributor (local checkout)** | Monorepo contributors hacking on bridge / verify / MCP server | Local checkout + `file:` packages from the clone; domain deps off; skill on. Build `mcp-server/` first (see [Development setup](development-setup.md)) |
-| **Team CI** | Headless CI automation | Global npm install; **Manual / CLI snippet** client; skill skipped; configure token auth on the bridge for CI |
-| **Secure / remote** | Non-localhost bridge access with restricted mutations | Published sources; skill on. Token auth, remote bind, and restricted tool groups are bridge-side controls — configure them from the bridge window after onboarding |
 | **Custom / skip** | Anyone who wants the wizard's built-in defaults | No pre-fills — identical to the manual flow |
 
-### Step 2 — Project detection + diagnostics
+**More presets** (behind the disclosure):
 
-- Valid Unity project layout
-- Unity version detection (minimum 2022.3 LTS; Unity 6+ recommended)
-- Node.js check (18+) — required to launch the MCP server
-- Writable `Packages/manifest.json`
-- Existing bridge/verify package check
-- Existing MCP config check
+| Preset | Best for | Pre-fills |
+|---|---|---|
+| **Team CI** | Headless CI automation | Global npm install; **Manual / CLI snippet** client; skill skipped; configure token auth on the bridge for CI |
+| **Secure / remote** | Non-localhost bridge access with restricted mutations | Published sources; skill on. Token auth, remote bind, and restricted tool groups are bridge-side controls — configure them from the bridge window after onboarding |
 
-A **Diagnostics** panel at the top runs the same checks in a one-click-remediation list (green check / red cross). Each failing row carries a short hint on how to fix it. Use **Run diagnostics** to re-run project detection + the Node probe on demand.
+### Preflight — environment gate
 
-Detection and the Node probe run off the UI thread and are bounded by timeouts, so a slow disk or a hung `node --version` spawn surfaces a real error instead of freezing the wizard. You can always close the wizard with **Cancel**, **Escape**, or the **×** button — detection stops in the background.
+Preflight checks your environment and is the gate for everything else. Checks split into two groups:
 
-This step is the environment gate: the **Next** button is disabled until the project is valid, meets the minimum Unity version, has a writable manifest, and Node.js 18+ is detected. **Re-detect** refreshes the snapshot from disk and shows a confirmation when it completes.
+- **Blocking — must pass to continue:** valid Unity project layout, Unity version (minimum 2022.3 LTS; Unity 6+ recommended), Node.js 18+, and a writable `Packages/manifest.json`. These must all pass before Next is enabled.
+- **Setup status — handled on later steps:** whether the bridge / verify packages, an MCP client config, and an agent skill are already installed. These read "Not yet" (not as failures) and turn green as you complete the later steps.
+
+A single **Re-check** button re-runs project detection and the Node probe. Detection and the Node probe run off the UI thread and are bounded by timeouts, so a slow disk or a hung `node --version` spawn surfaces a real error instead of freezing the wizard. You can always close the wizard with **Cancel**, **Escape**, or the **×** button — detection stops in the background.
+
+**Already configured?** If the bridge, verify, and an MCP client are all already set up for the project, Preflight offers a **You're ready** banner with a **Go to Verify** shortcut that skips the apply steps.
+
+**Express setup:** when the environment checks pass, Preflight offers **Express setup** — one **Set up** click runs package install → MCP client write → launch/verify with a live progress list. The full step-by-step path stays available via the progress strip.
 
 ![plot](../screenshots/hub-wizard-1.png)
 
-### Step 3 — MCP server source
+### MCP server source (optional / advanced)
 
-Choose how the `unity-open-mcp` server is launched. Not sure? Leave it on the
-default — `npx` downloads and runs the server at the pinned version
-(`unity-open-mcp@0.5.0`), which matches the bridge and verify packages.
+Choose how the `unity-open-mcp` server is launched. The default (`npx`) needs no configuration here and the wizard auto-skips this step on the Recommended path — you only land here via the progress strip or the **Custom / skip** / **Contributor** preset.
 
-- default: `npx -y unity-open-mcp@0.5.0` ← recommended for most users
-- optional: global install (`npm i -g unity-open-mcp`) — installs once, then the client launches it directly.
-- optional: local checkout path (only if you cloned the `unity-open-mcp` monorepo to hack on it).
+- **npx (published npm)** *(default)* — fetches the latest `unity-open-mcp` from npm on first spawn. No repo clone needed.
+- **Global install** — launches the bare `unity-open-mcp` binary (assumes `npm i -g unity-open-mcp`). Stable path for CI images.
+- **Local checkout** — points at a cloned `unity-open-mcp` monorepo. Packages and skill copy use the toolkit root.
+- **Custom entrypoint (advanced)** — a specific `mcp-server/dist/index.js` path for builds outside the toolkit root.
 
-If you use local checkout, build first:
+Pick one source; only the inputs for your choice are shown. Local checkout and custom entrypoint both require a validated toolkit root. If you use local checkout, build first:
 
 ```bash
 cd mcp-server
@@ -91,13 +93,16 @@ npm run build
 
 ![plot](../screenshots/hub-wizard-2.png)
 
-### Step 4 — Unity packages
+### Unity packages
 
-- Install or upgrade bridge and verify packages
-- Optional: install Unity domain dependencies (NavMesh, Input System, ProBuilder) that activate the bundled domain tools
-- Review manifest diff before apply
+Install or upgrade the bridge and verify packages in `Packages/manifest.json`. The required toggles are in the default section; a live diff preview re-computes as you change them.
 
-Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation) are **bundled with the bridge** — there is no separate extension-pack install. They compile in automatically once the matching Unity package is present in the project. Toggle the Unity domain dependencies you want the wizard to add to `Packages/manifest.json`; the bridge's embedded tools register after Unity re-imports the manifest. Built-in Unity modules (Particle System, Animation) ship with the Editor and need no manifest entry — the wizard lists them for visibility only.
+**Advanced (optional)** (collapsed by default — the recommended path never needs it):
+
+- **Use local packages** — install via `file:` paths relative to the toolkit root (typical for projects inside the monorepo).
+- **Package version pin** — override the tag both packages pin to. Leave empty to install the version matching this Hub build.
+- **Custom git URL** — replaces the toolkit root's git remote (for testing against a fork).
+- **Unity domain dependencies (optional)** — NavMesh, Input System, ProBuilder. Domain tools are **bundled with the bridge**; they compile in automatically once the matching Unity package is present. Toggle the ones you want the wizard to add. Built-in modules (Particle System, Animation) ship with the Editor and need no manifest entry.
 
 After onboarding, you can add or remove Unity domain dependencies at any time from the bridge window (**Tools → Unity Open MCP Bridge → Extensions → Optional Unity dependencies**) — one click per domain, no manifest editing. The Hub's project settings modal also shows a read-only installed / missing status per domain.
 
@@ -105,37 +110,31 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 
 ![plot](../screenshots/hub-wizard-3.png)
 
-### Step 5 — MCP client config
+### Configure AI client
 
-- Pick a client from the searchable, grouped picker. The catalog covers the
-  common editor/IDE agents (Cursor, Claude Desktop, Cline, VS Code Copilot,
-  Visual Studio Copilot, ZooCode, Kilo Code, Rider/Junie, Unity AI, Antigravity,
-  OpenCode, ZCode), the CLI agents (Claude Code, GitHub Copilot CLI, Gemini CLI,
-  Codex), and Manual / Custom fallbacks.
-- A search box filters the list by name; the selected client is always visible
-  even when it does not match the filter.
-- Each option has a tooltip describing the config format and target path:
-  - Cursor / Claude Desktop / Cline / most editor agents: `mcpServers` JSON
-  - VS Code Copilot / Visual Studio Copilot: `servers` JSON (project `.vscode/mcp.json` / `.vs/mcp.json`)
-  - OpenCode: `mcp` + `$schema` JSON
-  - ZCode: `mcp.servers` + `type:stdio` JSON with skills under `.agents/skills/`
-  - Codex: TOML `[mcp_servers.unity-open-mcp]` table in `.codex/config.toml`
-  - Claude Code: CLI-only — renders a `claude mcp add` command (no file)
-- Review the generated config preview (JSON or TOML, or a CLI command for
-  Claude Code).
-- Write config to the target location (or copy a CLI command / JSON snippet for
-  Claude Code / Manual / Custom). Writes are merge-safe: unrelated keys and
-  sibling MCP servers are preserved, and a `.bak` backup is left next to the
-  original file.
+Pick the AI client to connect. The first viewport shows a short **Popular** list (Cursor, Claude Desktop, VS Code Copilot, Claude Code, Manual); the full catalog is behind **Show all clients** with a search box.
+
+Each option shows whether it writes a config file, is CLI-only, or copies a JSON snippet, and has a tooltip describing the config format and target path:
+
+- Cursor / Claude Desktop / Cline / most editor agents: `mcpServers` JSON
+- VS Code Copilot / Visual Studio Copilot: `servers` JSON (project `.vscode/mcp.json` / `.vs/mcp.json`)
+- OpenCode: `mcp` + `$schema` JSON
+- ZCode: `mcp.servers` + `type:stdio` JSON with skills under `.agents/skills/`
+- Codex: TOML `[mcp_servers.unity-open-mcp]` table in `.codex/config.toml`
+- Claude Code: CLI-only — renders a `claude mcp add` command (no file)
+
+Review the generated config preview (JSON or TOML, or a CLI command for Claude Code), then write it. Writes are merge-safe: unrelated keys and sibling MCP servers are preserved, and a `.bak` backup is left next to the original file.
+
+**Advanced (optional):** the **Bridge HTTP port** override lives here (collapsed by default; the port auto-derives from the project path).
 
 ![plot](../screenshots/hub-wizard-4.png)
 
-### Step 6 — Agent skill (optional)
+### Agent skill (optional)
 
 The agent skill gives your AI client workflow guidance for the Unity MCP tools — the mutate→gate→fix loop, capabilities-first discovery, and the agent senses (tests, profiler, screenshots). Two options write to the same project-relative skill folder(s) for your selected client (ZCode → `.agents/skills/`, Cursor → `.cursor/skills/`, etc.):
 
 - **Copy skill** — installs the template playbook (`skills/unity-open-mcp/SKILL.md`). The same workflow guidance for every project; no build required.
-- **Generate project skill** — produces a project-specific `SKILL.md` that merges the template playbook with this project's inventory (Unity version, installed packages, key MonoBehaviour / ScriptableObject types). Runs the local MCP server generator without a live Unity bridge; requires the built MCP server entry (`mcp-server/dist/index.js`), the same prerequisite as the local launch mode on the Configure AI client step. The result preview is shown inline.
+- **Generate project skill** — produces a project-specific `SKILL.md` that merges the template playbook with this project's inventory (Unity version, installed packages, key MonoBehaviour / ScriptableObject types). Requires the built MCP server (`mcp-server/dist/index.js`).
 
 Both honor an explicit overwrite checkbox; existing files are backed up to `*.bak` before they are replaced. You can copy only, generate only, or both (generate overwrites the same path the copy writes, so confirm the overwrite).
 
@@ -143,15 +142,15 @@ The **Team CI** preset auto-skips this step — CI agents typically don't need a
 
 ![plot](../screenshots/hub-wizard-5.png)
 
-### Step 7 — Launch and verify
+### Launch and verify
 
 - Launch Unity
 - Wait for compile and bridge readiness
 - Finish when health checks pass
 
 While waiting, the MCP server auto-dismisses common Unity startup modals (Safe
-Mode, version mismatch, and similar) per `UNITY_OPEN_MCP_DIALOG_POLICY`. If
-Step 7 stalls on a modal, see [Dialog policy](dialog-policy.md).
+Mode, version mismatch, and similar) per `UNITY_OPEN_MCP_DIALOG_POLICY`. If this
+step stalls on a modal, see [Dialog policy](dialog-policy.md).
 
 ![plot](../screenshots/hub-wizard-6.png)
 
@@ -168,18 +167,18 @@ A `.bak` backup is created next to each changed file. Per-target failures are re
 ## Troubleshooting
 
 - **AI action missing on a project row:** re-check the project path and that
-  Unity version detection passed in Step 2.
-- **Package install disabled (Next greyed out):** resolve the Step 2 environment
+  Unity version detection passed on the Preflight step.
+- **Package install disabled (Next greyed out):** resolve the Preflight blocking
   checks first — the project must meet the minimum Unity version, have Node.js
   18+, and a writable `Packages/manifest.json`.
 - **Tools unavailable in the client after finishing:** restart the client. Most
   MCP clients only read their config at startup.
-- **Bridge unavailable in Step 7:** verify the project path is right, Unity
-  actually launched, and finished compiling. The health check runs while Unity is
-  running. If a startup modal blocks progress (Safe Mode, project upgrade),
-  see [Dialog policy](dialog-policy.md).
-- **Re-detect does nothing:** it refreshes the on-disk snapshot only — bridge
-  reachability is checked in Step 7 while Unity is running.
+- **Bridge unavailable on Launch and verify:** verify the project path is right,
+  Unity actually launched, and finished compiling. The health check runs while
+  Unity is running. If a startup modal blocks progress (Safe Mode, project
+  upgrade), see [Dialog policy](dialog-policy.md).
+- **Re-check does nothing:** it refreshes the on-disk snapshot only — bridge
+  reachability is checked on Launch and verify while Unity is running.
 - **npx first run looks slow:** expected — the server downloads on first launch.
 
 ## Related docs

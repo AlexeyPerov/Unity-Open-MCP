@@ -94,6 +94,18 @@ function replaceNpmPin(body, v) {
   );
 }
 
+// Rewrites the bare `bridge-v<X.Y.Z>` / `verify-v<X.Y.Z>` literals the wizard
+// Packages step shows as the version-pin example (placeholder + hint). Only
+// the trio-version-shaped tag suffixes are touched; the Rust planner's actual
+// default tags are compile-time-derived, so this keeps the *example* the user
+// sees in sync with what gets installed.
+/** @param {string} body @param {string} v */
+function replaceWizardTags(body, v) {
+  return body
+    .replace(/(bridge-v)\d+\.\d+\.\d+/g, `$1${v}`)
+    .replace(/(verify-v)\d+\.\d+\.\d+/g, `$1${v}`);
+}
+
 // Bridge C# constant — kept in sync with packages/bridge/package.json so /ping
 // reports the package version rather than a hand-edited literal.
 const TRIO_TARGETS = [
@@ -154,6 +166,19 @@ const TRIO_TARGETS = [
       b
         .replace(/(#bridge-v)\d+\.\d+\.\d+/g, `$1${v}`)
         .replace(/(#verify-v)\d+\.\d+\.\d+/g, `$1${v}`),
+  },
+  // Wizard UI tag examples — the Packages step shows a `bridge-v<ver>` /
+  // `verify-v<ver>` placeholder + hint so the version-pin field's example
+  // matches the default the Rust planner derives from version.json. Kept in
+  // sync so a stale example never implies a nonexistent tag. The Rust default
+  // tags themselves are compile-time-derived (build.rs reads version.json), so
+  // this only guards the UI-facing example literals.
+  {
+    file: "hub/src/lib/components/wizard/WizardStep3Packages.svelte",
+    kind: "wizard-tag",
+    description:
+      "wizard Packages step bridge-v / verify-v tag example literals (placeholder + hint)",
+    replace: replaceWizardTags,
   },
   // npm package pins — the unity-open-mcp server shares the trio version, so
   // the @<version> suffix in every install snippet is generated from
@@ -300,6 +325,12 @@ function extractVersion(body, kind) {
   if (kind === "md-git") {
     // First #bridge-v<X.Y.Z> pin in the doc (manual-setup.md git-URL examples).
     const m = body.match(/#bridge-v(\d+\.\d+\.\d+)/);
+    return m ? m[1] : undefined;
+  }
+  if (kind === "wizard-tag") {
+    // First bare bridge-v<X.Y.Z> literal in the wizard Packages step
+    // (placeholder + hint example).
+    const m = body.match(/bridge-v(\d+\.\d+\.\d+)/);
     return m ? m[1] : undefined;
   }
   if (kind === "md-npm") {

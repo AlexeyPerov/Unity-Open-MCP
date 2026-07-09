@@ -17,14 +17,10 @@
 
 <section class="wiz-section">
   <p class="wiz-desc">
-    This step launches Unity with the bridge port pinned via
-    <code>-UNITY_OPEN_MCP_BRIDGE_PORT={state.step5BridgePort ?? state.resolvedBridgePort ?? "auto"}</code>
-    and polls the bridge HTTP <code>/ping</code> endpoint
-    for up to 120 s. The wizard never spawns a separate
-    <code>unity-open-mcp</code> subprocess — the wizard
-    keeps the verify path to a direct HTTP GET. The
-    Done screen re-runs detection on entry and pairs the
-    live snapshot with this step's bridge result.
+    Launch Unity and confirm the bridge is reachable. The wizard starts
+    the Editor, waits for compilation, and pings the bridge for up to
+    120 s — when all four checks below turn green, your AI client can
+    drive Unity.
   </p>
   <ol class="wiz-checklist">
     <li class:done={state.step5Items.launch === "ok"} class:running={state.step5Items.launch === "running"}>

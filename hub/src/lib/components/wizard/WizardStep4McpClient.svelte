@@ -154,7 +154,7 @@
   {/if}
 
   <details class="wiz-advanced">
-    <summary>Advanced</summary>
+    <summary>Advanced (optional)</summary>
     <div class="wiz-field">
       <label class="wiz-label" for="wiz-bridge-port">Bridge HTTP port</label>
       <input

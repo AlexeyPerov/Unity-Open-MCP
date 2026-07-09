@@ -40,16 +40,15 @@
       id: "custom",
       label: "Custom entrypoint (advanced)",
       blurb:
-        "A specific mcp-server/dist/index.js path. Owns the former override escape hatch — custom is a mode, not a hidden switch.",
+        "Point the client at a specific built mcp-server/dist/index.js. Use this when your build lives outside the toolkit root.",
     },
   ];
 </script>
 
 <section class="wiz-section">
   <p class="wiz-desc">
-    Choose how the <code>unity-open-mcp</code> MCP server is launched. Pick
-    one source — only the inputs for your choice are shown. Project, Unity
-    version, and Node.js checks live on the Preflight step.
+    Pick how the <code>unity-open-mcp</code> MCP server is launched. The
+    default (<strong>npx</strong>) works for most users — no extra setup.
   </p>
 
   <div class="wiz-field">
@@ -154,10 +153,9 @@
         oninput={(e) => handlers.setMcpIndexOverride((e.currentTarget as HTMLInputElement).value)}
       />
       <p class="wiz-hint">
-        The exact entrypoint the client launches. Defaults to
+        The exact entrypoint the client launches. Leave empty to use
         <code>{state.toolkitRoot || "<toolkit>"}/mcp-server/dist/index.js</code>
-        when empty; Unity packages step URLs and skill copy always use the
-        toolkit root regardless of this path.
+        from the toolkit root above.
       </p>
     </div>
   {/if}

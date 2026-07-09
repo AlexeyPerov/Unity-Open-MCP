@@ -81,8 +81,15 @@ pub const DEFAULT_GIT_REMOTE: &str = "https://github.com/AlexeyPerov/unity-open-
 
 /// Default git tag pins for each package. Used when the user does
 /// not override via the Step 3 "Package version pin" field.
-pub const DEFAULT_BRIDGE_TAG: &str = "bridge-v1.0.0";
-pub const DEFAULT_VERIFY_TAG: &str = "verify-v1.0.0";
+///
+/// M28 Plan 5: these are derived from the shared trio version source
+/// (`version.json`) at compile time via `build.rs`, so they can never drift
+/// to a nonexistent tag. `build.rs` reads `version.json` and emits the full
+/// tag strings (`bridge-v<ver>` / `verify-v<ver>`) as env vars; `env!`
+/// bakes them into `&'static str` constants. A sentinel fallback keeps the
+/// crate compiling in a standalone `cargo build` without the repo root.
+pub const DEFAULT_BRIDGE_TAG: &str = env!("TRIO_BRIDGE_TAG");
+pub const DEFAULT_VERIFY_TAG: &str = env!("TRIO_VERIFY_TAG");
 
 /// Per-package default install (relative path inside the
 /// monorepo + default tag pin).
@@ -1962,11 +1969,16 @@ mod tests {
     fn plan_manifest_merge_flags_upgrade_when_tag_differs() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
+        // Existing manifest pins a tag that is intentionally different from
+        // the current default (`DEFAULT_BRIDGE_TAG`, derived from
+        // version.json). We craft the "before" tag by swapping the version
+        // segment so the test is robust to version bumps.
+        let stale_tag = "bridge-v0.0.0-stale";
         write_manifest(
             dir.path(),
             &[(
                 BRIDGE_PACKAGE_ID,
-                "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.5.0",
+                "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.0.0-stale",
             )],
         );
         let plan = plan_manifest_merge_at(&ManifestMergeParams {
@@ -1987,8 +1999,23 @@ mod tests {
             .find(|c| c.id == BRIDGE_PACKAGE_ID)
             .unwrap();
         assert_eq!(bridge.kind, ChangeKind::Upgrade);
-        assert!(bridge.before.as_ref().unwrap().contains("v0.5.0"));
-        assert!(bridge.after.contains("v1.0.0"));
+        assert!(bridge.before.as_ref().unwrap().contains(stale_tag));
+        // The proposed tag is the current default (derived from version.json).
+        assert_eq!(bridge.after, expected_default_bridge_url());
+    }
+
+    /// Builds the bridge git-URL the planner derives by default (no version
+    /// pin, default remote). Tests assert against this so they stay correct
+    /// when `DEFAULT_BRIDGE_TAG` changes with a version bump.
+    fn expected_default_bridge_url() -> String {
+        format!(
+            "{}{}{}{}{}",
+            DEFAULT_GIT_REMOTE.trim_end_matches('/'),
+            PATH_QUERY_PREFIX,
+            BRIDGE_PACKAGE_PATH,
+            TAG_FRAGMENT_PREFIX,
+            DEFAULT_BRIDGE_TAG,
+        )
     }
 
     #[test]
@@ -2208,12 +2235,14 @@ mod tests {
     fn write_manifest_merge_refuses_upgrade_without_confirmation() {
         let dir = tempdir().unwrap();
         make_valid_project(dir.path());
+        // Pin an intentionally stale tag so this is always an upgrade against
+        // the current default (`DEFAULT_BRIDGE_TAG`), regardless of the trio
+        // version baked in at compile time.
+        let stale_url =
+            "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.0.0-stale";
         write_manifest(
             dir.path(),
-            &[(
-                BRIDGE_PACKAGE_ID,
-                "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.5.0",
-            )],
+            &[(BRIDGE_PACKAGE_ID, stale_url)],
         );
         let err = write_manifest_merge_at(&ManifestMergeParams {
             project_path: dir.path().to_string_lossy().into_owned(),
@@ -2231,11 +2260,10 @@ mod tests {
 
         // The manifest must not have changed.
         let read_after = read_manifest_inner(dir.path());
-        assert!(read_after
-            .dependencies
-            .get(BRIDGE_PACKAGE_ID)
-            .unwrap()
-            .contains("v0.5.0"));
+        assert_eq!(
+            read_after.dependencies.get(BRIDGE_PACKAGE_ID).unwrap(),
+            stale_url
+        );
     }
 
     #[test]
