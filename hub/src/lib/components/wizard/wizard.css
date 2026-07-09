@@ -662,6 +662,31 @@
   font-size: 0.82rem;
 }
 
+/* Plan 3 — compact one-line project identity shown above the diagnostics
+   list. Replaces the old full <dl> summary that duplicated the diag rows. */
+.wiz-project-line {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--hub-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.wiz-project-line strong {
+  color: var(--hub-text-bright);
+}
+
+.wiz-project-line code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.76rem;
+  background: var(--hub-card);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  color: var(--hub-text);
+}
+
 .wiz-summary dt {
   color: var(--hub-text-muted);
 }

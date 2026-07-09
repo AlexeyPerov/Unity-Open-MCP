@@ -63,6 +63,10 @@ export interface McpClientOption {
    *  it, so users picking one client understand the format they are committing
    *  to. */
   sharedWith?: string;
+  /** Plan 3 — when `true`, the client surfaces in the short Popular list on
+   *  the client step's first viewport. The full catalog stays reachable behind
+   *  "Show all clients". */
+  popular?: boolean;
 }
 
 /** Catalog of MCP client options rendered by the Step 4 picker. */
@@ -73,6 +77,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     label: "Cursor",
     kind: "file",
     category: "ide",
+    popular: true,
     sharedWith:
       "Format: mcpServers JSON at ~/.cursor/mcp.json (global) or .cursor/mcp.json (project).",
   },
@@ -81,6 +86,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     label: "Claude Desktop",
     kind: "file",
     category: "ide",
+    popular: true,
     sharedWith:
       "Format: mcpServers JSON (Claude Desktop config). Same envelope as Cursor; shared by Claude Desktop and Cursor.",
   },
@@ -97,6 +103,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     label: "VS Code Copilot",
     kind: "file",
     category: "ide",
+    popular: true,
     sharedWith:
       "Format: servers JSON at .vscode/mcp.json (project). Uses the `servers` key, not `mcpServers`.",
   },
@@ -200,6 +207,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     label: "Claude Code (CLI only)",
     kind: "cli",
     category: "cli",
+    popular: true,
     sharedWith:
       "CLI-only: renders a `claude mcp add` command (no config file is written). Skill installs to .claude/skills/.",
   },
@@ -217,6 +225,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     label: "Manual / copy JSON",
     kind: "clipboard",
     category: "manual",
+    popular: true,
     sharedWith:
       "Copy a JSON snippet to paste into any MCP client manually. No file is written by the wizard.",
   },

@@ -31,6 +31,17 @@ test("exactly one preset is marked recommended (regular-npm)", () => {
   assert.equal(recommended[0].id, "regular-npm");
 });
 
+test("primary presets are the three common-path choices; niche presets are demoted", () => {
+  const primaryIds = WIZARD_PRESETS.filter(
+    (p) => (p.tier ?? "primary") === "primary",
+  ).map((p) => p.id);
+  const moreIds = WIZARD_PRESETS.filter((p) => p.tier === "more").map((p) => p.id);
+  // The three first-viewport choices.
+  assert.deepEqual([...primaryIds].sort(), ["contributor", "custom", "regular-npm"].sort());
+  // Niche presets stay reachable but are not peers of Recommended.
+  assert.deepEqual([...moreIds].sort(), ["secure-remote", "team-ci"].sort());
+});
+
 test("every preset has a non-empty label, description, and tooltip", () => {
   for (const p of WIZARD_PRESETS) {
     assert.ok(p.label.length > 0, `${p.id} label empty`);

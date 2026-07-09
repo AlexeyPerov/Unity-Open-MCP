@@ -28,20 +28,9 @@
 
 <section class="wiz-section">
   <p class="wiz-desc">
-    This step adds bridge + verify packages to the project's
-    <code>Packages/manifest.json</code>. Domain tools (NavMesh,
-    Input System, ProBuilder, Particle System, Animation) are
-    <strong>bundled with the bridge</strong> — they activate
-    automatically once the matching Unity package is present, so
-    you install the bridge once and toggle Unity domain deps in
-    the section below. The diff preview is live — it re-computes
-    whenever you change a toggle, version pin, custom URL, or
-    local-package mode. Enable <strong>Use local packages</strong>
-    to install via <code>file:</code> paths from the toolkit root
-    (typical for projects inside this monorepo). An upgrade
-    (existing entry with a different URL or tag) always requires
-    explicit confirmation before the wizard will write. Unrelated
-    dependency entries are preserved verbatim.
+    Add the bridge + verify packages to the project's
+    <code>Packages/manifest.json</code>. The live diff preview
+    re-computes as you change a toggle.
   </p>
 
   <div class="wiz-field">
@@ -64,32 +53,28 @@
         <small>Scoped health checks for AI gates — not the full Unity Scanner window.</small>
       </span>
     </label>
-    <label class="wiz-toggle">
-      <input
-        type="checkbox"
-        checked={state.useLocalPackages}
-        onchange={(e) =>
-          handlers.onUseLocalPackagesChange((e.currentTarget as HTMLInputElement).checked)}
-      />
-      <span>
-        <strong>Use local packages</strong> —
-        <small>
-          Install via <code>file:</code> paths relative to the toolkit root
-          (e.g. <code>file:../../packages/bridge</code>).
-        </small>
-      </span>
-    </label>
-    <label class="wiz-toggle">
-      <input type="checkbox" checked={state.installScanner} disabled />
-      <span>
-        <strong>Also install Unity Scanner</strong> —
-        <small>Full upstream product for inspection in the Editor (advanced, off by default).</small>
-      </span>
-    </label>
   </div>
 
   <details class="wiz-advanced">
     <summary>Advanced package options</summary>
+    <div class="wiz-field">
+      <label class="wiz-toggle">
+        <input
+          type="checkbox"
+          checked={state.useLocalPackages}
+          onchange={(e) =>
+            handlers.onUseLocalPackagesChange((e.currentTarget as HTMLInputElement).checked)}
+        />
+        <span>
+          <strong>Use local packages</strong> —
+          <small>
+            Install via <code>file:</code> paths relative to the toolkit root
+            (e.g. <code>file:../../packages/bridge</code>). Typical for projects
+            inside this monorepo.
+          </small>
+        </span>
+      </label>
+    </div>
     <div class="wiz-field">
       <label class="wiz-label" for="wiz-pkg-pin">Package version pin (tag)</label>
       <input

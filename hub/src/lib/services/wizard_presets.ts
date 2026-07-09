@@ -54,6 +54,12 @@ export interface WizardPreset {
   tooltip: string;
   /** Highlights the recommended default card. */
   recommended?: boolean;
+  /** Display tier. `"primary"` presets render in the first viewport grid;
+   *  `"more"` presets are demoted behind a "More presets" disclosure so they
+   *  stay reachable without competing with the common-path choices. Niche
+   *  presets (Team CI, Secure / remote) opt into `"more"`. Defaults to
+   *  `"primary"`. */
+  tier?: "primary" | "more";
   /** Pre-filled values applied when the user picks this preset. */
   values: WizardPresetValues;
 }
@@ -100,6 +106,7 @@ export const WIZARD_PRESETS: readonly WizardPreset[] = [
     label: "Team CI",
     description:
       "Headless automation: global install, manual client config, no desktop skill, token auth on the bridge.",
+    tier: "more",
     tooltip:
       "MCP server: global npm install (stable path for CI images). Packages: bridge + verify, domain deps off. Client: manual / CLI snippet. Skill: skipped. Configure token auth on the bridge for CI.",
     values: {
@@ -118,6 +125,7 @@ export const WIZARD_PRESETS: readonly WizardPreset[] = [
     label: "Secure / remote",
     description:
       "Remote-bridge mode for non-localhost access. Configure token auth + restricted tool groups on the bridge.",
+    tier: "more",
     tooltip:
       "MCP server: npx or global per environment. Packages: bridge + verify, domain deps off. Skill: on. Token auth, remote bind, and restricted tool groups are bridge-side controls — configure them from the bridge window after onboarding.",
     values: {

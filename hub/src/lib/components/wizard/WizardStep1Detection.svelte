@@ -1,7 +1,6 @@
 <script lang="ts">
   import Button from "$lib/components/shell/Button.svelte";
   import { diagTone, splitDiagnosticsGroups } from "./diagnostics.ts";
-  import { mcpConfiguredSummary } from "./diagnostics.ts";
   import WizardExpressPanel from "./WizardExpressPanel.svelte";
   import type { WizardState, WizardHandlers } from "./state.ts";
 
@@ -23,13 +22,27 @@
 
 <section class="wiz-section">
   <p class="wiz-desc">
-    Preflight checks the environment before you continue. The
-    <strong>Blocking</strong> rows below must pass to proceed; the
-    <strong>Setup status</strong> rows report work handled on later steps
-    (they read "Not yet" until then). Detection re-runs on every entry so
-    the values reflect the on-disk manifest and
-    <code>ProjectVersion.txt</code>; the Done screen re-uses this snapshot.
+    Preflight checks your environment. <strong>Blocking</strong> rows
+    must pass to continue; <strong>Setup status</strong> rows report work
+    handled on later steps and read "Not yet" until then.
   </p>
+
+  {#if state.detection?.isValidUnityProject}
+    <p class="wiz-project-line">
+      <strong>{state.detection.name || state.projectName}</strong>
+      <code title={state.detection.path}>{state.detection.path}</code>
+      {#if state.detection.unityVersion}
+        · <code>{state.detection.unityVersion}</code>
+        {#if !state.detection.meetsMinUnityVersion}
+          <span class="wiz-tag wiz-tag-warn" title="Unity 2022.3 LTS is the minimum supported version.">below minimum</span>
+        {:else if state.detection.meetsRecommendedUnityVersion}
+          <span class="wiz-tag wiz-tag-ok" title="Meets the recommended Unity 6+.">Unity 6+</span>
+        {:else}
+          <span class="wiz-tag wiz-tag-warn" title="Meets the minimum (2022.3 LTS); uses the legacy toolbar button fallback.">supported (legacy toolbar)</span>
+        {/if}
+      {/if}
+    </p>
+  {/if}
 
   {#if state.alreadyConfigured}
     <div class="wiz-block wiz-block-ok" role="status">
@@ -68,14 +81,6 @@
   <div class="wiz-diag-block">
     <div class="wiz-diag-head">
       <span class="wiz-label">Blocking — must pass to continue</span>
-      <Button
-        variant="secondary"
-        onclick={() => { handlers.refreshDetection(); handlers.runNodeProbe(); }}
-        disabled={state.detectionLoading || state.nodeProbing}
-        title="Re-run project detection + Node probe"
-      >
-        {state.detectionLoading || state.nodeProbing ? "Checking…" : "Run diagnostics"}
-      </Button>
     </div>
     <ul class="wiz-diag" aria-label="Blocking environment checks">
       {#each groups.blocking as row (row.id)}
@@ -154,60 +159,6 @@
         </div>
       </div>
     {:else}
-      <dl class="wiz-summary">
-        <div>
-          <dt>Project name</dt>
-          <dd>{state.detection.name || state.projectName}</dd>
-        </div>
-        <div>
-          <dt>Path</dt>
-          <dd><code title={state.detection.path}>{state.detection.path}</code></dd>
-        </div>
-        <div>
-          <dt>Unity version</dt>
-          <dd>
-            {#if state.detection.unityVersion}
-              <code>{state.detection.unityVersion}</code>
-              {#if !state.detection.meetsMinUnityVersion}
-                <span class="wiz-tag wiz-tag-warn" title="Unity 2022.3 LTS is the minimum supported version.">below minimum</span>
-              {:else if state.detection.meetsRecommendedUnityVersion}
-                <span class="wiz-tag wiz-tag-ok" title="Meets the recommended Unity 6+; minimum supported is 2022.3 LTS.">Unity 6+</span>
-              {:else}
-                <span class="wiz-tag wiz-tag-warn" title="Meets the minimum (2022.3 LTS); uses the legacy toolbar button fallback instead of the native Unity 6 toolbar element.">supported (legacy toolbar)</span>
-              {/if}
-            {:else}
-              <em>unknown</em>
-            {/if}
-          </dd>
-        </div>
-        <div>
-          <dt>Bridge installed</dt>
-          <dd>
-            {#if state.detection.bridgeInstalled}
-              <span class="wiz-tag wiz-tag-ok">yes</span>
-            {:else}
-              <span class="wiz-tag wiz-tag-warn">no</span>
-            {/if}
-          </dd>
-        </div>
-        <div>
-          <dt>Verify installed</dt>
-          <dd>
-            {#if state.detection.verifyInstalled}
-              <span class="wiz-tag wiz-tag-ok">yes</span>
-            {:else}
-              <span class="wiz-tag wiz-tag-warn">no</span>
-            {/if}
-          </dd>
-        </div>
-        <div>
-          <dt>MCP configured</dt>
-          <dd>
-            {mcpConfiguredSummary(state.detection.mcpConfigured)}
-          </dd>
-        </div>
-      </dl>
-
       {#if !state.detection.meetsMinUnityVersion}
         <div class="wiz-block wiz-block-error" role="alert">
           <strong>Unity {state.detection.unityVersion ?? "unknown"} does not meet the minimum.</strong>
@@ -230,39 +181,29 @@
         </div>
       {/if}
 
-      <div class="wiz-field">
-        <span class="wiz-label">Node.js</span>
-        {#if state.nodeProbing || state.nodeProbe === null}
-          <p class="wiz-hint">Probing…</p>
-        {:else if state.nodeProbe.ok}
-          <p class="wiz-hint wiz-hint-ok">
-            Detected <strong>Node {state.nodeProbe.version}</strong>
-            (major {state.nodeProbe.major} ≥ {state.nodeProbe.requiredMajor}).
-          </p>
-        {:else}
-          <div class="wiz-block wiz-block-error" role="alert">
-            <strong>Node.js {state.nodeProbe.requiredMajor}+ is required</strong>
-            to run <code>unity-open-mcp</code>.
-            {#if state.nodeProbe.version}
-              Detected <strong>{state.nodeProbe.version}</strong>.
-            {:else}
-              Not detected on PATH.
-            {/if}
-            {#if state.nodeProbe.error}
-              <br /><small>{state.nodeProbe.error}</small>
-            {/if}
-          </div>
-        {/if}
-        <div>
-          <Button variant="secondary" onclick={handlers.runNodeProbe} disabled={state.nodeProbing}>
-            {state.nodeProbing ? "Checking…" : "Re-check Node"}
-          </Button>
+      {#if state.nodeProbe && !state.nodeProbe.ok}
+        <div class="wiz-block wiz-block-error" role="alert">
+          <strong>Node.js {state.nodeProbe.requiredMajor}+ is required</strong>
+          to run <code>unity-open-mcp</code>.
+          {#if state.nodeProbe.version}
+            Detected <strong>{state.nodeProbe.version}</strong>.
+          {:else}
+            Not detected on PATH.
+          {/if}
+          {#if state.nodeProbe.error}
+            <br /><small>{state.nodeProbe.error}</small>
+          {/if}
         </div>
-      </div>
+      {/if}
 
       <div class="wiz-actions-row">
-        <Button variant="secondary" onclick={handlers.refreshDetection} disabled={state.detectionLoading}>
-          {state.detectionLoading ? "Re-detecting…" : "Re-detect"}
+        <Button
+          variant="secondary"
+          onclick={() => { handlers.refreshDetection(); handlers.runNodeProbe(); }}
+          disabled={state.detectionLoading || state.nodeProbing}
+          title="Re-run project detection + Node probe"
+        >
+          {state.detectionLoading || state.nodeProbing ? "Checking…" : "Re-check"}
         </Button>
         {#if state.detectToast}
           <span class="wiz-toast" role="status">{state.detectToast}</span>

@@ -4,6 +4,7 @@
     CLIENT_CATEGORY_LABELS,
     MCP_CLIENT_OPTIONS,
     clientKind,
+    type McpClientOption,
   } from "./constants.ts";
   import { describeMcpConfigError } from "./error_descriptors.ts";
   import type { WizardState, WizardHandlers } from "./state.ts";
@@ -15,9 +16,26 @@
 
   let { state, handlers }: Props = $props();
 
-  // Filtered + grouped view of the client picker. The search matches
-  // label or id (case-insensitive); the currently-selected client is
-  // always kept visible so the preview/write actions stay reachable.
+  // Plan 3 — Popular clients show in the first viewport; the full catalog
+  // stays behind a "Show all clients" disclosure. The currently-selected
+  // client is always visible in Popular (pinned when it isn't a popular one)
+  // so the preview/write actions stay reachable without expanding.
+  let popular = $derived(
+    MCP_CLIENT_OPTIONS.filter((o) => o.popular),
+  );
+  let pinnedSelected = $derived.by(() => {
+    const sel = MCP_CLIENT_OPTIONS.find((o) => o.id === state.mcpClient);
+    if (!sel) return null;
+    return sel.popular ? null : sel;
+  });
+  let popularList = $derived.by(() => {
+    if (pinnedSelected) return [pinnedSelected, ...popular];
+    return popular;
+  });
+
+  // Filtered + grouped view of the full client catalog (shown when "Show all
+  // clients" is expanded). The search matches label or id (case-insensitive);
+  // the currently-selected client is always kept visible.
   let filtered = $derived.by(() => {
     const q = state.mcpClientSearch.trim().toLowerCase();
     if (!q) return MCP_CLIENT_OPTIONS;
@@ -30,7 +48,7 @@
   });
 
   let grouped = $derived.by(() => {
-    const groups: { category: "ide" | "cli" | "manual"; items: typeof MCP_CLIENT_OPTIONS }[] = [];
+    const groups: { category: "ide" | "cli" | "manual"; items: McpClientOption[] }[] = [];
     for (const cat of ["ide", "cli", "manual"] as const) {
       const items = filtered.filter((o) => o.category === cat);
       if (items.length > 0) groups.push({ category: cat, items });
@@ -41,39 +59,19 @@
 
 <section class="wiz-section">
   <p class="wiz-desc">
-    This step writes a <code>unity-open-mcp</code> MCP server
-    entry to your client config. The launch command comes from your
-    MCP server source choice — <code>npx -y unity-open-mcp@latest</code> by
-    default, or <code>node &lt;root&gt;/mcp-server/dist/index.js</code>
-    when <strong>Use local checkout</strong> is on. The wizard calls
-    the Rust planner on every form-state change so the live preview
-    matches exactly what the writer will emit:
-    <code>mcpServers.unity-open-mcp</code> for Cursor / Claude Desktop,
-    <code>mcp.unity-open-mcp</code> for OpenCode, a
-    <code>claude mcp add</code> command for Claude Code, and a copyable
-    snippet for Manual. Unrelated MCP servers are merged through
-    unchanged.
+    Choose the AI client you want to connect. The wizard writes a
+    <code>unity-open-mcp</code> entry to its config — other servers
+    are left untouched.
   </p>
 
   <div class="wiz-field">
-    <div class="wiz-label-row">
-      <span class="wiz-label">MCP client</span>
-      <input
-        type="search"
-        class="wiz-input wiz-input-small wiz-client-search"
-        placeholder="Filter clients…"
-        value={state.mcpClientSearch}
-        oninput={(e) =>
-          handlers.setMcpClientSearch((e.currentTarget as HTMLInputElement).value)}
-        aria-label="Filter MCP clients"
-      />
-    </div>
+    <span class="wiz-label">MCP client</span>
     <div role="radiogroup" aria-label="MCP client">
-      {#each grouped as group (group.category)}
+      {#if popularList.length > 0}
         <div class="wiz-client-group">
-          <p class="wiz-client-group-label">{CLIENT_CATEGORY_LABELS[group.category]}</p>
+          <p class="wiz-client-group-label">Popular</p>
           <div class="wiz-radio-grid">
-            {#each group.items as opt (opt.id)}
+            {#each popularList as opt (opt.id)}
               <label class="wiz-radio" title={opt.sharedWith}>
                 <input
                   type="radio"
@@ -94,7 +92,48 @@
             {/each}
           </div>
         </div>
-      {/each}
+      {/if}
+
+      <details class="wiz-advanced wiz-client-all">
+        <summary>Show all clients</summary>
+        <div class="wiz-label-row">
+          <input
+            type="search"
+            class="wiz-input wiz-input-small wiz-client-search"
+            placeholder="Filter clients…"
+            value={state.mcpClientSearch}
+            oninput={(e) =>
+              handlers.setMcpClientSearch((e.currentTarget as HTMLInputElement).value)}
+            aria-label="Filter MCP clients"
+          />
+        </div>
+        {#each grouped as group (group.category)}
+          <div class="wiz-client-group">
+            <p class="wiz-client-group-label">{CLIENT_CATEGORY_LABELS[group.category]}</p>
+            <div class="wiz-radio-grid">
+              {#each group.items as opt (opt.id)}
+                <label class="wiz-radio" title={opt.sharedWith}>
+                  <input
+                    type="radio"
+                    name="wiz-mcp-client"
+                    value={opt.id}
+                    checked={state.mcpClient === opt.id}
+                    onchange={() => handlers.setMcpClient(opt.id)}
+                  />
+                  <span>
+                    <strong>{opt.label}</strong>
+                    <small>
+                      {#if opt.kind === "file"}writes config file{/if}
+                      {#if opt.kind === "cli"}CLI command only{/if}
+                      {#if opt.kind === "clipboard"}copy JSON to clipboard{/if}
+                    </small>
+                  </span>
+                </label>
+              {/each}
+            </div>
+          </div>
+        {/each}
+      </details>
     </div>
   </div>
 
@@ -114,23 +153,26 @@
     </div>
   {/if}
 
-  <div class="wiz-field">
-    <label class="wiz-label" for="wiz-bridge-port">Bridge HTTP port</label>
-    <input
-      id="wiz-bridge-port"
-      type="text"
-      class="wiz-input wiz-input-small"
-      placeholder="(auto)"
-      value={state.bridgePort}
-      oninput={(e) => handlers.setBridgePort((e.currentTarget as HTMLInputElement).value)}
-    />
-    {#if !state.bridgePort.trim() && state.resolvedBridgePort != null}
-      <p class="wiz-hint">
-        Auto-derived from project path: <code>{state.resolvedBridgePort}</code>.
-        Override only if you pin a specific port.
-      </p>
-    {/if}
-  </div>
+  <details class="wiz-advanced">
+    <summary>Advanced</summary>
+    <div class="wiz-field">
+      <label class="wiz-label" for="wiz-bridge-port">Bridge HTTP port</label>
+      <input
+        id="wiz-bridge-port"
+        type="text"
+        class="wiz-input wiz-input-small"
+        placeholder="(auto)"
+        value={state.bridgePort}
+        oninput={(e) => handlers.setBridgePort((e.currentTarget as HTMLInputElement).value)}
+      />
+      {#if !state.bridgePort.trim() && state.resolvedBridgePort != null}
+        <p class="wiz-hint">
+          Auto-derived from project path: <code>{state.resolvedBridgePort}</code>.
+          Override only if you pin a specific port.
+        </p>
+      {/if}
+    </div>
+  </details>
 
   <div class="wiz-field">
     <span class="wiz-label">
