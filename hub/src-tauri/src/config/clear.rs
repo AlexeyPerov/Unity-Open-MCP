@@ -27,6 +27,7 @@ use super::mcp_config::{
     ClientScope, McpClientId, MCP_SERVER_KEY,
 };
 use super::wizard::{claude_desktop_config_path, BRIDGE_PACKAGE_ID, VERIFY_PACKAGE_ID};
+use crate::config::constants::PROJECT_PATH_ENV_VAR;
 
 /// Every client-relative skill path the wizard can copy. Mirrors
 /// `skills/client-paths.json` so clear runs without a toolkit root;
@@ -238,7 +239,7 @@ fn entry_matches_project(entry: &Value, project_path: &str) -> bool {
         .get("env")
         .or_else(|| entry.get("environment"))
         .and_then(|e| e.as_object());
-    match env.and_then(|e| e.get("UNITY_PROJECT_PATH")).and_then(Value::as_str) {
+    match env.and_then(|e| e.get(PROJECT_PATH_ENV_VAR)).and_then(Value::as_str) {
         Some(p) => same_path(p, project_path),
         None => true,
     }
@@ -554,7 +555,7 @@ fn toml_entry_matches_project(entry: &toml::Value, project_path: &str) -> bool {
     let Some(env) = entry.get("env").and_then(|e| e.as_table()) else {
         return true;
     };
-    match env.get("UNITY_PROJECT_PATH").and_then(|v| v.as_str()) {
+    match env.get(PROJECT_PATH_ENV_VAR).and_then(|v| v.as_str()) {
         Some(p) => same_path(p, project_path),
         None => true,
     }

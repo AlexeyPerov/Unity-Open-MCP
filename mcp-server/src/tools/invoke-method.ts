@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { BRIDGE_DEFAULT_TIMEOUT_MS } from "../constants.js";
 
 // M16 Plan 6 — invoke_method enhanced in place with better overload + generic-
 // arg resolution. Two new inputs:
@@ -91,7 +92,7 @@ export const invokeMethod: Tool = {
       },
       timeout_ms: {
         type: "integer",
-        default: 30000,
+        default: BRIDGE_DEFAULT_TIMEOUT_MS,
       },
       max_depth: {
         type: "integer",

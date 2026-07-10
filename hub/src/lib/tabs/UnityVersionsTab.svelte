@@ -293,9 +293,15 @@
     releasesContext = null;
   }
 
+  // Unity release-notes prefix. The Hub frontend uses the dashed form
+  // (`.` → `-`) which is the canonical Unity URL shape; the mcp-server and
+  // Rust backend build the same prefix from RELEASE_NOTES_URL_PREFIX in
+  // their respective constants modules.
+  const RELEASE_NOTES_URL_PREFIX = "https://unity.com/releases/editor/whats-new/";
+
   function releaseNotesUrl(version: string): string {
     const dashed = version.replace(/\./g, "-");
-    return `https://unity.com/releases/editor/whats-new/${dashed}`;
+    return `${RELEASE_NOTES_URL_PREFIX}${dashed}`;
   }
 
   function formatInstallDate(iso: string | undefined): string {

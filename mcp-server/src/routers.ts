@@ -14,6 +14,11 @@ import { ResourceRouter } from "./resource-router.js";
 import { BridgeEventStream } from "./event-stream.js";
 import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
 import { ToolSessionState } from "./tool-session-state.js";
+import {
+  PORT_ENV_VAR,
+  PROJECT_PATH_ENV_VAR,
+  bridgeBaseUrl,
+} from "./constants.js";
 
 export interface ResolvedEnv {
   projectPath: string;
@@ -40,15 +45,15 @@ export function resolveEnv(
   projectPathOverride?: string,
   portOverride?: number,
 ): ResolvedEnv {
-  const projectPath = projectPathOverride ?? process.env.UNITY_PROJECT_PATH;
+  const projectPath = projectPathOverride ?? process.env[PROJECT_PATH_ENV_VAR];
   if (!projectPath) {
     throw new ResolveEnvError(
-      "UNITY_PROJECT_PATH environment variable is required " +
+      `${PROJECT_PATH_ENV_VAR} environment variable is required ` +
         "(or pass --project <path>).",
     );
   }
 
-  const rawEnvPort = process.env.UNITY_OPEN_MCP_BRIDGE_PORT;
+  const rawEnvPort = process.env[PORT_ENV_VAR];
   const envPort = rawEnvPort ? parseInt(rawEnvPort, 10) : undefined;
   const effectiveEnvPort =
     rawEnvPort && Number.isInteger(envPort) ? envPort : undefined;
@@ -93,7 +98,7 @@ export function buildRouterStack(env: ResolvedEnv): RouterStack {
   const live = new LiveClient(env.port, pingCache, env.authToken, env.projectPath, undefined, env.envPort);
   const batch = new BatchSpawn();
   const eventStream = new BridgeEventStream(
-    `http://127.0.0.1:${env.port}`,
+    bridgeBaseUrl(env.port),
     undefined,
     env.authToken,
   );

@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { STATUS_DIR_NAME } from "./constants.js";
 
 export const PORT_RANGE_START = 20000;
 export const PORT_RANGE_SIZE = 10000;
@@ -95,7 +96,7 @@ export function computePort(projectPath: string): number {
  * `test-pending-*.json` / `test-results-*.json` scratch files.
  */
 export function statusDir(): string {
-  return join(homedir(), ".unity-open-mcp");
+  return join(homedir(), STATUS_DIR_NAME);
 }
 
 /** Directory holding one lock file per running bridge instance. */

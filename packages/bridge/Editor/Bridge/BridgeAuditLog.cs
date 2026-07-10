@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using UnityEngine;
+using UnityOpenMcpBridge.Config;
 
 namespace UnityOpenMcpBridge
 {
@@ -27,7 +28,7 @@ namespace UnityOpenMcpBridge
                 if (!string.IsNullOrEmpty(AuditDirOverride)) return AuditDirOverride;
                 return Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".unity-open-mcp",
+                    BridgeConstants.SettingsDirName,
                     "audit");
             }
         }

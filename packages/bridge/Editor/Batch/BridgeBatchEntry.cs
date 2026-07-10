@@ -2,14 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
+using UnityOpenMcpBridge.Config;
 using UnityOpenMcpBridge.MetaTools;
 
 namespace UnityOpenMcpBridge.Batch
 {
     public static class BridgeBatchEntry
     {
-        public const string OutputBegin = "---UNITY_OPEN_MCP_VERIFY_JSON_BEGIN---";
-        public const string OutputEnd = "---UNITY_OPEN_MCP_VERIFY_JSON_END---";
+        // Sourced from BridgeConstants so the bridge, the mcp-server, and the
+        // verify entry points share one definition (parity-tested).
+        public const string OutputBegin = BridgeConstants.VerifyJsonBegin;
+        public const string OutputEnd = BridgeConstants.VerifyJsonEnd;
 
         public const int ExitPass = 0;
         public const int ExitFail = 1;

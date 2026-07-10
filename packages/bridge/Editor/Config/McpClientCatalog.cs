@@ -197,8 +197,11 @@ namespace UnityOpenMcpBridge.Config
                 invocation.Append(' ').Append(a);
             }
             return string.Format(
-                "claude mcp add {0} --env UNITY_PROJECT_PATH={1} --env UNITY_OPEN_MCP_BRIDGE_PORT={2} -- {3}",
-                ServerKey, unityProjectPath, bridgePort, invocation);
+                "claude mcp add {0} --env {1}={2} --env {3}={4} -- {5}",
+                ServerKey,
+                BridgeConstants.ProjectPathEnvVar, unityProjectPath,
+                BridgeConstants.PortEnvVar, bridgePort,
+                invocation);
         }
 
         /// <summary>
@@ -224,8 +227,8 @@ namespace UnityOpenMcpBridge.Config
         {
             return new Dictionary<string, string>
             {
-                { "UNITY_PROJECT_PATH", project },
-                { "UNITY_OPEN_MCP_BRIDGE_PORT", port.ToString() },
+                { BridgeConstants.ProjectPathEnvVar, project },
+                { BridgeConstants.PortEnvVar, port.ToString() },
             };
         }
 
@@ -357,8 +360,8 @@ namespace UnityOpenMcpBridge.Config
             }
             sb.Append("]\n\n");
             sb.Append("[mcp_servers.").Append(ServerKey).Append(".env]\n");
-            sb.Append("UNITY_PROJECT_PATH = ").Append(TomlString(project)).Append('\n');
-            sb.Append("UNITY_OPEN_MCP_BRIDGE_PORT = ").Append(TomlString(port.ToString())).Append('\n');
+            sb.Append(BridgeConstants.ProjectPathEnvVar).Append(" = ").Append(TomlString(project)).Append('\n');
+            sb.Append(BridgeConstants.PortEnvVar).Append(" = ").Append(TomlString(port.ToString())).Append('\n');
             return sb.ToString();
         }
 

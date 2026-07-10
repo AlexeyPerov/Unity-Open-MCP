@@ -44,6 +44,9 @@ use serde_json::{json, Map, Value};
 use super::wizard::claude_desktop_config_path;
 use crate::config::ai_toolkit::derived_mcp_index_path;
 use crate::config::bridge_port::{parse_override, resolve_port};
+use crate::config::constants::{
+    NPM_PACKAGE_LATEST, PORT_ENV_VAR, PROJECT_PATH_ENV_VAR, UNITY_PATH_ENV_VAR,
+};
 
 /// Hard deadline for the `node`-based skill generation spawn. The
 /// generate-skill tool loads the MCP server, reads the project, and
@@ -808,7 +811,7 @@ fn launch_command_parts(mode: McpLaunchMode, resolved_index: &str) -> (String, V
     match mode {
         McpLaunchMode::Npx => (
             "npx".to_string(),
-            vec!["-y".to_string(), "unity-open-mcp@latest".to_string()],
+            vec!["-y".to_string(), NPM_PACKAGE_LATEST.to_string()],
         ),
         McpLaunchMode::Global => ("unity-open-mcp".to_string(), Vec::new()),
         McpLaunchMode::Local | McpLaunchMode::LocalOverride => (
@@ -911,15 +914,15 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
 fn build_env_map(params: &McpConfigParams) -> Map<String, Value> {
     let mut env = Map::new();
     env.insert(
-        "UNITY_PROJECT_PATH".to_string(),
+        PROJECT_PATH_ENV_VAR.to_string(),
         Value::String(params.unity_project_path.clone()),
     );
     let port = resolve_port(&params.unity_project_path, parse_override(&params.bridge_port))
         .to_string();
-    env.insert("UNITY_OPEN_MCP_BRIDGE_PORT".to_string(), Value::String(port));
+    env.insert(PORT_ENV_VAR.to_string(), Value::String(port));
     if params.include_unity_path && !params.unity_path.trim().is_empty() {
         env.insert(
-            "UNITY_PATH".to_string(),
+            UNITY_PATH_ENV_VAR.to_string(),
             Value::String(params.unity_path.trim().to_string()),
         );
     }
@@ -1135,7 +1138,7 @@ pub fn claude_mcp_add_command(
 ) -> String {
     let port = resolve_port(unity_project_path, parse_override(bridge_port)).to_string();
     let invocation = match launch_mode {
-        McpLaunchMode::Npx => "npx -y unity-open-mcp@latest".to_string(),
+        McpLaunchMode::Npx => format!("npx -y {}", NPM_PACKAGE_LATEST),
         McpLaunchMode::Global => "unity-open-mcp".to_string(),
         McpLaunchMode::Local | McpLaunchMode::LocalOverride => {
             format!("node {}", resolved_index)

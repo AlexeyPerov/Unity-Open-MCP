@@ -5,11 +5,12 @@ import type { Router } from "./router.js";
 import { resolveUnityPath, scannedHubRoots } from "./unity-install-discovery.js";
 import { readInstanceLock } from "./instance-discovery.js";
 import { makeErrorResult } from "./results.js";
+import { VERIFY_JSON_BEGIN, VERIFY_JSON_END } from "./constants.js";
 
 const VERIFY_EXECUTE_METHOD = "UnityOpenMcpVerify.Batch.VerifyBatchEntry.Run";
 const BRIDGE_EXECUTE_METHOD = "UnityOpenMcpBridge.Batch.BridgeBatchEntry.Run";
-const OUTPUT_BEGIN = "---UNITY_OPEN_MCP_VERIFY_JSON_BEGIN---";
-const OUTPUT_END = "---UNITY_OPEN_MCP_VERIFY_JSON_END---";
+const OUTPUT_BEGIN = VERIFY_JSON_BEGIN;
+const OUTPUT_END = VERIFY_JSON_END;
 
 const DEFAULT_BATCH_TIMEOUT_MS = 600_000;
 

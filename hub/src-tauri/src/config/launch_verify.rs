@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::config::commands::AppState;
+use crate::config::constants::PORT_ENV_VAR;
 use crate::config::env_vars;
 use crate::config::launch::{read_project_version, resolve_install_for_version};
 use crate::config::launch_log::{self, LaunchOutcome};
@@ -401,12 +402,12 @@ fn launch_for_verify_inner(
     // `packages/bridge.md` §HTTP API) and as an env var (the
     // bridge package reads the env var first). The arg is
     // additive — we never strip user-provided args above.
-    let port_arg = format!("-UNITY_OPEN_MCP_BRIDGE_PORT={}", effective_port);
+    let port_arg = format!("-{}={}", PORT_ENV_VAR, effective_port);
     args.push(port_arg.clone());
     let mut command = std::process::Command::new(&executable);
     command.args(&args);
     env_vars::apply_to_command(&mut command, &project.env_vars);
-    command.env("UNITY_OPEN_MCP_BRIDGE_PORT", effective_port.to_string());
+    command.env(PORT_ENV_VAR, effective_port.to_string());
     let child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {

@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
+using UnityOpenMcpBridge.Config;
 using Object = UnityEngine.Object;
 
 // Exposes TestRunnerService internals (BuildResultsJson, Cap, TestResultInfo)
@@ -32,7 +33,7 @@ namespace UnityOpenMcpBridge.TestRunner
 
         internal static readonly string StatusDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".unity-open-mcp");
+            BridgeConstants.SettingsDirName);
 
         internal static string ResultsFilePath(string runId) =>
             Path.Combine(StatusDir, $"test-results-{runId}.json");

@@ -17,6 +17,11 @@ import { PingCache } from "./ping-cache.js";
 import { ResourceRouter } from "./resource-router.js";
 import { withSchemaDefaults } from "./schema-defaults.js";
 import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
+import {
+  PORT_ENV_VAR,
+  PROJECT_PATH_ENV_VAR,
+  bridgeBaseUrl,
+} from "./constants.js";
 // M23 Plan 3 — per-request routing (port override + agent identity).
 import { extractRouting } from "./agent-identity.js";
 import { BridgeEventStream } from "./event-stream.js";
@@ -50,14 +55,14 @@ const TOOL_BY_NAME = new Map<string, Tool>(
  * The resolved port is logged so users can see which bridge was picked.
  */
 function getEnv(): { projectPath: string; port: number; authToken?: string; envPort?: number } {
-  const projectPath = process.env.UNITY_PROJECT_PATH;
+  const projectPath = process.env[PROJECT_PATH_ENV_VAR];
   if (!projectPath) {
     console.error(
-      "unity-open-mcp: UNITY_PROJECT_PATH environment variable is required.",
+      `unity-open-mcp: ${PROJECT_PATH_ENV_VAR} environment variable is required.`,
     );
     process.exit(1);
   }
-  const rawEnvPort = process.env.UNITY_OPEN_MCP_BRIDGE_PORT;
+  const rawEnvPort = process.env[PORT_ENV_VAR];
   const envPort = rawEnvPort ? parseInt(rawEnvPort, 10) : undefined;
   const resolvedEnvPort =
     rawEnvPort && Number.isInteger(envPort) ? envPort : undefined;
@@ -114,7 +119,7 @@ export function createServer(
   // amortizes the connection and lets every `unity_senses_pull_events` call
   // share the same buffered queue.
   const eventStream = new BridgeEventStream(
-    `http://127.0.0.1:${port}`,
+    bridgeBaseUrl(port),
     undefined,
     authToken,
   );

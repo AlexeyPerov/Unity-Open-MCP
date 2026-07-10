@@ -13,6 +13,12 @@ import {
 } from "./dialog-dismiss.js";
 import { readInstanceLock, classifyInstance, lockPath, isPidAlive, statusDir, hasRecentPendingTestRun } from "./instance-discovery.js";
 import type { InstanceClassification, InstanceLock } from "./instance-discovery.js";
+import {
+  bridgeBaseUrl,
+  BRIDGE_DEFAULT_TIMEOUT_MS,
+  PORT_ENV_VAR,
+  PROJECT_PATH_ENV_VAR,
+} from "./constants.js";
 import { findUnityForProject } from "./running-unity.js";
 import { makeErrorResult } from "./results.js";
 import {
@@ -43,17 +49,9 @@ import { PROCESS_AGENT_ID } from "./agent-identity.js";
 
 const PING_TIMEOUT_MS = 5_000;
 
-// The bridge's default per-tool wait before IT gives up and returns a timeout
-// envelope (packages/bridge/Editor/Bridge/BridgeRequestBody.cs
-// DefaultTimeoutMs). The client fetch timeout must never preempt this — if the
-// client aborts first it re-POSTs while the bridge is still processing the
-// original Work, manufacturing duplicate side-effects (specs/feedback.md entry
-// 4B/4A). postTool floors its fetch timeout at BRIDGE_DEFAULT_TIMEOUT_MS +
-// slack so a small/absent timeout_ms can't make the client give up before the
-// bridge. Kept as a literal here (not imported from the C# side) because the
-// bridge assembly isn't readable from the TS server; the cross-reference above
-// is the contract — bump both together.
-const BRIDGE_DEFAULT_TIMEOUT_MS = 30_000;
+// BRIDGE_DEFAULT_TIMEOUT_MS now lives in constants.ts (single source shared
+// with the bridge C# parity test). The client fetch timeout must never
+// preempt the bridge's default wait — see constants.ts for the contract.
 
 const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_validate_edit",
@@ -166,9 +164,9 @@ const OFFLINE_HINT =
   "Ensure the Unity Editor is open with the Agent Bridge running. " +
   "The bridge port is per-project (20000 + sha256(projectPath) % 10000), not " +
   "fixed — if Unity is open the MCP server may be aimed at the wrong port. " +
-  "Check the instance lock at ~/.unity-open-mcp/instances/<sha256(projectPath)>.json " +
-  "for the live port/pid, or set UNITY_OPEN_MCP_BRIDGE_PORT. If Unity is not " +
-  "open, launch it (or set UNITY_PATH + UNITY_PROJECT_PATH for batch fallback).";
+  `Check the instance lock at ~/.unity-open-mcp/instances/<sha256(projectPath)>.json ` +
+  `for the live port/pid, or set ${PORT_ENV_VAR}. If Unity is not ` +
+  `open, launch it (or set UNITY_PATH + ${PROJECT_PATH_ENV_VAR} for batch fallback).`;
 
 /**
  * Build a per-instance offline hint that names THIS project's lock file path
@@ -246,7 +244,7 @@ export class LiveClient implements Router {
     agentId: string = PROCESS_AGENT_ID,
     envPort?: number,
   ) {
-    this.baseUrl = `http://127.0.0.1:${port}`;
+    this.baseUrl = bridgeBaseUrl(port);
     this.pingCache = pingCache;
     this.authToken = authToken;
     this.projectPath = projectPath;
@@ -1025,10 +1023,10 @@ export class LiveClient implements Router {
     const portChanged =
       typeof lock.port === "number" &&
       lock.port > 0 &&
-      this.baseUrl !== `http://127.0.0.1:${lock.port}`;
+      this.baseUrl !== bridgeBaseUrl(lock.port);
     const tokenChanged = lock.authToken !== this.authToken;
     if (!portChanged && !tokenChanged) return false;
-    if (portChanged) this.baseUrl = `http://127.0.0.1:${lock.port}`;
+    if (portChanged) this.baseUrl = bridgeBaseUrl(lock.port);
     if (tokenChanged) this.authToken = lock.authToken;
     return true;
   }

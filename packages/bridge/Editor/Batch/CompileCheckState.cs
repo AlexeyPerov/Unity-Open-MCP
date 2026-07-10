@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using UnityOpenMcpBridge.Config;
 using UnityOpenMcpBridge.MetaTools;
 using UnityEditor;
 using UnityEditor.Compilation;
@@ -28,7 +29,7 @@ namespace UnityOpenMcpBridge.Batch
     {
         internal static readonly string StatusDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".unity-open-mcp");
+            BridgeConstants.SettingsDirName);
 
         internal static string PendingFilePath => Path.Combine(StatusDir, "compile-check-pending.json");
 

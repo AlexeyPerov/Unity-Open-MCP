@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using UnityOpenMcpBridge.Config;
 
 namespace UnityOpenMcpBridge
 {
@@ -49,7 +50,7 @@ namespace UnityOpenMcpBridge
                     return InstancesDirOverride;
                 return Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".unity-open-mcp",
+                    BridgeConstants.SettingsDirName,
                     "instances");
             }
         }

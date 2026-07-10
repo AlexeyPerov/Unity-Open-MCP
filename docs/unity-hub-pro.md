@@ -70,7 +70,7 @@ For full setup steps, see [wizard-setup.md](wizard-setup.md).
 Unity Hub Pro ships as pre-built installers — you do **not** need Node, npm, or
 any build toolchain to run it. Grab the latest release for your operating system:
 
-> **Download:** [Unity Hub Pro releases](https://github.com/AlexeyPerov/Unity-AI-Hub/releases)
+> **Download:** [Unity Hub Pro releases](https://github.com/AlexeyPerov/Unity-Open-MCP/releases)
 > — look for the latest **`hub-v*`** tag.
 
 ### macOS

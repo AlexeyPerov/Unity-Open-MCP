@@ -28,8 +28,8 @@ namespace UnityOpenMcpBridge
     [InitializeOnLoad]
     public static class BridgeHttpServer
     {
-        private const string PortEnvVar = "UNITY_OPEN_MCP_BRIDGE_PORT";
-        private const string PortArgPrefix = "-UNITY_OPEN_MCP_BRIDGE_PORT=";
+        private const string PortEnvVar = UnityOpenMcpBridge.Config.BridgeConstants.PortEnvVar;
+        private const string PortArgPrefix = UnityOpenMcpBridge.Config.BridgeConstants.PortArgPrefix;
 
         // Tool classification tables (KnownTools / DirectResponseTools /
         // MutatingTools) live in BridgeToolClassification.cs. Aliased here so the
@@ -1448,7 +1448,7 @@ namespace UnityOpenMcpBridge
                     var instance = entry.GetInstance();
                     var result = entry.Method.Invoke(instance, null);
                     return result?.ToString() ?? "";
-                }, 30000);
+                }, BridgeRequestBody.DefaultTimeoutMs);
 
                 var content = task.Result;
                 var bytes = Encoding.UTF8.GetBytes(content);

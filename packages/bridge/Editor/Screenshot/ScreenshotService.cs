@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using UnityOpenMcpBridge.Config;
 using Object = UnityEngine.Object;
 
 namespace UnityOpenMcpBridge.Screenshot
@@ -18,7 +19,7 @@ namespace UnityOpenMcpBridge.Screenshot
     {
         public static readonly string OutputDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".unity-open-mcp", "screenshots");
+            BridgeConstants.SettingsDirName, "screenshots");
 
         private const TextureFormat CaptureFormat = TextureFormat.RGBA32;
         private const bool CaptureMipChain = false;

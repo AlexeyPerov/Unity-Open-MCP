@@ -13,6 +13,11 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { RouterStack } from "../routers.js";
 import { ALL_TOOLS } from "../tools/index.js";
+import {
+  PORT_ENV_VAR,
+  PROJECT_PATH_ENV_VAR,
+  bridgeBaseUrl,
+} from "../constants.js";
 import { withSchemaDefaults } from "../schema-defaults.js";
 import {
   readInstanceLock,
@@ -68,7 +73,7 @@ export async function runPingCommand(
   const poll = await singlePing(stack.live, opts.timeoutMs);
   const json = {
     command: "ping",
-    baseUrl: `http://127.0.0.1:${stack.port}`,
+    baseUrl: bridgeBaseUrl(stack.port),
     status: poll.status,
     ready: poll.status === "ready",
     body: poll.body,
@@ -86,7 +91,7 @@ export async function runPingCommand(
     poll.status === "compiling"
       ? "Bridge is reachable but Unity is compiling."
       : poll.status === "offline"
-        ? `Bridge is not reachable at http://127.0.0.1:${stack.port}.`
+        ? `Bridge is not reachable at ${bridgeBaseUrl(stack.port)}.`
         : `Ping failed (${poll.status}).`;
   return {
     exitCode: 1,
@@ -98,7 +103,7 @@ export async function runPingCommand(
 
 function formatPingHuman(port: number, body: PingBody): string {
   const lines = [
-    `Bridge: http://127.0.0.1:${port}`,
+    `Bridge: ${bridgeBaseUrl(port)}`,
     `connected: ${body.connected ?? "unknown"}`,
     `compiling: ${body.compiling ?? "unknown"}`,
     `isPlaying: ${body.isPlaying ?? "unknown"}`,
@@ -183,7 +188,7 @@ export async function runStatusCommand(
     command: "status",
     projectPath: stack.projectPath,
     port: stack.port,
-    baseUrl: `http://127.0.0.1:${stack.port}`,
+    baseUrl: bridgeBaseUrl(stack.port),
     authTokenDiscovered: stack.authToken !== undefined,
     instance: {
       lockPath: lockPathOnDisk,
@@ -894,8 +899,8 @@ export function helpText(binName: string): string {
     "",
     "Options:",
     "  --json                        Emit JSON instead of human-readable output (all commands).",
-    "  --project <path>, -P <path>   Unity project path (default: UNITY_PROJECT_PATH).",
-    "  --port <n>, -p <n>            Bridge port override (default: UNITY_OPEN_MCP_BRIDGE_PORT).",
+    `  --project <path>, -P <path>   Unity project path (default: ${PROJECT_PATH_ENV_VAR}).`,
+    `  --port <n>, -p <n>            Bridge port override (default: ${PORT_ENV_VAR}).`,
     "  --timeout-ms <n>              Ping / wait-for-ready timeout in ms.",
     "  --interval-ms <n>             wait-for-ready poll interval in ms.",
     "  --args '<json>'               JSON object of tool args (run-tool).",
@@ -912,8 +917,8 @@ export function helpText(binName: string): string {
     "  --regression-threshold <n>    regression: max allowed error-count increase (default 0).",
     "",
     "Environment:",
-    "  UNITY_PROJECT_PATH             Required for every command.",
-    "  UNITY_OPEN_MCP_BRIDGE_PORT     Optional port override.",
+    `  ${PROJECT_PATH_ENV_VAR.padEnd(30)}Required for every command.`,
+    `  ${PORT_ENV_VAR.padEnd(30)}Optional port override.`,
     "  UNITY_PATH                     Unity Editor executable for batch-only tools.",
     "",
     "Examples:",

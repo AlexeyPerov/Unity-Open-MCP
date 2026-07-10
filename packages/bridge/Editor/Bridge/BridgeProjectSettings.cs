@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityOpenMcpBridge.Config;
 using UnityOpenMcpVerify.Cache;
 
 namespace UnityOpenMcpBridge
@@ -75,7 +76,9 @@ namespace UnityOpenMcpBridge
 
     public static class BridgeProjectSettings
     {
-        private const string SettingsDirName = ".unity-open-mcp";
+        // Sourced from BridgeConstants so every tree (bridge / mcp-server /
+        // hub) reads the same value.
+        private const string SettingsDirName = BridgeConstants.SettingsDirName;
         private const string SettingsFileName = "settings.json";
         private const string TempSuffix = ".tmp";
 

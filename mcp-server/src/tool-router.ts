@@ -20,6 +20,7 @@ import { generateSkill } from "./skill/generate-skill.js";
 import { knownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
+import { PORT_ENV_VAR } from "./constants.js";
 import { findUnityForProject } from "./running-unity.js";
 import {
   listInstalledEditors,
@@ -699,7 +700,7 @@ export class ToolRouter implements Router {
                   "Ensure the Unity Editor is open with the Agent Bridge running. " +
                   "The bridge port is per-project (20000 + sha256(projectPath) % 10000), not fixed — " +
                   `if Unity is open, check the instance lock at ${lockPath(this.projectPath)} ` +
-                  "for the live port/pid, or set UNITY_OPEN_MCP_BRIDGE_PORT.",
+                  `for the live port/pid, or set ${PORT_ENV_VAR}.`,
               },
             }),
           },

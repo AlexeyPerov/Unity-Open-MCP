@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
+using UnityOpenMcpBridge.Config;
 using UnityOpenMcpBridge.UI.Controls;
 using UnityOpenMcpVerify.Cache;
 
@@ -20,11 +21,11 @@ namespace UnityOpenMcpBridge
     /// </summary>
     public partial class UnityOpenMcpBridgeWindow
     {
-        private const string BindAddress = "127.0.0.1";
+        private const string BindAddress = BridgeBindAddress.Loopback;
 
-        // Canonical repo URL — single source for every Info-tab link and any
-        // in-window reference to the project.
-        private const string RepoUrl = "https://github.com/AlexeyPerov/Unity-Open-MCP";
+        // Canonical repo URL — sourced from BridgeConstants so every tree
+        // (bridge / mcp-server / hub) shares one definition.
+        private const string RepoUrl = BridgeConstants.RepoUrl;
 
         // Shared hover-tooltip text for cell values / labels that surface
         // internal bridge concepts. Centralised so wording stays consistent

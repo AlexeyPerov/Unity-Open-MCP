@@ -370,7 +370,7 @@ async function tryDismissWindows(
     const child = execFile(
       "powershell",
       ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_DISMISS_PS_SCRIPT],
-      { timeout: 5000, windowsHide: true },
+      { timeout: DISMISS_SHELL_TIMEOUT_MS, windowsHide: true },
       (err, stdout) => {
         if (err) {
           resolve({ kind: "error", message: err.message });
@@ -603,7 +603,7 @@ async function tryDismissMacOS(
     execFile(
       "osascript",
       ["-e", macosDismissAppleScript(opts)],
-      { timeout: 5000 },
+      { timeout: DISMISS_SHELL_TIMEOUT_MS },
       (err, stdout) => {
         if (err) {
           resolve({ kind: "error", message: err.message });
@@ -630,7 +630,7 @@ function isXdotoolAvailable(): boolean {
   try {
     execFileSync("xdotool", ["--version"], {
       stdio: "ignore",
-      timeout: 2000,
+      timeout: XDOTOOL_PROBE_TIMEOUT_MS,
     });
     xdotoolPresence = true;
   } catch {
@@ -665,7 +665,7 @@ function getUnityPidsLinux(): readonly number[] {
   try {
     const stdout = execFileSync("pgrep", ["-x", "Unity"], {
       stdio: ["ignore", "pipe", "ignore"],
-      timeout: 1000,
+      timeout: LINUX_PROBE_TIMEOUT_MS,
       encoding: "utf8",
     });
     return stdout
@@ -740,7 +740,7 @@ async function tryDismissLinuxX11(
         execFile(
           "xdotool",
           ["search", "--name", regexEscapeForXdotool(fragment)],
-          { timeout: 2000 },
+          { timeout: XDOTOOL_PROBE_TIMEOUT_MS },
           (err, stdout) => {
             if (err || !stdout.trim()) {
               tryNextFragment();
@@ -778,7 +778,7 @@ async function tryDismissLinuxX11(
                   "--clearmodifiers",
                   "Return",
                 ],
-                { timeout: 2000 },
+                { timeout: XDOTOOL_PROBE_TIMEOUT_MS },
                 (activateErr) => {
                   if (activateErr) {
                     resolve({
@@ -820,7 +820,7 @@ function findUnityOwnedWindow(
     execFile(
       "xdotool",
       ["getwindowpid", winId],
-      { timeout: 1000 },
+      { timeout: LINUX_PROBE_TIMEOUT_MS },
       (err, stdout) => {
         if (err) {
           next();
@@ -916,6 +916,17 @@ function isDialogKind(s: string): s is DialogKind {
 export const DEFAULT_DISMISS_TIMEOUT_MS = 30_000;
 /** Default dismiss probe poll interval (1.5s tick). */
 export const DEFAULT_DISMISS_INTERVAL_MS = 1_500;
+
+// Subprocess probe timeouts for the per-platform dismiss backends. These are
+// fire-and-forget shell probes (PowerShell / osascript / xdotool / pgrep);
+// a hung subprocess would stall the dismiss loop, so each gets a tight cap.
+// Centralized here so a per-platform bump is one edit, not seven.
+/** Windows PowerShell + macOS osascript dismiss invocation cap. */
+const DISMISS_SHELL_TIMEOUT_MS = 5_000;
+/** xdotool presence / window-search / key-send probe cap. */
+const XDOTOOL_PROBE_TIMEOUT_MS = 2_000;
+/** Linux process-presence / window-id probe cap (pgrep / getwindowpid). */
+const LINUX_PROBE_TIMEOUT_MS = 1_000;
 
 /**
  * Substring markers that identify a `kind: "error"` outcome as permanent for

@@ -42,6 +42,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::config::paths;
+use crate::config::constants::RELEASE_NOTES_URL_PREFIX;
 
 /// Public download-archive page. Server-renders the full Unity release
 /// catalog as a Next.js RSC payload (see module docs). Used as the live
@@ -148,7 +149,7 @@ pub struct ReleasesResult {
 pub const CACHE_TTL_SECONDS: u64 = 60 * 60;
 
 fn release_notes_url(version: &str) -> String {
-    format!("https://unity.com/releases/editor/whats-new/{}", version)
+    format!("{}{}", RELEASE_NOTES_URL_PREFIX, version)
 }
 
 // ── Snapshot (offline fallback) ────────────────────────────────────

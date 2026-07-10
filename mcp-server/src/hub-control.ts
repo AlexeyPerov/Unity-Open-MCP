@@ -32,6 +32,11 @@ import {
   scannedHubRoots,
   type UnityInstall,
 } from "./unity-install-discovery.js";
+import {
+  UNITY_LTS_PREFIXES,
+  ARCHIVE_URL,
+  RELEASE_NOTES_URL_PREFIX,
+} from "./constants.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -201,12 +206,9 @@ export function releaseTypeFor(version: string): string {
     case "f": {
       const lower = version.toLowerCase();
       // Known Unity LTS lines (min supported by the packages is 2022.3 LTS).
-      const isKnownLts =
-        lower.startsWith("6000.0") ||
-        lower.startsWith("2022.3") ||
-        lower.startsWith("2021.3") ||
-        lower.startsWith("2020.3") ||
-        lower.startsWith("2019.4");
+      const isKnownLts = UNITY_LTS_PREFIXES.some((p) =>
+        lower.startsWith(p),
+      );
       return isKnownLts ? "LTS" : "TECH";
     }
     default:
@@ -422,7 +424,7 @@ export function normalizeReleaseDate(raw?: string | null): string | null {
 }
 
 function releaseNotesUrl(version: string): string {
-  return `https://unity.com/releases/editor/whats-new/${version}`;
+  return `${RELEASE_NOTES_URL_PREFIX}${version}`;
 }
 
 /**
@@ -800,8 +802,11 @@ function defaultArchiveFetcher(url: string): Promise<string> {
   });
 }
 
-/** Public archive URL — the same source the Hub launcher fetches. */
-export const ARCHIVE_URL = "https://unity.com/releases/editor/archive";
+/**
+ * Public archive URL — re-exported from constants.ts so existing callers
+ * keep their import unchanged. The same source the Hub launcher fetches.
+ */
+export { ARCHIVE_URL };
 
 /**
  * Fetch Unity's public download-archive page and parse the release catalog.
