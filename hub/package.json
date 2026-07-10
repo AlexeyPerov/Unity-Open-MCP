@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "test": "node --test --experimental-strip-types --no-warnings \"src/lib/**/*.test.ts\"",
+    "test": "node --import ./src/lib/state/_register-test-env.mjs --test --experimental-strip-types --no-warnings \"src/lib/**/*.test.ts\"",
     "tauri": "tauri"
   },
   "license": "MIT",
