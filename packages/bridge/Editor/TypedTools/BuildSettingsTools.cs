@@ -644,7 +644,7 @@ namespace UnityOpenMcpBridge.TypedTools
                         continue;
                     }
                     // value may be a string / number / boolean / null. We read
-                    // it raw so the per-key switch can parse it appropriately.
+                    // it raw so the registry setter can parse it appropriately.
                     var valueRaw = JsonBody.GetRawValue(raw, "value");
                     var warn = ApplyPlayerSetting(key, valueRaw);
                     if (warn != null) warnings.Add(warn);
@@ -954,47 +954,45 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Apply one TimeManager patch to the SerializedObject. Returns null on
-        // success, a warning string on failure. captureFramerate is a runtime-
-        // only Time value (not serialized in TimeManager.asset) — it is applied
-        // via the Time static API directly.
+        // success, a warning string on failure. The per-key mapping lives in
+        // TimeSetters (one delegate per key, aliases registered explicitly).
+        // captureFramerate is a runtime-only Time value (not serialized in
+        // TimeManager.asset) — its setter ignores the SerializedObject and
+        // applies via the Time static API directly.
         private static string ApplyTimeSetting(SerializedObject so, string key, string valueRaw)
         {
-            // captureFramerate is a runtime Time value, not a TimeManager.asset
-            // field — apply it via the static API and return.
-            if (key == "captureFramerate")
+            if (TimeSetters.TryGetValue(key, out var setter))
             {
-                try { Time.captureFramerate = AsInt(valueRaw); return null; }
+                try { return setter(so, valueRaw); }
                 catch (Exception e) { return $"Could not apply time setting '{key}': {e.Message}"; }
             }
+            return $"Unknown time setting key: '{key}'. Supported: fixedDeltaTime, timeScale, maximumDeltaTime, captureFramerate.";
+        }
 
-            // TimeManager.asset uses friendly property names matching the
-            // Project Settings > Time panel.
-            string propName;
-            switch (key)
+        // key → (SerializedObject, valueRaw) → null/warning. Float fields share
+        // SetTimeFloat; captureFramerate ignores the SerializedObject.
+        private delegate string TimeSetter(SerializedObject so, string valueRaw);
+
+        private static readonly Dictionary<string, TimeSetter> TimeSetters =
+            new Dictionary<string, TimeSetter>(StringComparer.Ordinal)
             {
-                case "fixedDeltaTime":
-                case "Fixed Timestep":
-                    propName = "Fixed Timestep"; break;
-                case "timeScale":
-                case "Time Scale":
-                    propName = "Time Scale"; break;
-                case "maximumDeltaTime":
-                case "Maximum Allowed Timestep":
-                    propName = "Maximum Allowed Timestep"; break;
-                default:
-                    return $"Unknown time setting key: '{key}'. Supported: fixedDeltaTime, timeScale, maximumDeltaTime, captureFramerate.";
-            }
-            try
-            {
-                var prop = so.FindProperty(propName);
-                if (prop == null) return $"TimeManager property '{propName}' not found on this Unity version.";
-                prop.floatValue = AsFloat(valueRaw);
-                return null;
-            }
-            catch (Exception e)
-            {
-                return $"Could not apply time setting '{key}': {e.Message}";
-            }
+                ["fixedDeltaTime"]              = (so, v) => SetTimeFloat(so, "Fixed Timestep", v),
+                ["Fixed Timestep"]              = (so, v) => SetTimeFloat(so, "Fixed Timestep", v),
+                ["timeScale"]                   = (so, v) => SetTimeFloat(so, "Time Scale", v),
+                ["Time Scale"]                  = (so, v) => SetTimeFloat(so, "Time Scale", v),
+                ["maximumDeltaTime"]            = (so, v) => SetTimeFloat(so, "Maximum Allowed Timestep", v),
+                ["Maximum Allowed Timestep"]    = (so, v) => SetTimeFloat(so, "Maximum Allowed Timestep", v),
+                ["captureFramerate"]            = (so, v) => { Time.captureFramerate = AsInt(v); return null; },
+            };
+
+        // Write a TimeManager float property. Returns null on success, a warning
+        // when the property is absent on this Unity version.
+        private static string SetTimeFloat(SerializedObject so, string propName, string valueRaw)
+        {
+            var prop = so.FindProperty(propName);
+            if (prop == null) return $"TimeManager property '{propName}' not found on this Unity version.";
+            prop.floatValue = AsFloat(valueRaw);
+            return null;
         }
 
         // Load the TimeManager.asset (ProjectSettings). Returns null when absent.
@@ -1067,196 +1065,189 @@ namespace UnityOpenMcpBridge.TypedTools
             }
         }
 
-        // Returns null on success, an error/warning string on failure.
+        // Returns null on success, an error/warning string on failure. The
+        // per-key mapping lives in PlayerSetters (one delegate per key).
         private static string ApplyPlayerSetting(string key, string valueRaw)
         {
-            try
+            if (PlayerSetters.TryGetValue(key, out var setter))
             {
-                switch (key)
-                {
-                    case "companyName":
-                        PlayerSettings.companyName = AsString(valueRaw);
-                        return null;
-                    case "productName":
-                        PlayerSettings.productName = AsString(valueRaw);
-                        return null;
-                    case "bundleVersion":
-                        PlayerSettings.bundleVersion = AsString(valueRaw);
-                        return null;
-                    case "runInBackground":
-                        PlayerSettings.runInBackground = AsBool(valueRaw);
-                        return null;
-                    case "defaultIsNativeResolution":
-                        PlayerSettings.defaultIsNativeResolution = AsBool(valueRaw);
-                        return null;
-                    case "defaultScreenWidth":
-                        PlayerSettings.defaultScreenWidth = AsInt(valueRaw);
-                        return null;
-                    case "defaultScreenHeight":
-                        PlayerSettings.defaultScreenHeight = AsInt(valueRaw);
-                        return null;
-                    case "colorSpace":
-                        if (Enum.TryParse<ColorSpace>(AsString(valueRaw), true, out var cs))
-                        {
-                            PlayerSettings.colorSpace = cs;
-                            return null;
-                        }
-                        return $"colorSpace value '{valueRaw}' did not parse to a ColorSpace.";
-                    case "activeInputHandler":
-                    case "activeInputHandling":
-                    case "inputHandling":
-                        var parsed = ParseActiveInputHandler(valueRaw, out var inputErr);
-                        if (inputErr != null) return inputErr;
-                        WriteSerializedPlayerInt("activeInputHandler", parsed);
-                        return null;
-                    default:
-                        return $"Unknown player setting key: '{key}'.";
-                }
+                try { return setter(valueRaw); }
+                catch (Exception e) { return $"Could not apply player setting '{key}': {e.Message}"; }
             }
-            catch (Exception e)
+            return $"Unknown player setting key: '{key}'.";
+        }
+
+        // key → valueRaw → null/warning. One-line registration per key;
+        // aliases (activeInputHandler / activeInputHandling / inputHandling)
+        // share the same handler.
+        private delegate string PlayerSetter(string valueRaw);
+
+        private static string SetPlayerActiveInputHandler(string valueRaw)
+        {
+            var parsed = ParseActiveInputHandler(valueRaw, out var inputErr);
+            if (inputErr != null) return inputErr;
+            WriteSerializedPlayerInt("activeInputHandler", parsed);
+            return null;
+        }
+
+        private static readonly Dictionary<string, PlayerSetter> PlayerSetters =
+            new Dictionary<string, PlayerSetter>(StringComparer.Ordinal)
             {
-                return $"Could not apply player setting '{key}': {e.Message}";
+                ["companyName"]                = v => { PlayerSettings.companyName = AsString(v); return null; },
+                ["productName"]                = v => { PlayerSettings.productName = AsString(v); return null; },
+                ["bundleVersion"]              = v => { PlayerSettings.bundleVersion = AsString(v); return null; },
+                ["runInBackground"]            = v => { PlayerSettings.runInBackground = AsBool(v); return null; },
+                ["defaultIsNativeResolution"]  = v => { PlayerSettings.defaultIsNativeResolution = AsBool(v); return null; },
+                ["defaultScreenWidth"]         = v => { PlayerSettings.defaultScreenWidth = AsInt(v); return null; },
+                ["defaultScreenHeight"]        = v => { PlayerSettings.defaultScreenHeight = AsInt(v); return null; },
+                ["colorSpace"]                 = SetPlayerColorSpace,
+                ["activeInputHandler"]         = SetPlayerActiveInputHandler,
+                ["activeInputHandling"]        = SetPlayerActiveInputHandler,
+                ["inputHandling"]              = SetPlayerActiveInputHandler,
+            };
+
+        private static string SetPlayerColorSpace(string valueRaw)
+        {
+            if (Enum.TryParse<ColorSpace>(AsString(valueRaw), true, out var cs))
+            {
+                PlayerSettings.colorSpace = cs;
+                return null;
             }
+            return $"colorSpace value '{valueRaw}' did not parse to a ColorSpace.";
         }
 
         private static string ApplyQualitySetting(string key, string valueRaw)
         {
-            try
+            if (QualitySetters.TryGetValue(key, out var setter))
             {
-                switch (key)
-                {
-                    case "level":
-                        QualitySettings.SetQualityLevel(AsInt(valueRaw));
-                        return null;
-                    case "shadowDistance":
-                        QualitySettings.shadowDistance = AsFloat(valueRaw);
-                        return null;
-                    case "shadowCascades":
-                        QualitySettings.shadowCascades = AsInt(valueRaw);
-                        return null;
-                    case "antiAliasing":
-                        QualitySettings.antiAliasing = AsInt(valueRaw);
-                        return null;
-                    case "vSyncCount":
-                        QualitySettings.vSyncCount = AsInt(valueRaw);
-                        return null;
-                    case "pixelLightCount":
-                        QualitySettings.pixelLightCount = AsInt(valueRaw);
-                        return null;
-                    default:
-                        return $"Unknown quality setting key: '{key}'.";
-                }
+                try { return setter(valueRaw); }
+                catch (Exception e) { return $"Could not apply quality setting '{key}': {e.Message}"; }
             }
-            catch (Exception e)
-            {
-                return $"Could not apply quality setting '{key}': {e.Message}";
-            }
+            return $"Unknown quality setting key: '{key}'.";
         }
+
+        private delegate string QualitySetter(string valueRaw);
+
+        private static readonly Dictionary<string, QualitySetter> QualitySetters =
+            new Dictionary<string, QualitySetter>(StringComparer.Ordinal)
+            {
+                ["level"]               = v => { QualitySettings.SetQualityLevel(AsInt(v)); return null; },
+                ["shadowDistance"]      = v => { QualitySettings.shadowDistance = AsFloat(v); return null; },
+                ["shadowCascades"]      = v => { QualitySettings.shadowCascades = AsInt(v); return null; },
+                ["antiAliasing"]        = v => { QualitySettings.antiAliasing = AsInt(v); return null; },
+                ["vSyncCount"]          = v => { QualitySettings.vSyncCount = AsInt(v); return null; },
+                ["pixelLightCount"]     = v => { QualitySettings.pixelLightCount = AsInt(v); return null; },
+            };
 
         private static string ApplyPhysicsSetting(string key, string valueRaw)
         {
-            try
+            if (PhysicsSetters.TryGetValue(key, out var setter))
             {
-                switch (key)
-                {
-                    case "gravity":
-                        var g = AsVector3(valueRaw);
-                        if (g == null) return "gravity expects [x,y,z].";
-                        Physics.gravity = g.Value;
-                        return null;
-                    case "defaultSolverIterations":
-                        Physics.defaultSolverIterations = AsInt(valueRaw);
-                        return null;
-                    case "defaultSolverVelocityIterations":
-                        Physics.defaultSolverVelocityIterations = AsInt(valueRaw);
-                        return null;
-                    case "bounceThreshold":
-                        Physics.bounceThreshold = AsFloat(valueRaw);
-                        return null;
-                    case "sleepThreshold":
-                        Physics.sleepThreshold = AsFloat(valueRaw);
-                        return null;
-                    case "defaultContactOffset":
-                        Physics.defaultContactOffset = AsFloat(valueRaw);
-                        return null;
-                    case "physics2DGravity":
-                        var g2 = AsVector2(valueRaw);
-                        if (g2 == null) return "physics2DGravity expects [x,y].";
-                        Physics2D.gravity = g2.Value;
-                        return null;
-                    default:
-                        return $"Unknown physics setting key: '{key}'.";
-                }
+                try { return setter(valueRaw); }
+                catch (Exception e) { return $"Could not apply physics setting '{key}': {e.Message}"; }
             }
-            catch (Exception e)
-            {
-                return $"Could not apply physics setting '{key}': {e.Message}";
-            }
+            return $"Unknown physics setting key: '{key}'.";
         }
+
+        private delegate string PhysicsSetter(string valueRaw);
+
+        private static string SetPhysicsGravity(string valueRaw)
+        {
+            var g = AsVector3(valueRaw);
+            if (g == null) return "gravity expects [x,y,z].";
+            Physics.gravity = g.Value;
+            return null;
+        }
+
+        private static string SetPhysics2DGravity(string valueRaw)
+        {
+            var g2 = AsVector2(valueRaw);
+            if (g2 == null) return "physics2DGravity expects [x,y].";
+            Physics2D.gravity = g2.Value;
+            return null;
+        }
+
+        private static readonly Dictionary<string, PhysicsSetter> PhysicsSetters =
+            new Dictionary<string, PhysicsSetter>(StringComparer.Ordinal)
+            {
+                ["gravity"]                         = SetPhysicsGravity,
+                ["defaultSolverIterations"]         = v => { Physics.defaultSolverIterations = AsInt(v); return null; },
+                ["defaultSolverVelocityIterations"] = v => { Physics.defaultSolverVelocityIterations = AsInt(v); return null; },
+                ["bounceThreshold"]                 = v => { Physics.bounceThreshold = AsFloat(v); return null; },
+                ["sleepThreshold"]                  = v => { Physics.sleepThreshold = AsFloat(v); return null; },
+                ["defaultContactOffset"]            = v => { Physics.defaultContactOffset = AsFloat(v); return null; },
+                ["physics2DGravity"]                = SetPhysics2DGravity,
+            };
 
         private static string ApplyLightingSetting(string key, string valueRaw)
         {
-            try
+            if (LightingSetters.TryGetValue(key, out var setter))
             {
-                switch (key)
-                {
-                    case "ambientMode":
-                        if (Enum.TryParse<AmbientMode>(AsString(valueRaw), true, out var am))
-                        {
-                            RenderSettings.ambientMode = am;
-                            MarkSceneDirty();
-                            return null;
-                        }
-                        return $"ambientMode value '{valueRaw}' did not parse to an AmbientMode.";
-                    case "ambientIntensity":
-                        RenderSettings.ambientIntensity = AsFloat(valueRaw);
-                        MarkSceneDirty();
-                        return null;
-                    case "ambientColor":
-                        var ac = AsColor(valueRaw);
-                        if (ac == null) return "ambientColor expects [r,g,b,(a)].";
-                        RenderSettings.ambientLight = ac.Value;
-                        MarkSceneDirty();
-                        return null;
-                    case "fog":
-                        RenderSettings.fog = AsBool(valueRaw);
-                        MarkSceneDirty();
-                        return null;
-                    case "fogMode":
-                        if (Enum.TryParse<FogMode>(AsString(valueRaw), true, out var fm))
-                        {
-                            RenderSettings.fogMode = fm;
-                            MarkSceneDirty();
-                            return null;
-                        }
-                        return $"fogMode value '{valueRaw}' did not parse to a FogMode.";
-                    case "fogDensity":
-                        RenderSettings.fogDensity = AsFloat(valueRaw);
-                        MarkSceneDirty();
-                        return null;
-                    case "fogColor":
-                        var fc = AsColor(valueRaw);
-                        if (fc == null) return "fogColor expects [r,g,b,(a)].";
-                        RenderSettings.fogColor = fc.Value;
-                        MarkSceneDirty();
-                        return null;
-                    case "fogStartDistance":
-                        RenderSettings.fogStartDistance = AsFloat(valueRaw);
-                        MarkSceneDirty();
-                        return null;
-                    case "fogEndDistance":
-                        RenderSettings.fogEndDistance = AsFloat(valueRaw);
-                        MarkSceneDirty();
-                        return null;
-                    default:
-                        return $"Unknown lighting setting key: '{key}'.";
-                }
+                try { return setter(valueRaw); }
+                catch (Exception e) { return $"Could not apply lighting setting '{key}': {e.Message}"; }
             }
-            catch (Exception e)
-            {
-                return $"Could not apply lighting setting '{key}': {e.Message}";
-            }
+            return $"Unknown lighting setting key: '{key}'.";
         }
+
+        private delegate string LightingSetter(string valueRaw);
+
+        // Every lighting setter ends with MarkSceneDirty (RenderSettings is
+        // scene-scoped — writes only persist when the active scene is marked
+        // dirty). Enum-parsing keys (ambientMode / fogMode) get their own
+        // method so a parse miss returns a precise message.
+        private static string SetLightingAmbientMode(string valueRaw)
+        {
+            if (Enum.TryParse<AmbientMode>(AsString(valueRaw), true, out var am))
+            {
+                RenderSettings.ambientMode = am;
+                MarkSceneDirty();
+                return null;
+            }
+            return $"ambientMode value '{valueRaw}' did not parse to an AmbientMode.";
+        }
+
+        private static string SetLightingAmbientColor(string valueRaw)
+        {
+            var ac = AsColor(valueRaw);
+            if (ac == null) return "ambientColor expects [r,g,b,(a)].";
+            RenderSettings.ambientLight = ac.Value;
+            MarkSceneDirty();
+            return null;
+        }
+
+        private static string SetLightingFogMode(string valueRaw)
+        {
+            if (Enum.TryParse<FogMode>(AsString(valueRaw), true, out var fm))
+            {
+                RenderSettings.fogMode = fm;
+                MarkSceneDirty();
+                return null;
+            }
+            return $"fogMode value '{valueRaw}' did not parse to a FogMode.";
+        }
+
+        private static string SetLightingFogColor(string valueRaw)
+        {
+            var fc = AsColor(valueRaw);
+            if (fc == null) return "fogColor expects [r,g,b,(a)].";
+            RenderSettings.fogColor = fc.Value;
+            MarkSceneDirty();
+            return null;
+        }
+
+        private static readonly Dictionary<string, LightingSetter> LightingSetters =
+            new Dictionary<string, LightingSetter>(StringComparer.Ordinal)
+            {
+                ["ambientMode"]         = SetLightingAmbientMode,
+                ["ambientIntensity"]    = v => { RenderSettings.ambientIntensity = AsFloat(v); MarkSceneDirty(); return null; },
+                ["ambientColor"]        = SetLightingAmbientColor,
+                ["fog"]                 = v => { RenderSettings.fog = AsBool(v); MarkSceneDirty(); return null; },
+                ["fogMode"]             = SetLightingFogMode,
+                ["fogDensity"]          = v => { RenderSettings.fogDensity = AsFloat(v); MarkSceneDirty(); return null; },
+                ["fogColor"]            = SetLightingFogColor,
+                ["fogStartDistance"]    = v => { RenderSettings.fogStartDistance = AsFloat(v); MarkSceneDirty(); return null; },
+                ["fogEndDistance"]      = v => { RenderSettings.fogEndDistance = AsFloat(v); MarkSceneDirty(); return null; },
+            };
 
         // RenderSettings is scene-scoped — writes only persist when the active
         // scene is marked dirty. MarkSceneDirty covers that without forcing a

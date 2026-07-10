@@ -522,75 +522,13 @@ namespace UnityOpenMcpBridge.TypedTools
                     "'fields' is required and must be a non-empty array of { name, value } patches.");
 
             var allowStatic = JsonBody.GetBool(body, "allow_static", false);
-            var type = target.GetType();
             var modified = new List<string>();
             var errors = new List<string>();
 
-            foreach (var entry in entries)
-            {
-                var name = JsonBody.GetString(entry, "name");
-                if (string.IsNullOrEmpty(name))
-                {
-                    errors.Add("Skipping entry with empty 'name'.");
-                    continue;
-                }
-
-                MemberInfo member = null;
-                Type memberType = null;
-                bool isStatic = false;
-                bool isInitOnly = false;
-
-                var field = type.GetField(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static);
-                if (field != null)
-                {
-                    member = field;
-                    memberType = field.FieldType;
-                    isStatic = field.IsStatic;
-                    isInitOnly = field.IsInitOnly;
-                }
-                else
-                {
-                    var prop = type.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static);
-                    if (prop != null && prop.GetSetMethod(nonPublic: true) == null && prop.GetSetMethod() == null)
-                    {
-                        // Read-only property — surface a precise error.
-                        errors.Add($"Property '{name}' on {type.Name} has no setter.");
-                        continue;
-                    }
-                    if (prop != null)
-                    {
-                        member = prop;
-                        memberType = prop.PropertyType;
-                        isStatic = prop.GetSetMethod() != null && prop.GetSetMethod().IsStatic;
-                    }
-                }
-
-                if (member == null)
-                {
-                    errors.Add($"No public field or property '{name}' on {type.Name}. Use type_schema to discover members.");
-                    continue;
-                }
-
-                if ((isStatic || isInitOnly) && !allowStatic)
-                {
-                    var reason = isStatic ? "static" : "init-only/readonly";
-                    errors.Add($"Refusing to write {reason} member '{name}' without allow_static:true.");
-                    continue;
-                }
-
-                var valueRaw = JsonBody.GetRawValue(entry, "value");
-                try
-                {
-                    var converted = ConvertValue(valueRaw, memberType);
-                    if (member is FieldInfo fi) fi.SetValue(target, converted);
-                    else if (member is PropertyInfo pi) pi.SetValue(target, converted);
-                    modified.Add(name);
-                }
-                catch (Exception e)
-                {
-                    errors.Add($"Set '{name}' failed: {e.Message}");
-                }
-            }
+            // Delegates to the same reflection + ConvertValue path used by
+            // scriptableobject_create (ApplyFieldPatches) so member resolution,
+            // static/init-only guarding, and value conversion live in one place.
+            ApplyFieldPatches(target, entries, allowStatic, modified, errors);
 
             if (modified.Count > 0)
             {
@@ -1143,19 +1081,17 @@ namespace UnityOpenMcpBridge.TypedTools
             return sb.ToString();
         }
 
-        // Apply a batch of {name, value} field patches to an object via the same
-        // reflection + ConvertValue path object_modify uses. Extracted so
-        // scriptableobject_create can apply initial fields without duplicating
-        // the field-write logic, and reused by the three-surface
-        // gameobject_modify jsonPatches surface (T22.1.4). Per-entry errors are
-        // accumulated in `errors` and do not abort the batch; successfully-
-        // written field names land in `modified`.
+        // Apply a batch of {name, value} field patches to an object via the
+        // shared reflection + ConvertValue path. Single source of truth for
+        // member resolution + writes — used by object_modify,
+        // scriptableobject_create, and the three-surface gameobject_modify
+        // jsonPatches surface (T22.1.4). Per-entry errors are accumulated in
+        // `errors` and do not abort the batch; successfully-written field names
+        // land in `modified`.
         internal static void ApplyFieldPatches(UnityEngine.Object target, string[] entries,
             bool allowStatic, List<string> modified, List<string> errors)
         {
             var type = target.GetType();
-            const BindingFlags PublicInstanceStatic =
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static;
 
             foreach (var entry in entries)
             {
@@ -1166,38 +1102,14 @@ namespace UnityOpenMcpBridge.TypedTools
                     continue;
                 }
 
-                MemberInfo member = null;
-                Type memberType = null;
-                bool isStatic = false;
-                bool isInitOnly = false;
-
-                var field = type.GetField(name, PublicInstanceStatic);
-                if (field != null)
+                // Resolve the member once (handles FieldInfo / PropertyInfo).
+                // ResolveSettableMember returns null with a precise error in
+                // `resolveError` for read-only / missing members.
+                var (member, memberType, isStatic, isInitOnly, resolveError) =
+                    ResolveSettableMember(type, name);
+                if (resolveError != null)
                 {
-                    member = field;
-                    memberType = field.FieldType;
-                    isStatic = field.IsStatic;
-                    isInitOnly = field.IsInitOnly;
-                }
-                else
-                {
-                    var prop = type.GetProperty(name, PublicInstanceStatic);
-                    if (prop != null && prop.GetSetMethod(nonPublic: true) == null && prop.GetSetMethod() == null)
-                    {
-                        errors.Add($"Property '{name}' on {type.Name} has no setter.");
-                        continue;
-                    }
-                    if (prop != null)
-                    {
-                        member = prop;
-                        memberType = prop.PropertyType;
-                        isStatic = prop.GetSetMethod() != null && prop.GetSetMethod().IsStatic;
-                    }
-                }
-
-                if (member == null)
-                {
-                    errors.Add($"No public field or property '{name}' on {type.Name}. Use type_schema to discover members.");
+                    errors.Add(resolveError);
                     continue;
                 }
 
@@ -1212,14 +1124,54 @@ namespace UnityOpenMcpBridge.TypedTools
                 try
                 {
                     var converted = ConvertValue(valueRaw, memberType);
-                    if (member is FieldInfo fi) fi.SetValue(target, converted);
-                    else if (member is PropertyInfo pi) pi.SetValue(target, converted);
+                    SetMemberValue(member, target, converted);
                     modified.Add(name);
                 }
                 catch (Exception e)
                 {
                     errors.Add($"Set '{name}' failed: {e.Message}");
                 }
+            }
+        }
+
+        // Resolve a public instance+static field or property by name. Returns
+        // the member, its declared type, static/init-only flags, and a precise
+        // error string (non-null when the member is absent or read-only).
+        // Centralized so the FieldInfo/PropertyInfo branching lives once —
+        // object_modify and scriptableobject_create both go through here.
+        private static (MemberInfo member, Type memberType, bool isStatic, bool isInitOnly, string error)
+            ResolveSettableMember(Type type, string name)
+        {
+            const BindingFlags PublicInstanceStatic =
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static;
+
+            var field = type.GetField(name, PublicInstanceStatic);
+            if (field != null)
+                return (field, field.FieldType, field.IsStatic, field.IsInitOnly, null);
+
+            var prop = type.GetProperty(name, PublicInstanceStatic);
+            if (prop == null)
+                return (null, null, false, false,
+                    $"No public field or property '{name}' on {type.Name}. Use type_schema to discover members.");
+
+            if (prop.GetSetMethod(nonPublic: true) == null && prop.GetSetMethod() == null)
+                return (null, null, false, false,
+                    $"Property '{name}' on {type.Name} has no setter.");
+
+            bool isStatic = prop.GetSetMethod() != null && prop.GetSetMethod().IsStatic;
+            return (prop, prop.PropertyType, isStatic, false, null);
+        }
+
+        // Write a converted value to a FieldInfo or PropertyInfo. The single
+        // member-type branch — replaces the copy-pasted `is FieldInfo … else
+        // if PropertyInfo` blocks that lived in both object_modify and
+        // scriptableobject_create.
+        private static void SetMemberValue(MemberInfo member, object target, object value)
+        {
+            switch (member)
+            {
+                case FieldInfo f: f.SetValue(target, value); break;
+                case PropertyInfo p: p.SetValue(target, value); break;
             }
         }
 
