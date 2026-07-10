@@ -106,6 +106,21 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * M28-refactoring Plan 3 (T3.3) — sentinel returned by {@link
+ * LiveClient#postToolFetch} when a 503-compile-retry settled cleanly and the
+ * tool call should be re-POSTed once without 503 retry. A branded object (not a
+ * `CallToolResult`) so the re-POST signal is structurally distinct from a real
+ * response and TypeScript narrows it cleanly via {@link isCompileRepostSentinel}.
+ */
+interface CompileRepostSentinel {
+  readonly __compileRepost: unique symbol;
+}
+const COMPILE_REPOST_SENTINEL = { __compileRepost: 0 } as unknown as CompileRepostSentinel;
+function isCompileRepostSentinel(v: unknown): v is CompileRepostSentinel {
+  return typeof v === "object" && v !== null && "__compileRepost" in v;
+}
+
+/**
  * Decide whether {@link LiveClient#postTool}'s catch block should re-POST after
  * a transient fetch failure. Exported so the retry policy is unit-testable in
  * isolation (driving a real response-timeout through postTool takes 40s because
@@ -455,279 +470,334 @@ export class LiveClient implements Router {
     });
   }
 
+  /**
+   * POST a tool call to the bridge and shape the response. Decomposed in
+   * M28-refactoring Plan 3 (T3.3) into named steps so retry, compile-wait,
+   * transient-offline handling, and result shaping are independently readable.
+   *
+   * Pipeline:
+   *   1. {@link postToolFetch} — POST with a timeout floored above the bridge's
+   *      own default wait, handling 503-compile-retry and non-OK HTTP.
+   *   2. {@link shapeToolResult} — parse the body and dispatch mutation-envelope
+   *      vs direct-body vs inline-image vs reload/corruption outcomes.
+   *   3. On a transient fetch failure, {@link handlePostFailure} classifies +
+   *      recovers (re-syncing the endpoint, waiting out a reload, or surfacing
+   *      the structured offline/dead-bridge error) and re-POSTs only when safe.
+   *
+   * The retry/compile contract is unchanged from the former monolithic body.
+   */
   private async postTool(
     toolName: string,
     args: Record<string, unknown>,
     retryOn503: boolean,
   ): Promise<CallToolResult> {
     try {
-      const timeoutMs =
-        typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
-      // Floor the client fetch timeout at the bridge's own default wait + slack
-      // so the client never aborts before the bridge has had a chance to return
-      // its timeout envelope. Without this floor, a small/absent timeout_ms
-      // (MCP hosts often omit the field → schema default 30000, or smaller)
-      // makes the client re-POST while the bridge is still processing →
-      // duplicate mutations (specs/feedback.md entry 4B). An explicit large
-      // timeout_ms still wins via the Math.max.
-      const fetchTimeout = Math.max(
-        timeoutMs + 10_000,
-        BRIDGE_DEFAULT_TIMEOUT_MS + 10_000,
-      );
-      const res = await this.fetchWithTimeout(
-        `/tools/${toolName}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json; charset=utf-8" },
-          body: JSON.stringify(args),
-        },
-        fetchTimeout,
-      );
-
-      if (res.status === 503 && retryOn503) {
-        const compileError = await this.waitForCompile();
-        if (compileError) return compileError;
+      const res = await this.postToolFetch(toolName, args, retryOn503);
+      // 503 + compile settled cleanly → re-POST once without 503 retry.
+      if (isCompileRepostSentinel(res)) {
         return this.postTool(toolName, args, false);
       }
-
-      if (!res.ok) {
-        const body = (await res
-          .json()
-          .catch(() => null)) as HttpErrorBody | null;
-        return makeErrorResult({
-          code: "bridge_http_error",
-          message: body?.error?.message ?? `Bridge returned HTTP ${res.status}`,
-          detail: body ?? {
-            error: {
-              code: "bridge_http_error",
-              message: `HTTP ${res.status}`,
-            },
-          },
-        });
-      }
-
-      // The bridge returns TWO response shapes from /tools/*:
-      //   1. A MUTATION envelope: { mutation: { success, ... }, gate: {...} }
-      //      for gate-tracked mutating tools (gameobject_*, assets_*, etc.).
-      //   2. A DIRECT body: the tool's own JSON (e.g. { status, count, tags })
-      //      for read-only / state-only tools the bridge classifies as
-      //      DirectResponseTools (editor_get_tags, asmdef_list, shader_list_all,
-      //      scene_list_opened, material_get_properties, ~80 total).
-      //
-      // Previously postTool dispatched off a hardcoded DIRECT_RESPONSE_TOOLS set
-      // that was ~60 entries behind the bridge's set. Tools missing from it fell
-      // through to deriveIsError(body), which dereferences body.mutation.success
-      // — undefined for a direct body → TypeError. That thrown TypeError landed
-      // in the connection-recovery catch block, surfacing a misleading
-      // bridge_offline (and, with the entry-2026-07-02-b retry change, looping).
-      //
-      // The fix: detect the envelope shape from the BODY itself. A response with
-      // a top-level `mutation` object is a mutation envelope; anything else is a
-      // direct body. This is reliable because the bridge's DirectResponseTools
-      // path (HandleDirectResponseTool) never emits a `mutation` field and the
-      // gate path always does (BuildMutationEnvelope). The DIRECT_RESPONSE_TOOLS
-      // set is now only the inlineImage-unwrap allowlist (capture_inline), kept
-      // for that one special-case transform, not for shape routing.
-      //
-      // Capture the raw text first so the unparsable-body branch below can
-      // distinguish an EMPTY body (the signature of a compile-reload tool that
-      // triggered a domain reload mid-response — the bridge tore down its HTTP
-      // socket and the in-flight body was lost) from a SUBSTANTIAL-but-corrupt
-      // body (e.g. an execute_csharp snippet whose OutputSerializer output was
-      // truncated by a TypeLoadException). The reload case is a likely-success
-      // outcome; the corruption case is a real error. See specs/feedback.md
-      // 2026-07-05 (reload) + 2026-07-03-c (corruption).
-      const rawText = await res.text();
-      let parsed: Record<string, unknown> | null = null;
-      try {
-        parsed = JSON.parse(rawText) as Record<string, unknown>;
-      } catch {
-        parsed = null;
-      }
-
-      // capture_inline returns an `inlineImage` base64 PNG field. Unwrap it into
-      // an MCP image content block alongside a text metadata block
-      // ([{type: image}, {type: text}]). The image carries the same viewable
-      // payload a file-path screenshot would; the metadata keeps the view /
-      // resolution / byteLength fields without the base64 blob.
-      const inlineImage = parsed?.inlineImage;
-      if (
-        DIRECT_RESPONSE_TOOLS.has(toolName) &&
-        parsed != null &&
-        typeof inlineImage === "string" &&
-        inlineImage.length > 0 &&
-        parsed.error == null
-      ) {
-        const mimeType =
-          typeof parsed.mimeType === "string" ? parsed.mimeType : "image/png";
-        const metadata = { ...parsed };
-        delete metadata.inlineImage;
-        return {
-          content: [
-            { type: "image", data: inlineImage, mimeType },
-            { type: "text", text: JSON.stringify(metadata) },
-          ],
-          isError: false,
-        };
-      }
-
-      // Mutation envelope vs direct body, decided from the body itself.
-      if (parsed != null && typeof parsed.mutation === "object" && parsed.mutation !== null) {
-        const body = parsed as unknown as MutationEnvelope;
-        return {
-          content: [{ type: "text", text: JSON.stringify(body) }],
-          isError: deriveIsError(body),
-        };
-      }
-
-      // Malformed bridge body — JSON.parse rejected (parsed === null) on what
-      // should be a 200 OK application/json response. The bridge's two response
-      // shapes (BuildGateEnvelope, BuildDirectToolErrorJson) are always valid
-      // JSON, so a parse failure means the response was corrupted in transit or
-      // — the case that motivated this guard — a mutating tool's serialized
-      // output was interpolated raw into the gate envelope and produced
-      // unbalanced JSON (e.g. an execute_csharp snippet whose result threw a
-      // TypeLoadException during OutputSerializer's reflective walk).
-      //
-      // Previously this branch silently degraded to isError:false with an empty
-      // `{}` body, manufacturing a fake success. For compile-reload tools,
-      // annotateCompileVerify then stamped `_compileVerify` onto that `{}`,
-      // producing a malformed envelope `{"_compileVerify":{...}}` with NO
-      // `mutation` object — violating the documented contract and confusing
-      // agents that key off mutation.success (specs/feedback.md entry
-      // 2026-07-03-c). Surface a structured error instead so the failure is
-      // visible and annotateCompileVerify (gated on !result.isError) never
-      // annotates a body that lost its mutation block.
-      //
-      // Compile-reload special case (specs/feedback.md 2026-07-05 entry): for
-      // tools with the restart_then_settle lifecycle, an EMPTY (or near-empty)
-      // body on a 200 OK is the signature of a SUCCESSFUL mutation that
-      // triggered a domain reload mid-response — the bridge tore down its HTTP
-      // socket for the reload, the in-flight response was lost, and the agent
-      // observes a body that is empty or truncated to a few bytes. The
-      // mutation almost certainly committed (reimport_package,
-      // asmdef_create/modify, package_add/remove, … all commit before the
-      // reload). Returning bridge_response_unparsable here would frame a
-      // successful operation as corruption. Instead surface a typed
-      // triggered_reload outcome that tells the agent to verify post-state
-      // rather than suspect a corrupt response.
-      //
-      // The reload vs. corruption split keys off rawText length: a torn-down
-      // socket delivers zero or a handful of bytes (no Content-Length / chunk
-      // completing), while an OutputSerializer corruption leaves a substantial
-      // half-written envelope. A SUBSTANTIAL unparseable body on a
-      // compile-reload tool is STILL treated as corruption (the original
-      // 2026-07-03-c contract) — that path keeps bridge_response_unparsable.
-      if (parsed == null) {
-        const isEmptyLikeReload = rawText.trim().length === 0;
-        if (isEmptyLikeReload && lifecycleFor(toolName).class === "compile-reload") {
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  status: "triggered_reload",
-                  // The bridge returned 200 (the mutation reached the
-                  // dispatcher and the response was started) but the body was
-                  // empty — the hallmark of a domain reload tearing down the
-                  // socket mid-response. The mutation very likely committed;
-                  // treat this as "verify post-state" rather than "response
-                  // corrupt, retry".
-                  triggeredReload: true,
-                  message:
-                    `Bridge returned HTTP 200 for '${toolName}' with an empty ` +
-                    `response body. '${toolName}' is a compile-reload tool, so ` +
-                    `this is the expected signature of a mutation that triggered ` +
-                    `a domain reload mid-response — the bridge tore down its HTTP ` +
-                    `socket for the reload and the in-flight response was lost ` +
-                    `before any bytes were written. The mutation very likely ` +
-                    `committed (compile-reload tools commit before the reload ` +
-                    `begins). Do NOT treat this as corruption and do NOT retry ` +
-                    `blindly (that would re-run the mutation). Verify post-state: ` +
-                    `call unity_open_mcp_editor_status / bridge_status to confirm ` +
-                    `the reload settled, then unity_open_mcp_read_compile_errors ` +
-                    `to confirm there are no compile errors.`,
-                  agentNextSteps: [
-                    "Poll unity_open_mcp_editor_status / bridge_status until the bridge reports running and not compiling.",
-                    "Call unity_open_mcp_read_compile_errors to confirm the recompiled assembly has no CSxxxx errors (note: if the response carries staleLogSuspected, force a recompile via reimport_package / compile_check first).",
-                    "Do NOT retry the original call — the mutation likely committed before the reload. Verify the effect via the appropriate read tool instead.",
-                  ],
-                  _route: { route: "live", outcome: "triggered_reload" },
-                }),
-              },
-            ],
-            isError: false,
-          };
-        }
-        return makeErrorResult({
-          code: "bridge_response_unparsable",
-          message:
-            `Bridge returned HTTP 200 for '${toolName}' but the response body ` +
-            `was not valid JSON. This usually means a mutating tool's serialized ` +
-            `output was corrupted (e.g. an execute_csharp snippet whose result ` +
-            `threw during serialization). The result is unreliable — do not trust ` +
-            `any partial output. Check editor_status / bridge_status, then retry. ` +
-            `Endpoint: ${this.baseUrl}.`,
-        });
-      }
-
-      // Direct body: return it verbatim. isError when the tool reported a
-      // top-level error field (the bridge's direct-response convention).
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(parsed),
-          },
-        ],
-        isError: parsed.error != null,
-      };
+      return res;
     } catch (err) {
-      // M20 Plan 4-5 / T-fix-2 — transient POST failure (ECONNREFUSED /
-      // timeout during a domain reload). Classify + recover before declaring
-      // offline. handleTransientOffline re-syncs the cached endpoint from the
-      // lock first (so a Unity restart self-heals).
-      //
-      // Re-POST discipline (specs/feedback.md entry 4A — duplicate side-effects):
-      // only re-POST when the endpoint CHANGED during recovery (a restart → new
-      // bridge that never saw the original POST, so a retry is safe). When the
-      // endpoint is unchanged the same live bridge is still processing — or has
-      // queued — the original POST's Work; re-POSTing would run the mutation a
-      // second time. In that case surface the timeout instead of retrying.
-      //
-      // shouldRetryPostAfterFailure additionally allows a re-POST on a genuine
-      // CONNECTION failure (TypeError — the socket never connected / was reset
-      // before the body flushed / ECONNREFUSED), because no bytes reached the
-      // server and no side effect is possible. This must NOT fire for a
-      // TypeError thrown by response parsing (e.g. deriveIsError on a malformed
-      // body) — that path is now guarded by parsing the body defensively above,
-      // but as a belt-and-braces measure the response-parsing path is structured
-      // so it cannot throw into this catch (every .json() is .catch()-guarded).
-      const endpointBefore = this.baseUrl;
-      const recovered = await this.handleTransientOffline("post");
-      if (recovered !== null) return recovered;
-      const endpointChanged = this.baseUrl !== endpointBefore;
-      if (shouldRetryPostAfterFailure(err, endpointChanged)) {
-        return this.postTool(toolName, args, retryOn503);
-      }
+      return this.handlePostFailure(toolName, args, err, retryOn503);
+    }
+  }
+
+  /**
+   * Step 1 of {@link postTool}: perform the HTTP POST with the timeout floor,
+   * then handle 503-compile-retry and non-OK HTTP. Returns either a shaped
+   * {@link CallToolResult} (handed straight back by postTool) or a sentinel
+   * `{ _repostAfterCompile: true }` signaling a clean compile settle that
+   * should re-POST without 503 retry. Throws on transient fetch failure so the
+   * caller's catch runs {@link handlePostFailure}.
+   */
+  private async postToolFetch(
+    toolName: string,
+    args: Record<string, unknown>,
+    retryOn503: boolean,
+  ): Promise<CallToolResult | CompileRepostSentinel> {
+    const timeoutMs =
+      typeof args.timeout_ms === "number" ? args.timeout_ms : 60_000;
+    // Floor the client fetch timeout at the bridge's own default wait + slack
+    // so the client never aborts before the bridge has had a chance to return
+    // its timeout envelope. Without this floor, a small/absent timeout_ms
+    // (MCP hosts often omit the field → schema default 30000, or smaller)
+    // makes the client re-POST while the bridge is still processing →
+    // duplicate mutations (specs/feedback.md entry 4B). An explicit large
+    // timeout_ms still wins via the Math.max.
+    const fetchTimeout = Math.max(
+      timeoutMs + 10_000,
+      BRIDGE_DEFAULT_TIMEOUT_MS + 10_000,
+    );
+    const res = await this.fetchWithTimeout(
+      `/tools/${toolName}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify(args),
+      },
+      fetchTimeout,
+    );
+
+    if (res.status === 503 && retryOn503) {
+      const compileError = await this.waitForCompile();
+      if (compileError) return compileError;
+      return COMPILE_REPOST_SENTINEL;
+    }
+
+    if (!res.ok) {
+      const body = (await res
+        .json()
+        .catch(() => null)) as HttpErrorBody | null;
       return makeErrorResult({
-        code: "bridge_offline",
-        message:
-          `Tool '${toolName}' did not return from the bridge within the client ` +
-          `timeout. The bridge endpoint did not change (no restart detected) and ` +
-          `the failure was a response timeout (not a connection failure), so ` +
-          `the request was NOT retried — re-POSTing would risk running the ` +
-          `mutation twice on the same bridge. If the editor was briefly slow ` +
-          `(unfocused, GC, a long main-thread op), the original call may still ` +
-          `complete there; verify the effect before retrying. Endpoint: ${this.baseUrl}.`,
-        detail: {
+        code: "bridge_http_error",
+        message: body?.error?.message ?? `Bridge returned HTTP ${res.status}`,
+        detail: body ?? {
           error: {
-            code: "bridge_offline",
-            message: `Client timeout against unchanged endpoint ${this.baseUrl}; not retried to avoid duplicate side-effects.`,
+            code: "bridge_http_error",
+            message: `HTTP ${res.status}`,
           },
         },
       });
     }
+
+    return this.shapeToolResult(toolName, res);
+  }
+
+  /**
+   * Step 2 of {@link postTool}: parse the bridge response body and shape it into
+   * a {@link CallToolResult}. Handles the four response outcomes:
+   *   - inline-image unwrap (capture_inline → MCP image block + metadata),
+   *   - mutation envelope (derive isError from mutation.success),
+   *   - compile-reload empty body (triggered_reload — likely-success domain
+   *     reload tore down the socket mid-response),
+   *   - direct body (verbatim, isError when a top-level error field is present),
+   *   - unparsable body (bridge_response_unparsable corruption error).
+   */
+  private async shapeToolResult(
+    toolName: string,
+    res: Response,
+  ): Promise<CallToolResult> {
+    // The bridge returns TWO response shapes from /tools/*:
+    //   1. A MUTATION envelope: { mutation: { success, ... }, gate: {...} }
+    //      for gate-tracked mutating tools (gameobject_*, assets_*, etc.).
+    //   2. A DIRECT body: the tool's own JSON (e.g. { status, count, tags })
+    //      for read-only / state-only tools the bridge classifies as
+    //      DirectResponseTools (editor_get_tags, asmdef_list, shader_list_all,
+    //      scene_list_opened, material_get_properties, ~80 total).
+    //
+    // Previously postTool dispatched off a hardcoded DIRECT_RESPONSE_TOOLS set
+    // that was ~60 entries behind the bridge's set. Tools missing from it fell
+    // through to deriveIsError(body), which dereferences body.mutation.success
+    // — undefined for a direct body → TypeError. That thrown TypeError landed
+    // in the connection-recovery catch block, surfacing a misleading
+    // bridge_offline (and, with the entry-2026-07-02-b retry change, looping).
+    //
+    // The fix: detect the envelope shape from the BODY itself. A response with
+    // a top-level `mutation` object is a mutation envelope; anything else is a
+    // direct body. This is reliable because the bridge's DirectResponseTools
+    // path (HandleDirectResponseTool) never emits a `mutation` field and the
+    // gate path always does (BuildMutationEnvelope). The DIRECT_RESPONSE_TOOLS
+    // set is now only the inlineImage-unwrap allowlist (capture_inline), kept
+    // for that one special-case transform, not for shape routing.
+    //
+    // Capture the raw text first so the unparsable-body branch below can
+    // distinguish an EMPTY body (the signature of a compile-reload tool that
+    // triggered a domain reload mid-response — the bridge tore down its HTTP
+    // socket and the in-flight body was lost) from a SUBSTANTIAL-but-corrupt
+    // body (e.g. an execute_csharp snippet whose OutputSerializer output was
+    // truncated by a TypeLoadException). The reload case is a likely-success
+    // outcome; the corruption case is a real error. See specs/feedback.md
+    // 2026-07-05 (reload) + 2026-07-03-c (corruption).
+    const rawText = await res.text();
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = JSON.parse(rawText) as Record<string, unknown>;
+    } catch {
+      parsed = null;
+    }
+
+    // capture_inline returns an `inlineImage` base64 PNG field. Unwrap it into
+    // an MCP image content block alongside a text metadata block
+    // ([{type: image}, {type: text}]). The image carries the same viewable
+    // payload a file-path screenshot would; the metadata keeps the view /
+    // resolution / byteLength fields without the base64 blob.
+    const inlineImage = parsed?.inlineImage;
+    if (
+      DIRECT_RESPONSE_TOOLS.has(toolName) &&
+      parsed != null &&
+      typeof inlineImage === "string" &&
+      inlineImage.length > 0 &&
+      parsed.error == null
+    ) {
+      const mimeType =
+        typeof parsed.mimeType === "string" ? parsed.mimeType : "image/png";
+      const metadata = { ...parsed };
+      delete metadata.inlineImage;
+      return {
+        content: [
+          { type: "image", data: inlineImage, mimeType },
+          { type: "text", text: JSON.stringify(metadata) },
+        ],
+        isError: false,
+      };
+    }
+
+    // Mutation envelope vs direct body, decided from the body itself.
+    if (parsed != null && typeof parsed.mutation === "object" && parsed.mutation !== null) {
+      const body = parsed as unknown as MutationEnvelope;
+      return {
+        content: [{ type: "text", text: JSON.stringify(body) }],
+        isError: deriveIsError(body),
+      };
+    }
+
+    // Malformed bridge body — JSON.parse rejected (parsed === null) on what
+    // should be a 200 OK application/json response. The bridge's two response
+    // shapes (BuildGateEnvelope, BuildDirectToolErrorJson) are always valid
+    // JSON, so a parse failure means the response was corrupted in transit or
+    // — the case that motivated this guard — a mutating tool's serialized
+    // output was interpolated raw into the gate envelope and produced
+    // unbalanced JSON (e.g. an execute_csharp snippet whose result threw a
+    // TypeLoadException during OutputSerializer's reflective walk).
+    //
+    // Previously this branch silently degraded to isError:false with an empty
+    // `{}` body, manufacturing a fake success. For compile-reload tools,
+    // annotateCompileVerify then stamped `_compileVerify` onto that `{}`,
+    // producing a malformed envelope `{"_compileVerify":{...}}` with NO
+    // `mutation` object — violating the documented contract and confusing
+    // agents that key off mutation.success (specs/feedback.md entry
+    // 2026-07-03-c). Surface a structured error instead so the failure is
+    // visible and annotateCompileVerify (gated on !result.isError) never
+    // annotates a body that lost its mutation block.
+    //
+    // Compile-reload special case (specs/feedback.md 2026-07-05 entry): for
+    // tools with the restart_then_settle lifecycle, an EMPTY (or near-empty)
+    // body on a 200 OK is the signature of a SUCCESSFUL mutation that
+    // triggered a domain reload mid-response — the bridge tore down its HTTP
+    // socket for the reload, the in-flight response was lost, and the agent
+    // observes a body that is empty or truncated to a few bytes. The
+    // mutation almost certainly committed (reimport_package,
+    // asmdef_create/modify, package_add/remove, … all commit before the
+    // reload). Returning bridge_response_unparsable here would frame a
+    // successful operation as corruption. Instead surface a typed
+    // triggered_reload outcome that tells the agent to verify post-state
+    // rather than suspect a corrupt response.
+    //
+    // The reload vs. corruption split keys off rawText length: a torn-down
+    // socket delivers zero or a handful of bytes (no Content-Length / chunk
+    // completing), while an OutputSerializer corruption leaves a substantial
+    // half-written envelope. A SUBSTANTIAL unparseable body on a
+    // compile-reload tool is STILL treated as corruption (the original
+    // 2026-07-03-c contract) — that path keeps bridge_response_unparsable.
+    if (parsed == null) {
+      const isEmptyLikeReload = rawText.trim().length === 0;
+      if (isEmptyLikeReload && lifecycleFor(toolName).class === "compile-reload") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "triggered_reload",
+                // The bridge returned 200 (the mutation reached the
+                // dispatcher and the response was started) but the body was
+                // empty — the hallmark of a domain reload tearing down the
+                // socket mid-response. The mutation very likely committed;
+                // treat this as "verify post-state" rather than "response
+                // corrupt, retry".
+                triggeredReload: true,
+                message:
+                  `Bridge returned HTTP 200 for '${toolName}' with an empty ` +
+                  `response body. '${toolName}' is a compile-reload tool, so ` +
+                  `this is the expected signature of a mutation that triggered ` +
+                  `a domain reload mid-response — the bridge tore down its HTTP ` +
+                  `socket for the reload and the in-flight response was lost ` +
+                  `before any bytes were written. The mutation very likely ` +
+                  `committed (compile-reload tools commit before the reload ` +
+                  `begins). Do NOT treat this as corruption and do NOT retry ` +
+                  `blindly (that would re-run the mutation). Verify post-state: ` +
+                  `call unity_open_mcp_editor_status / bridge_status to confirm ` +
+                  `the reload settled, then unity_open_mcp_read_compile_errors ` +
+                  `to confirm there are no compile errors.`,
+                agentNextSteps: [
+                  "Poll unity_open_mcp_editor_status / bridge_status until the bridge reports running and not compiling.",
+                  "Call unity_open_mcp_read_compile_errors to confirm the recompiled assembly has no CSxxxx errors (note: if the response carries staleLogSuspected, force a recompile via reimport_package / compile_check first).",
+                  "Do NOT retry the original call — the mutation likely committed before the reload. Verify the effect via the appropriate read tool instead.",
+                ],
+                _route: { route: "live", outcome: "triggered_reload" },
+              }),
+            },
+          ],
+          isError: false,
+        };
+      }
+      return makeErrorResult({
+        code: "bridge_response_unparsable",
+        message:
+          `Bridge returned HTTP 200 for '${toolName}' but the response body ` +
+          `was not valid JSON. This usually means a mutating tool's serialized ` +
+          `output was corrupted (e.g. an execute_csharp snippet whose result ` +
+          `threw during serialization). The result is unreliable — do not trust ` +
+          `any partial output. Check editor_status / bridge_status, then retry. ` +
+          `Endpoint: ${this.baseUrl}.`,
+      });
+    }
+
+    // Direct body: return it verbatim. isError when the tool reported a
+    // top-level error field (the bridge's direct-response convention).
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(parsed),
+        },
+      ],
+      isError: parsed.error != null,
+    };
+  }
+
+  /**
+   * Step 3 of {@link postTool}: classify + recover from a transient POST
+   * failure (ECONNREFUSED / timeout during a domain reload). Re-syncs the cached
+   * endpoint from the lock first (so a Unity restart self-heals), waits out a
+   * reload, and re-POSTs ONLY when safe (endpoint changed during recovery, or a
+   * genuine connection failure where no bytes reached the server).
+   *
+   * Re-POST discipline (specs/feedback.md entry 4A — duplicate side-effects):
+   * when the endpoint is unchanged the same live bridge is still processing —
+   * or has queued — the original POST's Work; re-POSTing would run the mutation
+   * a second time. In that case surface the timeout instead of retrying.
+   */
+  private async handlePostFailure(
+    toolName: string,
+    args: Record<string, unknown>,
+    err: unknown,
+    retryOn503: boolean,
+  ): Promise<CallToolResult> {
+    const endpointBefore = this.baseUrl;
+    const recovered = await this.handleTransientOffline("post");
+    if (recovered !== null) return recovered;
+    const endpointChanged = this.baseUrl !== endpointBefore;
+    if (shouldRetryPostAfterFailure(err, endpointChanged)) {
+      return this.postTool(toolName, args, retryOn503);
+    }
+    return makeErrorResult({
+      code: "bridge_offline",
+      message:
+        `Tool '${toolName}' did not return from the bridge within the client ` +
+        `timeout. The bridge endpoint did not change (no restart detected) and ` +
+        `the failure was a response timeout (not a connection failure), so ` +
+        `the request was NOT retried — re-POSTing would risk running the ` +
+        `mutation twice on the same bridge. If the editor was briefly slow ` +
+        `(unfocused, GC, a long main-thread op), the original call may still ` +
+        `complete there; verify the effect before retrying. Endpoint: ${this.baseUrl}.`,
+      detail: {
+        error: {
+          code: "bridge_offline",
+          message: `Client timeout against unchanged endpoint ${this.baseUrl}; not retried to avoid duplicate side-effects.`,
+        },
+      },
+    });
   }
 
   private async ensureReady(): Promise<CallToolResult | null> {

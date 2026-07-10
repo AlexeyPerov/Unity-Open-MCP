@@ -351,6 +351,52 @@ function bridgeStatusRecoveryHint(
 
 export class ToolRouter implements Router {
   private readonly modelCache = new AssetModelCache();
+
+  /**
+   * M28-refactoring Plan 3 (T3.2) — named-tool dispatch map. Replaces the
+   * former ~70-block `if (toolName === "...")` chain in routeCore. Each entry
+   * binds the tool name to its route-handler method. The map is built lazily on
+   * first use (the handlers are bound instance methods, so it cannot be a
+   * static field). Adding a new named-tool route is now a map entry, not a new
+   * `if` block. Tools that share a handler (validate_edit + scan_paths) or are
+   * reached via a predicate (isCompressible) are handled below the lookup — the
+   * map covers only exact-name dispatch.
+   */
+  private routeHandlers?: Map<string, (live: LiveClient, args: Record<string, unknown>) => Promise<CallToolResult>>;
+
+  private getRouteHandlers(): Map<string, (live: LiveClient, args: Record<string, unknown>) => Promise<CallToolResult>> {
+    if (this.routeHandlers) return this.routeHandlers;
+    const handlers: Map<string, (live: LiveClient, args: Record<string, unknown>) => Promise<CallToolResult>> = new Map([
+      // Offline-routed tools (resolved from disk; never hit the bridge).
+      ["unity_open_mcp_list_assets", (_l, a) => this.routeListAssets(a)],
+      ["unity_open_mcp_read_compile_errors", (_l, a) => this.routeReadCompileErrors(a)],
+      // Local-routed tools (server-only; no live/batch hop).
+      ["unity_senses_pull_events", (l, a) => this.routePullEvents(a, l)],
+      ["unity_open_mcp_capabilities", (l, a) => this.routeCapabilities(a, l)],
+      ["unity_open_mcp_list_rules", (_l, a) => this.routeListRules(a)],
+      ["unity_open_mcp_generate_skill", (_l, a) => this.routeGenerateSkill(a)],
+      ["unity_open_mcp_manage_tools", (l, a) => this.routeManageTools(a, l)],
+      ["unity_open_mcp_bridge_status", (l, a) => this.routeBridgeStatus(a, l)],
+      // Hub control tools (local-routed; system-level ops).
+      ["unity_open_mcp_hub_list_editors", () => this.routeHubListEditors()],
+      ["unity_open_mcp_hub_available_releases", () => this.routeHubAvailableReleases()],
+      ["unity_open_mcp_hub_install_editor", (_l, a) => this.routeHubInstallEditor(a)],
+      ["unity_open_mcp_hub_install_modules", (_l, a) => this.routeHubInstallModules(a)],
+      ["unity_open_mcp_hub_get_install_path", () => this.routeHubGetInstallPath()],
+      ["unity_open_mcp_hub_set_install_path", (_l, a) => this.routeHubSetInstallPath(a)],
+      // Offline-first reference tools (fall back to live when the bridge is up).
+      ["unity_open_mcp_find_references", (l, a) => this.routeFindReferences(a, l)],
+      ["unity_open_mcp_dependencies", (l, a) => this.routeDependencies(a, l)],
+      // Verify tools — share a single handler (toolName carried through).
+      ["unity_open_mcp_validate_edit", (l, a) => this.routeVerifyResult("unity_open_mcp_validate_edit", a, l)],
+      ["unity_open_mcp_scan_paths", (l, a) => this.routeVerifyResult("unity_open_mcp_scan_paths", a, l)],
+      // Scene data — output-profile + paging applied server-side.
+      ["unity_open_mcp_scene_get_data", (l, a) => this.routeSceneGetData(a, l)],
+    ]);
+    this.routeHandlers = handlers;
+    return handlers;
+  }
+
   constructor(
     private live: LiveClient,
     private batch: BatchSpawn,
@@ -392,113 +438,13 @@ export class ToolRouter implements Router {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<CallToolResult> {
-    // list_assets — always offline (no live equivalent needed).
-    if (toolName === "unity_open_mcp_list_assets") {
-      return this.routeListAssets(args);
-    }
-
-    // read_compile_errors — always offline. Reads Unity's Editor.log directly;
-    // the one channel that works when the bridge assembly itself has failed to
-    // compile (every in-bridge channel is dead with it, and compile_check can't
-    // run). Never touches the bridge or spawns Unity.
-    if (toolName === "unity_open_mcp_read_compile_errors") {
-      return this.routeReadCompileErrors(args);
-    }
-
-    // M13 T4.4 — bridge event stream pull. The MCP server is the only long-lived
-    // hop between the bridge and the agent; a per-process SSE reader amortizes
-    // the connection and shares the queue across pulls. Lives only when the
-    // bridge is reachable; an unreachable bridge returns a clear error instead
-    // of hanging on connect.
-    if (toolName === "unity_senses_pull_events") {
-      return this.routePullEvents(args, live);
-    }
-
-    // capabilities — local capability-discovery surface (no live/batch hop).
-    if (toolName === "unity_open_mcp_capabilities") {
-      return this.routeCapabilities(args, live);
-    }
-
-    // list_rules — local rule catalog (no live/batch hop). Lets an agent
-    // discover which rules apply to which asset kinds before calling
-    // scan_paths / validate_edit.
-    if (toolName === "unity_open_mcp_list_rules") {
-      return this.routeListRules(args);
-    }
-
-    // generate_skill — local skill generation (no live/batch hop).
-    if (toolName === "unity_open_mcp_generate_skill") {
-      return this.routeGenerateSkill(args);
-    }
-
-    // M18 Plan 2 / T18.2.2 — manage_tools is server-only. It mutates the
-    // per-session tool-group visibility state that lives in the MCP server
-    // (ToolSessionState). The bridge does not track session state — it answers
-    // manage_tools meta-calls by reporting the compiled tool set; the MCP
-    // server applies the activate / deactivate filter to ListTools. Always
-    // visible regardless of the current active set (meta-tool).
-    if (toolName === "unity_open_mcp_manage_tools") {
-      return this.routeManageTools(args, live);
-    }
-
-    // testsuite-tauri phase-3 — bridge_status. Operator-only health snapshot.
-    // Server-resolved (classifyInstance + one /ping via the LiveClient); never
-    // hits the bridge tool endpoint and never spawns Unity. Returns a coarse
-    // `status` token (running/compiling/stopped/dead_bridge) the Validation
-    // Suite app drives its offline-scenario gate off. Read-only, gate-free.
-    if (toolName === "unity_open_mcp_bridge_status") {
-      return this.routeBridgeStatus(args, live);
-    }
-
-    // M26 Plan 2 — Unity Hub control tools. Local-routed: resolved inside the
-    // MCP server (filesystem discovery + Unity archive feed + unityhub:// deep
-    // link + Hub CLI). Never hit the bridge tool endpoint, never spawn Unity.
-    // Mutating members are system-level ops (paths_hint N/A, gate-free).
-    if (toolName === "unity_open_mcp_hub_list_editors") {
-      return this.routeHubListEditors();
-    }
-    if (toolName === "unity_open_mcp_hub_available_releases") {
-      return this.routeHubAvailableReleases();
-    }
-    if (toolName === "unity_open_mcp_hub_install_editor") {
-      return this.routeHubInstallEditor(args);
-    }
-    if (toolName === "unity_open_mcp_hub_install_modules") {
-      return this.routeHubInstallModules(args);
-    }
-    if (toolName === "unity_open_mcp_hub_get_install_path") {
-      return this.routeHubGetInstallPath();
-    }
-    if (toolName === "unity_open_mcp_hub_set_install_path") {
-      return this.routeHubSetInstallPath(args);
-    }
-
-    // find_references — offline-first when no bridge is connected; live
-    // ReferenceGraph remains available when the bridge is up.
-    if (toolName === "unity_open_mcp_find_references") {
-      return this.routeFindReferences(args, live);
-    }
-
-    // dependencies — offline-first (M24 Plan 2 / T24.2). Forward + reverse
-    // edges + impact analysis all compute from YAML on disk when no bridge is
-    // connected; the live DependenciesTool remains available when the bridge
-    // is up. The offline path is the only one that exposes include_impact
-    // (transitive reverse closure) today.
-    if (toolName === "unity_open_mcp_dependencies") {
-      return this.routeDependencies(args, live);
-    }
-
-    // M22 — verify tools. The bridge returns the full issues[] list; we fold +
-    // page server-side per the output profile (compact = counts only).
-    if (toolName === "unity_open_mcp_validate_edit" || toolName === "unity_open_mcp_scan_paths") {
-      return this.routeVerifyResult(toolName, args, live);
-    }
-
-    // M22 — scene_get_data. Resolves the output profile (onto detail) and pages
-    // the node stream server-side; the bridge detail/max_nodes params keep
-    // working as back-compat aliases.
-    if (toolName === "unity_open_mcp_scene_get_data") {
-      return this.routeSceneGetData(args, live);
+    // Named-tool dispatch (T3.2): the handler map covers every exact-name
+    // route. The per-tool policy rationale (offline / local / hub / offline-
+    // first / verify-fold / scene-paging) lives in each routeXxx method's
+    // header comment.
+    const handler = this.getRouteHandlers().get(toolName);
+    if (handler) {
+      return handler(live, args);
     }
 
     // Compact drill-down reads: offline-first for text-serialized assets, fall
