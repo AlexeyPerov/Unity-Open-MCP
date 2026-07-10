@@ -1,0 +1,1997 @@
+.projects {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.6rem;
+}
+
+/**
+ * Drag-and-drop visual affordance. The Tauri webview fires enter/over
+ * events for any drag entering the window; the project list draws a
+ * dashed accent border and tints the toolbar while a drag is over the
+ * tab. The list itself does not need its position changed — Tauri
+ * blocks the default HTML drop behavior at the window level so the
+ * OS cursor is the only thing the user sees moving.
+ */
+.projects.drag-over .table {
+  border-color: var(--hub-accent);
+  box-shadow: 0 0 0 1px var(--hub-accent) inset, 0 0 0 4px rgba(92, 124, 250, 0.18);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.projects.drag-over .toolbar {
+  outline: 1px dashed var(--hub-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.toolbar-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.icon-btn {
+  align-self: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  margin-top: 0px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--hub-border-hover);
+  background: var(--hub-selected);
+  color: var(--hub-text);
+  cursor: pointer;
+  line-height: 1.4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 500;
+  font-family: inherit;
+}
+
+.icon-btn:hover:not(:disabled) {
+  border-color: var(--hub-accent);
+  color: var(--hub-text-bright);
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--hub-accent);
+  outline-offset: 1px;
+}
+
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.icon-btn .icon-spin {
+  animation: icon-spin 0.9s linear infinite;
+}
+
+@keyframes icon-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.toolbar-status {
+  font-size: 0.78rem;
+  color: var(--hub-text-muted);
+}
+
+.inline-error {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--hub-error-fg);
+  border-radius: 6px;
+  background: var(--hub-error-bg);
+  color: var(--hub-error-fg);
+  font-size: 0.82rem;
+}
+
+.inline-error-text { flex: 1; }
+
+.inline-error-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--hub-error-fg);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+}
+
+.inline-error-dismiss:hover { color: var(--hub-text-bright); }
+
+.search {
+  flex: 0 1 18rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid var(--hub-border-light);
+  background: var(--hub-surface);
+  color: var(--hub-text);
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.search::placeholder { color: var(--hub-text-placeholder); }
+.search:focus-visible {     border-color: var(--hub-accent); }
+
+.filter-btn {
+  padding: 0.4rem 0.7rem;
+  background: transparent;
+  color: var(--hub-text-dim);
+  border: none;
+  font-size: 0.78rem;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.filter-btn:hover { color: var(--hub-text-bright); background: var(--hub-bg); }
+.filter-btn.filter-active { background: var(--hub-selected); color: var(--hub-text-bright); }
+
+.table {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 8rem;
+  border: 1px solid var(--hub-border);
+  border-radius: 8px;
+  background: var(--hub-bg);
+  overflow: hidden;
+}
+
+.table-head {
+  display: grid;
+  flex-shrink: 0;
+  background: var(--hub-surface);
+  border-bottom: 1px solid var(--hub-border);
+  padding: 0 0.25rem;
+}
+
+.th {
+  padding: 0.55rem 0.7rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--hub-text-muted);
+  font-weight: 600;
+  user-select: none;
+  cursor: default;
+}
+
+.th-settings { padding: 0.55rem 0.3rem; }
+
+.table-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 0.4rem;
+}
+
+.row-wrapper {
+  border-bottom: 1px solid var(--hub-card);
+}
+
+.row-wrapper:last-child { border-bottom: none; }
+
+.row {
+  display: grid;
+  align-items: center;
+  padding: 0 0.25rem;
+  cursor: pointer;
+  transition: background 0.08s ease;
+}
+
+/* Multi-type: non-Unity rows are not launchable, but a click now
+   opens their settings popup (mirroring the settings gear), so keep
+   the pointer cursor to signal interactivity. The row stays
+   interactive for selection / context menu / settings. */
+.row-nonlaunchable { cursor: pointer; }
+
+.row:hover { background: var(--hub-surface); }
+
+.row-selected {
+  background: var(--hub-selected) !important;
+}
+
+.row-missing { opacity: 0.72; }
+
+.cell {
+  padding: 0 0.7rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-settings {
+  padding: 0.15rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  border-left: 1px solid var(--hub-card);
+}
+
+.row-action-btn {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--hub-text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  border-radius: 6px;
+}
+
+.row-action-btn:hover {
+  color: var(--hub-text-bright);
+  background: var(--hub-bg);
+}
+
+.row-action-btn:focus-visible {
+  outline: 2px solid var(--hub-accent);
+  outline-offset: 1px;
+}
+
+.ai-row-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.settings-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.cell-name {
+  padding: 0.45rem 0.7rem;
+  overflow: visible;
+}
+
+.name-path {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.name-text {
+  font-weight: 500;
+  color: var(--hub-text);
+  font-size: 0.88rem;
+  /* Allow the name + tag(s) to wrap to a second line when they do
+     not fit horizontally. `flex-wrap` keeps each inline child
+     intact: a type chip that does not fit beside the name moves down
+     as a unit rather than breaking mid-word. The container itself
+     still respects the cell width because the parent grid column is
+     sized via `minmax`. */
+  white-space: normal;
+  overflow: hidden;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* The project name itself wraps across multiple lines when it does
+   not fit on one. Kept as a separate flex child (rather than a bare
+   text node) so `flex-wrap` on `.name-text` moves the chip to a
+   fresh line when the name + chip would overflow. */
+.name-label {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.source-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  /* Keep the chip on a single line; if it does not fit beside the
+     name, `flex-wrap` on `.name-text` moves the whole chip to the
+     next line instead of splitting it across lines. */
+  white-space: nowrap;
+}
+
+.source-hubseed {
+  background: rgba(110, 118, 140, 0.18);
+  color: var(--hub-source-seed-fg);
+  border-color: rgba(110, 118, 140, 0.45);
+}
+
+/* Multi-type: the kind chip is the primary type discriminator in
+   the list (Unity rows show no chip so existing Unity users see no
+   visual change). Each non-Unity kind gets a distinct accent so the
+   four kinds are scannable at a glance. */
+.source-kind { min-width: 3.2rem; justify-content: center; }
+.source-kind-package {
+  background: rgba(86, 180, 130, 0.18);
+  color: #56b482;
+  border-color: rgba(86, 180, 130, 0.45);
+}
+.source-kind-openMcp {
+  background: rgba(192, 132, 252, 0.18);
+  color: #c084fc;
+  border-color: rgba(192, 132, 252, 0.45);
+}
+.source-kind-custom {
+  background: rgba(234, 179, 8, 0.18);
+  color: #d4a017;
+  border-color: rgba(234, 179, 8, 0.45);
+}
+
+.path-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.7rem;
+  color: var(--hub-text-placeholder);
+  /* The end of a project path is more valuable than the start
+     (folder name vs. ancestors). Use a flex container right-aligned
+     with overflow hidden on the left so long paths keep their tail
+     visible and clip the prefix instead of the suffix. A leading
+     ellipsis is intentionally omitted — the row title attribute
+     carries the full path on hover. */
+  display: flex;
+  justify-content: flex-end;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* Inner span carries the actual text. `flex: none` keeps it at its
+   intrinsic width so the parent's `justify-content: flex-end` shifts
+   it right and the left side overflows + clips, rather than the text
+   shrinking to fit. */
+.path-text-inner {
+  flex: none;
+}
+
+.cell-version .version-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.76rem;
+  color: var(--hub-text-dim);
+}
+
+/* M15 T6.4: SRP + build-target chips stacked under the version
+   string. Kept compact (small font, no border) so the row does not
+   grow taller when both are present. */
+.cell-version .meta-chip {
+  display: block;
+  margin-top: 0.18rem;
+  padding: 0.04rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.35;
+  width: fit-content;
+  color: var(--hub-text-dim);
+  background: var(--hub-surface);
+  border: 1px solid var(--hub-border-light);
+}
+
+.cell-version .meta-chip-urp {
+  color: var(--hub-ok-fg, var(--hub-text-dim));
+  border-color: var(--hub-ok-border, var(--hub-border-light));
+}
+
+.cell-version .meta-chip-hdrp {
+  color: var(--hub-accent, var(--hub-text-dim));
+  border-color: var(--hub-accent, var(--hub-border-light));
+}
+
+.cell-version .meta-chip-birp {
+  color: var(--hub-text-muted);
+}
+
+.cell-version .meta-chip-target {
+  color: var(--hub-text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+.cell-size .size-text {
+  font-size: 0.78rem;
+  color: var(--hub-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.branch-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--hub-branch-chip-border);
+  border-radius: 999px;
+  background: var(--hub-branch-chip-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--hub-branch-chip-fg);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.branch-detached {
+  border-color: var(--hub-branch-detached-border);
+  background: var(--hub-branch-detached-bg);
+  color: var(--hub-branch-detached-fg);
+}
+
+/* Multi-type: the branch chip is clickable to open the read-only
+   git popup. Hover/focus feedback signals interactivity without
+   changing the chip's compact shape. */
+.branch-clickable {
+  cursor: pointer;
+  transition: border-color 0.08s ease, background 0.08s ease;
+}
+.branch-clickable:hover {
+  border-color: var(--hub-accent, #5c7cfa);
+  background: rgba(92, 124, 250, 0.12);
+}
+
+/* Git popup */
+.git-modal { max-width: 640px; }
+.git-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.8rem;
+  border-radius: 0.5rem;
+  background: var(--hub-card);
+  border: 1px solid var(--hub-border);
+  margin-bottom: 1rem;
+}
+.git-summary-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+.git-label {
+  font-size: 0.75rem;
+  color: var(--hub-text-dim);
+  min-width: 8rem;
+}
+.git-value {
+  font-size: 0.8rem;
+  color: var(--hub-text);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.git-ahead { color: #56b482; font-weight: 600; }
+.git-behind { color: #e0a230; font-weight: 600; }
+.git-pending h3 {
+  font-size: 0.8rem;
+  margin: 0 0 0.4rem;
+  color: var(--hub-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--hub-border);
+  border-radius: 0.5rem;
+}
+.pending-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--hub-border);
+  font-size: 0.75rem;
+}
+.pending-item:last-child { border-bottom: none; }
+.pending-status {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  background: var(--hub-card);
+  color: var(--hub-text-dim);
+  min-width: 4rem;
+  text-align: center;
+}
+.pending-modified { color: #e0a230; }
+.pending-added { color: #56b482; }
+.pending-deleted { color: #e05656; }
+.pending-untracked { color: var(--hub-text-dim); }
+.pending-unmerged { color: #c084fc; }
+.pending-staged { color: #56b482; font-size: 0.6rem; }
+.pending-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--hub-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pending-rename {
+  color: var(--hub-text-dim);
+  font-size: 0.7rem;
+  font-style: italic;
+}
+.git-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.error-text { color: var(--hub-danger); font-size: 0.8rem; }
+
+.muted { color: var(--hub-text-placeholder); }
+
+.chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: nowrap;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--hub-text-muted);
+  padding: 2rem 0;
+}
+
+.empty-state p { margin: 0.2rem 0; font-size: 0.88rem; }
+.empty-state .empty-hint { font-size: 0.78rem; color: var(--hub-text-placeholder); }
+
+.settings-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.settings-panels-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.mini-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--hub-border-light);
+  border-radius: 6px;
+  background: var(--hub-bg);
+}
+
+.mini-panel-head {
+  display: flex;
+  flex-direction: column;
+}
+
+.mini-panel-title {
+  margin: 0;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--hub-text-muted);
+  font-weight: 600;
+}
+
+.args-input {
+  flex: 1;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--hub-border-light);
+  background: var(--hub-bg);
+  color: var(--hub-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.3;
+  resize: vertical;
+  outline: none;
+}
+
+.args-input:focus-visible {     border-color: var(--hub-accent); }
+
+.args-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.args-actions .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+}
+
+.field-error {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--hub-error-fg);
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--hub-text-muted);
+}
+
+.env-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.env-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 0.8fr) 1fr auto;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.env-key,
+.env-value {
+  background: var(--hub-bg);
+  border: 1px solid var(--hub-border-light);
+  border-radius: 4px;
+  color: var(--hub-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.76rem;
+  padding: 0.3rem 0.45rem;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.env-key:focus,
+.env-value:focus {
+  border-color: var(--hub-accent);
+}
+
+.env-value-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.env-value-wrap .env-value { flex: 1; min-width: 0; }
+
+.env-reveal {
+  flex-shrink: 0;
+}
+
+.env-remove {
+  flex-shrink: 0;
+  color: var(--hub-error-fg);
+}
+
+.env-remove:hover { color: var(--hub-text-bright); }
+
+.env-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.link-btn {
+  background: transparent;
+  border: 1px solid var(--hub-border-light);
+  border-radius: 4px;
+  padding: 0.25rem 0.55rem;
+  color: var(--hub-text-dim);
+  font-size: 0.74rem;
+  cursor: pointer;
+  line-height: 1.3;
+  font-family: inherit;
+}
+
+.link-btn:hover { color: var(--hub-text-bright);     border-color: var(--hub-accent); }
+
+.mini-panel-hint {
+  margin: 0.2rem 0 0;
+  font-size: 0.7rem;
+  color: var(--hub-text-placeholder);
+  line-height: 1.45;
+}
+
+.mini-panel-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.7rem;
+  background: var(--hub-bg);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  color: var(--hub-text-dim);
+}
+
+.intent-row {
+  display: flex;
+  flex-direction: row;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.intent-status {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--hub-text-muted);
+}
+
+.intent-status strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--hub-text-dim);
+  font-weight: 500;
+}
+
+.log-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.log-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.log-row .btn {
+  min-width: 6.5rem;
+  justify-content: center;
+}
+
+.log-label {
+  flex: 0 0 5.5rem;
+  font-size: 0.72rem;
+  color: var(--hub-text-dim);
+  font-weight: 500;
+}
+
+.muted-inline { color: var(--hub-text-placeholder); font-size: 0.74rem; }
+
+.panel-empty {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--hub-text-placeholder);
+}
+
+.more-wrap { position: relative; }
+
+.more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 50;
+  min-width: 11rem;
+  background: var(--hub-card);
+  border: 1px solid var(--hub-border-light);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  padding: 0.25rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.more-item {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  background: transparent;
+  border: none;
+  color: var(--hub-text);
+  font-size: 0.82rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.more-item:hover { background: var(--hub-bg); color: var(--hub-text-bright); }
+
+.more-item-destructive { color: var(--hub-error-fg); }
+.more-item-destructive:hover {     background: var(--hub-error-bg); color: var(--hub-text-bright); }
+.more-item-destructive:disabled,
+.more-item:disabled {     color: var(--hub-text-disabled); cursor: not-allowed; background: transparent; }
+
+.more-item-relink { color: var(--hub-relink-fg); }
+.more-item-relink:hover { background: var(--hub-relink-hover-bg); color: var(--hub-text-bright); }
+.more-item-relink:disabled {     color: var(--hub-text-disabled); cursor: not-allowed; background: transparent; }
+
+.more-sep {
+  height: 1px;
+  background: var(--hub-border);
+  margin: 0.25rem 0;
+}
+
+.ctx-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 11rem;
+  background: var(--hub-card);
+  border: 1px solid var(--hub-border-light);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  padding: 0.25rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.ctx-item {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  background: transparent;
+  border: none;
+  color: var(--hub-text);
+  font-size: 0.82rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ctx-item:hover { background: var(--hub-bg); color: var(--hub-text-bright); }
+.ctx-item-destructive { color: var(--hub-error-fg); }
+.ctx-item-destructive:hover {     background: var(--hub-error-bg); color: var(--hub-text-bright); }
+.ctx-item-destructive:disabled,
+.ctx-item:disabled {     color: var(--hub-text-disabled); cursor: not-allowed; background: transparent; }
+
+.ctx-item-relink { color: var(--hub-relink-fg); }
+.ctx-item-relink:hover { background: var(--hub-relink-hover-bg); color: var(--hub-text-bright); }
+.ctx-item-relink:disabled {     color: var(--hub-text-disabled); cursor: not-allowed; background: transparent; }
+
+.ctx-sep {
+  height: 1px;
+  background: var(--hub-border);
+  margin: 0.25rem 0;
+}
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.settings-modal {
+  background: var(--hub-card);
+  border: 1px solid var(--hub-border-light);
+  border-radius: 12px;
+  width: min(40rem, 92vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.settings-modal-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--hub-border);
+}
+
+.settings-modal-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.settings-modal-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--hub-text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-modal-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.7rem;
+  color: var(--hub-text-placeholder);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-modal-body {
+  padding: 0.85rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  overflow-y: auto;
+}
+
+.modal-close-btn {
+  padding: 0.3rem;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--hub-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.modal-close-btn:hover {
+  color: var(--hub-text-bright);
+  border-color: var(--hub-border-hover);
+  background: var(--hub-selected);
+}
+
+.info-modal {
+  width: min(34rem, 92vw);
+}
+
+.info-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.info-title {
+  margin: 0;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--hub-text-muted);
+  font-weight: 600;
+}
+
+.info-text {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--hub-text-dim);
+  line-height: 1.5;
+}
+
+.info-text code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.74rem;
+  background: var(--hub-bg);
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  color: var(--hub-text);
+}
+
+.info-code {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  background: var(--hub-bg);
+  border: 1px solid var(--hub-border-light);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--hub-text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.info-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem 0.55rem;
+  background: var(--hub-bg);
+  border: 1px solid var(--hub-border-light);
+  border-radius: 4px;
+}
+
+.info-code-inline {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.74rem;
+  color: var(--hub-text);
+}
+
+.info-desc {
+  font-size: 0.74rem;
+  color: var(--hub-text-muted);
+  line-height: 1.45;
+}
+
+.info-link {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--hub-border-light);
+  border-radius: 4px;
+  padding: 0.35rem 0.6rem;
+  color: var(--hub-accent);
+  font-size: 0.78rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  cursor: pointer;
+  text-align: left;
+}
+
+.info-link:hover {
+  border-color: var(--hub-accent);
+  background: var(--hub-bg);
+  color: var(--hub-info-fg);
+}
+
+.walkup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 14, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.walkup-modal {
+  background: var(--hub-bg);
+  border: 1px solid var(--hub-border);
+  border-radius: 10px;
+  width: 100%;
+  max-width: 32rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 1.1rem 1.25rem 1rem;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.walkup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.walkup-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--hub-text);
+}
+
+.walkup-close {
+  background: transparent;
+  border: none;
+  color: var(--hub-text-muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.4rem;
+}
+
+.walkup-close:hover {
+  color: var(--hub-text);
+}
+
+.walkup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.walkup-desc {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--hub-text-muted);
+  line-height: 1.5;
+}
+
+.walkup-desc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.74rem;
+  background: var(--hub-bg);
+  color: var(--hub-text);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+}
+
+.walkup-section-title {
+  margin: 0;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--hub-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.walkup-roots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 6.5rem;
+  overflow-y: auto;
+  border: 1px solid var(--hub-border-light);
+  border-radius: 6px;
+  background: var(--hub-bg);
+  padding: 0.4rem 0.5rem;
+}
+
+.walkup-root {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.74rem;
+  color: var(--hub-source-seed-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.walkup-empty {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--hub-error-fg);
+  line-height: 1.5;
+}
+
+.walkup-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* Toggle row for a single project-type filter. Matches the
+   `.check-row` idiom used across the app (e.g. SettingsTab) — a
+   native checkbox with `accent-color` inside a flex <label>. */
+.walkup-kind-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.86rem;
+  color: var(--hub-text);
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.walkup-kind-row input {
+  margin-top: 0.2rem;
+  accent-color: var(--hub-accent);
+  flex-shrink: 0;
+}
+
+.walkup-kind-row.disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.walkup-kind-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.walkup-kind-name {
+  font-weight: 500;
+}
+
+.walkup-kind-desc {
+  color: var(--hub-text-muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.walkup-kind-desc code {
+  font-family: ui-monospace, SFMono-Regular, Menaco, Menlo, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 0.72rem;
+}
+
+.walkup-config-list,
+.walkup-progress-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.85rem;
+  margin: 0;
+}
+
+.walkup-config-list div,
+.walkup-progress-list div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.walkup-config-list dt,
+.walkup-progress-list dt {
+  font-size: 0.7rem;
+  color: var(--hub-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.walkup-config-list dd,
+.walkup-progress-list dd {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--hub-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.walkup-config,
+.walkup-progress,
+.walkup-done {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed var(--hub-border-light);
+}
+
+.walkup-done-line {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--hub-text-dim);
+}
+
+.walkup-done-line strong {
+  color: var(--hub-text);
+}
+
+.walkup-error {
+  margin: 0;
+  color: var(--hub-error-fg);
+  font-size: 0.8rem;
+}
+
+.walkup-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--hub-border-light);
+  padding-top: 0.7rem;
+}
+
+.walkup-footer-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.74rem;
+  color: var(--hub-text-muted);
+  line-height: 1.45;
+}
+
+/**
+ * M1.5-12 / M1.5-13 — New project modal. Reuses the walk-up
+ * overlay + header / footer style so the two modals feel like the
+ * same family; the body has its own field-level layout.
+ */
+.newproj-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 14, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.newproj-modal {
+  background: var(--hub-bg);
+  border: 1px solid var(--hub-border);
+  border-radius: 10px;
+  width: 100%;
+  max-width: 34rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 1.1rem 1.25rem 1rem;
+  max-height: 86vh;
+  overflow-y: auto;
+}
+
+.newproj-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.newproj-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--hub-text);
+}
+
+/* Multi-type: Project | Package tab switch at the top of the modal. */
+.newproj-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--hub-border-light);
+  margin-bottom: 0.3rem;
+}
+.newproj-tab {
+  padding: 0.4rem 0.8rem;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--hub-text-dim);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.newproj-tab.active {
+  color: var(--hub-text);
+  border-bottom-color: var(--hub-accent, #5c7cfa);
+}
+.newproj-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--hub-text-dim);
+}
+
+.newproj-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.newproj-desc {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--hub-text-muted);
+  line-height: 1.5;
+}
+
+.newproj-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.newproj-label {
+  font-size: 0.74rem;
+  color: var(--hub-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 600;
+}
+
+.newproj-input {
+  background: var(--hub-bg);
+  border: 1px solid var(--hub-border-light);
+  border-radius: 6px;
+  color: var(--hub-text);
+  font-size: 0.86rem;
+  font-family: inherit;
+  padding: 0.4rem 0.5rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.newproj-input:focus {
+  outline: 2px solid var(--hub-accent);
+  outline-offset: 0;
+  border-color: var(--hub-accent);
+}
+
+.newproj-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.newproj-input-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.newproj-input-row .newproj-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.newproj-hint {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--hub-text-muted);
+  line-height: 1.4;
+}
+
+.newproj-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  background: var(--hub-bg);
+  color: var(--hub-text);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+}
+
+.newproj-hint-warn {
+  color: var(--hub-error-fg);
+}
+
+.newproj-template-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--hub-border-light);
+  border-radius: 6px;
+  background: var(--hub-bg);
+}
+
+.newproj-template-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  column-gap: 0.5rem;
+  row-gap: 0.1rem;
+  font-size: 0.85rem;
+  color: var(--hub-text);
+  cursor: pointer;
+}
+
+.newproj-template-option input[type="radio"] {
+  margin-top: 0.18rem;
+}
+
+.newproj-template-option.newproj-template-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.newproj-template-hint {
+  grid-column: 2 / 3;
+  font-size: 0.74rem;
+  color: var(--hub-text-muted);
+  line-height: 1.4;
+}
+
+.newproj-template-picker {
+  margin-left: 1.4rem;
+  max-width: calc(100% - 1.4rem);
+}
+
+.newproj-save-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-left: 1.4rem;
+  font-size: 0.74rem;
+  color: var(--hub-text-muted);
+  line-height: 1.4;
+}
+
+.newproj-error {
+  margin: 0;
+  color: var(--hub-error-fg);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.newproj-overwrite {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--hub-error-fg);
+  border-radius: 6px;
+  background: var(--hub-error-bg);
+  color: var(--hub-error-fg);
+  font-size: 0.78rem;
+}
+
+.newproj-overwrite-hint {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.newproj-overwrite-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  background: var(--hub-bg);
+  color: var(--hub-text);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+}
+
+.newproj-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  border-top: 1px solid var(--hub-border-light);
+  padding-top: 0.7rem;
+}
+
+/**
+ * M1.5-14 / M1.5-15 row + toolbar styles. The row classes are
+ * flat-tone modifiers on the existing `.row` selector so a
+ * missing-path / stale / hidden row picks up the right opacity
+ * without any per-cell work. The toolbar `Show hidden` chip is a
+ * stand-alone `.filter-btn` re-uses the filter group styling so a
+ * the new affordance does not introduce a third button shape.
+ */
+.row-stale { opacity: 0.85; }
+.row-hidden { opacity: 0.5; }
+
+.show-hidden-btn {
+  margin-left: 0.4rem;
+  border: 1px solid var(--hub-border-light);
+  border-radius: 6px;
+  color: var(--hub-text-dim);
+}
+
+.source-hidden {
+  background: rgba(110, 118, 140, 0.18);
+  color: var(--hub-source-seed-fg);
+  border-color: rgba(110, 118, 140, 0.45);
+}
+
+.ctx-item-upgrade,
+.more-item-upgrade {
+  color: var(--hub-source-walkup-fg);
+}
+
+.ctx-item-upgrade:hover:not(:disabled),
+.more-item-upgrade:hover:not(:disabled) {
+  background: rgba(92, 124, 250, 0.18);
+}
+
+/**
+ * Upgrade modal — same overlay / panel layout vocabulary as
+ * walk-up and new-project, with a tighter color palette so the
+ * user reads the action as a small but consequential change.
+ */
+.upgrade-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 9, 13, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.upgrade-modal {
+  width: min(40rem, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--hub-bg);
+  border: 1px solid var(--hub-border-light);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.upgrade-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.upgrade-title {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--hub-text-bright);
+}
+
+.upgrade-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.upgrade-desc {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--hub-text-dim);
+  line-height: 1.45;
+}
+
+.upgrade-desc code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.74rem;
+  background: var(--hub-bg);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  color: var(--hub-text-dim);
+}
+
+.upgrade-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.upgrade-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--hub-text-muted);
+  font-weight: 600;
+}
+
+.upgrade-summary {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.7rem;
+  margin: 0;
+  font-size: 0.76rem;
+}
+
+.upgrade-summary dt {
+  color: var(--hub-text-muted);
+}
+
+.upgrade-summary dd {
+  margin: 0;
+  color: var(--hub-text);
+}
+
+.upgrade-summary code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.74rem;
+  background: var(--hub-bg);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  color: var(--hub-text-dim);
+}
+
+.upgrade-empty {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px dashed var(--hub-border-light);
+  border-radius: 6px;
+  color: var(--hub-text-muted);
+  font-size: 0.78rem;
+}
+
+.upgrade-strategy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.upgrade-strategy-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--hub-border-light);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.76rem;
+  color: var(--hub-text-dim);
+}
+
+.upgrade-strategy-option:hover {     border-color: var(--hub-accent); }
+
+.upgrade-strategy-option:has(input:checked) {
+  border-color: var(--hub-accent);
+  background: rgba(92, 124, 250, 0.08);
+}
+
+.upgrade-strategy-option strong { color: var(--hub-text-bright); }
+
+.upgrade-strategy-hint {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--hub-text-muted);
+  margin-top: 0.1rem;
+}
+
+.upgrade-preview {
+  margin: 0.2rem 0 0;
+  padding: 0.4rem 0.6rem;
+  background: var(--hub-bg);
+  border: 1px solid var(--hub-border-light);
+  border-radius: 6px;
+  font-size: 0.76rem;
+  color: var(--hub-text-dim);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.upgrade-preview-label { color: var(--hub-text-muted); }
+
+.upgrade-preview code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: var(--hub-bg);
+  padding: 0 0.25rem;
+  border-radius: 3px;
+  color: var(--hub-text-dim);
+}
+
+.upgrade-preview-arrow { color: var(--hub-accent); font-weight: 600; }
+
+.upgrade-error {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--hub-error-fg);
+  border-radius: 6px;
+  background: var(--hub-error-bg);
+  color: var(--hub-error-fg);
+  font-size: 0.78rem;
+}
+
+.upgrade-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  border-top: 1px solid var(--hub-border-light);
+  padding-top: 0.7rem;
+}
+
+/**
+ * M4 Plan 2 (M4-4): AI Setup button visual states. The same
+ * classes apply whether the button lives in the toolbar or the
+ * settings-popup action bar; we just need three tones to match
+ * hub-ui.md §Projects toolbar (disabled / ready / incomplete).
+ * The disabled state is the same as the regular disabled button
+ * and is rendered through the Button component's `disabled` prop
+ * — we only style the active states here.
+ */
+.ai-setup-btn {
+  position: relative;
+}
+.ai-setup-btn.ai-setup-ready {
+  border-color: var(--hub-accent);
+  color: var(--hub-text-bright);
+  background: rgba(92, 124, 250, 0.16);
+}
+.ai-setup-btn.ai-setup-ready:hover:not(:disabled) {
+  background: rgba(92, 124, 250, 0.28);
+}
+.ai-setup-btn.ai-setup-incomplete {
+  border-color: #fbbf24;
+  color: #fde68a;
+  background: rgba(251, 191, 36, 0.10);
+}
+.ai-setup-btn.ai-setup-incomplete:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.18);
+}
+/* Green "setup complete" state — driven by the cached detection
+   snapshot (bridge + verify installed + an MCP client configured).
+   Uses --hub-success to match StatusChip's "ok" tone. */
+.ai-setup-btn.ai-setup-complete {
+  border-color: var(--hub-success);
+  color: #9fe0b6;
+  background: rgba(47, 111, 74, 0.28);
+}
+.ai-setup-btn.ai-setup-complete:hover:not(:disabled) {
+  background: rgba(47, 111, 74, 0.42);
+}
+
+.ctx-item-ai-setup,
+.more-item-ai-setup {
+  color: var(--hub-source-walkup-fg);
+}
+
+.ctx-item-ai-setup:hover:not(:disabled),
+.more-item-ai-setup:hover:not(:disabled) {
+  background: rgba(92, 124, 250, 0.18);
+}
+
+/* M15 T6.4: "Import from Hub" modal — mirrors the upgrade modal's
+   overlay/panel shape. The list shows live Unity Hub candidates
+   with already-tracked paths greyed out. */
+.hub-import-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 9, 13, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.hub-import-modal {
+  width: min(46rem, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--hub-bg);
+  border: 1px solid var(--hub-border-light);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.hub-import-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--hub-border);
+}
+
+.hub-import-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.hub-import-close {
+  background: none;
+  border: none;
+  color: var(--hub-text-muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+}
+
+.hub-import-close:hover:not(:disabled) {
+  background: var(--hub-surface);
+  color: var(--hub-text);
+}
+
+.hub-import-close:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hub-import-body {
+  padding: 0.9rem 1.1rem;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.hub-import-help {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--hub-text-muted);
+  line-height: 1.45;
+}
+
+.hub-import-empty,
+.hub-import-error {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.82rem;
+  color: var(--hub-text-dim);
+}
+
+.hub-import-error {
+  color: var(--hub-error-fg);
+  background: var(--hub-error-bg);
+  border: 1px solid var(--hub-error-fg);
+  border-radius: 6px;
+}
+
+.hub-import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.hub-import-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--hub-border);
+  border-radius: 6px;
+  background: var(--hub-surface);
+}
+
+.hub-import-row.tracked {
+  opacity: 0.55;
+}
+
+.hub-import-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.hub-import-row-name {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--hub-text);
+}
+
+.hub-import-row-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--hub-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hub-import-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.68rem;
+  color: var(--hub-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hub-import-missing {
+  color: var(--hub-error-fg);
+}
+
+.hub-import-tracked {
+  font-size: 0.72rem;
+  color: var(--hub-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.hub-import-footer {
+  padding: 0.65rem 1.1rem;
+  border-top: 1px solid var(--hub-border);
+  display: flex;
+  justify-content: flex-end;
+}
