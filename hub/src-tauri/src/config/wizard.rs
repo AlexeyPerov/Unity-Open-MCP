@@ -49,13 +49,13 @@ pub const BRIDGE_PACKAGE_ID: &str = "com.alexeyperov.unity-open-mcp-bridge";
 /// UPM package id for the verify package.
 pub const VERIFY_PACKAGE_ID: &str = "com.alexeyperov.unity-open-mcp-verify";
 
-// M18 Plan 6: the wizard NEVER installs the deprecated legacy extension packs
-// (`com.alexeyperov.unity-open-mcp-ext-<domain>`). Shipped domain tools are
-// embedded in the bridge and activate via the Unity domain dependencies in
-// UNITY_DOMAIN_DEP_IDS below — there is no constant, plan step, or merge
-// branch in this module that writes a `…-ext-*` entry. The legacy packs are
-// retained under packages/extensions/ only so external pinned manifests keep
-// resolving (see packages/extensions/AGENTS.md §Deprecation policy).
+// M18 Plan 6: the wizard NEVER installs separate extension packs for shipped
+// domains. Shipped domain tools are embedded in the bridge and activate via the
+// Unity domain dependencies in UNITY_DOMAIN_DEP_IDS below — there is no
+// constant, plan step, or merge branch in this module that writes a
+// `…-ext-*` entry. The former standalone `com.alexeyperov.unity-open-mcp-ext-*`
+// packs were removed as duplicates of the embedded tools (see
+// packages/extensions/AGENTS.md §Shipped-domain copies removed).
 
 /// UPM ids of the installable Unity domain dependencies whose typed
 /// tools are bundled in the bridge (M18 Plan 4). Built-in module

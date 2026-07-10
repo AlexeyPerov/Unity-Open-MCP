@@ -171,7 +171,7 @@ The generated targets, mapped to their sources:
 | `hub/src-tauri/Cargo.toml` | `version` |
 | `hub/package.json` | `version` |
 
-The deprecated extension packages under `packages/extensions/*` are intentionally **not** synced — they're legacy pins kept at `0.1.0` for compatibility, and new domain tools live inside the bridge. (They install via `file:` from a local checkout, never via the public git URL, so the stale pin doesn't block resolution.) The root `package.json` is a private marker (`0.0.0`) and is also not touched.
+The former standalone extension packages for shipped domains (`packages/extensions/{navigation,inputsystem,probuilder,particlesystem,animation}`) were **removed** — they were duplicates of the domain tools embedded in the bridge. Any remaining community packs under `packages/extensions/*` are independent third-party packages and are not part of the shared version trio. The root `package.json` is a private marker (`0.0.0`) and is also not touched.
 
 ## Bumping the shared version
 

@@ -121,9 +121,9 @@ Two advanced workflows exist for contributors and third-party pack authors.
 
 `packages/extensions/` is the home for **third-party / community** domain packs
 that are not shipped with the bridge. The shipped domains (Nav, Input,
-ProBuilder, Particles, Animation) are embedded in the bridge and **must not**
-also be installed as separate `com.alexeyperov.unity-open-mcp-ext-*` packs —
-that would double-register tool IDs. See
+ProBuilder, Particles, Animation) are embedded in the bridge; the former
+standalone `com.alexeyperov.unity-open-mcp-ext-*` packs for these domains were
+removed as duplicates. See
 [contributing/extensions.md](contributing/extensions.md) for the community-pack
 contract.
 

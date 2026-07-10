@@ -161,12 +161,12 @@
     {/if}
 
     <p class="wiz-hint">
-      Contributor / community-pack path: the legacy
+      Contributor / community-pack path: shipped domains are
+      <strong>embedded in the bridge</strong> — the former
       <code>com.alexeyperov.unity-open-mcp-ext-*</code> UPM packages
-      are no longer required for shipped domains (M18 Plan 4) — they
-      remain in <code>packages/extensions/</code> for third-party
-      packs only. See the manual setup guide for the
-      <code>file:</code> workflow.
+      were removed as duplicates. <code>packages/extensions/</code>
+      now holds third-party / community packs only. See the manual
+      setup guide for the <code>file:</code> workflow.
     </p>
   </details>
 

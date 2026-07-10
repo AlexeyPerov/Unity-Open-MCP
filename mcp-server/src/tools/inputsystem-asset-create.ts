@@ -1,9 +1,9 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-// M16 Plan 10 / T6.6.4 — Input System extension tool. Requires the
-// `com.alexeyperov.unity-open-mcp-ext-inputsystem` extension pack installed in
-// the target project. Mutating: runs the full gate path; paths_hint is the new
-// .inputactions asset path.
+// M16 Plan 10 / T6.6.4 — Input System extension tool. The bridge-side handler
+// is embedded in the bridge (compile-gated by UNITY_OPEN_MCP_EXT_INPUTSYSTEM,
+// active when com.unity.inputsystem is present). Mutating: runs the full gate
+// path; paths_hint is the new .inputactions asset path.
 export const inputsystemAssetCreate: Tool = {
   name: "unity_open_mcp_inputsystem_asset_create",
   description:

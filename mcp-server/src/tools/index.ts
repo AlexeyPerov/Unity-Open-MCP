@@ -199,10 +199,11 @@ import { settingsGetTime } from "./settings-get-time.js";
 import { settingsSetTime } from "./settings-set-time.js";
 import { settingsGetRenderPipeline } from "./settings-get-render-pipeline.js";
 import { settingsSetQualityLevel } from "./settings-set-quality-level.js";
-// M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tools. Each tool is
-// gated on the `com.alexeyperov.unity-open-mcp-ext-navigation` extension pack
-// being installed in the target project; the tool definitions live in core so
-// capabilities discovery advertises the surface even before the pack is added.
+// M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tools. The bridge-side
+// handlers are embedded in the bridge (compile-gated by
+// UNITY_OPEN_MCP_EXT_NAVIGATION, active when com.unity.ai.navigation is
+// present); the tool definitions live in core so capabilities discovery
+// advertises the surface even before the package is added.
 import { navigationSurfaceAdd } from "./navigation-surface-add.js";
 import { navigationSetBakeSettings } from "./navigation-set-bake-settings.js";
 import { navigationSurfaceBake } from "./navigation-surface-bake.js";
@@ -214,10 +215,11 @@ import { navigationAgentSetDestination } from "./navigation-agent-set-destinatio
 import { navigationList } from "./navigation-list.js";
 import { navigationGet } from "./navigation-get.js";
 import { navigationModify } from "./navigation-modify.js";
-// M16 Plan 10 / T6.6.4 — Input System extension tools. Each tool is gated on
-// the `com.alexeyperov.unity-open-mcp-ext-inputsystem` extension pack being
-// installed in the target project; the tool definitions live in core so
-// capabilities discovery advertises the surface even before the pack is added.
+// M16 Plan 10 / T6.6.4 — Input System extension tools. The bridge-side
+// handlers are embedded in the bridge (compile-gated by
+// UNITY_OPEN_MCP_EXT_INPUTSYSTEM, active when com.unity.inputsystem is
+// present); the tool definitions live in core so capabilities discovery
+// advertises the surface even before the package is added.
 import { inputsystemAssetCreate } from "./inputsystem-asset-create.js";
 import { inputsystemActionmapAdd } from "./inputsystem-actionmap-add.js";
 import { inputsystemActionAdd } from "./inputsystem-action-add.js";
@@ -225,23 +227,23 @@ import { inputsystemBindingAdd } from "./inputsystem-binding-add.js";
 import { inputsystemBindingCompositeAdd } from "./inputsystem-binding-composite-add.js";
 import { inputsystemControlschemeAdd } from "./inputsystem-controlscheme-add.js";
 import { inputsystemGet } from "./inputsystem-get.js";
-// M16 Plan 10 / T6.6.5 — ProBuilder extension tools. Each tool is gated on the
-// `com.alexeyperov.unity-open-mcp-ext-probuilder` extension pack being
-// installed in the target project.
+// M16 Plan 10 / T6.6.5 — ProBuilder extension tools. The bridge-side handlers
+// are embedded in the bridge (compile-gated by UNITY_OPEN_MCP_EXT_PROBUILDER,
+// active when com.unity.probuilder is present).
 import { probuilderCreateShape } from "./probuilder-create-shape.js";
 import { probuilderGetMeshInfo } from "./probuilder-get-mesh-info.js";
 import { probuilderExtrude } from "./probuilder-extrude.js";
 import { probuilderDeleteFaces } from "./probuilder-delete-faces.js";
 import { probuilderSetFaceMaterial } from "./probuilder-set-face-material.js";
-// M16 Plan 10 / T6.6.9 — Particle System extension tools. Each tool is gated
-// on the `com.alexeyperov.unity-open-mcp-ext-particlesystem` extension pack
-// being installed in the target project.
+// M16 Plan 10 / T6.6.9 — Particle System extension tools. The bridge-side
+// handlers are embedded in the bridge (ungated — UnityEngine.ParticleSystem is
+// a core engine module present in every install).
 import { particleSystemGet } from "./particle-system-get.js";
 import { particleSystemModify } from "./particle-system-modify.js";
 // M16 Plan 10 / T6.6.10 — Animation extension tools (AnimationClip +
-// AnimatorController). Each tool is gated on the
-// `com.alexeyperov.unity-open-mcp-ext-animation` extension pack being installed
-// in the target project.
+// AnimatorController). The bridge-side handlers are embedded in the bridge
+// (compile-gated by UNITY_OPEN_MCP_EXT_ANIMATION, active when the built-in
+// animation module is present).
 import { animationCreate } from "./animation-create.js";
 import { animationGetData } from "./animation-get-data.js";
 import { animationModify } from "./animation-modify.js";

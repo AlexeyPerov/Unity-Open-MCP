@@ -1,9 +1,9 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-// M16 Plan 10 / T6.6.5 — ProBuilder extension tool. Requires the
-// `com.alexeyperov.unity-open-mcp-ext-probuilder` extension pack installed in
-// the target project. Mutating: runs the full gate path; paths_hint is the
-// active scene path.
+// M16 Plan 10 / T6.6.5 — ProBuilder extension tool. The bridge-side handler
+// is embedded in the bridge (compile-gated by UNITY_OPEN_MCP_EXT_PROBUILDER,
+// active when com.unity.probuilder is present). Mutating: runs the full gate
+// path; paths_hint is the active scene path.
 export const probuilderCreateShape: Tool = {
   name: "unity_open_mcp_probuilder_create_shape",
   description:

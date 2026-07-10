@@ -4,18 +4,18 @@
 
 Rules for `packages/extensions/` — the home for **third-party / community** domain extension UPM packages that add typed helpers on top of the core bridge. Inherits root `AGENTS.md` and `packages/bridge/AGENTS.md`; deeper rules win on overlap.
 
-The five **shipped** first-party domains (navigation, inputsystem, probuilder, particlesystem, animation) are **embedded in the bridge** and **deprecated** here — see [Deprecation policy](#deprecation-policy-m18-plan-6) below. Only community packs and the `template/` scaffold are live in this folder.
+The five **shipped** first-party domains (navigation, inputsystem, probuilder, particlesystem, animation) are **embedded in the bridge** — see [Shipped-domain copies removed](#shipped-domain-copies-removed) below. Only community packs and the `template/` scaffold are live in this folder.
 
 Each pack lives in its own subfolder (`packages/extensions/<domain>/`) and ships as a standalone UPM package (`com.alexeyperov.unity-open-mcp-ext-<domain>`). Packs are opt-in — projects add only the ones they need to `Packages/manifest.json`.
 
-## Deprecation policy (M18 Plan 6)
+## Shipped-domain copies removed
 
-The five **shipped** domains (navigation, inputsystem, probuilder, particlesystem, animation) are **embedded** inside the bridge (`packages/bridge/Editor/TypedTools/Extensions/*`, compile-gated by `UNITY_OPEN_MCP_EXT_<DOMAIN>`) and are the single source of truth for those tool surfaces. The legacy copies in this folder are **deprecated**:
+The five **shipped** domains (navigation, inputsystem, probuilder, particlesystem, animation) are **embedded** inside the bridge (`packages/bridge/Editor/TypedTools/Extensions/*`, compile-gated by `UNITY_OPEN_MCP_EXT_<DOMAIN>`) and are the single source of truth for those tool surfaces. The bridge's embedded tools activate automatically when the matching Unity package/module is present — no separate pack install, no manifest entry, no onboarding step.
 
-- **Status:** **DEPRECATED.** Do **not** install `com.alexeyperov.unity-open-mcp-ext-<domain>` for any of the five shipped domains in a new project. The bridge's embedded tools activate automatically when the matching Unity package/module is present — no separate pack install, no manifest entry, no onboarding step.
-- **Retention:** The folders are **retained, not deleted**, so any pinned manifest that still references a `file:../../packages/extensions/<domain>` (or git-pinned) copy continues to resolve. New first-party domains go into `packages/bridge/Editor/TypedTools/Extensions/`, never here.
-- **Duplicate-registration guard:** A project that keeps a legacy pack installed **and** the embedded bridge copy active will register the same tool ids twice. `BridgeToolRegistry` keeps the first-registered entry and records the collision (`DuplicateToolNames` / `DuplicateCount` after each `Scan()`), emitting a non-fatal `Debug.LogWarning`. The dogfood demo project migrated off the legacy packs in M18 Plan 6; the only remaining reference to these copies is this deprecation safety net.
-- **Default onboarding:** The Hub wizard **never** installs legacy ext packs — it installs only the bridge + verify packages plus opt-in Unity domain packages (`com.unity.ai.navigation`, …). There is no wizard path that installs `com.alexeyperov.unity-open-mcp-ext-*` for a shipped domain.
+The former standalone copies that lived here (`packages/extensions/{navigation,inputsystem,probuilder,particlesystem,animation}/`) were **removed** — they were near-verbatim duplicates of the embedded bridge copies and had drifted behind them. Projects that pinned a removed pack via `file:../../packages/extensions/<domain>` (or a git pin) must drop that manifest entry; the embedded bridge tools provide the same surface with no separate install.
+
+- **Duplicate-registration guard (historical):** when both copies existed, a project with a legacy pack installed **and** the embedded bridge copy active registered the same tool ids twice. `BridgeToolRegistry` kept the first-registered entry and recorded the collision (`DuplicateToolNames` / `DuplicateCount` after each `Scan()`), emitting a non-fatal `Debug.LogWarning`. Removing the legacy copies eliminates this scenario.
+- **Default onboarding:** The Hub wizard **never** installed legacy ext packs — it installs only the bridge + verify packages plus opt-in Unity domain packages (`com.unity.ai.navigation`, …). There is no wizard path that installs `com.alexeyperov.unity-open-mcp-ext-*` for a shipped domain.
 - **Scope of this folder going forward:** This is the home for **third-party / community** domain packs and the `template/` scaffold. See `docs/contributing/extensions.md` §Embedded domain model.
 
 ## Package shape

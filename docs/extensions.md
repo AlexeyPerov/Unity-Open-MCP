@@ -79,13 +79,14 @@ When a dependency is missing, `capabilities` reports
 Per-domain agent playbooks ship as skills under `skills/extensions/<domain>/`.
 See [Skills](skills.md).
 
-## Advanced — deprecated legacy packs
+## Advanced — community packs
 
-Do **not** install `com.alexeyperov.unity-open-mcp-ext-*` UPM packages for
-shipped domains (Nav, Input, ProBuilder, Particles, Animation). Those legacy
-copies under `packages/extensions/` are deprecated; the embedded bridge tools
-are the source of truth. Installing both double-registers tool ids (non-fatal
-warning).
+Shipped domains (Nav, Input, ProBuilder, Particles, Animation) are **embedded
+in the bridge** and have no separate UPM package. The former standalone
+`com.alexeyperov.unity-open-mcp-ext-*` packs for these domains were removed —
+they were duplicates of the embedded tools. If a pinned manifest still
+references one, drop that entry; the embedded bridge tools provide the same
+surface with no separate install.
 
 **Third-party / community** domain packs still live under
 `packages/extensions/` as separate UPM packages. See

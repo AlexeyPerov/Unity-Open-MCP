@@ -175,20 +175,20 @@ own asmdef referencing the bridge. See
 [`packages/extensions/AGENTS.md`](../../packages/extensions/AGENTS.md) for
 the full authoring checklist.
 
-### Deprecated shipped-domain copies
+### Removed shipped-domain copies
 
-The five shipped domains (Nav, Input, ProBuilder, Particles, Animation) also
-have **legacy copies** under
+The five shipped domains (Nav, Input, ProBuilder, Particles, Animation)
+previously had **legacy standalone copies** under
 `packages/extensions/{navigation,inputsystem,probuilder,particlesystem,animation}/`.
-These are **deprecated** and **retained only so pinned manifests keep
-resolving**:
+These were **removed** — they were near-verbatim duplicates of the embedded
+bridge tools and had drifted behind them:
 
-- Do **not** install `com.alexeyperov.unity-open-mcp-ext-<domain>` for any
-  shipped domain in a new project.
-- Installing a legacy pack **and** the embedded copy registers the same tool
-  ids twice. `BridgeToolRegistry` keeps the first-registered entry and records
-  the collision (`DuplicateCount` / `DuplicateToolNames`), emitting a
-  non-fatal warning.
+- The embedded bridge tools (`packages/bridge/Editor/TypedTools/Extensions/*`,
+  compile-gated by `UNITY_OPEN_MCP_EXT_<DOMAIN>`) are the single source of
+  truth for shipped-domain tool surfaces.
+- A manifest that pinned a removed pack via
+  `file:../../packages/extensions/<domain>` (or a git pin) must drop that
+  entry; the embedded tools provide the same surface with no separate install.
 - New first-party domains go into
   `packages/bridge/Editor/TypedTools/Extensions/`, never here.
 

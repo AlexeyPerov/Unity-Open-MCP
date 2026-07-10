@@ -1,10 +1,11 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-// M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tool. Requires the
-// `com.alexeyperov.unity-open-mcp-ext-navigation` extension pack installed in
-// the target project (adds the bridge-side handler). Mutating: runs the full
-// gate path; paths_hint is the scene path containing the host. Address the
-// host by instance_id > path > name (same model as gameobject_* / component_*).
+// M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tool. The bridge-side
+// handler is embedded in the bridge (compile-gated by
+// UNITY_OPEN_MCP_EXT_NAVIGATION, active when com.unity.ai.navigation is
+// present). Mutating: runs the full gate path; paths_hint is the scene path
+// containing the host. Address the host by instance_id > path > name (same
+// model as gameobject_* / component_*).
 const targetSchema = {
   instance_id: {
     type: ["string", "integer"],
