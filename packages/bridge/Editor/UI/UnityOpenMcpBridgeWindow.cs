@@ -42,8 +42,9 @@ namespace UnityOpenMcpBridge
         private MessageType _lastPingMessageType = MessageType.None;
         private bool _pingInFlight;
 
-        [NonSerialized] private bool _stopConfirmPending;
-        [NonSerialized] private double _stopConfirmDeadline;
+        // M29 Plan 2 — the two-click Stop-confirm transient is now owned by
+        // BridgeStopConfirmCoordinator so the toolbar and this window share
+        // the same confirm policy. The window no longer keeps its own copy.
 
         // Tools tab state (M4.5-4/5/6)
         enum ToolFilterMode { All, Enabled, Disabled }
@@ -157,6 +158,10 @@ namespace UnityOpenMcpBridge
         // counts down, and the pending state must auto-expire after 5s. While
         // that transient is active we repaint each frame (≤ 5s, negligible).
         //
+        // M29 Plan 2 — the transient now lives on BridgeStopConfirmCoordinator
+        // (shared with the toolbar). The window still drives the countdown
+        // repaint + auto-expire tick while it is open.
+        //
         // Everything else is event-driven and needs no tick:
         //  - Activity / Gate-run / Batch-progress updates arrive via *.Changed
         //    → OnDataChanged → Repaint.
@@ -167,10 +172,8 @@ namespace UnityOpenMcpBridge
         // window (e.g. Settings) burns zero repaints from the update loop.
         private void EditorUpdateTick()
         {
-            if (!_stopConfirmPending) return;
-
-            if (EditorApplication.timeSinceStartup >= _stopConfirmDeadline)
-                _stopConfirmPending = false;
+            BridgeStopConfirmCoordinator.Tick();
+            if (!BridgeStopConfirmCoordinator.IsArmed) return;
             Repaint();
         }
 

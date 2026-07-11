@@ -16,7 +16,16 @@ namespace UnityOpenMcpBridge
     {
         private void DrawStatusTab()
         {
+            // M29 Plan 2 — connection strip leads the tab so an operator can
+            // answer "why isn't the agent talking?" in one glance, without
+            // opening foldouts. Built from existing signals only (listener,
+            // instance lock, client-config heuristic); the detailed prose +
+            // MCP-connectivity + configure-client panels stay below.
             EditorGUILayout.Space(6);
+            ConnectionStripUI.Draw(BuildConnectionStrip());
+            EditorGUILayout.Space(8);
+            BridgeGUIUtilities.HorizontalLine(8, 6);
+
             EditorGUILayout.LabelField("Bridge runtime", EditorStyles.boldLabel);
 
             var running = BridgeHttpServer.IsRunning;
@@ -120,6 +129,52 @@ namespace UnityOpenMcpBridge
             }
         }
 
+        // M29 Plan 2 — gather the existing signals into the pure strip inputs
+        // and build the at-a-glance model. Kept out of DrawStatusTab so the
+        // signal collection (lock JSON read, client-config heuristic) is in
+        // one place and the builder stays pure / unit-testable.
+        private ConnectionStripModel BuildConnectionStrip()
+        {
+            var projectPath = BridgeSession.ProjectPath;
+            var hasProject = !string.IsNullOrEmpty(projectPath);
+
+            // Discovery signals — reuse the same on-disk read the MCP
+            // connectivity panel uses below; no new probes.
+            var lockAcquired = BridgeInstanceLock.IsAcquired;
+            var lockJson = BridgeInstanceLock.ReadCurrentJson();
+            var snap = BridgeInstanceLock.TryParseSnapshot(lockJson);
+
+            // Client stage — reuse the configure-client "configured" heuristic.
+            // The check is only meaningful when a project is open; otherwise the
+            // stage reads Unknown so the operator is not told "no client" for a
+            // state where the check was never run.
+            var clientCheckAvailable = hasProject;
+            var anyConfigured = false;
+            if (clientCheckAvailable)
+            {
+                foreach (var client in UnityOpenMcpBridge.Config.McpClientCatalog.Clients)
+                {
+                    if (ComputeClientConfigured(client, projectPath))
+                    {
+                        anyConfigured = true;
+                        break;
+                    }
+                }
+            }
+
+            var inputs = new ConnectionStripInputs(
+                listenerRunning: BridgeHttpServer.IsRunning,
+                isCompiling: BridgeSession.IsCompiling,
+                lastStartError: BridgeHttpServer.LastStartError,
+                lockAcquired: lockAcquired,
+                lockState: snap.Valid ? snap.State : null,
+                lockSnapshotValid: snap.Valid,
+                anyClientConfigured: anyConfigured,
+                clientCheckAvailable: clientCheckAvailable);
+
+            return ConnectionStripBuilder.Build(inputs);
+        }
+
         private void DrawRuntimeControls()
         {
             var running = BridgeHttpServer.IsRunning;
@@ -146,16 +201,16 @@ namespace UnityOpenMcpBridge
             EditorGUI.EndDisabledGroup();
 
             EditorGUI.BeginDisabledGroup(!running);
-            var buttonLabel = _stopConfirmPending ? "Confirm Stop" : "Stop";
-            var buttonTooltip = _stopConfirmPending
+            var stopArmed = BridgeStopConfirmCoordinator.IsArmed;
+            var buttonLabel = stopArmed ? "Confirm Stop" : "Stop";
+            var buttonTooltip = stopArmed
                 ? "Click again to confirm: stops the listener and drops MCP connectivity for any active agent."
                 : "Shut the listener down. Requires a two-click confirm because it disconnects any active agent.";
             if (GUILayout.Button(new GUIContent(buttonLabel, buttonTooltip), GUILayout.Width(110)))
             {
-                if (!_stopConfirmPending)
+                if (!stopArmed)
                 {
-                    _stopConfirmPending = true;
-                    _stopConfirmDeadline = EditorApplication.timeSinceStartup + 5.0;
+                    BridgeStopConfirmCoordinator.Arm();
                     _lastPingResult = "Press 'Confirm Stop' within 5 seconds to stop the bridge listener.\n" +
                                       "Warning: stopping the listener will drop MCP connectivity for any active agent.";
                     _lastPingMessageType = MessageType.Warning;
@@ -176,17 +231,17 @@ namespace UnityOpenMcpBridge
                     }
                     finally
                     {
-                        _stopConfirmPending = false;
+                        BridgeStopConfirmCoordinator.Disarm();
                     }
                 }
             }
             EditorGUI.EndDisabledGroup();
 
-            if (_stopConfirmPending)
+            if (stopArmed)
             {
                 var prev = GUI.color;
                 GUI.color = Color.yellow;
-                GUILayout.Label($"Confirm within {Mathf.Max(0f, (float)(_stopConfirmDeadline - EditorApplication.timeSinceStartup)):0.0}s");
+                GUILayout.Label($"Confirm within {(float)BridgeStopConfirmCoordinator.RemainingSeconds:0.0}s");
                 GUI.color = prev;
             }
 
