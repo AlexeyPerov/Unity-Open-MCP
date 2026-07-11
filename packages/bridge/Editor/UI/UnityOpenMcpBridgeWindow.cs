@@ -30,6 +30,10 @@ namespace UnityOpenMcpBridge
     {
         private const string MenuPath = "Tools/Unity Open MCP Bridge";
         private const string SelectedTabPref = "UOMCB_SelectedTab";
+        // M29 Plan 4 — remember the operator's explicit Configure-AI-client
+        // foldout toggle across window reopens. Absent = no manual choice yet,
+        // so the panel auto-expands when the selected client is unconfigured.
+        private const string ConfigureClientFoldoutPref = "UOMCB_ConfigureClientFoldout";
 
         [MenuItem(MenuPath)]
         public static void Launch()
@@ -116,7 +120,14 @@ namespace UnityOpenMcpBridge
         // current project so an operator can copy it without leaving
         // Unity. The Hub wizard remains the full one-click writer; this
         // panel mirrors the envelope shapes so the bytes match.
-        [NonSerialized] private bool _configureClientFoldout = false;
+        //
+        // M29 Plan 4 — the foldout now auto-expands when the selected client
+        // is NOT configured (so an operator who never opened Hub still sees
+        // the snippet), and collapses once configured. The operator's manual
+        // toggle is remembered in EditorPrefs across reopens; while a manual
+        // choice exists it wins over the auto-expand heuristic.
+        [NonSerialized] private bool _configureClientFoldoutUserChose;
+        [NonSerialized] private bool _configureClientFoldout;
         [NonSerialized] private int _configureClientIndex = 0;
         [NonSerialized] private string _configureClientSnippet = "";
         [NonSerialized] private string _configureClientTargetPath = "";
@@ -172,6 +183,16 @@ namespace UnityOpenMcpBridge
         private void OnEnable()
         {
             _currentTab = LoadSelectedTabWithMigration();
+            // M29 Plan 4 — load the operator's explicit Configure-AI-client
+            // foldout choice. EditorPrefs.GetBool only tells us whether a key
+            // is present, not the value, so we probe HasKey to distinguish
+            // "no manual choice yet" (auto-expand on unconfigured) from "user
+            // collapsed this once" (respect that choice).
+            _configureClientFoldoutUserChose = EditorPrefs.HasKey(ConfigureClientFoldoutPref);
+            if (_configureClientFoldoutUserChose)
+            {
+                _configureClientFoldout = EditorPrefs.GetBool(ConfigureClientFoldoutPref);
+            }
             // EditorApplication.update drives the transient Stop-confirm
             // countdown only — it does NOT repaint every frame (see
             // EditorUpdateTick). Data-change repaints come from the *.Changed
@@ -206,6 +227,15 @@ namespace UnityOpenMcpBridge
             BridgeBatchRunHistory.Changed -= OnDataChanged;
             BridgeProjectSettings.Changed -= OnDataChanged;
             EditorPrefs.SetInt(SelectedTabPref, (int)_currentTab);
+            // M29 Plan 4 — persist the operator's explicit Configure-AI-client
+            // foldout choice so it survives a window reopen. Only written when
+            // the operator actually toggled the foldout; the auto-expand
+            // default for an unconfigured client is never persisted, so a fresh
+            // open always re-applies the heuristic.
+            if (_configureClientFoldoutUserChose)
+            {
+                EditorPrefs.SetBool(ConfigureClientFoldoutPref, _configureClientFoldout);
+            }
         }
 
         // EditorApplication.update handler. The ONLY periodic repaint need is

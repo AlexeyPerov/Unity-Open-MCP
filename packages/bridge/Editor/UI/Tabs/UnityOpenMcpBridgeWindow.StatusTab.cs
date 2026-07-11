@@ -438,8 +438,34 @@ namespace UnityOpenMcpBridge
 
         private void DrawConfigureClientSection()
         {
+            // M29 Plan 4 — auto-expand the section when the SELECTED client is
+            // not yet configured (the operator most likely to miss it is the
+            // one who still needs to wire a client). The operator's explicit
+            // foldout toggle always wins: once they open or close the section
+            // by hand, that choice is remembered in EditorPrefs and the
+            // auto-expand heuristic no longer runs.
+            if (!_configureClientFoldoutUserChose)
+            {
+                var projectPath = BridgeSession.ProjectPath;
+                if (!string.IsNullOrEmpty(projectPath))
+                {
+                    var catalog0 = UnityOpenMcpBridge.Config.McpClientCatalog.Clients;
+                    var idx = (_configureClientIndex >= 0 && _configureClientIndex < catalog0.Length)
+                        ? _configureClientIndex : 0;
+                    _configureClientFoldout = !ComputeClientConfigured(catalog0[idx], projectPath);
+                }
+            }
+
+            var prevFoldout = _configureClientFoldout;
             _configureClientFoldout = EditorGUILayout.Foldout(
                 _configureClientFoldout, "Configure AI client", true);
+            // The operator toggled the foldout by hand — record that a manual
+            // choice now exists so it wins over auto-expand on future repaints.
+            if (_configureClientFoldout != prevFoldout)
+            {
+                _configureClientFoldoutUserChose = true;
+                EditorPrefs.SetBool(ConfigureClientFoldoutPref, _configureClientFoldout);
+            }
             if (!_configureClientFoldout) return;
 
             EditorGUI.indentLevel++;
@@ -537,10 +563,40 @@ namespace UnityOpenMcpBridge
 
             EditorGUILayout.Space(4);
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Copy to clipboard", GUILayout.Width(160)))
+            if (GUILayout.Button(new GUIContent(
+                "Copy snippet",
+                "Copy the config snippet above to the clipboard."),
+                GUILayout.Width(120)))
             {
                 GUIUtility.systemCopyBuffer = _configureClientSnippet;
             }
+            // M29 Plan 4 — Copy path + Open target close the discoverability
+            // gap for file-backed clients without duplicating the Hub wizard's
+            // merge writer. The buttons are only meaningful when a target file
+            // path resolves (file-backed clients with a path template); CLI /
+            // manual clients have no file to reveal.
+            var canTargetFile = client.IsFileBacked && !string.IsNullOrEmpty(_configureClientTargetPath);
+            EditorGUI.BeginDisabledGroup(!canTargetFile);
+            if (GUILayout.Button(new GUIContent(
+                "Copy path",
+                "Copy the target config file path to the clipboard."),
+                GUILayout.Width(100)))
+            {
+                GUIUtility.systemCopyBuffer = _configureClientTargetPath;
+            }
+            if (GUILayout.Button(new GUIContent(
+                "Open target",
+                "Reveal the target config file in the OS file browser (Finder / Explorer). " +
+                "Creates the file first if it does not yet exist, so you can paste the snippet " +
+                "into it without hunting for the path."),
+                GUILayout.Width(110)))
+            {
+                RevealClientConfigTarget(_configureClientTargetPath);
+            }
+            EditorGUI.EndDisabledGroup();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Open in Unity Hub Pro", GUILayout.Width(180)))
             {
                 Application.OpenURL(RepoUrl);
@@ -554,13 +610,44 @@ namespace UnityOpenMcpBridge
             EditorGUI.indentLevel--;
         }
 
+        // M29 Plan 4 — reveal the resolved target file in the OS file browser
+        // so the operator can open it and paste the snippet. If the file does
+        // not exist yet (common — the wizard normally creates it), we create
+        // an empty one so RevealInFinder has something to select; this is a
+        // convenience, not a merge writer. Parent directories are created on
+        // demand. Failures are surfaced as a warning box rather than thrown,
+        // because a bad path (e.g. permissions) must never break the panel.
+        private static void RevealClientConfigTarget(string targetPath)
+        {
+            if (string.IsNullOrEmpty(targetPath)) return;
+            try
+            {
+                var dir = Path.GetDirectoryName(targetPath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                if (!File.Exists(targetPath))
+                {
+                    File.WriteAllText(targetPath, "");
+                }
+                EditorUtility.RevealInFinder(targetPath);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"Could not reveal '{targetPath}': {e.Message}");
+            }
+        }
+
         /// <summary>
         /// Best-effort <c>IsConfigured</c> heuristic: returns <c>true</c> when the
         /// client's target file exists and contains a <c>unity-open-mcp</c> entry
         /// under the client's merge key (or, for TOML/Codex, the
         /// <c>[mcp_servers.unity-open-mcp]</c> table). File-read failures default
         /// to <c>false</c> so a missing or unreadable file never falsely reports
-        /// as configured.
+        /// as configured. The content match itself is delegated to
+        /// <see cref="UnityOpenMcpBridge.Config.McpClientCatalog.IsConfiguredEntry"/>
+        /// so the policy is unit-testable without the filesystem.
         /// </summary>
         private static bool ComputeClientConfigured(UnityOpenMcpBridge.Config.McpClientCatalog.ClientEntry client, string projectPath)
         {
@@ -570,13 +657,7 @@ namespace UnityOpenMcpBridge
             try
             {
                 var body = File.ReadAllText(path);
-                if (client.EnvelopeKind == UnityOpenMcpBridge.Config.McpClientCatalog.Envelope.Codex)
-                {
-                    return body.Contains("[mcp_servers.unity-open-mcp]");
-                }
-                // JSON clients: a substring match on the server key is a
-                // good-enough signal (the wizard writes the key verbatim).
-                return body.Contains("\"unity-open-mcp\"");
+                return UnityOpenMcpBridge.Config.McpClientCatalog.IsConfiguredEntry(client.EnvelopeKind, body);
             }
             catch
             {

@@ -221,6 +221,33 @@ namespace UnityOpenMcpBridge.Config
             return p.Replace('\\', '/');
         }
 
+        /// <summary>
+        /// Pure content check: does the target config file body already
+        /// contain a <c>unity-open-mcp</c> entry for this client's envelope?
+        /// Extracted from the Status panel's configured-detection so the
+        /// matching policy is unit-testable without the filesystem. JSON
+        /// clients match on the server key substring; Codex (TOML) matches on
+        /// its table header; CLI/Manual envelopes never report configured
+        /// from file contents (they have no target file).
+        /// </summary>
+        public static bool IsConfiguredEntry(Envelope envelope, string fileBody)
+        {
+            if (string.IsNullOrEmpty(fileBody)) return false;
+            switch (envelope)
+            {
+                case Envelope.Codex:
+                    return fileBody.Contains("[mcp_servers.unity-open-mcp]");
+                case Envelope.CliOnly:
+                case Envelope.Manual:
+                    // No target file — never "configured" via content scan.
+                    return false;
+                default:
+                    // JSON clients: a substring match on the server key is a
+                    // good-enough signal (the wizard writes the key verbatim).
+                    return fileBody.Contains("\"unity-open-mcp\"");
+            }
+        }
+
         // --- envelope helpers -------------------------------------------------
 
         private static Dictionary<string, string> EnvMap(string project, int port)
