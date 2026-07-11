@@ -15,7 +15,8 @@ namespace UnityOpenMcpBridge
     {
         private void DrawGateTab()
         {
-            _gateTabScroll = EditorGUILayout.BeginScrollView(_gateTabScroll);
+            // Page scroll is owned by the shell (DrawContent). Bounded result
+            // snippets below keep their own MinHeight scrolls.
             DrawGateDefaultPolicySection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawGateLatestResultSection();
@@ -23,7 +24,6 @@ namespace UnityOpenMcpBridge
             DrawGateCheckpointHistorySection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawGateManualValidateSection();
-            EditorGUILayout.EndScrollView();
         }
 
         private void DrawGateDefaultPolicySection()

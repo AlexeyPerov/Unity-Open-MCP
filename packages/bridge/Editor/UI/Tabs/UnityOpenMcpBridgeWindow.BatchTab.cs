@@ -13,13 +13,11 @@ namespace UnityOpenMcpBridge
 {
     public partial class UnityOpenMcpBridgeWindow
     {
-        [NonSerialized] private Vector2 _batchTabScroll;
-
         private void DrawBatchTab()
         {
-            _batchTabScroll = EditorGUILayout.BeginScrollView(_batchTabScroll);
+            // Page scroll is owned by the shell (DrawContent). The panel's
+            // active/completed lists keep their own bounded MinHeight scrolls.
             BridgeBatchPanel.Draw();
-            EditorGUILayout.EndScrollView();
         }
     }
 }

@@ -13,8 +13,6 @@ namespace UnityOpenMcpBridge
 {
     public partial class UnityOpenMcpBridgeWindow
     {
-        [NonSerialized] private Vector2 _extensionsTabScroll;
-
         // The Extensions tab has two sections:
         //  1. Optional Unity dependencies (M18 T18.4.2) — the live install /
         //     status panel for the embedded domain tool groups. Owns the
@@ -25,15 +23,12 @@ namespace UnityOpenMcpBridge
         //     planned packs.
         private void DrawExtensionsTab()
         {
-            _extensionsTabScroll = EditorGUILayout.BeginScrollView(_extensionsTabScroll);
-
+            // Page scroll is owned by the shell (DrawContent).
             OptionalDependenciesPanel.Draw();
 
             BridgeGUIUtilities.HorizontalLine(2, 8);
 
             DrawCommunityPacksSection();
-
-            EditorGUILayout.EndScrollView();
         }
 
         private void DrawCommunityPacksSection()

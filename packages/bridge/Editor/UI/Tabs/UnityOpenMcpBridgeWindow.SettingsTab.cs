@@ -19,8 +19,7 @@ namespace UnityOpenMcpBridge
 
         private void DrawSettingsTab()
         {
-            _settingsTabScroll = EditorGUILayout.BeginScrollView(_settingsTabScroll);
-
+            // Page scroll is owned by the shell (DrawContent).
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("Bridge runtime settings", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(SettingsPersistenceNote, MessageType.None);
@@ -46,8 +45,6 @@ namespace UnityOpenMcpBridge
             DrawSettingsStorageSection();
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawSettingsPassiveBatchHint();
-
-            EditorGUILayout.EndScrollView();
         }
 
         private void DrawAutoStartSection()

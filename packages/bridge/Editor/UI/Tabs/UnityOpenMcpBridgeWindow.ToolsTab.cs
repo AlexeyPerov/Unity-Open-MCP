@@ -186,7 +186,12 @@ namespace UnityOpenMcpBridge
 
             DrawToolPagination(filtered.Count);
 
-            _toolListScroll = EditorGUILayout.BeginScrollView(_toolListScroll);
+            // Bounded list scroll (MaxHeight) nested inside the shell's page
+            // scroll. Pagination caps a page at ToolsPageSize rows, so this
+            // shows the current page without competing with the shell scroll
+            // for the whole tab surface.
+            _toolListScroll = EditorGUILayout.BeginScrollView(
+                _toolListScroll, GUILayout.MaxHeight(420));
 
             int pagesCount = filtered.Count / ToolsPageSize + (filtered.Count % ToolsPageSize > 0 ? 1 : 0);
             bool paginated = pagesCount > 1 && _toolPageToShow.HasValue;

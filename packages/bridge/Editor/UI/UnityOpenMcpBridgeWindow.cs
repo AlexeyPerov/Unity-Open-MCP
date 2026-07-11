@@ -59,9 +59,10 @@ namespace UnityOpenMcpBridge
         [NonSerialized] private int? _toolPageToShow = 0;
         [NonSerialized] private Vector2 _toolPagesScroll;
 
-        // Gate tab state (M4.5-7/8/9)
+        // Gate tab state (M4.5-7/8/9). The page-level scroll is owned by the
+        // shell (DrawContent's _contentScroll); only the bounded result-snippet
+        // scrolls below remain.
         [NonSerialized] private string _manualValidateInput = "";
-        [NonSerialized] private Vector2 _gateTabScroll;
         [NonSerialized] private Vector2 _gateLatestScroll;
         [NonSerialized] private Vector2 _gateCheckpointScroll;
         [NonSerialized] private Vector2 _gateManualResultScroll;
@@ -75,8 +76,7 @@ namespace UnityOpenMcpBridge
         // Gate tab's checkpoint section. Mirrors the listener stop pattern.
         [NonSerialized] private bool _checkpointClearPending;
 
-        // Activity tab state (M4.5-10)
-        [NonSerialized] private Vector2 _activityTabScroll;
+        // Activity tab state (M4.5-10). No page scroll — the shell owns it.
         [NonSerialized] private bool _activityVerboseFoldout = false;
         [NonSerialized] private bool _activityFilterToolRequests = true;
         [NonSerialized] private bool _activityFilterDisabled = true;
@@ -85,8 +85,7 @@ namespace UnityOpenMcpBridge
         [NonSerialized] private bool _activityFilterResources = false;
         [NonSerialized] private string _activitySearch = "";
 
-        // Settings tab state (M4.5-11)
-        [NonSerialized] private Vector2 _settingsTabScroll;
+        // Settings tab state (M4.5-11). No page scroll — the shell owns it.
 
         // Status tab foldouts — Editor state and Project are diagnostic/debug
         // fields, so they are collapsed by default to keep the runtime + control
@@ -117,43 +116,69 @@ namespace UnityOpenMcpBridge
         private void OnEnable()
         {
             _currentTab = (BridgeWindowTab)EditorPrefs.GetInt(SelectedTabPref, (int)BridgeWindowTab.Status);
-            EditorApplication.update -= RepaintTick;
-            EditorApplication.update += RepaintTick;
-            BridgeToolTogglePolicy.Changed -= RepaintTick;
-            BridgeToolTogglePolicy.Changed += RepaintTick;
-            BridgeGateDefaultPolicy.Changed -= RepaintTick;
-            BridgeGateDefaultPolicy.Changed += RepaintTick;
-            BridgeGateRunHistory.Changed -= RepaintTick;
-            BridgeGateRunHistory.Changed += RepaintTick;
-            BridgeActivityLog.Changed -= RepaintTick;
-            BridgeActivityLog.Changed += RepaintTick;
-            BridgeBatchRunHistory.Changed -= RepaintTick;
-            BridgeBatchRunHistory.Changed += RepaintTick;
-            BridgeProjectSettings.Changed -= RepaintTick;
-            BridgeProjectSettings.Changed += RepaintTick;
+            // EditorApplication.update drives the transient Stop-confirm
+            // countdown only — it does NOT repaint every frame (see
+            // EditorUpdateTick). Data-change repaints come from the *.Changed
+            // events below via OnDataChanged.
+            EditorApplication.update -= EditorUpdateTick;
+            EditorApplication.update += EditorUpdateTick;
+            // *.Changed → repaint immediately. These fire when underlying state
+            // changes (tool toggle, gate run, activity event, batch progress,
+            // settings write), so a repaint is always warranted. This is the
+            // event-driven path that keeps live tabs fresh without a tick.
+            BridgeToolTogglePolicy.Changed -= OnDataChanged;
+            BridgeToolTogglePolicy.Changed += OnDataChanged;
+            BridgeGateDefaultPolicy.Changed -= OnDataChanged;
+            BridgeGateDefaultPolicy.Changed += OnDataChanged;
+            BridgeGateRunHistory.Changed -= OnDataChanged;
+            BridgeGateRunHistory.Changed += OnDataChanged;
+            BridgeActivityLog.Changed -= OnDataChanged;
+            BridgeActivityLog.Changed += OnDataChanged;
+            BridgeBatchRunHistory.Changed -= OnDataChanged;
+            BridgeBatchRunHistory.Changed += OnDataChanged;
+            BridgeProjectSettings.Changed -= OnDataChanged;
+            BridgeProjectSettings.Changed += OnDataChanged;
         }
 
         private void OnDisable()
         {
-            EditorApplication.update -= RepaintTick;
-            BridgeToolTogglePolicy.Changed -= RepaintTick;
-            BridgeGateDefaultPolicy.Changed -= RepaintTick;
-            BridgeGateRunHistory.Changed -= RepaintTick;
-            BridgeActivityLog.Changed -= RepaintTick;
-            BridgeBatchRunHistory.Changed -= RepaintTick;
-            BridgeProjectSettings.Changed -= RepaintTick;
+            EditorApplication.update -= EditorUpdateTick;
+            BridgeToolTogglePolicy.Changed -= OnDataChanged;
+            BridgeGateDefaultPolicy.Changed -= OnDataChanged;
+            BridgeGateRunHistory.Changed -= OnDataChanged;
+            BridgeActivityLog.Changed -= OnDataChanged;
+            BridgeBatchRunHistory.Changed -= OnDataChanged;
+            BridgeProjectSettings.Changed -= OnDataChanged;
             EditorPrefs.SetInt(SelectedTabPref, (int)_currentTab);
         }
 
-        private void RepaintTick()
+        // EditorApplication.update handler. The ONLY periodic repaint need is
+        // the two-click Stop-confirm countdown: its "Confirm within Xs" label
+        // counts down, and the pending state must auto-expire after 5s. While
+        // that transient is active we repaint each frame (≤ 5s, negligible).
+        //
+        // Everything else is event-driven and needs no tick:
+        //  - Activity / Gate-run / Batch-progress updates arrive via *.Changed
+        //    → OnDataChanged → Repaint.
+        //  - Async ping/probe completions call Repaint() in their finally block.
+        //  - Optional-deps UPM install/remove uses a modal progress bar + its
+        //    own EditorApplication.update poll; no window repaint needed.
+        // So when no transient is active, this method is a no-op and an idle
+        // window (e.g. Settings) burns zero repaints from the update loop.
+        private void EditorUpdateTick()
         {
-            if (_stopConfirmPending && EditorApplication.timeSinceStartup >= _stopConfirmDeadline)
-            {
+            if (!_stopConfirmPending) return;
+
+            if (EditorApplication.timeSinceStartup >= _stopConfirmDeadline)
                 _stopConfirmPending = false;
-                Repaint();
-            }
             Repaint();
         }
+
+        // *.Changed handler — always repaint. The event means "underlying data
+        // changed, the window should show it". Distinct from EditorUpdateTick
+        // (which is conditional on a transient) so data changes always refresh
+        // regardless of which tab is visible.
+        private void OnDataChanged() => Repaint();
 
         private void OnGUI()
         {
@@ -224,6 +249,12 @@ namespace UnityOpenMcpBridge
 
         private void DrawContent()
         {
+            // Single scroll owner: the shell wraps every tab in ONE page scroll.
+            // Tabs must NOT open a second full-page BeginScrollView (nested
+            // IMGUI scrolls fight the mouse wheel). Bounded list scrolls
+            // (MaxHeight/MinHeight on Gate snippets, Batch rows, Tools
+            // token-summary/pagination) are allowed because they are nested
+            // list regions, not competing full-page scrolls.
             _contentScroll = EditorGUILayout.BeginScrollView(_contentScroll);
             switch (_currentTab)
             {

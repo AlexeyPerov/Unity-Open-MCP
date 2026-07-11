@@ -15,8 +15,8 @@ namespace UnityOpenMcpBridge
     // bulk run that funnels progress through BridgeBatchRunHistory).
     //
     // Re-render is driven by BridgeBatchRunHistory.Changed → the host window's
-    // RepaintTick (subscribed in OnEnable), so progress updates without a manual
-    // refresh.
+    // OnDataChanged handler (subscribed in OnEnable), so progress updates
+    // without a manual refresh.
     public static class BridgeBatchPanel
     {
         // Host-window-side scroll state. Kept here (not on the EditorWindow)

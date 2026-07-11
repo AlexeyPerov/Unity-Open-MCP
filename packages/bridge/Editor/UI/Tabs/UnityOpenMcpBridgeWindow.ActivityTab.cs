@@ -19,8 +19,7 @@ namespace UnityOpenMcpBridge
 
         private void DrawActivityTab()
         {
-            _activityTabScroll = EditorGUILayout.BeginScrollView(_activityTabScroll);
-
+            // Page scroll is owned by the shell (DrawContent).
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("Activity log (in-memory ring buffer)", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
@@ -36,8 +35,6 @@ namespace UnityOpenMcpBridge
             DrawActivityList();
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawActivityPassiveBatchHint();
-
-            EditorGUILayout.EndScrollView();
         }
 
         private void DrawActivityControls()

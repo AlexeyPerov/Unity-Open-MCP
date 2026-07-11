@@ -13,8 +13,6 @@ namespace UnityOpenMcpBridge
 {
     public partial class UnityOpenMcpBridgeWindow
     {
-        private Vector2 _infoTabScroll;
-
         // Single source of truth for the doc links surfaced in the Info tab.
         // Each entry is (label, relative path under docs/, tooltip). The repo
         // URL + branch prefix is prepended so links open the rendered markdown
@@ -37,8 +35,7 @@ namespace UnityOpenMcpBridge
 
         private void DrawInfoTab()
         {
-            _infoTabScroll = EditorGUILayout.BeginScrollView(_infoTabScroll);
-
+            // Page scroll is owned by the shell (DrawContent).
             EditorGUILayout.Space(6);
             EditorGUILayout.LabelField("Unity Open MCP Bridge", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
@@ -80,8 +77,6 @@ namespace UnityOpenMcpBridge
             EditorGUILayout.LabelField(
                 $"Bridge {BridgeSession.BridgeVersion}  •  Unity {BridgeSession.UnityVersion ?? "?"}  •  {BridgeSession.Mode} mode",
                 EditorStyles.miniLabel);
-
-            EditorGUILayout.EndScrollView();
         }
 
         // Renders a titled list of links. Each row: a label-style button that
