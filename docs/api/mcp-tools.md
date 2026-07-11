@@ -311,10 +311,12 @@ The estimate is **regenerated from the same source as the tool catalog** — the
 Where it shows:
 
 - **Per tool** — each catalog row renders `~{N} tokens` (K-formatted above 1000, e.g. `~1.2K`) as a chip alongside the mutability / gate / source chips.
-- **Per group** — a collapsible "Per-group token estimate" breakdown lists every group with its active vs total token cost (e.g. `core: ~2K active / ~2K total (6/6 tools)`), so the operator can see which groups dominate the budget.
+- **Per group** — a collapsible "Per-group token estimate" breakdown lists every group with its active vs total token cost (e.g. `core: ~2K active / ~2K total (6/6 tools)`), so the operator can see which groups dominate the budget. Each row also has **Enable** / **Disable** buttons that toggle exactly that group's tools in one action.
 - **Total** — the filters header reports `Active tokens: ~{N}` — the headline context-window cost of the enabled tool set.
 
 The active total is recomputed every frame from the live per-tool toggle state, so disabling a tool (or every tool in a group) drops its tokens from the total immediately. Note this reflects the **bridge toggle policy** (per-tool enable/disable in `.unity-open-mcp/settings.json`), not per-session `manage_tools` activation — session activation lives in the MCP server and is not tracked by the bridge window.
+
+**Bulk actions** — the Tools tab offers **Enable all** / **Disable all** that act on the **current filtered view** (search + Enabled/Disabled filter), not the whole catalog, so a search-narrowed bulk is surgical. Tools outside the filtered set keep their state. Disabling more than a small number of tools shows a native confirm dialog first; re-enabling is one click. Both bulk paths and the per-group toggles persist through the same `.unity-open-mcp/settings.json` `disabledTools` field as a single per-tool toggle.
 
 ## Asset dependency graph: `unity_open_mcp_dependencies`
 

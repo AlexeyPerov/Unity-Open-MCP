@@ -28,6 +28,12 @@ namespace UnityOpenMcpBridge
             "Estimated tokens contributed by all ENABLED tools combined — the headline context-window cost " +
             "of the active tool set an agent will see when it connects. Recomputed live as you toggle tools/groups.";
 
+        // Disabling more than this many tools in one bulk action prompts a
+        // native confirm dialog so an accidental "Disable all" on a large
+        // catalog cannot quietly drop the whole tool surface. Enable is always
+        // one-click (re-enabling is never destructive).
+        private const int BulkDisableConfirmThreshold = 10;
+
         // Per-group token summary foldout (collapsed by default — the headline
         // number lives in the filters header; this is the breakdown).
         [NonSerialized] private bool _toolGroupTokensFoldout = false;
@@ -83,6 +89,36 @@ namespace UnityOpenMcpBridge
                         TooltipTokenEstimate),
                     EditorStyles.miniLabel);
                 GUILayout.FlexibleSpace();
+
+                // Per-group bulk toggles (M29 Plan 5). The tool names in this
+                // group come from the catalog so the action is exact — it does
+                // not depend on the current search/filter.
+                var groupNames = BridgeToolCatalog.ToolNamesForGroup(items, s.Group);
+                EditorGUI.BeginDisabledGroup(s.ActiveToolCount == s.ToolCount);
+                if (GUILayout.Button("Enable", EditorStyles.miniButton, GUILayout.Width(56)))
+                {
+                    BridgeToolTogglePolicy.SetGroupEnabled(groupNames, true);
+                }
+                EditorGUI.EndDisabledGroup();
+                EditorGUI.BeginDisabledGroup(s.ActiveToolCount == 0);
+                if (GUILayout.Button("Disable", EditorStyles.miniButton, GUILayout.Width(60)))
+                {
+                    if (s.ActiveToolCount > BulkDisableConfirmThreshold)
+                    {
+                        if (!EditorUtility.DisplayDialog(
+                                "Disable group",
+                                $"Disable all {s.ActiveToolCount} enabled tools in the '{s.Group}' group?\n\n" +
+                                "Disabled tools return a `tool_disabled` error to agents until re-enabled.",
+                                "Disable", "Cancel"))
+                        {
+                            EditorGUILayout.EndHorizontal();
+                            continue;
+                        }
+                    }
+                    BridgeToolTogglePolicy.SetGroupEnabled(groupNames, false);
+                }
+                EditorGUI.EndDisabledGroup();
+
                 EditorGUILayout.EndHorizontal();
             }
             EditorGUILayout.EndScrollView();
@@ -154,12 +190,101 @@ namespace UnityOpenMcpBridge
                 _toolPageToShow = null;
             }
 
-            if (GUILayout.Button(new GUIContent("Enable all", "Re-enable every tool (clears the disabled-tool list in settings.json)."), EditorStyles.miniButton, GUILayout.Width(78)) && disabled > 0)
+            EditorGUILayout.EndHorizontal();
+
+            // Bulk actions row (M29 Plan 5). "Enable all" / "Disable all" act on
+            // the CURRENT FILTERED SET (search + Enabled/Disabled filter), not
+            // the whole catalog — so a search-narrowed bulk is surgical.
+            // Disabling more than BulkDisableConfirmThreshold prompts a native
+            // confirm so an accidental bulk-disable cannot quietly drop the
+            // whole tool surface; enable is always one-click (re-enabling is
+            // never destructive).
+            DrawToolBulkActions(filtered);
+        }
+
+        // Bulk enable/disable for the current filtered view. The buttons render
+        // disabled when there is nothing to do (no enabled tools to disable, no
+        // disabled tools to enable in the filtered set), which also advertises
+        // the action's scope without a separate label.
+        private void DrawToolBulkActions(List<BridgeToolCatalogItem> filtered)
+        {
+            if (filtered == null || filtered.Count == 0) return;
+
+            int filteredEnabled = 0;
+            int filteredDisabled = 0;
+            foreach (var item in filtered)
             {
-                BridgeToolTogglePolicy.Clear();
+                if (item == null) continue;
+                if (BridgeToolTogglePolicy.IsDisabled(item.Name)) filteredDisabled++;
+                else filteredEnabled++;
             }
 
+            EditorGUILayout.Space(2);
+            EditorGUILayout.BeginHorizontal();
+
+            EditorGUILayout.LabelField(
+                new GUIContent(
+                    $"Bulk (filtered: {filtered.Count})",
+                    "These actions apply to the current filtered view (search + Enabled/Disabled filter), not the whole catalog."),
+                EditorStyles.miniLabel,
+                GUILayout.Width(130));
+
+            GUILayout.FlexibleSpace();
+
+            EditorGUI.BeginDisabledGroup(filteredDisabled == 0);
+            if (GUILayout.Button(
+                    new GUIContent(
+                        $"Enable all ({filteredDisabled})",
+                        "Re-enable every tool in the current filtered view that is currently disabled."),
+                    EditorStyles.miniButton,
+                    GUILayout.Width(120)))
+            {
+                ApplyBulk(filtered, enabled: true);
+            }
+            EditorGUI.EndDisabledGroup();
+
+            EditorGUI.BeginDisabledGroup(filteredEnabled == 0);
+            if (GUILayout.Button(
+                    new GUIContent(
+                        $"Disable all ({filteredEnabled})",
+                        "Disable every tool in the current filtered view that is currently enabled."),
+                    EditorStyles.miniButton,
+                    GUILayout.Width(120)))
+            {
+                ApplyBulk(filtered, enabled: false);
+            }
+            EditorGUI.EndDisabledGroup();
+
             EditorGUILayout.EndHorizontal();
+        }
+
+        // Apply a bulk enable/disable to the filtered set. Disable above the
+        // confirm threshold asks the operator first; enable is one-click.
+        private void ApplyBulk(List<BridgeToolCatalogItem> filtered, bool enabled)
+        {
+            var names = new List<string>(filtered.Count);
+            foreach (var item in filtered)
+            {
+                if (item == null) continue;
+                if (BridgeToolTogglePolicy.IsDisabled(item.Name) == enabled)
+                    names.Add(item.Name); // only tools whose state would change
+            }
+            if (names.Count == 0) return;
+
+            if (!enabled && names.Count > BulkDisableConfirmThreshold)
+            {
+                if (!EditorUtility.DisplayDialog(
+                        "Disable tools",
+                        $"Disable {names.Count} tools in the current filtered view?\n\n" +
+                        "Disabled tools return a `tool_disabled` error to agents until re-enabled. " +
+                        "The change persists in `.unity-open-mcp/settings.json`.",
+                        "Disable", "Cancel"))
+                {
+                    return;
+                }
+            }
+
+            BridgeToolTogglePolicy.SetEnabled(names, enabled);
         }
 
         private ToolFilterMode DrawFilterButton(ToolFilterMode mode, string label, ToolFilterMode current)

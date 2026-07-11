@@ -266,6 +266,30 @@ namespace UnityOpenMcpBridge
             return list;
         }
 
+        // Return the tool names that belong to a group id. The synthetic
+        // "(always visible)" bucket (used by GroupTokenSummaries for tools with
+        // a null Group) is matched when `group` is that exact string OR null/
+        // empty — so callers passing the summary's Group field round-trip. Used
+        // by the Tools tab's per-group bulk enable/disable (M29 Plan 5).
+        public static List<string> ToolNamesForGroup(IReadOnlyList<BridgeToolCatalogItem> items, string group)
+        {
+            var result = new List<string>();
+            if (items == null) return result;
+            var matchAlwaysVisible = string.IsNullOrEmpty(group) || group == "(always visible)";
+            foreach (var t in items)
+            {
+                if (t == null) continue;
+                var g = t.Group ?? "(always visible)";
+                if (matchAlwaysVisible && string.IsNullOrEmpty(t.Group))
+                {
+                    result.Add(t.Name);
+                    continue;
+                }
+                if (g == group) result.Add(t.Name);
+            }
+            return result;
+        }
+
         public static string FormatParameterList(BridgeToolCatalogItem item)
         {
             if (item == null || item.Parameters == null || item.Parameters.Count == 0)

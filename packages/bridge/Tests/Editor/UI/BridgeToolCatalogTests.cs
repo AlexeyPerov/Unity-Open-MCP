@@ -88,5 +88,71 @@ namespace UnityOpenMcpBridge.Tests
                     $"Tools catalog must not contain test fixtures, found: {name}");
             }
         }
+
+        // M29 Plan 5 — ToolNamesForGroup backs the per-group bulk enable/disable
+        // in the Tools tab. It must return exactly the tools whose catalog Group
+        // matches, and match the synthetic "(always visible)" bucket for tools
+        // with a null Group (the bucket GroupTokenSummaries produces).
+        [Test]
+        public static void ToolNamesForGroup_MatchesExactGroupId()
+        {
+            var items = BridgeToolCatalog.Build();
+            var typedEditor = BridgeToolCatalog.ToolNamesForGroup(items, "typed-editor");
+            CollectionAssert.IsNotEmpty(typedEditor,
+                "typed-editor group must have tools in the catalog.");
+            // Every returned name must actually belong to the typed-editor group.
+            foreach (var name in typedEditor)
+            {
+                var item = items.First(i => i.Name == name);
+                Assert.AreEqual("typed-editor", item.Group);
+            }
+        }
+
+        [Test]
+        public static void ToolNamesForGroup_AlwaysVisibleBucketCoversNullGroup()
+        {
+            var items = BridgeToolCatalog.Build();
+            var alwaysVisible = BridgeToolCatalog.ToolNamesForGroup(items, "(always visible)");
+            CollectionAssert.IsNotEmpty(alwaysVisible,
+                "the synthetic (always visible) bucket must include meta-tools with no group.");
+            foreach (var name in alwaysVisible)
+            {
+                var item = items.First(i => i.Name == name);
+                Assert.IsTrue(string.IsNullOrEmpty(item.Group),
+                    "(always visible) bucket must only contain tools with a null group.");
+            }
+        }
+
+        [Test]
+        public static void ToolNamesForGroup_UnknownGroupReturnsEmpty()
+        {
+            var items = BridgeToolCatalog.Build();
+            var result = BridgeToolCatalog.ToolNamesForGroup(items, "no-such-group");
+            CollectionAssert.IsEmpty(result);
+        }
+
+        [Test]
+        public static void ToolNamesForGroup_PartitionsAllToolsAcrossGroups()
+        {
+            // The union of every group bucket must equal the full catalog, and
+            // no tool may appear in two buckets — bulk group actions would
+            // double-toggle otherwise.
+            var items = BridgeToolCatalog.Build();
+            var summary = BridgeToolCatalog.GroupTokenSummaries(items);
+            var seen = new HashSet<string>();
+            int total = 0;
+            foreach (var s in summary)
+            {
+                var names = BridgeToolCatalog.ToolNamesForGroup(items, s.Group);
+                total += names.Count;
+                foreach (var n in names)
+                {
+                    Assert.IsTrue(seen.Add(n),
+                        $"tool '{n}' appeared in more than one group bucket.");
+                }
+            }
+            Assert.AreEqual(items.Count, total,
+                "group buckets must partition the full catalog with no overlaps or gaps.");
+        }
     }
 }
