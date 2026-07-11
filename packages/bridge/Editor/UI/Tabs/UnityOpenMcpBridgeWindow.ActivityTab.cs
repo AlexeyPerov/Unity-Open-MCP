@@ -34,7 +34,7 @@ namespace UnityOpenMcpBridge
             BridgeGUIUtilities.HorizontalLine(2, 4);
             DrawActivityList();
             BridgeGUIUtilities.HorizontalLine(2, 4);
-            DrawActivityPassiveBatchHint();
+            DrawActivityBatchSection();
         }
 
         private void DrawActivityControls()
@@ -269,18 +269,36 @@ namespace UnityOpenMcpBridge
             };
         }
 
-        // ---------- Passive batch hint (M4.5-12) ----------
+        // ---------- Batch section (M29 Plan 3) ----------
+        //
+        // Batch is no longer a peer tab. The read-only batch-run panel
+        // (BridgeBatchPanel) now lives here as a section under Activity so an
+        // operator sees live batch progress and per-entry results alongside
+        // the HTTP event log. The panel keeps its own bounded list scrolls
+        // (active / completed) — those are nested list regions, not competing
+        // full-page scrolls, so the single-scroll-owner contract still holds.
+        // The foldout auto-opens when there is an active or completed run so a
+        // batch in flight is discoverable without expanding it by hand.
+        [NonSerialized] private bool _activityBatchFoldout;
 
-        private void DrawActivityPassiveBatchHint()
+        private void DrawActivityBatchSection()
         {
+            // Auto-expand once a run exists (active or recently completed).
+            if (!_activityBatchFoldout &&
+                (BridgeBatchRunHistory.Active != null || BridgeBatchRunHistory.CompletedCount > 0))
+            {
+                _activityBatchFoldout = true;
+            }
+
             EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Batch workflows", EditorStyles.miniBoldLabel);
-            EditorGUILayout.HelpBox(
-                "Batch scan / baseline / regression workflows run via `unity-open-mcp` " +
-                "fallback (or headless Editor CLI). Live in-Editor batch-run progress and per-entry " +
-                "results are shown in the Batch tab. Use the Gate tab's Manual validate for ad-hoc " +
-                "scoped scans in the meantime.",
-                MessageType.None);
+            _activityBatchFoldout = EditorGUILayout.Foldout(
+                _activityBatchFoldout,
+                $"Batch runs  —  active: {(BridgeBatchRunHistory.Active != null ? 1 : 0)}  completed: {BridgeBatchRunHistory.CompletedCount}",
+                true);
+            if (!_activityBatchFoldout) return;
+
+            // BridgeBatchPanel renders its own header + bounded list scrolls.
+            BridgeBatchPanel.Draw();
         }
 
     }

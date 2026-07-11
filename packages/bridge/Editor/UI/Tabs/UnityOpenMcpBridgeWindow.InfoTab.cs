@@ -13,10 +13,10 @@ namespace UnityOpenMcpBridge
 {
     public partial class UnityOpenMcpBridgeWindow
     {
-        // Single source of truth for the doc links surfaced in the Info tab.
-        // Each entry is (label, relative path under docs/, tooltip). The repo
-        // URL + branch prefix is prepended so links open the rendered markdown
-        // on GitHub.
+        // Single source of truth for the doc links surfaced in the About foldout
+        // (toolbar "?" button; was the Info tab before M29 Plan 3). Each entry
+        // is (label, relative path under docs/, tooltip). The repo URL + branch
+        // prefix is prepended so links open the rendered markdown on GitHub.
         private static readonly (string Label, string Path, string Tooltip)[] DocLinks =
         {
             ("README", "README.md", "Project overview, feature set, and quick links."),
@@ -33,11 +33,16 @@ namespace UnityOpenMcpBridge
             ("Code conventions", "docs/code-conventions.md", "Non-obvious C# decisions (instance IDs, namespaces)."),
         };
 
-        private void DrawInfoTab()
+        // M29 Plan 3 — Info is no longer a peer tab. The toolbar "?" button
+        // toggles _aboutFoldout (owned on the window) and DrawContent renders
+        // this body at the top of the page scroll when the foldout is open, so
+        // the links are reachable from any tab without a dedicated surface.
+        // All the links the old Info tab carried (docs, repo, settings path,
+        // audit dir) are preserved; only the discovery changed.
+        private void DrawAboutFoldout()
         {
-            // Page scroll is owned by the shell (DrawContent).
             EditorGUILayout.Space(6);
-            EditorGUILayout.LabelField("Unity Open MCP Bridge", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("About Unity Open MCP Bridge", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Unity Open MCP is an open MCP server for Unity — it exposes the Editor to " +
                 "MCP-compatible AI clients (Claude, Cursor, …) over a local HTTP bridge so an " +

@@ -6,13 +6,13 @@ namespace UnityOpenMcpBridge
 {
     // T20.7.5.1 — in-Editor batch-run state.
     //
-    // This is the read-only state the Batch tab observes. It is the same surface
-    // an in-Editor batch machinery (the future M26 / T26.3 "batch_*" flow, or any
-    // operator-driven bulk run that wants progress visible in-Editor) writes to.
-    // The bridge owns the state because the bridge is the single Editor process;
-    // batch runs dispatched from the MCP `batch_*` surface (M26) or from the Hub
-    // funnel their progress through here so the Batch tab can render it without a
-    // manual refresh.
+    // This is the read-only state the Activity tab's Batch section observes. It
+    // is the same surface an in-Editor batch machinery (the future M26 / T26.3
+    // "batch_*" flow, or any operator-driven bulk run that wants progress
+    // visible in-Editor) writes to. The bridge owns the state because the bridge
+    // is the single Editor process; batch runs dispatched from the MCP `batch_*`
+    // surface (M26) or from the Hub funnel their progress through here so the
+    // Activity Batch section can render it without a manual refresh.
     //
     // Design notes:
     //  - Modelled on BridgeActivityLog / BridgeGateRunHistory: a static ring

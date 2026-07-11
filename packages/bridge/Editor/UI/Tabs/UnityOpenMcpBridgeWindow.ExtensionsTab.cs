@@ -17,14 +17,21 @@ namespace UnityOpenMcpBridge
         //  1. Optional Unity dependencies (M18 T18.4.2) — the live install /
         //     status panel for the embedded domain tool groups. Owns the
         //     one-click UPM install/remove actions.
-        //  2. Community / planned packs — the legacy ExtensionCatalog mirror.
-        //     Shipped domains no longer need a separate pack (their tools are
-        //     embedded), so this section now advertises only third-party and
-        //     planned packs.
+        //  2. Additional packs — third-party / community extension packs. This
+        //     section is rendered ONLY when ExtensionCatalog.Packs is non-empty
+        //     (M29 Plan 3): the catalog currently has no entries, so the empty
+        //     section adds operator noise. When a pack is added back to the
+        //     catalog, the foldout reappears automatically.
         private void DrawExtensionsTab()
         {
             // Page scroll is owned by the shell (DrawContent).
             OptionalDependenciesPanel.Draw();
+
+            // Hide the additional-packs section entirely when the catalog is
+            // empty — no header, no dev-facing catalog source path, no empty
+            // row count. The data path stays intact for future packs.
+            if (ExtensionCatalog.Packs == null || ExtensionCatalog.Packs.Length == 0)
+                return;
 
             BridgeGUIUtilities.HorizontalLine(2, 8);
 
@@ -34,16 +41,14 @@ namespace UnityOpenMcpBridge
         private void DrawCommunityPacksSection()
         {
             EditorGUILayout.Space(4);
-            EditorGUILayout.LabelField("Community / planned packs", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Additional packs", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
                 "Shipped domain tools (NavMesh, Input System, ProBuilder, " +
                 "Particle System, Animation) are embedded inside the bridge " +
                 "and activate automatically when the matching Unity package is " +
                 "present — see the Optional Unity dependencies panel above for " +
-                "one-click install. The rows below cover the legacy catalog: " +
-                "third-party / community packs still live under " +
-                "packages/extensions/ as separate UPM packages, and planned " +
-                "domains are coming-soon placeholders.",
+                "one-click install. The rows below cover additional extension " +
+                "packs available for this project.",
                 MessageType.None);
 
             BridgeGUIUtilities.HorizontalLine(2, 4);
@@ -57,10 +62,6 @@ namespace UnityOpenMcpBridge
             BridgeGUIUtilities.HorizontalLine(2, 4);
             EditorGUILayout.LabelField(
                 $"Installed: {installedCount} / {ExtensionCatalog.Packs.Length}",
-                EditorStyles.miniLabel);
-            EditorGUILayout.LabelField(
-                "Catalog source: packages/bridge/Editor/UI/ExtensionCatalog.cs " +
-                "(add a new pack here + mirror it in hub/src/lib/services/extensions.ts).",
                 EditorStyles.miniLabel);
         }
 
@@ -151,7 +152,5 @@ namespace UnityOpenMcpBridge
                 return false;
             return BridgeToolRegistry.Contains(pack.ToolIds[0]);
         }
-
-        // ---------- Info tab ----------
     }
 }

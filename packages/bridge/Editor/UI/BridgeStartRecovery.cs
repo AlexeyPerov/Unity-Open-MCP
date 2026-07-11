@@ -33,7 +33,7 @@ namespace UnityOpenMcpBridge
                 "   " + lockPath + "\n" +
                 "5. Reopen the project — the bridge auto-starts unless disabled in Settings.\n" +
                 "6. Do not click Start if the listener already shows Running. Use Ping to verify.\n\n" +
-                "Full guide: docs/troubleshooting.md (also linked from the Info tab).";
+                "Full guide: docs/troubleshooting.md (also linked from the toolbar ? button).";
         }
     }
 }

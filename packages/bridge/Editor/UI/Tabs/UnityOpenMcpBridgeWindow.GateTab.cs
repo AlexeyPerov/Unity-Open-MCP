@@ -111,6 +111,53 @@ namespace UnityOpenMcpBridge
             return labels;
         }
 
+        // M29 Plan 3 — read-only echo of the project default gate mode. The
+        // single interactive control lives on the Gate tab; the Settings tab
+        // shows this echo + a pointer instead of a second interactive popup,
+        // so there is one primary control and no divergent help text. Reuses
+        // the same yellow-tinted visual treatment for consistency with the
+        // primary control, but renders the mode as a non-interactive label.
+        private static void DrawGlobalGateModeReadOnly()
+        {
+            var current = BridgeGateDefaultPolicy.GetDefault();
+
+            var prevBg = GUI.backgroundColor;
+            GUI.backgroundColor = new Color(1f, 0.96f, 0.7f);
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            GUI.backgroundColor = prevBg;
+
+            try
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Default mode", GUILayout.Width(120));
+                EditorGUILayout.LabelField(ModeDescriptor(current), EditorStyles.boldLabel);
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.LabelField("Effective policy", ModeDescriptor(current), EditorStyles.miniLabel);
+
+                if (current == BridgeGateDefaultPolicy.Off)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Gate is OFF project-wide — mutating tools run WITHOUT the checkpoint → validate safety flow.",
+                        MessageType.Error);
+                }
+                else if (current == BridgeGateDefaultPolicy.Warn)
+                {
+                    EditorGUILayout.HelpBox(
+                        "Gate is in `warn` mode — new compile errors surface as warnings, not MCP errors.",
+                        MessageType.Warning);
+                }
+
+                EditorGUILayout.LabelField(
+                    "Change the project default gate mode on the Gate tab.",
+                    EditorStyles.miniLabel);
+            }
+            finally
+            {
+                EditorGUILayout.EndVertical();
+            }
+        }
+
         private static int IndexOfMode(string mode)
         {
             for (int i = 0; i < BridgeGateDefaultPolicy.ValidModes.Length; i++)

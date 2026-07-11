@@ -70,7 +70,10 @@ namespace UnityOpenMcpBridge
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Project default gate mode", EditorStyles.miniBoldLabel);
-            DrawGlobalGateModeControl(showStorageHint: false);
+            // M29 Plan 3 — the single interactive control lives on the Gate tab.
+            // Settings shows a read-only echo + pointer so there is one primary
+            // control and no divergent help text between the two tabs.
+            DrawGlobalGateModeReadOnly();
         }
 
         private void DrawAuthSection()
@@ -384,16 +387,17 @@ namespace UnityOpenMcpBridge
             EditorUtility.RevealInFinder(path);
         }
 
-        // Passive batch hint shared between the Activity and Settings tabs (M4.5-12).
+        // Passive batch hint (M4.5-12; updated M29 Plan 3 — Batch is now an
+        // Activity section, not a peer tab).
         private void DrawSettingsPassiveBatchHint()
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Batch workflows", EditorStyles.miniBoldLabel);
             EditorGUILayout.HelpBox(
                 "Batch scan / baseline / regression workflows land their live progress and " +
-                "per-entry results in the Batch tab (read-only). Batch execution itself is driven " +
-                "from the MCP batch surface or the Hub — no batch execution controls are exposed " +
-                "in this window.",
+                "per-entry results in the Activity tab's Batch section (read-only). Batch " +
+                "execution itself is driven from the MCP batch surface or the Hub — no batch " +
+                "execution controls are exposed in this window.",
                 MessageType.None);
         }
 

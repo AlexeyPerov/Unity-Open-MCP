@@ -122,9 +122,9 @@ namespace UnityOpenMcpBridge.MetaTools
 
             // --- BridgeBatchRunHistory live progress -------------------------
             // One BeginRun / CompleteRun pair around the whole loop so the
-            // operator's Batch tab shows in-flight progress without a manual
-            // refresh. Source "mcp" distinguishes agent-driven batches from
-            // any future Hub-initiated runs.
+            // operator's Activity Batch section shows in-flight progress without
+            // a manual refresh. Source "mcp" distinguishes agent-driven batches
+            // from any future Hub-initiated runs.
             var runId = System.Guid.NewGuid().ToString("N");
             var label = BuildRunLabel(steps);
             BridgeBatchRunHistory.BeginRun(runId, "mcp", label);
@@ -230,7 +230,7 @@ namespace UnityOpenMcpBridge.MetaTools
         }
 
         // Build the redacted run label from the step tool names (no full params
-        // dump — keeps the Batch tab readable and avoids leaking payloads).
+        // dump — keeps the Activity Batch section readable and avoids leaking payloads).
         private static string BuildRunLabel(List<BatchStep> steps)
         {
             if (steps.Count == 0) return "batch_execute";
@@ -248,7 +248,7 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        // Per-entry args summary for the Batch tab. Redacted to the tool name +
+        // Per-entry args summary for the Activity Batch section. Redacted to the tool name +
         // a short hint of the first key id-like param — never the full params
         // body (could be large / sensitive).
         private static string SummarizeArgs(BatchStep step)

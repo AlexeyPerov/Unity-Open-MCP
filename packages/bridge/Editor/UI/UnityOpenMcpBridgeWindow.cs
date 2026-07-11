@@ -11,16 +11,19 @@ using UnityOpenMcpVerify.Cache;
 
 namespace UnityOpenMcpBridge
 {
+    // M29 Plan 3 — peer-tab IA cleanup. Batch and Info are no longer peer
+    // tabs: Batch is a section under Activity (its panel still renders via
+    // BridgeBatchPanel.Draw), and Info is a toolbar About foldout (DrawAboutFoldout).
+    // The enum is the source of truth for the toolbar row; do not re-add
+    // removed values without updating the prefs migration below.
     public enum BridgeWindowTab
     {
         Status,
         Tools,
         Gate,
         Activity,
-        Batch,
         Settings,
-        Extensions,
-        Info
+        Extensions
     }
 
     public partial class UnityOpenMcpBridgeWindow : EditorWindow
@@ -37,6 +40,11 @@ namespace UnityOpenMcpBridge
 
         private BridgeWindowTab _currentTab;
         private Vector2 _contentScroll;
+
+        // M29 Plan 3 — About foldout state. Info is no longer a peer tab; the
+        // toolbar "?" button toggles this foldout, which renders the same docs
+        // / repo / quick-reference links the old Info tab carried.
+        [NonSerialized] private bool _aboutFoldout;
 
         private string _lastPingResult = "";
         private MessageType _lastPingMessageType = MessageType.None;
@@ -114,9 +122,56 @@ namespace UnityOpenMcpBridge
         [NonSerialized] private string _configureClientTargetPath = "";
         [NonSerialized] private bool _configureClientConfigured;
 
+        // M29 Plan 3 — prefs migration. Before this plan the enum had 8 values
+        // (Status, Tools, Gate, Activity, Batch, Settings, Extensions, Info).
+        // Batch and Info were removed; the surviving indices shifted down. An
+        // old saved index therefore no longer names the same tab. We remap the
+        // legacy indices once and persist the migrated value so future loads
+        // skip the map. Anything out of range falls back to Status.
+        //
+        // Legacy → new map:
+        //   0 Status      → 0 Status
+        //   1 Tools       → 1 Tools
+        //   2 Gate        → 2 Gate
+        //   3 Activity    → 3 Activity
+        //   4 Batch       → 3 Activity  (Batch is now an Activity section)
+        //   5 Settings    → 4 Settings
+        //   6 Extensions  → 5 Extensions
+        //   7 Info        → 0 Status    (Info is now a toolbar About foldout)
+        private static BridgeWindowTab MigrateSelectedTab(int oldIndex)
+        {
+            switch (oldIndex)
+            {
+                case 0: return BridgeWindowTab.Status;
+                case 1: return BridgeWindowTab.Tools;
+                case 2: return BridgeWindowTab.Gate;
+                case 3:
+                case 4: return BridgeWindowTab.Activity;
+                case 5: return BridgeWindowTab.Settings;
+                case 6: return BridgeWindowTab.Extensions;
+                case 7: return BridgeWindowTab.Status;
+                default: return BridgeWindowTab.Status;
+            }
+        }
+
+        private BridgeWindowTab LoadSelectedTabWithMigration()
+        {
+            var raw = EditorPrefs.GetInt(SelectedTabPref, (int)BridgeWindowTab.Status);
+            // Any value outside the current enum range is legacy or corrupt —
+            // remap it and persist so the migration runs exactly once.
+            var max = Enum.GetValues(typeof(BridgeWindowTab)).Length - 1;
+            if (raw < 0 || raw > max)
+            {
+                var migrated = MigrateSelectedTab(raw);
+                EditorPrefs.SetInt(SelectedTabPref, (int)migrated);
+                return migrated;
+            }
+            return (BridgeWindowTab)raw;
+        }
+
         private void OnEnable()
         {
-            _currentTab = (BridgeWindowTab)EditorPrefs.GetInt(SelectedTabPref, (int)BridgeWindowTab.Status);
+            _currentTab = LoadSelectedTabWithMigration();
             // EditorApplication.update drives the transient Stop-confirm
             // countdown only — it does NOT repaint every frame (see
             // EditorUpdateTick). Data-change repaints come from the *.Changed
@@ -201,7 +256,11 @@ namespace UnityOpenMcpBridge
                 var label = new GUIContent(TabLabel(tab), TabTooltip(tab));
                 var prev = GUI.backgroundColor;
                 if (isCurrent) GUI.backgroundColor = new Color(0.7f, 0.85f, 1f);
-                if (GUILayout.Button(label, EditorStyles.toolbarButton, GUILayout.Width(72)))
+                // M29 Plan 3 — flexible width (sized to label) replaces the old
+                // fixed 72px so the surviving six tabs fit at the 520px minSize
+                // without clipping. ExpandWidth(false) keeps each button to its
+                // content width and lets FlexibleSpace absorb the remainder.
+                if (GUILayout.Button(label, EditorStyles.toolbarButton, GUILayout.ExpandWidth(false)))
                 {
                     if (!isCurrent)
                     {
@@ -213,6 +272,22 @@ namespace UnityOpenMcpBridge
             }
 
             GUILayout.FlexibleSpace();
+
+            // M29 Plan 3 — About button. Info is no longer a peer tab; this
+            // button toggles the About foldout (docs / repo / quick-reference
+            // links) that draws at the top of DrawContent regardless of tab.
+            var aboutPrev = GUI.backgroundColor;
+            if (_aboutFoldout) GUI.backgroundColor = new Color(0.7f, 0.85f, 1f);
+            if (GUILayout.Button(
+                    new GUIContent("?",
+                        "Docs, repository, and quick-reference links (bind URL, settings file, instance lock, audit dir)."),
+                    EditorStyles.toolbarButton,
+                    GUILayout.Width(24)))
+            {
+                _aboutFoldout = !_aboutFoldout;
+            }
+            GUI.backgroundColor = aboutPrev;
+
             GUILayout.Label($"Bridge {BridgeSession.BridgeVersion}", EditorStyles.miniLabel);
             EditorGUILayout.EndHorizontal();
         }
@@ -225,10 +300,8 @@ namespace UnityOpenMcpBridge
                 BridgeWindowTab.Tools => "Tools",
                 BridgeWindowTab.Gate => "Gate",
                 BridgeWindowTab.Activity => "Activity",
-                BridgeWindowTab.Batch => "Batch",
                 BridgeWindowTab.Settings => "Settings",
                 BridgeWindowTab.Extensions => "Extensions",
-                BridgeWindowTab.Info => "Info",
                 _ => tab.ToString()
             };
         }
@@ -241,11 +314,9 @@ namespace UnityOpenMcpBridge
                 BridgeWindowTab.Status => "Listener state and start/stop controls.",
                 BridgeWindowTab.Tools => "Catalog of dispatchable tools; toggle or inspect each tool.",
                 BridgeWindowTab.Gate => "Gate policy: project default, latest result, manual validate.",
-                BridgeWindowTab.Activity => "Live log of HTTP events hitting the bridge.",
-                BridgeWindowTab.Batch => "In-Editor batch-run progress and per-entry results (read-only).",
+                BridgeWindowTab.Activity => "Live log of HTTP events and in-Editor batch runs.",
                 BridgeWindowTab.Settings => "Project runtime settings persisted to settings.json.",
-                BridgeWindowTab.Extensions => "Optional Unity domain tools and community packs.",
-                BridgeWindowTab.Info => "Links to docs, repo, and quick references.",
+                BridgeWindowTab.Extensions => "Optional Unity domain tools and extensions.",
                 _ => null
             };
         }
@@ -259,6 +330,16 @@ namespace UnityOpenMcpBridge
             // token-summary/pagination) are allowed because they are nested
             // list regions, not competing full-page scrolls.
             _contentScroll = EditorGUILayout.BeginScrollView(_contentScroll);
+
+            // M29 Plan 3 — About foldout renders at the top of the scroll
+            // regardless of the active tab so the links are reachable from
+            // anywhere without a dedicated tab. It scrolls with the content.
+            if (_aboutFoldout)
+            {
+                DrawAboutFoldout();
+                BridgeGUIUtilities.HorizontalLine(2, 4);
+            }
+
             switch (_currentTab)
             {
                 case BridgeWindowTab.Status:
@@ -273,17 +354,11 @@ namespace UnityOpenMcpBridge
                 case BridgeWindowTab.Activity:
                     DrawActivityTab();
                     break;
-                case BridgeWindowTab.Batch:
-                    DrawBatchTab();
-                    break;
                 case BridgeWindowTab.Settings:
                     DrawSettingsTab();
                     break;
                 case BridgeWindowTab.Extensions:
                     DrawExtensionsTab();
-                    break;
-                case BridgeWindowTab.Info:
-                    DrawInfoTab();
                     break;
             }
             EditorGUILayout.EndScrollView();
