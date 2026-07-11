@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
+use crate::config::paths;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -212,15 +211,7 @@ fn default_walk_up_max_depth() -> u32 {
 /// discovery, which always scans the current OS's defaults regardless
 /// of what is stored here.
 fn default_parent_folders() -> Vec<String> {
-    let path: PathBuf = if cfg!(target_os = "macos") {
-        PathBuf::from("/Applications/Unity/Hub/Editor")
-    } else if cfg!(target_os = "windows") {
-        PathBuf::from("C:\\Program Files\\Unity\\Hub\\Editor")
-    } else {
-        dirs::home_dir()
-            .map(|h| h.join("Unity/Hub/Editor"))
-            .unwrap_or_else(|| PathBuf::from("Unity/Hub/Editor"))
-    };
+    let path = paths::unity_hub_editor_default_dir();
     vec![path.to_string_lossy().to_string()]
 }
 

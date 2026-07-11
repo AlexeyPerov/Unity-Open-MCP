@@ -106,7 +106,6 @@
     type StepId,
   } from "./wizard/constants.ts";
   import {
-    effectiveLaunchMode,
     resolveLaunchSourceMode,
     wireModeForSourceMode,
     type McpLaunchSourceMode,
@@ -474,8 +473,9 @@
         break;
       case "custom":
         // Preserve an existing override path when switching into custom; only
-        // clear the checkout/global flags so effectiveLaunchMode no longer
-        // collapses to local/localOverride by precedence.
+        // clear the checkout/global flags so resolveLaunchSourceMode plus
+        // wireModeForSourceMode no longer collapses to local/localOverride
+        // by precedence.
         useLocalCheckout = false;
         useGlobalInstall = false;
         break;
@@ -913,11 +913,13 @@
     const override = mcpIndexOverride;
     const localCheckout = useLocalCheckout;
     const globalInstall = useGlobalInstall;
-    const mode: McpLaunchModeWire = effectiveLaunchMode({
-      mcpIndexOverride: override,
-      useLocalCheckout: localCheckout,
-      useGlobalInstall: globalInstall,
-    });
+    const mode: McpLaunchModeWire = wireModeForSourceMode(
+      resolveLaunchSourceMode({
+        mcpIndexOverride: override,
+        useLocalCheckout: localCheckout,
+        useGlobalInstall: globalInstall,
+      }),
+    );
     if (!projectPath || ((mode === "local" || mode === "localOverride") && !root)) {
       mcpPlan = null;
       return;
@@ -1009,11 +1011,13 @@
 
   function canWriteMcpConfig(): boolean {
     if (clientKind(mcpClient) !== "file") return false;
-    const mode = effectiveLaunchMode({
-      mcpIndexOverride,
-      useLocalCheckout,
-      useGlobalInstall,
-    });
+    const mode = wireModeForSourceMode(
+      resolveLaunchSourceMode({
+        mcpIndexOverride,
+        useLocalCheckout,
+        useGlobalInstall,
+      }),
+    );
     if (mode === "local" || mode === "localOverride") {
       if (resolvedMcpPathValid !== true) return false;
       if (!toolkitValidation?.ok) return false;
@@ -1073,11 +1077,13 @@
     if (!canWriteMcpConfig() || mcpWriting) return;
     const root = toolkitRoot;
     const projectPath = wizardProjectPath;
-    const mode = effectiveLaunchMode({
-      mcpIndexOverride,
-      useLocalCheckout,
-      useGlobalInstall,
-    });
+    const mode = wireModeForSourceMode(
+      resolveLaunchSourceMode({
+        mcpIndexOverride,
+        useLocalCheckout,
+        useGlobalInstall,
+      }),
+    );
     if (!projectPath) return;
     if ((mode === "local" || mode === "localOverride") && !root) return;
     mcpWriting = true;

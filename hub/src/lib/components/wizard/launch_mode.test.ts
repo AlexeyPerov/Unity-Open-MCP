@@ -1,102 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  effectiveLaunchMode,
-  resolveLaunchSourceMode,
-  wireModeForSourceMode,
-} from "./launch_mode.ts";
-
-test("effectiveLaunchMode: npx is the default", () => {
-  assert.equal(
-    effectiveLaunchMode({
-      mcpIndexOverride: "",
-      useLocalCheckout: false,
-      useGlobalInstall: false,
-    }),
-    "npx",
-  );
-});
-
-test("effectiveLaunchMode: useGlobalInstall refines npx → global", () => {
-  assert.equal(
-    effectiveLaunchMode({
-      mcpIndexOverride: "",
-      useLocalCheckout: false,
-      useGlobalInstall: true,
-    }),
-    "global",
-  );
-});
-
-test("effectiveLaunchMode: useLocalCheckout → local (ignores global flag)", () => {
-  assert.equal(
-    effectiveLaunchMode({
-      mcpIndexOverride: "",
-      useLocalCheckout: true,
-      useGlobalInstall: true,
-    }),
-    "local",
-  );
-});
-
-test("effectiveLaunchMode: mcpIndexOverride always wins (localOverride)", () => {
-  assert.equal(
-    effectiveLaunchMode({
-      mcpIndexOverride: "/opt/builds/unity-open-mcp/index.js",
-      useLocalCheckout: true,
-      useGlobalInstall: true,
-    }),
-    "localOverride",
-  );
-});
-
-test("effectiveLaunchMode: whitespace-only override is ignored", () => {
-  assert.equal(
-    effectiveLaunchMode({
-      mcpIndexOverride: "   ",
-      useLocalCheckout: false,
-      useGlobalInstall: false,
-    }),
-    "npx",
-  );
-});
-
-test("effectiveLaunchMode precedence: override > local > global > npx", () => {
-  // Each tier overrides the next-lower one.
-  assert.equal(
-    effectiveLaunchMode({
-      mcpIndexOverride: "x",
-      useLocalCheckout: true,
-      useGlobalInstall: true,
-    }),
-    "localOverride",
-  );
-  assert.equal(
-    effectiveLaunchMode({
-      mcpIndexOverride: "",
-      useLocalCheckout: true,
-      useGlobalInstall: true,
-    }),
-    "local",
-  );
-  assert.equal(
-    effectiveLaunchMode({
-      mcpIndexOverride: "",
-      useLocalCheckout: false,
-      useGlobalInstall: true,
-    }),
-    "global",
-  );
-  assert.equal(
-    effectiveLaunchMode({
-      mcpIndexOverride: "",
-      useLocalCheckout: false,
-      useGlobalInstall: false,
-    }),
-    "npx",
-  );
-});
+import { resolveLaunchSourceMode, wireModeForSourceMode } from "./launch_mode.ts";
 
 // ---- resolveLaunchSourceMode (Plan 2 exclusive-mode model) ----
 
@@ -191,21 +96,38 @@ test("wireModeForSourceMode: maps each source mode to its wire mode", () => {
   assert.equal(wireModeForSourceMode("custom"), "localOverride");
 });
 
-test("wireModeForSourceMode + resolveLaunchSourceMode round-trips through effectiveLaunchMode", () => {
-  // The deprecated effectiveLaunchMode must agree with the new two-step
-  // model for every legacy-field combination.
+test("wireModeForSourceMode + resolveLaunchSourceMode preserves legacy precedence mapping", () => {
+  // Legacy precedence was override > local > global > npx.
   const cases = [
-    { mcpIndexOverride: "", useLocalCheckout: false, useGlobalInstall: false },
-    { mcpIndexOverride: "", useLocalCheckout: false, useGlobalInstall: true },
-    { mcpIndexOverride: "", useLocalCheckout: true, useGlobalInstall: false },
-    { mcpIndexOverride: "", useLocalCheckout: true, useGlobalInstall: true },
-    { mcpIndexOverride: "x", useLocalCheckout: false, useGlobalInstall: false },
-    { mcpIndexOverride: "x", useLocalCheckout: true, useGlobalInstall: true },
+    {
+      input: { mcpIndexOverride: "", useLocalCheckout: false, useGlobalInstall: false },
+      expected: "npx",
+    },
+    {
+      input: { mcpIndexOverride: "", useLocalCheckout: false, useGlobalInstall: true },
+      expected: "global",
+    },
+    {
+      input: { mcpIndexOverride: "", useLocalCheckout: true, useGlobalInstall: false },
+      expected: "local",
+    },
+    {
+      input: { mcpIndexOverride: "", useLocalCheckout: true, useGlobalInstall: true },
+      expected: "local",
+    },
+    {
+      input: { mcpIndexOverride: "x", useLocalCheckout: false, useGlobalInstall: false },
+      expected: "localOverride",
+    },
+    {
+      input: { mcpIndexOverride: "x", useLocalCheckout: true, useGlobalInstall: true },
+      expected: "localOverride",
+    },
   ];
-  for (const input of cases) {
+  for (const { input, expected } of cases) {
     assert.equal(
-      effectiveLaunchMode(input),
       wireModeForSourceMode(resolveLaunchSourceMode(input)),
+      expected,
     );
   }
 });

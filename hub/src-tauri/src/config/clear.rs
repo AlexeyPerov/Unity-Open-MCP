@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::config::paths;
 use super::mcp_config::{
     cline_settings_path, client_format, client_is_global, merge_key_path, ClientFormat,
     ClientScope, McpClientId, MCP_SERVER_KEY,
@@ -704,7 +705,7 @@ pub fn clear_ai_setup_at(project_path: &str, home: &Path) -> ClearAiSetupResult 
 /// cannot stall the WebView main thread on a slow/cloud-synced volume.
 #[tauri::command]
 pub async fn clear_ai_setup(project_path: String) -> Result<ClearAiSetupResult, String> {
-    let home = dirs::home_dir()
+    let home = paths::home_dir()
         .ok_or_else(|| "Cannot resolve the home directory.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || clear_ai_setup_at(&project_path, &home))
         .await

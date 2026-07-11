@@ -22,6 +22,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::config::paths;
 use crate::config::schemas::ProjectKind;
 
 /// Per-(project, panel) tracked process. Holds the child PID (when
@@ -65,7 +66,7 @@ fn key(project_id: &str, panel: &str) -> String {
 /// a GUI-app launch fails the Step 2 Node check with "node not found on PATH"
 /// even though `node` is installed via nvm.
 pub(crate) fn resolve_node_bin_dir() -> Option<PathBuf> {
-    let home = dirs::home_dir()?;
+    let home = paths::home_dir()?;
 
     // (a) nvm: prefer the `default` alias target, else the highest installed
     // version under ~/.nvm/versions/node/.

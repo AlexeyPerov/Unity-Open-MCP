@@ -27,6 +27,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use crate::config::paths;
 
 /// Minimum supported Unity version. The bridge and verify packages
 /// declare `unity: "2022.3"` in their manifests, and the wizard
@@ -1404,7 +1405,7 @@ fn any_skill_installed(project: &Path) -> bool {
 }
 
 fn read_mcp_heuristic(project: &Path) -> McpConfigHeuristic {
-    let home = match dirs::home_dir() {
+    let home = match paths::home_dir() {
         Some(h) => h,
         None => return McpConfigHeuristic::default(),
     };

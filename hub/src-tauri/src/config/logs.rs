@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use crate::config::paths;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -53,79 +54,8 @@ fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
 }
 
-fn editor_logs_dir_macos() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join("Library").join("Logs").join("Unity"))
-        .unwrap_or_else(|| PathBuf::from("~/Library/Logs/Unity"))
-}
-
-fn editor_logs_dir_windows() -> PathBuf {
-    if let Some(local) = dirs::config_local_dir() {
-        return local.join("Unity").join("Editor");
-    }
-    if let Some(appdata) = std::env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(appdata).join("Unity").join("Editor");
-    }
-    PathBuf::from("C:\\Users\\Public\\AppData\\Local\\Unity\\Editor")
-}
-
-fn editor_logs_dir_linux() -> PathBuf {
-    // Unity Editor on Linux writes logs under ~/.config/unity3d/Editor.log by
-    // default, but the *folder* typically shown in third-party launchers is
-    // ~/.config/unity3d. Fall back to that if XDG_CONFIG_HOME is missing.
-    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
-        return PathBuf::from(xdg).join("unity3d");
-    }
-    dirs::home_dir()
-        .map(|h| h.join(".config").join("unity3d"))
-        .unwrap_or_else(|| PathBuf::from("~/.config/unity3d"))
-}
-
-fn editor_logs_dir() -> PathBuf {
-    if cfg!(target_os = "macos") {
-        editor_logs_dir_macos()
-    } else if cfg!(target_os = "windows") {
-        editor_logs_dir_windows()
-    } else {
-        editor_logs_dir_linux()
-    }
-}
-
-fn crash_logs_dir_macos() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join("Library").join("Logs").join("DiagnosticReports"))
-        .unwrap_or_else(|| PathBuf::from("~/Library/Logs/DiagnosticReports"))
-}
-
-fn crash_logs_dir_windows() -> PathBuf {
-    if let Some(local) = dirs::config_local_dir() {
-        return local.join("CrashDumps");
-    }
-    if let Some(appdata) = std::env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(appdata).join("CrashDumps");
-    }
-    PathBuf::from("C:\\Users\\Public\\AppData\\Local\\CrashDumps")
-}
-
-fn crash_logs_dir_linux() -> PathBuf {
-    // No canonical Unity crash folder on Linux; ~/_test is sometimes used by
-    // Unity test runners, but for end-user projects ~/.config/unity3d is the
-    // closest standard location.
-    editor_logs_dir_linux()
-}
-
-fn crash_logs_dir() -> PathBuf {
-    if cfg!(target_os = "macos") {
-        crash_logs_dir_macos()
-    } else if cfg!(target_os = "windows") {
-        crash_logs_dir_windows()
-    } else {
-        crash_logs_dir_linux()
-    }
-}
-
 pub fn resolve_log_paths(project_path: &Path) -> LogPaths {
-    let editor_dir = editor_logs_dir();
+    let editor_dir = paths::unity_editor_logs_dir();
     let editor_file = editor_dir.join("Editor.log");
     // M1.5-16: `Editor-prev.log` is the rotated copy of the previous
     // editor session's log. The filename is the same on every OS — Unity
@@ -151,7 +81,7 @@ pub fn resolve_log_paths(project_path: &Path) -> LogPaths {
         None
     };
     let player_dir = project_path.join("Logs");
-    let crash_dir = crash_logs_dir();
+    let crash_dir = paths::unity_crash_dumps_dir();
 
     LogPaths {
         editor_logs_folder: Some(path_to_string(&editor_dir)),
@@ -177,32 +107,8 @@ pub fn log_paths(project_path: String) -> LogPaths {
 /// command falls back to the parent `Unity` directory so the button still has
 /// something to open. Linux is intentionally unsupported in M1.5 — most
 /// developers run the Hub on macOS or Windows.
-fn asset_store_parent_macos() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| {
-        h.join("Library")
-            .join("Application Support")
-            .join("Unity")
-    })
-}
-
-fn asset_store_parent_windows() -> Option<PathBuf> {
-    if let Some(local) = dirs::config_local_dir() {
-        return Some(local.join("Unity"));
-    }
-    if let Some(appdata) = std::env::var_os("LOCALAPPDATA") {
-        return Some(PathBuf::from(appdata).join("Unity"));
-    }
-    Some(PathBuf::from("C:\\Users\\Public\\AppData\\Local\\Unity"))
-}
-
 fn asset_store_parent() -> Option<PathBuf> {
-    if cfg!(target_os = "macos") {
-        asset_store_parent_macos()
-    } else if cfg!(target_os = "windows") {
-        asset_store_parent_windows()
-    } else {
-        None
-    }
+    paths::unity_asset_store_parent_dir()
 }
 
 fn find_versioned_asset_store_dir(parent: &Path) -> Option<PathBuf> {
@@ -288,7 +194,7 @@ pub fn asset_store_paths() -> AssetStorePaths {
 /// reveal the folder in the native file manager.
 #[tauri::command]
 pub fn crash_log_path() -> Option<String> {
-    Some(crash_logs_dir().to_string_lossy().to_string())
+    Some(paths::unity_crash_dumps_dir().to_string_lossy().to_string())
 }
 
 #[cfg(test)]

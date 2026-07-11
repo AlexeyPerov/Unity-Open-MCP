@@ -7,6 +7,7 @@ use serde::Deserialize;
 use tauri::State;
 
 use crate::config::commands::AppState;
+use crate::config::paths;
 use crate::config::persistence;
 use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile};
 
@@ -35,28 +36,13 @@ pub struct SeedResult {
     pub error: Option<String>,
 }
 
-/// OS-specific Unity Hub data directory.
-///
-/// - macOS: `~/Library/Application Support/UnityHub/`
-/// - Windows: `%APPDATA%\UnityHub\`
-/// - Linux: `~/.config/UnityHub/`
-fn unity_hub_data_dir() -> Option<PathBuf> {
-    if cfg!(target_os = "macos") {
-        dirs::home_dir().map(|h| h.join("Library/Application Support/UnityHub"))
-    } else if cfg!(target_os = "windows") {
-        dirs::data_dir().map(|d| d.join("UnityHub"))
-    } else {
-        dirs::home_dir().map(|h| h.join(".config/UnityHub"))
-    }
-}
-
 fn unix_ms_to_iso8601(ms: u64) -> Option<String> {
     let secs = (ms / 1000) as i64;
     chrono::Utc.timestamp_opt(secs, 0).single().map(|dt| dt.to_rfc3339())
 }
 
 fn read_hub_projects() -> Result<(Vec<HubProjectData>, String), String> {
-    let dir = unity_hub_data_dir()
+    let dir = paths::unity_hub_data_dir()
         .ok_or("Cannot determine Unity Hub data directory for this platform")?;
 
     if !dir.exists() {

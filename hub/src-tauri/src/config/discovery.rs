@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::config::commands::AppState;
+use crate::config::paths;
 use crate::config::schemas::Settings;
 
 /// Mapping from a Unity `Data/PlaybackEngines/<folder>` name to the
@@ -212,16 +213,7 @@ pub struct DiscoveryResult {
 }
 
 fn get_os_default_hub_paths() -> Vec<PathBuf> {
-    if cfg!(target_os = "macos") {
-        vec![PathBuf::from("/Applications/Unity/Hub/Editor")]
-    } else if cfg!(target_os = "windows") {
-        vec![PathBuf::from("C:\\Program Files\\Unity\\Hub\\Editor")]
-    } else {
-        dirs::home_dir()
-            .map(|h| h.join("Unity/Hub/Editor"))
-            .into_iter()
-            .collect()
-    }
+    vec![paths::unity_hub_editor_default_dir()]
 }
 
 fn get_env_hub_path() -> Option<PathBuf> {

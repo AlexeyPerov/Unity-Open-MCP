@@ -64,6 +64,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::config::commands::AppState;
+use crate::config::paths;
 use crate::config::persistence;
 use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile};
 
@@ -423,19 +424,7 @@ fn rewrite_bundle_in_file(path: &Path, bundle_version: &str) -> std::io::Result<
 /// the directory does not exist (Hub is not installed, or no template
 /// has been downloaded yet).
 fn unity_hub_templates_dir() -> Option<PathBuf> {
-    let base = if cfg!(target_os = "macos") {
-        dirs::home_dir()?.join("Library/Application Support/UnityHub")
-    } else if cfg!(target_os = "windows") {
-        dirs::data_dir()?.join("UnityHub")
-    } else {
-        dirs::home_dir()?.join(".config/UnityHub")
-    };
-    let templates = base.join("Templates");
-    if templates.is_dir() {
-        Some(templates)
-    } else {
-        None
-    }
+    paths::unity_hub_templates_dir()
 }
 
 /// Public command: list the Hub's downloaded templates so the modal

@@ -47,6 +47,7 @@ use crate::config::bridge_port::{parse_override, resolve_port};
 use crate::config::constants::{
     NPM_PACKAGE_LATEST, PORT_ENV_VAR, PROJECT_PATH_ENV_VAR, UNITY_PATH_ENV_VAR,
 };
+use crate::config::paths;
 
 /// Hard deadline for the `node`-based skill generation spawn. The
 /// generate-skill tool loads the MCP server, reads the project, and
@@ -382,7 +383,7 @@ impl McpConfigError {
 pub async fn plan_mcp_config(params: McpConfigParams) -> Result<McpConfigPlan, McpConfigError> {
     // Resolve home before spawning so the error path does not have to
     // cross the thread boundary (the pool task returns the inner result).
-    let home = match dirs::home_dir() {
+    let home = match paths::home_dir() {
         Some(h) => h,
         None => {
             return Err(McpConfigError::new(
@@ -412,7 +413,7 @@ pub async fn plan_mcp_config(params: McpConfigParams) -> Result<McpConfigPlan, M
 pub async fn write_mcp_config(
     params: McpConfigParams,
 ) -> Result<McpConfigWriteResult, McpConfigError> {
-    let home = match dirs::home_dir() {
+    let home = match paths::home_dir() {
         Some(h) => h,
         None => {
             return Err(McpConfigError::new(

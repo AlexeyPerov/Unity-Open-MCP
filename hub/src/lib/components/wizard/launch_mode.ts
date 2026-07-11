@@ -25,8 +25,7 @@ export interface LaunchModeInput {
  * Resolve the exclusive launch-source mode from the legacy draft fields.
  *
  * Used to hydrate the Step 2 radio selector from a persisted draft (which
- * still stores the three legacy booleans/strings). Precedence mirrors the
- * pre-Plan-2 `effectiveLaunchMode`: override > local > global > npx.
+ * still stores the three legacy booleans/strings).
  */
 export function resolveLaunchSourceMode(
   input: LaunchModeInput,
@@ -59,17 +58,3 @@ export function wireModeForSourceMode(
   }
 }
 
-/**
- * The launch mode the wizard passes to `plan_mcp_config` / `write_mcp_config`.
- *
- * Precedence: the Step 2 advanced override always wins (the explicit
- * "custom mcp-server/dist/index.js" escape hatch), then the toggle picks local
- * vs npx, then the global-install option refines npx → global.
- *
- * @deprecated Prefer {@link resolveLaunchSourceMode} +
- *   {@link wireModeForSourceMode} (Plan 2 exclusive-mode model). This helper
- *   is retained for the draft-hydration path and existing tests.
- */
-export function effectiveLaunchMode(input: LaunchModeInput): McpLaunchModeWire {
-  return wireModeForSourceMode(resolveLaunchSourceMode(input));
-}

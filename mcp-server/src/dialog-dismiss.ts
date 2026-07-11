@@ -583,19 +583,6 @@ function fragmentCheck(
           end if`;
 }
 
-/**
- * Kept for M13 T4.5 back-compat — the original launch-errors-only AppleScript
- * constant some external tests reference. Delegates to the generalized
- * template under the default policy.
- * @deprecated Use {@link macosDismissAppleScript} instead.
- */
-export const MACOS_DISMISS_APPLESCRIPT: string = macosDismissAppleScript({
-  platform: "darwin",
-  policy: "ignore",
-  allowProjectUpgrade: false,
-  allowUnsavedSceneDismiss: false,
-});
-
 async function tryDismissMacOS(
   opts: DismissProbeOptions,
 ): Promise<DismissOutcome> {

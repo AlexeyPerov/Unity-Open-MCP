@@ -24,7 +24,6 @@ import {
   LAUNCH_ERROR_DIALOG_TITLE_FRAGMENTS,
   WINDOWS_DISMISS_PS_SCRIPT,
   macosDismissAppleScript,
-  MACOS_DISMISS_APPLESCRIPT,
   DISMISS_BUTTON_LABEL,
   LINUX_XDOTOOL_MISSING_PREFIX,
   UNSUPPORTED_PLATFORM_PREFIX,
@@ -249,15 +248,6 @@ test("macosDismissAppleScript: never auto-clicks a project-upgrade dialog (block
 
 test("macosDismissAppleScript: catches AppleScript errors (loop must not abort)", () => {
   assert.ok(macosDismissAppleScript(DEFAULT_PROBE_OPTS).includes("on error"));
-});
-
-test("MACOS_DISMISS_APPLESCRIPT: back-compat constant is the default-policy script", () => {
-  // The deprecated export must equal the function output under the default
-  // policy so legacy references keep working.
-  assert.equal(
-    MACOS_DISMISS_APPLESCRIPT,
-    macosDismissAppleScript(DEFAULT_PROBE_OPTS),
-  );
 });
 
 test("macosDismissAppleScript: dismisses unsaved-scene sheets when opt-in is set", () => {
