@@ -172,6 +172,36 @@ export function classifyBatchFailure(combined: string): string | null {
   return null;
 }
 
+const UNITY_SPAWN_REFUSED_NEXT_STEPS = [
+  "The Unity binary could not be executed (spawn refused or exit code 127). Do not retry compile_check blindly.",
+  "Verify UNITY_PATH points to a valid Unity Editor executable, then call unity_open_mcp_read_compile_errors to check compile state without headless spawn.",
+  "Call unity_open_mcp_bridge_status to confirm whether a live Editor is running before retrying batch operations.",
+];
+
+// Builds the argv array passed to the headless Unity child process. Exported
+// for unit tests that assert compile_check omits -quit (async finalize path).
+export function buildUnityBatchArgs(
+  operation: string,
+  projectPath: string,
+  executeMethod: string,
+  toolArgs: string[],
+): string[] {
+  const unityArgs = ["-batchmode"];
+  // compile_check is asynchronous: BridgeBatchEntry.Run() returns immediately
+  // and CompileCheckState emits markers later from EditorApplication.update.
+  // -quit would exit as soon as Run() returns (exit 0, no markers).
+  if (operation !== "compile_check") {
+    unityArgs.push("-quit");
+  }
+  unityArgs.push(
+    "-projectPath", projectPath,
+    "-executeMethod", executeMethod,
+    "--",
+    ...toolArgs,
+  );
+  return unityArgs;
+}
+
 // Error carrying a classified code so route()'s catch can emit a targeted
 // error result instead of the generic batch_spawn_failed. Thrown by the
 // spawn close-handler when classifyBatchFailure matches the tail.
@@ -250,6 +280,15 @@ export class BatchSpawn implements Router {
 
   isBatchTool(toolName: string): boolean {
     return BATCH_TOOL_NAMES.has(toolName);
+  }
+
+  // The resolved project path this router will pass to the headless Unity
+  // spawn. Read-only — the value is fixed at construction from
+  // BatchSpawnOptions.projectPath, UNITY_PROJECT_PATH, or the instance lock.
+  // Exposed so the router-stack wiring test can assert buildRouterStack
+  // threads env.projectPath through (without spawning Unity to observe it).
+  getProjectPath(): string {
+    return this.projectPath;
   }
 
   async route(
@@ -402,14 +441,12 @@ export class BatchSpawn implements Router {
     return new Promise((resolve, reject) => {
       const toolArgs = argBuilder(operation, args);
 
-      const unityArgs = [
-        "-batchmode",
-        "-quit",
-        "-projectPath", this.projectPath,
-        "-executeMethod", executeMethod,
-        "--",
-        ...toolArgs,
-      ];
+      const unityArgs = buildUnityBatchArgs(
+        operation,
+        this.projectPath,
+        executeMethod,
+        toolArgs,
+      );
 
       console.error(
         `[unity-open-mcp] Batch spawn: ${this.unityPath} ${unityArgs.join(" ")}`,
@@ -440,8 +477,10 @@ export class BatchSpawn implements Router {
 
       child.on("error", (err) => {
         clearTimeout(timer);
-        reject(new Error(
+        reject(new BatchClassificationError(
+          "unity_spawn_refused",
           `Failed to spawn Unity at '${this.unityPath}': ${err.message}`,
+          UNITY_SPAWN_REFUSED_NEXT_STEPS,
         ));
       });
 
@@ -493,6 +532,15 @@ export class BatchSpawn implements Router {
                 "To confirm a specific local package recompiled, call unity_open_mcp_reimport_package on the package and compare dllMtimeBefore/dllMtimeAfter.",
                 "To run a true headless compile_check, close the live Editor first.",
               ],
+            ));
+            return;
+          }
+          if (exitCode === 127) {
+            reject(new BatchClassificationError(
+              "unity_spawn_refused",
+              `Unity binary exited with code 127 (command not found or not executable). ` +
+                `Path: '${this.unityPath}'.`,
+              UNITY_SPAWN_REFUSED_NEXT_STEPS,
             ));
             return;
           }

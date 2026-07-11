@@ -113,7 +113,7 @@ export function createServer(
 
   const pingCache = new PingCache();
   const liveClient = new LiveClient(port, pingCache, authToken, projectPath, undefined, envPort);
-  const batchSpawn = new BatchSpawn();
+  const batchSpawn = new BatchSpawn({ projectPath });
   // M13 T4.4 — one SSE subscription per server process. The MCP server is the
   // only long-lived hop between the bridge and the LLM; a per-process reader
   // amortizes the connection and lets every `unity_senses_pull_events` call

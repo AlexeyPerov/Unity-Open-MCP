@@ -20,6 +20,26 @@ namespace UnityOpenMcpBridge.Tests
             StringAssert.Contains("\"windowOpened\":false", result.Output);
         }
 
+        // Regression: Start hand-built the `note` field by closing the JSON
+        // string mid-sentence across two StringBuilder.Append calls, so the
+        // body was rejected as bridge_response_unparsable. The whole response
+        // must round-trip through a JSON parser with a complete note string.
+        [Test]
+        public void Start_ResponseParsesAsJson_WithCompleteNote()
+        {
+            var result = ProfilerSessionTools.Start("{\"open_window\":false}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            var parsed = JsonUtility.FromJson<StartStopPayload>(result.Output);
+            Assert.AreEqual("ok", parsed.status);
+            Assert.IsFalse(string.IsNullOrEmpty(parsed.note),
+                "note must be present: " + result.Output);
+            // The pre-fix bug closed the note after "frame; " — the fixed note
+            // must carry the full sentence through "confirm.".
+            StringAssert.Contains("frame", parsed.note);
+            StringAssert.Contains("profiler_get_status", parsed.note);
+            StringAssert.Contains("confirm.", parsed.note);
+        }
+
         // ----------------------- Stop -----------------------------------
 
         [Test]
@@ -29,6 +49,22 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(result.Success, result.ErrorMessage);
             StringAssert.Contains("\"status\":\"ok\"", result.Output);
             StringAssert.Contains("\"enabled\":false", result.Output);
+        }
+
+        // Regression: same split-note bug as Start — Stop's note was closed
+        // after "profiler_clear_data to " across two Appends.
+        [Test]
+        public void Stop_ResponseParsesAsJson_WithCompleteNote()
+        {
+            var result = ProfilerSessionTools.Stop("{}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            var parsed = JsonUtility.FromJson<StartStopPayload>(result.Output);
+            Assert.AreEqual("ok", parsed.status);
+            Assert.IsFalse(string.IsNullOrEmpty(parsed.note),
+                "note must be present: " + result.Output);
+            StringAssert.Contains("profiler_clear_data", parsed.note);
+            StringAssert.Contains("profiler_save_data", parsed.note);
+            StringAssert.Contains("snapshot first.", parsed.note);
         }
 
         // ----------------------- Get status -----------------------------
@@ -292,6 +328,20 @@ namespace UnityOpenMcpBridge.Tests
                 "unity_open_mcp_profiler_start", "{}"));
             Assert.IsFalse(SceneDirtyGuard.AppliesTo(
                 "unity_open_mcp_profiler_set_config", "{}"));
+        }
+
+        // Minimal serializable shape covering the fields Start/Stop emit. The
+        // extra `enabled` / `windowOpened` members are ignored by JsonUtility
+        // when absent (e.g. Stop omits windowOpened), so one struct serves
+        // both regression parses — the point is that the whole body is valid
+        // JSON with a complete `note`.
+        [System.Serializable]
+        private struct StartStopPayload
+        {
+            public string status;
+            public bool enabled;
+            public bool windowOpened;
+            public string note;
         }
     }
 }

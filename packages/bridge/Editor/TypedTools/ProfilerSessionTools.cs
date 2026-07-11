@@ -145,8 +145,11 @@ namespace UnityOpenMcpBridge.TypedTools
                 sb.Append("{\"status\":\"ok\",\"enabled\":")
                   .Append(UnityProfiler.enabled ? "true" : "false")
                   .Append(",\"windowOpened\":").Append(menuOpened ? "true" : "false");
-                sb.Append(",\"note\":\"Profiler.enabled flipped. Recording starts at the next frame; \"")
-                  .Append("poll profiler_get_status / unity_senses_profiler_capture to confirm.\"}");
+                // Single escaped string — closing the note mid-sentence across
+                // two Append calls produces malformed JSON (the first Append's
+                // trailing \" ends the string, leaving the second half as a
+                // bare token). Keep the whole note in one Append.
+                sb.Append(",\"note\":\"Profiler.enabled flipped. Recording starts at the next frame; poll profiler_get_status / unity_senses_profiler_capture to confirm.\"}");
                 return ToolDispatchResult.Ok(sb.ToString());
             }
             catch (Exception e)
@@ -167,8 +170,8 @@ namespace UnityOpenMcpBridge.TypedTools
                 var sb = new StringBuilder(96);
                 sb.Append("{\"status\":\"ok\",\"enabled\":")
                   .Append(UnityProfiler.enabled ? "true" : "false");
-                sb.Append(",\"note\":\"Buffered frames stay in memory. Use profiler_clear_data to \"")
-                  .Append("discard them, or profiler_save_data to persist a snapshot first.\"}");
+                // Single escaped string (see Start for the same rationale).
+                sb.Append(",\"note\":\"Buffered frames stay in memory. Use profiler_clear_data to discard them, or profiler_save_data to persist a snapshot first.\"}");
                 return ToolDispatchResult.Ok(sb.ToString());
             }
             catch (Exception e)

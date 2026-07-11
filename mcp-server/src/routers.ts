@@ -96,7 +96,7 @@ export interface RouterStack {
 export function buildRouterStack(env: ResolvedEnv): RouterStack {
   const pingCache = new PingCache();
   const live = new LiveClient(env.port, pingCache, env.authToken, env.projectPath, undefined, env.envPort);
-  const batch = new BatchSpawn();
+  const batch = new BatchSpawn({ projectPath: env.projectPath });
   const eventStream = new BridgeEventStream(
     bridgeBaseUrl(env.port),
     undefined,

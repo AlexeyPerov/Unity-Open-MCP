@@ -23,6 +23,7 @@ import {
   PORT_ENV_VAR,
 } from "./constants.js";
 import { computePort } from "./instance-discovery.js";
+import { BatchSpawn } from "./batch-spawn.js";
 
 // Save/restore process.env around every test that mutates it. The node:test
 // runner shares one process; leaking UNITY_* env vars would poison later tests.
@@ -270,6 +271,51 @@ test("buildRouterStack from the same ResolvedEnv twice is equivalent in wiring (
       assert.equal(a.port, b.port);
       assert.equal(a.projectPath, b.projectPath);
       assert.equal(a.authToken, b.authToken);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// buildRouterStack — BatchSpawn inherits the resolved project path
+// ---------------------------------------------------------------------------
+//
+// Regression: buildRouterStack constructed `new BatchSpawn()` with no
+// projectPath, so CLI `run-tool --project …` resolved live routing but batch
+// tools (notably compile_check) could fail with project_path_missing even when
+// the project was known. The stack must thread env.projectPath into BatchSpawn
+// so batch spawn gets the same -projectPath the live client uses.
+
+test("buildRouterStack threads env.projectPath into BatchSpawn", () => {
+  withEnv(
+    { [PROJECT_PATH_ENV_VAR]: SYNTH_PROJECT, [PORT_ENV_VAR]: undefined },
+    () => {
+      const env = resolveEnv(SYNTH_PROJECT, 33333);
+      const stack = buildRouterStack(env);
+      // The resolved project path must reach the batch router — not be left
+      // to fall back to UNITY_PROJECT_PATH / instance lock alone.
+      assert.equal(
+        stack.batch.getProjectPath(),
+        env.projectPath,
+        "BatchSpawn must inherit the resolved projectPath from buildRouterStack",
+      );
+    },
+  );
+});
+
+test("BatchSpawn still resolves cleanly with no project path (no env, no lock)", () => {
+  // A BatchSpawn built with no projectPath option still constructs — it just
+  // has an empty projectPath, and route() surfaces project_path_missing at
+  // call time. This is the regression baseline: the missing-path failure mode
+  // is preserved (we did not change BatchSpawn's fallback chain, only the
+  // router-stack wiring that feeds it a path when one is known).
+  withEnv(
+    { [PROJECT_PATH_ENV_VAR]: undefined, [PORT_ENV_VAR]: undefined },
+    () => {
+      // buildRouterStack always has a projectPath (resolveEnv throws without
+      // one), so to exercise the empty case we construct BatchSpawn directly
+      // — no option, no env, no lock.
+      const batch = new BatchSpawn({ discoveryRoots: [] });
+      assert.equal(batch.getProjectPath(), "");
     },
   );
 });
