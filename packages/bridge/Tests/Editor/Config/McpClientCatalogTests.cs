@@ -1,6 +1,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityOpenMcpBridge.Config;
+using Envelope = UnityOpenMcpBridge.Config.McpClientCatalog.Envelope;
 
 namespace UnityOpenMcpBridge.Tests
 {

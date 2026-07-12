@@ -8,7 +8,13 @@ using System.Text;
 using UnityEngine;
 using UnityOpenMcpBridge.ObjectRefs;
 
+// Exposes bridge root internals (OutputSerializer, BridgeJson) to the first-party
+// sub-assemblies that need the shared JSON helpers. BridgeJson stays internal per
+// packages/bridge/AGENTS.md §Transport ("do not make it public just to reach an
+// extension"); IVT is the sanctioned seam for same-package satellites.
 [assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.Editor.Tests")]
+[assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.TestRunner.Editor")]
+[assembly: InternalsVisibleTo("com.alexeyperov.unity-open-mcp-bridge.Dependencies.Editor")]
 
 namespace UnityOpenMcpBridge.MetaTools
 {

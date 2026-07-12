@@ -13,6 +13,7 @@
 // Success + Output for the happy paths.
 #if UNITY_OPEN_MCP_EXT_TIMELINE
 #pragma warning disable CS0618
+using System.Linq;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -172,8 +173,8 @@ namespace UnityOpenMcpBridge.Tests.Extensions.TimelineExt
 
             var asset = AssetDatabase.LoadAssetAtPath<TimelineAsset>(tempAssetPath);
             Assert.IsNotNull(asset);
-            // 2 root tracks.
-            Assert.GreaterOrEqual(asset.GetRootTracks().Count, 2);
+            // 2 root tracks. GetRootTracks() returns IEnumerable, so use LINQ Count().
+            Assert.GreaterOrEqual(asset.GetRootTracks().Count(), 2);
         }
 
         [Test]

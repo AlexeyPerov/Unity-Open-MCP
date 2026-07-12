@@ -22,6 +22,7 @@
 //
 // Naming: `unity_open_mcp_timeline_<action>` (snake_case domain prefix).
 #if UNITY_OPEN_MCP_EXT_TIMELINE
+using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 using UnityEditor;
@@ -150,7 +151,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             TrackAsset parent = null;
             if (parent_track_index >= 0)
             {
-                var roots = asset.GetRootTracks();
+                var roots = ToList(asset.GetRootTracks());
                 if (parent_track_index >= roots.Count)
                     return TimelineJson.Error("track_not_found",
                         $"parent_track_index {parent_track_index} out of range " +
@@ -166,7 +167,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             EditorUtility.SetDirty(asset);
 
             int index = -1;
-            var allRoots = asset.GetRootTracks();
+            var allRoots = ToList(asset.GetRootTracks());
             for (int i = 0; i < allRoots.Count; i++)
                 if (allRoots[i] == track || (parent != null && parent == allRoots[i])) { index = i; break; }
 
@@ -234,21 +235,23 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             TimelineClip clip;
             // Typed tracks ship a default clip kind; on a generic PlayableTrack
             // the agent may request a specific kind via clip_type.
+            // ActivationPlayableAsset is internal in com.unity.timeline, so the
+            // ActivationTrack branch (and the "activation" clip_type on a generic
+            // track) use CreateDefaultClip() — ActivationTrack carries a
+            // [TrackClipType(typeof(ActivationPlayableAsset))] attribute so the
+            // default-clip path produces the correct asset.
             if (track is AnimationTrack)
                 clip = track.CreateClip<AnimationPlayableAsset>();
             else if (track is AudioTrack)
                 clip = track.CreateClip<AudioPlayableAsset>();
             else if (track is ActivationTrack)
-                clip = track.CreateClip<ActivationPlayableAsset>();
+                clip = track.CreateDefaultClip();
             else if (!string.IsNullOrEmpty(clip_type) &&
                      string.Equals(clip_type, "animation", System.StringComparison.OrdinalIgnoreCase))
                 clip = track.CreateClip<AnimationPlayableAsset>();
             else if (!string.IsNullOrEmpty(clip_type) &&
                      string.Equals(clip_type, "audio", System.StringComparison.OrdinalIgnoreCase))
                 clip = track.CreateClip<AudioPlayableAsset>();
-            else if (!string.IsNullOrEmpty(clip_type) &&
-                     string.Equals(clip_type, "activation", System.StringComparison.OrdinalIgnoreCase))
-                clip = track.CreateClip<ActivationPlayableAsset>();
             else
                 clip = track.CreateDefaultClip();
 
@@ -446,6 +449,13 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
         // Helpers
         // =====================================================================
 
+        // GetRootTracks() returns IEnumerable<TrackAsset>; materialize once so
+        // index/bounds access is cheap and readable (no LINQ dependency).
+        private static List<TrackAsset> ToList(IEnumerable<TrackAsset> tracks)
+        {
+            return tracks is List<TrackAsset> already ? already : new List<TrackAsset>(tracks);
+        }
+
         private static TimelineAsset ResolveTimeline(string assetPath, int instanceId)
         {
             if (!string.IsNullOrEmpty(assetPath))
@@ -470,7 +480,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             }
             if (index >= 0)
             {
-                var roots = asset.GetRootTracks();
+                var roots = ToList(asset.GetRootTracks());
                 if (index < roots.Count) return roots[index];
             }
             return null;

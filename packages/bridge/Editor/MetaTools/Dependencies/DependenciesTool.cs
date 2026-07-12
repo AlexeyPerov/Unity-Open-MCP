@@ -59,8 +59,8 @@ namespace UnityOpenMcpBridge.MetaTools
             if (result.Success) return result.Output;
             // Flat error envelope matching the direct-response tool contract
             // (BuildDirectToolErrorJson shape): { "error": { "code", "message" } }.
-            return "{\"error\":{\"code\":\"" + BridgeJson.BridgeJson.EscapeString(result.ErrorCode) +
-                   "\",\"message\":\"" + BridgeJson.BridgeJson.EscapeString(result.ErrorMessage) + "\"}}";
+            return "{\"error\":{\"code\":\"" + BridgeJson.EscapeString(result.ErrorCode) +
+                   "\",\"message\":\"" + BridgeJson.EscapeString(result.ErrorMessage) + "\"}}";
         }
 
         // Body-driven entry point retained for EditMode tests + internal reuse.
