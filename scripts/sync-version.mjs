@@ -442,10 +442,14 @@ function tagExists(name) {
  * @param {string[]} names */
 function createTags(names) {
   // `git tag -a -m "" a b c` creates three annotated tags on HEAD in one call.
-  execFileSync("git", ["tag", "-a", "-m", "", ...names], {
-    cwd: REPO_ROOT,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // Note: git tag -a -m "" <tags...> fails if any tag name is empty or if there are too many arguments.
+  // We create tags one by one to avoid "too many arguments" or other shell-related issues.
+  for (const name of names) {
+    execFileSync("git", ["tag", "-a", "-m", "", name], {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
