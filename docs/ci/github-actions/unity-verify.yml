@@ -51,7 +51,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Wait for bridge ready
-        run: npx unity-open-mcp@0.6.0 wait-for-ready --json --timeout-ms 180000
+        run: npx unity-open-mcp@0.6.1 wait-for-ready --json --timeout-ms 180000
 
   # -------------------------------------------------------------------------
   # 2) Verify on PR — scan changed asset paths, fail on errors.
@@ -77,7 +77,7 @@ jobs:
       - name: Verify (fail on errors)
         # Exit 2 = errors present; 1 = warnings only (advisory, does not fail).
         run: |
-          npx unity-open-mcp@0.6.0 verify ${{ steps.paths.outputs.paths }} \
+          npx unity-open-mcp@0.6.1 verify ${{ steps.paths.outputs.paths }} \
             --fail-on-severity error \
             --profile balanced \
             --json
@@ -96,14 +96,14 @@ jobs:
 
       - name: Regression check
         run: |
-          npx unity-open-mcp@0.6.0 regression check \
+          npx unity-open-mcp@0.6.1 regression check \
             --baseline-path CI/unity-open-mcp-baseline.json \
             --regression-threshold 0 \
             --json
 
       - name: Update baseline (commit back to main)
         run: |
-          npx unity-open-mcp@0.6.0 baseline update \
+          npx unity-open-mcp@0.6.1 baseline update \
             --baseline-path CI/unity-open-mcp-baseline.json \
             --json
 

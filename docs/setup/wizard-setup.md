@@ -49,7 +49,7 @@ Pick a preset to pre-fill the rest of the wizard, or choose **Custom / skip** to
 
 | Preset | Best for | Pre-fills |
 |---|---|---|
-| **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@0.6.0`; bridge + verify from published sources; domain deps off; skill on |
+| **Regular user (npm)** *(recommended)* | Developers who want the published npm package, no monorepo checkout | `npx -y unity-open-mcp@0.6.1`; bridge + verify from published sources; domain deps off; skill on |
 | **Contributor (local checkout)** | Monorepo contributors hacking on bridge / verify / MCP server | Local checkout + `file:` packages from the clone; domain deps off; skill on. Build `mcp-server/` first (see [Development setup](development-setup.md)) |
 | **Custom / skip** | Anyone who wants the wizard's built-in defaults | No pre-fills — identical to the manual flow |
 
