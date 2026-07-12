@@ -8,3 +8,4 @@ dist-test/
 *.bak.meta
 .DS_Store
 **/.DS_Store
+**/.zcode/**
