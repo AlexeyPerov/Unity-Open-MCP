@@ -30,7 +30,7 @@ Edit `~/.cursor/mcp.json` (Cursor) or your Claude Desktop MCP config file:
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.5.0"],
+      "args": ["-y", "unity-open-mcp@0.6.0"],
       "env": {
         "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
       }
@@ -48,7 +48,7 @@ Edit `~/.config/opencode/opencode.json`:
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@0.5.0"],
+      "command": ["npx", "-y", "unity-open-mcp@0.6.0"],
       "enabled": true,
       "environment": {
         "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
@@ -66,7 +66,7 @@ For a project-scoped config, put the same `mcp.unity-open-mcp` block in
 ```bash
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/path/to/your/unity/project \
-  -- npx -y unity-open-mcp@0.5.0
+  -- npx -y unity-open-mcp@0.6.0
 ```
 
 > **Bridge port.** The bridge HTTP port is **derived from the project path**
@@ -129,7 +129,7 @@ for the full option reference.
 
 ## Version pinning
 
-The snippets above pin the server to `unity-open-mcp@0.5.0` so it stays in
+The snippets above pin the server to `unity-open-mcp@0.6.0` so it stays in
 lockstep with the bridge and verify packages, which share the same version
 number. To move to a newer release, bump the version in your client config and
 your Unity `manifest.json` together — see

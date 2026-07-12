@@ -14,7 +14,7 @@ Install both halves of Unity Open MCP for **one** Unity project:
 | Half | What you install |
 |---|---|
 | **Unity side** | Bridge + verify packages in `Packages/manifest.json` (Git URL pins) |
-| **AI side** | MCP client config that launches `npx -y unity-open-mcp@0.5.0` with `UNITY_PROJECT_PATH` |
+| **AI side** | MCP client config that launches `npx -y unity-open-mcp@0.6.0` with `UNITY_PROJECT_PATH` |
 
 Then install/update the core agent skill, hand off restarts to the human, and
 best-effort verify if tools become available.
@@ -52,8 +52,8 @@ Read `Packages/manifest.json`. Under `dependencies`, set (create or overwrite
 these two keys only — leave every other dependency untouched):
 
 ```json
-"com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.5.0",
-"com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.5.0"
+"com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.6.0",
+"com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.6.0"
 ```
 
 **Idempotent rules:**
@@ -76,7 +76,7 @@ Server name / key: `unity-open-mcp`
 ```json
 {
   "command": "npx",
-  "args": ["-y", "unity-open-mcp@0.5.0"],
+  "args": ["-y", "unity-open-mcp@0.6.0"],
   "env": {
     "UNITY_PROJECT_PATH": "/absolute/path/to/project"
   }
@@ -87,7 +87,7 @@ Replace `/absolute/path/to/project` with the absolute path from Preconditions.
 
 **Idempotent merge rules when `unity-open-mcp` already exists:**
 
-1. Update `command` / `args` (or equivalent) to the pinned `npx -y unity-open-mcp@0.5.0` form.
+1. Update `command` / `args` (or equivalent) to the pinned `npx -y unity-open-mcp@0.6.0` form.
 2. Set `UNITY_PROJECT_PATH` to **this** project’s absolute path.
 3. Preserve any other env keys already on the entry.
 4. Leave every other MCP server / unrelated config key untouched.
@@ -122,7 +122,7 @@ Replace `/absolute/path/to/project` with the absolute path from Preconditions.
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.5.0"],
+      "args": ["-y", "unity-open-mcp@0.6.0"],
       "env": {
         "UNITY_PROJECT_PATH": "/absolute/path/to/project"
       }
@@ -139,7 +139,7 @@ Replace `/absolute/path/to/project` with the absolute path from Preconditions.
     "unity-open-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.5.0"],
+      "args": ["-y", "unity-open-mcp@0.6.0"],
       "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
   }
@@ -154,7 +154,7 @@ Replace `/absolute/path/to/project` with the absolute path from Preconditions.
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@0.5.0"],
+      "command": ["npx", "-y", "unity-open-mcp@0.6.0"],
       "enabled": true,
       "environment": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
@@ -171,7 +171,7 @@ Replace `/absolute/path/to/project` with the absolute path from Preconditions.
       "unity-open-mcp": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "unity-open-mcp@0.5.0"],
+        "args": ["-y", "unity-open-mcp@0.6.0"],
         "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
       }
     }
@@ -185,7 +185,7 @@ Replace `/absolute/path/to/project` with the absolute path from Preconditions.
 [mcp_servers.unity-open-mcp]
 enabled = true
 command = "npx"
-args = ["-y", "unity-open-mcp@0.5.0"]
+args = ["-y", "unity-open-mcp@0.6.0"]
 
 [mcp_servers.unity-open-mcp.env]
 UNITY_PROJECT_PATH = "/absolute/path/to/project"
@@ -196,7 +196,7 @@ UNITY_PROJECT_PATH = "/absolute/path/to/project"
 ```sh
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/absolute/path/to/project \
-  -- npx -y unity-open-mcp@0.5.0
+  -- npx -y unity-open-mcp@0.6.0
 ```
 
 If `unity-open-mcp` is already registered, remove/replace it with the pinned
@@ -258,8 +258,8 @@ After the human confirms Unity is open and the client was restarted:
   MCP). Optionally they can run:
 
 ```bash
-npx -y unity-open-mcp@0.5.0 wait-for-ready --project /absolute/path/to/project
-npx -y unity-open-mcp@0.5.0 run-tool unity_open_mcp_capabilities --project /absolute/path/to/project --json
+npx -y unity-open-mcp@0.6.0 wait-for-ready --project /absolute/path/to/project
+npx -y unity-open-mcp@0.6.0 run-tool unity_open_mcp_capabilities --project /absolute/path/to/project --json
 ```
 
 ## Short troubleshooting

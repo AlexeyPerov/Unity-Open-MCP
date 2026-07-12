@@ -58,8 +58,8 @@ project folder, e.g. `MyGame/Packages/manifest.json`) and add two entries to the
 ```json
 {
   "dependencies": {
-    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.5.0",
-    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.5.0"
+    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.6.0",
+    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.6.0"
   }
 }
 ```
@@ -71,8 +71,8 @@ Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation) are
 ```json
 {
   "dependencies": {
-    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.5.0",
-    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.5.0",
+    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.6.0",
+    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.6.0",
     "com.unity.ai.navigation": "2.0.0",
     "com.unity.inputsystem": "1.7.0",
     "com.unity.probuilder": "6.0.9"
@@ -97,7 +97,7 @@ never install or update it manually:
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.5.0"],
+      "args": ["-y", "unity-open-mcp@0.6.0"],
       "env": {
         "UNITY_PROJECT_PATH": "/absolute/path/to/project"
       }
@@ -108,7 +108,7 @@ never install or update it manually:
 
 What that means:
 
-- `npx -y unity-open-mcp@0.5.0` downloads and launches that exact MCP server
+- `npx -y unity-open-mcp@0.6.0` downloads and launches that exact MCP server
   version from npm. The `-y` accepts the first-run prompt; pinning the version
   keeps the server in lockstep with the bridge and verify packages, which share
   the same number. To move to a newer release, bump the version here and in your
@@ -153,7 +153,7 @@ and Antigravity. A few clients use a different envelope:
     "unity-open-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.5.0"],
+      "args": ["-y", "unity-open-mcp@0.6.0"],
       "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
   }
@@ -171,7 +171,7 @@ Place it at `.vscode/mcp.json` (VS Code) or `.vs/mcp.json` (Visual Studio).
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@0.5.0"],
+      "command": ["npx", "-y", "unity-open-mcp@0.6.0"],
       "enabled": true,
       "environment": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
@@ -188,7 +188,7 @@ Place it at `.vscode/mcp.json` (VS Code) or `.vs/mcp.json` (Visual Studio).
       "unity-open-mcp": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "unity-open-mcp@0.5.0"],
+        "args": ["-y", "unity-open-mcp@0.6.0"],
         "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
       }
     }
@@ -202,7 +202,7 @@ Place it at `.vscode/mcp.json` (VS Code) or `.vs/mcp.json` (Visual Studio).
 [mcp_servers.unity-open-mcp]
 enabled = true
 command = "npx"
-args = ["-y", "unity-open-mcp@0.5.0"]
+args = ["-y", "unity-open-mcp@0.6.0"]
 
 [mcp_servers.unity-open-mcp.env]
 UNITY_PROJECT_PATH = "/absolute/path/to/project"
@@ -213,7 +213,7 @@ UNITY_PROJECT_PATH = "/absolute/path/to/project"
 ```sh
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/absolute/path/to/project \
-  -- npx -y unity-open-mcp@0.5.0
+  -- npx -y unity-open-mcp@0.6.0
 ```
 
 ## 3) Launch Unity and verify
@@ -240,8 +240,8 @@ are talking.
 ## 4) Optional CLI (CI and automation)
 
 ```bash
-npx -y unity-open-mcp@0.5.0 wait-for-ready --project /path/to/MyGame
-npx -y unity-open-mcp@0.5.0 run-tool unity_open_mcp_capabilities --project /path/to/MyGame --json
+npx -y unity-open-mcp@0.6.0 wait-for-ready --project /path/to/MyGame
+npx -y unity-open-mcp@0.6.0 run-tool unity_open_mcp_capabilities --project /path/to/MyGame --json
 ```
 
 On unattended machines, configure startup modal handling via

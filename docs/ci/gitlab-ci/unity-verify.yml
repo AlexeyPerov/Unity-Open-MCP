@@ -29,7 +29,7 @@ unity:health-check:
   stage: health
   image: node:22
   script:
-    - npx unity-open-mcp@0.5.0 wait-for-ready --json --timeout-ms 180000
+    - npx unity-open-mcp@0.6.0 wait-for-ready --json --timeout-ms 180000
 
 # -------------------------------------------------------------------------
 # 2) Verify on MR — scan changed asset paths, fail on errors.
@@ -45,7 +45,7 @@ unity:verify-mr:
     - BASE="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-main}"
     - PATHS=$(git diff --name-only "origin/$BASE...$CI_COMMIT_SHA" -- Assets/ Packages/ | tr '\n' ' ')
     - |
-      npx unity-open-mcp@0.5.0 verify $PATHS \
+      npx unity-open-mcp@0.6.0 verify $PATHS \
         --fail-on-severity error \
         --profile balanced \
         --json
@@ -61,12 +61,12 @@ unity:regression:
     - if: $CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"
   script:
     - |
-      npx unity-open-mcp@0.5.0 regression check \
+      npx unity-open-mcp@0.6.0 regression check \
         --baseline-path CI/unity-open-mcp-baseline.json \
         --regression-threshold 0 \
         --json
     - |
-      npx unity-open-mcp@0.5.0 baseline update \
+      npx unity-open-mcp@0.6.0 baseline update \
         --baseline-path CI/unity-open-mcp-baseline.json \
         --json
     # Commit the refreshed baseline back to main.
