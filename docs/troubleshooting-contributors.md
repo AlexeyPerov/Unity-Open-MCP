@@ -96,10 +96,16 @@ if save failed or a modal blocked the bridge.
 - **Finalize** (after Band C or G) repeats that hygiene; Main is excluded from
   auto-save unless you pass **`--save-main`** (debug only).
 - Band G (`run_tests`) is isolated last — it blocks the test runner and can
-  leave the bridge in a brief post-run degraded window.
+  leave the bridge in a brief post-run degraded window. Its per-step timeout is
+  120s so a genuinely slow runner isn't a false "tolerated timeout."
 - JSON reports include an **`isolation`** block:
   `ft_scene_created`, `ft_scene_active`, `active_scene_at_teardown`,
   `main_dirty_at_finalize`.
+- **Tolerate scope.** The suite `tolerate`s only genuine ongoing limitations
+  (screenshot/base64 serialization, post-domain-reload body truncation on
+  asmdef/reserialize). The profiler `note`, `asmdef_list` bool, and
+  `component_get` serialization bugs are fixed — those families now assert a
+  clean response, so a `bridge_response_unparsable` there is a real regression.
 
 ### macOS Accessibility (automation hosts)
 

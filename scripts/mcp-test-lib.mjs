@@ -67,6 +67,7 @@ export const LOCKED_CODES = new Set([
   "project_path_missing",
   "editor_instance_locked",
   "unity_not_discovered",
+  "unity_spawn_refused",
   "batch_failed",
   "compile_check_failed",
 ]);

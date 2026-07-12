@@ -312,9 +312,10 @@ function buildSuite() {
   s("find_members", "B", "unity_open_mcp_find_members", { query: "Rigidbody", max_results: 5 });
   s("script_read", "B", "unity_open_mcp_script_read", { file_path: "Assets/Scripts/ScriptWithGameObjectField.cs", max_lines: 5 });
   s("list_assets_of_type", "B", "unity_open_mcp_list_assets_of_type", { type_name: "Material", max_results: 5 });
-  // asmdef_list persistently returns bridge_response_unparsable (see
-  // specs/feedback.md) — tolerate so the suite reports the bug without failing.
-  s("asmdef_list", "B", "unity_open_mcp_asmdef_list", { folder: "Assets" }, { expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
+  // asmdef_list: the historical autoReferenced bool bug (C# True/False leaking
+  // into JSON) is fixed (Plan 5 helper enforces JSON true/false). Expect a clean
+  // ok now — bridge_response_unparsable here would be a regression.
+  s("asmdef_list", "B", "unity_open_mcp_asmdef_list", { folder: "Assets" });
   s("asmdef_get", "B", "unity_open_mcp_asmdef_get", { asset_path: "Assets/Tests/EditMode/Demo.Tests.EditMode.asmdef" });
   s("shader_list_all", "B", "unity_open_mcp_shader_list_all", { max_results: 5 });
   s("shader_get_data", "B", "unity_open_mcp_shader_get_data", { name: "Universal Render Pipeline/Lit" });
@@ -379,9 +380,12 @@ function buildSuite() {
     after: (r, ctx) => { ctx.ftSceneCreated = r.mutation?.success === true; },
   });
 
-  // scene_set_active only valid if FT_Scene was created; tolerate scene_not_found.
+  // scene_set_active resolves path-first (Plan 2). Pass the asset path rather
+  // than the display name so the lookup is authoritative even when the in-memory
+  // scene name is still "Untitled". Tolerate scene_not_found — additive create
+  // can still fail (untitled-scene limit), in which case there is no FT_Scene.
   s("scene_set_active", "C", "unity_open_mcp_scene_set_active", {
-    name: "FT_Scene",
+    path: FT_SCENE_ASSET,
     paths_hint: SCENE_HINT,
   }, {
     gate: true,
@@ -436,11 +440,13 @@ function buildSuite() {
     after: (r, ctx) => { ctx.rbInstanceId = pluck(r, "mutation.output.instanceId"); },
   });
 
-  // component_get returns bridge_response_unparsable (large field dump breaks
-  // serialization — see specs/feedback.md). Tolerate.
+  // component_get now ships compact/paginated reads (Plan 4) so the large-
+  // reflection-dump serialization bug is resolved. Expect a clean ok;
+  // gameobject_not_found remains tolerated only because the cube handle can go
+  // stale across the domain-reloading steps above (defense in depth).
   s("component_get", "C", "unity_open_mcp_component_get", {
-    resolveArgs: (ctx) => ({ instance_id: ctx.cubeId, type_name: "Rigidbody" }),
-  }, { expect: "tolerate", tolerate: ["bridge_response_unparsable", "gameobject_not_found"] });
+    resolveArgs: (ctx) => ({ instance_id: ctx.cubeId, type_name: "Rigidbody", profile: "compact" }),
+  }, { expect: "tolerate", tolerate: ["gameobject_not_found"] });
 
   s("component_modify", "C", "unity_open_mcp_component_modify", {
     resolveArgs: (ctx) => ({ instance_id: ctx.cubeId, type_name: "Rigidbody", fields: [{ path: "m_Mass", value: 5 }], paths_hint: SCENE_HINT }),
@@ -609,13 +615,14 @@ function buildSuite() {
   s("editorprefs_delete", "C", "unity_open_mcp_editorprefs_delete", { key: "FT_Key" });
 
   // --- profiler session control (gate-free editor state). profiler_start/stop
-  // return bridge_response_unparsable (see specs/feedback.md) — tolerate. ---
+  // JSON is fixed (Plan 1 note fix + Plan 5 shared helper) — expect a clean ok
+  // now; bridge_response_unparsable would be a regression. ---
   s("profiler_enable_module", "C", "unity_open_mcp_profiler_enable_module", { module: "CPU", enabled: true });
   s("profiler_set_config", "C", "unity_open_mcp_profiler_set_config", { enable_categories: ["Render"], disable_categories: [] });
-  s("profiler_start", "C", "unity_open_mcp_profiler_start", { open_window: false }, { expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
-  s("profiler_save_data", "C", "unity_open_mcp_profiler_save_data", { file_path: `${FT}/FT_Profile.json`, paths_hint: [`${FT}/FT_Profile.json`] }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable", "profiler_not_enabled"] });
-  s("profiler_load_data", "C", "unity_open_mcp_profiler_load_data", { file_path: `${FT}/FT_Profile.json`, add_to_profiler: false }, { expect: "tolerate", tolerate: ["file_not_found", "bridge_response_unparsable"] });
-  s("profiler_stop", "C", "unity_open_mcp_profiler_stop", {}, { expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
+  s("profiler_start", "C", "unity_open_mcp_profiler_start", { open_window: false });
+  s("profiler_save_data", "C", "unity_open_mcp_profiler_save_data", { file_path: `${FT}/FT_Profile.json`, paths_hint: [`${FT}/FT_Profile.json`] }, { gate: true, expect: "gate" });
+  s("profiler_load_data", "C", "unity_open_mcp_profiler_load_data", { file_path: `${FT}/FT_Profile.json`, add_to_profiler: false });
+  s("profiler_stop", "C", "unity_open_mcp_profiler_stop", {});
   s("profiler_clear_data", "C", "unity_open_mcp_profiler_clear_data");
 
   // Re-acquire cube handle before focus (name-only lookup can fail after the
@@ -810,13 +817,15 @@ function buildSuite() {
   }, { gate: true, expect: "tolerate", tolerate: ["gameobject_not_found"] });
 
   // --- scene save / unload (only valid if FT_Scene was created; tolerate).
-  // NOTE: when FT_Scene couldn't be created additively (untitled-scene limit),
-  // the GameObject chain runs in whatever scene IS active (often Main.unity).
-  // scene_save_ft targets "FT_Scene" by name, so it will NOT persist the chain
+  // Path-first identity (Plan 2): resolve by asset path so the lookup is
+  // authoritative even when the in-memory name is still "Untitled". NOTE: when
+  // FT_Scene couldn't be created additively (untitled-scene limit), the
+  // GameObject chain runs in whatever scene IS active (often Main.unity).
+  // scene_save_ft targets FT_Scene by path, so it will NOT persist the chain
   // into Main.unity — the chain GOs are destroyed by gameobject_destroy_*
   // below, and any that survive are discarded by NOT saving the active scene.
-  s("scene_save_ft", "C", "unity_open_mcp_scene_save", { name: "FT_Scene", paths_hint: SCENE_HINT }, { gate: true, expect: "tolerate", tolerate: ["scene_not_found", "missing_parameter"] });
-  s("scene_unload_ft", "C", "unity_open_mcp_scene_unload", { name: "FT_Scene", paths_hint: SCENE_HINT }, { gate: true, expect: "tolerate", tolerate: ["scene_not_found"] });
+  s("scene_save_ft", "C", "unity_open_mcp_scene_save", { path: FT_SCENE_ASSET, paths_hint: SCENE_HINT }, { gate: true, expect: "tolerate", tolerate: ["scene_not_found", "missing_parameter"] });
+  s("scene_unload_ft", "C", "unity_open_mcp_scene_unload", { path: FT_SCENE_ASSET, paths_hint: SCENE_HINT }, { gate: true, expect: "tolerate", tolerate: ["scene_not_found"] });
 
   // --- assets_delete the whole fixture root. Tolerate bridge_response_unparsable
   // (the post-delete refresh can hit the serialization bug); cleanup() is the
@@ -834,7 +843,15 @@ function buildSuite() {
   // Recorded as skips in the report; see SKIPS below.
 
   // =====================================================================
-  // BAND D — batch / headless (expect locked / can't grab project)
+  // BAND D — batch / headless
+  //
+  // These tools are batch-only (headless Unity + verify package). Plan 3 made
+  // the router ALWAYS route them to batch even when the live bridge is up, so
+  // they never return a live `tool_not_found` for a known batch-only tool name
+  // anymore. With the Editor OPEN they report lock/env codes
+  // (editor_instance_locked / project_path_missing / unity_spawn_refused /
+  // unity_not_discovered) — that is the correct, expected degraded outcome, NOT
+  // a routing miss. With the Editor CLOSED they run to completion.
   // =====================================================================
   s("compile_check", "D", "unity_open_mcp_compile_check", {}, { expect: "locked", timeoutMs: 180_000 });
   s("scan_all", "D", "unity_open_mcp_scan_all", {}, { expect: "locked", timeoutMs: 240_000 });
@@ -890,19 +907,23 @@ function buildSuite() {
     // shadergraph (com.unity.shadergraph)
     "unity_open_mcp_shader_graph_create", "unity_open_mcp_shader_graph_open",
     "unity_open_mcp_shader_graph_node_add", "unity_open_mcp_shader_graph_node_connect",
+    // timeline (com.unity.timeline — now in demo manifest)
+    "unity_open_mcp_timeline_create", "unity_open_mcp_timeline_track_add", "unity_open_mcp_timeline_clip_add",
+    "unity_open_mcp_timeline_director_bind", "unity_open_mcp_timeline_modify",
+    // splines (com.unity.splines — now in demo manifest)
+    "unity_open_mcp_splines_container_create", "unity_open_mcp_splines_add_knot", "unity_open_mcp_splines_set_knot",
+    "unity_open_mcp_splines_set_tangent_mode", "unity_open_mcp_splines_evaluate", "unity_open_mcp_splines_get_knots", "unity_open_mcp_splines_modify",
   ];
   for (const tool of REACHABLE_EXT_TOOLS) {
     const short = tool.replace(/^unity_(open_mcp_|senses_)/, "");
     s(`ext_${short}`, "F", tool, { paths_hint: HINT }, { expect: "reachable" });
   }
 
+  // Packages deliberately NOT in the demo manifest (Band F unavailable sub-band).
+  // These tools are not compiled into this bridge build — expect tool_not_found.
+  // VFX Graph / Memory Profiler / Tilemap stay deferred to
+  // backlog-demo-and-ext-coverage until their import cost is justified.
   const UNAVAIL_TOOLS = [
-    // splines (com.unity.splines — extension pack not in default bridge build)
-    "unity_open_mcp_splines_container_create", "unity_open_mcp_splines_add_knot", "unity_open_mcp_splines_set_knot",
-    "unity_open_mcp_splines_set_tangent_mode", "unity_open_mcp_splines_evaluate", "unity_open_mcp_splines_get_knots", "unity_open_mcp_splines_modify",
-    // timeline (com.unity.timeline)
-    "unity_open_mcp_timeline_create", "unity_open_mcp_timeline_track_add", "unity_open_mcp_timeline_clip_add",
-    "unity_open_mcp_timeline_director_bind", "unity_open_mcp_timeline_modify",
     // tilemap (com.unity.2d.tilemap)
     "unity_open_mcp_tilemap_create", "unity_open_mcp_tilemap_set_tile", "unity_open_mcp_tilemap_box_fill",
     "unity_open_mcp_tilemap_create_tile_asset", "unity_open_mcp_tilemap_create_rule_tile",
@@ -919,13 +940,17 @@ function buildSuite() {
   // =====================================================================
   // BAND G — run_tests (ISOLATED, runs LAST)
   //
-  // run_tests blocks the Editor test runner for ~30–45s AND leaves the bridge
-  // in a degraded (bridge_compile_failed) state for ~10–15s afterward, which
-  // poisons any tool called in that window. Running it in its own band at the
-  // very end (after all mutations + reads) means its contamination can't break
-  // anything else. See specs/feedback.md for the underlying bridge bug.
+  // run_tests blocks the Editor test runner for ~30–90s (varies by machine and
+  // how many demo EditMode assemblies load) AND leaves the bridge in a degraded
+  // (bridge_compile_failed) state for ~10–15s afterward, which poisons any tool
+  // called in that window. Running it in its own band at the very end (after all
+  // mutations + reads) means its contamination can't break anything else. The
+  // per-step timeout is 120s so a genuinely slow runner isn't a false
+  // "tolerated timeout" — a true async run_tests is backlog (see
+  // specs/feedback.md §2C). ok_or_timeout stays because the hang is itself the
+  // finding, surfaced in the report.
   // =====================================================================
-  s("run_tests", "G", "unity_senses_run_tests", { mode: "EditMode" }, { timeoutMs: 45_000, expect: "ok_or_timeout", tolerate: ["execution_error"] });
+  s("run_tests", "G", "unity_senses_run_tests", { mode: "EditMode" }, { timeoutMs: 120_000, expect: "ok_or_timeout", tolerate: ["execution_error"] });
 
   return steps;
 }
