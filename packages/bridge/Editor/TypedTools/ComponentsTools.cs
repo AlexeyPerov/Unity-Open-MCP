@@ -130,51 +130,116 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Component get returns the serialized field/property list of one
         // component on a GameObject, plus its type/enable state. Read-only,
-        // gate-free. Token-bounded by max_fields. Use find / list_all to
+        // gate-free. Profile + paging bound token output. Use list_all to
         // discover component type names first.
         public static ToolDispatchResult Get(string body)
         {
             var resolved = ResolveComponent(body, out var component, out var resolveError);
             if (!resolved) return resolveError;
 
-            int maxFields = JsonBody.GetInt(body, "max_fields", 100);
-            if (maxFields < 1) maxFields = 1;
-            var includeProperties = JsonBody.GetBool(body, "include_properties", true);
+            var options = ParseGetOptions(body);
+            var so = new SerializedObject(component);
+            var propertyPath = JsonBody.GetString(body, "property_path");
+
+            var entries = new List<ComponentGetEntry>(options.MaxFields);
+            int truncatedDuringCollect = 0;
+
+            if (!string.IsNullOrEmpty(propertyPath))
+            {
+                var scoped = so.FindProperty(propertyPath);
+                if (scoped == null)
+                {
+                    return ToolDispatchResult.Fail("property_not_found",
+                        $"Property path '{propertyPath}' not found on {component.GetType().Name}. " +
+                        "Use component_get without property_path to discover valid paths.");
+                }
+                CollectScopedProperty(scoped, options, entries, ref truncatedDuringCollect);
+            }
+            else
+            {
+                CollectSerializedFields(so, options, entries, ref truncatedDuringCollect);
+                if (options.IncludeProperties)
+                    CollectPublicProperties(component, options, entries, ref truncatedDuringCollect);
+            }
+
+            int offset = ParseGetCursor(JsonBody.GetString(body, "cursor"));
+            var pageSizeRaw = JsonBody.GetRawValue(body, "page_size");
+            int? pageSize = null;
+            if (pageSizeRaw != null)
+            {
+                pageSize = JsonBody.GetInt(body, "page_size", 25);
+                if (pageSize < 1) pageSize = 1;
+            }
+
+            int pageStart = pageSize.HasValue ? offset : 0;
+            int pageEnd = pageSize.HasValue
+                ? System.Math.Min(offset + pageSize.Value, entries.Count)
+                : entries.Count;
+            if (pageStart > entries.Count) pageStart = entries.Count;
+            if (pageEnd < pageStart) pageEnd = pageStart;
 
             var sb = new StringBuilder(1024);
             sb.Append("{\"type\":\"").Append(TypedTargets.Esc(component.GetType().FullName));
             sb.Append("\",\"name\":\"").Append(TypedTargets.Esc(component.GetType().Name));
             sb.Append("\",\"instanceId\":").Append(InstanceId.ToJson(component));
             sb.Append(",\"enabled\":").Append(IsEnabled(component) ? "true" : "false");
+            sb.Append(",\"profile\":\"").Append(ProfileToString(options.Profile)).Append('"');
+            if (!string.IsNullOrEmpty(propertyPath))
+                sb.Append(",\"property_path\":\"").Append(TypedTargets.Esc(propertyPath)).Append('"');
 
-            var so = new SerializedObject(component);
-            var prop = so.GetIterator();
             sb.Append(",\"fields\":[");
-
-            int emitted = 0;
-            int truncated = 0;
-            bool first = true;
-            for (var enter = prop.NextVisible(true); enter; enter = prop.NextVisible(false))
+            bool firstField = true;
+            for (int i = pageStart; i < pageEnd; i++)
             {
-                if (emitted >= maxFields) { truncated++; continue; }
-                if (!first) sb.Append(',');
-                first = false;
-                AppendSerializedProperty(sb, prop);
-                emitted++;
+                var entry = entries[i];
+                if (entry.IsProperty)
+                    continue;
+                if (!firstField) sb.Append(',');
+                firstField = false;
+                sb.Append(entry.Json);
             }
-
-            if (includeProperties)
+            sb.Append("],\"properties\":[");
+            bool firstProp = true;
+            for (int i = pageStart; i < pageEnd; i++)
             {
-                sb.Append("],\"properties\":[");
-                AppendPublicProperties(sb, component, ref emitted, maxFields, ref truncated);
+                var entry = entries[i];
+                if (!entry.IsProperty)
+                    continue;
+                if (!firstProp) sb.Append(',');
+                firstProp = false;
+                sb.Append(entry.Json);
             }
-            else
-            {
-                sb.Append("],\"properties\":[]");
-            }
+            sb.Append(']');
 
-            sb.Append("],\"count\":").Append(emitted);
+            int pageCount = pageEnd - pageStart;
+            int remainingAfterPage = entries.Count - pageEnd;
+            int truncated = truncatedDuringCollect + remainingAfterPage;
+
+            sb.Append(",\"count\":").Append(pageCount);
             sb.Append(",\"truncated\":").Append(truncated);
+
+            if (pageSize.HasValue)
+            {
+                sb.Append(",\"pagination\":{");
+                sb.Append("\"page_size\":").Append(pageSize.Value);
+                sb.Append(",\"cursor\":");
+                if (offset > 0)
+                    sb.Append('"').Append(TypedTargets.Esc("component_get:" + offset.ToString(CultureInfo.InvariantCulture))).Append('"');
+                else
+                    sb.Append("null");
+                if (remainingAfterPage > 0)
+                {
+                    sb.Append(",\"next_cursor\":\"component_get:");
+                    sb.Append(pageEnd.ToString(CultureInfo.InvariantCulture)).Append('"');
+                }
+                else
+                {
+                    sb.Append(",\"next_cursor\":null");
+                }
+                sb.Append(",\"truncated\":").Append(remainingAfterPage);
+                sb.Append('}');
+            }
+
             sb.Append('}');
             return ToolDispatchResult.Ok(sb.ToString());
         }
@@ -484,12 +549,249 @@ namespace UnityOpenMcpBridge.TypedTools
             return true;
         }
 
-        private static void AppendSerializedProperty(StringBuilder sb, SerializedProperty prop)
+        private enum GetProfile
         {
+            Compact,
+            Balanced,
+            Full
+        }
+
+        private sealed class GetOptions
+        {
+            public GetProfile Profile;
+            public int MaxFields;
+            public bool IncludeProperties;
+            public int MaxDepth;
+        }
+
+        private struct ComponentGetEntry
+        {
+            public bool IsProperty;
+            public string Json;
+        }
+
+        private static GetOptions ParseGetOptions(string body)
+        {
+            var profile = ParseGetProfile(JsonBody.GetString(body, "profile"));
+            var options = new GetOptions
+            {
+                Profile = profile,
+                MaxFields = profile == GetProfile.Compact ? 40
+                    : profile == GetProfile.Balanced ? 100 : 200,
+                IncludeProperties = profile != GetProfile.Compact,
+                MaxDepth = profile == GetProfile.Full
+                    ? System.Math.Max(1, JsonBody.GetInt(body, "max_depth", 3))
+                    : 0,
+            };
+
+            if (JsonBody.GetRawValue(body, "max_fields") != null)
+            {
+                options.MaxFields = JsonBody.GetInt(body, "max_fields", options.MaxFields);
+                if (options.MaxFields < 1) options.MaxFields = 1;
+            }
+            if (JsonBody.GetRawValue(body, "include_properties") != null)
+                options.IncludeProperties = JsonBody.GetBool(body, "include_properties", options.IncludeProperties);
+
+            return options;
+        }
+
+        private static GetProfile ParseGetProfile(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return GetProfile.Compact;
+            switch (raw.Trim().ToLowerInvariant())
+            {
+                case "balanced": return GetProfile.Balanced;
+                case "full": return GetProfile.Full;
+                default: return GetProfile.Compact;
+            }
+        }
+
+        private static string ProfileToString(GetProfile profile)
+        {
+            switch (profile)
+            {
+                case GetProfile.Balanced: return "balanced";
+                case GetProfile.Full: return "full";
+                default: return "compact";
+            }
+        }
+
+        private static int ParseGetCursor(string cursor)
+        {
+            const string prefix = "component_get:";
+            if (string.IsNullOrEmpty(cursor)) return 0;
+            if (!cursor.StartsWith(prefix, System.StringComparison.Ordinal)) return 0;
+            if (int.TryParse(cursor.Substring(prefix.Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out var offset)
+                && offset >= 0)
+                return offset;
+            return 0;
+        }
+
+        private static void TryAddEntry(List<ComponentGetEntry> entries, GetOptions options,
+            ref int truncated, bool isProperty, SerializedProperty prop)
+        {
+            if (entries.Count >= options.MaxFields)
+            {
+                truncated++;
+                return;
+            }
+            entries.Add(new ComponentGetEntry
+            {
+                IsProperty = isProperty,
+                Json = BuildSerializedEntryJson(prop),
+            });
+        }
+
+        private static void TryAddPropertyEntry(List<ComponentGetEntry> entries, GetOptions options,
+            ref int truncated, PropertyInfo prop, object value)
+        {
+            if (entries.Count >= options.MaxFields)
+            {
+                truncated++;
+                return;
+            }
+            entries.Add(new ComponentGetEntry
+            {
+                IsProperty = true,
+                Json = BuildPropertyEntryJson(prop, value),
+            });
+        }
+
+        private static void CollectSerializedFields(SerializedObject so, GetOptions options,
+            List<ComponentGetEntry> entries, ref int truncated)
+        {
+            var it = so.GetIterator();
+            if (!it.NextVisible(true)) return;
+            if (options.Profile == GetProfile.Full)
+            {
+                while (it.NextVisible(false))
+                    CollectSerializedProperty(it, 0, options, entries, ref truncated);
+                return;
+            }
+
+            while (it.NextVisible(false))
+                TryAddEntry(entries, options, ref truncated, false, it);
+        }
+
+        private static void CollectScopedProperty(SerializedProperty prop, GetOptions options,
+            List<ComponentGetEntry> entries, ref int truncated)
+        {
+            if (IsLeafSerializedProperty(prop) || options.Profile != GetProfile.Full)
+            {
+                TryAddEntry(entries, options, ref truncated, false, prop);
+                return;
+            }
+
+            CollectSerializedProperty(prop, 0, options, entries, ref truncated);
+        }
+
+        private static void CollectSerializedProperty(SerializedProperty prop, int depth, GetOptions options,
+            List<ComponentGetEntry> entries, ref int truncated)
+        {
+            if (IsLeafSerializedProperty(prop) || depth >= options.MaxDepth)
+            {
+                TryAddEntry(entries, options, ref truncated, false, prop);
+                return;
+            }
+
+            var copy = prop.Copy();
+            var end = prop.GetEndProperty();
+            if (!copy.NextVisible(true)) return;
+            do
+            {
+                CollectSerializedProperty(copy, depth + 1, options, entries, ref truncated);
+            }
+            while (copy.NextVisible(false) && !SerializedProperty.EqualContents(copy, end));
+        }
+
+        private static void CollectPublicProperties(Component component, GetOptions options,
+            List<ComponentGetEntry> entries, ref int truncated)
+        {
+            foreach (var prop in component.GetType().GetProperties(
+                BindingFlags.Instance | BindingFlags.Public))
+            {
+                if (entries.Count >= options.MaxFields) { truncated++; continue; }
+                if (prop.GetIndexParameters().Length > 0) continue;
+                if (prop.GetMethod == null) continue;
+                if (prop.Name == "material" || prop.Name == "materials"
+                    || prop.Name == "sharedMaterial" || prop.Name == "sharedMaterials")
+                    continue;
+                if (!IsLeafReflectionType(prop.PropertyType))
+                    continue;
+
+                object value;
+                try { value = prop.GetValue(component); }
+                catch { continue; }
+
+                TryAddPropertyEntry(entries, options, ref truncated, prop, value);
+            }
+        }
+
+        private static bool IsLeafSerializedProperty(SerializedProperty prop)
+        {
+            switch (prop.propertyType)
+            {
+                case SerializedPropertyType.Integer:
+                case SerializedPropertyType.Boolean:
+                case SerializedPropertyType.Float:
+                case SerializedPropertyType.String:
+                case SerializedPropertyType.Color:
+                case SerializedPropertyType.Vector2:
+                case SerializedPropertyType.Vector3:
+                case SerializedPropertyType.Vector4:
+                case SerializedPropertyType.Quaternion:
+                case SerializedPropertyType.Enum:
+                case SerializedPropertyType.ObjectReference:
+                case SerializedPropertyType.LayerMask:
+                case SerializedPropertyType.Rect:
+                case SerializedPropertyType.ArraySize:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsLeafReflectionType(System.Type type)
+        {
+            if (type == null) return true;
+            if (type.IsPrimitive || type.IsEnum || type == typeof(string) || type == typeof(decimal))
+                return true;
+            if (type == typeof(Vector2) || type == typeof(Vector3) || type == typeof(Vector4)
+                || type == typeof(Color) || type == typeof(Quaternion))
+                return true;
+            return typeof(Object).IsAssignableFrom(type);
+        }
+
+        private static string BuildSerializedEntryJson(SerializedProperty prop)
+        {
+            var sb = new StringBuilder(96);
             sb.Append("{\"path\":\"").Append(TypedTargets.Esc(prop.propertyPath));
             sb.Append("\",\"type\":\"").Append(prop.propertyType.ToString());
             sb.Append("\",\"value\":").Append(ReadSerializedValue(prop));
             sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string BuildPropertyEntryJson(PropertyInfo prop, object value)
+        {
+            var sb = new StringBuilder(96);
+            sb.Append("{\"path\":\"").Append(TypedTargets.Esc(prop.Name));
+            sb.Append("\",\"type\":\"").Append(TypedTargets.Esc(prop.PropertyType.Name));
+            sb.Append("\",\"value\":").Append(SerializeValue(value));
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string FormatFloat(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value)) return "null";
+            return value.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        private static string FormatDouble(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value)) return "null";
+            return value.ToString("R", CultureInfo.InvariantCulture);
         }
 
         private static string ReadSerializedValue(SerializedProperty prop)
@@ -501,44 +803,44 @@ namespace UnityOpenMcpBridge.TypedTools
                 case SerializedPropertyType.Boolean:
                     return prop.boolValue ? "true" : "false";
                 case SerializedPropertyType.Float:
-                    return prop.floatValue.ToString("R", CultureInfo.InvariantCulture);
+                    return FormatFloat(prop.floatValue);
                 case SerializedPropertyType.String:
                     return "\"" + TypedTargets.Esc(prop.stringValue) + "\"";
                 case SerializedPropertyType.Color:
                     {
                         var c = prop.colorValue;
                         var sb = new StringBuilder(48);
-                        sb.Append('[').Append(c.r.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(c.g.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(c.b.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(c.a.ToString("R", CultureInfo.InvariantCulture)).Append(']');
+                        sb.Append('[').Append(FormatFloat(c.r));
+                        sb.Append(',').Append(FormatFloat(c.g));
+                        sb.Append(',').Append(FormatFloat(c.b));
+                        sb.Append(',').Append(FormatFloat(c.a)).Append(']');
                         return sb.ToString();
                     }
                 case SerializedPropertyType.Vector2:
                     {
                         var v = prop.vector2Value;
                         var sb = new StringBuilder(32);
-                        sb.Append('[').Append(v.x.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v.y.ToString("R", CultureInfo.InvariantCulture)).Append(']');
+                        sb.Append('[').Append(FormatFloat(v.x));
+                        sb.Append(',').Append(FormatFloat(v.y)).Append(']');
                         return sb.ToString();
                     }
                 case SerializedPropertyType.Vector3:
                     {
                         var v = prop.vector3Value;
                         var sb = new StringBuilder(48);
-                        sb.Append('[').Append(v.x.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v.y.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v.z.ToString("R", CultureInfo.InvariantCulture)).Append(']');
+                        sb.Append('[').Append(FormatFloat(v.x));
+                        sb.Append(',').Append(FormatFloat(v.y));
+                        sb.Append(',').Append(FormatFloat(v.z)).Append(']');
                         return sb.ToString();
                     }
                 case SerializedPropertyType.Vector4:
                     {
                         var v = prop.vector4Value;
                         var sb = new StringBuilder(64);
-                        sb.Append('[').Append(v.x.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v.y.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v.z.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v.w.ToString("R", CultureInfo.InvariantCulture)).Append(']');
+                        sb.Append('[').Append(FormatFloat(v.x));
+                        sb.Append(',').Append(FormatFloat(v.y));
+                        sb.Append(',').Append(FormatFloat(v.z));
+                        sb.Append(',').Append(FormatFloat(v.w)).Append(']');
                         return sb.ToString();
                     }
                 case SerializedPropertyType.Quaternion:
@@ -546,9 +848,9 @@ namespace UnityOpenMcpBridge.TypedTools
                         var v = prop.quaternionValue.eulerAngles;
                         var sb = new StringBuilder(48);
                         sb.Append("{\"euler\":[");
-                        sb.Append(v.x.ToString("R", CultureInfo.InvariantCulture)).Append(',');
-                        sb.Append(v.y.ToString("R", CultureInfo.InvariantCulture)).Append(',');
-                        sb.Append(v.z.ToString("R", CultureInfo.InvariantCulture)).Append("]}");
+                        sb.Append(FormatFloat(v.x)).Append(',');
+                        sb.Append(FormatFloat(v.y)).Append(',');
+                        sb.Append(FormatFloat(v.z)).Append("]}");
                         return sb.ToString();
                     }
                 case SerializedPropertyType.Enum:
@@ -569,10 +871,10 @@ namespace UnityOpenMcpBridge.TypedTools
                     {
                         var r = prop.rectValue;
                         var sb = new StringBuilder(80);
-                        sb.Append("{\"x\":").Append(r.x.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(",\"y\":").Append(r.y.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(",\"width\":").Append(r.width.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(",\"height\":").Append(r.height.ToString("R", CultureInfo.InvariantCulture)).Append("}");
+                        sb.Append("{\"x\":").Append(FormatFloat(r.x));
+                        sb.Append(",\"y\":").Append(FormatFloat(r.y));
+                        sb.Append(",\"width\":").Append(FormatFloat(r.width));
+                        sb.Append(",\"height\":").Append(FormatFloat(r.height)).Append('}');
                         return sb.ToString();
                     }
                 case SerializedPropertyType.ArraySize:
@@ -730,39 +1032,6 @@ namespace UnityOpenMcpBridge.TypedTools
             return s;
         }
 
-        // Append non-serialized public properties that are commonly useful to
-        // an agent (transform.position, Rigidbody.velocity, etc.). Strictly
-        // read-only and bounded by max_fields.
-        private static void AppendPublicProperties(StringBuilder sb, Component component,
-            ref int emitted, int maxFields, ref int truncated)
-        {
-            bool first = true;
-            foreach (var prop in component.GetType().GetProperties(
-                BindingFlags.Instance | BindingFlags.Public))
-            {
-                if (emitted >= maxFields) { truncated++; continue; }
-                // Skip indexers and write-only props.
-                if (prop.GetIndexParameters().Length > 0) continue;
-                if (prop.GetMethod == null) continue;
-                // Skip heavy/allocating props that are unsafe to read on the
-                // editor thread (GetComponent-like or animation-time props).
-                if (prop.Name == "material" || prop.Name == "materials"
-                    || prop.Name == "sharedMaterial" || prop.Name == "sharedMaterials")
-                    continue;
-
-                object value;
-                try { value = prop.GetValue(component); }
-                catch { continue; }
-
-                if (!first) sb.Append(',');
-                first = false;
-                sb.Append("{\"path\":\"").Append(TypedTargets.Esc(prop.Name));
-                sb.Append("\",\"type\":\"").Append(TypedTargets.Esc(prop.PropertyType.Name));
-                sb.Append("\",\"value\":").Append(SerializeValue(value));
-                emitted++;
-            }
-        }
-
         private static string SerializeValue(object value)
         {
             if (value == null) return "null";
@@ -771,40 +1040,40 @@ namespace UnityOpenMcpBridge.TypedTools
                 case bool b: return b ? "true" : "false";
                 case int i: return i.ToString(CultureInfo.InvariantCulture);
                 case long l: return l.ToString(CultureInfo.InvariantCulture);
-                case float f: return f.ToString("R", CultureInfo.InvariantCulture);
-                case double d: return d.ToString("R", CultureInfo.InvariantCulture);
+                case float f: return FormatFloat(f);
+                case double d: return FormatDouble(d);
                 case string s: return "\"" + TypedTargets.Esc(s) + "\"";
                 case Vector2 v2:
                     {
                         var sb = new StringBuilder(32);
-                        sb.Append('[').Append(v2.x.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v2.y.ToString("R", CultureInfo.InvariantCulture)).Append(']');
+                        sb.Append('[').Append(FormatFloat(v2.x));
+                        sb.Append(',').Append(FormatFloat(v2.y)).Append(']');
                         return sb.ToString();
                     }
                 case Vector3 v3:
                     {
                         var sb = new StringBuilder(48);
-                        sb.Append('[').Append(v3.x.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v3.y.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v3.z.ToString("R", CultureInfo.InvariantCulture)).Append(']');
+                        sb.Append('[').Append(FormatFloat(v3.x));
+                        sb.Append(',').Append(FormatFloat(v3.y));
+                        sb.Append(',').Append(FormatFloat(v3.z)).Append(']');
                         return sb.ToString();
                     }
                 case Vector4 v4:
                     {
                         var sb = new StringBuilder(64);
-                        sb.Append('[').Append(v4.x.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v4.y.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v4.z.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(v4.w.ToString("R", CultureInfo.InvariantCulture)).Append(']');
+                        sb.Append('[').Append(FormatFloat(v4.x));
+                        sb.Append(',').Append(FormatFloat(v4.y));
+                        sb.Append(',').Append(FormatFloat(v4.z));
+                        sb.Append(',').Append(FormatFloat(v4.w)).Append(']');
                         return sb.ToString();
                     }
                 case Color c:
                     {
                         var sb = new StringBuilder(48);
-                        sb.Append('[').Append(c.r.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(c.g.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(c.b.ToString("R", CultureInfo.InvariantCulture));
-                        sb.Append(',').Append(c.a.ToString("R", CultureInfo.InvariantCulture)).Append(']');
+                        sb.Append('[').Append(FormatFloat(c.r));
+                        sb.Append(',').Append(FormatFloat(c.g));
+                        sb.Append(',').Append(FormatFloat(c.b));
+                        sb.Append(',').Append(FormatFloat(c.a)).Append(']');
                         return sb.ToString();
                     }
                 case Object uo:

@@ -148,6 +148,17 @@ export const TOOL_COST_HINTS: ToolCostHint[] = [
       full: { band: "large", approxTokens: describeBand("large") },
     },
   },
+  {
+    tool: "unity_open_mcp_component_get",
+    profileControls:
+      "top-level serialized fields (compact) vs + leaf public properties (balanced) vs nested serialized children (full).",
+    pageSizePages: "combined fields+properties stream.",
+    profiles: {
+      compact: { band: "small", approxTokens: describeBand("small") },
+      balanced: { band: "medium", approxTokens: describeBand("medium") },
+      full: { band: "large", approxTokens: describeBand("large") },
+    },
+  },
 ];
 
 /**
@@ -163,6 +174,7 @@ export const RECOMMENDED_PAGE_SIZE: Record<string, number> = {
   unity_open_mcp_find_references: 50,
   unity_open_mcp_validate_edit: 25,
   unity_open_mcp_scan_paths: 25,
+  unity_open_mcp_component_get: 25,
 };
 
 // ---------------------------------------------------------------------------
@@ -229,6 +241,15 @@ export const RECOMMENDED_TOOL_CHAINS: RecommendedToolChain[] = [
       "unity_open_mcp_find_members — reflect the real type + member signatures",
       "unity_open_mcp_type_schema — drill into fields/properties on a type",
       "only then unity_open_mcp_execute_csharp / invoke_method with the verified API",
+    ],
+  },
+  {
+    name: "component-inspect",
+    task: "Read a component cheaply, then expand only the slice you need.",
+    steps: [
+      "unity_open_mcp_component_get (default compact) — top-level serialized fields",
+      "unity_open_mcp_component_get(property_path=\"...\") — drill into one subtree",
+      "escalate to profile=\"balanced\" / \"full\" or page with page_size + cursor when more detail is needed",
     ],
   },
   {

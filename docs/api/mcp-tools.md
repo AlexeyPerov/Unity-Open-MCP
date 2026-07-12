@@ -409,6 +409,7 @@ Profile- and paging-aware tools, and what each axis controls:
 | `find_references` | counts/groupings (compact) vs per-asset list vs field locations | referencing-assets list |
 | `validate_edit` | counts by severity (compact) vs full issues list | issues list |
 | `scan_paths` | counts by severity (compact) vs full issues list | issues list |
+| `component_get` | top-level serialized fields vs + leaf public properties vs nested serialized children | combined fields+properties stream |
 
 **Back-compat / deprecation path.** The legacy caps (`detail`, `max_results`,
 `max_nodes`, `object_limit`, `max_per_folder`) remain as aliases. They still
@@ -452,9 +453,10 @@ budget-aware way to accomplish common tasks:
     "unity_open_mcp_scene_get_data": 50,
     "unity_open_mcp_find_references": 50,
     "unity_open_mcp_validate_edit": 25,
-    "unity_open_mcp_scan_paths": 25
+    "unity_open_mcp_scan_paths": 25,
+    "unity_open_mcp_component_get": 25
   },
-  "recommendedToolChains": [ /* discover, asset-inspect, find-references, mutate-then-verify, verify-api-before-coding */ ],
+  "recommendedToolChains": [ /* discover, asset-inspect, component-inspect, find-references, mutate-then-verify, verify-api-before-coding */ ],
   "guidance": "Start with the default compact profile on every heavy tool, then expand (profile=\"balanced\" / \"full\") or drill down (component / path / id flags) only for the slice you need. Set page_size to bound any profile; follow pagination.next_cursor to resume. compact is the documented default for all heavy tools."
 }
 ```
@@ -467,7 +469,7 @@ budget-aware way to accomplish common tasks:
 - `recommendedPageSize` is a starting point, not a hard cap — an agent may
   choose a different `page_size`.
 - `recommendedToolChains` names the canonical sequence for common tasks
-  (discover, asset-inspect, find-references, mutate-then-verify,
+  (discover, asset-inspect, component-inspect, find-references, mutate-then-verify,
   verify-api-before-coding).
 
 The bands are *planning hints*, not measurements — real payloads can fall
@@ -529,6 +531,14 @@ errors accumulate and never abort the batch (matches `object_modify` /
 carries a `surfaces` breakdown (`diffs` / `pathPatches` / `jsonPatches`, each
 with `applied` and `failed`); a legacy (root-only) call keeps the original
 compact result shape.
+
+**`component_get` response shape.** Default `profile: compact` returns top-level
+serialized `fields[]` (public `properties[]` omitted unless
+`include_properties: true`). Each entry carries `path`, `type`, and `value`.
+When capped or paged, `truncated` reports the remaining tail and a `pagination`
+block appears when `page_size` is set (`next_cursor` form:
+`component_get:<offset>`). Use `property_path` to read one subtree without
+re-fetching the whole component.
 
 ## Error contract
 

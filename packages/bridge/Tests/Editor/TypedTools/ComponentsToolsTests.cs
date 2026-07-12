@@ -131,8 +131,143 @@ namespace UnityOpenMcpBridge.Tests
                 Assert.IsTrue(result.Success);
                 // Only one field should be emitted (count = 1).
                 StringAssert.Contains("\"count\":1", result.Output);
+                StringAssert.Contains("\"truncated\":", result.Output);
             }
             finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Get_RigidbodyCompact_IsParseableAndUnderSizeBudget()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_Rigidbody");
+            go.AddComponent<Rigidbody>();
+            try
+            {
+                var result = ComponentsTools.Get(
+                    "{\"instance_id\":" +InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Rigidbody\"}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsTrue(IsValidJsonObject(result.Output), "Output must be valid JSON: " + result.Output);
+                Assert.Less(result.Output.Length, 16 * 1024, "Compact Rigidbody read must stay under 16 KiB.");
+                StringAssert.Contains("\"profile\":\"compact\"", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Get_FullProfile_IsParseable()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_Full");
+            go.AddComponent<Rigidbody>();
+            try
+            {
+                var result = ComponentsTools.Get(
+                    "{\"instance_id\":" +InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Rigidbody\",\"profile\":\"full\"}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsTrue(IsValidJsonObject(result.Output));
+                StringAssert.Contains("\"profile\":\"full\"", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Get_MaxFieldsCap_ReportsTruncation()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_Truncated");
+            try
+            {
+                var result = ComponentsTools.Get(
+                    "{\"instance_id\":" +InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\",\"max_fields\":2,\"include_properties\":false}");
+                Assert.IsTrue(result.Success);
+                StringAssert.Contains("\"count\":2", result.Output);
+                StringAssert.Contains("\"truncated\":", result.Output);
+                StringAssert.DoesNotContain("\"truncated\":0", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Get_Paging_ReturnsNextCursorAndResumes()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_Paging");
+            try
+            {
+                var page1 = ComponentsTools.Get(
+                    "{\"instance_id\":" +InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\",\"page_size\":1,\"include_properties\":false}");
+                Assert.IsTrue(page1.Success, page1.ErrorMessage);
+                StringAssert.Contains("\"pagination\":", page1.Output);
+                StringAssert.Contains("\"next_cursor\":\"component_get:1\"", page1.Output);
+
+                var page2 = ComponentsTools.Get(
+                    "{\"instance_id\":" +InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\",\"page_size\":1,\"cursor\":\"component_get:1\",\"include_properties\":false}");
+                Assert.IsTrue(page2.Success, page2.ErrorMessage);
+                Assert.AreNotEqual(page1.Output, page2.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Get_PropertyPath_ReturnsScopedSlice()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_PropertyPath");
+            try
+            {
+                var result = ComponentsTools.Get(
+                    "{\"instance_id\":" +InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\",\"property_path\":\"m_LocalPosition\"}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"property_path\":\"m_LocalPosition\"", result.Output);
+                StringAssert.Contains("\"m_LocalPosition\"", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Get_PropertyPath_NotFound_ReturnsError()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_PropertyPathMissing");
+            try
+            {
+                var result = ComponentsTools.Get(
+                    "{\"instance_id\":" +InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\",\"property_path\":\"__NoSuchPath__\"}");
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("property_not_found", result.ErrorCode);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        private static bool IsValidJsonObject(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return false;
+            json = json.Trim();
+            if (!json.StartsWith("{") || !json.EndsWith("}")) return false;
+            int depth = 0;
+            bool inString = false;
+            bool escaped = false;
+            for (int i = 0; i < json.Length; i++)
+            {
+                var c = json[i];
+                if (inString)
+                {
+                    if (escaped) escaped = false;
+                    else if (c == '\\') escaped = true;
+                    else if (c == '"') inString = false;
+                    continue;
+                }
+                if (c == '"') { inString = true; continue; }
+                if (c == '{') depth++;
+                else if (c == '}')
+                {
+                    depth--;
+                    if (depth < 0) return false;
+                }
+            }
+            return depth == 0 && !inString;
         }
 
         [Test]
