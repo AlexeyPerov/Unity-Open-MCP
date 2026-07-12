@@ -449,20 +449,24 @@ test("route: non-batch tool routes to live and tags _route=live", async () => {
 // batch tools — prefer live, fall back to batch
 // ---------------------------------------------------------------------------
 
-test("route: batch tool prefers live when available", async () => {
+test("route: batch-capable tool prefers live when available", async () => {
+  // find_members is batch-capable but NOT always-batch (not verify-family),
+  // so it stays live-first when the bridge is up — the generic batch-tool
+  // behavior. (scan_all / baseline_create / regression_check are always-batch
+  // and covered by their own tests below.)
   const live = makeFakeLive({ available: true });
-  const batch = makeFakeBatch({ batchTools: new Set(["unity_open_mcp_scan_all"]) });
+  const batch = makeFakeBatch({ batchTools: new Set(["unity_open_mcp_find_members"]) });
   const router = makeRouter(live, batch, "/proj", makeFakeEventStream());
 
-  await router.route("unity_open_mcp_scan_all", {});
-  assert.equal(live.calls.length, 1, "live should serve the batch tool when up");
+  await router.route("unity_open_mcp_find_members", {});
+  assert.equal(live.calls.length, 1, "live should serve the batch-capable tool when up");
   assert.equal(batch.calls.length, 0);
 });
 
-test("route: batch tool falls back to batch with _route=batch when live is down", async () => {
+test("route: batch-capable tool falls back to batch with _route=batch when live is down", async () => {
   const live = makeFakeLive({ available: false });
   const batch = makeFakeBatch({
-    batchTools: new Set(["unity_open_mcp_scan_all"]),
+    batchTools: new Set(["unity_open_mcp_find_members"]),
     result: {
       content: [{ type: "text", text: JSON.stringify({ summary: { error: 0, warn: 0, info: 0 } }) }],
       isError: false,
@@ -470,7 +474,7 @@ test("route: batch tool falls back to batch with _route=batch when live is down"
   });
   const router = makeRouter(live, batch, "/proj", makeFakeEventStream());
 
-  const result = await router.route("unity_open_mcp_scan_all", {});
+  const result = await router.route("unity_open_mcp_find_members", {});
   assert.equal(live.calls.length, 0);
   assert.equal(batch.calls.length, 1, "batch should serve the tool when live is down");
   const body = parseBody(result);
@@ -498,6 +502,64 @@ test("route: compile_check always routes to batch even when live is available", 
   assert.equal(
     (parseBody(result)._route as { fallbackReason?: string }).fallbackReason,
     "compile_check_always_batch",
+  );
+});
+
+// Verify-family tools (scan_all / baseline_create / regression_check) are
+// batch-only: the headless verify package runs them and they are NOT
+// registered on the live bridge. They must always route to batch even when the
+// live bridge is up — otherwise an agent sees a bare tool_not_found for a known
+// batch-only tool. Mirror the compile_check precedent.
+test("route: verify tools always route to batch even when live is available", async () => {
+  const verifyTools = [
+    "unity_open_mcp_scan_all",
+    "unity_open_mcp_baseline_create",
+    "unity_open_mcp_regression_check",
+  ];
+  for (const tool of verifyTools) {
+    const live = makeFakeLive({ available: true });
+    const batch = makeFakeBatch({
+      batchTools: new Set(verifyTools),
+      result: {
+        content: [{ type: "text", text: JSON.stringify({ summary: { error: 0, warn: 0, info: 0 } }) }],
+        isError: false,
+      },
+    });
+    const router = makeRouter(live, batch, "/proj", makeFakeEventStream());
+
+    const result = await router.route(tool, {});
+    assert.equal(live.calls.length, 0, `${tool} must never hit the live bridge`);
+    assert.equal(batch.calls.length, 1, `${tool} must always go to batch`);
+    assert.equal(routeOf(result), "batch", `${tool} _route.route`);
+    assert.equal(
+      (parseBody(result)._route as { fallbackReason?: string }).fallbackReason,
+      "verify_always_batch",
+      `${tool} fallbackReason`,
+    );
+  }
+});
+
+test("route: verify tools still batch when live bridge is down", async () => {
+  // When live is down the tool still resolves via batch — the reason stays
+  // verify_always_batch (not live_unavailable) because the routing decision is
+  // "always batch", independent of live availability.
+  const live = makeFakeLive({ available: false });
+  const batch = makeFakeBatch({
+    batchTools: new Set(["unity_open_mcp_scan_all"]),
+    result: {
+      content: [{ type: "text", text: JSON.stringify({ summary: { error: 0, warn: 0, info: 0 } }) }],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, batch, "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_scan_all", {});
+  assert.equal(live.calls.length, 0);
+  assert.equal(batch.calls.length, 1);
+  assert.equal(routeOf(result), "batch");
+  assert.equal(
+    (parseBody(result)._route as { fallbackReason?: string }).fallbackReason,
+    "verify_always_batch",
   );
 });
 

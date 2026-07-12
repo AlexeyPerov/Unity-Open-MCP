@@ -284,6 +284,7 @@ Treat `capabilities.routePolicy` + `batchCapable` as source of truth.
 - **Offline reads** (`list_assets`, `find_references`, `read_asset`, `search_assets`) parse the project from disk and never need Unity. Coverage: text-serialized Unity YAML (`.prefab`/`.unity`/`.asset`/`.mat`/`.controller`/`.anim`/`.playable`/`.preset`/`.spriteatlas`/`.terrainlayer`/`.vfx`) **plus** JSON assets unity-scanner can't parse (`.asmdef`, `.shadergraph`/`.shadersubgraph`). `read_asset` also reconstructs the full hierarchy offline, parses prefab-variant overrides (matching `prefab_get_overrides`), and surfaces `integrity[]` signals (missing refs, missing scripts, malformed JSON, orphaned prefab instances) on the response — act on them before a `validate_edit` round-trip.
 - `**dependencies` is live-only** — it reuses the verify `Dependencies.Scanner` (forward) + `ReferenceGraph` (reverse), both of which call AssetDatabase. No offline form.
 - `**compile_check` is always batch** — spawns a fresh headless Unity that recompiles from scratch, even when the live bridge is up.
+- `**Verify scans (`scan_all`, `baseline_create`, `regression_check`) are always batch** — they run in the headless verify package and are not registered on the live bridge, so even with the bridge up they spawn fresh Unity (`_route.fallbackReason: "verify_always_batch"`). Expect `editor_instance_locked` when a live Editor holds the project lock — close it and retry, or use the live `validate_edit` / `scan_paths` for a scoped health check instead.
 
 ## Typed tool catalog
 

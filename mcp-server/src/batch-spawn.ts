@@ -20,6 +20,17 @@ const VERIFY_TOOL_TO_OPERATION: Record<string, string> = {
   unity_open_mcp_regression_check: "regression_check",
 };
 
+// Verify-family tools that are ALWAYS batch-routed, even when a live bridge is
+// up. These scan/baseline/regression ops require the headless verify package
+// and are NOT registered on the live bridge — routing them live yields a bare
+// `tool_not_found`. The router mirrors the compile_check precedent: always
+// spawn fresh so the tool does what its contract says. validate_edit /
+// scan_paths are intentionally NOT here — those ARE registered on the live
+// bridge and stay live-first.
+export const VERIFY_BATCH_TOOL_NAMES: ReadonlySet<string> = new Set(
+  Object.keys(VERIFY_TOOL_TO_OPERATION),
+);
+
 const META_TOOL_TO_OPERATION: Record<string, string> = {
   unity_open_mcp_find_members: "find_members",
   unity_open_mcp_compile_check: "compile_check",
