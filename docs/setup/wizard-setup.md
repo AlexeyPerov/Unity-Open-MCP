@@ -11,6 +11,7 @@ step, checks your environment, edits `manifest.json` and your MCP-client config
 for you, and verifies the connection at the end.
 
 For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md).
+Prefer letting an AI agent install for you? See [agent-setup.md](agent-setup.md).
 
 ## Requirements
 
@@ -18,7 +19,7 @@ For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md)
 - **Node.js 18 or newer** — only needed because the MCP server is a small Node
   program. Install it from <https://nodejs.org/> (the **LTS** button) if you
   don't have it. The wizard checks this and tells you if it's missing or too old.
-- **Unity Hub Pro** — install it first. See [unity-hub-pro.md](unity-hub-pro.md)
+- **Unity Hub Pro** — install it first. See [unity-hub-pro.md](../unity-hub-pro.md)
   (download the installer for your OS from the GitHub Releases page).
 - **An MCP client** (Cursor, Claude Desktop, Claude Code, OpenCode, ZCode,
   Cline, Codex, VS Code Copilot, Gemini CLI, or one of the other supported
@@ -26,7 +27,7 @@ For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md)
 
 ## Quick flow
 
-1. **Install Unity Hub Pro** if you haven't (see [unity-hub-pro.md](unity-hub-pro.md)).
+1. **Install Unity Hub Pro** if you haven't (see [unity-hub-pro.md](../unity-hub-pro.md)).
 2. Open Unity Hub Pro and add your Unity project.
 3. Click the **AI** action for that project. The button turns **green** when the agent is already installed and configured for that project; otherwise it is amber/blue and opens the wizard.
 4. Pick a setup preset (or **Custom / skip**) on the preset step.
@@ -36,7 +37,7 @@ For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md)
 
 Wizard choices (preset, MCP client, package toggles, bridge port, and other form fields) are remembered **per project** when you reopen the wizard; you always start again at the preset picker.
 
-![plot](../screenshots/hub-ai-buttons.png)
+![plot](../../screenshots/hub-ai-buttons.png)
 
 ## Wizard steps
 
@@ -72,7 +73,7 @@ A single **Re-check** button re-runs project detection and the Node probe. Detec
 
 **Express setup:** when the environment checks pass, Preflight offers **Express setup** — one **Set up** click runs package install → MCP client write → launch/verify with a live progress list. The full step-by-step path stays available via the progress strip.
 
-![plot](../screenshots/hub-wizard-1.png)
+![plot](../../screenshots/hub-wizard-1.png)
 
 ### MCP server source (optional / advanced)
 
@@ -91,7 +92,7 @@ npm install
 npm run build
 ```
 
-![plot](../screenshots/hub-wizard-2.png)
+![plot](../../screenshots/hub-wizard-2.png)
 
 ### Unity packages
 
@@ -108,7 +109,7 @@ After onboarding, you can add or remove Unity domain dependencies at any time fr
 
 For the contributor / community-pack `file:` workflow, see [Development setup](development-setup.md).
 
-![plot](../screenshots/hub-wizard-3.png)
+![plot](../../screenshots/hub-wizard-3.png)
 
 ### Configure AI client
 
@@ -127,7 +128,7 @@ Review the generated config preview (JSON or TOML, or a CLI command for Claude C
 
 **Advanced (optional):** the **Bridge HTTP port** override lives here (collapsed by default; the port auto-derives from the project path).
 
-![plot](../screenshots/hub-wizard-4.png)
+![plot](../../screenshots/hub-wizard-4.png)
 
 ### Agent skill (optional)
 
@@ -140,7 +141,7 @@ Both honor an explicit overwrite checkbox; existing files are backed up to `*.ba
 
 The **Team CI** preset auto-skips this step — CI agents typically don't need a desktop skill file.
 
-![plot](../screenshots/hub-wizard-5.png)
+![plot](../../screenshots/hub-wizard-5.png)
 
 ### Launch and verify
 
@@ -150,9 +151,9 @@ The **Team CI** preset auto-skips this step — CI agents typically don't need a
 
 While waiting, the MCP server auto-dismisses common Unity startup modals (Safe
 Mode, version mismatch, and similar) per `UNITY_OPEN_MCP_DIALOG_POLICY`. If this
-step stalls on a modal, see [Dialog policy](dialog-policy.md).
+step stalls on a modal, see [Dialog policy](../dialog-policy.md).
 
-![plot](../screenshots/hub-wizard-6.png)
+![plot](../../screenshots/hub-wizard-6.png)
 
 ## Clear AI Setup
 
@@ -176,15 +177,16 @@ A `.bak` backup is created next to each changed file. Per-target failures are re
 - **Bridge unavailable on Launch and verify:** verify the project path is right,
   Unity actually launched, and finished compiling. The health check runs while
   Unity is running. If a startup modal blocks progress (Safe Mode, project
-  upgrade), see [Dialog policy](dialog-policy.md).
+  upgrade), see [Dialog policy](../dialog-policy.md).
 - **Re-check does nothing:** it refreshes the on-disk snapshot only — bridge
   reachability is checked on Launch and verify while Unity is running.
 - **npx first run looks slow:** expected — the server downloads on first launch.
 
 ## Related docs
 
-- [Dialog policy](dialog-policy.md)
+- [Dialog policy](../dialog-policy.md)
+- [Agent setup](agent-setup.md)
 - [Manual setup](manual-setup.md)
-- [Unity Hub Pro](unity-hub-pro.md)
-- [Bridge HTTP API](api/bridge-http.md)
-- [MCP tools API](api/mcp-tools.md)
+- [Unity Hub Pro](../unity-hub-pro.md)
+- [Bridge HTTP API](../api/bridge-http.md)
+- [MCP tools API](../api/mcp-tools.md)

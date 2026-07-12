@@ -159,9 +159,18 @@ const TRIO_TARGETS = [
       ),
   },
   {
-    file: "docs/manual-setup.md",
+    file: "docs/setup/manual-setup.md",
     kind: "md-git",
     description: "manual-setup.md git-URL install pins (#bridge-v / #verify-v)",
+    replace: (b, v) =>
+      b
+        .replace(/(#bridge-v)\d+\.\d+\.\d+/g, `$1${v}`)
+        .replace(/(#verify-v)\d+\.\d+\.\d+/g, `$1${v}`),
+  },
+  {
+    file: "docs/setup/agent-setup.md",
+    kind: "md-git",
+    description: "agent-setup.md git-URL install pins (#bridge-v / #verify-v)",
     replace: (b, v) =>
       b
         .replace(/(#bridge-v)\d+\.\d+\.\d+/g, `$1${v}`)
@@ -185,13 +194,19 @@ const TRIO_TARGETS = [
   // version.json too. Add a target here for any doc that shows a pinned
   // `npx -y unity-open-mcp@<ver>` or `npx unity-open-mcp@<ver>` invocation.
   {
-    file: "docs/manual-setup.md",
+    file: "docs/setup/manual-setup.md",
     kind: "md-npm",
     description: "manual-setup.md npm server pins (unity-open-mcp@<ver>)",
     replace: replaceNpmPin,
   },
   {
-    file: "docs/wizard-setup.md",
+    file: "docs/setup/agent-setup.md",
+    kind: "md-npm",
+    description: "agent-setup.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/setup/wizard-setup.md",
     kind: "md-npm",
     description: "wizard-setup.md npm server pins (unity-open-mcp@<ver>)",
     replace: replaceNpmPin,
@@ -323,7 +338,7 @@ function extractVersion(body, kind) {
     return m ? m[1] : undefined;
   }
   if (kind === "md-git") {
-    // First #bridge-v<X.Y.Z> pin in the doc (manual-setup.md git-URL examples).
+    // First #bridge-v<X.Y.Z> pin in the doc (setup/*.md git-URL examples).
     const m = body.match(/#bridge-v(\d+\.\d+\.\d+)/);
     return m ? m[1] : undefined;
   }
@@ -552,12 +567,12 @@ if (isBump || isSet) {
   if (!HUB) {
     // The trio release needs three tags on the same commit: v* (triggers
     // npm-publish.yml) plus bridge-v* / verify-v* so the UPM git-URL install
-    // pins documented in manual-setup.md resolve. See docs/versioning.md
+    // pins documented in docs/setup/*.md resolve. See docs/versioning.md
     // §Release channels and tag namespaces.
     console.log(`\nTags this will create (all on the same commit):`);
     console.log(`  ${nextNames[0]}          — triggers npm-publish.yml (publishes the MCP server)`);
-    console.log(`  ${nextNames[1]}   — resolves the bridge UPM git-URL pin in manual-setup.md`);
-    console.log(`  ${nextNames[2]}   — resolves the verify UPM git-URL pin in manual-setup.md`);
+    console.log(`  ${nextNames[1]}   — resolves the bridge UPM git-URL pin in docs/setup/`);
+    console.log(`  ${nextNames[2]}   — resolves the verify UPM git-URL pin in docs/setup/`);
   }
   process.exit(0);
 }

@@ -9,7 +9,7 @@ you manage projects, run the AI Setup wizard, and handle maintainer workflows
 from one UI.
 
 > **You do not need the Hub to use Unity Open MCP.** The manual path in
-> [Manual setup](manual-setup.md) works with no extra app. The Hub just automates
+> [Manual setup](setup/manual-setup.md) works with no extra app. The Hub just automates
 > the fiddly parts — editing `Packages/manifest.json`, writing the MCP-client
 > config, copying the agent skill — so you don't have to touch a text editor or a
 > terminal. If you're new to Node, MCP clients, or JSON config files, start here.
@@ -53,7 +53,7 @@ from one UI.
 
 ![projects](./art/hub-ai-buttons.png)
 
-For full setup steps, see [wizard-setup.md](wizard-setup.md).
+For full setup steps, see [wizard-setup.md](setup/wizard-setup.md).
 
 ### 3) Maintainer panel (Open MCP repositories)
 
@@ -94,7 +94,7 @@ any build toolchain to run it. Grab the latest release for your operating system
 
 Open the app and add a Unity project from disk — it should appear in the project
 list. Click the **AI** action on that row to start the wizard (see
-[wizard-setup.md](wizard-setup.md)).
+[wizard-setup.md](setup/wizard-setup.md)).
 
 ## For developers (build from source)
 

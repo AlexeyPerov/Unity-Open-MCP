@@ -78,7 +78,7 @@ Rules for the SKILL file:
 
 - Keep it lean (~150–200 lines): workflows, principles, one canonical example per concept, pointers to `unity_open_mcp_capabilities` for details. Do **not** copy the full `docs/api/mcp-tools.md` tables into the skill.
 - The `routing` object on the capabilities response is the machine-readable routing source — the SKILL only summarizes it.
-- Do **not** put MCP client config JSON, install path tables, or `Setup without Hub` content in the skill. Those live in `docs/manual-setup.md` / `docs/wizard-setup.md`.
+- Do **not** put MCP client config JSON, install path tables, or `Setup without Hub` content in the skill. Those live in `docs/setup/agent-setup.md` / `docs/setup/manual-setup.md` / `docs/setup/wizard-setup.md`.
 - The `unity_open_mcp_generate_skill` output stays a **project inventory** (packages, types, tool list from catalog). Do not reintroduce install/MCP JSON into generated skills.
 
 The MCP package (this directory) owns SKILL sync with tool changes — same obligation as the api doc sync above.

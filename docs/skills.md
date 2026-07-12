@@ -55,7 +55,7 @@ The **Hub AI Setup wizard** writes skills into your project at the per-client pa
 | OpenCode | `.opencode/skills/unity-open-mcp/SKILL.md` |
 | ZCode / generic `agents` | `.agents/skills/unity-open-mcp/SKILL.md` |
 
-For the step-by-step install flow, see [Wizard setup](wizard-setup.md) (recommended) or [Manual setup](manual-setup.md).
+For the step-by-step install flow, see [Agent setup](setup/agent-setup.md) (paste the README prompt into your AI client), [Wizard setup](setup/wizard-setup.md), or [Manual setup](setup/manual-setup.md).
 
 ## Project-specific skill generation
 
@@ -64,5 +64,6 @@ The runtime tool `unity_open_mcp_generate_skill` (`{ "write": true }`) regenerat
 ## Relationship to the rest of the docs
 
 - Skills are **agent-facing** — they live inside game projects and are read by the AI agent.
-- These docs (`docs/`) are **human-facing** — read by you.
+- [Agent setup](setup/agent-setup.md) is also **agent-facing** — a bootstrap procedure for installing MCP before the skill exists.
+- Other docs under `docs/` are **human-facing** — read by you.
 - For the full tool catalog and route policy, see [MCP tools API](api/mcp-tools.md). For domain catalog and activation, see [Extensions](extensions.md).

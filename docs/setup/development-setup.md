@@ -4,8 +4,8 @@ Work on the Unity Open MCP packages themselves — local checkouts, building the
 MCP server from source, contributor/community-pack workflows, and the
 maintainer publish flow for the `unity-open-mcp` npm package.
 
-For installing as a user (npm + Git URL), see
-[manual-setup.md](manual-setup.md). For guided setup, see
+For installing as a user (npm + Git URL), see [manual-setup.md](manual-setup.md)
+or let an agent follow [agent-setup.md](agent-setup.md). For guided setup, see
 [wizard-setup.md](wizard-setup.md).
 
 ## Requirements
@@ -74,10 +74,10 @@ package by replacing the `npx` command with a direct node launch:
 
 Optional startup-dialog env vars (`UNITY_OPEN_MCP_DIALOG_POLICY`, project-upgrade
 and unsaved-scene opt-ins, dismiss timeouts) apply the same way — see
-[Dialog policy](dialog-policy.md). On **macOS**, auto-dismiss also needs a
+[Dialog policy](../dialog-policy.md). On **macOS**, auto-dismiss also needs a
 one-time **Accessibility** grant for the app that runs `node` (Terminal, IDE,
 CI runner, etc.) — see
-[Dialog policy → macOS Accessibility](dialog-policy.md#macos-accessibility-required-for-auto-dismiss).
+[Dialog policy → macOS Accessibility](../dialog-policy.md#macos-accessibility-required-for-auto-dismiss).
 
 ## 3) Optional Unity domain dependencies
 
@@ -100,7 +100,7 @@ Unity package is present. Add the Unity dependencies you want under
 
 Particle System and Animation are built-in Unity modules — no manifest entry is
 needed, the tools compile in as soon as the module is enabled in the Editor.
-See [extensions.md](extensions.md) for the domain catalog and activation steps.
+See [extensions.md](../extensions.md) for the domain catalog and activation steps.
 
 ## 4) Launch Unity and verify
 
@@ -124,7 +124,7 @@ that are not shipped with the bridge. The shipped domains (Nav, Input,
 ProBuilder, Particles, Animation) are embedded in the bridge; the former
 standalone `com.alexeyperov.unity-open-mcp-ext-*` packs for these domains were
 removed as duplicates. See
-[contributing/extensions.md](contributing/extensions.md) for the community-pack
+[contributing/extensions.md](../contributing/extensions.md) for the community-pack
 contract.
 
 To install a community pack, add its UPM id under `dependencies`:
@@ -166,7 +166,7 @@ git push origin vX.Y.Z
 `bump` updates the single source (`version.json`) **and** rewrites every
 generated target (the server + bridge + verify `package.json`, plus the two C#
 version constants the bridge reports over `/ping`). See
-[docs/versioning.md](versioning.md) for the full policy, the drift gate, and how
+[Versioning](../versioning.md) for the full policy, the drift gate, and how
 the Hub app (which has its own independent version) is bumped.
 
 The `npm-publish.yml` workflow then runs `npm ci && npm publish --access public`
@@ -214,11 +214,12 @@ fork then point their clients at the forked package name
 
 ## Related docs
 
-- [Dialog policy](dialog-policy.md)
+- [Dialog policy](../dialog-policy.md)
+- [Agent setup](agent-setup.md)
 - [Manual setup](manual-setup.md)
 - [Wizard setup](wizard-setup.md)
-- [Extensions](extensions.md)
-- [Contributing — extensions](contributing/extensions.md)
-- [Contributor troubleshooting](troubleshooting-contributors.md) — test suites, worker-listener collisions, InitTestScene modals
-- [Bridge HTTP API](api/bridge-http.md)
-- [MCP tools API](api/mcp-tools.md)
+- [Extensions](../extensions.md)
+- [Contributing — extensions](../contributing/extensions.md)
+- [Contributor troubleshooting](../troubleshooting-contributors.md) — test suites, worker-listener collisions, InitTestScene modals
+- [Bridge HTTP API](../api/bridge-http.md)
+- [MCP tools API](../api/mcp-tools.md)

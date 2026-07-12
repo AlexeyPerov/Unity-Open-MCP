@@ -57,5 +57,5 @@ Use `/ping` to confirm:
 ## Related docs
 
 - [MCP tools API](mcp-tools.md)
-- [Manual setup](../manual-setup.md)
+- [Manual setup](../setup/manual-setup.md)
 - [Architecture](../architecture.md)

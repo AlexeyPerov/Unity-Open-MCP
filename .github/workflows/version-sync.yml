@@ -27,8 +27,9 @@ on:
       - hub/src-tauri/tauri.conf.json
       - hub/src-tauri/Cargo.toml
       - hub/package.json
-      - docs/manual-setup.md
-      - docs/wizard-setup.md
+      - docs/setup/manual-setup.md
+      - docs/setup/agent-setup.md
+      - docs/setup/wizard-setup.md
       - docs/api/mcp-tools.md
       - mcp-server/README.md
       - docs/ci/github-actions/unity-verify.yml
@@ -55,8 +56,9 @@ on:
       - hub/src-tauri/tauri.conf.json
       - hub/src-tauri/Cargo.toml
       - hub/package.json
-      - docs/manual-setup.md
-      - docs/wizard-setup.md
+      - docs/setup/manual-setup.md
+      - docs/setup/agent-setup.md
+      - docs/setup/wizard-setup.md
       - docs/api/mcp-tools.md
       - mcp-server/README.md
       - docs/ci/github-actions/unity-verify.yml

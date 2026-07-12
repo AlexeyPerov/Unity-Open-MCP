@@ -160,8 +160,8 @@ The generated targets, mapped to their sources:
 | `packages/verify/package.json` | `version` | what Unity Package Manager shows |
 | `packages/bridge/Editor/Bridge/BridgeSession.cs` | `BridgeVersion` constant | reported by `/ping` |
 | `packages/bridge/Editor/Bridge/BridgeHttpServer.cs` | `/ping` 503 fallback literal | pre-init body, before `BridgeSession` is ready |
-| `docs/manual-setup.md` | `#bridge-v` / `#verify-v` git-URL pins | UPM install snippets reference the version tags; kept current by the sync script |
-| `docs/manual-setup.md`, `docs/wizard-setup.md`, `mcp-server/README.md`, `docs/api/mcp-tools.md`, `docs/ci/**/*.yml` | `unity-open-mcp@<ver>` npm pins | the server shares the trio version, so every `npx … @<ver>` snippet is generated from `version.json` |
+| `docs/setup/manual-setup.md`, `docs/setup/agent-setup.md` | `#bridge-v` / `#verify-v` git-URL pins | UPM install snippets reference the version tags; kept current by the sync script |
+| `docs/setup/manual-setup.md`, `docs/setup/agent-setup.md`, `docs/setup/wizard-setup.md`, `mcp-server/README.md`, `docs/api/mcp-tools.md`, `docs/ci/**/*.yml` | `unity-open-mcp@<ver>` npm pins | the server shares the trio version, so every `npx … @<ver>` snippet is generated from `version.json` |
 
 **From `hub/version.json` →**
 

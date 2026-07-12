@@ -10,6 +10,9 @@ This is the **do-it-yourself** path. It's a good fit if you:
 - prefer to control exactly what gets installed and pinned, or
 - are on a headless/CI machine where the Hub GUI isn't an option.
 
+Prefer letting an AI agent do the install? See [agent-setup.md](agent-setup.md)
+(paste the README prompt into your AI client).
+
 If you've never opened a terminal or edited JSON, the **wizard** path is much
 easier — see [wizard-setup.md](wizard-setup.md). It does everything below
 automatically and explains each step.
@@ -77,7 +80,7 @@ Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation) are
 }
 ```
 
-Particle System and Animation are built-in Unity modules — no manifest entry is needed, the tools compile in as soon as the module is enabled in the Editor. See [extensions.md](extensions.md) for the domain catalog and activation steps.
+Particle System and Animation are built-in Unity modules — no manifest entry is needed, the tools compile in as soon as the module is enabled in the Editor. See [extensions.md](../extensions.md) for the domain catalog and activation steps.
 
 ### Optional dependencies (in-Editor)
 
@@ -109,7 +112,7 @@ What that means:
   version from npm. The `-y` accepts the first-run prompt; pinning the version
   keeps the server in lockstep with the bridge and verify packages, which share
   the same number. To move to a newer release, bump the version here and in your
-  Unity `manifest.json` together — see [Versioning](versioning.md).
+  Unity `manifest.json` together — see [Versioning](../versioning.md).
 - **First run can take 10–60 seconds** while the package is downloaded — that's
   normal, not a hang. Subsequent launches are fast.
 - Prefer a one-time install instead? `npm install -g unity-open-mcp` puts it on
@@ -127,7 +130,7 @@ What that means:
 - **Required:** `UNITY_PROJECT_PATH` — absolute path to the Unity project root.
 - Optional: `UNITY_OPEN_MCP_BRIDGE_PORT` (override the auto-derived port).
 - Optional: `UNITY_PATH` (batch fallback when the Editor can't auto-discover).
-- Optional startup-dialog handling (see [Dialog policy](dialog-policy.md)):
+- Optional startup-dialog handling (see [Dialog policy](../dialog-policy.md)):
   - `UNITY_OPEN_MCP_DIALOG_POLICY=auto|manual|ignore|recover|safe-mode|cancel` (default `ignore`)
   - `UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1` (opt in to auto-confirming the irreversible Project Upgrade dialog; off by default)
   - `UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1` (opt in to auto-dismissing the "Unsaved changes to scene" modal — destructive under every policy, off by default)
@@ -242,7 +245,7 @@ npx -y unity-open-mcp@0.5.0 run-tool unity_open_mcp_capabilities --project /path
 ```
 
 On unattended machines, configure startup modal handling via
-[Dialog policy](dialog-policy.md) (`UNITY_OPEN_MCP_DIALOG_POLICY` and related env vars).
+[Dialog policy](../dialog-policy.md) (`UNITY_OPEN_MCP_DIALOG_POLICY` and related env vars).
 
 ## Troubleshooting
 
@@ -260,21 +263,22 @@ On unattended machines, configure startup modal handling via
   by default (clicking Ignore). If it keeps reappearing, set
   `UNITY_OPEN_MCP_DIALOG_POLICY=manual` and dismiss it by hand, or check
   `unity_open_mcp_read_compile_errors` for the underlying CS error. See
-  [Dialog policy](dialog-policy.md).
+  [Dialog policy](../dialog-policy.md).
 - **"nothing happens" but no error:** double-check `UNITY_PROJECT_PATH` is an
   **absolute** path to the project root and contains no trailing slash or typos.
 - **macOS — modal auto-dismiss does nothing:** grant **Accessibility** to the
   app that runs `node` (Terminal, your IDE, etc.) in **System Settings →
   Privacy & Security → Accessibility**, then restart the MCP client. Required
   for any agent host — not Cursor-specific. See
-  [Dialog policy → macOS Accessibility](dialog-policy.md#macos-accessibility-required-for-auto-dismiss).
+  [Dialog policy → macOS Accessibility](../dialog-policy.md#macos-accessibility-required-for-auto-dismiss).
 
 ## Related docs
 
-- [Troubleshooting](troubleshooting.md) — bridge start failures and connectivity recovery
-- [Dialog policy](dialog-policy.md)
+- [Agent setup](agent-setup.md) — let an AI agent perform this install
+- [Troubleshooting](../troubleshooting.md) — bridge start failures and connectivity recovery
+- [Dialog policy](../dialog-policy.md)
 - [Wizard setup](wizard-setup.md)
 - [Development setup](development-setup.md) — local checkout, contributor and maintainer workflows.
-- [Unity Hub Pro](unity-hub-pro.md)
-- [Bridge HTTP API](api/bridge-http.md)
-- [MCP tools API](api/mcp-tools.md)
+- [Unity Hub Pro](../unity-hub-pro.md)
+- [Bridge HTTP API](../api/bridge-http.md)
+- [MCP tools API](../api/mcp-tools.md)

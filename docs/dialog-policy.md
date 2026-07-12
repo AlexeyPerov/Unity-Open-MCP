@@ -101,7 +101,8 @@ client so the next `node` child inherits the permission context.
 
 ## Related docs
 
-- [Manual setup](manual-setup.md) — MCP client config and CI CLI
-- [Wizard setup](wizard-setup.md) — guided install and launch verification
-- [Development setup](development-setup.md) — local checkout and contributor workflows
+- [Agent setup](setup/agent-setup.md) — let an AI agent install MCP + Unity packages
+- [Manual setup](setup/manual-setup.md) — MCP client config and CI CLI
+- [Wizard setup](setup/wizard-setup.md) — guided install and launch verification
+- [Development setup](setup/development-setup.md) — local checkout and contributor workflows
 - [MCP tools API](api/mcp-tools.md) — tool lifecycle classes (`modal-dialog`)

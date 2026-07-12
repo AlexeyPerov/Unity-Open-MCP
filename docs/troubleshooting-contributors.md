@@ -158,6 +158,6 @@ the orchestrator (`scripts/mcp-test-all.mjs`).
 ## Related docs
 
 - [Troubleshooting](troubleshooting.md) — user-facing recovery
-- [Development setup](development-setup.md) — local checkout and build
+- [Development setup](setup/development-setup.md) — local checkout and build
 - [Dialog policy](dialog-policy.md) — dismiss env vars and macOS Accessibility
 - [Bridge HTTP API](api/bridge-http.md)

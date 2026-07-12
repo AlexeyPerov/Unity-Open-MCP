@@ -40,19 +40,34 @@ For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-too
 
 Requires **Unity 2022.3 LTS or newer**.
 
-Use any of this options:
+Use any of these options:
 
-1. Install Unity Hub Pro and use its **AI Setup wizard** (simplest, no console needed): see [Wizard setup](docs/wizard-setup.md).
+1. **Easiest (AI agent):** paste this prompt into your AI client (Cursor, Claude, …) and let it install for you:
+
+```text
+Install Unity Open MCP in this Unity project by following
+https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/agent-setup.md
+exactly. Do every agent step yourself; stop and tell me only when a human action is required.
+If this monorepo is already open locally, read docs/setup/agent-setup.md from disk instead of fetching.
+```
+
+Full procedure: [Agent setup](docs/setup/agent-setup.md).
+
+2. If you prefer to edit config yourself: see [Manual setup](docs/setup/manual-setup.md).
+3. If you prefer cloning this repo and working with it directly: see [Development setup](docs/setup/development-setup.md). Fits contributor workflow.
+
+Guided install via Unity Hub Pro: [Wizard setup](docs/setup/wizard-setup.md).
 
 ![plot](./screenshots/hub-wizard-7.png)
-
-2. If you prefer manual setup: see [Manual setup](docs/manual-setup.md).
-3. If prefer cloning this repo and working with it directly: see [Development setup](docs/development-setup.md). Fits contributor workflow.
 
 Domain tools (NavMesh, Input System, ProBuilder, lighting, Shader Graph, …) are embedded in the bridge — see [Extensions](docs/extensions.md) for the catalog and activation steps.
 
 ## Documentation
 
+- [Agent setup](docs/setup/agent-setup.md) — let an AI agent install MCP + Unity packages.
+- [Manual setup](docs/setup/manual-setup.md) — DIY MCP client config and UPM pins.
+- [Wizard setup](docs/setup/wizard-setup.md) — Unity Hub Pro guided install.
+- [Development setup](docs/setup/development-setup.md) — local checkout and contributor workflows.
 - [Architecture](docs/architecture.md) — repository boundaries and runtime flow.
 - [Dialog policy](docs/dialog-policy.md) — startup modal auto-dismiss and `UNITY_OPEN_MCP_DIALOG_POLICY`.
 - [Troubleshooting](docs/troubleshooting.md) — bridge start failures, zombie listeners, and connectivity recovery.

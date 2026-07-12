@@ -105,7 +105,9 @@ Then use `"command": "unity-open-mcp", "args": []` (Cursor / Claude Desktop) or
    Unity (batch) or offline disk parsing.
 
 The bridge package must be installed in your Unity project. See the
-[manual setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/manual-setup.md)
+[agent setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/agent-setup.md)
+(paste the README prompt into your AI client) or the
+[manual setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/manual-setup.md)
 for the `Packages/manifest.json` entries.
 
 ## CLI
@@ -122,7 +124,7 @@ npx unity-open-mcp run-tool unity_open_mcp_capabilities \
 
 Commands: `ping`, `wait-for-ready`, `status`, `run-tool`, `--help`, `--version`.
 All accept `--json` for machine-readable output. See the
-[manual setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/manual-setup.md#cli-for-ci--automation)
+[manual setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/manual-setup.md#cli-for-ci--automation)
 for the full option reference.
 
 ## Version pinning
@@ -131,17 +133,18 @@ The snippets above pin the server to `unity-open-mcp@0.5.0` so it stays in
 lockstep with the bridge and verify packages, which share the same version
 number. To move to a newer release, bump the version in your client config and
 your Unity `manifest.json` together — see
-[Versioning](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/versioning.md).
+[Versioning](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/versioning.md).
 If you prefer to always run the newest published server, replace the pinned
 version with `@latest`.
 
 ## Documentation
 
-- [Full manual setup](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/manual-setup.md)
-- [Unity Hub Pro wizard walkthrough](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/wizard-setup.md)
-- [MCP tool catalog and routing](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/api/mcp-tools.md)
-- [Bridge HTTP API](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/api/bridge-http.md)
-- [Architecture](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/main/docs/architecture.md)
+- [Agent setup](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/agent-setup.md)
+- [Full manual setup](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/manual-setup.md)
+- [Unity Hub Pro wizard walkthrough](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/wizard-setup.md)
+- [MCP tool catalog and routing](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/mcp-tools.md)
+- [Bridge HTTP API](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/bridge-http.md)
+- [Architecture](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/architecture.md)
 
 ## License
 

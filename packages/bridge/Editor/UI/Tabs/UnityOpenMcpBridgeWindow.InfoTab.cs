@@ -20,10 +20,11 @@ namespace UnityOpenMcpBridge
         private static readonly (string Label, string Path, string Tooltip)[] DocLinks =
         {
             ("README", "README.md", "Project overview, feature set, and quick links."),
-            ("Wizard setup", "docs/wizard-setup.md", "Recommended onboarding flow via Unity Hub Pro."),
-            ("Manual setup", "docs/manual-setup.md", "Direct MCP setup and client config snippets."),
+            ("Agent setup", "docs/setup/agent-setup.md", "Let an AI agent install MCP + Unity packages."),
+            ("Wizard setup", "docs/setup/wizard-setup.md", "Recommended onboarding flow via Unity Hub Pro."),
+            ("Manual setup", "docs/setup/manual-setup.md", "Direct MCP setup and client config snippets."),
             ("Troubleshooting", "docs/troubleshooting.md", "Bridge start failures, zombie listeners, and connectivity recovery."),
-            ("Development setup", "docs/development-setup.md", "Local checkout, contributor and maintainer workflows."),
+            ("Development setup", "docs/setup/development-setup.md", "Local checkout, contributor and maintainer workflows."),
             ("Architecture", "docs/architecture.md", "Repository structure and cross-package boundaries."),
             ("Bridge HTTP API", "docs/api/bridge-http.md", "Bridge endpoints, envelopes, /ping, and remote bind."),
             ("MCP tools API", "docs/api/mcp-tools.md", "Tool catalog, route policy, and gate behavior."),
