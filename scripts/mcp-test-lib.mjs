@@ -98,10 +98,13 @@ export function classify(step, parsed) {
     }
     case "locked": {
       // Batch tools: pass if either they ran OR they reported a known
-      // "can't run because Editor has the project" / env-missing code, OR the
-      // tool isn't registered in the live bridge at all (scan_all/baseline/
-      // regression are batch-only and return tool_not_found via the live route).
-      const pass = !isError || LOCKED_CODES.has(errCode) || errCode === "tool_not_found";
+      // "can't run because Editor has the project" / env-missing code.
+      // After M30 Plan 3, verify-family tools always route to batch even with
+      // a live bridge up — a live `tool_not_found` is no longer an expected
+      // outcome and would indicate a routing regression, so it is NOT
+      // tolerated here. Expected degraded codes: editor_instance_locked,
+      // unity_spawn_refused, project_path_missing, unity_not_discovered.
+      const pass = !isError || LOCKED_CODES.has(errCode);
       return { pass, detail: isError ? `err=${errCode} (route=${route}, expected)` : "ran" };
     }
     case "refused": {

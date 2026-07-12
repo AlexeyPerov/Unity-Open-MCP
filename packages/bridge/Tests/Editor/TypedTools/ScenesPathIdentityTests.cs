@@ -238,6 +238,66 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual("missing_parameter", result.ErrorCode);
         }
 
+        // ----------------------- duplicate names (path disambiguates) ----
+
+        [Test]
+        public void SetActive_DuplicateNames_PathResolvesTheRightOne()
+        {
+            // Two additive scenes with the same stem in different fixture
+            // subfolders. Name-only lookup is ambiguous (returns the first
+            // match); path-first lookup must resolve the exact one requested.
+            var subA = FixtureRoot + "/DupA";
+            var subB = FixtureRoot + "/DupB";
+            EnsureDirectory(subA);
+            EnsureDirectory(subB);
+            var pathA = subA + "/Dup_" + System.Guid.NewGuid().ToString("N").Substring(0, 8) + ".unity";
+            var pathB = subB + "/Dup_" + System.Guid.NewGuid().ToString("N").Substring(0, 8) + ".unity";
+            ScenesTools.Create("{\"path\":\"" + pathA + "\",\"setup\":\"empty\",\"mode\":\"additive\"}");
+            ScenesTools.Create("{\"path\":\"" + pathB + "\",\"setup\":\"empty\",\"mode\":\"additive\"}");
+
+            // Set active by path B — must activate B, not A.
+            var result = ScenesTools.SetActive("{\"path\":\"" + pathB + "\"}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            Assert.AreEqual(pathB, EditorSceneManager.GetActiveScene().path,
+                "path-first lookup must resolve the exact scene, not the first name match");
+            // resolvedBy telemetry confirms path resolution.
+            StringAssert.Contains("\"resolvedBy\":\"path\"", result.Output);
+        }
+
+        // ----------------------- path normalization ----------------------
+
+        [Test]
+        public void SetActive_PathWithBackslashesAndMixedCase_NormalizesAndResolves()
+        {
+            var scenePath = CreateAdditiveScene("PathIdent_Normalize", makeDirty: false);
+            // ResolveOpenedByPath normalizes backslashes → forward slashes and
+            // matches case-insensitively. Build a mangled variant of the path.
+            var mangled = scenePath.Replace('/', '\\').ToUpperInvariant();
+            var result = ScenesTools.SetActive("{\"path\":\"" + mangled + "\"}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("\"activeScene\":\"PathIdent_Normalize\"", result.Output);
+        }
+
+        // ----------------------- resolvedBy telemetry --------------------
+
+        [Test]
+        public void SetActive_ByName_ReportsResolvedByName()
+        {
+            var scenePath = CreateAdditiveScene("PathIdent_ResolvedByName", makeDirty: false);
+            var result = ScenesTools.SetActive("{\"name\":\"PathIdent_ResolvedByName\"}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("\"resolvedBy\":\"name\"", result.Output);
+        }
+
+        [Test]
+        public void Unload_ByPath_ReportsResolvedByPath()
+        {
+            var scenePath = CreateAdditiveScene("PathIdent_UnloadResolvedBy", makeDirty: false);
+            var result = ScenesTools.Unload("{\"path\":\"" + scenePath + "\"}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains("\"resolvedBy\":\"path\"", result.Output);
+        }
+
         // ----------------------- helpers ---------------------------------
 
         // Create an additive scene at a unique fixture path, mark it dirty

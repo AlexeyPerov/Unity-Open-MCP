@@ -201,7 +201,46 @@ namespace UnityOpenMcpBridge
             return AppendJsonNumber(sb, value);
         }
 
-        // --- Gate dispatch response envelopes -------------------------------------
+        // --- Shared pagination block ----------------------------------------------
+        // Typed tools that page a result window (component_get today; search_assets
+        // and scene_get_data when they gain bridge-side paging) emit this block so
+        // the {page_size, cursor, next_cursor, truncated} shape stays identical
+        // across tools. The cursor is an opaque token of the form
+        // "<toolPrefix>:<offset>"; callers pass the tool prefix (e.g.
+        // "component_get") and the current offset, and this helper builds the
+        // echoed cursor + next_cursor (null when no more pages). `remaining` is
+        // the count of entries after the current page — emitted as the block's
+        // `truncated` so agents know how many more pages remain.
+        internal static StringBuilder AppendPaginationBlock(
+            StringBuilder sb, string toolPrefix, int offset, int pageSize, int remaining)
+        {
+            sb.Append(",\"pagination\":{");
+            sb.Append("\"page_size\":").Append(pageSize);
+            sb.Append(",\"cursor\":");
+            if (offset > 0)
+            {
+                sb.Append('"').Append(toolPrefix).Append(':')
+                  .Append(offset.ToString(CultureInfo.InvariantCulture)).Append('"');
+            }
+            else
+            {
+                sb.Append("null");
+            }
+            if (remaining > 0)
+            {
+                sb.Append(",\"next_cursor\":\"").Append(toolPrefix).Append(':')
+                  .Append((offset + pageSize).ToString(CultureInfo.InvariantCulture)).Append('"');
+            }
+            else
+            {
+                sb.Append(",\"next_cursor\":null");
+            }
+            sb.Append(",\"truncated\":").Append(remaining);
+            sb.Append('}');
+            return sb;
+        }
+
+
         // Every mutating dispatch returns one of these shapes: the success/failure
         // mutation result wrapped with the gate (mode/checkpoint/validation/delta)
         // and lifecycle telemetry, or one of the short-circuit error envelopes

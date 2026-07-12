@@ -193,10 +193,20 @@ namespace UnityOpenMcpBridge
                 return new StripStage(label, StripStageState.Unknown, "No lock held (listener stopped).");
             }
 
-            // Lock acquired. A non-idle state is worth surfacing as a warning
+            // Lock acquired. If the lock JSON is present but unparseable, the
+            // MCP server cannot read the heartbeat — surface a warning rather
+            // than a green Ok so the operator does not trust a possibly-stale
+            // lock. Otherwise a non-idle state is worth surfacing as a warning
             // because the MCP server's classification (idle/compiling/reloading)
             // is derived from this field — it is not an error, just not "ready".
-            var state = inputs.LockSnapshotValid ? (inputs.LockState ?? "") : "";
+            if (!inputs.LockSnapshotValid)
+            {
+                return new StripStage(
+                    label,
+                    StripStageState.Warning,
+                    "Lock acquired but its heartbeat payload could not be read — the MCP server may see stale discovery data.");
+            }
+            var state = inputs.LockState ?? "";
             if (IsTransientBusyState(state))
             {
                 return new StripStage(

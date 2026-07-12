@@ -95,6 +95,42 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public void Discovery_LockAcquired_EnteringPlaymode_IsWarning()
+        {
+            // The remaining two transient busy states must also surface as a
+            // warning — IsTransientBusyState recognizes four, and all four
+            // must be pinned so dropping one from the switch is caught.
+            var m = ConnectionStripBuilder.Build(Inputs(
+                listenerRunning: true, lockAcquired: true,
+                lockState: BridgeInstanceLock.StateEnteringPlaymode, lockSnapshotValid: true));
+            Assert.AreEqual(StripStageState.Warning, m.Discovery.State);
+            Assert.That(m.Discovery.Reason, Does.Contain("play").IgnoreCase);
+        }
+
+        [Test]
+        public void Discovery_LockAcquired_ExitingPlaymode_IsWarning()
+        {
+            var m = ConnectionStripBuilder.Build(Inputs(
+                listenerRunning: true, lockAcquired: true,
+                lockState: BridgeInstanceLock.StateExitingPlaymode, lockSnapshotValid: true));
+            Assert.AreEqual(StripStageState.Warning, m.Discovery.State);
+        }
+
+        [Test]
+        public void Discovery_LockAcquired_ButSnapshotInvalid_IsWarning()
+        {
+            // Lock acquired but the heartbeat JSON could not be parsed — the
+            // MCP server may see stale discovery data. Must NOT read as Ok
+            // (green), which would falsely reassure the operator.
+            var m = ConnectionStripBuilder.Build(Inputs(
+                listenerRunning: true, lockAcquired: true,
+                lockState: null, lockSnapshotValid: false));
+            Assert.AreEqual(StripStageState.Warning, m.Discovery.State,
+                "An acquired-but-unreadable lock must warn, not report Ok.");
+            Assert.That(m.Discovery.Reason, Does.Contain("heartbeat").IgnoreCase);
+        }
+
+        [Test]
         public void Discovery_ListenerUp_LockNotAcquired_IsWarning()
         {
             // The listener is running but no lock was published — the MCP

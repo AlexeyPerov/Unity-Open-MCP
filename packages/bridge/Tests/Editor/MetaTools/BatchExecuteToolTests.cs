@@ -205,7 +205,7 @@ namespace UnityOpenMcpBridge.Tests
 
         private void DestroyAllPrefixed()
         {
-            var all = Object.FindObjectsOfType<GameObject>();
+            var all = Object.FindObjectsByType<GameObject>(FindObjectsInactive.Exclude);
             foreach (var go in all)
             {
                 if (go != null && go.name != null && go.name.StartsWith(CleanupPrefix))

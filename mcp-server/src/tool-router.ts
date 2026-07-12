@@ -59,7 +59,7 @@ const defaultHubBackend: HubControlBackend = {
   getInstallPath: () => getInstallPath(),
   setInstallPath: (path) => setInstallPath(path),
 };
-import { BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES } from "./batch-spawn.js";
+import { BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS } from "./batch-spawn.js";
 import type { ToolSessionState } from "./tool-session-state.js";
 import {
   readProfileAndDetail,
@@ -470,38 +470,29 @@ export class ToolRouter implements Router {
     // running it against a live Editor that already compiled successfully
     // would trivially report "compile_passed" and never surface the broken
     // state the tool exists to diagnose.
-    if (toolName === "unity_open_mcp_compile_check") {
-      console.error(
-        `[unity-open-mcp] Route: ${toolName} -> batch (compile check always spawns fresh)`,
-      );
-      const result = await this.batch.route(toolName, args);
-      return injectRouteMeta(result, {
-        route: "batch",
-        fallbackReason: "compile_check_always_batch",
-      });
-    }
-
+    //
     // Verify-family tools (scan_all / baseline_create / regression_check) are
     // batch-only: they require the headless verify package and are NOT
     // registered on the live bridge. Routing them live (the previous default
-    // when the bridge was up) yielded a bare `tool_not_found` — confusing for
-    // a known batch-only tool. Mirror the compile_check precedent and always
-    // route to batch, even when the live bridge is available. An open Editor
+    // when the bridge was up) yielded a bare `tool_not_found`. An open Editor
     // holding the project lock surfaces as `editor_instance_locked` from the
     // batch spawn (the expected degraded outcome — agents should read the lock
     // code, not chase a live registration miss).
     //
     // validate_edit / scan_paths are intentionally excluded: those ARE
     // registered on the live bridge and stay live-first (routeVerifyResult
-    // below handles their output-profile folding).
-    if (VERIFY_BATCH_TOOL_NAMES.has(toolName)) {
+    // below handles their output-profile folding). The always-batch policy is
+    // declared once in ALWAYS_BATCH_TOOLS (tool name → reason); do not add a
+    // second pinned branch for a new always-batch tool — extend the map.
+    const alwaysBatchReason = ALWAYS_BATCH_TOOLS.get(toolName);
+    if (alwaysBatchReason !== undefined) {
       console.error(
-        `[unity-open-mcp] Route: ${toolName} -> batch (verify scans always run headless)`,
+        `[unity-open-mcp] Route: ${toolName} -> batch (always-batch: ${alwaysBatchReason})`,
       );
       const result = await this.batch.route(toolName, args);
       return injectRouteMeta(result, {
         route: "batch",
-        fallbackReason: "verify_always_batch",
+        fallbackReason: alwaysBatchReason,
       });
     }
 

@@ -199,32 +199,11 @@ namespace UnityOpenMcpBridge.TestRunner
             return value.Substring(0, max) + $"…[{value.Length - max} more chars]";
         }
 
-        internal static string EscapeString(string s)
-        {
-            if (s == null) return "null";
-            var sb = new StringBuilder(s.Length + 8);
-            sb.Append('"');
-            for (int i = 0; i < s.Length; i++)
-            {
-                var c = s[i];
-                switch (c)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (c < 32)
-                            sb.Append("\\u").Append(((int)c).ToString("X4"));
-                        else
-                            sb.Append(c);
-                        break;
-                }
-            }
-            sb.Append('"');
-            return sb.ToString();
-        }
+        // Delegates to the shared BridgeJson escape (null => bare `null` keyword,
+        // quoted). Kept as a thin wrapper so existing TestRunnerState callers
+        // resolve without churn; new code should call BridgeJson.EscapeString
+        // directly. See packages/bridge/AGENTS.md §Transport.
+        internal static string EscapeString(string s) => BridgeJson.EscapeString(s);
     }
 
     internal class TestCallbacks : ICallbacks

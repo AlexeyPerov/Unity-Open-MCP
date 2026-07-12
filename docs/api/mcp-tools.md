@@ -245,7 +245,7 @@ A tool can carry a secondary concern in `lifecycleNote` (e.g. `build_start` is `
 
 The scene mutators `scene_set_active`, `scene_unload`, and `scene_save`, plus the read `scene_get_data`, identify an opened scene by **asset path first, display name second**. Agents should prefer `path` (e.g. `Assets/Scenes/Foo.unity`) — it is the authoritative identity for an asset-centric MCP and is unaffected by Unity's transient in-memory scene names.
 
-- `scene_set_active` / `scene_unload` — provide `path` to resolve by asset path, or `name` to resolve by display name. When both are supplied, **`path` wins** and `name` is ignored. If neither resolves an opened scene, the call returns `scene_not_found` naming whichever key(s) you supplied.
+- `scene_set_active` / `scene_unload` — provide `path` to resolve by asset path, or `name` to resolve by display name. When both are supplied, **`path` wins** and `name` is ignored. If neither resolves an opened scene, the call returns `scene_not_found` naming whichever key(s) you supplied. On success the response carries `resolvedBy` (`"path"` or `"name"`) so the agent can confirm which identity key resolved the target — useful for diagnosing duplicate-name ambiguity.
 - `scene_save` — `path` is dual-purpose: when it matches an opened scene's asset path it selects that scene and saves it back to its own path (path-as-identity); when it does not match an opened scene it is a save-as destination for the active (or `name`-selected) scene and must end with `.unity`. `name` always selects an opened scene by display name when supplied.
 - `scene_get_data` — `path` resolves by asset path (takes precedence); `name` is the fallback; omit both to read the active scene.
 
@@ -535,10 +535,13 @@ compact result shape.
 **`component_get` response shape.** Default `profile: compact` returns top-level
 serialized `fields[]` (public `properties[]` omitted unless
 `include_properties: true`). Each entry carries `path`, `type`, and `value`.
-When capped or paged, `truncated` reports the remaining tail and a `pagination`
-block appears when `page_size` is set (`next_cursor` form:
-`component_get:<offset>`). Use `property_path` to read one subtree without
-re-fetching the whole component.
+Two distinct truncation signals are reported so the agent can pick the right
+remedy: the top-level `truncated` count is fields hidden by the `max_fields` cap
+(raise `max_fields` or switch to `profile: full` to see them; `truncated_by`
+names the limit), and when `page_size` is set the `pagination` block's
+`truncated` count is fields after the current page window (page on via
+`next_cursor`, form `component_get:<offset>`). Use `property_path` to read one
+subtree without re-fetching the whole component.
 
 ## Error contract
 

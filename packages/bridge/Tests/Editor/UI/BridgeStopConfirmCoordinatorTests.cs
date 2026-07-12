@@ -82,19 +82,63 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public void Tick_AutoExpires_AfterWindowElapses()
         {
-            // The coordinator's window is 5s. We can't fast-forward editor
-            // time in a unit test, but we can force the expiry by arming with
-            // the public API and then waiting for the deadline to pass via
-            // repeated Tick() calls over a real sleep. That is flaky on a
-            // loaded CI box, so instead we assert the contract indirectly:
-            // the public Deadline is in the future right after Arm.
-            BridgeStopConfirmCoordinator.Arm();
-            Assert.Greater(BridgeStopConfirmCoordinator.Deadline, 0.0);
-            // And RemainingSeconds is bounded by the configured window.
-            Assert.LessOrEqual(
-                BridgeStopConfirmCoordinator.RemainingSeconds,
-                BridgeStopConfirmCoordinator.ConfirmWindowSeconds + 0.001,
-                "Remaining seconds must not exceed the configured window.");
+            // Fast-forward the coordinator's time source past the deadline so
+            // the expiry branch in Tick() actually runs. Previously this test
+            // only asserted Deadline > 0, which passed even if the expiry line
+            // were deleted — now it pins the real behavior.
+            var now = 0.0;
+            BridgeStopConfirmCoordinator.SetTimeSource(() => now);
+            try
+            {
+                BridgeStopConfirmCoordinator.Arm();
+                Assert.IsTrue(BridgeStopConfirmCoordinator.IsArmed,
+                    "Arm must set the armed flag.");
+
+                // Just before the deadline: still armed.
+                now = BridgeStopConfirmCoordinator.ConfirmWindowSeconds - 0.001;
+                BridgeStopConfirmCoordinator.Tick();
+                Assert.IsTrue(BridgeStopConfirmCoordinator.IsArmed,
+                    "Tick before the deadline must not expire the confirm.");
+
+                // Past the deadline: expired.
+                now = BridgeStopConfirmCoordinator.ConfirmWindowSeconds + 0.001;
+                BridgeStopConfirmCoordinator.Tick();
+                Assert.IsFalse(BridgeStopConfirmCoordinator.IsArmed,
+                    "Tick past the deadline must auto-expire the armed confirm.");
+            }
+            finally
+            {
+                BridgeStopConfirmCoordinator.SetTimeSource(null);
+            }
+        }
+
+        [Test]
+        public void RequestStop_AfterExpiry_ArmsAgain_ThenConfirms()
+        {
+            // After the transient auto-expires, the next RequestStop must arm
+            // again (not silently perform a one-click stop) — the whole point
+            // of the confirm policy.
+            var now = 0.0;
+            var performed = false;
+            BridgeStopConfirmCoordinator.SetTimeSource(() => now);
+            try
+            {
+                // Arm, let it expire.
+                BridgeStopConfirmCoordinator.RequestStop(() => performed = true);
+                now = BridgeStopConfirmCoordinator.ConfirmWindowSeconds + 1.0;
+                BridgeStopConfirmCoordinator.Tick();
+                Assert.IsFalse(BridgeStopConfirmCoordinator.IsArmed);
+
+                // Next RequestStop must re-arm, NOT stop.
+                var stopped = BridgeStopConfirmCoordinator.RequestStop(() => performed = true);
+                Assert.IsFalse(stopped, "After expiry the next click must arm, not stop.");
+                Assert.IsFalse(performed, "Stop must not run on the re-arming click.");
+                Assert.IsTrue(BridgeStopConfirmCoordinator.IsArmed);
+            }
+            finally
+            {
+                BridgeStopConfirmCoordinator.SetTimeSource(null);
+            }
         }
 
         [Test]

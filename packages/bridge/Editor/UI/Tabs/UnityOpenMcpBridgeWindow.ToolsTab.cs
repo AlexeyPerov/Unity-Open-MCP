@@ -63,17 +63,33 @@ namespace UnityOpenMcpBridge
         // Per-group token breakdown. Collapsed by default (the headline active
         // total lives in DrawToolFilters); expanding shows one row per group
         // with its active vs total token cost so the operator can see which
-        // groups dominate the context budget.
+        // groups dominate the context budget. The foldout state is checked
+        // BEFORE allocating the summary so a collapsed foldout does not build
+        // the per-group dictionary every frame. The group count shown in the
+        // foldout title is computed cheaply from the catalog.
         private void DrawToolGroupTokenSummary(List<BridgeToolCatalogItem> items)
         {
-            var summaries = BridgeToolCatalog.GroupTokenSummaries(items);
-            if (summaries == null || summaries.Count == 0) return;
+            // Cheap count of distinct non-null groups for the foldout title.
+            // Avoids a full GroupTokenSummaries allocation when collapsed.
+            var groupCount = 0;
+            if (items != null)
+            {
+                var seen = new HashSet<string>();
+                foreach (var it in items)
+                {
+                    var g = it?.Group ?? "(always visible)";
+                    if (seen.Add(g)) groupCount++;
+                }
+            }
 
             _toolGroupTokensFoldout = EditorGUILayout.Foldout(
                 _toolGroupTokensFoldout,
-                $"Per-group token estimate ({summaries.Count} groups)",
+                $"Per-group token estimate ({groupCount} groups)",
                 true);
             if (!_toolGroupTokensFoldout) return;
+
+            var summaries = BridgeToolCatalog.GroupTokenSummaries(items);
+            if (summaries == null || summaries.Count == 0) return;
 
             _toolGroupTokensScroll = EditorGUILayout.BeginScrollView(
                 _toolGroupTokensScroll, GUILayout.MaxHeight(160));
@@ -111,6 +127,10 @@ namespace UnityOpenMcpBridge
                                 "Disabled tools return a `tool_disabled` error to agents until re-enabled.",
                                 "Disable", "Cancel"))
                         {
+                            // Balance the disabled group + horizontal opened above
+                            // before skipping this row, otherwise the remainder of
+                            // the foldout renders greyed-out for this frame.
+                            EditorGUI.EndDisabledGroup();
                             EditorGUILayout.EndHorizontal();
                             continue;
                         }

@@ -30,7 +30,8 @@ namespace UnityOpenMcpBridge
         private const string TooltipDiscovery =
             "Whether this Unity instance has published its discovery/heartbeat " +
             "file so the MCP server can auto-find it. Green = lock held, " +
-            "yellow = held but busy (compiling/reloading), red/gray = not published.";
+            "yellow = held but busy (compiling/reloading) or not yet published " +
+            "while the listener is up, gray = no lock held (listener stopped).";
         private const string TooltipClient =
             "Whether at least one known AI client config points at this project. " +
             "Green = detected, yellow = none detected, gray = not checked " +
@@ -38,7 +39,9 @@ namespace UnityOpenMcpBridge
 
         /// <summary>
         /// Draw the three-stage connection strip. Returns the total height
-        /// consumed (useful for layout assertions / future UI Toolkit port).
+        /// consumed (the dot row height + each rendered reason line, accounting
+        /// for word-wrap on narrow windows). Useful for layout assertions / a
+        /// future UI Toolkit port.
         /// </summary>
         public static float Draw(ConnectionStripModel model)
         {
@@ -46,13 +49,15 @@ namespace UnityOpenMcpBridge
 
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
             {
-                DrawStage(model.Bridge, TooltipBridge, true);
+                DrawStage(model.Bridge, TooltipBridge);
                 GUILayout.Space(StageGap);
-                DrawStage(model.Discovery, TooltipDiscovery, true);
+                DrawStage(model.Discovery, TooltipDiscovery);
                 GUILayout.Space(StageGap);
-                DrawStage(model.Client, TooltipClient, false);
+                DrawStage(model.Client, TooltipClient);
                 GUILayout.FlexibleSpace();
             }
+            // The dot row consumes at least the bold-label line height.
+            height += EditorGUIUtility.singleLineHeight;
             EditorGUILayout.EndHorizontal();
 
             // Reason lines (one per degraded stage) below the dot row. Kept
@@ -64,7 +69,7 @@ namespace UnityOpenMcpBridge
             return height;
         }
 
-        private static void DrawStage(StripStage stage, string tooltip, bool drawReasonInline)
+        private static void DrawStage(StripStage stage, string tooltip)
         {
             var color = ColorForState(stage.State);
             var rect = EditorGUILayout.GetControlRect(false, DotSize, GUILayout.Width(DotSize));
@@ -74,11 +79,11 @@ namespace UnityOpenMcpBridge
 
             GUILayout.Space(DotLabelGap);
 
-            var prev = GUI.color;
-            // Keep the label readable; the color signal is on the dot.
+            // Keep the label readable; the color signal is on the dot (the
+            // label is drawn with the default GUI color, so no tinting is
+            // needed here).
             var label = new GUIContent(stage.Label, tooltip);
             GUILayout.Label(label, EditorStyles.boldLabel);
-            GUI.color = prev;
         }
 
         private static float DrawReasonIfAny(StripStage stage)
@@ -86,9 +91,12 @@ namespace UnityOpenMcpBridge
             if (string.IsNullOrEmpty(stage.Reason)) return 0f;
             var prev = GUI.color;
             GUI.color = ColorForState(stage.State);
-            GUILayout.Label(stage.Reason, EditorStyles.wordWrappedMiniLabel);
+            // Use wordWrappedMiniLabel and measure the actual laid-out rect so
+            // the returned height reflects wrapped lines on narrow windows.
+            var content = new GUIContent(stage.Reason);
+            var rect = GUILayoutUtility.GetRect(content, EditorStyles.wordWrappedMiniLabel);
             GUI.color = prev;
-            return EditorGUIUtility.singleLineHeight;
+            return rect.height;
         }
 
         private static Color ColorForState(StripStageState state)

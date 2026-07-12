@@ -283,7 +283,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("unload_failed", e.Message);
             }
 
-            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("unloaded", subject));
+            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("unloaded", subject, resolvedBy));
         }
 
         public static ToolDispatchResult SetActive(string body)
@@ -305,7 +305,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
             // Idempotent: a no-op when the scene is already active.
             if (EditorSceneManager.GetActiveScene() == scene)
-                return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("set_active_noop", subject));
+                return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("set_active_noop", subject, resolvedBy));
 
             bool ok;
             try
@@ -320,7 +320,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("set_active_failed",
                     $"EditorSceneManager.SetActiveScene returned false for '{subject}'.");
 
-            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("set_active", subject));
+            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("set_active", subject, resolvedBy));
         }
 
         // --------------------------- reads ---------------------------------
@@ -928,17 +928,14 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // After scene_create saves the asset, the in-memory scene name can lag
-        // the filename stem (staying "Untitled" or the pre-save name). Re-open
-        // the saved asset so the opened-scene stack reflects the saved name +
-        // path; subsequent name-only lookups then resolve reliably. We avoid
-        // re-opening when the scene is already correctly named+pathed (common
-        // case) and when the mode is Single (the scene is already the only
-        // opened scene and SaveScene has named it). Returns the (possibly
-        // refreshed) scene handle.
-        //
-        // Note: Scene structs are value-type snapshots captured at resolution
-        // time; after SaveScene the captured `scene` may report a stale name,
-        // so we re-resolve from the opened stack by path.
+        // the filename stem (staying "Untitled" or the pre-save name). Scene is
+        // a value-type snapshot captured at resolution time, so the captured
+        // `scene` may report a stale name after SaveScene. We re-resolve from
+        // the opened-scene stack by path and return the refreshed handle so
+        // subsequent name-only lookups resolve reliably. The resolve is O(opened
+        // scenes) and cheap, so no fast-path elision for Single mode or the
+        // already-named common case — both were considered and dropped as
+        // premature complexity.
         private static Scene SyncCreatedSceneName(Scene scene, string assetPath)
         {
             var refreshed = ResolveOpenedByPath(assetPath);
@@ -1004,13 +1001,22 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Envelope listing all opened scenes — returned by open/unload/set_active
         // and list_opened so the agent can confirm post-op state in one call.
-        private static string BuildOpenedScenesEnvelope(string action, string subject)
+        private static string BuildOpenedScenesEnvelope(string action, string subject,
+            SceneIdentity? resolvedBy = null)
         {
             var sb = new StringBuilder(256);
             sb.Append("{\"status\":\"ok\",\"action\":\"").Append(TypedTargets.Esc(action)).Append("\"");
             if (subject != null)
             {
                 sb.Append(",\"subject\":\"").Append(TypedTargets.Esc(subject)).Append("\"");
+            }
+            // Which identity key resolved the target scene ("path" or "name").
+            // Only the identity-mutators (set_active / unload) pass this; it
+            // helps agents debug duplicate-name ambiguity without a separate
+            // lookup. Omitted (null) for open/list_opened where it is meaningless.
+            if (resolvedBy.HasValue && resolvedBy.Value != SceneIdentity.None)
+            {
+                sb.Append(",\"resolvedBy\":\"").Append(SceneIdentityToString(resolvedBy.Value)).Append('"');
             }
             sb.Append(",\"activeScene\":\"")
               .Append(TypedTargets.Esc(EditorSceneManager.GetActiveScene().name));
@@ -1023,6 +1029,17 @@ namespace UnityOpenMcpBridge.TypedTools
             }
             sb.Append("],\"openedSceneCount\":").Append(opened.Count).Append('}');
             return sb.ToString();
+        }
+
+        private static string SceneIdentityToString(SceneIdentity id)
+        {
+            switch (id)
+            {
+                case SceneIdentity.ByPath: return "path";
+                case SceneIdentity.ByName: return "name";
+                case SceneIdentity.Active: return "active";
+                default: return "none";
+            }
         }
     }
 }

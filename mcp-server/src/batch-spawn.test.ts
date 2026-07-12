@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, BatchClassificationError, encodeSpaces } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, BatchClassificationError, encodeSpaces, buildUnityBatchArgs } from "./batch-spawn.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 function parseBody(result: CallToolResult): Record<string, unknown> {
@@ -23,6 +23,41 @@ test("BATCH_TOOL_NAMES includes find_members and limited meta-tools", () => {
   assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_scan_all"));
   assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_baseline_create"));
   assert.ok(BATCH_TOOL_NAMES.has("unity_open_mcp_regression_check"));
+});
+
+// Guard the always-batch routing invariants. The router's single pinned branch
+// keys off ALWAYS_BATCH_TOOLS; these tests prevent silent drift between the
+// always-batch policy and the underlying batch-capable set.
+test("VERIFY_BATCH_TOOL_NAMES is a subset of BATCH_TOOL_NAMES", () => {
+  // Every verify-family tool must also be batch-capable, otherwise the
+  // always-batch branch routes to a tool the batch spawner cannot run.
+  for (const name of VERIFY_BATCH_TOOL_NAMES) {
+    assert.ok(
+      BATCH_TOOL_NAMES.has(name),
+      `verify tool ${name} is always-batch but missing from BATCH_TOOL_NAMES`,
+    );
+  }
+});
+
+test("always-batch set is disjoint: compile_check not in verify set", () => {
+  // compile_check has its own reason; it must not also appear in the verify
+  // set, or the verify-set entry would shadow the compile_check reason.
+  assert.ok(!VERIFY_BATCH_TOOL_NAMES.has("unity_open_mcp_compile_check"));
+  // And the union map contains compile_check exactly once with its own reason.
+  assert.equal(
+    ALWAYS_BATCH_TOOLS.get("unity_open_mcp_compile_check"),
+    "compile_check_always_batch",
+  );
+});
+
+test("ALWAYS_BATCH_TOOLS covers compile_check + all verify tools with distinct reasons", () => {
+  assert.equal(
+    ALWAYS_BATCH_TOOLS.get("unity_open_mcp_compile_check"),
+    "compile_check_always_batch",
+  );
+  for (const name of VERIFY_BATCH_TOOL_NAMES) {
+    assert.equal(ALWAYS_BATCH_TOOLS.get(name), "verify_always_batch");
+  }
 });
 
 test("isBatchTool returns true for all batch-capable tools", () => {
@@ -467,6 +502,81 @@ test("compile_check with a live Editor open surfaces editor_instance_locked, not
       assert.ok(
         Array.isArray(body.agentNextSteps) && body.agentNextSteps.length > 0,
         "editor_instance_locked should carry a non-empty agentNextSteps array",
+      );
+      assert.ok(
+        (body.agentNextSteps as string[]).some((s) => s.includes("read_compile_errors")),
+        "agentNextSteps should mention read_compile_errors",
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  } finally {
+    if (savedPath === undefined) delete process.env.UNITY_PATH;
+    else process.env.UNITY_PATH = savedPath;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// compile_check spawn argv — omit -quit (async finalize path)
+// ---------------------------------------------------------------------------
+
+test("buildUnityBatchArgs omits -quit for compile_check", () => {
+  const args = buildUnityBatchArgs(
+    "compile_check",
+    "/proj",
+    "UnityOpenMcpBridge.Batch.BridgeBatchEntry.Run",
+    ["compile_check"],
+  );
+  assert.ok(!args.includes("-quit"), "compile_check must not pass -quit");
+  assert.deepEqual(args.slice(0, 2), ["-batchmode", "-projectPath"]);
+});
+
+test("buildUnityBatchArgs includes -quit for synchronous batch ops", () => {
+  const args = buildUnityBatchArgs(
+    "find_members",
+    "/proj",
+    "UnityOpenMcpBridge.Batch.BridgeBatchEntry.Run",
+    ["find_members", "--query", "Transform"],
+  );
+  assert.deepEqual(args.slice(0, 3), ["-batchmode", "-quit", "-projectPath"]);
+});
+
+test("compile_check with exit 127 surfaces unity_spawn_refused, not batch_spawn_failed", async () => {
+  const savedPath = process.env.UNITY_PATH;
+  delete process.env.UNITY_PATH;
+  try {
+    const tmp = mkdtempSync(join(tmpdir(), "batch-spawn-127-"));
+    try {
+      const installDir = join(tmp, "6000.0.0f1");
+      const exeRel = process.platform === "win32"
+        ? ["Editor", "Unity.exe"]
+        : process.platform === "darwin"
+          ? ["Unity.app", "Contents", "MacOS", "Unity"]
+          : ["Editor", "Unity"];
+      const exe = join(installDir, ...exeRel);
+      mkdirSync(dirname(exe), { recursive: true });
+      if (process.platform === "win32") {
+        // On win32 we cannot write a real shell `exit 127` stub; a non-
+        // executable "fake" blob makes the spawn fail with ENOENT/EACCES,
+        // which classifies to the same `unity_spawn_refused` code via the
+        // child.on("error") path (not a genuine exit-127 process exit). The
+        // assertion below holds on both branches, but the win32 path is
+        // exercised through a different failure mode than the test name
+        // implies.
+        writeFileSync(exe, "fake");
+      } else {
+        writeFileSync(exe, "#!/bin/sh\nexit 127\n");
+        chmodSync(exe, 0o755);
+      }
+
+      const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
+      const result = await batch.route("unity_open_mcp_compile_check", {});
+      const body = parseBody(result);
+      const error = body.error as Record<string, string>;
+      assert.equal(error.code, "unity_spawn_refused");
+      assert.ok(
+        Array.isArray(body.agentNextSteps) && body.agentNextSteps.length > 0,
+        "unity_spawn_refused should carry agentNextSteps",
       );
       assert.ok(
         (body.agentNextSteps as string[]).some((s) => s.includes("read_compile_errors")),

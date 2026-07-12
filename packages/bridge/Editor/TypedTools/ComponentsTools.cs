@@ -213,31 +213,23 @@ namespace UnityOpenMcpBridge.TypedTools
 
             int pageCount = pageEnd - pageStart;
             int remainingAfterPage = entries.Count - pageEnd;
-            int truncated = truncatedDuringCollect + remainingAfterPage;
 
+            // Two distinct truncation signals, kept separate so an agent can
+            // tell which limit it hit:
+            //   - top-level `truncated`  = fields hidden by the max_fields cap
+            //     (raise `max_fields` or switch to `full` profile to see them);
+            //   - pagination.truncated   = fields after the current page window
+            //     (page on via `next_cursor`).
+            // Previously these were summed into one number, hiding the
+            // "raise max_fields" hint and conflating two different remedies.
             sb.Append(",\"count\":").Append(pageCount);
-            sb.Append(",\"truncated\":").Append(truncated);
+            sb.Append(",\"truncated\":").Append(truncatedDuringCollect);
+            if (truncatedDuringCollect > 0)
+                sb.Append(",\"truncated_by\":\"max_fields\"");
 
             if (pageSize.HasValue)
             {
-                sb.Append(",\"pagination\":{");
-                sb.Append("\"page_size\":").Append(pageSize.Value);
-                sb.Append(",\"cursor\":");
-                if (offset > 0)
-                    sb.Append('"').Append(TypedTargets.Esc("component_get:" + offset.ToString(CultureInfo.InvariantCulture))).Append('"');
-                else
-                    sb.Append("null");
-                if (remainingAfterPage > 0)
-                {
-                    sb.Append(",\"next_cursor\":\"component_get:");
-                    sb.Append(pageEnd.ToString(CultureInfo.InvariantCulture)).Append('"');
-                }
-                else
-                {
-                    sb.Append(",\"next_cursor\":null");
-                }
-                sb.Append(",\"truncated\":").Append(remainingAfterPage);
-                sb.Append('}');
+                BridgeJson.AppendPaginationBlock(sb, "component_get", offset, pageSize.Value, remainingAfterPage);
             }
 
             sb.Append('}');

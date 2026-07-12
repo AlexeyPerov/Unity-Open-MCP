@@ -30,6 +30,15 @@ namespace UnityOpenMcpBridge
     {
         private const string MenuPath = "Tools/Unity Open MCP Bridge";
         private const string SelectedTabPref = "UOMCB_SelectedTab";
+        // M29 follow-up — prefs schema version. The selected-tab index was
+        // originally written as a raw enum int, but the enum has been reshaped
+        // (Batch and Info removed in M29 Plan 3), so an in-range legacy index
+        // no longer names the same tab. A range check cannot tell "old 5 =
+        // Settings" apart from "new 5 = Extensions", so migration is gated on
+        // this independent version key instead. Bump it whenever the enum
+        // changes shape and update MigrateSelectedTab below.
+        private const int SelectedTabSchemaVersion_Current = 2;
+        private const string SelectedTabSchemaVersionPref = "UOMCB_SelectedTab_SchemaVersion";
         // M29 Plan 4 — remember the operator's explicit Configure-AI-client
         // foldout toggle across window reopens. Absent = no manual choice yet,
         // so the panel auto-expands when the selected client is unconfigured.
@@ -90,7 +99,6 @@ namespace UnityOpenMcpBridge
         [NonSerialized] private bool _checkpointClearPending;
 
         // Activity tab state (M4.5-10). No page scroll — the shell owns it.
-        [NonSerialized] private bool _activityVerboseFoldout = false;
         [NonSerialized] private bool _activityFilterToolRequests = true;
         [NonSerialized] private bool _activityFilterDisabled = true;
         [NonSerialized] private bool _activityFilterErrors = true;
@@ -136,9 +144,13 @@ namespace UnityOpenMcpBridge
         // M29 Plan 3 — prefs migration. Before this plan the enum had 8 values
         // (Status, Tools, Gate, Activity, Batch, Settings, Extensions, Info).
         // Batch and Info were removed; the surviving indices shifted down. An
-        // old saved index therefore no longer names the same tab. We remap the
-        // legacy indices once and persist the migrated value so future loads
-        // skip the map. Anything out of range falls back to Status.
+        // old saved index therefore no longer names the same tab — and crucially
+        // old indices 4 (Batch) and 5 (Settings) collide with valid NEW indices
+        // (Settings, Extensions), so a range check cannot detect them. Migration
+        // is therefore gated on an independent schema-version key (see
+        // SelectedTabSchemaVersionPref): once the saved schema matches the
+        // current one, the index is trusted verbatim; otherwise it is remapped
+        // and the new schema version is persisted so the map runs exactly once.
         //
         // Legacy → new map:
         //   0 Status      → 0 Status
@@ -168,16 +180,21 @@ namespace UnityOpenMcpBridge
         private BridgeWindowTab LoadSelectedTabWithMigration()
         {
             var raw = EditorPrefs.GetInt(SelectedTabPref, (int)BridgeWindowTab.Status);
-            // Any value outside the current enum range is legacy or corrupt —
-            // remap it and persist so the migration runs exactly once.
+            var savedSchema = EditorPrefs.GetInt(SelectedTabSchemaVersionPref, 1);
+            // Trust the saved index only when its schema matches the current
+            // enum layout AND it is in range. Any mismatch (older schema,
+            // corrupt/out-of-range value) routes through the legacy map and
+            // re-stamps the schema version so the map runs exactly once.
             var max = Enum.GetValues(typeof(BridgeWindowTab)).Length - 1;
-            if (raw < 0 || raw > max)
+            if (savedSchema == SelectedTabSchemaVersion_Current
+                && raw >= 0 && raw <= max)
             {
-                var migrated = MigrateSelectedTab(raw);
-                EditorPrefs.SetInt(SelectedTabPref, (int)migrated);
-                return migrated;
+                return (BridgeWindowTab)raw;
             }
-            return (BridgeWindowTab)raw;
+            var migrated = MigrateSelectedTab(raw);
+            EditorPrefs.SetInt(SelectedTabPref, (int)migrated);
+            EditorPrefs.SetInt(SelectedTabSchemaVersionPref, SelectedTabSchemaVersion_Current);
+            return migrated;
         }
 
         private void OnEnable()
@@ -275,11 +292,17 @@ namespace UnityOpenMcpBridge
             DrawContent();
         }
 
+        // Cached once: the enum shape changes only across a recompile, so the
+        // array is valid for the window's lifetime. Avoids a per-frame
+        // Enum.GetValues allocation inside DrawToolbar.
+        private static readonly BridgeWindowTab[] _toolbarTabs =
+            (BridgeWindowTab[])Enum.GetValues(typeof(BridgeWindowTab));
+
         private void DrawToolbar()
         {
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
 
-            var tabs = (BridgeWindowTab[])Enum.GetValues(typeof(BridgeWindowTab));
+            var tabs = _toolbarTabs;
             foreach (var tab in tabs)
             {
                 var isCurrent = tab == _currentTab;

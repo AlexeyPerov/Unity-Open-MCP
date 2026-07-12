@@ -64,6 +64,7 @@ test("makeErrorResult: preserves arbitrary code strings used across routers", ()
     "project_path_missing",
     "batch_spawn_failed",
     "unity_not_discovered",
+    "unity_spawn_refused",
     "unity_path_invalid",
     "unity_path_not_found",
     "missing_parameter",

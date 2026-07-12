@@ -80,8 +80,10 @@ export const componentGet: Tool = {
         type: ["string", "integer"],
         minimum: 1,
         description:
-          "Max fields+properties collected; remaining count is reported in truncated. Profile " +
-          "defaults: compact=40, balanced=100, full=200.",
+          "Max fields+properties collected. Fields hidden by this cap are reported in the top-level " +
+          "`truncated` count (raise max_fields or switch to profile=full to see them); when page_size " +
+          "is set, fields after the current page window are reported separately in pagination.truncated " +
+          "(page on via next_cursor). Profile defaults: compact=40, balanced=100, full=200.",
       },
       include_properties: {
         type: "boolean",

@@ -59,8 +59,8 @@ namespace UnityOpenMcpBridge.MetaTools
             if (result.Success) return result.Output;
             // Flat error envelope matching the direct-response tool contract
             // (BuildDirectToolErrorJson shape): { "error": { "code", "message" } }.
-            return "{\"error\":{\"code\":\"" + Escape(result.ErrorCode) +
-                   "\",\"message\":\"" + Escape(result.ErrorMessage) + "\"}}";
+            return "{\"error\":{\"code\":\"" + BridgeJson.BridgeJson.EscapeString(result.ErrorCode) +
+                   "\",\"message\":\"" + BridgeJson.BridgeJson.EscapeString(result.ErrorMessage) + "\"}}";
         }
 
         // Body-driven entry point retained for EditMode tests + internal reuse.
@@ -161,7 +161,7 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append(",\"reverseDependencies\":[]");
             sb.Append(",\"forwardCount\":0");
             sb.Append(",\"reverseCount\":0");
-            sb.Append(",\"detail\":").Append(EscapeString(detail));
+            sb.Append(",\"detail\":").Append(BridgeJson.EscapeString(detail));
             sb.Append('}');
             return sb.ToString();
         }
@@ -193,8 +193,8 @@ namespace UnityOpenMcpBridge.MetaTools
                 {
                     if (i > 0) sb.Append(',');
                     sb.Append('{');
-                    sb.Append("\"assetPath\":").Append(EscapeString(forwardDeps[i]));
-                    sb.Append(",\"guid\":").Append(EscapeString(AssetDatabase.AssetPathToGUID(forwardDeps[i])));
+                    sb.Append("\"assetPath\":").Append(BridgeJson.EscapeString(forwardDeps[i]));
+                    sb.Append(",\"guid\":").Append(BridgeJson.EscapeString(AssetDatabase.AssetPathToGUID(forwardDeps[i])));
                     sb.Append('}');
                 }
             }
@@ -208,7 +208,7 @@ namespace UnityOpenMcpBridge.MetaTools
             for (int i = 0; i < brokenGuids.Count; i++)
             {
                 if (i > 0) sb.Append(',');
-                sb.Append(EscapeString(brokenGuids[i]));
+                sb.Append(BridgeJson.EscapeString(brokenGuids[i]));
             }
             sb.Append(']');
 
@@ -224,7 +224,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 for (int j = 0; j < cycle.Count; j++)
                 {
                     if (j > 0) sb.Append(',');
-                    sb.Append(EscapeString(cycle[j]));
+                    sb.Append(BridgeJson.EscapeString(cycle[j]));
                 }
                 sb.Append(']');
             }
@@ -258,15 +258,15 @@ namespace UnityOpenMcpBridge.MetaTools
                 if (i > 0) sb.Append(',');
                 var p = display[i];
                 sb.Append('{');
-                sb.Append("\"assetPath\":").Append(EscapeString(p));
-                sb.Append(",\"guid\":").Append(EscapeString(AssetDatabase.AssetPathToGUID(p)));
+                sb.Append("\"assetPath\":").Append(BridgeJson.EscapeString(p));
+                sb.Append(",\"guid\":").Append(BridgeJson.EscapeString(AssetDatabase.AssetPathToGUID(p)));
                 sb.Append('}');
             }
             sb.Append(']');
 
             sb.Append(",\"reverseCount\":").Append(totalCount);
             sb.Append(",\"truncated\":").Append(truncated);
-            sb.Append(",\"detail\":").Append(EscapeString(detail));
+            sb.Append(",\"detail\":").Append(BridgeJson.EscapeString(detail));
 
             sb.Append('}');
             return sb.ToString();
@@ -289,8 +289,8 @@ namespace UnityOpenMcpBridge.MetaTools
 
         private static void AppendQueried(StringBuilder sb, string path, string guid)
         {
-            sb.Append("\"queriedAssetPath\":").Append(EscapeString(path));
-            sb.Append(",\"queriedAssetGuid\":").Append(EscapeString(guid));
+            sb.Append("\"queriedAssetPath\":").Append(BridgeJson.EscapeString(path));
+            sb.Append(",\"queriedAssetGuid\":").Append(BridgeJson.EscapeString(guid));
         }
 
         private static string BuildBody(string assetPath, string guid, string detail, int maxResults)
@@ -300,19 +300,19 @@ namespace UnityOpenMcpBridge.MetaTools
             bool needComma = false;
             if (assetPath != null)
             {
-                sb.Append("\"asset_path\":").Append(EscapeString(assetPath));
+                sb.Append("\"asset_path\":").Append(BridgeJson.EscapeString(assetPath));
                 needComma = true;
             }
             if (guid != null)
             {
                 if (needComma) sb.Append(',');
-                sb.Append("\"guid\":").Append(EscapeString(guid));
+                sb.Append("\"guid\":").Append(BridgeJson.EscapeString(guid));
                 needComma = true;
             }
             if (detail != null)
             {
                 if (needComma) sb.Append(',');
-                sb.Append("\"detail\":").Append(EscapeString(detail));
+                sb.Append("\"detail\":").Append(BridgeJson.EscapeString(detail));
                 needComma = true;
             }
             if (needComma) sb.Append(',');
@@ -321,33 +321,5 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        private static string Escape(string s)
-        {
-            return EscapeString(s);
-        }
-
-        private static string EscapeString(string s)
-        {
-            if (s == null) return "null";
-            var sb = new StringBuilder(s.Length + 8);
-            sb.Append('"');
-            foreach (var c in s)
-            {
-                switch (c)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (c < 32) sb.Append($"\\u{(int)c:X4}");
-                        else sb.Append(c);
-                        break;
-                }
-            }
-            sb.Append('"');
-            return sb.ToString();
-        }
     }
 }

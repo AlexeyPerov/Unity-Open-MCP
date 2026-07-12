@@ -225,12 +225,18 @@ namespace UnityOpenMcpBridge.Config
         /// Pure content check: does the target config file body already
         /// contain a <c>unity-open-mcp</c> entry for this client's envelope?
         /// Extracted from the Status panel's configured-detection so the
-        /// matching policy is unit-testable without the filesystem. JSON
-        /// clients match on the server key substring; Codex (TOML) matches on
-        /// its table header; CLI/Manual envelopes never report configured
-        /// from file contents (they have no target file).
+        /// matching policy is unit-testable without the filesystem.
+        ///
+        /// For JSON envelopes, when <paramref name="mergeKey"/> is non-empty
+        /// the body must contain BOTH the merge key and the
+        /// <c>"unity-open-mcp"</c> server key. This avoids the worst false
+        /// positive — an entry pasted under the wrong section (e.g. under
+        /// <c>servers</c> for a client that reads <c>mcpServers</c>) reporting
+        /// as configured and silencing further troubleshooting. Codex (TOML)
+        /// matches on its table header; CLI/Manual envelopes never report
+        /// configured from file contents (they have no target file).
         /// </summary>
-        public static bool IsConfiguredEntry(Envelope envelope, string fileBody)
+        public static bool IsConfiguredEntry(Envelope envelope, string fileBody, string mergeKey = null)
         {
             if (string.IsNullOrEmpty(fileBody)) return false;
             switch (envelope)
@@ -242,9 +248,13 @@ namespace UnityOpenMcpBridge.Config
                     // No target file — never "configured" via content scan.
                     return false;
                 default:
-                    // JSON clients: a substring match on the server key is a
-                    // good-enough signal (the wizard writes the key verbatim).
-                    return fileBody.Contains("\"unity-open-mcp\"");
+                    // JSON clients: require the server key. When the client has a
+                    // known merge key, also require it so an entry pasted under a
+                    // different section (a common config bug) is NOT reported as
+                    // configured.
+                    if (!fileBody.Contains("\"unity-open-mcp\"")) return false;
+                    if (string.IsNullOrEmpty(mergeKey)) return true;
+                    return fileBody.Contains(mergeKey);
             }
         }
 

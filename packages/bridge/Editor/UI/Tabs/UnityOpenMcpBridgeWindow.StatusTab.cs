@@ -14,8 +14,31 @@ namespace UnityOpenMcpBridge
 {
     public partial class UnityOpenMcpBridgeWindow
     {
+        // Per-repaint cache for the client-configured check. The same client's
+        // target file was being read up to three times per OnGUI (strip's
+        // all-clients loop, the auto-expand heuristic, and the configure panel).
+        // Each read does File.Exists + File.ReadAllText on the UI thread, so we
+        // memoize per-repaint instead. The cache is invalidated at the top of
+        // every DrawStatusTab by bumping _configuredCacheGeneration; it is keyed
+        // by the client Id string.
+        [NonSerialized] private int _guiGeneration;
+        [NonSerialized] private int _configuredCacheGeneration = -1;
+        [NonSerialized] private string _configuredCacheProjectPath;
+        [NonSerialized] private readonly Dictionary<string, bool> _configuredCache =
+            new Dictionary<string, bool>();
+        [NonSerialized] private bool _anyClientConfiguredCached;
+
         private void DrawStatusTab()
         {
+            // Bump the per-OnGUI generation so the configured cache (and any
+            // other per-frame memoization) invalidates exactly once per repaint.
+            _guiGeneration++;
+
+            // Refresh the per-repaint configured cache once per OnGUI so every
+            // downstream reader (strip, auto-expand, configure panel) shares one
+            // file read per client per frame.
+            RefreshConfiguredCache();
+
             // M29 Plan 2 — connection strip leads the tab so an operator can
             // answer "why isn't the agent talking?" in one glance, without
             // opening foldouts. Built from existing signals only (listener,
@@ -129,6 +152,54 @@ namespace UnityOpenMcpBridge
             }
         }
 
+        // Populate the per-repaint client-configured cache once per OnGUI.
+        // Reads each known client's target file exactly once, derives the
+        // anyClientConfigured aggregate, and is consumed by the connection
+        // strip, the configure-client auto-expand heuristic, and the configure
+        // panel's per-client badge — so the same client file is never read more
+        // than once per frame. Validity is keyed on a generation counter bumped
+        // once per DrawStatusTab call (see _guiGeneration), plus the active
+        // project path so a project switch re-reads immediately.
+        private void RefreshConfiguredCache()
+        {
+            var projectPath = BridgeSession.ProjectPath;
+            if (_configuredCacheGeneration == _guiGeneration
+                && string.Equals(_configuredCacheProjectPath, projectPath, StringComparison.Ordinal))
+            {
+                return;
+            }
+            _configuredCacheGeneration = _guiGeneration;
+            _configuredCacheProjectPath = projectPath;
+            _configuredCache.Clear();
+            _anyClientConfiguredCached = false;
+            if (string.IsNullOrEmpty(projectPath)) return;
+            foreach (var client in UnityOpenMcpBridge.Config.McpClientCatalog.Clients)
+            {
+                if (!_configuredCache.TryGetValue(client.Id, out var configured))
+                {
+                    configured = ComputeClientConfigured(client, projectPath);
+                    _configuredCache[client.Id] = configured;
+                }
+                if (configured) _anyClientConfiguredCached = true;
+            }
+        }
+
+        // Read a client's configured state from the per-repaint cache. Falls
+        // back to a direct read if the cache was not warmed this generation
+        // (e.g. a caller outside DrawStatusTab) so the answer is always correct.
+        private bool IsClientConfiguredCached(UnityOpenMcpBridge.Config.McpClientCatalog.ClientEntry client)
+        {
+            var projectPath = BridgeSession.ProjectPath;
+            if (string.IsNullOrEmpty(projectPath)) return false;
+            if (_configuredCacheGeneration == _guiGeneration
+                && string.Equals(_configuredCacheProjectPath, projectPath, StringComparison.Ordinal)
+                && _configuredCache.TryGetValue(client.Id, out var cached))
+            {
+                return cached;
+            }
+            return ComputeClientConfigured(client, projectPath);
+        }
+
         // M29 Plan 2 — gather the existing signals into the pure strip inputs
         // and build the at-a-glance model. Kept out of DrawStatusTab so the
         // signal collection (lock JSON read, client-config heuristic) is in
@@ -144,23 +215,13 @@ namespace UnityOpenMcpBridge
             var lockJson = BridgeInstanceLock.ReadCurrentJson();
             var snap = BridgeInstanceLock.TryParseSnapshot(lockJson);
 
-            // Client stage — reuse the configure-client "configured" heuristic.
-            // The check is only meaningful when a project is open; otherwise the
-            // stage reads Unknown so the operator is not told "no client" for a
-            // state where the check was never run.
+            // Client stage — reuse the per-repaint cache populated by
+            // RefreshConfiguredCache at the top of DrawStatusTab. The check is
+            // only meaningful when a project is open; otherwise the stage reads
+            // Unknown so the operator is not told "no client" for a state where
+            // the check was never run.
             var clientCheckAvailable = hasProject;
-            var anyConfigured = false;
-            if (clientCheckAvailable)
-            {
-                foreach (var client in UnityOpenMcpBridge.Config.McpClientCatalog.Clients)
-                {
-                    if (ComputeClientConfigured(client, projectPath))
-                    {
-                        anyConfigured = true;
-                        break;
-                    }
-                }
-            }
+            var anyConfigured = clientCheckAvailable && _anyClientConfiguredCached;
 
             var inputs = new ConnectionStripInputs(
                 listenerRunning: BridgeHttpServer.IsRunning,
@@ -208,15 +269,11 @@ namespace UnityOpenMcpBridge
                 : "Shut the listener down. Requires a two-click confirm because it disconnects any active agent.";
             if (GUILayout.Button(new GUIContent(buttonLabel, buttonTooltip), GUILayout.Width(110)))
             {
-                if (!stopArmed)
-                {
-                    BridgeStopConfirmCoordinator.Arm();
-                    _lastPingResult = "Press 'Confirm Stop' within 5 seconds to stop the bridge listener.\n" +
-                                      "Warning: stopping the listener will drop MCP connectivity for any active agent.";
-                    _lastPingMessageType = MessageType.Warning;
-                    Repaint();
-                }
-                else
+                // M29 follow-up — route through the SAME coordinator entry point
+                // the toolbar uses (RequestStop) so the two surfaces cannot
+                // drift on confirm policy. RequestStop returns false on the
+                // arming click and true once the stop actually ran.
+                var stopped = BridgeStopConfirmCoordinator.RequestStop(() =>
                 {
                     try
                     {
@@ -229,10 +286,13 @@ namespace UnityOpenMcpBridge
                         _lastPingResult = $"Stop failed: {e.Message}";
                         _lastPingMessageType = MessageType.Error;
                     }
-                    finally
-                    {
-                        BridgeStopConfirmCoordinator.Disarm();
-                    }
+                });
+                if (!stopped)
+                {
+                    _lastPingResult = "Press 'Confirm Stop' within 5 seconds to stop the bridge listener.\n" +
+                                      "Warning: stopping the listener will drop MCP connectivity for any active agent.";
+                    _lastPingMessageType = MessageType.Warning;
+                    Repaint();
                 }
             }
             EditorGUI.EndDisabledGroup();
@@ -444,21 +504,18 @@ namespace UnityOpenMcpBridge
             // with this one (CS0136), so it is reused everywhere in the method.
             var projectPath = BridgeSession.ProjectPath;
 
-            // M29 Plan 4 — auto-expand the section when the SELECTED client is
-            // not yet configured (the operator most likely to miss it is the
-            // one who still needs to wire a client). The operator's explicit
+            // M29 Plan 4 — auto-expand the section when NO known client is
+            // configured for this project (the operator most likely to miss it
+            // is the one who still needs to wire a client). This keys on the
+            // SAME anyConfigured signal the connection strip shows, so the
+            // foldout and the strip never disagree (the strip says "Client:
+            // configured" iff this stays collapsed). The operator's explicit
             // foldout toggle always wins: once they open or close the section
             // by hand, that choice is remembered in EditorPrefs and the
             // auto-expand heuristic no longer runs.
-            if (!_configureClientFoldoutUserChose)
+            if (!_configureClientFoldoutUserChose && !string.IsNullOrEmpty(projectPath))
             {
-                if (!string.IsNullOrEmpty(projectPath))
-                {
-                    var catalog0 = UnityOpenMcpBridge.Config.McpClientCatalog.Clients;
-                    var idx = (_configureClientIndex >= 0 && _configureClientIndex < catalog0.Length)
-                        ? _configureClientIndex : 0;
-                    _configureClientFoldout = !ComputeClientConfigured(catalog0[idx], projectPath);
-                }
+                _configureClientFoldout = !_anyClientConfiguredCached;
             }
 
             var prevFoldout = _configureClientFoldout;
@@ -517,8 +574,10 @@ namespace UnityOpenMcpBridge
                 UnityOpenMcpBridge.Config.McpClientCatalog.ResolveDisplayPath(client, projectPath) ?? "";
 
             // Configured-state check: read the target file (when file-backed)
-            // and look for our server key under the client's merge key.
-            _configureClientConfigured = ComputeClientConfigured(client, projectPath);
+            // and look for our server key under the client's merge key. Uses the
+            // per-repaint cache populated by RefreshConfiguredCache so the file
+            // is read at most once per client per frame.
+            _configureClientConfigured = IsClientConfiguredCached(client);
 
             if (client.IsFileBacked && !string.IsNullOrEmpty(_configureClientTargetPath))
             {
@@ -591,11 +650,11 @@ namespace UnityOpenMcpBridge
             if (GUILayout.Button(new GUIContent(
                 "Open target",
                 "Reveal the target config file in the OS file browser (Finder / Explorer). " +
-                "Creates the file first if it does not yet exist, so you can paste the snippet " +
-                "into it without hunting for the path."),
+                "Creates the file first (as a valid empty document) if it does not yet exist, " +
+                "so you can paste the snippet into it without hunting for the path."),
                 GUILayout.Width(110)))
             {
-                RevealClientConfigTarget(_configureClientTargetPath);
+                RevealClientConfigTarget(_configureClientTargetPath, client.EnvelopeKind);
             }
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.EndHorizontal();
@@ -616,12 +675,17 @@ namespace UnityOpenMcpBridge
 
         // M29 Plan 4 — reveal the resolved target file in the OS file browser
         // so the operator can open it and paste the snippet. If the file does
-        // not exist yet (common — the wizard normally creates it), we create
-        // an empty one so RevealInFinder has something to select; this is a
-        // convenience, not a merge writer. Parent directories are created on
-        // demand. Failures are surfaced as a warning box rather than thrown,
-        // because a bad path (e.g. permissions) must never break the panel.
-        private static void RevealClientConfigTarget(string targetPath)
+        // not exist yet (common — the wizard normally creates it), we create a
+        // VALID empty document for its format so that (a) RevealInFinder has
+        // something to select, and (b) the client does not choke on an empty
+        // file if it happens to read it before the operator pastes the snippet.
+        // JSON clients get `{}`; Codex (TOML) gets an empty string (a valid
+        // empty TOML document). This is a convenience, not a merge writer.
+        // Parent directories are created on demand. Failures are surfaced as a
+        // warning box rather than thrown, because a bad path (e.g. permissions)
+        // must never break the panel.
+        private static void RevealClientConfigTarget(
+            string targetPath, UnityOpenMcpBridge.Config.McpClientCatalog.Envelope envelope)
         {
             if (string.IsNullOrEmpty(targetPath)) return;
             try
@@ -633,7 +697,10 @@ namespace UnityOpenMcpBridge
                 }
                 if (!File.Exists(targetPath))
                 {
-                    File.WriteAllText(targetPath, "");
+                    var seed = envelope == UnityOpenMcpBridge.Config.McpClientCatalog.Envelope.Codex
+                        ? "" // empty TOML is valid TOML
+                        : "{}"; // valid empty JSON object
+                    File.WriteAllText(targetPath, seed);
                 }
                 EditorUtility.RevealInFinder(targetPath);
             }
@@ -661,7 +728,7 @@ namespace UnityOpenMcpBridge
             try
             {
                 var body = File.ReadAllText(path);
-                return UnityOpenMcpBridge.Config.McpClientCatalog.IsConfiguredEntry(client.EnvelopeKind, body);
+                return UnityOpenMcpBridge.Config.McpClientCatalog.IsConfiguredEntry(client.EnvelopeKind, body, client.MergeKey);
             }
             catch
             {

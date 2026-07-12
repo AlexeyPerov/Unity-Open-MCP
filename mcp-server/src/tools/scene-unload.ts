@@ -13,7 +13,9 @@ export const sceneUnload: Tool = {
     "the scene has unsaved changes you want to keep). Mutating: runs the full gate path; " +
     "`paths_hint` should be the scene's asset path. Scene identity is path-first: provide `path` " +
     "(the scene's `Assets/.../*.unity` asset path) to resolve unambiguously, or `name` to resolve " +
-    "by display name. When both are supplied, `path` wins and `name` is ignored. Returns the " +
+    "by display name. When both are supplied, `path` wins and `name` is ignored. The response " +
+    "carries `resolvedBy` (\"path\" or \"name\") so the agent can tell which identity key resolved " +
+    "the target. Returns the " +
     "post-unload list of opened scenes (name/path/isDirty/isLoaded/rootCount/buildIndex/isActive). " +
     "Prefer this over raw execute_csharp SceneManager.UnloadSceneAsync.",
   inputSchema: {

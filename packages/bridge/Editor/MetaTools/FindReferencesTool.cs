@@ -35,9 +35,9 @@ namespace UnityOpenMcpBridge.MetaTools
             var sb = new StringBuilder(1024);
 
             sb.Append("{\"queriedAssetPath\":");
-            sb.Append(EscapeString(result.QueriedAssetPath));
+            sb.Append(BridgeJson.EscapeString(result.QueriedAssetPath));
             sb.Append(",\"queriedAssetGuid\":");
-            sb.Append(EscapeString(result.QueriedAssetGuid));
+            sb.Append(BridgeJson.EscapeString(result.QueriedAssetGuid));
 
             sb.Append(",\"referencedBy\":[");
             if (result.ReferencedBy != null)
@@ -47,8 +47,8 @@ namespace UnityOpenMcpBridge.MetaTools
                     if (i > 0) sb.Append(',');
                     var entry = result.ReferencedBy[i];
                     sb.Append('{');
-                    sb.Append("\"assetPath\":").Append(EscapeString(entry.AssetPath));
-                    sb.Append(",\"guid\":").Append(EscapeString(entry.Guid));
+                    sb.Append("\"assetPath\":").Append(BridgeJson.EscapeString(entry.AssetPath));
+                    sb.Append(",\"guid\":").Append(BridgeJson.EscapeString(entry.Guid));
                     sb.Append('}');
                 }
             }
@@ -57,30 +57,6 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append(",\"totalCount\":").Append(result.TotalCount);
             sb.Append('}');
 
-            return sb.ToString();
-        }
-
-        private static string EscapeString(string s)
-        {
-            if (s == null) return "null";
-            var sb = new StringBuilder(s.Length + 8);
-            sb.Append('"');
-            foreach (var c in s)
-            {
-                switch (c)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (c < 32) sb.Append($"\\u{(int)c:X4}");
-                        else sb.Append(c);
-                        break;
-                }
-            }
-            sb.Append('"');
             return sb.ToString();
         }
     }

@@ -15,7 +15,9 @@ export const sceneSetActive: Tool = {
     "be the scene's asset path. The target scene must already be opened (use scene_open first). " +
     "Scene identity is path-first: provide `path` (the scene's `Assets/.../*.unity` asset path) to " +
     "resolve unambiguously, or `name` to resolve by display name. When both are supplied, `path` " +
-    "wins and `name` is ignored. Returns the post-set list of opened scenes (name/path/isDirty/" +
+    "wins and `name` is ignored. The response carries `resolvedBy` (\"path\" or \"name\") so the " +
+    "agent can tell which identity key resolved the target — useful for debugging duplicate-name " +
+    "ambiguity. Returns the post-set list of opened scenes (name/path/isDirty/" +
     "isLoaded/rootCount/buildIndex/isActive) so the agent can confirm which scene is now active. " +
     "Prefer this over raw execute_csharp EditorSceneManager.SetActiveScene.",
   inputSchema: {

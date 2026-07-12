@@ -33,6 +33,12 @@ namespace UnityOpenMcpBridge
         private static bool _armed;
         private static double _deadline;
 
+        // Time source seam. Defaults to EditorApplication.timeSinceStartup so
+        // production behavior is unchanged; tests override it via SetTimeSource
+        // to fast-forward the deadline and exercise the auto-expire branch in
+        // Tick() without a real sleep.
+        private static Func<double> _timeSource = () => EditorApplication.timeSinceStartup;
+
         /// <summary>
         /// Read-only view of the transient used by both surfaces.
         /// <see cref="BridgeToolbarToggle"/> and the Status tab read this to
@@ -49,8 +55,16 @@ namespace UnityOpenMcpBridge
             get
             {
                 if (!_armed) return 0.0;
-                return Math.Max(0.0, _deadline - EditorApplication.timeSinceStartup);
+                return Math.Max(0.0, _deadline - _timeSource());
             }
+        }
+
+        // Test-only seam: replace the time source so Tick()/expiry can be
+        // exercised deterministically. Restored to the editor clock by passing
+        // null. Production code never calls this.
+        internal static void SetTimeSource(Func<double> timeSource)
+        {
+            _timeSource = timeSource ?? (() => EditorApplication.timeSinceStartup);
         }
 
         /// <summary>
@@ -60,7 +74,7 @@ namespace UnityOpenMcpBridge
         public static void Arm()
         {
             _armed = true;
-            _deadline = EditorApplication.timeSinceStartup + ConfirmWindowSeconds;
+            _deadline = _timeSource() + ConfirmWindowSeconds;
         }
 
         /// <summary>
@@ -79,7 +93,7 @@ namespace UnityOpenMcpBridge
         /// </summary>
         public static void Tick()
         {
-            if (_armed && EditorApplication.timeSinceStartup >= _deadline)
+            if (_armed && _timeSource() >= _deadline)
                 _armed = false;
         }
 

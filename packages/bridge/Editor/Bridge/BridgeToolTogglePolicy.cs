@@ -94,29 +94,7 @@ namespace UnityOpenMcpBridge
         {
             var msg = $"Tool '{toolName}' is disabled in the Unity Open MCP Bridge runtime. " +
                       "Re-enable it in the Tools tab (or remove it from `.unity-open-mcp/settings.json` `disabledTools`) and retry.";
-            return $"{{\"error\":{{\"code\":\"{DisabledErrorCode}\",\"message\":\"{EscapeStringContent(msg)}\",\"tool\":\"{EscapeStringContent(toolName)}\",\"hint\":\"Enable the tool in the Unity Open MCP Bridge window Tools tab.\"}}}}";
-        }
-
-        private static string EscapeStringContent(string s)
-        {
-            if (s == null) return "";
-            var sb = new System.Text.StringBuilder(s.Length + 4);
-            foreach (var c in s)
-            {
-                switch (c)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (c < 32) sb.Append($"\\u{(int)c:X4}");
-                        else sb.Append(c);
-                        break;
-                }
-            }
-            return sb.ToString();
+            return $"{{\"error\":{{\"code\":\"{DisabledErrorCode}\",\"message\":\"{BridgeJson.EscapeStringContent(msg)}\",\"tool\":\"{BridgeJson.EscapeStringContent(toolName)}\",\"hint\":\"Enable the tool in the Unity Open MCP Bridge window Tools tab.\"}}}}";
         }
     }
 }

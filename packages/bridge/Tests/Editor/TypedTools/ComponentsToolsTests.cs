@@ -147,7 +147,7 @@ namespace UnityOpenMcpBridge.Tests
                     "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"type_name\":\"UnityEngine.Rigidbody\"}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
-                Assert.IsTrue(IsValidJsonObject(result.Output), "Output must be valid JSON: " + result.Output);
+                Assert.IsTrue(BridgeJson.IsValidJsonObject(result.Output), "Output must be valid JSON: " + result.Output);
                 Assert.Less(result.Output.Length, 16 * 1024, "Compact Rigidbody read must stay under 16 KiB.");
                 StringAssert.Contains("\"profile\":\"compact\"", result.Output);
             }
@@ -165,7 +165,7 @@ namespace UnityOpenMcpBridge.Tests
                     "{\"instance_id\":" +InstanceId.Of(go) +
                     ",\"type_name\":\"UnityEngine.Rigidbody\",\"profile\":\"full\"}");
                 Assert.IsTrue(result.Success, result.ErrorMessage);
-                Assert.IsTrue(IsValidJsonObject(result.Output));
+                Assert.IsTrue(BridgeJson.IsValidJsonObject(result.Output));
                 StringAssert.Contains("\"profile\":\"full\"", result.Output);
             }
             finally { Object.DestroyImmediate(go); }
@@ -210,6 +210,62 @@ namespace UnityOpenMcpBridge.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        // The truncation split (M30 review follow-up): top-level `truncated`
+        // counts fields hidden by the max_fields cap; pagination.truncated
+        // counts fields after the current page window. These must NOT be
+        // summed — an agent uses them to pick different remedies (raise
+        // max_fields vs page on).
+        [Test]
+        public void Get_PagingSmallerThanMaxFields_PageWithinMaxFieldsWindow()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_PageWithinMaxFields");
+            try
+            {
+                // max_fields:6 caps the collected entries at 6; page_size:2
+                // walks the 6-entry window in 3 pages. Top-level truncated
+                // reflects fields beyond max_fields (whatever Transform hides
+                // past 6); pagination.truncated reflects entries after the
+                // current page within the 6-entry window.
+                var page1 = ComponentsTools.Get(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\",\"max_fields\":6,\"page_size\":2,\"include_properties\":false}");
+                Assert.IsTrue(page1.Success, page1.ErrorMessage);
+                StringAssert.Contains("\"count\":2", page1.Output);
+                StringAssert.Contains("\"pagination\":", page1.Output);
+                StringAssert.Contains("\"next_cursor\":\"component_get:2\"", page1.Output);
+                // pagination.truncated is the remaining-after-page count (4
+                // entries left in the window after taking 2), NOT the summed
+                // value with the max_fields cap.
+                StringAssert.Contains("\"truncated\":4", page1.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Get_PagingPastLastPage_NullNextCursorAndZeroPaginationTruncated()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_LastPage");
+            try
+            {
+                // Walk to the end: page_size large enough to exhaust the
+                // max_fields window in one page.
+                var last = ComponentsTools.Get(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\",\"max_fields\":2,\"page_size\":10,\"include_properties\":false}");
+                Assert.IsTrue(last.Success, last.ErrorMessage);
+                StringAssert.Contains("\"next_cursor\":null", last.Output);
+                // pagination.truncated is 0 (no entries after the page), even
+                // though top-level truncated may be >0 (fields hidden by cap).
+                StringAssert.Contains("\"pagination\":", last.Output);
+                // The pagination block's truncated must be 0, distinct from
+                // the top-level truncated which reflects the max_fields cap.
+                Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(
+                    last.Output, "\"pagination\":\\{[^}]*\"truncated\":0[^}]*\\}"),
+                    "pagination.truncated must be 0 at the last page. Output: " + last.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         [Test]
         public void Get_PropertyPath_ReturnsScopedSlice()
         {
@@ -239,35 +295,6 @@ namespace UnityOpenMcpBridge.Tests
                 Assert.AreEqual("property_not_found", result.ErrorCode);
             }
             finally { Object.DestroyImmediate(go); }
-        }
-
-        private static bool IsValidJsonObject(string json)
-        {
-            if (string.IsNullOrEmpty(json)) return false;
-            json = json.Trim();
-            if (!json.StartsWith("{") || !json.EndsWith("}")) return false;
-            int depth = 0;
-            bool inString = false;
-            bool escaped = false;
-            for (int i = 0; i < json.Length; i++)
-            {
-                var c = json[i];
-                if (inString)
-                {
-                    if (escaped) escaped = false;
-                    else if (c == '\\') escaped = true;
-                    else if (c == '"') inString = false;
-                    continue;
-                }
-                if (c == '"') { inString = true; continue; }
-                if (c == '{') depth++;
-                else if (c == '}')
-                {
-                    depth--;
-                    if (depth < 0) return false;
-                }
-            }
-            return depth == 0 && !inString;
         }
 
         [Test]

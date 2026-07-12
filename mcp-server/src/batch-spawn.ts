@@ -31,6 +31,18 @@ export const VERIFY_BATCH_TOOL_NAMES: ReadonlySet<string> = new Set(
   Object.keys(VERIFY_TOOL_TO_OPERATION),
 );
 
+// Tools that ALWAYS route to batch, even when a live bridge is up — keyed by
+// tool name → fallbackReason for the route-meta envelope. Single source of
+// truth for the router's pinned always-batch branch: compile_check spawns a
+// fresh Unity to recompile from scratch; verify-family tools need the headless
+// verify package and are NOT registered on the live bridge. validate_edit /
+// scan_paths are intentionally NOT here — those ARE live-registered and stay
+// live-first. Keep this map disjoint (a tool appears once).
+export const ALWAYS_BATCH_TOOLS: ReadonlyMap<string, string> = new Map<string, string>([
+  ["unity_open_mcp_compile_check", "compile_check_always_batch"],
+  ...[...VERIFY_BATCH_TOOL_NAMES].map((name) => [name, "verify_always_batch"] as [string, string]),
+]);
+
 const META_TOOL_TO_OPERATION: Record<string, string> = {
   unity_open_mcp_find_members: "find_members",
   unity_open_mcp_compile_check: "compile_check",

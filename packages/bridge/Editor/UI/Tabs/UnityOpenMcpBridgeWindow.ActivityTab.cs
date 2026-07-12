@@ -64,8 +64,6 @@ namespace UnityOpenMcpBridge
                 $"buffer: {BridgeActivityLog.Count} / {BridgeActivityLog.Capacity}    " +
                 $"recorded: {BridgeActivityLog.TotalRecorded}    trimmed: {BridgeActivityLog.TotalDroppedTrim}",
                 EditorStyles.miniLabel);
-
-            _activityVerboseFoldout = newVerbose;
         }
 
         private void DrawActivityFilters()

@@ -75,6 +75,51 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(McpClientCatalog.IsConfiguredEntry(Envelope.McpServersStdio, null));
         }
 
+        // ---- IsConfiguredEntry — merge-key gating (wrong-section guard) -----
+        //
+        // When the client's merge key is supplied, the body must contain BOTH
+        // the merge key and the server key. This catches the common config bug
+        // of pasting the entry under a section the client does not read (e.g.
+        // `servers` for a client that reads `mcpServers`) — without this gate
+        // the panel would report "configured" and silence troubleshooting.
+
+        [Test]
+        public void IsConfiguredEntry_WithMergeKey_BothPresent_IsTrue()
+        {
+            var body = "{\n  \"mcpServers\": {\n    \"unity-open-mcp\": {}\n  }\n}";
+            Assert.IsTrue(McpClientCatalog.IsConfiguredEntry(
+                Envelope.McpServersStdio, body, "mcpServers"));
+        }
+
+        [Test]
+        public void IsConfiguredEntry_WithMergeKey_ServerKeyUnderWrongSection_IsFalse()
+        {
+            // Server key present, but under `servers` — the client reads
+            // `mcpServers`, so it will never see this entry. Must NOT report
+            // configured.
+            var body = "{\n  \"servers\": {\n    \"unity-open-mcp\": {}\n  }\n}";
+            Assert.IsFalse(McpClientCatalog.IsConfiguredEntry(
+                Envelope.McpServersStdio, body, "mcpServers"));
+        }
+
+        [Test]
+        public void IsConfiguredEntry_WithMergeKey_MissingServerKey_IsFalse()
+        {
+            var body = "{\n  \"mcpServers\": {\n    \"other\": {}\n  }\n}";
+            Assert.IsFalse(McpClientCatalog.IsConfiguredEntry(
+                Envelope.McpServersStdio, body, "mcpServers"));
+        }
+
+        [Test]
+        public void IsConfiguredEntry_NullMergeKey_FallsBackToServerKeyOnly()
+        {
+            // Backward-compatible 2-arg behavior: no merge key → server key
+            // substring suffices (the wizard writes the key verbatim).
+            var body = "{\n  \"servers\": {\n    \"unity-open-mcp\": {}\n  }\n}";
+            Assert.IsTrue(McpClientCatalog.IsConfiguredEntry(
+                Envelope.McpServersStdio, body, null));
+        }
+
         // ---- ResolveDisplayPath ------------------------------------------
 
         [Test]

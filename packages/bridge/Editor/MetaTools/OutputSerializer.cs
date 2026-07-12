@@ -231,6 +231,16 @@ namespace UnityOpenMcpBridge.MetaTools
             catch { return value.GetType().Name; }
         }
 
+        // Sanctioned reflection-serializer escape. This is the ONE place outside
+        // BridgeJson that hand-rolls JSON escaping, because it has ~80 call sites
+        // across the reflection/serializer tools and intentionally DIVERGES from
+        // BridgeJson.EscapeStringContent: it emits `\b`/`\f` as the short escapes
+        // `\\b`/`\\f`, whereas BridgeJson renders all C0 controls as `\uXXXX`.
+        // Both are valid JSON (RFC 8259), so this divergence is not a bug — but
+        // it means migrating these call sites to BridgeJson would be an
+        // observable wire-shape change, which the M30 no-behavior-change guard
+        // forbade. Do NOT introduce a third escape helper; new hand-rolled JSON
+        // uses BridgeJson (see packages/bridge/AGENTS.md §Transport).
         public static string EscapeJsonString(string s)
         {
             if (s == null) return "";

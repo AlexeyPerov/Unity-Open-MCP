@@ -115,14 +115,19 @@ namespace UnityOpenMcpBridge
 
         // Open (or focus) the bridge window so the armed confirm is visible.
         // The coordinator's transient is what the window reads; we just make
-        // sure the window exists. No-op if it is already open.
+        // sure the window exists. No-op if it is already open. Uses the same
+        // dockable-window overload as the menu Launch() path — NOT a utility
+        // window — so the window stays dockable and consistent regardless of
+        // which surface opened it.
         private static void EnsureWindowVisible()
         {
             try
             {
                 var window = EditorWindow.GetWindow<UnityOpenMcpBridgeWindow>(
-                    true, "Unity Open MCP Bridge", true);
-                window.ShowTab();
+                    "Unity Open MCP Bridge");
+                // Focus it so the armed "Confirm Stop" is immediately visible.
+                window.Show();
+                window.Focus();
             }
             catch
             {
