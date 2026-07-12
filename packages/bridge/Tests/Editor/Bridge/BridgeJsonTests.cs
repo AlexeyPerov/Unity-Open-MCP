@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using NUnit.Framework;
 using UnityOpenMcpBridge;
 
@@ -185,6 +186,202 @@ namespace UnityOpenMcpBridge.Tests
                 typeof(TimeoutException).IsAssignableFrom(typeof(MainThreadBlockedException)),
                 "MainThreadBlockedException must NOT be a TimeoutException subclass " +
                 "(the dispatcher's catch branches on the distinction).");
+        }
+
+        // ---- T30.5 shared JSON value appenders ---------------------------------
+        //
+        // AppendJsonString / AppendJsonBool / AppendJsonNumber* are the bridge-
+        // wide primitives typed tools MUST use for hand-rolled JSON (see the
+        // contributor note in packages/bridge/AGENTS.md §Transport). The two
+        // failure modes they exist to prevent:
+        //   1. split strings closed across Append calls → unparsable bodies
+        //      (the profiler `note` bug from M30 Plan 1);
+        //   2. `sb.Append(bool)` emitting C# True/False instead of JSON
+        //      true/false (the historical asmdef_list autoReferenced bug).
+
+        [Test]
+        public static void AppendJsonString_PlainString_WrappedInQuotes()
+        {
+            var sb = new StringBuilder();
+            BridgeJson.AppendJsonString(sb, "hello");
+            Assert.AreEqual("\"hello\"", sb.ToString());
+        }
+
+        [Test]
+        public static void AppendJsonString_Null_EmitsJsonNullKeyword()
+        {
+            // null ⇒ bare `null` keyword (NOT "null" the string). Callers that
+            // want "" for null pass an empty string.
+            var sb = new StringBuilder();
+            BridgeJson.AppendJsonString(sb, null);
+            Assert.AreEqual("null", sb.ToString());
+        }
+
+        [Test]
+        public static void AppendJsonString_EmptyString_EmitsEmptyQuotedString()
+        {
+            var sb = new StringBuilder();
+            BridgeJson.AppendJsonString(sb, "");
+            Assert.AreEqual("\"\"", sb.ToString());
+        }
+
+        [Test]
+        public static void AppendJsonString_EscapesEmbeddedQuotes()
+        {
+            // The exact shape that broke the profiler `note`: an unescaped quote
+            // inside the value terminates the string early. The helper must
+            // escape it so the whole value stays one JSON string token.
+            var sb = new StringBuilder();
+            BridgeJson.AppendJsonString(sb, "he said \"hi\"");
+            // Round-trip via a strict JSON parse: the emitted token must parse
+            // back to the original string.
+            var emitted = sb.ToString();
+            Assert.AreEqual("\"he said \\\"hi\\\"\"", emitted);
+            Assert.AreEqual("he said \"hi\"", SimpleJsonUnescape(emitted));
+        }
+
+        [Test]
+        public static void AppendJsonString_EscapesNewlinesAndTabs()
+        {
+            var sb = new StringBuilder();
+            BridgeJson.AppendJsonString(sb, "line1\nline2\ttab\rreturn");
+            var emitted = sb.ToString();
+            // No raw control characters may survive in the emitted JSON.
+            foreach (var ch in emitted)
+                Assert.IsFalse(ch == '\n' || ch == '\r' || ch == '\t',
+                    "raw control char survived escape: " + emitted);
+            Assert.AreEqual("line1\nline2\ttab\rreturn", SimpleJsonUnescape(emitted));
+        }
+
+        [Test]
+        public static void AppendJsonString_EscapesBackslash()
+        {
+            var sb = new StringBuilder();
+            BridgeJson.AppendJsonString(sb, "C:\\Program Files");
+            Assert.AreEqual("\"C:\\\\Program Files\"", sb.ToString());
+        }
+
+        [Test]
+        public static void AppendJsonString_ControlChars_EmitUnicodeEscape()
+        {
+            // C0 control chars (< 0x20) other than the named ones above must be
+            // emitted as \uXXXX so the output is valid JSON.
+            var sb = new StringBuilder();
+            BridgeJson.AppendJsonString(sb, "\x01\x02");
+            var emitted = sb.ToString();
+            StringAssert.StartsWith("\"\\u0001\\u0002\"", emitted);
+        }
+
+        [Test]
+        public static void AppendJsonString_ProducesValidJsonObjectAroundIt()
+        {
+            // The end-to-end shape: a whole object built with the helper must
+            // pass the same validity guard the dispatcher relies on. This is the
+            // regression line for "helper emits a value that breaks the envelope".
+            var sb = new StringBuilder();
+            sb.Append("{\"note\":");
+            BridgeJson.AppendJsonString(sb, "value with \"quotes\" and \n newlines");
+            sb.Append('}');
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(sb.ToString()));
+        }
+
+        [Test]
+        public static void AppendJsonBool_TrueAndFalse_EmitLowercaseJsonKeywords()
+        {
+            // sb.Append(bool) would emit C# True/False — the helper must emit
+            // JSON true/false. This is the asmdef_list autoReferenced regression
+            // line.
+            var sbT = new StringBuilder();
+            BridgeJson.AppendJsonBool(sbT, true);
+            Assert.AreEqual("true", sbT.ToString());
+
+            var sbF = new StringBuilder();
+            BridgeJson.AppendJsonBool(sbF, false);
+            Assert.AreEqual("false", sbF.ToString());
+        }
+
+        [Test]
+        public static void AppendJsonNumber_Long_EmitsInvariantInteger()
+        {
+            var sb = new StringBuilder();
+            BridgeJson.AppendJsonNumber(sb, 123456789L);
+            Assert.AreEqual("123456789", sb.ToString());
+        }
+
+        [Test]
+        public static void AppendJsonNumber_Double_EmitsInvariantDecimalNoComma()
+        {
+            // Locale safety: in de-DE a naive ToString would emit "1,5" — the
+            // helper must always emit "1.5" (JSON radix point).
+            var sb = new StringBuilder();
+            BridgeJson.AppendJsonNumber(sb, 1.5);
+            Assert.AreEqual("1.5", sb.ToString());
+        }
+
+        [Test]
+        public static void AppendJsonStringField_EmitsCompleteKeyColonValue()
+        {
+            // The field helper keeps key + escaped value in one call so neither
+            // half can dangle — the direct fix for the split-string anti-pattern.
+            var sb = new StringBuilder();
+            sb.Append('{');
+            BridgeJson.AppendJsonStringField(sb, "note", "recording starts next frame");
+            sb.Append('}');
+            var json = sb.ToString();
+            Assert.AreEqual("{\"note\":\"recording starts next frame\"}", json);
+            Assert.IsTrue(BridgeJson.IsValidJsonObject(json));
+        }
+
+        [Test]
+        public static void AppendJsonBoolField_EmitsCompleteKeyColonBool()
+        {
+            var sb = new StringBuilder();
+            sb.Append('{');
+            BridgeJson.AppendJsonBoolField(sb, "enabled", true);
+            sb.Append('}');
+            Assert.AreEqual("{\"enabled\":true}", sb.ToString());
+        }
+
+        [Test]
+        public static void AppendJsonNumberField_EmitsCompleteKeyColonNumber()
+        {
+            var sb = new StringBuilder();
+            sb.Append('{');
+            BridgeJson.AppendJsonNumberField(sb, "bytes", 4096L);
+            sb.Append('}');
+            Assert.AreEqual("{\"bytes\":4096}", sb.ToString());
+        }
+
+        // Minimal JSON string unescape for round-trip assertions above. Only
+        // handles the escapes BridgeJson.AppendJsonString emits (\", \\, \n,
+        // \r, \t, \uXXXX) — not a general parser.
+        private static string SimpleJsonUnescape(string quoted)
+        {
+            // Strip surrounding quotes.
+            var inner = quoted.Substring(1, quoted.Length - 2);
+            var sb = new StringBuilder(inner.Length);
+            for (int i = 0; i < inner.Length; i++)
+            {
+                if (inner[i] == '\\' && i + 1 < inner.Length)
+                {
+                    var n = inner[i + 1];
+                    switch (n)
+                    {
+                        case '"': sb.Append('"'); i++; break;
+                        case '\\': sb.Append('\\'); i++; break;
+                        case 'n': sb.Append('\n'); i++; break;
+                        case 'r': sb.Append('\r'); i++; break;
+                        case 't': sb.Append('\t'); i++; break;
+                        case 'u':
+                            sb.Append((char)Convert.ToInt32(inner.Substring(i + 2, 4), 16));
+                            i += 5;
+                            break;
+                        default: sb.Append(inner[i]); break;
+                    }
+                }
+                else sb.Append(inner[i]);
+            }
+            return sb.ToString();
         }
     }
 }

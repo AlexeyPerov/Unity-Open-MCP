@@ -134,26 +134,9 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        private static string Esc(string s)
-        {
-            if (s == null) return "";
-            var sb = new StringBuilder(s.Length + 4);
-            foreach (var c in s)
-            {
-                switch (c)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (c < 32) sb.Append($"\\u{(int)c:X4}");
-                        else sb.Append(c);
-                        break;
-                }
-            }
-            return sb.ToString();
-        }
+        // Single source of truth for JSON string-content escaping is BridgeJson
+        // (T30.5). Returns escaped CONTENT (no surrounding quotes), matching the
+        // call sites here; preserves the `null ⇒ ""` contract.
+        private static string Esc(string s) => BridgeJson.EscapeStringContent(s);
     }
 }

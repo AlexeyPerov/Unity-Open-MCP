@@ -850,10 +850,10 @@ namespace UnityOpenMcpBridge.TypedTools
         private static string Num(double d) => d.ToString("0.###", CultureInfo.InvariantCulture);
         private static string Num(float f) => f.ToString("0.###", CultureInfo.InvariantCulture);
 
-        private static string Esc(string s)
-        {
-            if (s == null) return "\"\"";
-            return "\"" + OutputSerializer.EscapeJsonString(s) + "\"";
-        }
+        // Single source of truth for JSON string escaping is BridgeJson (T30.5).
+        // Preserves this file's `null ⇒ ""` contract (BridgeJson.EscapeString
+        // would emit `null` for null — profiler field values here are never
+        // expected to be null, so we normalize to an empty string).
+        private static string Esc(string s) => s == null ? "\"\"" : BridgeJson.EscapeString(s);
     }
 }

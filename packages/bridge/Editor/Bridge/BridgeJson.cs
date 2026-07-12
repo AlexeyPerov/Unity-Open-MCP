@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using UnityOpenMcpBridge.Console;
 
@@ -117,6 +118,87 @@ namespace UnityOpenMcpBridge
                         break;
                 }
             }
+        }
+
+        // --- JSON value appenders (T30.5 shared JSON builder helper) --------------
+        //
+        // Typed tools assemble response JSON with `StringBuilder` (no serializer
+        // dependency — see packages/bridge/AGENTS.md §Transport). The two
+        // recurring bug classes that escape that discipline:
+        //
+        //   1. **Split strings** — closing a string literal in one Append and
+        //      reopening it in another (`sb.Append("\"note\":\"half..."); ...
+        //      sb.Append("...rest\"}")`) leaves the second half as a bare token
+        //      → the whole body is rejected as `bridge_response_unparsable`
+        //      (see M30 Plan 1 — profiler Start/Stop `note` bug).
+        //   2. **Bool casing** — `sb.Append(someBool)` emits C# `True`/`False`,
+        //      not JSON `true`/`false` (historical asmdef_list autoReferenced
+        //      bug; tests-feedback §6.4).
+        //
+        // These appenders emit a complete, valid JSON value token in one call,
+        // so a contributor cannot accidentally close a string across appends.
+        // New hand-rolled JSON across the bridge MUST use them instead of
+        // re-implementing the escape switch or `Append(bool)` — see the
+        // contributor note in packages/bridge/AGENTS.md §Transport.
+
+        // Append a complete JSON string value (`"..."`), escaped, including the
+        // surrounding quotes. `null` is emitted as the bare JSON keyword `null`
+        // (callers that want `""` for null should pass an empty string).
+        // Returns the buffer so it composes fluently with `Append(':')` etc.
+        internal static StringBuilder AppendJsonString(StringBuilder sb, string s)
+        {
+            if (s == null) return sb.Append("null");
+            sb.Append('"');
+            EscapeStringContentTo(sb, s);
+            sb.Append('"');
+            return sb;
+        }
+
+        // Append a JSON boolean literal (`true` / `false`). Never use
+        // `sb.Append(bool)` for JSON — that emits C# `True`/`False`.
+        internal static StringBuilder AppendJsonBool(StringBuilder sb, bool b)
+            => sb.Append(b ? "true" : "false");
+
+        // Append a JSON number. Goes through InvariantCulture so decimals are
+        // never rendered with a locale comma (a naive ToString would mis-emit
+        // "1,5" in de-DE). long overloads avoid any fractional formatting;
+        // double rounds to 3dp for stable wire sizes (matches the profiler
+        // family's Num()).
+        internal static StringBuilder AppendJsonNumber(StringBuilder sb, long n)
+            => sb.Append(n.ToString(CultureInfo.InvariantCulture));
+
+        internal static StringBuilder AppendJsonNumber(StringBuilder sb, double d)
+            => sb.Append(d.ToString("0.###", CultureInfo.InvariantCulture));
+
+        internal static StringBuilder AppendJsonNumber(StringBuilder sb, float f)
+            => sb.Append(f.ToString("0.###", CultureInfo.InvariantCulture));
+
+        // Append a complete `"key":value` pair for a string value. The most
+        // common typed-tool shape: `sb.Append(",\"name\":"); sb.Append(Esc(x));`
+        // becomes `BridgeJson.AppendJsonStringField(sb, "name", x);`. Keeps the
+        // key and the escaped value in one call so neither half can dangle.
+        internal static StringBuilder AppendJsonStringField(StringBuilder sb, string key, string value)
+        {
+            sb.Append('"').Append(key).Append("\":");
+            return AppendJsonString(sb, value);
+        }
+
+        internal static StringBuilder AppendJsonBoolField(StringBuilder sb, string key, bool value)
+        {
+            sb.Append('"').Append(key).Append("\":");
+            return AppendJsonBool(sb, value);
+        }
+
+        internal static StringBuilder AppendJsonNumberField(StringBuilder sb, string key, long value)
+        {
+            sb.Append('"').Append(key).Append("\":");
+            return AppendJsonNumber(sb, value);
+        }
+
+        internal static StringBuilder AppendJsonNumberField(StringBuilder sb, string key, double value)
+        {
+            sb.Append('"').Append(key).Append("\":");
+            return AppendJsonNumber(sb, value);
         }
 
         // --- Gate dispatch response envelopes -------------------------------------

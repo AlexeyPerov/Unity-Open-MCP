@@ -514,28 +514,11 @@ namespace UnityOpenMcpBridge.ProfilerExt
             return sb.ToString();
         }
 
-        private static string Esc(string s)
-        {
-            if (s == null) return "\"\"";
-            var sb = new StringBuilder(s.Length + 8);
-            sb.Append('"');
-            foreach (var c in s)
-            {
-                switch (c)
-                {
-                    case '"': sb.Append("\\\""); break;
-                    case '\\': sb.Append("\\\\"); break;
-                    case '\n': sb.Append("\\n"); break;
-                    case '\r': sb.Append("\\r"); break;
-                    case '\t': sb.Append("\\t"); break;
-                    default:
-                        if (c < 32) sb.Append($"\\u{(int)c:X4}");
-                        else sb.Append(c);
-                        break;
-                }
-            }
-            sb.Append('"');
-            return sb.ToString();
-        }
+        // Single source of truth for escaping a JSON string value lives in
+        // BridgeJson (T30.5). This thin wrapper preserves the `null ⇒ ""`
+        // contract this file already had (BridgeJson.AppendJsonString emits
+        // `null` for null — profiler field names are never expected to be null,
+        // so we normalize here to avoid changing wire shape).
+        private static string Esc(string s) => s == null ? "\"\"" : BridgeJson.EscapeString(s);
     }
 }
