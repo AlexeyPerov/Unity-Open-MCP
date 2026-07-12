@@ -438,6 +438,12 @@ namespace UnityOpenMcpBridge
 
         private void DrawConfigureClientSection()
         {
+            // Declared once at the top of the method: both the auto-expand
+            // heuristic below and the snippet rendering further down need the
+            // project path. A nested `var projectPath` in the if-block collides
+            // with this one (CS0136), so it is reused everywhere in the method.
+            var projectPath = BridgeSession.ProjectPath;
+
             // M29 Plan 4 — auto-expand the section when the SELECTED client is
             // not yet configured (the operator most likely to miss it is the
             // one who still needs to wire a client). The operator's explicit
@@ -446,7 +452,6 @@ namespace UnityOpenMcpBridge
             // auto-expand heuristic no longer runs.
             if (!_configureClientFoldoutUserChose)
             {
-                var projectPath = BridgeSession.ProjectPath;
                 if (!string.IsNullOrEmpty(projectPath))
                 {
                     var catalog0 = UnityOpenMcpBridge.Config.McpClientCatalog.Clients;
@@ -477,7 +482,6 @@ namespace UnityOpenMcpBridge
                 "(or `node <root>/mcp-server/dist/index.js` for a local checkout).",
                 MessageType.None);
 
-            var projectPath = BridgeSession.ProjectPath;
             var hasProject = !string.IsNullOrEmpty(projectPath);
             if (!hasProject)
             {

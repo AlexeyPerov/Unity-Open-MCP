@@ -15,10 +15,20 @@
 //     receiving updates and often precede a forced upgrade.
 //   - Package Manager errors / conflicts — anything tagged `[Package Manager]`
 //     that contains "error", "conflict", or "cannot resolve".
+//   - Editor file-descriptor exhaustion — `System.NotSupportedException: Could
+//     not register to wait for file descriptor <N>` thrown from the Bee build
+//     driver's named-pipe IPC. This is a Mono runtime / kqueue failure: after
+//     many domain reloads in a long session the Editor leaks file-descriptor
+//     numbers until one crosses Mono's internal ~1024 ceiling, and Mono refuses
+//     to register it. The Editor then hangs mid-build and never recovers on its
+//     own — restarting Unity is the only reliable fix. There are NO C# compile
+//     errors to fix; surfacing this distinct kind stops an agent from chasing a
+//     phantom CSxxxx problem and points it (and the operator) at a restart.
 //
 // The output is a flat list of HealthIssue records, each tagged with a
 // `kind` so an agent can branch on it ("assembly_resolution → check package
-// versions", "package_deprecated → plan an upgrade"). The list is bounded so
+// versions", "package_deprecated → plan an upgrade",
+// "editor_fd_exhaustion → restart the Editor"). The list is bounded so
 // a giant wall of log lines cannot blow up the tool response.
 
 import { extractStructuredCompilerErrors, type CompilerError } from "./compiler-errors.js";
@@ -29,7 +39,8 @@ export const MAX_HEALTH_ISSUES = 50;
 export type HealthIssueKind =
   | "assembly_resolution"
   | "package_deprecated"
-  | "package_manager_error";
+  | "package_manager_error"
+  | "editor_fd_exhaustion";
 
 export interface HealthIssue {
   /** Discriminator for branching in the agent. */
@@ -100,6 +111,29 @@ const PACKAGE_DEPRECATED_RE =
 const PACKAGE_MANAGER_ERROR_RE =
   /\[Package Manager\][^\n]*(?:error|conflict|cannot resolve|incompatible)[^\n]*/gi;
 
+// ---------------------------------------------------------------------------
+// Editor file-descriptor exhaustion (Bee build driver / Mono IOSelector).
+//
+// After many domain reloads in a long session, the Editor's file-descriptor
+// numbers climb until one crosses Mono's internal ~1024 ceiling, and Mono's
+// IOSelector (kqueue/kevent on macOS/BSD) refuses to register it. The
+// exception is thrown from the Bee build driver's named-pipe IPC and the
+// Editor hangs mid-build. Unity prints the full stack to Editor.log:
+//
+//   Unhandled exception during build: System.NotSupportedException: Could not
+//   register to wait for file descriptor 1194
+//     at System.IOSelector.Add(...)
+//     ... at System.IO.Pipes.NamedPipeServerStream.<WaitForConnectionAsync>...
+//     ... at Bee.BeeDriver.BeeDriver_RunBackend.ReadEntireBinlogFromIpcAsync...
+//
+// We match on the signature line only (the number varies) — the surrounding
+// stack is noise. This is a hard signal: the Editor cannot recover without a
+// restart, and there is no C# error to fix.
+// ---------------------------------------------------------------------------
+
+const FD_EXHAUSTION_RE =
+  /System\.NotSupportedException:\s*Could not register to wait for file descriptor \d+/g;
+
 /** Parse the simple assembly name out of a full assembly identity string. */
 function simpleAssemblyName(identity: string): string {
   // "Unity.ProBuilder.AddOns.Editor, Version=0.0.0.0, ..." -> "Unity.ProBuilder.AddOns.Editor"
@@ -119,6 +153,29 @@ export function extractProjectHealthIssues(log: string): HealthIssue[] {
   if (!log) return [];
   const seen = new Set<string>();
   const issues: HealthIssue[] = [];
+
+  // Editor fd-exhaustion is scanned FIRST. It is the most severe signal (the
+  // Editor is hung, not just unhealthy) and its remediation differs from every
+  // other kind — so it must not be dropped by the MAX_HEALTH_ISSUES cap when a
+  // noisy log tail has dozens of milder package notices ahead of it.
+  FD_EXHAUSTION_RE.lastIndex = 0;
+  if (FD_EXHAUSTION_RE.exec(log) !== null) {
+    const summary = "Editor file-descriptor exhaustion (build driver hang)";
+    seen.add(summary);
+    issues.push({
+      kind: "editor_fd_exhaustion",
+      summary,
+      raw: "System.NotSupportedException: Could not register to wait for file descriptor",
+      hint:
+        "The Unity Editor ran out of file descriptors (an internal Mono/Unity " +
+        "limit hit during the Bee build after many domain reloads in a long " +
+        "session). This is NOT a C# compile error — there is nothing to fix in " +
+        "your source. The Editor is hung mid-build and will not recover on its " +
+        "own: the operator must quit and relaunch Unity for this project " +
+        "(save scene work first if the Editor UI is still responsive, then " +
+        "restart). After relaunch the bridge reconnects automatically.",
+    });
+  }
 
   // Assembly resolution failures.
   ASSEMBLY_RESOLUTION_RE.lastIndex = 0;
@@ -209,9 +266,22 @@ export function summarizeProjectHealth(log: string): ProjectHealth {
         `${compilerErrors.length} compiler error(s) detected — the bridge ` +
         "will not reload until the C# errors are fixed.";
     } else {
-      // Only package/assembly issues. Find the worst kind for the headline.
+      // Only package/assembly issues. Pick the headline by the worst kind.
+      // Editor fd-exhaustion is checked first — it is a hard, non-code failure
+      // (the Editor is hung) whose fix (restart Unity) is different from every
+      // other kind, so it must not be masked by a "packages need attention"
+      // headline when it co-occurs with milder package notices.
+      const hasFdExhaustion = issues.some(
+        (i) => i.kind === "editor_fd_exhaustion",
+      );
       const hasAsmRes = issues.some((i) => i.kind === "assembly_resolution");
-      if (hasAsmRes) {
+      if (hasFdExhaustion) {
+        headline =
+          "Editor hung on file-descriptor exhaustion (internal Unity/Mono " +
+          "limit hit during the build driver), NOT a compile error — there " +
+          "is no C# to fix. Restart Unity to recover; the bridge reconnects " +
+          "on relaunch.";
+      } else if (hasAsmRes) {
         headline =
           `${issues.length} package/assembly issue(s) detected, including ` +
           "unresolved assembly references — a package version is likely " +
