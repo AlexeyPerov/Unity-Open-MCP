@@ -240,6 +240,16 @@ Three constraints apply specifically to the `compile-reload` class — internali
 
 A tool can carry a secondary concern in `lifecycleNote` (e.g. `build_start` is `modal-dialog` and notes its secondary `scene-dirty` concern; `package_add` is `compile-reload` and notes the rare project-upgrade modal). Read the note when present.
 
+### Scene identity (path-first)
+
+The scene mutators `scene_set_active`, `scene_unload`, and `scene_save`, plus the read `scene_get_data`, identify an opened scene by **asset path first, display name second**. Agents should prefer `path` (e.g. `Assets/Scenes/Foo.unity`) — it is the authoritative identity for an asset-centric MCP and is unaffected by Unity's transient in-memory scene names.
+
+- `scene_set_active` / `scene_unload` — provide `path` to resolve by asset path, or `name` to resolve by display name. When both are supplied, **`path` wins** and `name` is ignored. If neither resolves an opened scene, the call returns `scene_not_found` naming whichever key(s) you supplied.
+- `scene_save` — `path` is dual-purpose: when it matches an opened scene's asset path it selects that scene and saves it back to its own path (path-as-identity); when it does not match an opened scene it is a save-as destination for the active (or `name`-selected) scene and must end with `.unity`. `name` always selects an opened scene by display name when supplied.
+- `scene_get_data` — `path` resolves by asset path (takes precedence); `name` is the fallback; omit both to read the active scene.
+
+**Name sync after `scene_create`.** `scene_create` syncs the in-memory scene name to the asset filename stem after saving, so a subsequent name-only `scene_set_active` / `scene_save` / `scene_unload` by the stem resolves without a separate `scene_open`. This is complementary hardening — prefer `path` for robustness, but name-only flows no longer silently drift after create.
+
 ## Batch support notes
 
 Batch is intended for non-interactive scenarios and fallback operation.

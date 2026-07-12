@@ -2,14 +2,23 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 // M16 Plan 3 — typed scene save. Mutating: writes an opened scene back to
 // its .unity asset (or a new path). Runs the full gate path.
+//
+// Scene identity + destination: `path` does double duty. When it matches an
+// opened scene's asset path, it selects that scene and saves it back to its
+// own path (path-as-identity). When it does NOT match an opened scene, it is a
+// save-as destination for the active (or `name`-selected) scene. `name`
+// always selects an opened scene by display name when supplied.
 export const sceneSave: Tool = {
   name: "unity_open_mcp_scene_save",
   description:
     "Save an opened scene back to its asset file, or to a new `.unity` path when `path` is " +
     "provided. Mutating: runs the full gate path; `paths_hint` should be the destination `.unity` " +
-    "asset path. When `name` is omitted, saves the active scene. Returns { saved, name, path } " +
-    "with `saved: false` and a note when the scene was not dirty (idempotent). Prefer this over " +
-    "raw execute_csharp EditorSceneManager.SaveScene.",
+    "asset path. When `name` is omitted, saves the active scene. `path` is dual-purpose: when it " +
+    "matches an opened scene's asset path it selects that scene and saves it back to its own " +
+    "path (path-as-identity); otherwise it is a save-as destination for the active or " +
+    "`name`-selected scene. Returns { saved, name, path } with `saved: false` and a note when the " +
+    "scene was not dirty (idempotent). Prefer this over raw execute_csharp " +
+    "EditorSceneManager.SaveScene.",
   inputSchema: {
     type: "object",
     required: ["paths_hint"],
@@ -23,8 +32,10 @@ export const sceneSave: Tool = {
       path: {
         type: "string",
         description:
-          "Optional destination `.unity` asset path (save-as). Omit to save back to the scene's " +
-          "existing path. When provided, must end with '.unity'.",
+          "Dual-purpose. When it matches an opened scene's asset path (e.g. " +
+          "'Assets/Scenes/Foo.unity'), it selects that scene and saves it back to its own path " +
+          "(path-as-identity). When it does not match an opened scene, it is a save-as destination " +
+          "for the active or `name`-selected scene and must end with '.unity'.",
       },
       paths_hint: {
         type: "array",

@@ -82,6 +82,16 @@ namespace UnityOpenMcpBridge.TypedTools
 
             AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
 
+            // After SaveScene the in-memory scene name should match the asset
+            // filename stem, but in some Unity versions/additive paths the
+            // scene.name can lag the on-disk asset (staying "Untitled" or the
+            // previous name). Re-open the asset so the opened-scene stack
+            // reflects the saved name+path — subsequent name-only lookups then
+            // resolve reliably. This is the complementary hardening called out
+            // in the scene-path-identity plan: path-based lookup is primary,
+            // but name should not silently drift.
+            scene = SyncCreatedSceneName(scene, normalized);
+
             var sb = new StringBuilder(128);
             sb.Append("{\"status\":\"ok\",\"action\":\"created\",");
             sb.Append("\"scene\":").Append(BuildSceneShallow(scene)).Append('}');
@@ -127,14 +137,42 @@ namespace UnityOpenMcpBridge.TypedTools
             var name = JsonBody.GetString(body, "name");
             var destPath = JsonBody.GetString(body, "path");
 
+            // Scene identity: `name` selects an opened scene; `path` is
+            // primarily the save-as destination, but when it matches an opened
+            // scene's asset path it also disambiguates identity (the common
+            // "save this exact opened scene" case). Precedence:
+            //   1. name resolves  → use that scene (path, if any, is save-as dest)
+            //   2. path resolves to an opened scene → use that scene, save to its own path
+            //      (path-as-identity: destPath is treated as identity, not a new dest)
+            //   3. path does not match an opened scene + no name → active scene, save-as to destPath
+            //   4. neither → active scene
             Scene scene;
-            if (string.IsNullOrEmpty(name))
+            bool pathIsIdentity = false;
+            if (!string.IsNullOrWhiteSpace(name))
             {
-                scene = SceneManager.GetActiveScene();
+                scene = ResolveOpenedByName(name);
+            }
+            else if (!string.IsNullOrWhiteSpace(destPath))
+            {
+                // path could be identity (an opened scene's asset path) or a
+                // save-as destination for the active scene. Resolve identity
+                // first; if it hits, the save goes back to that scene's own
+                // path unless a separate save-as is intended (callers pass name
+                // for that disambiguation).
+                var byPath = ResolveOpenedByPath(destPath);
+                if (byPath.IsValid() && byPath.isLoaded)
+                {
+                    scene = byPath;
+                    pathIsIdentity = true;
+                }
+                else
+                {
+                    scene = SceneManager.GetActiveScene();
+                }
             }
             else
             {
-                scene = ResolveOpenedByName(name);
+                scene = SceneManager.GetActiveScene();
             }
 
             if (!scene.IsValid() || !scene.isLoaded)
@@ -143,13 +181,24 @@ namespace UnityOpenMcpBridge.TypedTools
                         ? "No active loaded scene to save."
                         : $"No opened scene named '{name}'. Use unity_open_mcp_scene_list_opened to enumerate opened scenes.");
 
-            var savePath = string.IsNullOrEmpty(destPath) ? scene.path : NormalizeScenePath(destPath);
-            // NormalizeScenePath returns null for a path that does not end with
-            // '.unity' — that is an invalid_parameter, not a missing_parameter,
-            // so check it before the empty-path guard below.
-            if (destPath != null && savePath == null)
-                return ToolDispatchResult.Fail("invalid_parameter",
-                    $"'path' must end with '.unity': '{destPath}'.");
+            // Determine the actual write path. When path was identity (matched
+            // an opened scene), save back to that scene's own asset path —
+            // do NOT treat it as a save-as. Otherwise path is a save-as dest.
+            string savePath;
+            if (pathIsIdentity)
+            {
+                savePath = scene.path;
+            }
+            else
+            {
+                savePath = string.IsNullOrEmpty(destPath) ? scene.path : NormalizeScenePath(destPath);
+                // NormalizeScenePath returns null for a path that does not end
+                // with '.unity' — that is an invalid_parameter, not a
+                // missing_parameter, so check it before the empty-path guard.
+                if (destPath != null && savePath == null)
+                    return ToolDispatchResult.Fail("invalid_parameter",
+                        $"'path' must end with '.unity': '{destPath}'.");
+            }
             if (string.IsNullOrEmpty(savePath))
                 return ToolDispatchResult.Fail("missing_parameter",
                     $"Scene '{scene.name}' has no path. Provide 'path' (ending with '.unity') to save-as.");
@@ -194,21 +243,26 @@ namespace UnityOpenMcpBridge.TypedTools
         public static ToolDispatchResult Unload(string body)
         {
             var name = JsonBody.GetString(body, "name");
-            if (string.IsNullOrWhiteSpace(name))
+            var path = JsonBody.GetString(body, "path");
+            if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(path))
                 return ToolDispatchResult.Fail("missing_parameter",
-                    "'name' is required and must be a non-empty string.");
+                    "Either 'name' or 'path' is required to identify the scene. " +
+                    "Use unity_open_mcp_scene_list_opened to enumerate opened scenes.");
 
-            var scene = ResolveOpenedByName(name);
+            var scene = ResolveOpenedForMutator(name, path, out var resolvedBy);
             if (!scene.IsValid() || !scene.isLoaded)
                 return ToolDispatchResult.Fail("scene_not_found",
-                    $"No opened scene named '{name}'. Use unity_open_mcp_scene_list_opened to enumerate opened scenes.");
+                    BuildSceneNotFoundMessage(name, path));
+
+            var subject = !string.IsNullOrWhiteSpace(scene.name) ? scene.name
+                : (!string.IsNullOrWhiteSpace(path) ? path : name);
 
             // Refuse to unload the last loaded scene — Unity leaves the editor
             // in an awkward state (no active scene). The agent should open a
             // replacement first.
             if (CountOpenedScenes() <= 1)
                 return ToolDispatchResult.Fail("invalid_parameter",
-                    $"Cannot unload '{name}': it is the only opened scene. Open another scene first.");
+                    $"Cannot unload '{subject}': it is the only opened scene. Open another scene first.");
 
             // EditorSceneManager.UnloadSceneAsync returns AsyncOperation (Unity
             // 6+; it returned bool in older versions). The editor unload is
@@ -222,31 +276,36 @@ namespace UnityOpenMcpBridge.TypedTools
                 var op = EditorSceneManager.UnloadSceneAsync(scene);
                 if (op == null)
                     return ToolDispatchResult.Fail("unload_failed",
-                        $"EditorSceneManager.UnloadSceneAsync returned null for '{name}'.");
+                        $"EditorSceneManager.UnloadSceneAsync returned null for '{subject}'.");
             }
             catch (System.Exception e)
             {
                 return ToolDispatchResult.Fail("unload_failed", e.Message);
             }
 
-            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("unloaded", name));
+            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("unloaded", subject));
         }
 
         public static ToolDispatchResult SetActive(string body)
         {
             var name = JsonBody.GetString(body, "name");
-            if (string.IsNullOrWhiteSpace(name))
+            var path = JsonBody.GetString(body, "path");
+            if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(path))
                 return ToolDispatchResult.Fail("missing_parameter",
-                    "'name' is required and must be a non-empty string.");
+                    "Either 'name' or 'path' is required to identify the scene. " +
+                    "Use unity_open_mcp_scene_list_opened to enumerate opened scenes.");
 
-            var scene = ResolveOpenedByName(name);
+            var scene = ResolveOpenedForMutator(name, path, out var resolvedBy);
             if (!scene.IsValid() || !scene.isLoaded)
                 return ToolDispatchResult.Fail("scene_not_found",
-                    $"No opened scene named '{name}'. The scene must be opened first (unity_open_mcp_scene_open).");
+                    BuildSceneNotFoundMessage(name, path));
+
+            var subject = !string.IsNullOrWhiteSpace(scene.name) ? scene.name
+                : (!string.IsNullOrWhiteSpace(path) ? path : name);
 
             // Idempotent: a no-op when the scene is already active.
             if (EditorSceneManager.GetActiveScene() == scene)
-                return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("set_active_noop", name));
+                return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("set_active_noop", subject));
 
             bool ok;
             try
@@ -259,9 +318,9 @@ namespace UnityOpenMcpBridge.TypedTools
             }
             if (!ok)
                 return ToolDispatchResult.Fail("set_active_failed",
-                    $"EditorSceneManager.SetActiveScene returned false for '{name}'.");
+                    $"EditorSceneManager.SetActiveScene returned false for '{subject}'.");
 
-            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("set_active", name));
+            return ToolDispatchResult.Ok(BuildOpenedScenesEnvelope("set_active", subject));
         }
 
         // --------------------------- reads ---------------------------------
@@ -304,21 +363,22 @@ namespace UnityOpenMcpBridge.TypedTools
         public static ToolDispatchResult GetData(string body)
         {
             var name = JsonBody.GetString(body, "name");
+            var path = JsonBody.GetString(body, "path");
             Scene scene;
-            if (string.IsNullOrEmpty(name))
+            if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(path))
             {
                 scene = SceneManager.GetActiveScene();
             }
             else
             {
-                scene = ResolveOpenedByName(name);
+                scene = ResolveOpenedForMutator(name, path, out _);
             }
 
             if (!scene.IsValid() || !scene.isLoaded)
                 return ToolDispatchResult.Fail("scene_not_found",
-                    string.IsNullOrEmpty(name)
+                    (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(path))
                         ? "No active loaded scene."
-                        : $"No opened scene named '{name}'.");
+                        : BuildSceneNotFoundMessage(name, path));
 
             var detail = ParseDetail(JsonBody.GetString(body, "detail"), DetailLevel.Summary);
             int depth = JsonBody.GetInt(body, "depth", 3);
@@ -804,12 +864,108 @@ namespace UnityOpenMcpBridge.TypedTools
 
         private static Scene ResolveOpenedByName(string name)
         {
+            if (string.IsNullOrEmpty(name)) return new Scene();
             for (int i = 0; i < SceneManager.sceneCount; i++)
             {
                 var s = SceneManager.GetSceneAt(i);
                 if (s.isLoaded && s.name == name) return s;
             }
             return new Scene();
+        }
+
+        // Resolve an opened scene by its asset path. `rawPath` is normalized
+        // the same way NormalizeScenePath normalizes create/open paths
+        // (backslashes → '/', trim). An empty/untitled scene has path == "",
+        // so it will never match a caller-supplied path — that is intentional:
+        // path identity is asset-centric and only matches asset-backed scenes.
+        // Comparison is case-insensitive on the normalized path to tolerate
+        // capitalization drift across platforms.
+        private static Scene ResolveOpenedByPath(string rawPath)
+        {
+            if (string.IsNullOrWhiteSpace(rawPath)) return new Scene();
+            var normalized = rawPath.Replace('\\', '/').Trim();
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var s = SceneManager.GetSceneAt(i);
+                if (!s.isLoaded || string.IsNullOrEmpty(s.path)) continue;
+                var scenePath = s.path.Replace('\\', '/').Trim();
+                if (string.Equals(scenePath, normalized, System.StringComparison.OrdinalIgnoreCase))
+                    return s;
+            }
+            return new Scene();
+        }
+
+        // Unified identity resolver for the name-only mutators (set_active,
+        // unload). Precedence: `path` wins when supplied and resolves to an
+        // opened scene; `name` is the fallback. When both are supplied and
+        // `path` resolves, the name is ignored (path is the authoritative
+        // identity for an asset-centric MCP). outResolvedBy reports which key
+        // resolved so callers can build precise error messages / subjects.
+        private enum SceneIdentity { None, ByPath, ByName, Active }
+
+        private static Scene ResolveOpenedForMutator(string name, string path, out SceneIdentity resolvedBy)
+        {
+            resolvedBy = SceneIdentity.None;
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                var byPath = ResolveOpenedByPath(path);
+                if (byPath.IsValid() && byPath.isLoaded)
+                {
+                    resolvedBy = SceneIdentity.ByPath;
+                    return byPath;
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                var byName = ResolveOpenedByName(name);
+                if (byName.IsValid() && byName.isLoaded)
+                {
+                    resolvedBy = SceneIdentity.ByName;
+                    return byName;
+                }
+            }
+            return new Scene();
+        }
+
+        // After scene_create saves the asset, the in-memory scene name can lag
+        // the filename stem (staying "Untitled" or the pre-save name). Re-open
+        // the saved asset so the opened-scene stack reflects the saved name +
+        // path; subsequent name-only lookups then resolve reliably. We avoid
+        // re-opening when the scene is already correctly named+pathed (common
+        // case) and when the mode is Single (the scene is already the only
+        // opened scene and SaveScene has named it). Returns the (possibly
+        // refreshed) scene handle.
+        //
+        // Note: Scene structs are value-type snapshots captured at resolution
+        // time; after SaveScene the captured `scene` may report a stale name,
+        // so we re-resolve from the opened stack by path.
+        private static Scene SyncCreatedSceneName(Scene scene, string assetPath)
+        {
+            var refreshed = ResolveOpenedByPath(assetPath);
+            if (refreshed.IsValid() && refreshed.isLoaded)
+                return refreshed;
+            // Fallback: the scene is in the stack but its path field hasn't
+            // populated yet (rare). Return the original handle.
+            return scene;
+        }
+
+        // Build a precise scene_not_found message that names whichever
+        // identity key(s) the caller supplied, and points at list_opened for
+        // discovery. Precedence note: when both name+path are supplied and the
+        // path does not resolve, we report the path (the authoritative key)
+        // and mention the name so the agent can tell which key missed.
+        private static string BuildSceneNotFoundMessage(string name, string path)
+        {
+            var hasName = !string.IsNullOrWhiteSpace(name);
+            var hasPath = !string.IsNullOrWhiteSpace(path);
+            if (hasPath && hasName)
+                return $"No opened scene matching path '{path}' or name '{name}'. " +
+                       "Use unity_open_mcp_scene_list_opened to enumerate opened scenes.";
+            if (hasPath)
+                return $"No opened scene at path '{path}'. " +
+                       "Use unity_open_mcp_scene_list_opened to enumerate opened scenes.";
+            return $"No opened scene named '{name}'. " +
+                   "Use unity_open_mcp_scene_list_opened to enumerate opened scenes.";
         }
 
         private static int CountOpenedScenes()

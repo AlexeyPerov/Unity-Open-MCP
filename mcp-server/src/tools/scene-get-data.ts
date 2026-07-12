@@ -16,16 +16,25 @@ export const sceneGetData: Tool = {
     "`profile: 'full'` adds per-node transform (position/rotation/scale) and instance_id so the " +
     "agent can chain gameobject_modify / component_modify without an extra lookup. " +
     "Page large hierarchies with page_size/cursor. " +
+    "Scene identity is path-first: provide `path` to resolve an opened scene by its asset path, " +
+    "or `name` to resolve by display name; when both are supplied, `path` wins. " +
     "Use scene_list_opened to enumerate scenes. Prefer this over read_asset on the .unity file " +
     "(which is YAML-heavy and does not reflect unsaved editor state).",
   inputSchema: {
     type: "object",
     properties: {
+      path: {
+        type: "string",
+        description:
+          "Opened scene asset path (e.g. 'Assets/Scenes/Foo.unity') to read. Resolves the scene " +
+          "by its asset path — the authoritative identity. When supplied, takes precedence over " +
+          "`name`. Omit (and omit `name`) to read the active scene.",
+      },
       name: {
         type: "string",
         description:
-          "Opened scene name. Omit (or empty) to read the active scene. Use scene_list_opened " +
-          "to enumerate opened scene names.",
+          "Opened scene name (fallback when `path` is not supplied). Omit (and omit `path`) to " +
+          "read the active scene. Use scene_list_opened to enumerate opened scene names.",
       },
       profile: {
         enum: ["compact", "balanced", "full"],
