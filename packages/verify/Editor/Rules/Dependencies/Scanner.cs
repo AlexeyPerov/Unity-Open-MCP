@@ -115,6 +115,11 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
         // DFS over the scoped forward graph; a back-edge into the current recursion
         // stack marks a cycle. We only follow edges whose target is itself in scope
         // (cycles through unscoped assets are not actionable from a paths_hint view).
+        //
+        // Cycle attribution: when a cycle A→B→C→A is detected at C (the back-edge
+        // node), the cycle is added to EVERY node on the cycle (A, B, C), not just
+        // C. Previously only C received a dependency_cycle issue — an agent
+        // inspecting A or B missed the cycle entirely.
         private static void DetectCycles(Dictionary<string, AssetDependencyData> byPath, HashSet<string> scoped)
         {
             var visited = new HashSet<string>(StringComparer.Ordinal);
@@ -135,7 +140,16 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
                     {
                         var cycle = ExtractCycle(pathStack, dep);
                         if (cycle.Count > 0)
-                            data.CyclesThrough.Add(cycle);
+                        {
+                            // Attribute the cycle to every node on the cycle
+                            // path (excluding the trailing repeat of the entry
+                            // node that ExtractCycle appends).
+                            for (var ci = 0; ci < cycle.Count - 1; ci++)
+                            {
+                                if (byPath.TryGetValue(cycle[ci], out var cycleNodeData))
+                                    cycleNodeData.CyclesThrough.Add(cycle);
+                            }
+                        }
                         continue;
                     }
                     Dfs(dep);

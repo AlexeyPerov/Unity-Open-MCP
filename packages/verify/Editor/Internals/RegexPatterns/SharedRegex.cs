@@ -5,7 +5,7 @@ namespace UnityOpenMcpVerify.Internals.RegexPatterns
     public static class SharedRegex
     {
         public static readonly Regex ExternalFileAndGuid = new Regex(
-            @"fileID: (\d+), guid: ([a-f0-9]{32})",
+            @"fileID: (\d+), guid: ([a-fA-F0-9]{32})",
             RegexOptions.Compiled);
 
         public static readonly Regex LocalFileId = new Regex(
@@ -25,7 +25,7 @@ namespace UnityOpenMcpVerify.Internals.RegexPatterns
             RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
         public static readonly Regex ScriptGuid = new Regex(
-            @"m_Script:\s*\{fileID:\s*\d+,\s*guid:\s*([a-f0-9]{32})",
+            @"m_Script:\s*\{fileID:\s*\d+,\s*guid:\s*([a-fA-F0-9]{32})",
             RegexOptions.Compiled);
 
         public static readonly Regex LayerIndex = new Regex(

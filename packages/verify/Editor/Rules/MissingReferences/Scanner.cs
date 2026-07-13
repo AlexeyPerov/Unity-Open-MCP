@@ -146,10 +146,18 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             foreach (var registry in refsData.LocalReferences)
             {
                 var usages = 0;
+                // Match the fileID as a YAML reference token, not a bare
+                // substring. The old `lines[j].Contains(registry.IdStr)` matched
+                // "123" inside "114123456", inside GUIDs, anywhere on the line —
+                // inflating LocalUsagesCount and causing false negatives for
+                // genuinely-missing local fileIDs. The reference form is
+                // `fileID: <id>`; anchor to the key + word boundary so only the
+                // exact ID token is counted.
+                var pattern = new Regex(@"fileID:\s*" + Regex.Escape(registry.IdStr) + @"\b");
                 for (var j = 0; j < lines.Length; j++)
                 {
                     if (j == registry.Line) continue;
-                    if (lines[j].Contains(registry.IdStr)) usages++;
+                    if (pattern.IsMatch(lines[j])) usages++;
                 }
                 registry.LocalUsagesCount = usages;
             }
@@ -390,7 +398,12 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                 var match = SharedRegex.LayerIndex.Match(lines[i]);
                 if (!match.Success) continue;
 
-                var layerIndex = int.Parse(match.Groups[1].Value);
+                // int.TryParse instead of int.Parse — a corrupted m_Layer value
+                // exceeding int.MaxValue (e.g. 99999999999) must not throw and
+                // abort missing_references for all remaining assets. Skip the
+                // line on parse failure; the regex already validated digits-only.
+                if (!int.TryParse(match.Groups[1].Value, out var layerIndex))
+                    continue;
                 if (!validLayers.Contains(layerIndex))
                     refsData.InvalidLayers.Add(new InvalidLayerEntry(layerIndex, i));
             }

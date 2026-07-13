@@ -448,12 +448,20 @@ namespace UnityOpenMcpVerify.Batch
 
         #region Output helpers
 
-        private static string ResolveProjectPath(string relativeOrAbsolute)
+        internal static string ResolveProjectPath(string relativeOrAbsolute)
         {
             if (Path.IsPathRooted(relativeOrAbsolute))
                 return relativeOrAbsolute;
 
-            var projectRoot = Application.dataPath.Replace("/Assets", "");
+            // Directory.GetParent(dataPath) is the project root — the same
+            // pattern ApplyFixGateRunner.PredictTouchedPaths uses. The old
+            // `.Replace("/Assets", "")` replaced ALL occurrences of "/Assets"
+            // in the path, corrupting project paths like
+            // "/Users/MyAssets/Projects/MyGame/Assets" into
+            // "/Users/My/Projects/MyGame".
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            if (string.IsNullOrEmpty(projectRoot))
+                projectRoot = Application.dataPath;
             return Path.Combine(projectRoot, relativeOrAbsolute);
         }
 

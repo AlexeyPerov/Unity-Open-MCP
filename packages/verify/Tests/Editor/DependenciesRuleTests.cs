@@ -170,8 +170,9 @@ namespace UnityOpenMcpVerify.Tests
             var knownCodes = new HashSet<string> { "broken_dependency", "dependency_cycle" };
             foreach (var issue in sink)
             {
-                CollectionAssert.Contains(knownCodes, issue.IssueCode,
-                    $"Issue code '{issue.IssueCode}' must be a known Dependencies code");
+                var bareCode = IssueKey.BareIssueCode(issue.IssueCode);
+                CollectionAssert.Contains(knownCodes, bareCode,
+                    $"Issue code '{issue.IssueCode}' (bare: '{bareCode}') must be a known Dependencies code");
             }
         }
 

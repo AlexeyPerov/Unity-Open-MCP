@@ -6,11 +6,46 @@ namespace UnityOpenMcpVerify.Internals.AssetDatabase
 {
     public static class PathFilterUtilities
     {
+        // A filter matches a path when:
+        //   1. The filter equals a path SEGMENT (case-insensitive) — e.g. filter
+        //      "Art" matches "Assets/Art/Textures/x.mat" because "Art" is a
+        //      segment, but NOT "Assets/Party/x.mat" (no "Art" segment).
+        //   2. The path starts with the filter as a prefix followed by a
+        //      separator — e.g. filter "Assets/Art" matches
+        //      "Assets/Art/Textures/x.mat".
+        //   3. The path equals the filter exactly (case-insensitive).
+        // The old substring match (`path.IndexOf(filter) >= 0`) matched "Art"
+        // inside "Assets/Party/..." — a false positive that inflated filtered
+        // sets and mis-scoped scans.
         public static bool PathMatchesFilter(string path, string filter)
         {
             if (string.IsNullOrEmpty(filter))
                 return true;
-            return path.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+            if (string.IsNullOrEmpty(path))
+                return false;
+
+            // Normalize separators so the logic works cross-platform.
+            var normPath = path.Replace('\\', '/');
+            var normFilter = filter.Replace('\\', '/');
+
+            // Exact match.
+            if (normPath.Equals(normFilter, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Prefix match — filter is a directory prefix.
+            if (normPath.StartsWith(normFilter + "/", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Segment match — the filter is a single path segment that appears
+            // as a complete directory/file name in the path.
+            var segments = normPath.Split('/');
+            for (var i = 0; i < segments.Length; i++)
+            {
+                if (segments[i].Equals(normFilter, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            return false;
         }
 
         public static List<System.Text.RegularExpressions.Regex> CompilePatterns(List<string> patterns)
