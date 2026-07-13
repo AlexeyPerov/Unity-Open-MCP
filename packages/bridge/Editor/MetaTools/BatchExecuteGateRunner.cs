@@ -51,13 +51,15 @@ namespace UnityOpenMcpBridge.MetaTools
                 // outcome — a partial batch still produced side effects the
                 // operator may want to undo as a unit. GetCurrentGroup() may
                 // have advanced past groupBefore if nested tools incremented
-                // it; collapse from groupBefore to the current group.
+                // it; CollapseUndoOperations(g) folds everything ABOVE g down
+                // to g, so we pass groupBefore (the boundary captured before
+                // the batch) — passing groupAfter would collapse nothing.
                 try
                 {
                     int groupAfter = Undo.GetCurrentGroup();
                     if (groupAfter > groupBefore)
                     {
-                        Undo.CollapseUndoOperations(groupAfter);
+                        Undo.CollapseUndoOperations(groupBefore);
                     }
                     // Stamp the final group name so the Editor's Edit > Undo
                     // menu reads "Undo Open MCP Batch" (not a generic label).

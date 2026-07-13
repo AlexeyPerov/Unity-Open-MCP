@@ -113,10 +113,38 @@ namespace UnityOpenMcpBridge.TypedTools
             GameObject clone;
             try
             {
-                clone = Object.Instantiate(go, go.transform.parent, false);
+                // Prefab instances must clone via PrefabUtility.InstantiatePrefab —
+                // Object.Instantiate strips the prefab connection and produces a
+                // broken disconnected copy (PrefabTools.Instantiate uses the same
+                // API at PrefabTools.cs:49 as the reference). Re-apply the
+                // caller's local pose after InstantiatePrefab (it does not take a
+                // world pose), then place the clone next to the source (editor
+                // duplicate sibling-index semantics).
+                if (PrefabUtility.IsPartOfPrefabInstance(go))
+                {
+                    clone = PrefabUtility.InstantiatePrefab(go, go.transform.parent) as GameObject;
+                    if (clone == null)
+                        return ToolDispatchResult.Fail("duplicate_failed",
+                            "PrefabUtility.InstantiatePrefab returned null.");
+                }
+                else
+                {
+                    clone = Object.Instantiate(go, go.transform.parent, false);
+                }
                 // Name after Instantiate appends "(Clone)" — match editor
                 // duplicate semantics so the result name is stable.
                 clone.name = go.name;
+
+                // Re-apply the source's local transform so InstantiatePrefab
+                // (which takes no pose) lands the clone at the same local pose.
+                var srcT = go.transform;
+                clone.transform.localPosition = srcT.localPosition;
+                clone.transform.localRotation = srcT.localRotation;
+                clone.transform.localScale = srcT.localScale;
+
+                // Editor duplicate places the clone immediately after the source
+                // rather than at the parent end.
+                clone.transform.SetSiblingIndex(srcT.GetSiblingIndex() + 1);
             }
             catch (System.Exception e)
             {
@@ -628,8 +656,15 @@ namespace UnityOpenMcpBridge.TypedTools
                 walker = walker.parent;
             }
 
-            Undo.SetTransformParent(go.transform, parentGo.transform, "MCP Set Parent");
-            go.transform.SetParent(parentGo.transform, worldPositionStays);
+            // Reparent exactly once, honoring the caller's worldPositionStays.
+            // The Undo.SetTransformParent overload that takes worldPositionStays
+            // (2021.3+) records the undo snapshot in the FINAL pose, so a later
+            // Ctrl+Z restores the true pre-parent world transform. Calling
+            // SetTransformParent then SetParent would move the transform twice;
+            // with worldPositionStays=false the undo snapshot captured the
+            // wrong pose (the true/intermediate one) but the live state used
+            // false — Ctrl+Z then restored a pose the object never had.
+            Undo.SetTransformParent(go.transform, parentGo.transform, worldPositionStays, "MCP Set Parent");
 
             EditorUtility.SetDirty(go);
             MarkActiveSceneDirty();

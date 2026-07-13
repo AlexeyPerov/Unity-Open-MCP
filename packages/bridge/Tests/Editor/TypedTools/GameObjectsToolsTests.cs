@@ -1,5 +1,6 @@
 #pragma warning disable CS0618
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge.TypedTools;
 using UnityOpenMcpBridge.ObjectRefs;
@@ -446,6 +447,186 @@ namespace UnityOpenMcpBridge.Tests
             {
                 Object.DestroyImmediate(parent);
                 Object.DestroyImmediate(child);
+            }
+        }
+
+        // ---- T1.2 — reparent exactly once, honoring world_position_stays ----
+
+        // world_position_stays:false keeps the child's LOCAL pose, so parenting
+        // under a non-origin parent changes the WORLD position. We capture the
+        // pre-parent world transform and assert the reparent honored `false`.
+        [Test]
+        public void SetParent_WorldPositionStaysFalse_KeepsLocalPose()
+        {
+            var parent = new GameObject("__MCPTest_GO_WPS_Parent");
+            parent.transform.position = new Vector3(10, 0, 0);
+            var child = new GameObject("__MCPTest_GO_WPS_Child");
+            child.transform.position = new Vector3(5, 0, 0);
+            try
+            {
+                var result = GameObjectsTools.SetParent(
+                    "{\"instance_id\":" +InstanceId.Of(child) +
+                    ",\"parent_instance_id\":" +InstanceId.Of(parent) +
+                    ",\"world_position_stays\":false}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.AreEqual(parent.transform, child.transform.parent);
+                // local pose preserved: localPos stays (5,0,0) even though
+                // parent moved the world origin to (10,0,0). World is now (15,0,0).
+                Assert.AreEqual(new Vector3(5, 0, 0), child.transform.localPosition);
+                Assert.AreEqual(new Vector3(15, 0, 0), child.transform.position);
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+                Object.DestroyImmediate(child);
+            }
+        }
+
+        // The bug: SetTransformParent (true) + SetParent(false) moved the
+        // transform twice, and the undo snapshot captured the wrong pose. After
+        // the fix (single call honoring worldPositionStays), Ctrl+Z restores the
+        // exact pre-parent WORLD transform even under world_position_stays:false.
+        [Test]
+        public void SetParent_WorldPositionStaysFalse_UndoRestoresPreParentWorldTransform()
+        {
+            var parent = new GameObject("__MCPTest_GO_WPSU_Parent");
+            parent.transform.position = new Vector3(100, 0, 0);
+            var child = new GameObject("__MCPTest_GO_WPSU_Child");
+            var preParentWorld = new Vector3(3, 4, 5);
+            child.transform.position = preParentWorld;
+            var preParentEuler = new Vector3(0, 45, 0);
+            child.transform.eulerAngles = preParentEuler;
+            try
+            {
+                var result = GameObjectsTools.SetParent(
+                    "{\"instance_id\":" +InstanceId.Of(child) +
+                    ",\"parent_instance_id\":" +InstanceId.Of(parent) +
+                    ",\"world_position_stays\":false}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+
+                // Reparent honored false → world pose changed (local preserved).
+                Assert.AreNotEqual(preParentWorld, child.transform.position);
+
+                Undo.PerformUndo();
+
+                // A single undo reverts the reparent and restores the exact
+                // pre-parent WORLD transform (position equality, not just
+                // "object moved"). Before the fix the undo snapshot held the
+                // true-pose intermediate, so this restoration was wrong.
+                Assert.IsNull(child.transform.parent, "undo should restore child to scene root (no parent)");
+                Assert.AreEqual(preParentWorld, child.transform.position,
+                    "undo must restore the exact pre-parent world position");
+                Assert.AreEqual(preParentEuler.y, child.transform.eulerAngles.y, 0.001f,
+                    "undo must restore the exact pre-parent world rotation");
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+                Object.DestroyImmediate(child);
+            }
+        }
+
+        // ---- T1.3 — duplicate preserves prefab-ness + sibling index --------
+
+        [Test]
+        public void Duplicate_PlainGameObject_SitsNextToSource()
+        {
+            var parent = new GameObject("__MCPTest_GO_DupSibling_Parent");
+            var a = new GameObject("__MCPTest_GO_DupSibling_A");
+            var b = new GameObject("__MCPTest_GO_DupSibling_B");
+            a.transform.SetParent(parent.transform, false);
+            b.transform.SetParent(parent.transform, false);
+            try
+            {
+                Assert.AreEqual(0, a.transform.GetSiblingIndex());
+                Assert.AreEqual(1, b.transform.GetSiblingIndex());
+
+                var result = GameObjectsTools.Duplicate(
+                    "{\"instance_id\":" +InstanceId.Of(a) + "}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+
+                // Two objects now share the name (clone strips "(Clone)"); find
+                // the one that sits at source.GetSiblingIndex()+1 (the clone).
+                var siblings = new System.Collections.Generic.List<GameObject>();
+                foreach (Transform t in parent.transform)
+                    if (t.gameObject.name == "__MCPTest_GO_DupSibling_A") siblings.Add(t.gameObject);
+                Assert.AreEqual(2, siblings.Count, "source + clone expected");
+
+                // The clone sits immediately after the source. Sort by sibling
+                // index so the lower one is the source, the higher one the clone.
+                siblings.Sort((x, y) => x.transform.GetSiblingIndex().CompareTo(y.transform.GetSiblingIndex()));
+                int srcIdx = siblings[0].transform.GetSiblingIndex();
+                int cloneIdx = siblings[1].transform.GetSiblingIndex();
+                Assert.AreEqual(srcIdx + 1, cloneIdx,
+                    "clone sibling index must be immediately after the source");
+                Assert.AreEqual(parent.transform, siblings[1].transform.parent,
+                    "clone stays under the same parent");
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+            }
+        }
+
+        [Test]
+        public void Duplicate_PrefabInstance_KeepsPrefabConnection()
+        {
+            const string TmpDir = "Assets/TmpDupTests";
+            const string PrefabPath = TmpDir + "/DupSourcePrefab.prefab";
+            // Clean slate.
+            if (AssetDatabase.LoadMainAssetAtPath(PrefabPath) != null)
+                AssetDatabase.DeleteAsset(PrefabPath);
+            if (AssetDatabase.IsValidFolder(TmpDir))
+                AssetDatabase.DeleteAsset(TmpDir);
+            AssetDatabase.CreateFolder("Assets", "TmpDupTests");
+
+            GameObject instance = null;
+            try
+            {
+                // Build a throwaway prefab + a connected instance in-scene.
+                var prefabSrc = new GameObject("DupSourcePrefab");
+                prefabSrc.AddComponent<MeshRenderer>();
+                PrefabUtility.SaveAsPrefabAsset(prefabSrc, PrefabPath);
+                Object.DestroyImmediate(prefabSrc);
+
+                var prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
+                Assert.IsNotNull(prefabAsset, "prefab asset must exist after SaveAsPrefabAsset");
+                instance = PrefabUtility.InstantiatePrefab(prefabAsset) as GameObject;
+                Assert.AreEqual(PrefabInstanceStatus.Connected,
+                    PrefabUtility.GetPrefabInstanceStatus(instance),
+                    "sanity: source instance must be Connected before duplicate");
+
+                var result = GameObjectsTools.Duplicate(
+                    "{\"instance_id\":" +InstanceId.Of(instance) + "}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+
+                // Find the clone: two objects named DupSourcePrefab now exist
+                // (source + clone share the name because we strip "(Clone)").
+                var matches = new System.Collections.Generic.List<GameObject>();
+                foreach (var go in Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include))
+                    if (go.name == "DupSourcePrefab") matches.Add(go);
+                Assert.AreEqual(2, matches.Count, "source + clone expected");
+
+                GameObject clone = null;
+                foreach (var go in matches)
+                {
+                    if (go == instance) continue;
+                    clone = go;
+                    break;
+                }
+                Assert.IsNotNull(clone, "clone must exist alongside the source");
+                Assert.AreEqual(PrefabInstanceStatus.Connected,
+                    PrefabUtility.GetPrefabInstanceStatus(clone),
+                    "duplicate of a prefab instance must stay Connected to the prefab asset");
+            }
+            finally
+            {
+                if (instance != null) Object.DestroyImmediate(instance);
+                // Destroy any leftover clones.
+                foreach (var go in Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include))
+                    if (go != null && go.name == "DupSourcePrefab") Object.DestroyImmediate(go);
+                if (AssetDatabase.IsValidFolder(TmpDir))
+                    AssetDatabase.DeleteAsset(TmpDir);
             }
         }
 

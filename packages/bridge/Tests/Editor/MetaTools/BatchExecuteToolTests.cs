@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge.MetaTools;
 
@@ -197,6 +198,81 @@ namespace UnityOpenMcpBridge.Tests
             // The success step carries the nested tool's output (instanceId etc.).
             StringAssert.Contains("\"output\":{", result.Output);
             StringAssert.Contains("\"instanceId\":", result.Output);
+        }
+
+        // -------------------------------------------------------------------
+        // T1.1 — BatchExecuteGateRunner collapses the whole batch into ONE undo
+        // step. Pre-fix the collapse passed groupAfter (the latest group), which
+        // collapses nothing; post-fix it passes groupBefore so a single Ctrl+Z
+        // reverts the entire batch.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void GateRunner_TwoSteps_CollapseToSingleUndoEntry()
+        {
+            // Drive the runner with gate:"off" so the gate cycle short-circuits
+            // and we isolate the undo-group behavior. The runner's finally block
+            // (the collapse) runs regardless of the gate decision.
+            var body = "{\"commands\":[" +
+                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"" + CleanupPrefix + "UndoA\"}}," +
+                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"" + CleanupPrefix + "UndoB\"}}" +
+                       "]}";
+
+            GameObject objA = null, objB = null;
+            try
+            {
+                var result = BatchExecuteGateRunner.Execute(body, "off",
+                    new[] { "Assets/__BatchUndoTest.unity" });
+                Assert.IsTrue(result.Mutation.Success, result.Mutation.ErrorMessage);
+
+                objA = GameObject.Find(CleanupPrefix + "UndoA");
+                objB = GameObject.Find(CleanupPrefix + "UndoB");
+                Assert.IsNotNull(objA, "step 1 must create UndoA");
+                Assert.IsNotNull(objB, "step 2 must create UndoB");
+
+                // A single undo must revert the WHOLE batch (both creates),
+                // proving the per-step undos were collapsed into one entry.
+                Undo.PerformUndo();
+
+                Assert.IsNull(GameObject.Find(CleanupPrefix + "UndoA"),
+                    "one undo must revert UndoA (collapsed batch)");
+                Assert.IsNull(GameObject.Find(CleanupPrefix + "UndoB"),
+                    "one undo must revert UndoB (collapsed batch)");
+
+                // Mark null so TearDown / finally does not double-destroy.
+                objA = null;
+                objB = null;
+            }
+            finally
+            {
+                if (objA != null) Object.DestroyImmediate(objA);
+                if (objB != null) Object.DestroyImmediate(objB);
+            }
+        }
+
+        [Test]
+        public void GateRunner_NoOpBatch_DoesNotCollapse()
+        {
+            // A batch that produces NO undo entries (read-only find) must not
+            // call CollapseUndoOperations — groupAfter == groupBefore, and the
+            // guard skips the collapse. We assert the guard holds by checking
+            // the undo group count does not decrease after the runner returns.
+            int groupBefore = Undo.GetCurrentGroup();
+
+            var body = "{\"commands\":[" +
+                       "{\"tool\":\"unity_open_mcp_gameobject_find\",\"params\":{\"name\":\"" + CleanupPrefix + "NoopFind\"}}" +
+                       "]}";
+
+            var result = BatchExecuteGateRunner.Execute(body, "off",
+                new[] { "Assets/__BatchUndoTest.unity" });
+            // Find on a non-existent name returns success with notFound.
+            Assert.IsTrue(result.Mutation.Success, result.Mutation.ErrorMessage);
+
+            int groupAfter = Undo.GetCurrentGroup();
+            // A no-op batch (no Undo.RegisterCreatedObjectUndo / RecordObject)
+            // leaves the group index unchanged → no collapse.
+            Assert.AreEqual(groupBefore, groupAfter,
+                "a read-only batch must not advance or collapse the undo group");
         }
 
         // -------------------------------------------------------------------

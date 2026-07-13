@@ -136,11 +136,22 @@ namespace UnityOpenMcpBridge.TypedTools
                 string errMsg = null;
                 try
                 {
-                    ok = op == "copy"
-                        ? AssetDatabase.CopyAsset(source, dest)
-                        : AssetDatabase.MoveAsset(source, dest) == "";
-                    if (!ok && op == "move")
-                        errMsg = AssetDatabase.MoveAsset(source, dest);
+                    if (op == "copy")
+                    {
+                        ok = AssetDatabase.CopyAsset(source, dest);
+                    }
+                    else
+                    {
+                        // Capture the move result EXACTLY ONCE. MoveAsset is not
+                        // idempotent: a second call is a fresh attempt that can
+                        // succeed/fail differently (or report "source not found"
+                        // if the first call actually moved it). Empty string →
+                        // success; non-empty → the error message from that one
+                        // call.
+                        var moveResult = AssetDatabase.MoveAsset(source, dest);
+                        ok = moveResult == "";
+                        if (!ok) errMsg = moveResult;
+                    }
                 }
                 catch (System.Exception e)
                 {
