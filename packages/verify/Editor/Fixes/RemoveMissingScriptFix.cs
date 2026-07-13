@@ -1,6 +1,8 @@
 using System.IO;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace UnityOpenMcpVerify.Fixes
 {
@@ -107,30 +109,71 @@ namespace UnityOpenMcpVerify.Fixes
 
         private static FixResult FixScene(string assetPath)
         {
-            var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(assetPath);
-            if (!scene.isLoaded)
+            // Mirror ScenePrefabHealth/Scanner.cs: open additively so we don't
+            // disrupt the editor's currently-active scene, and close what we
+            // opened in a finally block. A scene the user already had open
+            // stays open; a scene we opened ourselves is closed after the fix.
+            var wasOpen = false;
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+            {
+                if (SceneManager.GetSceneAt(i).path == assetPath)
+                {
+                    wasOpen = true;
+                    break;
+                }
+            }
+
+            Scene scene;
+            try
+            {
+                scene = wasOpen
+                    ? SceneManager.GetSceneByPath(assetPath)
+                    : EditorSceneManager.OpenScene(assetPath, OpenSceneMode.Additive);
+            }
+            catch (System.Exception e)
+            {
                 return new FixResult
                 {
                     Success = false,
-                    Description = $"Could not open scene at '{assetPath}'.",
+                    Description = $"Could not open scene at '{assetPath}': {e.Message}",
                     TouchedPaths = null
                 };
+            }
 
-            var totalRemoved = 0;
-            foreach (var root in scene.GetRootGameObjects())
-                totalRemoved += RemoveMissingScriptsRecursive(root);
-
-            if (totalRemoved > 0)
-                UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
-
-            return new FixResult
+            try
             {
-                Success = true,
-                Description = totalRemoved > 0
-                    ? $"Removed {totalRemoved} missing script component(s) from scene '{assetPath}'."
-                    : $"No missing script components found in scene '{assetPath}'.",
-                TouchedPaths = totalRemoved > 0 ? new[] { assetPath } : null
-            };
+                if (!scene.isLoaded)
+                    return new FixResult
+                    {
+                        Success = false,
+                        Description = $"Could not open scene at '{assetPath}'.",
+                        TouchedPaths = null
+                    };
+
+                var totalRemoved = 0;
+                foreach (var root in scene.GetRootGameObjects())
+                    totalRemoved += RemoveMissingScriptsRecursive(root);
+
+                if (totalRemoved > 0)
+                    EditorSceneManager.SaveScene(scene);
+
+                return new FixResult
+                {
+                    Success = true,
+                    Description = totalRemoved > 0
+                        ? $"Removed {totalRemoved} missing script component(s) from scene '{assetPath}'."
+                        : $"No missing script components found in scene '{assetPath}'.",
+                    TouchedPaths = totalRemoved > 0 ? new[] { assetPath } : null
+                };
+            }
+            finally
+            {
+                // Only close the scene if we opened it. A scene the user
+                // already had open must stay open (closing it would disrupt
+                // their editor state).
+                if (!wasOpen)
+                    EditorSceneManager.CloseScene(scene, true);
+            }
         }
 
         private static int RemoveMissingScriptsRecursive(GameObject go)

@@ -43,7 +43,7 @@ namespace UnityOpenMcpVerify.Tests
 
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
-            var broken = sink.FirstOrDefault(i => i.IssueCode == "broken_dependency");
+            var broken = sink.FirstOrDefault(i => i.IssueCode.StartsWith("broken_dependency"));
             Assert.IsNotNull(broken,
                 $"Expected 'broken_dependency' on BrokenRefFixture. " +
                 $"Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
@@ -71,7 +71,7 @@ namespace UnityOpenMcpVerify.Tests
 
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
-            var broken = sink.Where(i => i.IssueCode == "broken_dependency").ToList();
+            var broken = sink.Where(i => i.IssueCode.StartsWith("broken_dependency")).ToList();
             Assert.AreEqual(0, broken.Count,
                 $"HealthyFixture must not produce broken_dependency. " +
                 $"Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
@@ -92,7 +92,7 @@ namespace UnityOpenMcpVerify.Tests
 
             // Only the broken fixture should report issues.
             var brokenPaths = sink
-                .Where(i => i.IssueCode == "broken_dependency")
+                .Where(i => i.IssueCode.StartsWith("broken_dependency"))
                 .Select(i => i.AssetPath)
                 .Distinct()
                 .ToList();

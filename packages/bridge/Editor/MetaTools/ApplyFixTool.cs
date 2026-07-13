@@ -43,6 +43,20 @@ namespace UnityOpenMcpBridge.MetaTools
                 return ToolDispatchResult.Ok(BuildDryRunResult(desc));
             }
 
+            // Non-dry-run apply MUST run inside the gate runner so a FixRollback
+            // snapshot is active. Direct dispatch (e.g. batch_execute steps via
+            // DispatchTool, or gate=off) bypasses the runner and would apply a
+            // fix with no rollback — a corrupting fix would be permanent. The
+            // gate runner sets the ambient flag before calling this method.
+            if (!ApplyFixGateRunner.RollbackSnapshotActive)
+            {
+                return ToolDispatchResult.Fail("rollback_unavailable",
+                    "A non-dry-run apply_fix must run through the gate runner so a " +
+                    "rollback snapshot protects the asset. Use apply_fix as a top-level " +
+                    "call (not inside batch_execute) with gate != off, or use dry_run: true " +
+                    "to preview the fix without mutation.");
+            }
+
             FixResult result;
             try
             {

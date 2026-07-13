@@ -319,7 +319,11 @@ namespace UnityOpenMcpBridge
             // legacy delta keys (and older test fixtures) used UPPERCASE codes —
             // match case-insensitively so next-step guidance stays accurate
             // regardless of how the key was built.
-            var code = issueCode ?? "";
+            //
+            // Some codes carry a GUID suffix (e.g. "missing_guid:<guid>") so the
+            // fix provider can identify the exact broken reference. Strip it
+            // before comparing against the bare code.
+            var code = IssueKey.BareIssueCode(issueCode ?? "");
 
             if (categoryId == "missing_references" &&
                 code.Equals("missing_script", System.StringComparison.OrdinalIgnoreCase))

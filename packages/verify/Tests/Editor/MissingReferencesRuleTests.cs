@@ -209,12 +209,12 @@ namespace UnityOpenMcpVerify.Tests
                 var scope = new VerifyScope(new[] { prefabPath });
                 rule.Scan(scope, VerifyRunMode.Full, sink);
 
-                var hasMissingGuid = sink.Any(i => i.IssueCode == "missing_guid");
+                var hasMissingGuid = sink.Any(i => i.IssueCode.StartsWith("missing_guid"));
                 Assert.IsTrue(hasMissingGuid,
                     $"Expected 'missing_guid' for broken PPtr reference. " +
                     $"Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
 
-                var guidIssue = sink.First(i => i.IssueCode == "missing_guid");
+                var guidIssue = sink.First(i => i.IssueCode.StartsWith("missing_guid"));
                 Assert.AreEqual(VerifySeverity.Error, guidIssue.Severity,
                     "Broken PPtr reference must be Error severity");
             }
@@ -240,7 +240,7 @@ namespace UnityOpenMcpVerify.Tests
             var scope = new VerifyScope(new[] { prefabPath });
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
-            var hasMissingGuid = sink.Any(i => i.IssueCode == "missing_guid");
+            var hasMissingGuid = sink.Any(i => i.IssueCode.StartsWith("missing_guid"));
             Assert.IsFalse(hasMissingGuid,
                 "Valid PPtr reference must not produce missing_guid. " +
                 $"Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");

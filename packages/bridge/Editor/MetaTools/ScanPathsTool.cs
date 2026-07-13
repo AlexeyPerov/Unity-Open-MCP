@@ -90,7 +90,14 @@ namespace UnityOpenMcpBridge.MetaTools
                 // fixCandidates advertises every fix option (safe vs unsafe),
                 // superseding the single fixId/fixSafe pair below (kept for
                 // backwards compatibility).
-                if (IssueExplainability.TryGet(issue.RuleId, issue.IssueCode, out var explain))
+                //
+                // Some issueCodes carry a GUID suffix (e.g. "missing_guid:<guid>")
+                // so the fix provider can identify the exact broken reference.
+                // The explainability table is keyed by the bare code, so strip
+                // the suffix before lookup. FixProviderRegistry uses CanFix
+                // which handles both forms.
+                var bareCode = IssueKey.BareIssueCode(issue.IssueCode);
+                if (IssueExplainability.TryGet(issue.RuleId, bareCode, out var explain))
                 {
                     sb.Append(",\"rootCause\":\"").Append(Esc(explain.RootCause)).Append("\"");
                     sb.Append(",\"remediation\":\"").Append(Esc(explain.Remediation)).Append("\"");
@@ -106,7 +113,7 @@ namespace UnityOpenMcpBridge.MetaTools
                     }
                     sb.Append('}');
                 }
-                var candidates = FixProviderRegistry.CandidatesForIssue(issue.RuleId, issue.IssueCode);
+                var candidates = FixProviderRegistry.CandidatesForIssue(issue.RuleId, bareCode);
                 if (candidates.Length > 0)
                 {
                     sb.Append(",\"fixCandidates\":[");
@@ -119,7 +126,7 @@ namespace UnityOpenMcpBridge.MetaTools
                     }
                     sb.Append(']');
                 }
-                if (FixProviderRegistry.TryGetFixInfo(issue.RuleId, issue.IssueCode, out var fixId, out var safe))
+                if (FixProviderRegistry.TryGetFixInfo(issue.RuleId, bareCode, out var fixId, out var safe))
                 {
                     sb.Append(",\"fixId\":\"").Append(Esc(fixId)).Append("\"");
                     sb.Append(",\"fixSafe\":").Append(safe ? "true" : "false");

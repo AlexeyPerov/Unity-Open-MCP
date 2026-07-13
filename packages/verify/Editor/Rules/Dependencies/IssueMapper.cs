@@ -20,7 +20,7 @@ namespace UnityOpenMcpVerify.Rules.Dependencies
                     if (edge.Resolves) continue;
                     if (!reportedGuids.Add(edge.TargetGuid)) continue;
 
-                    sink.Add(MakeIssue(asset, CodeBrokenDependency,
+                    sink.Add(MakeIssue(asset, CodeBrokenDependency + ":" + edge.TargetGuid,
                         $"Forward dependency on missing asset (guid {edge.TargetGuid}, {edge.Kind} at line {edge.Line}) does not resolve",
                         VerifySeverity.Error,
                         Evidence(("guid", edge.TargetGuid),

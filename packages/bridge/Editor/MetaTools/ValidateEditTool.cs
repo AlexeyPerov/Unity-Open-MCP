@@ -64,7 +64,11 @@ namespace UnityOpenMcpBridge.MetaTools
                 sb.Append("\"description\":\"").Append(Esc(issue.Description)).Append("\"");
 
                 // M25 Plan 3 — explainability (see ScanPathsTool for details).
-                if (IssueExplainability.TryGet(issue.RuleId, issue.IssueCode, out var explain))
+                // Strip any GUID suffix from the issueCode before the
+                // explainability / registry lookups (those key on the bare
+                // code). CanFix handles both forms.
+                var bareCode = IssueKey.BareIssueCode(issue.IssueCode);
+                if (IssueExplainability.TryGet(issue.RuleId, bareCode, out var explain))
                 {
                     sb.Append(",\"rootCause\":\"").Append(Esc(explain.RootCause)).Append("\"");
                     sb.Append(",\"remediation\":\"").Append(Esc(explain.Remediation)).Append("\"");
@@ -80,7 +84,7 @@ namespace UnityOpenMcpBridge.MetaTools
                     }
                     sb.Append('}');
                 }
-                var candidates = FixProviderRegistry.CandidatesForIssue(issue.RuleId, issue.IssueCode);
+                var candidates = FixProviderRegistry.CandidatesForIssue(issue.RuleId, bareCode);
                 if (candidates.Length > 0)
                 {
                     sb.Append(",\"fixCandidates\":[");
@@ -93,7 +97,7 @@ namespace UnityOpenMcpBridge.MetaTools
                     }
                     sb.Append(']');
                 }
-                if (FixProviderRegistry.TryGetFixInfo(issue.RuleId, issue.IssueCode, out var fixId, out var safe))
+                if (FixProviderRegistry.TryGetFixInfo(issue.RuleId, bareCode, out var fixId, out var safe))
                 {
                     sb.Append(",\"fixId\":\"").Append(Esc(fixId)).Append("\"");
                     sb.Append(",\"fixSafe\":").Append(safe ? "true" : "false");

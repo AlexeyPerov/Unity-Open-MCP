@@ -124,7 +124,7 @@ namespace UnityOpenMcpVerify.Tests
 
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
-            var broken = sink.Where(i => i.IssueCode == "broken_dependency").ToList();
+            var broken = sink.Where(i => i.IssueCode.StartsWith("broken_dependency")).ToList();
             Assert.AreEqual(0, broken.Count,
                 $"Healthy prefab must not produce broken_dependency. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
         }
@@ -146,7 +146,7 @@ namespace UnityOpenMcpVerify.Tests
 
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
-            var broken = sink.FirstOrDefault(i => i.IssueCode == "broken_dependency");
+            var broken = sink.FirstOrDefault(i => i.IssueCode.StartsWith("broken_dependency"));
             Assert.IsNotNull(broken,
                 $"Expected 'broken_dependency' for unresolved forward edge. " +
                 $"Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");

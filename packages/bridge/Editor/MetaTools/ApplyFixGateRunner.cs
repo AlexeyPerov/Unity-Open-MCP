@@ -28,6 +28,17 @@ namespace UnityOpenMcpBridge.MetaTools
     // a render-queue override).
     public static class ApplyFixGateRunner
     {
+        // Ambient flag set while the gate runner has a FixRollback snapshot
+        // active. ApplyFixTool.Execute checks this to refuse a non-dry-run
+        // apply dispatched WITHOUT the gate runner wrapper (e.g. a batch_execute
+        // step, or gate=off direct dispatch) — those paths have no rollback
+        // protection and a fix that corrupts the asset would be permanent.
+        // Main-thread-only (bridge dispatch is serialized), so a plain static
+        // bool is safe without AsyncLocal.
+        private static bool _rollbackSnapshotActive;
+
+        internal static bool RollbackSnapshotActive => _rollbackSnapshotActive;
+
         public static GateDispatchResult Execute(
             string body, string gateMode, string[] pathsHint)
         {
@@ -43,6 +54,8 @@ namespace UnityOpenMcpBridge.MetaTools
                 rollback.Snapshot(predictedPaths);
 
             GateDispatchResult result;
+            var previousFlag = _rollbackSnapshotActive;
+            _rollbackSnapshotActive = true;
             try
             {
                 // Reuse the exact gate path (checkpoint → apply → validate →
@@ -60,6 +73,10 @@ namespace UnityOpenMcpBridge.MetaTools
                     rollback.Restore();
                 rollback.Discard();
                 throw;
+            }
+            finally
+            {
+                _rollbackSnapshotActive = previousFlag;
             }
 
             // Decide whether to roll back. Two triggers:
@@ -138,7 +155,17 @@ namespace UnityOpenMcpBridge.MetaTools
 
         // Convert absolute restored paths back to the Assets/-relative form so
         // the envelope matches the asset paths used everywhere else in the API.
-        private static string[] NormalizeRestoredPaths(string[] restored)
+        //
+        // Three cases, checked in order:
+        //   1. norm == dataPath           → "Assets" (the Assets root itself)
+        //   2. norm starts with dataPath/  → "Assets" + suffix (a path under Assets/)
+        //   3. anything else               → unchanged (already relative, or a
+        //      sibling dir like …/AssetsBackup that must NOT be mangled into
+        //      "AssetsAssetsBackup/…").
+        // The previous implementation used a bare StartsWith(dataPath) for case
+        // 1, which also matched sibling dirs (…/AssetsBackup/…) and produced
+        // malformed paths.
+        internal static string[] NormalizeRestoredPaths(string[] restored)
         {
             if (restored == null || restored.Length == 0) return restored;
             var dataPath = Application.dataPath.Replace('\\', '/');
@@ -146,9 +173,9 @@ namespace UnityOpenMcpBridge.MetaTools
             for (int i = 0; i < restored.Length; i++)
             {
                 var norm = restored[i].Replace('\\', '/');
-                if (norm.StartsWith(dataPath + "/", System.StringComparison.Ordinal))
-                    result[i] = "Assets" + norm.Substring(dataPath.Length);
-                else if (norm.StartsWith(dataPath, System.StringComparison.Ordinal))
+                if (norm == dataPath)
+                    result[i] = "Assets";
+                else if (norm.StartsWith(dataPath + "/", System.StringComparison.Ordinal))
                     result[i] = "Assets" + norm.Substring(dataPath.Length);
                 else
                     result[i] = norm;

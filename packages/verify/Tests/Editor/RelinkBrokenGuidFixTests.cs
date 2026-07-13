@@ -293,9 +293,11 @@ namespace UnityOpenMcpVerify.Tests
             AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceUpdate);
             yield return null;
 
+            // Use the GUID-encoded issueCode so the fix targets exactly this
+            // broken GUID (not a file-scan fallback).
             var issueId = IssueKey.Build(
                 "missing_references", VerifySeverity.Error,
-                prefabPath, "missing_guid");
+                prefabPath, "missing_guid:deadbeefdeadbeefdeadbeefdeadbeef");
 
             var result = fix.Apply(issueId, realGuid);
 
@@ -310,6 +312,167 @@ namespace UnityOpenMcpVerify.Tests
                 "rewritten prefab must carry the real mesh GUID");
             Assert.IsFalse(rewritten.Contains("guid: deadbeefdeadbeefdeadbeefdeadbeef"),
                 "fake GUID must be gone after rewrite");
+        }
+
+        // -------------------------------------------------------------------
+        // T2.3 — Multiple broken GUIDs: relink targets exactly the right one
+        // -------------------------------------------------------------------
+
+        [UnityTest]
+        public System.Collections.IEnumerator Apply_WithMultipleBrokenGuids_RewritesOnlyTheTargetedGuid()
+        {
+            // Build a prefab referencing two real meshes, then corrupt BOTH
+            // references with different fake GUIDs. Relinking with the
+            // issueCode carrying GUID-A must rewrite only A, leaving B intact.
+            var meshAPath = FixtureRoot + "/MeshA.asset";
+            var meshBPath = FixtureRoot + "/MeshB.asset";
+            var prefabPath = FixtureRoot + "/MultiBrokenPrefab.prefab";
+            yield return CreatePrefabWithTwoMeshReferences(prefabPath, meshAPath, meshBPath);
+
+            Assume.That(File.Exists(prefabPath), Is.True, "prefab must exist");
+
+            AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                AssetDatabase.LoadAssetAtPath<Mesh>(meshAPath), out var realGuidA, out _);
+            AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                AssetDatabase.LoadAssetAtPath<Mesh>(meshBPath), out var realGuidB, out _);
+            Assume.That(string.IsNullOrEmpty(realGuidA), Is.False);
+            Assume.That(string.IsNullOrEmpty(realGuidB), Is.False);
+            Assume.That(realGuidA, Is.Not.EqualTo(realGuidB));
+
+            var fakeGuidA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            var fakeGuidB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+            // Corrupt both references with distinct fake GUIDs.
+            InjectBrokenGuid(prefabPath, realGuidA, fakeGuidA);
+            InjectBrokenGuid(prefabPath, realGuidB, fakeGuidB);
+            AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            // Issue for GUID-A only — the issueCode carries the specific GUID.
+            var issueId = IssueKey.Build(
+                "missing_references", VerifySeverity.Error,
+                prefabPath, "missing_guid:" + fakeGuidA);
+
+            var result = fix.Apply(issueId, realGuidA);
+
+            Assert.IsTrue(result.Success,
+                $"Apply should succeed. Got: {result.Description}");
+
+            var rewritten = File.ReadAllText(prefabPath);
+
+            // GUID-A was relinked to the real mesh.
+            Assert.IsTrue(rewritten.Contains($"guid: {realGuidA}"),
+                "the targeted broken GUID-A must be relinked to the real mesh");
+            Assert.IsFalse(rewritten.Contains(fakeGuidA),
+                "the targeted broken GUID-A must be gone");
+
+            // GUID-B is untouched — still broken.
+            Assert.IsTrue(rewritten.Contains($"guid: {fakeGuidB}"),
+                "the untargeted broken GUID-B must remain untouched");
+            Assert.IsFalse(rewritten.Contains($"guid: {realGuidB}"),
+                "the untargeted GUID-B must NOT have been relinked");
+        }
+
+        // -------------------------------------------------------------------
+        // T2.3 — Regex anchored to YAML key: m_guid: / second_guid: not matched
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void RewriteGuid_DoesNotMatchNonKeyGuidSubstrings()
+        {
+            // Write a fixture YAML file with a `guid:` key AND a non-key
+            // substring like `m_guid:` that contains the same broken GUID.
+            // The anchored regex must only rewrite the real `guid:` key.
+            var tempDir = System.IO.Path.GetTempPath();
+            var fixturePath = tempDir + "unity_open_mcp_relink_anchor_test.mat";
+            var brokenGuid = "cccccccccccccccccccccccccccccccc";
+            var targetGuid = "dddddddddddddddddddddddddddddddd";
+
+            try
+            {
+                var yaml = "%YAML 1.1\n"
+                    + "%TAG !u! tag:unity3d.com,2011:\n"
+                    + "--- !u!21 &2100000\n"
+                    + "Material:\n"
+                    + "  m_ObjectHideFlags: 0\n"
+                    + "  m_Name: TestMat\n"
+                    + "  # A non-key substring — must NOT be rewritten:\n"
+                    + "  m_guid: " + brokenGuid + "\n"
+                    + "  # A comment mentioning second_guid: " + brokenGuid + "\n"
+                    + "  m_Texture: {fileID: 2800000, guid: " + brokenGuid + ", type: 3}\n";
+
+                System.IO.File.WriteAllText(fixturePath, yaml);
+
+                var issueId = IssueKey.Build(
+                    "missing_references", VerifySeverity.Error,
+                    fixturePath, "missing_guid:" + brokenGuid);
+
+                var result = fix.Apply(issueId, targetGuid);
+
+                // The fix should find the real `guid:` key (in the m_Texture
+                // line) and rewrite it. The `m_guid:` and comment substrings
+                // must be left alone.
+                Assert.IsTrue(result.Success,
+                    $"Apply should succeed. Got: {result.Description}");
+
+                var rewritten = System.IO.File.ReadAllText(fixturePath);
+
+                // The real key was rewritten.
+                Assert.IsTrue(rewritten.Contains($"guid: {targetGuid}"),
+                    "the real guid: key must be rewritten to the target");
+
+                // The non-key substrings were NOT rewritten — the broken GUID
+                // still appears in m_guid: and the comment.
+                Assert.IsTrue(rewritten.Contains($"m_guid: {brokenGuid}"),
+                    "m_guid: (a non-key substring) must NOT be rewritten");
+                Assert.IsTrue(rewritten.Contains($"second_guid: {brokenGuid}"),
+                    "second_guid: (a non-key substring) must NOT be rewritten");
+            }
+            finally
+            {
+                if (System.IO.File.Exists(fixturePath))
+                    System.IO.File.Delete(fixturePath);
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // T2.3 — Bare issueCode (no GUID suffix) still works (backward compat)
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void CanFix_AcceptsBareIssueCode_AndGuidEncodedIssueCode()
+        {
+            var bareIssue = IssueKey.Build(
+                "missing_references", VerifySeverity.Error,
+                "Assets/A.prefab", "missing_guid");
+            var encodedIssue = IssueKey.Build(
+                "missing_references", VerifySeverity.Error,
+                "Assets/A.prefab", "missing_guid:abcdefabcdefabcdefabcdefabcdefabcd");
+
+            Assert.IsTrue(fix.CanFix(bareIssue),
+                "bare missing_guid code must still match (synthetic keys)");
+            Assert.IsTrue(fix.CanFix(encodedIssue),
+                "GUID-encoded missing_guid code must match (real scan keys)");
+        }
+
+        [Test]
+        public void IssueKey_BareIssueCode_StripsGuidSuffix()
+        {
+            Assert.AreEqual("missing_guid", IssueKey.BareIssueCode("missing_guid"));
+            Assert.AreEqual("missing_guid", IssueKey.BareIssueCode("missing_guid:abcdef"));
+            Assert.AreEqual("broken_dependency", IssueKey.BareIssueCode("broken_dependency:abcdef"));
+            Assert.AreEqual("missing_script", IssueKey.BareIssueCode("missing_script"));
+            Assert.IsNull(IssueKey.BareIssueCode(null));
+        }
+
+        [Test]
+        public void IssueKey_IssueCodeGuid_ExtractsSuffix()
+        {
+            Assert.AreEqual("abcdef", IssueKey.IssueCodeGuid("missing_guid:abcdef"));
+            Assert.AreEqual("deadbeef", IssueKey.IssueCodeGuid("broken_dependency:deadbeef"));
+            Assert.IsNull(IssueKey.IssueCodeGuid("missing_guid"));
+            Assert.IsNull(IssueKey.IssueCodeGuid("missing_guid:"));
+            Assert.IsNull(IssueKey.IssueCodeGuid(null));
         }
 
         // -------------------------------------------------------------------
@@ -333,6 +496,39 @@ namespace UnityOpenMcpVerify.Tests
             var go = new GameObject("RelinkFixture");
             var mf = go.AddComponent<MeshFilter>();
             mf.sharedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+            PrefabUtility.SaveAsPrefabAsset(go, prefabPath);
+            Object.DestroyImmediate(go);
+            AssetDatabase.Refresh();
+            yield return null;
+        }
+
+        private static System.Collections.IEnumerator CreatePrefabWithTwoMeshReferences(
+            string prefabPath, string meshAPath, string meshBPath)
+        {
+            EnsureDirectory(Path.GetDirectoryName(prefabPath));
+
+            var meshA = new Mesh { name = "MeshA" };
+            meshA.vertices = new[] { new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0) };
+            meshA.triangles = new[] { 0, 1, 2 };
+            AssetDatabase.CreateAsset(meshA, meshAPath);
+
+            var meshB = new Mesh { name = "MeshB" };
+            meshB.vertices = new[] { new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0) };
+            meshB.triangles = new[] { 0, 1, 2 };
+            AssetDatabase.CreateAsset(meshB, meshBPath);
+
+            // Two child objects, each with a MeshFilter referencing a different mesh.
+            var go = new GameObject("MultiRelinkFixture");
+            var childA = new GameObject("ChildA");
+            childA.transform.SetParent(go.transform);
+            var mfA = childA.AddComponent<MeshFilter>();
+            mfA.sharedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshAPath);
+
+            var childB = new GameObject("ChildB");
+            childB.transform.SetParent(go.transform);
+            var mfB = childB.AddComponent<MeshFilter>();
+            mfB.sharedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshBPath);
+
             PrefabUtility.SaveAsPrefabAsset(go, prefabPath);
             Object.DestroyImmediate(go);
             AssetDatabase.Refresh();

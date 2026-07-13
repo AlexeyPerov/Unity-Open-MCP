@@ -20,9 +20,14 @@ namespace UnityOpenMcpVerify.Fixes
             if (!IssueKey.TryParse(issueId, out var ruleId, out _, out _, out var issueCode))
                 return false;
 
-            var code = issueCode ?? "";
-            return (ruleId == "missing_references" && code == "missing_guid")
-                || (ruleId == "dependencies" && code == "broken_dependency");
+            // Accept both the bare code ("missing_guid") and the GUID-encoded
+            // form ("missing_guid:<guid>") — the bare form is used by synthetic
+            // keys (FixProviderRegistry.TryGetFixInfo / CandidatesForIssue),
+            // while real scan-result issue keys carry the GUID suffix so the
+            // fix provider rewrites exactly the right reference.
+            var bareCode = IssueKey.BareIssueCode(issueCode);
+            return (ruleId == "missing_references" && bareCode == "missing_guid")
+                || (ruleId == "dependencies" && bareCode == "broken_dependency");
         }
 
         public FixDescription Describe(string issueId)
@@ -132,17 +137,26 @@ namespace UnityOpenMcpVerify.Fixes
         // Broken-GUID extraction
         // -------------------------------------------------------------------
         //
-        // The canonical issue id carries only {ruleId|severity|assetPath|issueCode}.
-        // We re-scan the asset to find the broken GUIDs it currently references —
-        // this keeps Apply honest (it operates on the file as it is now, not as it
-        // was when the issue was emitted) and lets the provider be invoked with a
-        // bare issue id.
+        // The issue id carries {ruleId|severity|assetPath|issueCode}. The
+        // issueCode may encode the specific broken GUID as a suffix
+        // ("missing_guid:<guid>" / "broken_dependency:<guid>") so the fix
+        // rewrites exactly the reference the issue describes — critical when
+        // an asset has multiple broken GUID references. When the suffix is
+        // absent (e.g. a hand-transcribed key or a synthetic test key), we
+        // fall back to scanning the asset for the first unresolved GUID.
 
         private static string ExtractBrokenGuidFromIssue(string issueId)
         {
-            if (!IssueKey.TryParse(issueId, out _, out _, out var assetPath, out _))
+            if (!IssueKey.TryParse(issueId, out _, out _, out var assetPath, out var issueCode))
                 return null;
 
+            // Preferred path: the GUID is encoded in the issueCode suffix.
+            var guidFromCode = IssueKey.IssueCodeGuid(issueCode);
+            if (!string.IsNullOrEmpty(guidFromCode))
+                return guidFromCode;
+
+            // Fallback: scan the asset for the first unresolved GUID. This is
+            // the legacy path for keys without a suffix (backward compat).
             if (string.IsNullOrEmpty(assetPath) || !File.Exists(assetPath))
                 return null;
 
@@ -237,9 +251,11 @@ namespace UnityOpenMcpVerify.Fixes
 
             // Match every `guid: <brokenGuid>` occurrence on the asset — a single
             // broken GUID is typically referenced once, but the same target may
-            // be wired into several PPtr fields.
+            // be wired into several PPtr fields. Anchor to start-of-line (multi-
+            // line mode) so we only match the YAML `guid:` key, not substrings
+            // like `m_guid:` or `second_guid:`. Mirrors FixDuplicateGuidFix.
             var pattern = new Regex(
-                @"guid:\s*" + Regex.Escape(brokenGuid) + @"\b",
+                @"(?m)^\s*guid:\s*" + Regex.Escape(brokenGuid) + @"\b",
                 RegexOptions.Compiled);
 
             if (!pattern.IsMatch(contents))

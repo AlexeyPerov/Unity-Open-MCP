@@ -28,7 +28,7 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                     if (!extRef.GuidExistsInAssets)
                     {
-                        sink.Add(MakeIssue(asset, CodeMissingGuid,
+                        sink.Add(MakeIssue(asset, CodeMissingGuid + ":" + extRef.Guid,
                             $"Broken PPtr reference: GUID '{extRef.Guid}' does not resolve to a loadable asset at line {extRef.Line}",
                             VerifySeverity.Error,
                             Evidence("guid", extRef.Guid, extRef.Line)));

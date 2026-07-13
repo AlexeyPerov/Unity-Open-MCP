@@ -71,6 +71,29 @@ namespace UnityOpenMcpVerify
                 throw new FormatException($"Malformed issue key: '{key}'. Expected format: {{ruleId}}|{{severity}}|{{assetPath}}|{{issueCode}}");
         }
 
+        // Some issue codes carry a GUID suffix (e.g. "missing_guid:<guid>") so
+        // the fix provider can identify exactly which broken reference to
+        // rewrite when an asset has multiple. The bare code (without the
+        // suffix) is what IssueExplainability and FixProviderRegistry key on.
+        // These helpers strip / extract the suffix. Codes without a ":" suffix
+        // are returned as-is (the common case).
+        public static string BareIssueCode(string issueCode)
+        {
+            if (string.IsNullOrEmpty(issueCode)) return issueCode;
+            var colon = issueCode.IndexOf(':');
+            return colon < 0 ? issueCode : issueCode.Substring(0, colon);
+        }
+
+        // Extract the GUID suffix from an issueCode like "missing_guid:<guid>".
+        // Returns null when the code has no suffix.
+        public static string IssueCodeGuid(string issueCode)
+        {
+            if (string.IsNullOrEmpty(issueCode)) return null;
+            var colon = issueCode.IndexOf(':');
+            if (colon < 0 || colon + 1 >= issueCode.Length) return null;
+            return issueCode.Substring(colon + 1);
+        }
+
         private static void ValidateComponents(string ruleId, VerifySeverity severity, string assetPath, string issueCode)
         {
             if (string.IsNullOrEmpty(ruleId))

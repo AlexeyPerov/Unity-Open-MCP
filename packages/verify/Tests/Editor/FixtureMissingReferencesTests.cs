@@ -100,11 +100,11 @@ namespace UnityOpenMcpVerify.Tests
             Assert.Greater(sink.Count, 0,
                 "BrokenRefFixture must produce at least one missing_references issue");
 
-            var hasMissingGuid = sink.Any(i => i.IssueCode == "missing_guid");
+            var hasMissingGuid = sink.Any(i => i.IssueCode.StartsWith("missing_guid"));
             Assert.IsTrue(hasMissingGuid,
                 $"Expected 'missing_guid' issue code. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
 
-            var missingGuidIssue = sink.First(i => i.IssueCode == "missing_guid");
+            var missingGuidIssue = sink.First(i => i.IssueCode.StartsWith("missing_guid"));
             Assert.AreEqual(VerifySeverity.Error, missingGuidIssue.Severity,
                 "missing_guid must be Error severity so gate/delta catches broken PPtr refs");
 
