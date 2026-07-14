@@ -20,8 +20,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // The two follow-on admin tools — `bridge_stop` / `bridge_start` — are
 // deferred: the bridge has no HTTP route for start/stop today (only the
 // Unity toolbar toggles it), and `stop` has a self-disconnect hazard. See
-// the deferred rationale in docs/api/mcp-tools.md and the testsuite-tauri
-// execution plan.
+// the deferred rationale in docs/api/routing-lifecycle.md.
 export const bridgeStatus: Tool = {
   name: "unity_open_mcp_bridge_status",
   description:

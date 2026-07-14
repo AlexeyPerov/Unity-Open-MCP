@@ -182,3 +182,7 @@ operator health:
 It combines the instance-lock classifier with one ping probe and never errors
 merely because the bridge is offline. `dead_bridge` includes a
 `recoveryHint` pointing to `unity_open_mcp_read_compile_errors`.
+
+Bridge start/stop tools are not exposed. Start/stop currently exists only in
+the Unity toolbar, and stopping through the same HTTP listener would risk
+tearing down the connection before its response is delivered.

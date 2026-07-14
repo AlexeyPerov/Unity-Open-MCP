@@ -56,6 +56,6 @@ Use `/ping` to confirm:
 
 ## Related docs
 
-- [MCP tools API](mcp-tools.md)
-- [Manual setup](../setup/manual-setup.md)
+- [Routing and lifecycle](routing-lifecycle.md)
+- [MCP client configuration](../setup/client-configuration.md)
 - [Architecture](../architecture.md)

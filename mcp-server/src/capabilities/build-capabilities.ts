@@ -564,8 +564,8 @@ export const PLANNED_TOOLS: PlannedTool[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * Static routing narrative. Mirrors `docs/api/mcp-tools.md` §Route
- * policy + §Batch support + the `BATCH_TOOL_NAMES` / blocked-tool
+ * Static routing narrative. Mirrors `docs/api/routing-lifecycle.md` plus the
+ * `BATCH_TOOL_NAMES` / blocked-tool
  * lists in `batch-spawn.ts`. Kept concise; per-tool `batchCapable`
  * flags live on each {@link ToolCapability}.
  */
@@ -731,8 +731,8 @@ export interface CapabilitiesResult {
 
 /**
  * Compact routing summary embedded in the capabilities response. This
- * is the agent-facing counterpart of `docs/api/mcp-tools.md` §Route
- * policy / §Batch support — it does NOT duplicate the full prose.
+ * is the agent-facing counterpart of `docs/api/routing-lifecycle.md` — it
+ * does NOT duplicate the full prose.
  */
 export interface RoutingSummary {
   /** Most tools prefer the live bridge when it is connected. */

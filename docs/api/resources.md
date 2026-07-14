@@ -69,6 +69,6 @@ Unknown resource URIs return a JSON payload with:
 
 ## Related docs
 
-- [MCP tools API](mcp-tools.md)
+- [Tool groups](tool-groups.md)
 - [Bridge HTTP API](bridge-http.md)
 - [API index](../api.md)

@@ -102,7 +102,5 @@ client so the next `node` child inherits the permission context.
 ## Related docs
 
 - [Agent setup](setup/agent-setup.md) — let an AI agent install MCP + Unity packages
-- [Manual setup](setup/manual-setup.md) — MCP client config and CI CLI
-- [Wizard setup](setup/wizard-setup.md) — guided install and launch verification
-- [Development setup](setup/development-setup.md) — local checkout and contributor workflows
+- [MCP client configuration](setup/client-configuration.md) — environment placement
 - [Routing and lifecycle](api/routing-lifecycle.md) — `modal-dialog` lifecycle

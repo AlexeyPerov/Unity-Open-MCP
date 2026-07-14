@@ -60,7 +60,7 @@ export interface ToolLifecycle {
 //
 // Keep this table in sync with the bridge's internal settle-timing map
 // (`packages/bridge/Editor/Bridge/ToolLifecycle.cs`) and the lifecycle doc in
-// `docs/api/mcp-tools.md` when a tool is added/removed/reclassified.
+// `docs/api/routing-lifecycle.md` when a tool is added/removed/reclassified.
 // ---------------------------------------------------------------------------
 
 export const TOOL_LIFECYCLE: Record<string, ToolLifecycle> = {

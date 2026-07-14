@@ -166,7 +166,7 @@ namespace UnityOpenMcpBridge.Batch
         // envelope) because the gate's checkpoint/validate/delta flow runs against
         // the live AssetDatabase in an interactive Editor and is unavailable
         // headless — this is the documented headless gate path (see
-        // docs/api/mcp-tools.md §Batch support). Operators who want a guarded
+        // docs/api/routing-lifecycle.md). Operators who want a guarded
         // mutation connect a live Editor; batch is the unguarded CI/script path.
 
         private static (int exitCode, string json) RunExecuteCSharp(string[] args)
