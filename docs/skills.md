@@ -2,7 +2,7 @@
 
 Skills are markdown playbooks (`SKILL.md`) that give an AI agent **project-specific guidance** — when to call which tool, in what order, and what to watch for. They ship into your game project alongside the MCP client config so the agent always has the right playbook on hand.
 
-> **Skills vs. tools.** *Tools* (documented in [MCP tools API](api/mcp-tools.md)) do things — they are the verbs the agent can call. *Skills* advise the agent on **how and when** to use those verbs. Every tool in this project is documented in the API reference; skills weave them into reliable workflows.
+> **Skills vs. tools.** *Tools* (indexed in [MCP tools API](api/mcp-tools.md)) do things — they are the verbs the agent can call. *Skills* advise the agent on **how and when** to use those verbs. Runtime capabilities provide exact schemas; skills weave tools into reliable workflows.
 
 ## What ships
 
@@ -72,4 +72,6 @@ The runtime tool `unity_open_mcp_generate_skill` (`{ "write": true }`) regenerat
 - Skills are **agent-facing** — they live inside game projects and are read by the AI agent.
 - [Agent setup](setup/agent-setup.md) is also **agent-facing** — a bootstrap procedure for installing MCP before the skill exists.
 - Other docs under `docs/` are **human-facing** — read by you.
-- For the full tool catalog and route policy, see [MCP tools API](api/mcp-tools.md). For domain catalog and activation, see [Extensions](extensions.md).
+- For route policy, see [Routing and lifecycle](api/routing-lifecycle.md).
+  For session groups, see [Tool groups](api/tool-groups.md). For the domain
+  catalog, see [Extensions](extensions.md).

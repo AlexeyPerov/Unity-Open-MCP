@@ -80,14 +80,40 @@ live tools time out. Errors mention **`dead_bridge`** or **`main_thread_blocked`
 1. Confirm the bridge Status tab shows **Running** and **Ping** succeeds.
 2. Check your MCP client config uses the **same absolute project path** as the
    open Unity project (`UNITY_PROJECT_PATH`).
-3. See [Manual setup](setup/manual-setup.md) for client `env` blocks,
+3. See [MCP client configuration](setup/client-configuration.md) for client
+   paths and envelopes,
    [Agent setup](setup/agent-setup.md) for the AI-driven install path, and
    [Wizard setup](setup/wizard-setup.md) for guided verification.
+
+If tools are still missing after a config edit, restart the MCP client. Most
+clients read MCP configuration only at startup.
+
+## Node or `npx` problems
+
+- **`node` / `npx` not found:** install Node.js 18 or newer from
+  <https://nodejs.org/>, then restart the terminal and MCP client so they get
+  the updated `PATH`.
+- **First `npx` launch looks stuck:** allow up to a minute for npm to download
+  the pinned server package. Later launches use npm's cache.
+- **Server exits immediately:** verify `UNITY_PROJECT_PATH` is present,
+  absolute, and points to the folder containing `Assets/`, `Packages/`, and
+  `ProjectSettings/`.
+
+## Startup dialog blocks Unity
+
+If Unity is waiting on Safe Mode, project upgrade, version mismatch, or another
+native modal, follow [Dialog policy](dialog-policy.md). It owns the supported
+policy values, destructive-operation opt-ins, and timeout controls.
+
+On macOS, auto-dismiss also requires Accessibility permission for the app that
+actually launches `node` (for example the terminal or IDE). Grant it in
+**System Settings → Privacy & Security → Accessibility**, then restart the MCP
+client.
 
 ## Related docs
 
 - [Dialog policy](dialog-policy.md) — startup and steady-state modal handling
 - [Agent setup](setup/agent-setup.md) — AI-driven install procedure
-- [Manual setup](setup/manual-setup.md) — MCP client configuration
+- [MCP client configuration](setup/client-configuration.md) — client paths and envelopes
 - [Bridge HTTP API](api/bridge-http.md) — `/ping` and listener contract
-- [MCP tools API](api/mcp-tools.md) — route classes and recovery hints per tool family
+- [Routing and lifecycle](api/routing-lifecycle.md) — route classes and recovery

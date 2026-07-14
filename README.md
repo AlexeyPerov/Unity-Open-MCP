@@ -73,7 +73,7 @@ Domain tools (NavMesh, Input System, ProBuilder, lighting, Shader Graph, …) ar
 - [Bridge HTTP API](docs/api/bridge-http.md) — bridge endpoints and envelopes.
 - [MCP resources API](docs/api/resources.md) — resource URIs and payloads.
 - [Code conventions](docs/code-conventions.md) — non-obvious C# decisions (instance IDs, namespace aliasing).
-- [Versioning](docs/versioning.md) — how the shared server/bridge/verify version and the Hub app version are managed, bumped, and kept in sync; the runtime compatibility check.
+- [Version compatibility](docs/versioning.md) — installed-version matching and mismatch recovery.
 - [CI templates](docs/ci/README.md) — GitHub Actions / GitLab CI templates for health checks, verify scans, and regression gates in standard CI.
 - [Contributing — extensions](docs/contributing/extensions.md) — embedded domain gates, wiring checklist, community packs.
 
@@ -91,5 +91,6 @@ Unity Hub Pro is the desktop companion app for Unity Open MCP. It helps you mana
 
 Helpful resources for contributors or those who would like to work on their own forks:
 - [Validation Suite](validation-suite/README.md) — app for guided manual validation; ships runnable scenario packs.
+- [Maintainer versioning and releases](docs/contributing/versioning.md) — synchronization, tags, and release workflows.
 
 **License:** MIT — see [LICENSE](LICENSE).

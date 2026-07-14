@@ -30,8 +30,8 @@ on:
       - docs/setup/manual-setup.md
       - docs/setup/agent-setup.md
       - docs/setup/wizard-setup.md
-      - docs/api/mcp-tools.md
-      - mcp-server/README.md
+      - docs/setup/client-configuration.md
+      - docs/api/cli-automation.md
       - docs/ci/github-actions/unity-verify.yml
       - docs/ci/gitlab-ci/unity-verify.yml
       - templates/github-actions/README.md
@@ -60,8 +60,8 @@ on:
       - docs/setup/manual-setup.md
       - docs/setup/agent-setup.md
       - docs/setup/wizard-setup.md
-      - docs/api/mcp-tools.md
-      - mcp-server/README.md
+      - docs/setup/client-configuration.md
+      - docs/api/cli-automation.md
       - docs/ci/github-actions/unity-verify.yml
       - docs/ci/gitlab-ci/unity-verify.yml
       - templates/github-actions/README.md

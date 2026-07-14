@@ -66,27 +66,10 @@ project folder, e.g. `MyGame/Packages/manifest.json`) and add two entries to the
 
 ### Optional Unity domain dependencies
 
-Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation)
-are **bundled with the bridge**. Their tools compile into the bridge when the
-matching Unity package is present, but most groups still require
-`manage_tools(action="activate", group="<domain>")` before they appear in
-`ListTools`. Shader Graph, VFX Graph, and Memory Profiler are the
-package-detected auto-activating exceptions. Add the Unity dependencies you
-want under `dependencies`:
-
-```json
-{
-  "dependencies": {
-    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.6.1",
-    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.6.1",
-    "com.unity.ai.navigation": "2.0.0",
-    "com.unity.inputsystem": "1.7.0",
-    "com.unity.probuilder": "6.0.9"
-  }
-}
-```
-
-Particle System and Animation are built-in Unity modules — no manifest entry is needed, the tools compile in as soon as the module is enabled in the Editor. See [extensions.md](../extensions.md) for the domain catalog and activation steps.
+Domain tools are bundled with the bridge. Some need a matching Unity package
+before they compile in, and most need explicit session activation. Use
+[Extensions](../extensions.md) for the canonical dependency catalog,
+activation table, and package examples.
 
 ### Optional dependencies (in-Editor)
 
@@ -94,22 +77,10 @@ Once the bridge is installed, you can add or remove Unity domain dependencies wi
 
 ## 2) Configure your MCP client (AI side)
 
-Now point your AI client at the MCP server. With **`npx`**, your client
-downloads and runs the pinned server version automatically:
-
-```json
-{
-  "mcpServers": {
-    "unity-open-mcp": {
-      "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.6.1"],
-      "env": {
-        "UNITY_PROJECT_PATH": "/absolute/path/to/project"
-      }
-    }
-  }
-}
-```
+Now point your AI client at the MCP server. Use
+[MCP client configuration](client-configuration.md) for the canonical
+client-specific path and JSON/TOML/CLI envelope. Merge the documented
+`unity-open-mcp` entry into your client without replacing unrelated settings.
 
 What that means:
 
@@ -130,96 +101,9 @@ What that means:
 > missing, and a wrong path means the AI can drive a different Unity project
 > than the one you have open.
 
-### Environment variables
-
-- **Required:** `UNITY_PROJECT_PATH` — absolute path to the Unity project root.
-- Optional: `UNITY_OPEN_MCP_BRIDGE_PORT` (override the auto-derived port).
-- Optional: `UNITY_PATH` (batch fallback when the Editor can't auto-discover).
-- Optional startup-dialog handling (see [Dialog policy](../dialog-policy.md)):
-  - `UNITY_OPEN_MCP_DIALOG_POLICY=auto|manual|ignore|recover|safe-mode|cancel` (default `ignore`)
-  - `UNITY_OPEN_MCP_ALLOW_PROJECT_UPGRADE=1` (opt in to auto-confirming the irreversible Project Upgrade dialog; off by default)
-  - `UNITY_OPEN_MCP_ALLOW_UNSAVED_SCENE_DISMISS=1` (opt in to auto-dismissing the "Unsaved changes to scene" modal — destructive under every policy, off by default)
-  - `UNITY_OPEN_MCP_NO_AUTO_DISMISS_LAUNCH_ERRORS=1` (kill-switch — disables all OS clicks)
-  - `UNITY_OPEN_MCP_DISMISS_TIMEOUT_MS` (default 30000)
-  - `UNITY_OPEN_MCP_DISMISS_INTERVAL_MS` (default 1500)
-
-### Per-client config snippets
-
-The `mcpServers` JSON shape above works for Cursor, Claude Desktop, Cline,
-Gemini CLI, GitHub Copilot CLI, Kilo Code, Rider (Junie), Unity AI, ZooCode,
-and Antigravity. A few clients use a different envelope:
-
-**VS Code Copilot / Visual Studio Copilot** use a `servers` key (not
-`mcpServers`) in a project-local file:
-
-```json
-{
-  "servers": {
-    "unity-open-mcp": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.6.1"],
-      "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
-    }
-  }
-}
-```
-
-Place it at `.vscode/mcp.json` (VS Code) or `.vs/mcp.json` (Visual Studio).
-
-**OpenCode** nests under `mcp` with `command` as an array and env under
-`environment`:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "unity-open-mcp": {
-      "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@0.6.1"],
-      "enabled": true,
-      "environment": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
-    }
-  }
-}
-```
-
-**ZCode** nests under `mcp.servers` with `type: "stdio"`:
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "unity-open-mcp": {
-        "type": "stdio",
-        "command": "npx",
-        "args": ["-y", "unity-open-mcp@0.6.1"],
-        "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
-      }
-    }
-  }
-}
-```
-
-**Codex** uses TOML in `.codex/config.toml`:
-
-```toml
-[mcp_servers.unity-open-mcp]
-enabled = true
-command = "npx"
-args = ["-y", "unity-open-mcp@0.6.1"]
-
-[mcp_servers.unity-open-mcp.env]
-UNITY_PROJECT_PATH = "/absolute/path/to/project"
-```
-
-**Claude Code** is CLI-only — run this instead of writing a file:
-
-```sh
-claude mcp add unity-open-mcp \
-  --env UNITY_PROJECT_PATH=/absolute/path/to/project \
-  -- npx -y unity-open-mcp@0.6.1
-```
+Core project, port, and batch environment variables are summarized in the
+shared client reference. The complete startup-dialog environment-variable
+matrix and safety policy live only in [Dialog policy](../dialog-policy.md).
 
 ## 3) Launch Unity and verify
 
@@ -254,32 +138,16 @@ On unattended machines, configure startup modal handling via
 
 ## Troubleshooting
 
-- **Connection refused / "bridge unavailable":** confirm Unity is **open** with
-  the **same project path** that `UNITY_PROJECT_PATH` points to. The bridge runs
-  *inside* Unity, so Unity must be running for the two halves to talk.
-- **`npx` first run looks stuck:** that's the package downloading — give it up to
-  a minute on the first launch. It's fast afterwards.
-- **`npx` / `node` not found:** Node isn't on your PATH. Reopen your terminal
-  after installing Node from <https://nodejs.org/>, or restart your AI client so
-  it picks up the new PATH.
-- **Tools missing in the client after editing config:** restart the client. Most
-  MCP clients only read the config at startup.
-- **Compile-error launch dialog blocks startup:** the server auto-dismisses it
-  by default (clicking Ignore). If it keeps reappearing, set
-  `UNITY_OPEN_MCP_DIALOG_POLICY=manual` and dismiss it by hand, or check
-  `unity_open_mcp_read_compile_errors` for the underlying CS error. See
-  [Dialog policy](../dialog-policy.md).
-- **"nothing happens" but no error:** double-check `UNITY_PROJECT_PATH` is an
-  **absolute** path to the project root and contains no trailing slash or typos.
-- **macOS — modal auto-dismiss does nothing:** grant **Accessibility** to the
-  app that runs `node` (Terminal, your IDE, etc.) in **System Settings →
-  Privacy & Security → Accessibility**, then restart the MCP client. Required
-  for any agent host — not Cursor-specific. See
-  [Dialog policy → macOS Accessibility](../dialog-policy.md#macos-accessibility-required-for-auto-dismiss).
+For this path, first confirm Unity is open on the same absolute
+`UNITY_PROJECT_PATH`, compilation finished, and the MCP client was restarted.
+For connection, listener, modal, and dead-bridge recovery, follow the complete
+[Troubleshooting](../troubleshooting.md) guide. Modal policy and macOS
+Accessibility details live in [Dialog policy](../dialog-policy.md).
 
 ## Related docs
 
 - [Agent setup](agent-setup.md) — let an AI agent perform this install
+- [MCP client configuration](client-configuration.md) — client paths and envelopes
 - [Troubleshooting](../troubleshooting.md) — bridge start failures and connectivity recovery
 - [Dialog policy](../dialog-policy.md)
 - [Wizard setup](wizard-setup.md)

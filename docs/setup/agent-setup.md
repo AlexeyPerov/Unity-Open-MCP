@@ -69,21 +69,12 @@ these two keys only — leave every other dependency untouched):
 **Prefer project-local config** whenever the client supports it. Use a global
 config only if the human explicitly asks.
 
-### Canonical entry (most clients)
-
-Server name / key: `unity-open-mcp`
-
-```json
-{
-  "command": "npx",
-  "args": ["-y", "unity-open-mcp@0.6.1"],
-  "env": {
-    "UNITY_PROJECT_PATH": "/absolute/path/to/project"
-  }
-}
-```
-
-Replace `/absolute/path/to/project` with the absolute path from Preconditions.
+Read [MCP client configuration](client-configuration.md), select the detected
+client's target and envelope, and replace `/absolute/path/to/project` with the
+absolute path from Preconditions. If you fetched this procedure remotely,
+fetch
+`https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/client-configuration.md`.
+Use the pinned `npx -y unity-open-mcp@0.6.1` command shown there.
 
 **Idempotent merge rules when `unity-open-mcp` already exists:**
 
@@ -94,113 +85,9 @@ Replace `/absolute/path/to/project` with the absolute path from Preconditions.
 5. Create parent directories if missing. If the file does not exist, create it with
    the correct top-level envelope for that client.
 
-### Per-client targets and envelopes
-
-| Client | Prefer this file (project-local) | Envelope notes |
-|---|---|---|
-| **Cursor** | `<project>/.cursor/mcp.json` | Top-level `mcpServers` object |
-| **Claude Desktop** | OS global config (no project file) | `mcpServers` — ask human only if you cannot locate the OS path |
-| **Claude Code** | *(CLI — no file)* | Run the `claude mcp add` command below |
-| **VS Code Copilot** | `<project>/.vscode/mcp.json` | Top-level `servers` (not `mcpServers`); include `"type": "stdio"` |
-| **Visual Studio Copilot** | `<project>/.vs/mcp.json` | Same as VS Code (`servers` + `type`) |
-| **OpenCode** | `<project>/opencode.json` | Under `mcp`; `command` is an **array**; env under `environment` |
-| **ZCode** | `<project>/.zcode/cli/config.json` | Under `mcp.servers`; include `"type": "stdio"` |
-| **Codex** | `<project>/.codex/config.toml` | TOML tables below |
-| **Cline** | client global MCP settings | `mcpServers` (locate existing Cline MCP config; merge) |
-| **Gemini CLI** | `<project>/.gemini/settings.json` | `mcpServers` |
-| **GitHub Copilot CLI** | `<project>/.mcp.json` | `mcpServers` |
-| **Kilo Code** | `<project>/.kilocode/mcp.json` | `mcpServers` |
-| **Rider (Junie)** | `<project>/.junie/mcp/mcp.json` | `mcpServers` |
-| **Unity AI** | `<project>/UserSettings/mcp.json` | `mcpServers` |
-| **ZooCode** | `<project>/.roo/mcp.json` | `mcpServers` |
-| **Antigravity** | global Antigravity MCP config | `mcpServers` |
-
-#### Cursor / Claude Desktop / Cline / Gemini / Copilot CLI / Kilo / Rider / Unity AI / ZooCode / Antigravity
-
-```json
-{
-  "mcpServers": {
-    "unity-open-mcp": {
-      "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.6.1"],
-      "env": {
-        "UNITY_PROJECT_PATH": "/absolute/path/to/project"
-      }
-    }
-  }
-}
-```
-
-#### VS Code Copilot / Visual Studio Copilot
-
-```json
-{
-  "servers": {
-    "unity-open-mcp": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.6.1"],
-      "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
-    }
-  }
-}
-```
-
-#### OpenCode
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "unity-open-mcp": {
-      "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@0.6.1"],
-      "enabled": true,
-      "environment": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
-    }
-  }
-}
-```
-
-#### ZCode
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "unity-open-mcp": {
-        "type": "stdio",
-        "command": "npx",
-        "args": ["-y", "unity-open-mcp@0.6.1"],
-        "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
-      }
-    }
-  }
-}
-```
-
-#### Codex
-
-```toml
-[mcp_servers.unity-open-mcp]
-enabled = true
-command = "npx"
-args = ["-y", "unity-open-mcp@0.6.1"]
-
-[mcp_servers.unity-open-mcp.env]
-UNITY_PROJECT_PATH = "/absolute/path/to/project"
-```
-
-#### Claude Code (CLI)
-
-```sh
-claude mcp add unity-open-mcp \
-  --env UNITY_PROJECT_PATH=/absolute/path/to/project \
-  -- npx -y unity-open-mcp@0.6.1
-```
-
-If `unity-open-mcp` is already registered, remove/replace it with the pinned
-command above (or re-add so the pin and `UNITY_PROJECT_PATH` match this project).
+Do not guess an envelope from memory: the shared reference is the owner for
+client paths and JSON/TOML/CLI shapes. If Claude Desktop's OS-global file cannot
+be located, ask the human for its path.
 
 ## Step 3 — Install / update the core skill
 
@@ -276,7 +163,8 @@ More detail: [Troubleshooting](../troubleshooting.md), [Dialog policy](../dialog
 
 ## Related docs
 
-- [Manual setup](manual-setup.md) — human DIY reference (same pins and envelopes)
+- [MCP client configuration](client-configuration.md) — client paths and envelopes
+- [Manual setup](manual-setup.md) — human DIY installation flow
 - [Development setup](development-setup.md) — local checkout / contributor path
 - [Skills](../skills.md) — what the playbook covers after install
 - [Extensions](../extensions.md) — optional domain packages (skipped by this flow)

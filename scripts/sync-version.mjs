@@ -219,15 +219,15 @@ const TRIO_TARGETS = [
     replace: replaceNpmPin,
   },
   {
-    file: "mcp-server/README.md",
+    file: "docs/setup/client-configuration.md",
     kind: "md-npm",
-    description: "mcp-server/README.md npm server pins (unity-open-mcp@<ver>)",
+    description: "client-configuration.md npm server pins (unity-open-mcp@<ver>)",
     replace: replaceNpmPin,
   },
   {
-    file: "docs/api/mcp-tools.md",
+    file: "docs/api/cli-automation.md",
     kind: "md-npm",
-    description: "docs/api/mcp-tools.md npm server pin (unity-open-mcp@<ver>)",
+    description: "cli-automation.md npm server pins (unity-open-mcp@<ver>)",
     replace: replaceNpmPin,
   },
   {

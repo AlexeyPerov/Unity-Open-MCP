@@ -50,19 +50,18 @@ When the Hub detects a checkout as an Open-MCP repository (`mcp-server/` directo
 
 ## Versioning
 
-The repo tracks **two independent versions**, each from a single source file:
-`version.json` (the shared trio: npm server + bridge + verify Unity packages)
-and `hub/version.json` (the Unity Hub Pro app, on its own cadence). Every other
-version string is **generated** by `scripts/sync-version.mjs`, which also drives
-the CI drift gate (`.github/workflows/version-sync.yml`) and the release
-preflight in `npm-publish.yml` / `hub-release.yml`. At runtime, the bridge
-reports its version on `/ping` (`bridgeVersion`) and the server compares it
-against its own in `compat.ts`, warning once if the pair is incompatible.
-See [versioning.md](versioning.md) for the full policy.
+The server, bridge, and verify package share one version; Unity Hub Pro has an
+independent version. Generated targets come from those two sources, and the
+server checks its running bridge version through `/ping`.
+
+See [Version compatibility](versioning.md) for user behavior and
+[Maintainer versioning and releases](contributing/versioning.md) for sources,
+sync, tags, and release workflows.
 
 ## Related docs
 
 - [MCP tools API](api/mcp-tools.md)
+- [Routing and lifecycle](api/routing-lifecycle.md)
 - [Bridge HTTP API](api/bridge-http.md)
 - [Extensions](extensions.md)
 - [Contributing — extensions](contributing/extensions.md)

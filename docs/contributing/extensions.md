@@ -106,11 +106,10 @@ template.
 
 ### Package-detection auto-activation
 
-Most domain groups are **manual-activation**: a fresh session starts with the
-five default-on groups (`core`, `gate-and-verify`, `asset-intelligence`,
-`typed-editor`, and `diagnostics`) visible, and the agent must call
+Most domain groups are **manual-activation**: the agent must call
 `unity_open_mcp_manage_tools(action="activate", group="<domain>")` before the
-domain's tools appear in `ListTools`.
+domain's tools appear in `ListTools`. The default session contract lives in
+[Tool groups](../api/tool-groups.md).
 
 A domain group may additionally opt into **package-detection auto-activation**
 by setting `autoActivate: true` (with a matching `unityPackage`) in the
@@ -199,6 +198,7 @@ domain.
 ## Related docs
 
 - [Extensions](../extensions.md) — user-facing domain catalog and activation.
-- [MCP tools API](../api/mcp-tools.md) — tool groups, auto-activation, contracts.
+- [Tool groups](../api/tool-groups.md) — visibility and auto-activation.
+- [MCP tools API](../api/mcp-tools.md) — tool contract overview.
 - [Architecture](../architecture.md) — bridge / verify / MCP server boundaries.
 - [`packages/extensions/AGENTS.md`](../../packages/extensions/AGENTS.md) — community pack rules.

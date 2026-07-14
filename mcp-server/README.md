@@ -18,56 +18,10 @@ global install.
 
 ### Configure your MCP client
 
-Pick your client and merge the matching config. Replace `/path/to/your/unity/project`
-with the absolute path to your Unity project root.
-
-#### Cursor or Claude Desktop
-
-Edit `~/.cursor/mcp.json` (Cursor) or your Claude Desktop MCP config file:
-
-```json
-{
-  "mcpServers": {
-    "unity-open-mcp": {
-      "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.6.1"],
-      "env": {
-        "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
-      }
-    }
-  }
-}
-```
-
-#### OpenCode (global)
-
-Edit `~/.config/opencode/opencode.json`:
-
-```json
-{
-  "mcp": {
-    "unity-open-mcp": {
-      "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@0.6.1"],
-      "enabled": true,
-      "environment": {
-        "UNITY_PROJECT_PATH": "/path/to/your/unity/project"
-      }
-    }
-  }
-}
-```
-
-For a project-scoped config, put the same `mcp.unity-open-mcp` block in
-`opencode.json` at your Unity project root.
-
-#### Claude Code (CLI)
-
-```bash
-claude mcp add unity-open-mcp \
-  --env UNITY_PROJECT_PATH=/path/to/your/unity/project \
-  -- npx -y unity-open-mcp@0.6.1
-```
+Pick your client and merge a `unity-open-mcp` entry using the canonical
+[MCP client configuration reference](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/client-configuration.md).
+It owns the client-specific paths and JSON/TOML/CLI envelopes. Set
+`UNITY_PROJECT_PATH` to the absolute Unity project root.
 
 > **Bridge port.** The bridge HTTP port is **derived from the project path**
 > (`20000 + sha256(path) % 10000`, so two projects never collide), and the
@@ -87,13 +41,9 @@ Then use `"command": "unity-open-mcp", "args": []` (Cursor / Claude Desktop) or
 `"command": ["unity-open-mcp"]` (OpenCode) in your client config. Update with
 `npm update -g unity-open-mcp`.
 
-## Environment variables
-
-| Variable | Required | Purpose |
-|---|---|---|
-| `UNITY_PROJECT_PATH` | yes | Absolute path to your Unity project root. |
-| `UNITY_OPEN_MCP_BRIDGE_PORT` | no | Bridge HTTP port override. When unset, the port is derived deterministically from the project path (`20000 + sha256(path) % 10000`) and discovered via the bridge's lock file. Set only to pin a specific port. |
-| `UNITY_PATH` | no | Unity Editor executable for batch-only (headless) tools. |
+Core environment variables and modal-policy options are documented in the
+[client configuration reference](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/client-configuration.md)
+and [Dialog policy](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/dialog-policy.md).
 
 ## How it works
 
@@ -122,25 +72,23 @@ npx unity-open-mcp run-tool unity_open_mcp_capabilities \
   --project /path/to/MyGame --json --arg include_planned=false
 ```
 
-Commands: `ping`, `wait-for-ready`, `status`, `run-tool`, `--help`, `--version`.
-All accept `--json` for machine-readable output. See the
-[manual setup guide](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/manual-setup.md#cli-for-ci--automation)
+Commands also include event streaming, verify, baseline, and regression
+automation. All accept `--json` for machine-readable output. See the
+[CLI and automation reference](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/cli-automation.md)
 for the full option reference.
 
 ## Version pinning
 
-The snippets above pin the server to `unity-open-mcp@0.6.1` so it stays in
-lockstep with the bridge and verify packages, which share the same version
-number. To move to a newer release, bump the version in your client config and
-your Unity `manifest.json` together — see
-[Versioning](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/versioning.md).
-If you prefer to always run the newest published server, replace the pinned
-version with `@latest`.
+The client configuration reference pins the server so it stays in lockstep
+with the bridge and verify packages. To move to a newer release, bump the
+client and Unity package pins together — see
+[Version compatibility](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/versioning.md).
 
 ## Documentation
 
 - [Agent setup](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/agent-setup.md)
 - [Full manual setup](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/manual-setup.md)
+- [MCP client configuration](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/client-configuration.md)
 - [Unity Hub Pro wizard walkthrough](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/setup/wizard-setup.md)
 - [MCP tool catalog and routing](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/mcp-tools.md)
 - [Bridge HTTP API](https://github.com/AlexeyPerov/Unity-Open-MCP/blob/master/docs/api/bridge-http.md)

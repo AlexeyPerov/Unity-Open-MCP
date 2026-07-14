@@ -115,14 +115,10 @@ For the contributor / community-pack `file:` workflow, see [Development setup](d
 
 Pick the AI client to connect. The first viewport shows a short **Popular** list (Cursor, Claude Desktop, VS Code Copilot, Claude Code, Manual); the full catalog is behind **Show all clients** with a search box.
 
-Each option shows whether it writes a config file, is CLI-only, or copies a JSON snippet, and has a tooltip describing the config format and target path:
-
-- Cursor / Claude Desktop / Cline / most editor agents: `mcpServers` JSON
-- VS Code Copilot / Visual Studio Copilot: `servers` JSON (project `.vscode/mcp.json` / `.vs/mcp.json`)
-- OpenCode: `mcp` + `$schema` JSON
-- ZCode: `mcp.servers` + `type:stdio` JSON with skills under `.agents/skills/`
-- Codex: TOML `[mcp_servers.unity-open-mcp]` table in `.codex/config.toml`
-- Claude Code: CLI-only — renders a `claude mcp add` command (no file)
+Each option shows whether it writes a config file, is CLI-only, or copies a
+snippet, with the target path and format in its tooltip. The complete path and
+envelope catalog lives in
+[MCP client configuration](client-configuration.md).
 
 Review the generated config preview (JSON or TOML, or a CLI command for Claude Code), then write it. Writes are merge-safe: unrelated keys and sibling MCP servers are preserved, and a `.bak` backup is left next to the original file.
 
@@ -167,24 +163,17 @@ A `.bak` backup is created next to each changed file. Per-target failures are re
 
 ## Troubleshooting
 
-- **AI action missing on a project row:** re-check the project path and that
-  Unity version detection passed on the Preflight step.
-- **Package install disabled (Next greyed out):** resolve the Preflight blocking
-  checks first — the project must meet the minimum Unity version, have Node.js
-  18+, and a writable `Packages/manifest.json`.
-- **Tools unavailable in the client after finishing:** restart the client. Most
-  MCP clients only read their config at startup.
-- **Bridge unavailable on Launch and verify:** verify the project path is right,
-  Unity actually launched, and finished compiling. The health check runs while
-  Unity is running. If a startup modal blocks progress (Safe Mode, project
-  upgrade), see [Dialog policy](../dialog-policy.md).
-- **Re-check does nothing:** it refreshes the on-disk snapshot only — bridge
-  reachability is checked on Launch and verify while Unity is running.
-- **npx first run looks slow:** expected — the server downloads on first launch.
+Resolve any blocking Preflight checks before continuing. After setup, restart
+the client, confirm Unity launched the selected project, and wait for
+compilation. **Re-check** refreshes on-disk setup state; bridge reachability is
+tested only during Launch and verify. For connection and recovery procedures,
+use [Troubleshooting](../troubleshooting.md); for startup modals, use
+[Dialog policy](../dialog-policy.md).
 
 ## Related docs
 
 - [Dialog policy](../dialog-policy.md)
+- [MCP client configuration](client-configuration.md)
 - [Agent setup](agent-setup.md)
 - [Manual setup](manual-setup.md)
 - [Unity Hub Pro](../unity-hub-pro.md)
