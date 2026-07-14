@@ -1,0 +1,50 @@
+name: Feature request
+description: Propose an improvement or new workflow
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first and describe the user need before the implementation.
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow or problem
+      description: What are you trying to accomplish, and what currently blocks or complicates it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-outcome
+    attributes:
+      label: Expected outcome
+      description: Describe the behavior or result you would like.
+    validations:
+      required: true
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current behavior and alternatives
+      description: What happens today, and what workarounds have you tried?
+    validations:
+      required: true
+  - type: input
+    id: unity-version
+    attributes:
+      label: Unity version
+      description: Enter the full editor version, or "Not applicable".
+    validations:
+      required: true
+  - type: textarea
+    id: package-versions
+    attributes:
+      label: Unity Open MCP and package versions
+      description: List relevant server, bridge, verify, and Unity package versions, or "Not applicable".
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation criteria
+      description: How could a contributor verify that the requested outcome works?
+    validations:
+      required: true

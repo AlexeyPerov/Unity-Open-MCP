@@ -1,0 +1,60 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. Remove secrets and private project data from logs and attachments.
+  - type: input
+    id: unity-version
+    attributes:
+      label: Unity version
+      description: Include the full editor version, such as 2022.3.62f1 or 6000.0.40f1.
+    validations:
+      required: true
+  - type: input
+    id: operating-system
+    attributes:
+      label: Operating system
+      description: Include the OS name, version, and architecture.
+    validations:
+      required: true
+  - type: textarea
+    id: package-versions
+    attributes:
+      label: Unity Open MCP and package versions
+      description: List the MCP server, bridge, verify, and relevant Unity package versions.
+      placeholder: |
+        MCP server:
+        Bridge:
+        Verify:
+        Relevant Unity packages:
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide a minimal, ordered sequence that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation and diagnostics
+      description: List checks already attempted and attach relevant sanitized logs or screenshots.
+    validations:
+      required: true
