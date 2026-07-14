@@ -45,7 +45,7 @@ namespace UnityOpenMcpBridge
 
         public static string DescribePrecedence()
         {
-            return "Precedence: request body `gate` > project default (.unity-open-mcp/settings.json) > tool-level default.";
+            return "Precedence: valid request body `gate` > project default (.unity-open-mcp/settings.json). Tool attributes are catalog metadata.";
         }
     }
 }

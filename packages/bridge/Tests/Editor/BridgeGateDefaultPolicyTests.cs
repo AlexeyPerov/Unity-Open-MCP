@@ -68,6 +68,16 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(BridgeGateDefaultPolicy.IsValid("ENFORCE"));
             Assert.IsFalse(BridgeGateDefaultPolicy.IsValid("unknown"));
         }
+
+        [Test]
+        public void DescribePrecedence_MatchesDispatchContract()
+        {
+            var description = BridgeGateDefaultPolicy.DescribePrecedence();
+
+            StringAssert.Contains("request body `gate` > project default", description);
+            StringAssert.Contains("Tool attributes are catalog metadata", description);
+            StringAssert.DoesNotContain("tool-level default", description);
+        }
     }
 
     public class BridgeGateRunHistoryTests
