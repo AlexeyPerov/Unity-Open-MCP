@@ -2,7 +2,7 @@
 
 ## Scope
 
-Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Inherits root `AGENTS.md`; deeper rules win on overlap.
+Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Root `AGENTS.md` also applies.
 
 ## Package shape
 
@@ -38,14 +38,14 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Inherits ro
 - Compiled-state availability (`available` per group) is probed via `LiveClient.listBridgeTools()` (`GET /tools`). `null` (unknown) when the bridge is offline; `true/false` when reachable. Capabilities and manage_tools share this probe.
 - Domain groups (navigation, input-system, probuilder, particle-system, animation) carry `domainDefine` so an absent Unity package surfaces as `available: false (dependency missing: <package>)`.
 
-## Instance discovery (M13)
+## Instance discovery
 
-- Bridge port resolution lives in `src/instance-discovery.ts`. Precedence: `UNITY_OPEN_MCP_BRIDGE_PORT` env var → `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` lock file (when its `pid` is alive) → deterministic hash `20000 + (sha256(path) % 10000)`.
-- The hash formula must stay byte-for-byte identical to the bridge mirror at `packages/bridge/Editor/Bridge/InstancePortResolver.cs` (`ComputePort`) **and** the Hub mirror at `hub/src-tauri/src/config/bridge_port.rs` (`compute_port`). The Hub writes the port into generated MCP client configs and pins it for the Step 5 Unity launch, so all three sides (bridge C#, MCP server TS, Hub Rust) must agree. Cross-side consistency is pinned by `instance-discovery.test.ts`, `InstancePortResolverTests.cs`, and the `bridge_port` Rust tests (they share fixtures including the demo path) — if any side changes the formula, update all three in the same task.
+- Bridge port resolution lives in `src/instance-discovery.ts`. Precedence: `UNITY_OPEN_MCP_BRIDGE_PORT` env var → `~/.unity-open-mcp/instances/<sha256(projectPath)>.json` lock file (when its `pid` is alive) → the shared deterministic computation defined by the bridge contract.
+- The bridge owns the detailed [three-way deterministic-port contract](../packages/bridge/AGENTS.md#multi-instance-port-and-discovery). If hashing, path normalization, range, or fallback behavior changes, update the bridge C#, this TypeScript mirror, the Hub Rust mirror, and all three fixture suites in the same task.
 - The MCP server is **read-only** on the lock file. Stale-lock cleanup (PID-liveness sweep) is the bridge's job on its next `Acquire`; never delete or rewrite locks from this package.
 - No new runtime deps: the module uses only `node:crypto`, `node:fs`, `node:os`, `node:path`.
 - M14 — the same lock file carries an `authToken`. `resolveAuthToken` reads it and the token is threaded into `LiveClient` and `BridgeEventStream`, which attach `Authorization: Bearer <token>` to every request. When no token is discoverable (older bridge, dead-pid lock, or an explicit `UNITY_OPEN_MCP_BRIDGE_PORT` override that skips the lock read) no header is sent and the bridge must be in `authMode "none"`. The `InstanceLock` interface must mirror the bridge's lock schema; adding/removing a lock field is a cross-side change.
-- **Dead-bridge detection.** `classifyInstance(lock)` reads the lock mid-session to distinguish a recoverable reload from a dead bridge assembly: a live PID with a stale heartbeat (`>= HEARTBEAT_STALE_MS`) means Unity is still running but the bridge's `[InitializeOnLoad]` never re-ran after a compile failure — `/ping` will not recover. `LiveClient` threads `projectPath` (from `index.ts`) so its `ensureReady`/`waitForCompile` paths can call this and return a structured `bridge_compile_failed` error immediately instead of hanging on the 120s compile-wait. The error points the agent at `unity_open_mcp_read_compile_errors`, the only error channel that works in this state (it reads `Editor.log` offline; `read_console` and `compile_check` are both dead with the broken bridge assembly). The bridge keeps the lock on disk during a domain reload specifically to make this signature available — see `packages/bridge/AGENTS.md` §Instance discovery.
+- **Dead-bridge detection.** `classifyInstance(lock)` reads the lock mid-session to distinguish a recoverable reload from a dead bridge assembly: a live PID with a stale heartbeat (`>= HEARTBEAT_STALE_MS`) means Unity is still running but the bridge's `[InitializeOnLoad]` never re-ran after a compile failure — `/ping` will not recover. `LiveClient` threads `projectPath` (from `index.ts`) so its `ensureReady`/`waitForCompile` paths can call this and return a structured `bridge_compile_failed` error immediately instead of hanging on the 120s compile-wait. The error points the agent at `unity_open_mcp_read_compile_errors`, the only error channel that works in this state (it reads `Editor.log` offline; `read_console` and `compile_check` are both dead with the broken bridge assembly). The bridge keeps the lock on disk during a domain reload specifically to make this signature available — see [bridge multi-instance discovery](../packages/bridge/AGENTS.md#multi-instance-port-and-discovery).
 
 ## Offline reads
 
@@ -54,16 +54,16 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Inherits ro
 
 ## Capabilities
 
-- `src/capabilities/` holds the rule/fix catalog and the `buildCapabilities` transform. These mirror the C# verify package state — keep them in sync when rules/fixes change (see `packages/verify/AGENTS.md` §Capability catalog sync).
+- `src/capabilities/` holds the rule/fix catalog and the `buildCapabilities` transform. These mirror the C# verify package state — keep them in sync when rules/fixes change (see [Verify capability catalog sync](../packages/verify/AGENTS.md#capability-catalog-sync)).
 
 ## Verification
 
 - Run `npm run typecheck` and `npm test` after changes. Tests use `node --test` with type stripping.
 - Tool contract changes: update the relevant page indexed by
   `docs/api/mcp-tools.md` in the same task.
-- Capability changes: verify `build-capabilities.test.ts` covers the new rule/fix/surface.
+- Capability changes: verify `mcp-server/src/capabilities/build-capabilities.test.ts` covers the new rule/fix/surface.
 
-## Agent skill sync (`skills/unity-open-mcp/SKILL.md`)
+## Agent skill sync
 
 The agent skill is the **agent-facing** counterpart of the human/contributor docs. Two surfaces must stay in sync with tool/capability/routing changes — they serve different audiences:
 

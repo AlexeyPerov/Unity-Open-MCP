@@ -2,7 +2,7 @@
 
 ## Scope
 
-Rules for `packages/extensions/` — the home for **third-party / community** domain extension UPM packages that add typed helpers on top of the core bridge. Inherits root `AGENTS.md` and `packages/bridge/AGENTS.md`; deeper rules win on overlap.
+Rules for `packages/extensions/` — the home for **third-party / community** domain extension UPM packages that add typed helpers on top of the core bridge. Root `AGENTS.md` also applies. Read `packages/bridge/AGENTS.md` when a change touches bridge-owned mirrors; sibling rules are not inherited automatically.
 
 The five **shipped** first-party domains (navigation, inputsystem, probuilder, particlesystem, animation) are **embedded in the bridge** — see [Shipped-domain copies removed](#shipped-domain-copies-removed) below. Only community packs and the `template/` scaffold are live in this folder.
 
@@ -16,7 +16,7 @@ The former standalone copies that lived here (`packages/extensions/{navigation,i
 
 - **Duplicate-registration guard (historical):** when both copies existed, a project with a legacy pack installed **and** the embedded bridge copy active registered the same tool ids twice. `BridgeToolRegistry` kept the first-registered entry and recorded the collision (`DuplicateToolNames` / `DuplicateCount` after each `Scan()`), emitting a non-fatal `Debug.LogWarning`. Removing the legacy copies eliminates this scenario.
 - **Default onboarding:** The Hub wizard **never** installed legacy ext packs — it installs only the bridge + verify packages plus opt-in Unity domain packages (`com.unity.ai.navigation`, …). There is no wizard path that installs `com.alexeyperov.unity-open-mcp-ext-*` for a shipped domain.
-- **Scope of this folder going forward:** This is the home for **third-party / community** domain packs and the `template/` scaffold. See `docs/contributing/extensions.md` §Embedded domain model.
+- **Scope of this folder going forward:** This is the home for **third-party / community** domain packs and the `template/` scaffold. See [Embedded domain model](../../docs/contributing/extensions.md#embedded-domain-model).
 
 ## Package shape
 
@@ -57,7 +57,7 @@ Every pack must update four core surfaces **in the same task** so the pack is di
    - C#: `packages/bridge/Editor/UI/ExtensionCatalog.cs`
    - TS: `hub/src/lib/services/extensions.ts`
 
-See `docs/contributing/extensions.md` §Community domain packs for the full checklist.
+See [Community domain packs](../../docs/contributing/extensions.md#community-domain-packs) for the full checklist.
 
 ## Verification
 

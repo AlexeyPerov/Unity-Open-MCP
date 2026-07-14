@@ -2,13 +2,13 @@
 
 ## Scope
 
-Rules for `packages/verify/` — the scoped health-check package (`com.alexeyperov.unity-open-mcp-verify`). Inherits root `AGENTS.md`; deeper rules win on overlap.
+Rules for `packages/verify/` — the scoped health-check package (`com.alexeyperov.unity-open-mcp-verify`). Root `AGENTS.md` also applies.
 
 ## Package shape
 
 - Editor-only Unity package. All code lives under `Editor/` and uses the `UnityOpenMcpVerify` namespace.
 - No dependency on the bridge package — verify must stay usable standalone (the bridge depends on verify, not the reverse). Do not add a reference to `com.alexeyperov.unity-open-mcp-bridge`.
-- `Tests/` holds EditMode tests.
+- `Tests/Editor/` holds EditMode tests.
 
 ## Verify rules
 
@@ -26,9 +26,9 @@ Rules for `packages/verify/` — the scoped health-check package (`com.alexeyper
 ## Capability catalog sync
 
 - The MCP-side rule catalog (`mcp-server/src/capabilities/rule-catalog.ts`) mirrors the implemented rules and their issue codes/severities. When you add, remove, rename, or change a rule or issue code, update the MCP catalog in the same task so `unity_open_mcp_capabilities` stays accurate.
-- Planned-but-unbuilt rules (the `SelectRuleIds` stubs: `materials`, `shader_analysis`, etc.) are listed as `implemented: false` with guidance. Do not remove a planned stub from the catalog unless the rule is implemented or explicitly dropped.
+- Planned-but-unbuilt rules are the `PLANNED_RULES` entries in the canonical catalog (`mcp-server/src/capabilities/rule-catalog.ts`), currently including `textures`, `sprite_2d_analysis`, and `audio_analysis`. They remain `implemented: false` with guidance until implemented or explicitly dropped.
 
 ## Verification
 
-- C# changes: add or update the narrowest EditMode test in `Tests/`.
-- Rule changes: verify the issue → fix linkage both ways (rule issue `fixIds` ↔ fix `issueCodes`) in tests and via the capability catalog tests (`build-capabilities.test.ts`).
+- C# changes: add or update the narrowest EditMode test in `Tests/Editor/`.
+- Rule changes: verify the issue → fix linkage both ways (rule issue `fixIds` ↔ fix `issueCodes`) in tests and via `mcp-server/src/capabilities/build-capabilities.test.ts`.

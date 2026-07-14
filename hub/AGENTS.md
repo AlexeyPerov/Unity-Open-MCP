@@ -2,7 +2,7 @@
 
 ## Scope
 
-Rules for `hub/` — the Tauri + SvelteKit desktop application. Inherits root `AGENTS.md`; deeper rules win on overlap.
+Rules for `hub/` — the Tauri + SvelteKit desktop application. Root `AGENTS.md` also applies.
 
 ## Package shape
 
@@ -14,9 +14,9 @@ Rules for `hub/` — the Tauri + SvelteKit desktop application. Inherits root `A
 ## State and data
 
 - Project and settings data lives in `projects.json` and `settings.json` at the OS config dir, read/written via Tauri commands. Do not introduce a database.
-- No migrations. The app is pre-release; prefer simplifying storage/codecs over backward compatibility (root `AGENTS.md` §Migrations).
+- No migrations. The app is pre-release; prefer simplifying storage/codecs over backward compatibility (see [root contributor rules](../AGENTS.md#universal-contributor-rules)).
 - Platform-neutral storage only — no Windows-only config formats.
-- New `ProjectEntry` fields that are derived from disk (SRP label, default build target, …) must be `#[serde(default, skip_serializing_if = "Option::is_none")]` so legacy `projects.json` files keep loading and the on-disk shape stays compact until the value is computed. Populate them in every entry-construction site (`add_project`, `refresh_all_projects`, `walk_up_scan`, `seed_from_unity_hub`, `create_new_project`) and recompute them in `refresh_all_projects` alongside the other disk-derived fields.
+- New `ProjectEntry` fields that are derived from disk (SRP label, default build target, …) must be `#[serde(default, skip_serializing_if = "Option::is_none")]` so legacy `projects.json` files keep loading and the on-disk shape stays compact until the value is computed. Populate them in every entry-construction pipeline (`projects::add_project`, `projects::refresh_all_projects`, `walk_up_scan::build_entry`, `seed::seed_from_unity_hub`, `new_project::create_new_project`) and recompute them in `projects::refresh_all_projects` alongside the other disk-derived fields.
 
 ## Tauri commands
 
@@ -58,10 +58,15 @@ The Rust + TS sides must agree byte-for-byte (the wizard preview is asserted
 to match the writer in `mcp_config.rs` tests). Run `cargo test --lib` +
 `npm test` + `npm run check` after a catalog change.
 
+## Bridge port mirror
+
+- `src-tauri/src/config/bridge_port.rs` mirrors the bridge and MCP deterministic-port formula. The bridge owns the detailed [three-way contract](../packages/bridge/AGENTS.md#multi-instance-port-and-discovery).
+- If hashing, path normalization, range, or fallback behavior changes, update all three implementations and their C#, TypeScript, and Rust fixtures in the same task.
+
 ## UI conventions
 
 - Follow the existing component-per-zone pattern (tabs, popups, drawer). Do not create monolithic single-file UI shells.
-- No internal references in UI strings — labels, tooltips, and help text must never contain `specs/` paths, milestone IDs, or task numbers (root `AGENTS.md` §No internal references).
+- No internal references in UI strings — labels, tooltips, and help text must never contain `specs/` paths, milestone IDs, or task numbers (see [root public-surface rules](../AGENTS.md#universal-contributor-rules)).
 
 ## Verification
 
