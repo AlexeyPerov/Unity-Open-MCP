@@ -56,7 +56,7 @@ Full procedure: [Agent setup](docs/setup/agent-setup.md).
 2. If you prefer to edit config yourself: see [Manual setup](docs/setup/manual-setup.md).
 3. If you prefer cloning this repo and working with it directly: see [Development setup](docs/setup/development-setup.md). Fits contributor workflow.
 
-Guided install via Unity Hub Pro: [Wizard setup](docs/setup/wizard-setup.md).
+4. If you prefer setup via UI wizard see Unity Hub Pro: [Wizard setup](docs/setup/wizard-setup.md).
 
 ![plot](./screenshots/hub-wizard-7.png)
 

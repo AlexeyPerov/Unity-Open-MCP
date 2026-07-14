@@ -247,6 +247,8 @@ git push origin v0.2.0 bridge-v0.2.0 verify-v0.2.0
 
 `.github/workflows/version-sync.yml` runs on every PR (and push to `main`/`master`) that touches any version-related file. It runs `sync-version.mjs --check` twice — once for the trio, once for the Hub — and **fails the PR** if any generated target has drifted from its source.
 
+The same workflow also runs an **advisory** token-estimate drift check (`generate-token-estimates.mjs --check`, `continue-on-error`) when tool schemas change. It reports drift in the CI log but does not block the PR. Regenerate after schema changes — `sync-version.mjs bump` prints a reminder.
+
 The fix for a failed gate is always: run the bump or sync script, never hand-edit a single file. Concretely:
 
 ```bash
@@ -329,11 +331,6 @@ It is wired into two places in `mcp-server/src/live-client.ts`:
 
 The CLI `status` command (`mcp-server/src/cli/commands.ts`) computes `checkBridgeCompat` from the ping body and adds both a `compat` object to the JSON output and a `Compat:` line to the human output, so operators can see drift without parsing stderr.
 
-## Why no monorepo tooling
-
-This repo deliberately does **not** use changesets, lerna, nx, turbo, or a pnpm workspace. One bespoke sync script (`scripts/sync-version.mjs`, ~250 lines, zero runtime dependencies) is the proven minimal pattern for a repo with two version lines and a handful of generated targets each — the same approach taken by comparable projects (a root version file + a sync script + a CI `--check` gate). Adopting heavier tooling would add dependency surface and learning cost without meaningful benefit at this size.
-
-Revisit if the number of independently-versioned artifacts grows well beyond two, or if per-package independent versioning becomes a requirement (at which point changesets would be the natural fit).
 
 ## Related docs
 

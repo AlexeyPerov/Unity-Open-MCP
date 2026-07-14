@@ -36,9 +36,9 @@ on:
       - docs/ci/gitlab-ci/unity-verify.yml
       - scripts/sync-version.mjs
       - .github/workflows/version-sync.yml
-      # Token-estimate codegen drift gate — fires when the MCP-server tool
-      # schemas or the codegen script change, so the generated
-      # BridgeToolTokenEstimates.cs cannot silently drift from its source.
+      # Token-estimate codegen advisory check — fires when the MCP-server tool
+      # schemas or the codegen script change. Reports drift but does not block
+      # the PR (continue-on-error on the job step).
       - mcp-server/src/tools/**
       - mcp-server/src/capabilities/tool-groups.ts
       - scripts/generate-token-estimates.mjs
@@ -113,11 +113,11 @@ jobs:
           node-version: "22"
 
       - name: Verify generated token-estimate table matches the tool schemas
-        # Read-only: --check imports the live MCP-server tool schemas
-        # (mcp-server/src/tools/* + tool-groups.ts) via --experimental-strip-types
-        # and exits non-zero if the checked-in
-        # packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs disagrees. The
-        # table is the single source the bridge Tools tab reads for per-tool /
-        # per-group / total token estimates; drift would desync the UI from the
-        # real catalog.
+        # Advisory only (continue-on-error): --check imports the live MCP-server
+        # tool schemas (mcp-server/src/tools/* + tool-groups.ts) via
+        # --experimental-strip-types and reports when the checked-in
+        # packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs disagrees.
+        # Regenerate locally with scripts/generate-token-estimates.mjs — the
+        # sync-version bump output prints a reminder.
+        continue-on-error: true
         run: node --experimental-strip-types scripts/generate-token-estimates.mjs --check

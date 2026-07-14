@@ -577,6 +577,12 @@ if (isBump || isSet) {
     console.log(`  ${nextNames[0]}          — triggers npm-publish.yml (publishes the MCP server)`);
     console.log(`  ${nextNames[1]}   — resolves the bridge UPM git-URL pin in docs/setup/`);
     console.log(`  ${nextNames[2]}   — resolves the verify UPM git-URL pin in docs/setup/`);
+    console.log(
+      "\nReminder: if tool schemas changed since the last release, regenerate token estimates:",
+    );
+    console.log(
+      "  node --experimental-strip-types scripts/generate-token-estimates.mjs",
+    );
   }
   process.exit(0);
 }

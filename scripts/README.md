@@ -17,7 +17,7 @@ Live suites need a Unity Editor open on the target project with the bridge runni
 | Script | Purpose |
 |--------|---------|
 | [`sync-version.mjs`](sync-version.mjs) | Keeps version strings in sync from `version.json` (MCP server + bridge + verify trio) or `hub/version.json` (Hub app). Supports `--check`, `bump`, `set`, and `tags`. |
-| [`generate-token-estimates.mjs`](generate-token-estimates.mjs) | Generates `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs` from live MCP tool schemas. Use `--check` in CI to catch drift. |
+| [`generate-token-estimates.mjs`](generate-token-estimates.mjs) | Generates `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs` from live MCP tool schemas. `--check` is advisory in CI (`continue-on-error`). |
 | [`gen-mcp-coverage-matrix.mjs`](gen-mcp-coverage-matrix.mjs) | Regenerates the per-tool coverage matrix under `specs/execution/M27/`. Fails if any registered tool has no suite owner. |
 
 ## MCP test suites

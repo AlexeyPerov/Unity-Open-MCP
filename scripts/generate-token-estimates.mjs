@@ -27,8 +27,8 @@
 //
 // Requires Node 20.6+ (uses node:module register() + --experimental-strip-types
 // to load the TS sources directly — no dist build, no second list). The CI drift
-// gate (.github/workflows/version-sync.yml) runs --check on every PR touching
-// the tool schemas or this script.
+// advisory check (.github/workflows/version-sync.yml, continue-on-error) runs
+// --check on PRs touching the tool schemas or this script.
 //
 // Mirrors the dependency-free philosophy of scripts/sync-version.mjs: zero
 // runtime dependencies, only node: builtins.
@@ -145,10 +145,10 @@ function generate() {
   );
   lines.push("//       node scripts/generate-token-estimates.mjs");
   lines.push(
-    "//     The CI drift gate (.github/workflows/version-sync.yml) fails any",
+    "//     CI runs an advisory drift check (version-sync.yml, continue-on-error).",
   );
   lines.push(
-    "//     PR where this file disagrees with the source schemas.",
+    "//     Regenerate after tool-schema changes so the Tools tab stays in sync.",
   );
   lines.push("// </auto-generated>");
   lines.push("");
