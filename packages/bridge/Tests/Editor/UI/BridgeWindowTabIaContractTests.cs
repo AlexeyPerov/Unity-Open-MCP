@@ -106,6 +106,33 @@ namespace UnityOpenMcpBridge.Tests
                 "control (no duplicate interactive popup).");
         }
 
+        [Test]
+        public void InternalTermTooltipConstantsExistAndAreNonEmpty()
+        {
+            var requiredTooltipFields = new[]
+            {
+                "TooltipMutating",
+                "TooltipReadOnly",
+                "TooltipGateEnforce",
+                "TooltipGateWarn",
+                "TooltipGateOff",
+                "TooltipGateNa",
+                "TooltipSourceRegistry",
+                "TooltipSourceHardcoded",
+                "TooltipEnabledToggle",
+            };
+
+            var windowType = typeof(UnityOpenMcpBridgeWindow);
+            foreach (var fieldName in requiredTooltipFields)
+            {
+                var field = windowType.GetField(fieldName, StaticFlags);
+                Assert.IsNotNull(field,
+                    $"{fieldName} is missing. Internal bridge terms must use shared tooltip wording.");
+                Assert.IsNotEmpty(field.GetRawConstantValue() as string,
+                    $"{fieldName} must provide non-empty hover help.");
+            }
+        }
+
         // ---------- prefs migration ----------
 
         [Test]

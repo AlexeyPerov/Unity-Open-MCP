@@ -64,10 +64,11 @@ namespace UnityOpenMcpBridge
 
         internal static string ExtractGateMode(string body)
         {
-            // Precedence per architecture/gate-policy.md:
+            // Precedence per docs/api/bridge-http.md#gate-policy:
             //   1. Request body `gate` value
             //   2. Project default from `.unity-open-mcp/settings.json`
-            //   3. Tool-level default (caller-provided)
+            // The tool attribute is catalog/recommendation metadata and does
+            // not override the project default at dispatch time.
             if (string.IsNullOrEmpty(body)) return BridgeGateDefaultPolicy.GetDefault();
 
             const string key = "\"gate\"";

@@ -27,6 +27,7 @@ Rules for `packages/verify/` — the scoped health-check package (`com.alexeyper
 
 - The MCP-side rule catalog (`mcp-server/src/capabilities/rule-catalog.ts`) mirrors the implemented rules and their issue codes/severities. When you add, remove, rename, or change a rule or issue code, update the MCP catalog in the same task so `unity_open_mcp_capabilities` stays accurate.
 - Planned-but-unbuilt rules are the `PLANNED_RULES` entries in the canonical catalog (`mcp-server/src/capabilities/rule-catalog.ts`), currently including `textures`, `sprite_2d_analysis`, and `audio_analysis`. They remain `implemented: false` with guidance until implemented or explicitly dropped.
+- When a rule or fix changes user-visible gate behavior, issue codes, fix guidance, or recovery steps, update the owning section of `docs/api/mcp-tools.md` and `docs/troubleshooting.md` in the same task.
 
 ## Verification
 

@@ -7,15 +7,17 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Root `AGENT
 ## Package shape
 
 - TypeScript ESM project (`"type": "module"`). Source under `src/`, built to `dist/`.
-- Node 18+. Type-stripping (`--experimental-strip-types`) is used for tests; keep imports statically resolvable — no dynamic `import()` for internal modules.
+- Node 18+. Keep production internal modules statically resolvable; do not use dynamic `import()` for ordinary internal wiring. Dynamic imports are allowed for test isolation, justified Node built-ins, or a documented exceptional lazy-loading boundary.
 - No runtime dependencies beyond `@modelcontextprotocol/sdk`. Do not add dependencies without strong justification.
 
 ## Tool definitions
 
 - Every MCP tool is defined in `src/tools/{tool-name}.ts` and exported from `src/tools/index.ts`.
 - Tool names follow the `unity_open_mcp_*` (bridge-routed) or `unity_senses_*` (standalone) convention. The prefix signals routing to agents.
-- Every tool definition includes: `name`, `description`, `inputSchema` (JSON Schema), and a handler. Add the tool to the appropriate export array (`M11_TOOLS`, etc.) in `tools/index.ts`.
+- Every tool definition includes: `name`, `description`, `inputSchema` (JSON Schema), and a handler. Export it, add it to the appropriate domain/tool array in `tools/index.ts`, and ensure that array is spread into `ALL_TOOLS`.
 - When a tool's schema changes, the bridge-side C# handler (`packages/bridge/`) must stay in sync in the same task — the bridge parses args by key name, not by schema validation.
+- Legacy typed tools also require bridge registration in `packages/bridge/Editor/Bridge/BridgeToolClassification.cs` (`KnownTools`, plus the applicable read/mutate set) and a `BridgeHttpServer.DispatchTool` case. Registry-discovered tools do not use those hardcoded paths. Follow the bridge [tool registration rules](../packages/bridge/AGENTS.md#tool-registration).
+- Domain additions and changes follow the canonical [end-to-end domain checklist](../docs/contributing/extensions.md#end-to-end-domain-checklist), including tool-group/category registration, domain skills, API docs, token estimates, catalogs where applicable, and routed tests.
 
 ## Routing
 
@@ -23,10 +25,10 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Root `AGENT
   - **live** — requires the bridge running; routes to `POST /tools/{name}`.
   - **batch** — headless Unity fallback when live is unavailable.
   - **offline** — local disk parsers, no Unity needed.
-  - **local** — never hits Unity (capabilities, manage_tools, skill generation).
+  - **local** — handler executes in the MCP server with no live/batch dispatch; an explicitly documented optional read-only probe may enrich its result.
 - Do not add a new route type without updating `docs/architecture.md` and
   `docs/api/routing-lifecycle.md`.
-- Capability-discovery (`unity_open_mcp_capabilities`), skill generation (`unity_open_mcp_generate_skill`), and `unity_open_mcp_manage_tools` are **local-only** — they must never depend on the live bridge or batch Unity. (`capabilities` and `manage_tools(list_groups)` may probe a live bridge via `GET /tools` for compiled-state availability, but they remain local-route — the probe is a read-only fetch, not a route classification change.)
+- Capability discovery (`unity_open_mcp_capabilities`), skill generation (`unity_open_mcp_generate_skill`), and `unity_open_mcp_manage_tools` remain **local-route** and never dispatch through live or batch Unity. `capabilities` and `manage_tools(list_groups)` may make an optional read-only `GET /tools` probe to enrich compiled-state availability. The probe must fail open to unknown availability: an offline bridge must not make the local tool unusable.
 
 ## Tool-group visibility (M18 Plan 2)
 
@@ -65,20 +67,22 @@ Rules for `mcp-server/` — the stdio MCP server (`unity-open-mcp`). Root `AGENT
 
 ## Agent skill sync
 
-The agent skill is the **agent-facing** counterpart of the human/contributor docs. Two surfaces must stay in sync with tool/capability/routing changes — they serve different audiences:
+Agent skills are the **agent-facing** counterpart of the human/contributor docs. Keep the applicable surfaces synchronized because they serve different audiences:
 
 - `skills/unity-open-mcp/SKILL.md` — **agent playbook**: workflows, principles, short routing narrative, pointers to `unity_open_mcp_capabilities`. Shipped into a game project's `.claude/skills/` / `.cursor/skills/` / `.opencode/skills/` / `.agents/skills/` (paths from `skills/client-paths.json`). Agents working in a game project see this file, not `docs/api/`.
+- `skills/extensions/<domain>/SKILL.md` — **domain playbook** for domain-specific tools and workflows.
 - `docs/api/mcp-tools.md` and its focused API pages — **human/contributor
   reference**: tool-family index, group/session contract, route/lifecycle
   policy, CLI automation, and selected response shapes. They live in the
   toolkit repo and are not assumed visible to agents in a downstream project.
 
-When an MCP tool, capability, route policy, batch behavior, or agent-senses tool changes, update **both**:
+When an MCP tool, capability, route policy, batch behavior, or agent-senses tool changes, update the applicable agent-facing surfaces:
 
 - **Always** update the owning API page linked from
   `docs/api/mcp-tools.md` (overview, groups, routing/lifecycle, CLI, or response
   shape).
 - **When the change affects agent workflow or routing guidance**, also update `skills/unity-open-mcp/SKILL.md`. Examples that require a SKILL edit: a new agent-senses tool, a new batch-eligible tool, a route-policy change, a new gate workflow, a new verify rule that changes the mutate→gate→fix loop.
+- **For a domain tool or workflow**, update its owning `skills/extensions/<domain>/SKILL.md` in the same task. The MCP package owns this synchronization even though the skill is stored outside `mcp-server/`.
 - Pure schema tweaks (renaming an optional field, adding a non-workflow detail) only need the api doc.
 
 Rules for the SKILL file:

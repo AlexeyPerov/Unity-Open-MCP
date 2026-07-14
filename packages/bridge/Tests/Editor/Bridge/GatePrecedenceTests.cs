@@ -3,8 +3,10 @@ using UnityOpenMcpBridge;
 
 namespace UnityOpenMcpBridge.Tests
 {
-    // Pins the documented gate precedence (packages/bridge/AGENTS.md §Gate policy):
-    //   request body `gate`  >  project default (BridgeGateDefaultPolicy)  >  tool attribute.
+    // Pins the documented gate precedence (docs/api/bridge-http.md#gate-policy):
+    //   valid request body `gate`  >  project default (BridgeGateDefaultPolicy).
+    // The tool attribute is catalog/recommendation metadata, not a dispatch
+    // fallback.
     //
     // Regression guard: a previous version of BridgeHttpServer overrode the
     // project default with the [BridgeTool].Gate attribute for registry tools

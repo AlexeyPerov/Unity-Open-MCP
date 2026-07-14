@@ -22,8 +22,9 @@ using a **self-contained per-sub-asmdef gate**:
    the sub-asmdef when the `versionDefines` rule fires, so the optional
    package reference never breaks a project that lacks it.
 
-The symbol naming convention is `UNITY_OPEN_MCP_EXT_<DOMAIN>` (uppercase,
-`<DOMAIN>` matches the tool-group id).
+The symbol naming convention is `UNITY_OPEN_MCP_EXT_<DEFINE_STEM>` (uppercase,
+without punctuation). Record it separately from the tool-group ID when they
+differ; for example, group `input-system` uses define stem `INPUTSYSTEM`.
 
 > **Why per-sub-asmdef (not the root bridge asmdef).** Unity 6's
 > `versionDefines` semantics are per-assembly: a symbol defined by a
@@ -136,64 +137,84 @@ This is additive to the manual-activation model:
 Shader Graph (`shadergraph`), VFX Graph (`vfx`), and Memory Profiler
 (`memoryprofiler`) are the shipped auto-activating domains.
 
-### MCP + capability sync (embedded domain)
+## End-to-end domain checklist
 
-Every new or changed embedded domain must update these surfaces **in the same
-task**:
+This is the canonical synchronization checklist for both shipped embedded
+domains and community packs. Complete the applicable items in one task.
 
-1. **MCP tool definitions** — `mcp-server/src/tools/<domain>-<action>.ts` (one
-   per tool) + import + add to the plan array in `mcp-server/src/tools/index.ts`
-   + spread into `ALL_TOOLS`.
-2. **Tool-group catalog** — `mcp-server/src/capabilities/tool-groups.ts` (group
-   id, `domainDefine`, `unityPackage`, optional `autoActivate`).
-3. **Capability category** — `mcp-server/src/capabilities/build-capabilities.ts`
-   `TOOL_CATEGORY` entry per tool.
-4. **Skill doc** — `skills/extensions/<domain>/SKILL.md` (agent playbook).
-5. **Catalog mirrors** (kept in sync):
-   - C#: `packages/bridge/Editor/UI/ExtensionCatalog.cs`
-   - TS: `hub/src/lib/services/extensions.ts`
+### Name the three dimensions explicitly
 
-### Tool naming
+The names are related but need not be identical:
 
-Domain tools use:
+- **Tool-group ID** — the session-visibility key in
+  `mcp-server/src/capabilities/tool-groups.ts`, usually hyphenated. Example:
+  `input-system`.
+- **Tool ID prefix** — the stable snake-case segment after
+  `unity_open_mcp_`; it may concatenate words. Example:
+  `unity_open_mcp_inputsystem_*`.
+- **Source and skill folder** — the source folder uses the C# domain name
+  (`InputSystem`), while the skill folder is
+  `skills/extensions/inputsystem/`.
 
-```text
-unity_open_mcp_<domain>_<action>
-```
+Record all three when adding a domain. Do not infer one mechanically from
+another. Tool IDs normally use
+`unity_open_mcp_<domain-prefix>_<action>`; for example,
+`unity_open_mcp_navigation_surface_add`.
 
-Example: `unity_open_mcp_navigation_surface_add`.
+### Shared MCP, capability, skill, docs, and test wiring
 
-IDs are stable across the migration from standalone extension packs to the
-embedded model — the MCP tool definitions and skills do not change.
+1. Add or update each MCP definition in `mcp-server/src/tools/`, export it,
+   register it in the appropriate domain/tool array in
+   `mcp-server/src/tools/index.ts`, and ensure that array is included in
+   `ALL_TOOLS`.
+2. Register the group and every tool assignment in
+   `mcp-server/src/capabilities/tool-groups.ts`.
+3. Add every tool to `TOOL_CATEGORY` in
+   `mcp-server/src/capabilities/build-capabilities.ts`.
+4. Create or update the agent playbook at
+   `skills/extensions/<skill-folder>/SKILL.md`.
+5. Update the owning MCP API page indexed by
+   [MCP tools API](../api/mcp-tools.md).
+6. Regenerate `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs` with
+   `node scripts/generate-token-estimates.mjs`; never edit the generated file
+   by hand.
+7. Add the narrowest EditMode coverage and run the routed-tool smoke slice:
+   S0 for registration/routing and S4 for embedded-domain workflows. If tests
+   require an optional Unity package, update the demo package manifest/lock and
+   `testables` entries so CI compiles and runs them.
+
+### Shipped embedded-domain wiring
+
+1. Implement the bridge domain under
+   `packages/bridge/Editor/TypedTools/Extensions/<SourceFolder>/`, including
+   its compile/version gate where the dependency is optional. Keep the source
+   guard, sub-asmdef, and gated test asmdef aligned.
+2. Use `[BridgeToolType]` and `[BridgeTool]`; embedded domains are discovered
+   by the registry and do not use legacy `KnownTools` dispatch.
+3. Update `packages/bridge/Editor/UI/EmbeddedDomainCatalog.cs` and the
+   `EMBEDDED_DOMAINS` mirror in `hub/src/lib/services/extensions.ts` when the
+   domain is shown by either UI. Keep package IDs, group IDs, labels, and
+   built-in/package status aligned.
+
+### Community-pack wiring
+
+1. Start from `packages/extensions/template/` and implement a standalone UPM
+   package under `packages/extensions/<source-folder>/`.
+2. Use registry discovery; do not add community tools to bridge
+   `KnownTools` or hardcoded dispatch.
+3. Add the pack to `packages/bridge/Editor/UI/ExtensionCatalog.cs` and the
+   `EXTENSION_PACKS` mirror in `hub/src/lib/services/extensions.ts`.
+   `ExtensionCatalog` is for community packs only; shipped embedded domains
+   belong in `EmbeddedDomainCatalog`.
 
 ## Community domain packs
 
 `packages/extensions/` is the home for **third-party / community** domain packs
 that are not shipped with the bridge. Each is a separate UPM package with its
-own asmdef referencing the bridge. See
-[`packages/extensions/AGENTS.md`](../../packages/extensions/AGENTS.md) for
-the full authoring checklist.
-
-### Removed shipped-domain copies
-
-The five shipped domains (Nav, Input, ProBuilder, Particles, Animation)
-previously had **legacy standalone copies** under
-`packages/extensions/{navigation,inputsystem,probuilder,particlesystem,animation}/`.
-These were **removed** — they were near-verbatim duplicates of the embedded
-bridge tools and had drifted behind them:
-
-- The embedded bridge tools (`packages/bridge/Editor/TypedTools/Extensions/*`,
-  compile-gated by `UNITY_OPEN_MCP_EXT_<DOMAIN>`) are the single source of
-  truth for shipped-domain tool surfaces.
-- A manifest that pinned a removed pack via
-  `file:../../packages/extensions/<domain>` (or a git pin) must drop that
-  entry; the embedded tools provide the same surface with no separate install.
-- New first-party domains go into
-  `packages/bridge/Editor/TypedTools/Extensions/`, never here.
-
-Use `packages/extensions/template/` as the reference scaffold for community
-packs. A community pack must not reuse tool ids owned by a shipped embedded
-domain.
+own asmdef referencing the bridge. Follow the
+[end-to-end domain checklist](#end-to-end-domain-checklist) and the local
+[`packages/extensions/AGENTS.md`](../../packages/extensions/AGENTS.md) rules.
+A community pack must not reuse tool IDs owned by a shipped embedded domain.
 
 ## Related docs
 

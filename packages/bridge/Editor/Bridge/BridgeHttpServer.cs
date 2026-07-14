@@ -757,8 +757,8 @@ namespace UnityOpenMcpBridge
 
             bool isRegistryTool = BridgeToolRegistry.TryGet(toolName, out var registryEntry);
             bool isMutating = MutatingTools.Contains(toolName) || (isRegistryTool && registryEntry.IsMutating);
-            // Effective gate precedence (packages/bridge/AGENTS.md §Gate policy):
-            //   request `gate`  →  project default (BridgeGateDefaultPolicy)  →  tool attribute.
+            // Effective gate precedence (docs/api/bridge-http.md#gate-policy):
+            //   valid request `gate`  →  project default (BridgeGateDefaultPolicy).
             // ExtractGateMode already resolves (1) → (2); the [BridgeTool].Gate
             // attribute is catalog metadata only (the tool's recommended gate)
             // and must NOT override the project default here. Previously registry

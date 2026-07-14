@@ -42,6 +42,21 @@ Default bind is loopback (`127.0.0.1`).
 - `error`: structured error object (on failure)
 - optional lifecycle/settle metadata for mutating tools
 
+## Gate policy
+
+For a mutating tool, the bridge selects the effective gate mode in this order:
+
+1. A valid request-level `gate` value (`"enforce"`, `"warn"`, or `"off"`).
+2. The project default in `.unity-open-mcp/settings.json`.
+
+An omitted, malformed, or unknown request value falls back to the project
+default. The gate value declared by a registry tool is catalog/recommendation
+metadata; it does not override that project default during dispatch.
+
+`GatePolicy.Execute` then applies the selected mode to the
+checkpoint → mutate → validate → delta flow. Changing this precedence or its
+fallback behavior is a bridge API contract change.
+
 ## Health check example
 
 ```bash

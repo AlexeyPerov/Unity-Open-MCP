@@ -4,19 +4,9 @@
 
 Rules for `packages/extensions/` — the home for **third-party / community** domain extension UPM packages that add typed helpers on top of the core bridge. Root `AGENTS.md` also applies. Read `packages/bridge/AGENTS.md` when a change touches bridge-owned mirrors; sibling rules are not inherited automatically.
 
-The five **shipped** first-party domains (navigation, inputsystem, probuilder, particlesystem, animation) are **embedded in the bridge** — see [Shipped-domain copies removed](#shipped-domain-copies-removed) below. Only community packs and the `template/` scaffold are live in this folder.
+Shipped first-party domains are embedded in `packages/bridge/Editor/TypedTools/Extensions/`; do not add or mirror them here. This subtree owns only community packs and the `template/` scaffold.
 
 Each pack lives in its own subfolder (`packages/extensions/<domain>/`) and ships as a standalone UPM package (`com.alexeyperov.unity-open-mcp-ext-<domain>`). Packs are opt-in — projects add only the ones they need to `Packages/manifest.json`.
-
-## Shipped-domain copies removed
-
-The five **shipped** domains (navigation, inputsystem, probuilder, particlesystem, animation) are **embedded** inside the bridge (`packages/bridge/Editor/TypedTools/Extensions/*`, compile-gated by `UNITY_OPEN_MCP_EXT_<DOMAIN>`) and are the single source of truth for those tool surfaces. The bridge's embedded tools activate automatically when the matching Unity package/module is present — no separate pack install, no manifest entry, no onboarding step.
-
-The former standalone copies that lived here (`packages/extensions/{navigation,inputsystem,probuilder,particlesystem,animation}/`) were **removed** — they were near-verbatim duplicates of the embedded bridge copies and had drifted behind them. Projects that pinned a removed pack via `file:../../packages/extensions/<domain>` (or a git pin) must drop that manifest entry; the embedded bridge tools provide the same surface with no separate install.
-
-- **Duplicate-registration guard (historical):** when both copies existed, a project with a legacy pack installed **and** the embedded bridge copy active registered the same tool ids twice. `BridgeToolRegistry` kept the first-registered entry and recorded the collision (`DuplicateToolNames` / `DuplicateCount` after each `Scan()`), emitting a non-fatal `Debug.LogWarning`. Removing the legacy copies eliminates this scenario.
-- **Default onboarding:** The Hub wizard **never** installed legacy ext packs — it installs only the bridge + verify packages plus opt-in Unity domain packages (`com.unity.ai.navigation`, …). There is no wizard path that installs `com.alexeyperov.unity-open-mcp-ext-*` for a shipped domain.
-- **Scope of this folder going forward:** This is the home for **third-party / community** domain packs and the `template/` scaffold. See [Embedded domain model](../../docs/contributing/extensions.md#embedded-domain-model).
 
 ## Package shape
 
@@ -48,16 +38,14 @@ The same pattern applies to any future pack whose domain types shadow a `UnityEn
 
 ## MCP + capability sync (per pack)
 
-Every pack must update four core surfaces **in the same task** so the pack is discoverable end-to-end:
+Follow the canonical [end-to-end domain checklist](../../docs/contributing/extensions.md#end-to-end-domain-checklist) in the same task. At minimum:
 
-1. **MCP tool definitions** — `mcp-server/src/tools/<domain>-<action>.ts` (one per tool) + import + add to the plan array in `mcp-server/src/tools/index.ts` + spread into `ALL_TOOLS`.
-2. **Capability category** — `mcp-server/src/capabilities/build-capabilities.ts` `TOOL_CATEGORY` entry per tool.
-3. **Skill doc** — `skills/extensions/<domain>/SKILL.md` (agent playbook).
-4. **Catalog mirrors** (kept in sync):
-   - C#: `packages/bridge/Editor/UI/ExtensionCatalog.cs`
-   - TS: `hub/src/lib/services/extensions.ts`
+1. Export MCP definitions, register them in the appropriate domain/tool array, and ensure that array is included in `ALL_TOOLS`.
+2. Update `tool-groups.ts`, `TOOL_CATEGORY`, the domain skill, MCP API docs, token estimates, and narrow tests.
+3. Add community-pack metadata to `packages/bridge/Editor/UI/ExtensionCatalog.cs` and the Hub `EXTENSION_PACKS` mirror. Never use `ExtensionCatalog` for shipped embedded domains.
+4. Update the demo manifest, lock, and `testables` when the pack or its tests must be installed for CI.
 
-See [Community domain packs](../../docs/contributing/extensions.md#community-domain-packs) for the full checklist.
+Name the dimensions separately when they differ: tool-group ID (usually hyphenated, such as `input-system`), tool ID prefix (such as `inputsystem`), and source/skill folder name.
 
 ## Verification
 
@@ -65,5 +53,5 @@ See [Community domain packs](../../docs/contributing/extensions.md#community-dom
   - All tool ids are discovered by `BridgeToolRegistry` (registry-discovery contract).
   - Every mutating tool refuses empty `paths_hint` (the gate contract).
   - The core round-trip for the pack's primary workflow.
-- Add the pack to the demo project's `Packages/manifest.json` `testables` list so CI runs the tests.
+- Add the pack to the demo project's package manifest/lock and `testables` list so CI runs the tests.
 - Tool contract changes: update the MCP-side tool definition (`mcp-server/src/tools/`) in the same task so schemas stay in sync.
