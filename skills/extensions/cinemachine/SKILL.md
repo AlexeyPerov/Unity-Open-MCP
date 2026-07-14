@@ -22,8 +22,9 @@ MCP server.
   the Package Manager.
 - The `cinemachine` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="cinemachine")` before
-  invoking any `cinemachine_*` tool. Fresh sessions start with only `core`
-  visible.
+  invoking any `cinemachine_*` tool.
+  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
+  `asset-intelligence`, `typed-editor`, and `diagnostics`.
 
 ## Tool prefix
 

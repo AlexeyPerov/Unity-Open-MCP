@@ -898,7 +898,7 @@ export class ToolRouter implements Router {
         reset: true,
         activeGroups: this.sessionState.activeGroups(),
         message:
-          "Tool-group visibility restored to defaults (`core` only). " +
+          "Tool-group visibility restored to the five default-on groups. " +
           "MCP clients that support listChanged will refresh ListTools automatically.",
       });
     }
@@ -1006,7 +1006,7 @@ export class ToolRouter implements Router {
             note:
               "Activate a group to add its tools to your ListTools surface; " +
               "deactivate to hide them. State is per-session and ephemeral — " +
-              "it resets to `core`-only when the MCP server restarts. " +
+              "it resets to the five default-on groups when the MCP server restarts. " +
               "Compiled-state availability (the `available` field) reflects " +
               "whether the Unity domain dependency is compiled in; use " +
               "unity_open_mcp_capabilities for the authoritative compiled-state " +

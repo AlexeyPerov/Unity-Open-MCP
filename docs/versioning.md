@@ -42,7 +42,9 @@ unity-open-mcp ships as **three tightly-coupled artifacts that share one version
 | **Bridge** | The Unity Editor package that exposes Unity to the server | Unity Package Manager (git URL) |
 | **Verify** | The Unity Editor package for validation rules | Unity Package Manager (git URL) |
 
-These three ship breaking changes **together** and always carry the same version (e.g. if the server is `0.5.2`, the bridge and verify packages are also `0.5.2`). The number is identical across all three by design.
+These three ship breaking changes **together** and always carry the same version
+(if the server is `X.Y.Z`, the bridge and verify packages are also `X.Y.Z`).
+The number is identical across all three by design.
 
 The **Unity Hub Pro** desktop app is a separate, **optional** companion app on its **own independent version**. It is not coupled to the three above and doesn't need to match them.
 
@@ -57,8 +59,8 @@ npx unity-open-mcp status
 Output includes:
 
 ```
-Bridge ver: 0.5.2
-Compat:   ok (server 0.5.2 / bridge 0.5.2)
+Bridge ver: X.Y.Z
+Compat:   ok (server X.Y.Z / bridge X.Y.Z)
 ```
 
 - **`Bridge ver`** — the version the running Unity Editor's bridge reports (from its `/ping`).
@@ -68,7 +70,7 @@ You can also see the server's own version with:
 
 ```bash
 npx unity-open-mcp --version
-# unity-open-mcp 0.5.2
+# unity-open-mcp X.Y.Z
 ```
 
 And the bridge version of an installed Unity package from Unity: **Window → Package Manager**, find *Unity Open MCP Bridge*, read the version column.
@@ -86,11 +88,11 @@ unity-open-mcp: INCOMPATIBLE versions — server 0.5.0, bridge 0.4.0.
 
 This is **advisory** — the connection proceeds and tools keep working. We warn rather than hard-fail so a mixed pair never silently misbehaves, but also never blocks a user mid-task. The warning fires **once per server process**, not on every request.
 
-What counts as "incompatible" follows our [pre-1.0 convention](#pre-10-semver-convention): while the version starts with `0.`, a difference in the **middle** (minor) number is incompatible, while a difference in only the **last** (patch) number is compatible and produces a softer `ok (drift)` line instead of `WARN`.
+What counts as "incompatible" follows our [pre-1.0 convention](#pre-10-semver-convention): while the version starts with `0.`, a difference in the **middle** (minor) number is incompatible, while a difference in only the **last** (patch) number is compatible and produces a softer `ok (drift)` line instead of `WARN`. The values below are illustrative examples, not current release numbers.
 
 | Server | Bridge | Compat | Why |
 |---|---|---|---|
-| `0.5.2` | `0.5.2` | `ok` | identical |
+| `X.Y.Z` | `X.Y.Z` | `ok` | identical |
 | `0.5.0` | `0.5.1` | `ok (drift)` | patch-only difference — compatible |
 | `0.5.0` | `0.4.0` | `WARN` | minor differs — incompatible (pre-1.0) |
 | `0.5.0` | `0.6.0` | `WARN` | minor differs — incompatible (pre-1.0) |
@@ -267,11 +269,11 @@ node scripts/sync-version.mjs --check --hub
 
 | Tag pattern | What it releases | Workflow | Publishes to |
 |---|---|---|---|
-| `v*` (e.g. `v0.5.2`) | The shared trio (npm server is what gets pushed; bridge/verify move with it via git URL) | `npm-publish.yml` | npm registry **and** a GitHub Release (auto-generated notes) |
+| `v*` (e.g. `vX.Y.Z`) | The shared trio (npm server is what gets pushed; bridge/verify move with it via git URL) | `npm-publish.yml` | npm registry **and** a GitHub Release (auto-generated notes) |
 | `hub-v*` (e.g. `hub-v0.3.0`) | The Unity Hub Pro desktop app | `hub-release.yml` | GitHub Release (installers) |
 | `bridge-v*` / `verify-v*` | (Convention) git-URL install pins for the Unity packages | — (no workflow) | n/a — users pin in their manifest |
 
-The `bridge-v*`/`verify-v*` tags have no workflow because the Unity packages aren't published to a registry; they exist purely so users can pin a known-good version in their `Packages/manifest.json` git URL. A trio release needs **three tags on the same commit**: `v0.5.2` (publishes the npm server, which the `unity-open-mcp@<ver>` pins in the setup docs resolve to), plus `bridge-v0.5.2` and `verify-v0.5.2` (which the UPM git-URL pins resolve to). The `tags` subcommand creates all three in one call; the `bump`/`set` output prints the exact invocation. The setup docs reference these tags, and the sync script keeps them current with `version.json`, so a missing tag means the documented install fails to resolve.
+The `bridge-v*`/`verify-v*` tags have no workflow because the Unity packages aren't published to a registry; they exist purely so users can pin a known-good version in their `Packages/manifest.json` git URL. A trio release needs **three tags on the same commit**: `vX.Y.Z` (publishes the npm server, which the `unity-open-mcp@<ver>` pins in the setup docs resolve to), plus `bridge-vX.Y.Z` and `verify-vX.Y.Z` (which the UPM git-URL pins resolve to). The `tags` subcommand creates all three in one call; the `bump`/`set` output prints the exact invocation. The setup docs reference these tags, and the sync script keeps them current with `version.json`, so a missing tag means the documented install fails to resolve.
 
 ## Creating release tags
 
@@ -296,7 +298,7 @@ While the major version is **0**, the **minor** digit is the breaking axis. This
 
 - `0.4.x` ↔ `0.5.x` → **incompatible** (minor differs) → `WARN`
 - `0.5.0` ↔ `0.5.1` → **compatible** (patch differs) → `ok (drift)`
-- `0.5.2` ↔ `0.5.2` → **identical** → `ok`
+- `X.Y.Z` ↔ `X.Y.Z` → **identical** → `ok`
 
 Once the project reaches **1.0**, the standard rule takes over: the **major** digit becomes the breaking axis (`1.x` ↔ `2.x` incompatible; `1.2` ↔ `1.9` compatible). The handshake code handles both regimes — see [`Runtime handshake internals`](#runtime-handshake-internals).
 

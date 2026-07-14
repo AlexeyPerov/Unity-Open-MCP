@@ -22,8 +22,11 @@ extension UPM package for shipped domains.
 unity_open_mcp_manage_tools(action="activate", group="navigation")
 ```
 
-Fresh MCP sessions start with only core groups visible. Domain tools use the
-naming pattern `unity_open_mcp_<domain>_<action>` (for example
+Fresh MCP sessions start with five groups visible: `core`, `gate-and-verify`,
+`asset-intelligence`, `typed-editor`, and `diagnostics`. Installing a Unity
+package makes its embedded domain available to the bridge; most domain groups
+still require session activation before they appear in `ListTools`. Domain
+tools use the naming pattern `unity_open_mcp_<domain>_<action>` (for example
 `unity_open_mcp_navigation_surface_add`).
 
 For group visibility, auto-activation rules, and tool contracts, see

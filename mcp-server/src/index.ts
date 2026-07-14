@@ -123,10 +123,9 @@ export function createServer(
     undefined,
     authToken,
   );
-  // M18 Plan 2 / T18.2.2 — per-session tool-group visibility state. Lives in
-  // the MCP server (the resolved decision in M18 execution-plan.md). Resets to
-  // `core`-only on every server restart; mutated only by
-  // unity_open_mcp_manage_tools and consulted by ListTools.
+  // Per-session tool-group visibility state. Lives in the MCP server and
+  // restores the catalog's default-on groups on every server restart; mutated
+  // only by unity_open_mcp_manage_tools and consulted by ListTools.
   const sessionState = new ToolSessionState();
   const notifyToolListChanged = async (): Promise<void> => {
     try {
@@ -153,10 +152,9 @@ export function createServer(
     port,
   });
 
-  // M18 Plan 2 / T18.2.2 — ListTools filters per the session's active groups.
-  // A fresh session sees only `core` + always-visible meta-tools (capabilities,
-  // manage_tools, ping, ...). Activating a group via manage_tools adds its
-  // tools to subsequent ListTools responses in the same session.
+  // ListTools filters per the session's active groups. A fresh session sees
+  // the five default-on groups plus always-visible meta-tools. Activating a
+  // group via manage_tools adds its tools to subsequent ListTools responses.
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: filterVisibleTools(ALL_TOOLS, sessionState),
   }));

@@ -106,9 +106,9 @@ template.
 
 ### Package-detection auto-activation
 
-Most domain groups are **manual-activation**: a fresh session starts with only
-`core` (and the always-on `gate-and-verify` / `asset-intelligence` /
-`typed-editor` / `diagnostics` groups) visible, and the agent must call
+Most domain groups are **manual-activation**: a fresh session starts with the
+five default-on groups (`core`, `gate-and-verify`, `asset-intelligence`,
+`typed-editor`, and `diagnostics`) visible, and the agent must call
 `unity_open_mcp_manage_tools(action="activate", group="<domain>")` before the
 domain's tools appear in `ListTools`.
 

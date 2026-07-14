@@ -55,7 +55,7 @@ Add to your project's `Packages/manifest.json`:
 
 ```json
 {
-  "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v1.0.0"
+  "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.6.1"
 }
 ```
 

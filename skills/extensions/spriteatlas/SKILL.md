@@ -16,8 +16,10 @@ Skill for AI agents driving Unity SpriteAtlas assets in a project through the
 - `unity_open_mcp_ping` returns `connected: true`.
 - The `sprite2d` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="sprite2d")` before
-  invoking any SpriteAtlas (or Texture) tool. Fresh sessions start with only
-  `core` visible. Because the 2D module is built-in, `capabilities` always
+  invoking any SpriteAtlas (or Texture) tool.
+  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
+  `asset-intelligence`, `typed-editor`, and `diagnostics`.
+  Because the 2D module is built-in, `capabilities` always
   reports the `sprite2d` group as `available: true` (no `domainDefine`).
 
 ## Tool prefix

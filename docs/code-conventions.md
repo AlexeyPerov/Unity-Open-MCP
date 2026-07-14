@@ -44,10 +44,10 @@ falls back to `GetInstanceID()` (int, widened to long) /
 
 ### How this shows up in the source
 
-Every typed tool and extension that emits or consumes an instanceId field uses
+Every typed tool and community pack that emits or consumes an instanceId field uses
 `InstanceId.Of(...)` / `InstanceId.ToObject(...)` and carries a
 `using UnityOpenMcpBridge.ObjectRefs;`. The helper is `public` so the
-companion extension packs (separate assemblies referencing the bridge) share
+companion community packs (separate assemblies referencing the bridge) share
 the same path. Do not call `GetInstanceID()` / `InstanceIDToObject()` /
 `GetEntityId()` / `EntityIdToObject()` directly outside the helper — the
 version gating and the int↔EntityId round-trip must stay centralised.
@@ -62,15 +62,13 @@ same rule via the helper.
 The bridge previously suppressed CS0618 (and, briefly, CS0619) with pragmas and
 kept calling the deprecated int APIs directly. Unity 6000.5's CS0619 escalation
 made that untenable, AND the 8-byte EntityId widening meant the int contract
-itself was lossy. The migration to the version-gated `InstanceId` helper (long
-internally, string on the wire) was completed across all ~96 call sites in
-`packages/bridge/Editor/` + `packages/extensions/`. The pre-migration design
-and constraints are documented in
-[`specs/backlog/new-unity.md`](../specs/backlog/new-unity.md).
+itself was lossy. The version-gated `InstanceId` helper now owns that contract
+across the bridge and community-pack call sites: `long` internally and a
+lossless string on the wire.
 
 ## Namespace/type shadowing
 
-Some extension packs put their domain in a namespace whose last segment matches
+Some community packs put their domain in a namespace whose last segment matches
 a `UnityEngine` type. The clearest case is the Particle System pack: its
 original namespace `UnityOpenMcpExtensions.ParticleSystem` collided with
 `UnityEngine.ParticleSystem`, so a bare `ParticleSystem` reference (and the

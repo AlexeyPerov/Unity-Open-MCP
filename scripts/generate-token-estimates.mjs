@@ -8,10 +8,10 @@
 // read TS at runtime, so this script imports the TS sources at codegen time and
 // emits a static lookup table the bridge reads like any other const.
 //
-// Why codegen (not a hand-maintained list): the catalog has 230 tools and
-// grows every milestone. A second hand-maintained list would drift from the
-// real schemas within one release. Importing the live TS source means the
-// generated table can never disagree with what an agent actually receives.
+// Why codegen (not a hand-maintained list): the catalog grows continuously.
+// A second hand-maintained list would drift from the real schemas within one
+// release. Importing the live TS source means the generated table can never
+// disagree with what an agent actually receives.
 //
 // Token heuristic: serialize each tool's { name, description, inputSchema } to
 // its MCP wire JSON, then estimate tokens as max(1, ceil(jsonLen / 4)). This is

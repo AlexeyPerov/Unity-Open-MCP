@@ -6,8 +6,8 @@
 //
 //     DO NOT EDIT BY HAND. Regenerate with:
 //       node scripts/generate-token-estimates.mjs
-//     The CI drift gate (.github/workflows/version-sync.yml) fails any
-//     PR where this file disagrees with the source schemas.
+//     CI runs an advisory drift check (version-sync.yml, continue-on-error).
+//     Regenerate after tool-schema changes so the Tools tab stays in sync.
 // </auto-generated>
 
 using System.Collections.Generic;
@@ -125,7 +125,7 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_list_rules", 240 },
             { "unity_open_mcp_lod_add_level", 450 },
             { "unity_open_mcp_lod_group_configure", 424 },
-            { "unity_open_mcp_manage_tools", 394 },
+            { "unity_open_mcp_manage_tools", 413 },
             { "unity_open_mcp_material_create", 277 },
             { "unity_open_mcp_material_get_keywords", 165 },
             { "unity_open_mcp_material_get_properties", 239 },

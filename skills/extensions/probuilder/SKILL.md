@@ -16,7 +16,9 @@ Skill for AI agents driving Unity ProBuilder in a project through the `unity-ope
   bridge recompile.
 - The `probuilder` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="probuilder")` before
-  invoking any `probuilder_*` tool. Fresh sessions start with only `core` visible.
+  invoking any `probuilder_*` tool.
+  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
+  `asset-intelligence`, `typed-editor`, and `diagnostics`.
 - The Unity project has `com.unity.probuilder` available.
 
 ## Tool prefix

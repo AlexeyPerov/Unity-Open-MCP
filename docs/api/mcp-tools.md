@@ -15,13 +15,13 @@ For exact schemas, see tool files in `mcp-server/src/tools/` and use `unity_open
 - **Asset intelligence**: reserialize, read/search/list assets.
 - **Agent senses**: tests, screenshots (scene/game/isolated, arbitrary camera pose, inline image, editor window), Frame Debugger (enable/disable/draw-call list), console read, profiler capture (per-frame + single-frame deep capture), memory/rendering snapshots, Memory Profiler `.snap` capture (com.unity.memoryprofiler), spatial queries, event pull.
 - **Typed editor surface**: scenes, GameObjects, components, packages, profiler session controls, build/project settings, script/object helpers, ScriptableObject create + list-by-type, Assembly Definition (asmdef) list/get/create/modify.
-- **Extension domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio, ui, constraints, terrain, cinemachine, timeline, tilemap, shader graph, vfx graph, 2D art pipeline (sprite atlas + texture import).
+- **Embedded domains**: navigation, input system, probuilder, particle system, animation, splines, lighting, audio, ui, constraints, terrain, cinemachine, timeline, tilemap, shader graph, vfx graph, 2D art pipeline (sprite atlas + texture import).
 - **Discovery utilities**: capabilities, rules list, skill generation, manage_tools.
 - **Unity Hub control**: list installed editors (+ build-target platforms), available releases feed, install editor/modules via the `unityhub://` deep link, get/set the default editor install path. Local-routed (no running Unity or bridge required).
 
 ## Tool groups and session visibility
 
-Sessions start with five main groups enabled (`core`, `gate-and-verify`, `asset-intelligence`, `typed-editor`, `diagnostics`). Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools` — **except auto-activating groups**, which activate automatically when their Unity package is installed (see §Auto-activation below). This keeps the prompt surface small (the full tool set is 263 tools) — a per-session group-visibility model so only the relevant tools are advertised.
+Sessions start with five main groups enabled (`core`, `gate-and-verify`, `asset-intelligence`, `typed-editor`, `diagnostics`). Every other group is hidden from `ListTools` until the agent activates it via `unity_open_mcp_manage_tools` — **except auto-activating groups**, which activate automatically when their Unity package is installed (see §Auto-activation below). This keeps the prompt surface small even though the full catalog contains **250+ tools**.
 
 ### Groups
 
@@ -32,7 +32,7 @@ Sessions start with five main groups enabled (`core`, `gate-and-verify`, `asset-
 | `gate-and-verify`    | on      | validate_edit, checkpoint_create, delta, find_references, dependencies, scan_paths, apply_fix, scan_all, baseline_create, regression_check                                                    |
 | `asset-intelligence` | on      | reserialize, read_asset, search_assets, list_assets                                                                                                                             |
 | `typed-editor`       | on      | typed editor surface (assets, materials, shaders, prefabs, GameObjects, components, scenes, SceneView camera pose, packages, console, selection, undo + undo history/clear, tags, layers, reflection, scripts, object data, ScriptableObject create + list-by-type, Assembly Definition list/get/create/modify) |
-| `diagnostics`        | off     | Profiler session controls + per-frame capture/memory/rendering reads                                                                                                            |
+| `diagnostics`        | on      | Profiler session controls (`unity_open_mcp_profiler_*`): start/stop, config, modules, save/load data, and script stats. Per-frame capture/memory/rendering reads are in `agent-senses`. |
 | `gate-intelligence`  | off     | impact_preview, gate_budget_estimate, mutation_explain                                                                                                                          |
 | `build-settings`     | off     | Build pipeline + ProjectSettings reads and mutators (player/quality/physics/lighting + time/render-pipeline/quality-level), plus KV preferences (PlayerPrefs + EditorPrefs)      |
 | `navigation`         | off     | NavMesh tools — compile-gated on `com.unity.ai.navigation`                                                                                                                      |
@@ -71,14 +71,14 @@ Always-visible meta-tools (no group assignment): `unity_open_mcp_capabilities`, 
 // Deactivate a group — its tools disappear from ListTools.
 { "action": "deactivate", "group": "navigation" }
 
-// Restore the default active set (`core` only).
+// Restore the five default-on groups.
 { "action": "reset" }
 ```
 
 ### State lifecycle
 
 - **Ephemeral, per session.** The MCP server holds the state in memory; it is not persisted.
-- **Resets to `core`-only on MCP-server restart.** Each agent session starts fresh.
+- **Reset and restart restore the five default-on groups.** `reset` clears manual and auto activations beyond that baseline; an auto-activating group may reappear after the next `capabilities` or `list_groups` call when its package is still installed.
 - **Per-session independent.** Two concurrent agent sessions do not share activation state.
 - **List-changed notifications.** The server declares `tools.listChanged: true`. When `activate`, `deactivate`, or `reset` actually changes the filtered `ListTools` surface, the server emits `notifications/tools/list_changed`. MCP clients should re-issue `tools/list` to refresh their tool descriptors (no server restart required). Idempotent activate/deactivate and no-op reset do not emit a notification.
 
@@ -87,7 +87,7 @@ Always-visible meta-tools (no group assignment): `unity_open_mcp_capabilities`, 
 Two distinct concerns, intentionally not conflated:
 
 - **Compiled-state availability** — whether the bridge compiled a domain in (e.g. `UNITY_OPEN_MCP_EXT_NAVIGATION` when `com.unity.ai.navigation` is installed). Reported in:
-  - `unity_open_mcp_capabilities` → `toolGroups[].available` (probed from the bridge `GET /tools` endpoint when live; `null` when the bridge is offline). The top-level `bridgeReachable` flag distinguishes "group genuinely not compiled in" (`available:false` + `availableReason`) from "I can't tell because the bridge is down" (`available:null` while `bridgeReachable:false`). When `available:false`, the reason names both possible causes — the Unity package not installed, or the installed bridge binary not built with the domain extension pack.
+  - `unity_open_mcp_capabilities` → `toolGroups[].available` (probed from the bridge `GET /tools` endpoint when live; `null` when the bridge is offline). The top-level `bridgeReachable` flag distinguishes "group genuinely not compiled in" (`available:false` + `availableReason`) from "I can't tell because the bridge is down" (`available:null` while `bridgeReachable:false`). When `available:false`, the reason names both possible causes — the Unity package not installed, or the installed bridge binary not built with that embedded domain.
   - `unity_open_mcp_manage_tools(action="list_groups")` → `groups[].available` (same probe).
 - **Session activation** — whether the current session has activated the group (managed by manage_tools). Reported in `manage_tools(list_groups)` → `groups[].active`.
 
@@ -189,7 +189,7 @@ When asserting routes in tests or tooling, treat `live` as acceptable for any ba
 `read_asset`, `search_assets`, `find_references`, and `dependencies` parse text-serialized assets from disk without a running Editor — the hybrid live/offline differentiator. The offline parser covers two asset families:
 
 - **Text-serialized Unity YAML** — `.prefab`, `.unity`, `.asset`, `.mat`, `.controller`, `.anim`, `.playable`, `.preset`, `.spriteatlas`, `.terrainlayer`, `.vfx` (YAML object headers + GUID refs parse; embedded binary blobs are skipped).
-- **JSON assets** (a path unity-scanner does not handle) — `.asmdef` (single JSON object), `.shadergraph` / `.shadersubgraph` (a stream of pretty-printed JSON objects, one per graph element).
+- **JSON assets** (not covered by YAML-only offline parsers) — `.asmdef` (single JSON object), `.shadergraph` / `.shadersubgraph` (a stream of pretty-printed JSON objects, one per graph element).
 
 Binary formats (`.png`, `.wav`, `.fbx`, …) stay live-routed. When the bridge is down, offline-parseable assets still read; non-parseable assets surface a `source_unavailable` error pointing at the bridge.
 
@@ -315,7 +315,7 @@ Distinct from the headless batch spawn above: one **live HTTP call** runs many t
 
 ### In-Editor Tools tab token estimate
 
-The bridge window's **Tools** tab surfaces a per-tool token estimate so operators can reason about the context-window cost of an active tool set *before* an agent connects. With 263 tools across the always-on + grouped + auto-activated domains, the cost of an active set is otherwise invisible until an agent sees the tool list.
+The bridge window's **Tools** tab surfaces a per-tool token estimate so operators can reason about the context-window cost of an active tool set *before* an agent connects. With **250+ tools** across the always-on, grouped, and auto-activated domains, the cost of an active set is otherwise invisible until an agent sees the tool list.
 
 The estimate is **regenerated from the same source as the tool catalog** — the MCP-server tool schemas (`mcp-server/src/tools/*`) — by `scripts/generate-token-estimates.mjs`, which serializes each tool's `{ name, description, inputSchema }` to its MCP wire JSON and estimates tokens via a `chars / 4` heuristic (dependency-free; a real BPE tokenizer is out of scope — the value is for *relative* cost, not exact counts). The generated `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs` is checked in and read by the bridge at runtime; there is no second hand-maintained list. CI runs an advisory drift check (`.github/workflows/version-sync.yml`, `continue-on-error`) on PRs that touch the schemas; regenerate locally after schema changes — `sync-version.mjs bump` prints a reminder.
 
@@ -378,7 +378,7 @@ token-budget knob and a resumable paging convention:
 
 - **`profile`**: `compact` (default) | `balanced` | `full`. This is the public,
   documented knob. It maps onto each tool's existing `detail` axis
-  (`compact`→`summary`, `balanced`→`normal`, `full`→`verbose`) so the M9
+  (`compact`→`summary`, `balanced`→`normal`, `full`→`verbose`) so the output
   compression module does the folding — the profile is just its public name.
   An explicit `profile` wins over a legacy `detail`; the two are otherwise
   interchangeable (`detail` is a backwards-compatible alias).
@@ -633,7 +633,7 @@ Wraps the instance-lock classifier (`instance-discovery.ts#classifyInstance`) + 
 
 **Cold Safe Mode detection.** When Unity launches straight into Safe Mode, the bridge's `[InitializeOnLoad]` never runs and **no instance lock is written**, so `classifyInstance` returns `gone` — the same classification as "Unity is not running." Previously this folded into the generic `stopped` with no hint that `read_compile_errors` was the right next step. The server now scans for a live Unity process whose command line references this project (`-projectPath <project>`); a match reuses the `dead_bridge` status token + `recoveryHint` so the recovery path is identical to the mid-session dead-bridge case. The `instance.unityProcessPid` field carries the scanned PID so operators can confirm the diagnosis. Cross-platform: macOS (`ps`) + Windows (PowerShell `Get-CimInstance`); Linux and the bare-editor (no `-projectPath`) case are known false negatives that fall through to `stopped` (no regression — the Hub has the same limitation without `lastLaunchPid`). The scan runs only when the lock is `gone` AND `/ping` is unreachable, so the happy path never pays the cost.
 
-**`classification` + `recoveryHint` (M23 Plan 2).** The top-level `classification` mirrors `instance.classification` so agents can branch on a single field. `recoveryHint` is non-null only when the status has a specific recovery tool — today, `dead_bridge` returns `{ tool: "unity_open_mcp_read_compile_errors", reason: "..." }` and every other status returns `null`. A `dead_bridge` signature (live PID + stale heartbeat, OR cold Safe Mode with no lock + a live Unity process) usually means Unity is sitting in Safe Mode / showing compile errors, so the hint and `nextStep` wording name Safe Mode explicitly rather than the generic "toolbar off" reading. It can also mean the Editor has **hung** on an internal file-descriptor limit (`editor_fd_exhaustion` in the `read_compile_errors` issues list) after many domain reloads — in that case there is no CS fix; the operator must restart Unity. Call `read_compile_errors` and branch on `issues[].kind` to tell the two apart. This is the machine-readable recovery signal — `ping` / live tools return `bridge_compile_failed` with the same wording when the dead-bridge signature is observed mid-call or in the cold-start case.
+**`classification` + `recoveryHint`.** The top-level `classification` mirrors `instance.classification` so agents can branch on a single field. `recoveryHint` is non-null only when the status has a specific recovery tool — today, `dead_bridge` returns `{ tool: "unity_open_mcp_read_compile_errors", reason: "..." }` and every other status returns `null`. A `dead_bridge` signature (live PID + stale heartbeat, OR cold Safe Mode with no lock + a live Unity process) usually means Unity is sitting in Safe Mode / showing compile errors, so the hint and `nextStep` wording name Safe Mode explicitly rather than the generic "toolbar off" reading. It can also mean the Editor has **hung** on an internal file-descriptor limit (`editor_fd_exhaustion` in the `read_compile_errors` issues list) after many domain reloads — in that case there is no CS fix; the operator must restart Unity. Call `read_compile_errors` and branch on `issues[].kind` to tell the two apart. This is the machine-readable recovery signal — `ping` / live tools return `bridge_compile_failed` with the same wording when the dead-bridge signature is observed mid-call or in the cold-start case.
 
 ### Deferred: `bridge_stop` / `bridge_start`
 

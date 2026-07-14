@@ -164,7 +164,7 @@ async function withTmp(name: string, fn: (tmp: string) => Promise<void>): Promis
   }
 }
 
-/** Build a ToolRouter with a fresh ToolSessionState (default `core`-only). */
+/** Build a ToolRouter with a fresh ToolSessionState (catalog defaults active). */
 function makeRouter(
   live: LiveClient,
   batch: BatchSpawn,
@@ -809,7 +809,7 @@ test("route: manage_tools deactivate removes a group", async () => {
   assert.equal(session.isGroupActive("navigation"), false);
 });
 
-test("route: manage_tools reset restores core-only", async () => {
+test("route: manage_tools reset restores default-on groups", async () => {
   const session = new ToolSessionState();
   session.activate("navigation");
   session.activate("probuilder");
@@ -1244,7 +1244,7 @@ test("route: bridge_status is registered in ALL_TOOLS and always-visible", async
   const { filterVisibleTools } = await import("./tool-session-state.js");
   const names = ALL_TOOLS.map((t) => t.name);
   assert.ok(names.includes("unity_open_mcp_bridge_status"));
-  // A fresh session (core-only) must still see bridge_status.
+  // A fresh session must still see bridge_status.
   const freshSession = new ToolSessionState();
   const visible = filterVisibleTools(ALL_TOOLS, freshSession).map((t) => t.name);
   assert.ok(
@@ -1370,7 +1370,7 @@ test("route: bridge_status cold Safe Mode — Unity process for a DIFFERENT proj
 //
 // These resolve entirely in the MCP server (no bridge hop, no batch Unity):
 // every response is tagged `_source: "local"`. They live in the
-// `unity-hub-control` group (NOT always-visible), so a fresh core-only session
+// `unity-hub-control` group (NOT always-visible), so a fresh default session
 // must hide them until the group is activated. Mutating members
 // (install_editor / install_modules / set_install_path) return the gate-
 // consistent mutation/gate/agentNextSteps envelope with gate.skipped=true.
@@ -1392,11 +1392,11 @@ test("hub control tools are registered in ALL_TOOLS and group-gated (not always-
     assert.ok(names.includes(name), `${name} must be in ALL_TOOLS`);
     assert.equal(groupFor(name), "unity-hub-control", `${name} must map to unity-hub-control`);
   }
-  // A fresh core-only session must NOT see the hub tools (they're group-gated).
+  // A fresh default session must NOT see the hub tools (they're group-gated).
   const freshSession = new ToolSessionState();
   const visible = filterVisibleTools(ALL_TOOLS, freshSession).map((t) => t.name);
   for (const name of hubTools) {
-    assert.ok(!visible.includes(name), `${name} must be hidden in a fresh core-only session`);
+    assert.ok(!visible.includes(name), `${name} must be hidden in a fresh default session`);
   }
   // Activating the group exposes them.
   freshSession.activate("unity-hub-control");

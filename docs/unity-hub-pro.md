@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="250">
+  <img src="../hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="250">
 </p>
 
 # Unity Hub Pro
@@ -33,7 +33,7 @@ from one UI.
 
 | Projects                            | Tools                                |
 |------------------------------------------|-------------------------------------------------|
-| ![plot](./art/hub-projects.png) | ![plot](./art/hub-tools.png) |
+| ![plot](../screenshots/hub-projects.png) | ![plot](../screenshots/hub-tools.png) |
 
 ## Main workflows
 
@@ -43,7 +43,7 @@ from one UI.
 - Open project-specific settings.
 - Launch Unity with per-project configuration.
 
-![projects](./art/hub-settings.png)
+![projects](../screenshots/hub-settings.png)
 
 ### 2) AI setup
 
@@ -51,7 +51,7 @@ from one UI.
 - Follow wizard steps for packages, MCP client config, and verification.
 - Re-run verification when Unity or dependencies change.
 
-![projects](./art/hub-ai-buttons.png)
+![projects](../screenshots/hub-ai-buttons.png)
 
 For full setup steps, see [wizard-setup.md](setup/wizard-setup.md).
 

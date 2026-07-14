@@ -13,8 +13,10 @@ Skill for AI agents driving Unity Particle System components in a project throug
 - `unity_open_mcp_ping` returns `connected: true`.
 - The `particle-system` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="particle-system")` before
-  invoking any `particle_system_*` tool. Fresh sessions start with only `core`
-  visible. Because ParticleSystem is built-in, `capabilities` always reports the
+  invoking any `particle_system_*` tool.
+  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
+  `asset-intelligence`, `typed-editor`, and `diagnostics`.
+  Because ParticleSystem is built-in, `capabilities` always reports the
   `particle-system` group as `available: true`.
 
 ## Tool prefix

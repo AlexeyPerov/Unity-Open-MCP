@@ -1,20 +1,19 @@
-// M18 Plan 2 / T18.2 — per-session tool-group visibility state.
+// Per-session tool-group visibility state.
 //
-// Pure in-memory store: ephemeral, per connected MCP client/session. Matches
-// the resolved decision in M18 execution-plan.md — the MCP server is the
-// authority for session visibility; the bridge does NOT track session state.
-// The state resets to `core`-only on every MCP-server restart and is shared
-// across one stdio server process (one connected MCP client ↔ one store).
+// Pure in-memory store: ephemeral, per connected MCP client/session. The MCP
+// server is the authority for session visibility; the bridge does NOT track
+// session state. Every MCP-server restart restores the catalog's default-on
+// groups. One stdio server process has one connected client and one store.
 //
 // `unity_open_mcp_manage_tools` is the only mutator of this state. ListTools
 // reads it via `filterVisibleTools` to drop tools whose group is not active.
 //
 // The store is intentionally not keyed by session id — the stdio MCP server
 // has exactly one client per process. HTTP/SSE MCP transports would need a
-// per-client map; that is a Phase-2 concern (see M18 spec §Out of scope).
+// per-client map.
 //
-// M20 Plan 7 / T20.7.0 — auto-activation. In addition to the manual activate
-// path, the store records WHY each active group is active (manual vs auto),
+// In addition to the manual activation path, the store records why each active
+// group is active (manual vs auto),
 // so capabilities / manage_tools can surface `autoActivated: true` with the
 // driving package dependency. Auto-activation is driven from the live bridge's
 // compiled-tool inventory: when a group with `autoActivate: true` has its

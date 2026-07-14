@@ -18,7 +18,7 @@ Live suites need a Unity Editor open on the target project with the bridge runni
 |--------|---------|
 | [`sync-version.mjs`](sync-version.mjs) | Keeps version strings in sync from `version.json` (MCP server + bridge + verify trio) or `hub/version.json` (Hub app). Supports `--check`, `bump`, `set`, and `tags`. |
 | [`generate-token-estimates.mjs`](generate-token-estimates.mjs) | Generates `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs` from live MCP tool schemas. `--check` is advisory in CI (`continue-on-error`). |
-| [`gen-mcp-coverage-matrix.mjs`](gen-mcp-coverage-matrix.mjs) | Regenerates the per-tool coverage matrix under `specs/execution/M27/`. Fails if any registered tool has no suite owner. |
+| [`gen-mcp-coverage-matrix.mjs`](gen-mcp-coverage-matrix.mjs) | Regenerates the internal, gitignored per-tool coverage matrix. Fails if any registered tool has no suite owner. |
 
 ## MCP test suites
 
@@ -31,7 +31,7 @@ These drive tools through `unity-open-mcp run-tool` (one fresh process per call)
 | [`mcp-behavior.mjs`](mcp-behavior.mjs) | **S1** — behavioral | Strict happy-path tests for tools S0 only reaches via `tolerate` / `reachable`, plus tools absent from S0. |
 | [`mcp-headless.mjs`](mcp-headless.mjs) | **S2** — headless | Batch/offline paths with the Editor **closed** on the target project. |
 | [`mcp-protocol.mjs`](mcp-protocol.mjs) | **S3** — protocol | Stdio MCP transport: `initialize`, `tools/list`, `tools/call`. Local portion runs without Unity; use `--skip-live` to skip bridge calls. |
-| [`mcp-extensions.mjs`](mcp-extensions.mjs) | **S4** — extensions | End-to-end chains per compiled extension pack (NavMesh, Input System, ProBuilder, …). Uncompiled groups skip; compiled groups must pass. |
+| [`mcp-extensions.mjs`](mcp-extensions.mjs) | **S4** — embedded domains | End-to-end chains per compiled embedded domain (NavMesh, Input System, ProBuilder, …). Uncompiled groups skip; compiled groups must pass. |
 | [`mcp-sandbox.mjs`](mcp-sandbox.mjs) | **S5** — sandbox | Destructive lifecycle (packages, Hub mutators, builds) on a disposable clone of `demo/`. Editor must not be open on the sandbox. |
 
 Shared helpers for S0–S5 live in [`mcp-test-lib.mjs`](mcp-test-lib.mjs) (not run directly).

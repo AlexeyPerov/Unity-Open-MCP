@@ -66,7 +66,13 @@ project folder, e.g. `MyGame/Packages/manifest.json`) and add two entries to the
 
 ### Optional Unity domain dependencies
 
-Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation) are **bundled with the bridge** — they activate automatically once the matching Unity package is present. Add the Unity dependencies you want under `dependencies`:
+Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation)
+are **bundled with the bridge**. Their tools compile into the bridge when the
+matching Unity package is present, but most groups still require
+`manage_tools(action="activate", group="<domain>")` before they appear in
+`ListTools`. Shader Graph, VFX Graph, and Memory Profiler are the
+package-detected auto-activating exceptions. Add the Unity dependencies you
+want under `dependencies`:
 
 ```json
 {
@@ -88,9 +94,8 @@ Once the bridge is installed, you can add or remove Unity domain dependencies wi
 
 ## 2) Configure your MCP client (AI side)
 
-Now point your AI client at the MCP server. With **`npx`** it is fully automatic
-— your client downloads the server on first run and keeps it up to date, so you
-never install or update it manually:
+Now point your AI client at the MCP server. With **`npx`**, your client
+downloads and runs the pinned server version automatically:
 
 ```json
 {

@@ -687,7 +687,7 @@ export interface CapabilitiesResult {
     rulesPlanned: number;
     fixesImplemented: number;
     fixesPlanned: number;
-    /** M18 Plan 2 — count of groups enabled by default (`core` only). */
+    /** Count of catalog groups enabled by default for a fresh session. */
     toolGroupsDefaultEnabled: number;
     /** M18 Plan 2 — total group count. */
     toolGroupsTotal: number;

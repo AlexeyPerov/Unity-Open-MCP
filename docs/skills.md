@@ -9,11 +9,11 @@ Skills are markdown playbooks (`SKILL.md`) that give an AI agent **project-speci
 | Skill | Audience | Activates when |
 | ----- | -------- | -------------- |
 | [`skills/unity-open-mcp/SKILL.md`](../skills/unity-open-mcp/SKILL.md) | Any agent driving a Unity project | Always — the core playbook |
-| [`skills/extensions/navigation/SKILL.md`](../skills/extensions/navigation/SKILL.md) | Agents using NavMesh / AI Navigation | Navigation extension pack **and** `com.unity.ai.navigation` installed |
-| [`skills/extensions/inputsystem/SKILL.md`](../skills/extensions/inputsystem/SKILL.md) | Agents using the Unity Input System | Input System extension pack **and** `com.unity.inputsystem` installed |
-| [`skills/extensions/probuilder/SKILL.md`](../skills/extensions/probuilder/SKILL.md) | Agents using ProBuilder | ProBuilder extension pack **and** `com.unity.probuilder` installed |
-| [`skills/extensions/particlesystem/SKILL.md`](../skills/extensions/particlesystem/SKILL.md) | Agents using Particle Systems | Particle System extension pack installed (built-in Unity module) |
-| [`skills/extensions/animation/SKILL.md`](../skills/extensions/animation/SKILL.md) | Agents using AnimationClip / Animator | Animation extension pack installed (built-in Unity modules) |
+| [`skills/extensions/navigation/SKILL.md`](../skills/extensions/navigation/SKILL.md) | Agents using NavMesh / AI Navigation | `navigation` embedded domain activated **and** `com.unity.ai.navigation` installed |
+| [`skills/extensions/inputsystem/SKILL.md`](../skills/extensions/inputsystem/SKILL.md) | Agents using the Unity Input System | `input-system` embedded domain activated **and** `com.unity.inputsystem` installed |
+| [`skills/extensions/probuilder/SKILL.md`](../skills/extensions/probuilder/SKILL.md) | Agents using ProBuilder | `probuilder` embedded domain activated **and** `com.unity.probuilder` installed |
+| [`skills/extensions/particlesystem/SKILL.md`](../skills/extensions/particlesystem/SKILL.md) | Agents using Particle Systems | `particle-system` embedded domain activated (built-in Unity module) |
+| [`skills/extensions/animation/SKILL.md`](../skills/extensions/animation/SKILL.md) | Agents using AnimationClip / Animator | `animation` embedded domain activated (built-in Unity modules) |
 | [`skills/extensions/splines/SKILL.md`](../skills/extensions/splines/SKILL.md) | Agents using the Splines package | `com.unity.splines` installed (embedded domain group) |
 | [`skills/extensions/lighting/SKILL.md`](../skills/extensions/lighting/SKILL.md) | Agents using per-Light / ReflectionProbe / skybox tooling | `lighting` tool group activated (built-in lighting module — always compiled) |
 | [`skills/extensions/audio/SKILL.md`](../skills/extensions/audio/SKILL.md) | Agents using AudioSource / AudioListener / AudioMixer tooling | `audio` tool group activated (built-in audio module — always compiled) |
@@ -42,7 +42,13 @@ Skills are markdown playbooks (`SKILL.md`) that give an AI agent **project-speci
 
 ### Extension skills
 
-Each `skills/extensions/<domain>/SKILL.md` is scoped to one domain pack. They follow the same shape as the core playbook but cover only that pack's tools: preconditions, tool prefix, face/selection model, and the pack-specific gate behavior. An extension skill is only useful when its pack is installed — if a domain tool returns `tool_not_found`, the pack is not in the project (check the bridge window's **Extensions** tab or the Hub AI Setup wizard).
+Each `skills/extensions/<domain>/SKILL.md` is scoped to one embedded domain.
+They follow the same shape as the core playbook but cover only that domain's
+tools: preconditions, tool prefix, face/selection model, and domain-specific
+gate behavior. A domain skill is useful when its Unity dependency has compiled
+in and its group is active. If a domain tool returns `tool_not_found`, check
+`capabilities` and `manage_tools(action="list_groups")`, then the bridge
+window's **Extensions** tab or the Hub AI Setup wizard.
 
 ## How skills get installed
 

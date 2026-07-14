@@ -82,9 +82,11 @@ CI runner, etc.) — see
 ## 3) Optional Unity domain dependencies
 
 Domain tools (NavMesh, Input System, ProBuilder, Particle System, Animation)
-are **bundled with the bridge** — they activate automatically once the matching
-Unity package is present. Add the Unity dependencies you want under
-`dependencies`:
+are **bundled with the bridge**. Matching Unity dependencies make package-gated
+domains compile in and become available, but do not activate most domain groups
+for a session. Activate the groups you need explicitly. Only the `shadergraph`,
+`vfx`, and `memoryprofiler` groups auto-activate when available. Add the Unity
+dependencies you want under `dependencies`:
 
 ```json
 {

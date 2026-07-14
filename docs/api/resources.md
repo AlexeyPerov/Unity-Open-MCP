@@ -49,7 +49,9 @@ Resources are registered in `mcp-server/src/resources/index.ts` and resolved by 
 - Static catalog (no bridge round-trip).
 - Returns:
   - `groups[]` — id, description, defaultEnabled, domainDefine, unityPackage per group.
-  - `defaultEnabledGroups` — array containing `"core"` only.
+  - `defaultEnabledGroups` — group ids whose catalog entries are default-on:
+    `core`, `gate-and-verify`, `asset-intelligence`, `typed-editor`, and
+    `diagnostics`.
   - `usageHint` — points at `manage_tools` for activation and `capabilities` for the per-tool roster.
 - For compiled-state availability and tool rosters, call `unity_open_mcp_capabilities`; for session activation state, call `unity_open_mcp_manage_tools(action="list_groups")`.
 

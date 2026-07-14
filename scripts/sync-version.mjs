@@ -176,6 +176,13 @@ const TRIO_TARGETS = [
         .replace(/(#bridge-v)\d+\.\d+\.\d+/g, `$1${v}`)
         .replace(/(#verify-v)\d+\.\d+\.\d+/g, `$1${v}`),
   },
+  {
+    file: "templates/github-actions/README.md",
+    kind: "md-git",
+    description: "GitHub Actions template verify git-URL pin (#verify-v)",
+    replace: (b, v) =>
+      b.replace(/(#verify-v)\d+\.\d+\.\d+/g, `$1${v}`),
+  },
   // Wizard UI tag examples — the Packages step shows a `bridge-v<ver>` /
   // `verify-v<ver>` placeholder + hint so the version-pin field's example
   // matches the default the Rust planner derives from version.json. Kept in
@@ -338,8 +345,8 @@ function extractVersion(body, kind) {
     return m ? m[1] : undefined;
   }
   if (kind === "md-git") {
-    // First #bridge-v<X.Y.Z> pin in the doc (setup/*.md git-URL examples).
-    const m = body.match(/#bridge-v(\d+\.\d+\.\d+)/);
+    // First bridge or verify git-URL pin in the document.
+    const m = body.match(/#(?:bridge|verify)-v(\d+\.\d+\.\d+)/);
     return m ? m[1] : undefined;
   }
   if (kind === "wizard-tag") {

@@ -1,4 +1,4 @@
-// M18 Plan 2 / T18.2 — canonical tool-group catalog.
+// Canonical tool-group catalog.
 //
 // Single source of truth for the per-session tool-group visibility system.
 // Drives two surfaces:
@@ -10,9 +10,9 @@
 // Tools with no entry map to `null` and are always visible — they are server
 // meta-tools (capabilities, ping, manage_tools itself, etc.).
 //
-// Groups are stable lowercase identifiers. The DEFAULT_ENABLED set is
-// `{ "core" }` only — every other group is hidden from ListTools until the
-// connected MCP session activates it via manage_tools.
+// Groups are stable lowercase identifiers. DEFAULT_ENABLED is derived from
+// catalog entries whose `defaultEnabled` flag is true. Other groups are hidden
+// from ListTools until activated for the connected MCP session.
 //
 // Domain groups (navigation, input, probuilder, particle-system, animation)
 // carry a `domainDefine` so capabilities can report compiled-state
@@ -21,8 +21,8 @@
 // when the Unity domain package is absent. Availability is compiled-state
 // only; it does not change per session.
 //
-// M20 Plan 7 / T20.7.0 — a domain group may additionally carry
-// `autoActivate: true` to opt into package-detection auto-activation: when
+// A domain group may additionally carry `autoActivate: true` to opt into
+// package-detection auto-activation: when
 // the project has the group's `unityPackage` installed, the group is auto-
 // activated for the session (no manual manage_tools call). This is additive
 // to the manual-activation model — existing groups keep their manual-only
@@ -39,7 +39,6 @@ export interface ToolGroup {
   description: string;
   /**
    * True when the group is enabled by default for every fresh session.
-   * Only `"core"` is default-on; everything else must be activated.
    */
   defaultEnabled: boolean;
   /**
@@ -56,13 +55,12 @@ export interface ToolGroup {
    */
   unityPackage?: string;
   /**
-   * M20 Plan 7 / T20.7.0 — when true, the group auto-activates for the
-   * session when its {@link unityPackage} dependency is detected as
-   * installed in the project (no manual manage_tools call required). This
-   * mirrors the competitor's "package installed → tools appear" UX, additive
-   * to the manual-activation model. Only meaningful when {@link unityPackage}
-   * is also set; ignored otherwise. The activation is ephemeral per session
-   * (same store as manual activation) — NOT persisted across server restarts.
+   * When true, the group auto-activates for the session when its
+   * {@link unityPackage} dependency is detected as installed in the project
+   * (no manual manage_tools call required). This is additive to the
+   * manual-activation model. Only meaningful when {@link unityPackage} is also
+   * set; ignored otherwise. The activation is ephemeral per session (same
+   * store as manual activation) — NOT persisted across server restarts.
    */
   autoActivate?: boolean;
 }
@@ -96,17 +94,16 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: "typed-editor",
     description:
-      "Typed editor surface (M16 Plans 1–6, 9): assets, materials, shaders, " +
-      "prefabs, GameObjects, components, scenes, packages, console, editor " +
-      "state, selection, undo, tags, layers, reflection, scripts, object " +
-      "data, build pipeline, project settings.",
+      "Typed editor surface: assets, materials, shaders, prefabs, GameObjects, " +
+      "components, scenes, packages, console, editor state, selection, undo, " +
+      "tags, layers, reflection, scripts, object data, build pipeline, project settings.",
     defaultEnabled: true,
   },
   {
     id: "diagnostics",
     description:
-      "Profiler session control, counters, memory snapshots, and the M10 " +
-      "per-frame capture / memory / rendering reads.",
+      "Profiler session controls: start/stop, config, modules, save/load data, " +
+      "and script stats. Per-frame profiler reads belong to agent-senses.",
     defaultEnabled: true,
   },
   {
@@ -353,7 +350,6 @@ export const TOOL_GROUPS: ToolGroup[] = [
 
 /**
  * Set of group ids enabled by default for every fresh session.
- * Per the resolved decision (M18 execution-plan.md), this is `core` only.
  */
 export const DEFAULT_ENABLED_GROUPS: ReadonlySet<string> = new Set(
   TOOL_GROUPS.filter((g) => g.defaultEnabled).map((g) => g.id),

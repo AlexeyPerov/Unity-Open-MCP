@@ -34,6 +34,7 @@ on:
       - mcp-server/README.md
       - docs/ci/github-actions/unity-verify.yml
       - docs/ci/gitlab-ci/unity-verify.yml
+      - templates/github-actions/README.md
       - scripts/sync-version.mjs
       - .github/workflows/version-sync.yml
       # Token-estimate codegen advisory check — fires when the MCP-server tool
@@ -63,6 +64,7 @@ on:
       - mcp-server/README.md
       - docs/ci/github-actions/unity-verify.yml
       - docs/ci/gitlab-ci/unity-verify.yml
+      - templates/github-actions/README.md
 
 jobs:
   check-trio:

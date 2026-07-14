@@ -18,7 +18,9 @@ Unity project through the `unity-open-mcp` MCP server.
   recompile.
 - The `splines` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="splines")` before
-  invoking any `splines_*` tool. Fresh sessions start with only `core` visible.
+  invoking any `splines_*` tool.
+  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
+  `asset-intelligence`, `typed-editor`, and `diagnostics`.
 
 ## Tool prefix
 

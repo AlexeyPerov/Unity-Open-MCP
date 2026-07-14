@@ -11,11 +11,8 @@
 
 Unity Open MCP is a comprehensive set of tools to use AI agents with Unity projects.
 
-The MCP server consists of a total of **229** tools:
-- Typed editor/project tools (core package): **92**
-- Core + validation tools: **16**
-- Asset intelligence + senses + discovery + diagnostics + meta tools: **34**
-- Optional extension-pack tools: **87**
+The MCP server exposes **250+ tools** across typed editor workflows, gate and
+validation, asset intelligence, diagnostics, and embedded domain groups.
 
 ## Key features
 

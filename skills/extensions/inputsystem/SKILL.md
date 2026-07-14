@@ -16,7 +16,9 @@ Skill for AI agents driving the Unity Input System in a project through the `uni
   bridge recompile.
 - The `input-system` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="input-system")` before
-  invoking any `inputsystem_*` tool. Fresh sessions start with only `core` visible.
+  invoking any `inputsystem_*` tool.
+  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
+  `asset-intelligence`, `typed-editor`, and `diagnostics`.
 - The Unity project has `com.unity.inputsystem` available.
 - `ProjectSettings/ProjectSettings.asset` has `activeInputHandler` set to a valid value: `0` (Old Input Manager), `1` (Input System only), or `2` (Both). A value of `-1` (Unity's "not configured" sentinel) makes the Input System throw `ArgumentException: Invalid value of 'activeInputHandler' setting: -1` in its static constructor on every editor update, which blocks the bridge from loading. If you see that exception in `read_compile_errors` / the console, set `activeInputHandler: 2` directly in the asset file (or use `settings_set_player` with `activeInputHandling: "both"` once the bridge is up).
 

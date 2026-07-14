@@ -16,7 +16,9 @@ neighbor stitching) in a project through the `unity-open-mcp` MCP server.
 - `unity_open_mcp_ping` returns `connected: true`.
 - The `terrain` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="terrain")` before
-  invoking any Terrain tool. Fresh sessions start with only `core` visible.
+  invoking any Terrain tool.
+  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
+  `asset-intelligence`, `typed-editor`, and `diagnostics`.
   Because these types are built-in, `capabilities` always reports the
   `terrain` group as `available: true` (no `domainDefine`).
 
