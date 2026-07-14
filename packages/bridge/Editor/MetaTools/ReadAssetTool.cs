@@ -234,25 +234,29 @@ namespace UnityOpenMcpBridge.MetaTools
             var result = new List<KeyValuePair<string, string>>();
             try
             {
-                var so = new SerializedObject(asset);
-                var prop = so.GetIterator();
-                if (!prop.NextVisible(true))
-                    return result;
-
-                int emitted = 0;
-                // First visible property is "m_Script" for MonoBehaviours; iterate top-level children.
-                do
+                // SerializedObject is IDisposable (native SerializedFile
+                // handle) — scope it to this read with `using`.
+                using (var so = new SerializedObject(asset))
                 {
-                    if (emitted >= fieldLimit) break;
-                    if (prop.depth != 0) continue;
-                    var fieldName = prop.name;
-                    if (fieldName == "m_Script") continue;
-                    var value = ReadPropertyValue(prop);
-                    if (value == null) continue;
-                    result.Add(new KeyValuePair<string, string>(fieldName, value));
-                    emitted++;
+                    var prop = so.GetIterator();
+                    if (!prop.NextVisible(true))
+                        return result;
+
+                    int emitted = 0;
+                    // First visible property is "m_Script" for MonoBehaviours; iterate top-level children.
+                    do
+                    {
+                        if (emitted >= fieldLimit) break;
+                        if (prop.depth != 0) continue;
+                        var fieldName = prop.name;
+                        if (fieldName == "m_Script") continue;
+                        var value = ReadPropertyValue(prop);
+                        if (value == null) continue;
+                        result.Add(new KeyValuePair<string, string>(fieldName, value));
+                        emitted++;
+                    }
+                    while (prop.NextVisible(false));
                 }
-                while (prop.NextVisible(false));
             }
             catch
             {

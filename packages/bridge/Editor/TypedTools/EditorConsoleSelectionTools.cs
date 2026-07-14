@@ -796,6 +796,10 @@ namespace UnityOpenMcpBridge.TypedTools
         // Load the TagManager as a SerializedObject. Uses
         // AssetDatabase.LoadMainAssetAtPath on the well-known ProjectSettings
         // path; this returns the live TagManager asset Unity keeps loaded.
+        // Returns the SerializedObject undisposed: it must outlive this factory
+        // so the caller can FindProperty / ApplyModifiedProperties on it. Each
+        // caller owns disposal via `finally { so?.Dispose(); }` (add_tag /
+        // add_layer) — the native SerializedFile handle is released there.
         private static SerializedObject LoadTagManagerSerialized()
         {
             var asset = AssetDatabase.LoadMainAssetAtPath("ProjectSettings/TagManager.asset");

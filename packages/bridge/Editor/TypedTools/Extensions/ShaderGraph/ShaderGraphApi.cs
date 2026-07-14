@@ -906,15 +906,17 @@ namespace UnityOpenMcpBridge.Extensions.ShaderGraphExt
             // derived); bail gracefully if reflection produced something else.
             var uo = node as UnityEngine.Object;
             if (uo == null) return;
-            var so = new SerializedObject(uo);
-            var entries = ParseJsonObject(propertiesJson);
-            foreach (var kv in entries)
+            using (var so = new SerializedObject(uo))
             {
-                var sp = so.FindProperty(kv.Key);
-                if (sp == null) continue;
-                ApplyToProperty(sp, kv.Value);
+                var entries = ParseJsonObject(propertiesJson);
+                foreach (var kv in entries)
+                {
+                    var sp = so.FindProperty(kv.Key);
+                    if (sp == null) continue;
+                    ApplyToProperty(sp, kv.Value);
+                }
+                so.ApplyModifiedPropertiesWithoutUndo();
             }
-            so.ApplyModifiedPropertiesWithoutUndo();
         }
 
         private static string ExtractNodeSlotsJson(object node)

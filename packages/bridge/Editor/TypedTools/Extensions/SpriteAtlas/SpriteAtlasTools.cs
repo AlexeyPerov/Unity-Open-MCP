@@ -649,21 +649,25 @@ namespace UnityOpenMcpBridge.Extensions.SpriteAtlasExt
         private static List<PackableEntry> GetPackables(U2D.SpriteAtlasAsset asset)
         {
             var result = new List<PackableEntry>();
-            var so = new SerializedObject(asset);
-            var arr = so.FindProperty("m_ImporterData.packables.Array");
-            if (arr == null) return result;
-            int size = arr.arraySize;
-            for (int i = 0; i < size; i++)
+            // SerializedObject is IDisposable — scope it with `using` so the
+            // native SerializedFile handle is freed after the enumeration.
+            using (var so = new SerializedObject(asset))
             {
-                var elem = arr.GetArrayElementAtIndex(i);
-                var obj = elem.objectReferenceValue;
-                if (obj == null) continue;
-                result.Add(new PackableEntry
+                var arr = so.FindProperty("m_ImporterData.packables.Array");
+                if (arr == null) return result;
+                int size = arr.arraySize;
+                for (int i = 0; i < size; i++)
                 {
-                    Object = obj,
-                    Path = AssetDatabase.GetAssetPath(obj),
-                    TypeName = obj.GetType().Name,
-                });
+                    var elem = arr.GetArrayElementAtIndex(i);
+                    var obj = elem.objectReferenceValue;
+                    if (obj == null) continue;
+                    result.Add(new PackableEntry
+                    {
+                        Object = obj,
+                        Path = AssetDatabase.GetAssetPath(obj),
+                        TypeName = obj.GetType().Name,
+                    });
+                }
             }
             return result;
         }

@@ -845,6 +845,8 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Resolve a type by full name (preferred) or class name fallback.
         // Mirrors InvokeMethodTool.FindType so the behavior is consistent.
+        // Skips execute_csharp snippet assemblies — they are transient scratch
+        // assemblies whose Snippet type must never resolve as a project type.
         private static Type ResolveType(string typeName, string assemblyName)
         {
             var assemblies = AppDomain.CurrentDomain.GetAssemblies();
@@ -855,11 +857,13 @@ namespace UnityOpenMcpBridge.TypedTools
             }
             foreach (var asm in assemblies)
             {
+                if (ExecuteCSharpTool.IsSnippetAssembly(asm)) continue;
                 var type = asm.GetType(typeName);
                 if (type != null) return type;
             }
             foreach (var asm in assemblies)
             {
+                if (ExecuteCSharpTool.IsSnippetAssembly(asm)) continue;
                 try
                 {
                     foreach (var t in SafeGetTypes(asm))
@@ -966,7 +970,38 @@ namespace UnityOpenMcpBridge.TypedTools
             if (targetType == typeof(double)) return double.Parse(StripQuotes(raw), NumberStyles.Float, CultureInfo.InvariantCulture);
             if (targetType == typeof(bool)) return StripQuotes(raw) == "true";
             if (targetType == typeof(long)) return long.Parse(StripQuotes(raw), NumberStyles.Integer, CultureInfo.InvariantCulture);
-            if (targetType.IsEnum) return Enum.Parse(targetType, StripQuotes(raw), ignoreCase: true);
+            if (targetType.IsEnum)
+            {
+                var unquoted = StripQuotes(raw);
+
+                // Numeric form FIRST — Enum.TryParse accepts ANY numeric value
+                // that fits the underlying type, even when no declared enum
+                // constant has that value (e.g. "42" on a 3-value enum returns
+                // true with garbage). So we must validate numeric input against
+                // the declared constants ourselves before accepting it; a value
+                // that matches no constant is rejected with a clear error.
+                if (long.TryParse(unquoted, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numeric))
+                {
+                    foreach (var defined in Enum.GetValues(targetType))
+                    {
+                        if (Convert.ToInt64(defined, CultureInfo.InvariantCulture) == numeric)
+                            return Enum.ToObject(targetType, numeric);
+                    }
+                    var numAllowed = string.Join(", ", Enum.GetNames(targetType));
+                    throw new ArgumentException(
+                        $"value '{unquoted}' is not a valid {targetType.Name}; allowed: [{numAllowed}]");
+                }
+
+                // Name form (case-insensitive). Enum.TryParse returns false for
+                // unknown names instead of throwing the cryptic ArgumentException
+                // that Enum.Parse emits, so we can surface a clear error here.
+                if (Enum.TryParse(targetType, unquoted, ignoreCase: true, out object enumValue))
+                    return enumValue;
+
+                var allowed = string.Join(", ", Enum.GetNames(targetType));
+                throw new ArgumentException(
+                    $"value '{unquoted}' is not a valid {targetType.Name}; allowed: [{allowed}]");
+            }
 
             // Vector / Color — reuse MaterialTools float-array parser.
             if (targetType == typeof(Vector2))
@@ -1010,10 +1045,16 @@ namespace UnityOpenMcpBridge.TypedTools
                 if (string.IsNullOrEmpty(path)) path = JsonBody.GetString(raw, "asset_path");
                 if (!string.IsNullOrEmpty(path))
                     return AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
+                // instance_id fallback — long-backed via InstanceId.Parse so
+                // IDs > int.MaxValue resolve on Unity 6000.5+ (the 8-byte
+                // EntityId no longer fits in an int). Accepts both bare numeric
+                // and JSON-string wire forms.
                 var idRaw = JsonBody.GetRawValue("{\"v\":" + raw + "}", "v");
-                if (!string.IsNullOrEmpty(idRaw)
-                    && int.TryParse(idRaw.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
-                    return InstanceId.ToObject(id);
+                if (!string.IsNullOrEmpty(idRaw))
+                {
+                    var id = InstanceId.Parse(StripQuotes(idRaw));
+                    if (id != 0) return InstanceId.ToObject(id);
+                }
                 throw new FormatException("object_reference value must be {\"path\": \"...\"}, {\"asset_path\": \"...\"}, {\"instance_id\": N}, or null.");
             }
 
@@ -1092,6 +1133,18 @@ namespace UnityOpenMcpBridge.TypedTools
             bool allowStatic, List<string> modified, List<string> errors)
         {
             var type = target.GetType();
+
+            // Record the target's pre-patch state once so a later
+            // Undo.PerformUndo() reverts every reflection write in this batch.
+            // Reflection SetValue is NOT auto-undoable — without this record a
+            // Ctrl+Z would silently skip reflection patches, leaving
+            // object_modify and the jsonPatchesPerGameObject surface of
+            // gameobject_modify half-undoable (root diff undoable, component
+            // patches not). NOTE: this only covers INSTANCE members — Unity's
+            // Undo system does not snapshot static-field writes, so static
+            // patches (which already require allow_static:true) remain
+            // non-undoable by design.
+            Undo.RecordObject(target, "MCP object_modify");
 
             foreach (var entry in entries)
             {

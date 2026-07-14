@@ -635,20 +635,23 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             // SerializedObject is the canonical Unity editor path — handles
             // properties (including the [SerializeField] private fields most
             // Timeline assets expose) without binding to a concrete type.
-            var so = new SerializedObject(obj);
-            var prop = so.FindProperty(entry.Field);
-            if (prop == null)
-                return new FieldResult { Ok = false, Message = $"Unknown field '{entry.Field}' on {obj.GetType().Name}." };
+            // Wrapped in `using` so the native SerializedFile handle is freed.
+            using (var so = new SerializedObject(obj))
+            {
+                var prop = so.FindProperty(entry.Field);
+                if (prop == null)
+                    return new FieldResult { Ok = false, Message = $"Unknown field '{entry.Field}' on {obj.GetType().Name}." };
 
-            try
-            {
-                ApplyToProperty(prop, entry.RawValue, entry.TypeHint);
-                so.ApplyModifiedPropertiesWithoutUndo();
-                return new FieldResult { Ok = true };
-            }
-            catch (System.Exception e)
-            {
-                return new FieldResult { Ok = false, Message = e.Message };
+                try
+                {
+                    ApplyToProperty(prop, entry.RawValue, entry.TypeHint);
+                    so.ApplyModifiedPropertiesWithoutUndo();
+                    return new FieldResult { Ok = true };
+                }
+                catch (System.Exception e)
+                {
+                    return new FieldResult { Ok = false, Message = e.Message };
+                }
             }
         }
 

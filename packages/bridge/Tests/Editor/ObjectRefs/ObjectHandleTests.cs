@@ -213,5 +213,34 @@ namespace UnityOpenMcpBridge.Tests
                 Object.DestroyImmediate(go);
             }
         }
+
+        // ===================== M30-polish Plan 4 — T4.4 long-backed IDs =====================
+
+        // T4.4 — InstanceId.Parse must round-trip a value > int.MaxValue
+        // (the Unity 6000.5+ 8-byte EntityId regime) without truncation. The
+        // object_modify / component_modify / execute_csharp object_reference
+        // call sites previously used int.TryParse, which silently returned
+        // null for IDs above int.MaxValue. They now go through InstanceId.Parse
+        // (long-backed); this unit test pins the round-trip so a future
+        // regression to int.TryParse would be caught even on a < 6000.5 build.
+        [Test]
+        public static void InstanceIdParse_LargeValue_RoundTripsAsLong()
+        {
+            // A value that exceeds int.MaxValue (2147483647) but fits in long.
+            const long large = 568105589213726936L;
+
+            // Bare numeric string form (the call sites StripQuotes before
+            // calling Parse, so Parse itself sees the clean numeric string).
+            Assert.AreEqual(large, InstanceId.Parse(large.ToString()));
+            // long input passes through.
+            Assert.AreEqual(large, InstanceId.Parse(large));
+            // int input widens cleanly.
+            Assert.AreEqual(42L, InstanceId.Parse(42));
+
+            // Null / empty / unparseable → 0 (no throw).
+            Assert.AreEqual(0, InstanceId.Parse(null));
+            Assert.AreEqual(0, InstanceId.Parse(""));
+            Assert.AreEqual(0, InstanceId.Parse("not-a-number"));
+        }
     }
 }

@@ -138,28 +138,34 @@ namespace UnityOpenMcpBridge.TypedTools
             if (!resolved) return resolveError;
 
             var options = ParseGetOptions(body);
-            var so = new SerializedObject(component);
             var propertyPath = JsonBody.GetString(body, "property_path");
 
             var entries = new List<ComponentGetEntry>(options.MaxFields);
             int truncatedDuringCollect = 0;
 
-            if (!string.IsNullOrEmpty(propertyPath))
+            // SerializedObject is IDisposable (holds a native SerializedFile
+            // handle). Scope it to the collection phase only — the entries are
+            // materialized into JSON strings inside this block, so the output
+            // StringBuilder below no longer touches the SerializedObject.
+            using (var so = new SerializedObject(component))
             {
-                var scoped = so.FindProperty(propertyPath);
-                if (scoped == null)
+                if (!string.IsNullOrEmpty(propertyPath))
                 {
-                    return ToolDispatchResult.Fail("property_not_found",
-                        $"Property path '{propertyPath}' not found on {component.GetType().Name}. " +
-                        "Use component_get without property_path to discover valid paths.");
+                    var scoped = so.FindProperty(propertyPath);
+                    if (scoped == null)
+                    {
+                        return ToolDispatchResult.Fail("property_not_found",
+                            $"Property path '{propertyPath}' not found on {component.GetType().Name}. " +
+                            "Use component_get without property_path to discover valid paths.");
+                    }
+                    CollectScopedProperty(scoped, options, entries, ref truncatedDuringCollect);
                 }
-                CollectScopedProperty(scoped, options, entries, ref truncatedDuringCollect);
-            }
-            else
-            {
-                CollectSerializedFields(so, options, entries, ref truncatedDuringCollect);
-                if (options.IncludeProperties)
-                    CollectPublicProperties(component, options, entries, ref truncatedDuringCollect);
+                else
+                {
+                    CollectSerializedFields(so, options, entries, ref truncatedDuringCollect);
+                    if (options.IncludeProperties)
+                        CollectPublicProperties(component, options, entries, ref truncatedDuringCollect);
+                }
             }
 
             int offset = ParseGetCursor(JsonBody.GetString(body, "cursor"));
@@ -252,43 +258,54 @@ namespace UnityOpenMcpBridge.TypedTools
                     "'fields' is required and must be a non-empty array of { path, value, type? } patches. " +
                     "Use component_get first to discover valid paths.");
 
-            var so = new SerializedObject(component);
+            // SerializedObject is IDisposable (holds a native SerializedFile
+            // handle) — wrap in `using` so the slot is freed even on early
+            // returns / thrown exceptions. ApplyModifiedProperties (not
+            // WithoutUndo) records the patch into the Undo system so Ctrl+Z
+            // reverts it, matching every sibling mutation surface.
             var modified = new List<string>();
             var errors = new List<string>();
 
-            foreach (var entry in entries)
+            using (var so = new SerializedObject(component))
             {
-                var path = JsonBody.GetString(entry, "path");
-                if (string.IsNullOrEmpty(path))
+                // Record before applying so one Undo.PerformUndo() reverts the
+                // whole patch — consistent with gameobject_modify / material_*.
+                Undo.RecordObject(component, "MCP component_modify");
+
+                foreach (var entry in entries)
                 {
-                    errors.Add("Skipping entry with empty 'path'.");
-                    continue;
-                }
-                var sp = so.FindProperty(path);
-                if (sp == null)
-                {
-                    errors.Add($"Property '{path}' not found on {component.GetType().Name}.");
-                    continue;
+                    var path = JsonBody.GetString(entry, "path");
+                    if (string.IsNullOrEmpty(path))
+                    {
+                        errors.Add("Skipping entry with empty 'path'.");
+                        continue;
+                    }
+                    var sp = so.FindProperty(path);
+                    if (sp == null)
+                    {
+                        errors.Add($"Property '{path}' not found on {component.GetType().Name}.");
+                        continue;
+                    }
+
+                    var valueRaw = JsonBody.GetRawValue(entry, "value");
+                    var typeHint = JsonBody.GetString(entry, "type");
+                    try
+                    {
+                        WriteSerializedProperty(sp, valueRaw, typeHint);
+                        modified.Add(path);
+                    }
+                    catch (System.Exception e)
+                    {
+                        errors.Add($"Set '{path}' failed: {e.Message}");
+                    }
                 }
 
-                var valueRaw = JsonBody.GetRawValue(entry, "value");
-                var typeHint = JsonBody.GetString(entry, "type");
-                try
+                if (modified.Count > 0)
                 {
-                    WriteSerializedProperty(sp, valueRaw, typeHint);
-                    modified.Add(path);
+                    so.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(component);
+                    MarkActiveSceneDirty(component.gameObject);
                 }
-                catch (System.Exception e)
-                {
-                    errors.Add($"Set '{path}' failed: {e.Message}");
-                }
-            }
-
-            if (modified.Count > 0)
-            {
-                so.ApplyModifiedPropertiesWithoutUndo();
-                EditorUtility.SetDirty(component);
-                MarkActiveSceneDirty(component.gameObject);
             }
 
             return ToolDispatchResult.Ok(BuildOpResult(modified, errors, "modified"));
@@ -374,7 +391,11 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Resolve a component type by full name (preferred) or class name
         // fallback. Searches every loaded assembly so project MonoBehaviours
-        // resolve as well as built-in components.
+        // resolve as well as built-in components. Skips execute_csharp snippet
+        // assemblies (UnityOpenMcpSnippet.*) — those are transient scratch
+        // assemblies whose UnityOpenMcpSnippet.Snippet type must never surface
+        // as an attachable component, and whose load-order-dependent presence
+        // caused undefined resolution when multiple snippets accumulated.
         public static System.Type ResolveComponentType(string rawName)
         {
             if (string.IsNullOrWhiteSpace(rawName)) return null;
@@ -382,6 +403,7 @@ namespace UnityOpenMcpBridge.TypedTools
             // Fast path: full-name exact match.
             foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
             {
+                if (MetaTools.ExecuteCSharpTool.IsSnippetAssembly(asm)) continue;
                 var type = asm.GetType(rawName);
                 if (type != null) return type;
             }
@@ -389,6 +411,7 @@ namespace UnityOpenMcpBridge.TypedTools
             // Class-name fallback (no namespace). Returns the first match.
             foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
             {
+                if (MetaTools.ExecuteCSharpTool.IsSnippetAssembly(asm)) continue;
                 foreach (var type in SafeGetTypes(asm))
                 {
                     if (type.Name == rawName) return type;
@@ -957,7 +980,18 @@ namespace UnityOpenMcpBridge.TypedTools
                         }
                         else
                         {
-                            sp.enumValueIndex = ParseInt(valueRaw);
+                            // Numeric branch: validate the index against the
+                            // enum's name count. Unity's setter accepts any int
+                            // silently, which produces garbage on next
+                            // serialization — mirror the name branch's guard so
+                            // an out-of-range value surfaces a clear error
+                            // instead.
+                            var idx = ParseInt(valueRaw);
+                            if (idx < 0 || idx >= sp.enumNames.Length)
+                                throw new System.FormatException(
+                                    $"Enum index {idx} out of range for {sp.enumNames.Length} value(s) " +
+                                    $"[{string.Join(", ", sp.enumNames)}].");
+                            sp.enumValueIndex = idx;
                         }
                         break;
                     }
@@ -979,13 +1013,19 @@ namespace UnityOpenMcpBridge.TypedTools
                             sp.objectReferenceValue = obj;
                             break;
                         }
-                        // instance_id fallback.
+                        // instance_id fallback. Use the long-backed InstanceId
+                        // parser so IDs > int.MaxValue resolve on Unity 6000.5+
+                        // (where the 8-byte EntityId no longer fits in an int).
+                        // Accept both bare numeric and JSON-string wire forms.
                         var idStr = JsonBody.GetRawValue("{\"v\":" + valueRaw + "}", "v");
-                        if (!string.IsNullOrEmpty(idStr)
-                            && int.TryParse(idStr.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+                        if (!string.IsNullOrEmpty(idStr))
                         {
-                            sp.objectReferenceValue = InstanceId.ToObject(id);
-                            break;
+                            var id = InstanceId.Parse(StripQuotes(idStr));
+                            if (id != 0)
+                            {
+                                sp.objectReferenceValue = InstanceId.ToObject(id);
+                                break;
+                            }
                         }
                         throw new System.FormatException("object_reference value must be {\"path\": \"...\"}, {\"asset_path\": \"...\"}, {\"instance_id\": N}, or null.");
                     }

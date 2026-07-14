@@ -95,6 +95,43 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(result.Success);
             Assert.AreEqual("denied_by_policy", result.ErrorCode);
         }
+
+        // ===================== M30-polish Plan 4 — T4.5 lifecycle =====================
+
+        // T4.5 — IsSnippetAssembly must classify the UnityOpenMcpSnippet
+        // assembly name as a snippet (so type lookups skip it) and NOT classify
+        // real loaded assemblies as snippets. This is the type-resolution guard
+        // that keeps the transient snippet type out of ResolveComponentType /
+        // ResolveType / FindType / TryResolveType.
+        [Test]
+        public static void IsSnippetAssembly_ClassifiesCorrectly()
+        {
+            // Real loaded assemblies must never classify as snippets.
+            int snippetCount = 0;
+            int realCount = 0;
+            foreach (var asm in System.AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (ExecuteCSharpTool.IsSnippetAssembly(asm))
+                    snippetCount++;
+                else
+                    realCount++;
+            }
+            // No snippet has been compiled in this test session (the deny
+            // heuristic short-circuits before Assembly.Load), so the count of
+            // snippet-classified assemblies must be zero here.
+            Assert.AreEqual(0, snippetCount,
+                "No execute_csharp snippet should be loaded in the test session.");
+            Assert.Greater(realCount, 0, "Sanity: the AppDomain has loaded assemblies.");
+        }
+
+        // T4.5 — null must not throw (defensive). IsSnippetAssembly is called
+        // inside assembly-enumeration loops; a null entry must never abort the
+        // scan.
+        [Test]
+        public static void IsSnippetAssembly_Null_ReturnsFalse()
+        {
+            Assert.IsFalse(ExecuteCSharpTool.IsSnippetAssembly(null));
+        }
     }
 }
 

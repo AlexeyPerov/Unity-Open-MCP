@@ -258,6 +258,10 @@ namespace UnityOpenMcpBridge.ObjectRefs
 
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
+                // Skip execute_csharp snippet assemblies — they are transient
+                // scratch assemblies whose Snippet type must never resolve as a
+                // handle's fallback type (would produce stale/wrong objects).
+                if (UnityOpenMcpBridge.MetaTools.ExecuteCSharpTool.IsSnippetAssembly(asm)) continue;
                 try
                 {
                     var type = asm.GetType(typeName);

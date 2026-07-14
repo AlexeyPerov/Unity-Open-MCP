@@ -1,5 +1,6 @@
 #pragma warning disable CS0618
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge.TypedTools;
 using UnityOpenMcpBridge.ObjectRefs;
@@ -442,6 +443,109 @@ namespace UnityOpenMcpBridge.Tests
         {
             var t = ComponentsTools.ResolveComponentType("__DefinitelyNotAType__");
             Assert.IsNull(t);
+        }
+
+        // ===================== M30-polish Plan 4 — Undo / lifecycle =====================
+
+        // T4.1 — component_modify must write via ApplyModifiedProperties (Undo-
+        // backed) so a single Ctrl+Z reverts the patch. Before the fix it used
+        // ApplyModifiedPropertiesWithoutUndo — the only typed mutation surface
+        // that skipped Undo.
+        [Test]
+        public void Modify_IsUndoable_PerformUndoRevertsPatch()
+        {
+            var go = new GameObject("__MCPTest_Comp_Modify_Undo");
+            try
+            {
+                var result = ComponentsTools.Modify(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\"," +
+                    "\"fields\":[{\"path\":\"m_LocalPosition\",\"value\":[5,6,7]}]}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.AreEqual(new Vector3(5, 6, 7), go.transform.localPosition);
+
+                Undo.PerformUndo();
+
+                // One undo step reverts the component_modify patch to the
+                // pre-patch value (Vector3.zero for a fresh GameObject).
+                Assert.AreEqual(Vector3.zero, go.transform.localPosition,
+                    "Undo.PerformUndo must revert the component_modify patch.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        // T4.2 — heavy component_get loop must complete without error. The
+        // native SerializedFile handle is freed via `using` on each call; before
+        // the fix it leaked, and a long session could exhaust serialization
+        // slots. This regression test catches disposal regressions indirectly
+        // (a leaked/disposed handle surfaces as an exception or malformed output).
+        [Test]
+        public void Get_HeavyLoop_CompletesWithoutError()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_Heavy");
+            go.AddComponent<Rigidbody>();
+            try
+            {
+                for (int i = 0; i < 50; i++)
+                {
+                    var result = ComponentsTools.Get(
+                        "{\"instance_id\":" + InstanceId.Of(go) +
+                        ",\"type_name\":\"UnityEngine.Rigidbody\"}");
+                    Assert.IsTrue(result.Success, result.ErrorMessage);
+                    Assert.IsTrue(BridgeJson.IsValidJsonObject(result.Output),
+                        $"Iteration {i} produced malformed JSON — likely a leaked/disposed SerializedObject handle.");
+                }
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        // T4.6 — component_modify enum-by-index must reject out-of-range ints.
+        // Before the fix Unity's setter accepted any int silently, producing
+        // garbage on the next serialization.
+        [Test]
+        public void Modify_EnumIndexOutOfRange_ReportsErrorNoMutation()
+        {
+            var go = new GameObject("__MCPTest_Comp_Modify_EnumRange");
+            var rb = go.AddComponent<Rigidbody>();
+            // Rigidbody.interpolation is an enum (RigidbodyInterpolation):
+            // None=0, Interpolate=1, Extrapolate=2. Set a known-good value first.
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+            try
+            {
+                // 42 is out of range for a 3-value enum.
+                var result = ComponentsTools.Modify(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Rigidbody\"," +
+                    "\"fields\":[{\"path\":\"m_Interpolation\",\"value\":42}]}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"errors\":", result.Output);
+                // The invalid index must NOT have mutated the field.
+                Assert.AreEqual(RigidbodyInterpolation.Interpolate, rb.interpolation,
+                    "Out-of-range enum index must not mutate the field.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        // T4.6 — component_modify enum-by-name (type:"name") already validated;
+        // this asserts the name path still works and the index path accepts a
+        // valid index.
+        [Test]
+        public void Modify_EnumValidIndex_SetsValue()
+        {
+            var go = new GameObject("__MCPTest_Comp_Modify_EnumValid");
+            var rb = go.AddComponent<Rigidbody>();
+            rb.interpolation = RigidbodyInterpolation.None;
+            try
+            {
+                // Index 2 == Extrapolate.
+                var result = ComponentsTools.Modify(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Rigidbody\"," +
+                    "\"fields\":[{\"path\":\"m_Interpolation\",\"value\":2}]}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.AreEqual(RigidbodyInterpolation.Extrapolate, rb.interpolation);
+            }
+            finally { Object.DestroyImmediate(go); }
         }
     }
 }

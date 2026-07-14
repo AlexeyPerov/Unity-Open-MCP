@@ -152,12 +152,14 @@ namespace UnityOpenMcpBridge.MetaTools
 
             foreach (var asm in assemblies)
             {
+                if (ExecuteCSharpTool.IsSnippetAssembly(asm)) continue;
                 var type = asm.GetType(typeName);
                 if (type != null) return type;
             }
 
             foreach (var asm in assemblies)
             {
+                if (ExecuteCSharpTool.IsSnippetAssembly(asm)) continue;
                 try
                 {
                     foreach (var t in asm.GetTypes())

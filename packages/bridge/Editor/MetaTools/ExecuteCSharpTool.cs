@@ -11,6 +11,56 @@ namespace UnityOpenMcpBridge.MetaTools
 {
     public static class ExecuteCSharpTool
     {
+        // M30-polish T4.5 — snippet assembly lifecycle. Assembly.Load(byte[])
+        // assemblies are tracked by the AppDomain and are NOT unloadable without
+        // a collectible AssemblyLoadContext (the full fix, deferred to backlog).
+        // Two problems arise from loading a fresh assembly every call:
+        //   1. Accumulation — each call grows the AppDomain with a new
+        //      UnityOpenMcpSnippet.Snippet assembly.
+        //   2. Type-resolution ambiguity — ResolveComponentType /
+        //      ObjectHandle.TryResolveType walk AppDomain.GetAssemblies() and
+        //      return the FIRST UnityOpenMcpSnippet.Snippet they find, which is
+        //      load-order dependent and may be a stale snippet.
+        //
+        // Minimal mitigation (this plan): keep a single static reference to the
+        // most-recently-loaded snippet assembly + its compiled PE hash. When the
+        // incoming PE is byte-identical to the last load (the common case — an
+        // agent re-running the same snippet), reuse the existing assembly
+        // instead of loading a new one, so repeated identical calls do NOT
+        // accumulate. When the PE differs, load the new assembly and drop the
+        // old static reference. The dropped assembly remains in the AppDomain
+        // (Unity limitation) but is no longer reachable via our static handle,
+        // and type lookups that prefer s_snippetType resolve the newest snippet.
+        // True unload via collectible ALC is tracked in
+        // specs/backlog/backlog-packages.md (P2 — Collectible ALC).
+        private static Assembly s_snippetAssembly;
+        private static byte[] s_snippetPeHash;
+        private static readonly object s_snippetLock = new object();
+
+        // The transient namespace + assembly-name prefix every compiled snippet
+        // is emitted into (see BuildSource). Used by IsSnippetAssembly so type-
+        // lookup helpers (ComponentsTools.ResolveComponentType,
+        // ObjectHandle.TryResolveType) can skip snippet assemblies — they are
+        // internal scratch assemblies that must never surface as resolvable
+        // component/object types, and whose load-order-dependent presence
+        // caused undefined type resolution.
+        internal const string SnippetAssemblyName = "UnityOpenMcpSnippet";
+
+        // True for assemblies produced by execute_csharp (named via
+        // Assembly.Load's anonymous-name convention, which prefixes the simple
+        // name with the namespace). Skipping these in type catalogs keeps the
+        // snippet type out of agent-facing type resolution.
+        internal static bool IsSnippetAssembly(System.Reflection.Assembly asm)
+        {
+            if (asm == null) return false;
+            try
+            {
+                var name = asm.GetName().Name;
+                return name != null && name.StartsWith(SnippetAssemblyName, StringComparison.Ordinal);
+            }
+            catch { return false; }
+        }
+
         private static readonly string[] DefaultUsings =
         {
             "System",
@@ -62,10 +112,11 @@ namespace UnityOpenMcpBridge.MetaTools
                     var idStr = objectIdStrings[i];
                     if (string.IsNullOrEmpty(idStr)) continue;
 
-                    // Accept bare integers or full handle JSON.
-                    var resolved = int.TryParse(idStr.Trim(), out var bareId)
-                        ? ObjectHandle.Resolve(bareId, null, null, null, null, null, out _)
-                        : ObjectHandle.ResolveJson(idStr, out _);
+                    // Accept bare integers (long-backed via InstanceId.Parse so
+                    // IDs > int.MaxValue resolve on Unity 6000.5+, where the
+                    // 8-byte EntityId no longer fits in an int) or full handle
+                    // JSON. ResolveJson already uses the long path internally.
+                    var resolved = ObjectHandle.ResolveJson(idStr, out _);
                     resolvedRefs[i] = resolved;
                 }
             }
@@ -84,7 +135,7 @@ namespace UnityOpenMcpBridge.MetaTools
 
             try
             {
-                var assembly = Assembly.Load(pe);
+                var assembly = LoadSnippetAssembly(pe);
                 var type = assembly.GetType("UnityOpenMcpSnippet.Snippet");
                 if (type == null)
                     return ToolDispatchResult.Fail("execution_error", "Compiled snippet type not found");
@@ -152,6 +203,39 @@ namespace UnityOpenMcpBridge.MetaTools
                 MaxDepth = maxDepth <= 0 ? 4 : maxDepth,
                 MaxListItems = maxItems <= 0 ? 100 : maxItems,
             };
+        }
+
+        // Resolve the snippet assembly for this call, reusing the previously
+        // loaded assembly when the compiled PE is byte-identical (the common
+        // case — an agent re-running the same snippet). This bounds identical-
+        // call accumulation to one assembly instead of one-per-call. Distinct
+        // snippets still load a new assembly (the old one is dropped from our
+        // static handle); true unload requires a collectible AssemblyLoadContext
+        // (backlog). Thread-safe via s_snippetLock — execute_csharp runs on the
+        // main thread today, but the guard is cheap insurance against future
+        // call sites.
+        private static Assembly LoadSnippetAssembly(byte[] pe)
+        {
+            var hash = System.Security.Cryptography.SHA256.Create().ComputeHash(pe);
+            lock (s_snippetLock)
+            {
+                if (s_snippetAssembly != null && s_snippetPeHash != null && BytesEqual(s_snippetPeHash, hash))
+                    return s_snippetAssembly;
+
+                s_snippetAssembly = Assembly.Load(pe);
+                s_snippetPeHash = hash;
+                return s_snippetAssembly;
+            }
+        }
+
+        // Byte-for-byte hash comparison. Short-circuits on length mismatch.
+        private static bool BytesEqual(byte[] a, byte[] b)
+        {
+            if (a == null || b == null) return a == b;
+            if (a.Length != b.Length) return false;
+            for (int i = 0; i < a.Length; i++)
+                if (a[i] != b[i]) return false;
+            return true;
         }
 
         private static string BuildSource(string code, string[] usings)
