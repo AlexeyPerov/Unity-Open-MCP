@@ -320,8 +320,22 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                 if (scenePath.StartsWith("Packages/", StringComparison.Ordinal)) continue;
                 if (scenePath.StartsWith("Library/", StringComparison.Ordinal)) continue;
 
+                // T5.5 — same wasOpen hardening as ScenePrefabHealth.Scanner.
+                // Only close a scene the scanner itself opened; leave any
+                // already-open additive scene intact.
+                bool wasOpen = false;
+                for (var i = 0; i < SceneManager.sceneCount; i++)
+                {
+                    if (SceneManager.GetSceneAt(i).path == scenePath) { wasOpen = true; break; }
+                }
+
                 Scene scene;
-                try { scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive); }
+                try
+                {
+                    scene = wasOpen
+                        ? SceneManager.GetSceneByPath(scenePath)
+                        : EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
+                }
                 catch { continue; }
 
                 try
@@ -333,7 +347,7 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                 }
                 finally
                 {
-                    if (SceneManager.sceneCount > 1)
+                    if (!wasOpen)
                         EditorSceneManager.CloseScene(scene, true);
                 }
             }

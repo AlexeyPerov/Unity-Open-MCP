@@ -82,6 +82,10 @@ namespace UnityOpenMcpBridge
                 GateOutcome.Failed => result.Mutation != null && !result.Mutation.Success
                     ? BridgeActivityOutcome.Failed
                     : BridgeActivityOutcome.Failed,
+                // T5.3 — the mutation committed but the validate scan could not
+                // run. Surface as Failed so the operator notices something needs
+                // a manual check (the gate did not pass cleanly).
+                GateOutcome.ValidateScanFailed => BridgeActivityOutcome.Failed,
                 _ => BridgeActivityOutcome.Unknown
             };
             if (result.Mutation != null && !result.Mutation.Success && !string.IsNullOrEmpty(result.Mutation.ErrorCode))

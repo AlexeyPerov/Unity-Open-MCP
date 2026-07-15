@@ -10,7 +10,10 @@ export const applyFix: Tool = {
     "reassign_missing_texture (unsafe — needs target_texture), reassign_missing_shader (unsafe — needs target_shader). " +
     "Safe auto-fix rollback: a non-dry-run apply that fails or introduces new errors under enforce is " +
     "restored to its pre-fix state and the response carries a top-level `rollback` block " +
-    "({rolledBack, reason, restoredPaths}).",
+    "({rolledBack, reason, restoredPaths}). Non-dry-run applies are gate-runner-mediated: a FixRollback " +
+    "snapshot is active so a corrupting fix is automatically reverted on failure or new errors. " +
+    "Use gate: \"off\" ONLY when you accept that the fix commits with no rollback — the response then " +
+    "carries `rollbackDisabled: true` to flag that no automatic restore is available.",
   inputSchema: {
     type: "object",
     required: ["issue_id"],
@@ -55,7 +58,9 @@ export const applyFix: Tool = {
       gate: {
         enum: ["enforce", "warn", "off"],
         default: "enforce",
-        description: "Gate mode when dry_run is false. Ignored for dry_run.",
+        description: "Gate mode when dry_run is false. Ignored for dry_run. Non-dry-run applies are " +
+          "always gate-runner-mediated (rollback snapshot active). Use gate: \"off\" only when you " +
+          "accept the fix commits with no rollback — the response then carries rollbackDisabled: true.",
       },
     },
     additionalProperties: false,

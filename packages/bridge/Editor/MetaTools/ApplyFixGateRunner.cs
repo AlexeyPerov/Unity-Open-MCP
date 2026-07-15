@@ -113,6 +113,25 @@ namespace UnityOpenMcpBridge.MetaTools
                 steps.Add("The fix was rolled back — no project change remains. Inspect the issue manually before retrying.");
                 result.AgentNextSteps = steps.ToArray();
             }
+            else if (mode == GateMode.Off && result.Mutation != null && result.Mutation.Success)
+            {
+                // M30-polish Plan 5 / T5.1 — gate:"off" skips the delta and
+                // never consults the rollback snapshot. A fix that corrupts the
+                // asset under this path is permanent (no auto-restore). Surface
+                // a structured rollbackDisabled warning so the agent knows the
+                // mutation committed without rollback protection and can verify
+                // health manually. The operator explicitly asked for no gate,
+                // so this is a warning, not a refusal.
+                result.RollbackDisabled = true;
+                var steps = result.AgentNextSteps == null
+                    ? new System.Collections.Generic.List<string>()
+                    : new System.Collections.Generic.List<string>(result.AgentNextSteps);
+                steps.Add(
+                    "The fix was applied with gate:\"off\" — no rollback snapshot was consulted. " +
+                    "If the asset is in a bad state, run unity_open_mcp_validate_edit (or " +
+                    "unity_open_mcp_scan_paths) on the touched path to confirm health.");
+                result.AgentNextSteps = steps.ToArray();
+            }
 
             rollback.Discard();
             return result;

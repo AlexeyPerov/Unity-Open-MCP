@@ -374,6 +374,15 @@ namespace UnityOpenMcpBridge
                 sb.Append("]}");
             }
 
+            // M30-polish Plan 5 / T5.1 — gate:"off" on a non-dry-run apply_fix
+            // commits the fix with no auto-rollback. Surface a structured
+            // warning so the agent knows the mutation is permanent and should
+            // verify health manually. Emitted only when the runner flagged it.
+            if (result.RollbackDisabled)
+            {
+                sb.Append(",\"rollbackDisabled\":true");
+            }
+
             sb.Append(",\"agentNextSteps\":[");
             var steps = result.AgentNextSteps;
             if (steps != null)

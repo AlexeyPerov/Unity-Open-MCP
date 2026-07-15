@@ -281,6 +281,8 @@ namespace UnityOpenMcpBridge
                 GateOutcome.Failed => "Failed",
                 GateOutcome.Warned => "Warned",
                 GateOutcome.Skipped => "Skipped (no gate ran)",
+                // T5.3 — mutation committed but validate scan could not run.
+                GateOutcome.ValidateScanFailed => "Validate scan failed",
                 _ => outcome.ToString()
             };
         }
@@ -292,6 +294,9 @@ namespace UnityOpenMcpBridge
                 GateOutcome.Passed => new Color(0.6f, 0.9f, 0.6f),
                 GateOutcome.Warned => new Color(1f, 0.9f, 0.4f),
                 GateOutcome.Failed => new Color(1f, 0.5f, 0.5f),
+                // T5.3 — same warning-tier color as Warned: the mutation is in
+                // place but needs a manual health check.
+                GateOutcome.ValidateScanFailed => new Color(1f, 0.9f, 0.4f),
                 _ => new Color(0.7f, 0.7f, 0.7f)
             };
         }

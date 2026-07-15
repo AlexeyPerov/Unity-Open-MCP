@@ -34,28 +34,39 @@ namespace UnityOpenMcpBridge.MetaTools
         public const int DefaultMaxCommands = 25;
         public const int HardMaxCommands = 100;
 
-        // v1 deny-list: tools that must NOT be invoked as nested batch steps.
+        // v1 deny-list: tools that must NOT be invoked as nested batch steps for
+        // reasons OTHER than lifecycle. Tools that force a domain reload or scene
+        // switch are denied via the lifecycle-derived check in IsNestedReloadUnsafe
+        // (so the deny-list stays accurate as new RestartThenSettle tools are
+        // added without re-touching this list). This explicit set covers:
         //   - batch_execute itself (no nesting — would recurse).
         //   - compile_check (always headless spawn; cannot run live).
-        //   - The three meta-tools that can run arbitrary code or hit any menu
-        //     (execute_csharp / invoke_method / execute_menu). Agents use batch
-        //     for typed tools; the power tools stay single-call so the deny
-        //     heuristic + bypass contract stays uniform. Tracked as a HashSet
-        //     for O(1) membership; the local-only tools (capabilities,
-        //     manage_tools, hub_*, read_compile_errors, bridge_status,
-        //     generate_skill, pull_events) are rejected dynamically below
-        //     because they are NOT in the bridge's KnownTools set — a nested
-        //     step naming one of them dispatches to tool_not_found, which is
-        //     surfaced as a per-step error (matching the MCP contract's
-        //     `batch_tool_not_invokable`).
+        // The local-only tools (capabilities, manage_tools, hub_*,
+        // read_compile_errors, bridge_status, generate_skill, pull_events) are
+        // rejected dynamically because they are NOT in the bridge's KnownTools
+        // set — a nested step naming one of them dispatches to tool_not_found,
+        // which is surfaced as a per-step error (matching the MCP contract's
+        // `batch_tool_not_invokable`).
         private static readonly HashSet<string> DeniedNestedTools = new HashSet<string>
         {
             "unity_open_mcp_batch_execute",
             "unity_open_mcp_compile_check",
-            "unity_open_mcp_execute_csharp",
-            "unity_open_mcp_invoke_method",
-            "unity_open_mcp_execute_menu",
         };
+
+        // M30-polish Plan 5 / T5.2 — a nested step that resolves to the
+        // RestartThenSettle lifecycle would force a domain reload (package add /
+        // remove / reimport, asmdef edit, build_set_defines/target, settings_set
+        // player) or a scene switch (scene_open Single mode), silently aborting
+        // every later step in the batch (the bridge's RestartThenSettle settle
+        // wait can't bridge a mid-batch reload). Deriving the deny-list from the
+        // lifecycle taxonomy catches the whole class as new RestartThenSettle
+        // tools are added, instead of hardcoding each tool name. Returns the
+        // resolved lifecycle so the caller can build a precise error message.
+        private static bool IsNestedReloadUnsafe(string toolName, out LifecyclePolicy policy)
+        {
+            policy = ToolLifecycle.Resolve(toolName);
+            return policy == LifecyclePolicy.RestartThenSettle;
+        }
 
         public static ToolDispatchResult Execute(string body)
         {
@@ -107,14 +118,30 @@ namespace UnityOpenMcpBridge.MetaTools
                     ? "{}"
                     : paramsRaw;
 
-                // Deny-list check (nesting / headless-only / power tools).
+                // Deny-list check (nesting / headless-only). These are the tools
+                // blocked for non-lifecycle reasons; RestartThenSettle tools are
+                // blocked separately below with a lifecycle-specific error.
                 if (DeniedNestedTools.Contains(tool))
                 {
                     return ToolDispatchResult.Fail(
                         "batch_tool_not_invokable",
                         $"commands[{i}] tool '{tool}' is not invokable inside a batch " +
-                        "(nesting / headless-only / power-tool restriction). Use it as a " +
+                        "(nesting / headless-only restriction). Use it as a " +
                         "single top-level call instead.");
+                }
+
+                // T5.2 — deny RestartThenSettle nested steps. A domain reload
+                // or scene switch mid-batch silently aborts every later step
+                // (the settle wait can't bridge a reload). Refuse up-front with
+                // a clear error naming the offending step and why.
+                if (IsNestedReloadUnsafe(tool, out var unsafePolicy))
+                {
+                    return ToolDispatchResult.Fail(
+                        "batch_nested_reload_unsafe",
+                        $"commands[{i}] tool '{tool}' has lifecycle " +
+                        $"{unsafePolicy.ToWireString()} and is not invokable inside a batch: " +
+                        "it may trigger a domain reload or scene switch that silently aborts " +
+                        "the remaining steps. Use it as a single top-level call instead.");
                 }
 
                 steps.Add(new BatchStep { Tool = tool, ParamsBody = paramsBody });

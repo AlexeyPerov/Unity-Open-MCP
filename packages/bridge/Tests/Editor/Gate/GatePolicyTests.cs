@@ -220,6 +220,37 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // -------------------------------------------------------------------
+        // T5.3 — ValidateScanFailed outcome is distinct from Failed/Warned
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void ValidateScanFailed_Outcome_IsDistinctFromFailed()
+        {
+            // The new outcome must be a distinct value so the validate-exception
+            // path is not conflated with a real delta failure (the mutation
+            // committed but the post-mutation health check could not run).
+            Assert.AreNotEqual(GateOutcome.Failed, GateOutcome.ValidateScanFailed);
+            Assert.AreNotEqual(GateOutcome.Warned, GateOutcome.ValidateScanFailed);
+            Assert.AreNotEqual(GateOutcome.Passed, GateOutcome.ValidateScanFailed);
+            Assert.AreNotEqual(GateOutcome.Skipped, GateOutcome.ValidateScanFailed);
+        }
+
+        [Test]
+        public void ResolveOutcome_NeverReturnsValidateScanFailed()
+        {
+            // ValidateScanFailed is set ONLY by the validate-exception catch in
+            // GatePolicy.Execute — ResolveOutcome (the delta→outcome decision)
+            // must never produce it, otherwise it would leak into normal flows.
+            var delta = Delta(errors: 5, warnings: 5);
+            Assert.AreNotEqual(GateOutcome.ValidateScanFailed,
+                GatePolicy.ResolveOutcome(GateMode.Enforce, delta).outcome);
+            Assert.AreNotEqual(GateOutcome.ValidateScanFailed,
+                GatePolicy.ResolveOutcome(GateMode.Warn, delta).outcome);
+            Assert.AreNotEqual(GateOutcome.ValidateScanFailed,
+                GatePolicy.ResolveOutcome(GateMode.Off, delta).outcome);
+        }
+
+        // -------------------------------------------------------------------
         // helpers
         // -------------------------------------------------------------------
 

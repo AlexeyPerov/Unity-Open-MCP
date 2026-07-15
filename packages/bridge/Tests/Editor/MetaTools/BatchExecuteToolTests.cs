@@ -94,11 +94,74 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public void Execute_DenyListedPowerTool_ReturnsBatchToolNotInvokable()
         {
-            // execute_csharp is blocked in v1 — agents use batch for typed tools.
-            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_execute_csharp\",\"params\":{\"code\":\"return 1;\"}}]}";
+            // compile_check is headless-only and blocked in v1.
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_compile_check\",\"params\":{}}]}";
             var result = BatchExecuteTool.Execute(body);
             Assert.IsFalse(result.Success);
             Assert.AreEqual("batch_tool_not_invokable", result.ErrorCode);
+        }
+
+        // -------------------------------------------------------------------
+        // T5.2 — RestartThenSettle lifecycle tools are denied as nested steps
+        // (domain reload / scene switch would silently abort remaining steps).
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void Execute_PackageAdd_RefusedAsNestedReloadUnsafe()
+        {
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_package_add\",\"params\":{\"package_id\":\"com.unity.test\"}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
+            StringAssert.Contains("package_add", result.ErrorMessage);
+            StringAssert.Contains("restart_then_settle", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_SceneOpen_RefusedAsNestedReloadUnsafe()
+        {
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_scene_open\",\"params\":{\"path\":\"Assets/Foo.unity\"}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
+            StringAssert.Contains("scene_open", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_AsmdefModify_RefusedAsNestedReloadUnsafe()
+        {
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_asmdef_modify\",\"params\":{\"asset_path\":\"Assets/Foo.asmdef\"}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
+            StringAssert.Contains("asmdef_modify", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_ExecuteCsharp_RefusedAsNestedReloadUnsafe()
+        {
+            // execute_csharp is RestartThenSettle — now denied via the lifecycle
+            // path (batch_nested_reload_unsafe), not the old explicit deny-list.
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_execute_csharp\",\"params\":{\"code\":\"return 1;\"}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
+            StringAssert.Contains("execute_csharp", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_ReloadUnsafe_NamesTheOffendingStepIndex()
+        {
+            // A batch with a safe step before the unsafe one — the error must
+            // name commands[1] (the offending step).
+            var body = "{\"commands\":[" +
+                       "{\"tool\":\"unity_open_mcp_gameobject_find\",\"params\":{}}," +
+                       "{\"tool\":\"unity_open_mcp_package_remove\",\"params\":{\"package_id\":\"x\"}}" +
+                       "]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
+            StringAssert.Contains("commands[1]", result.ErrorMessage);
         }
 
         // -------------------------------------------------------------------

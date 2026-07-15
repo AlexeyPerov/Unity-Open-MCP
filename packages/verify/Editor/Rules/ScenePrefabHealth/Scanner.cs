@@ -54,10 +54,30 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
                                    scenePath.IndexOf("splash", StringComparison.OrdinalIgnoreCase) >= 0
             };
 
+            // M30-polish Plan 5 / T5.5 — track whether the scanner opened this
+            // scene. The previous code opened the scene additively and then, in
+            // the finally block, closed it whenever sceneCount > 1. That guard
+            // does NOT distinguish a scene the scanner opened from one the
+            // agent/user already had open additively (e.g. a scene_create /
+            // scene_open additive that just ran as the gate's mutation). The
+            // validate phase runs AFTER the mutation, so the additive scene is
+            // already in the stack; CloseScene(..., true) then evicted it,
+            // making every gated additive scene_create / scene_open appear to
+            // "drop" the scene. The wasOpen pattern (same one RemoveMissing-
+            // ScriptFix.FixScene uses) only closes what the scanner itself
+            // opened, leaving intentional scene-stack side effects intact.
+            bool wasOpen = false;
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+            {
+                if (SceneManager.GetSceneAt(i).path == scenePath) { wasOpen = true; break; }
+            }
+
             Scene scene;
             try
             {
-                scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
+                scene = wasOpen
+                    ? SceneManager.GetSceneByPath(scenePath)
+                    : EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Additive);
             }
             catch
             {
@@ -131,7 +151,10 @@ namespace UnityOpenMcpVerify.Rules.ScenePrefabHealth
             }
             finally
             {
-                if (SceneManager.sceneCount > 1)
+                // Only close the scene if the scanner opened it. A scene that
+                // was already open (the gate mutation's additive scene_create /
+                // scene_open, or a human-opened scene) must be left intact.
+                if (!wasOpen)
                     EditorSceneManager.CloseScene(scene, true);
             }
 

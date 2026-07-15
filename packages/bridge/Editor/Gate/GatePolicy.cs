@@ -20,7 +20,16 @@ namespace UnityOpenMcpBridge
         Skipped,
         Passed,
         Failed,
-        Warned
+        Warned,
+        // M30-polish Plan 5 / T5.3 — the mutation committed successfully, but
+        // the post-mutation validate scan threw an exception so no delta could
+        // be computed. Distinct from Failed (where the delta ran and reported
+        // new errors): here the mutation is honest-to-goodness committed, and
+        // the agent should run validate_edit / scan_paths manually to confirm
+        // health. The gate result carries Mutation (success) + AgentNextSteps
+        // recommending the manual check; GateFailed stays true so the dispatch
+        // is surfaced as a non-passing outcome (the operator chose enforce).
+        ValidateScanFailed
     }
 
     public class DeltaData
@@ -68,6 +77,13 @@ namespace UnityOpenMcpBridge
         public bool RolledBack;
         public string RollbackReason;
         public string[] RestoredPaths;
+        // M30-polish Plan 5 / T5.1 — set by ApplyFixGateRunner when a non-dry-
+        // run apply_fix ran under gate:"off". The operator explicitly asked for
+        // no gate, so the FixRollback snapshot is never consulted and a fix that
+        // corrupts the asset is permanent. The envelope surfaces a top-level
+        // `rollbackDisabled` warning so the agent knows the mutation committed
+        // without auto-rollback protection. False on every other path.
+        public bool RollbackDisabled;
     }
 
     public static class GatePolicy
@@ -171,17 +187,31 @@ namespace UnityOpenMcpBridge
             }
             catch (Exception e)
             {
+                // M30-polish Plan 5 / T5.3 — the mutation already committed
+                // (line above). A validate-scan exception is NOT a real delta
+                // failure: the mutation succeeded but the post-mutation health
+                // check could not run. Surface a distinct outcome so the agent
+                // knows the mutation is in place and can verify health manually,
+                // instead of treating this as "delta said new errors" and
+                // retrying the mutation. Do NOT roll back — the mutation
+                // succeeded and rolling back would discard a good change based
+                // on an unrelated scanner failure.
                 gateSw.Stop();
                 return new GateDispatchResult
                 {
                     Mutation = mutationResult,
                     GateRan = true,
-                    Outcome = GateOutcome.Failed,
+                    Outcome = GateOutcome.ValidateScanFailed,
                     CheckpointId = checkpoint.CheckpointId,
                     CheckpointDurationMs = checkpointMs,
                     TotalGateDurationMs = gateSw.ElapsedMilliseconds,
                     GateFailed = true,
-                    AgentNextSteps = new[] { $"Validation scan exception: {e.Message}" }
+                    AgentNextSteps = new[]
+                    {
+                        $"Mutation committed, but the gate's validate scan threw ({e.Message}). " +
+                        "Run unity_open_mcp_validate_edit (or unity_open_mcp_scan_paths) on the " +
+                        "touched paths to confirm health."
+                    }
                 };
             }
 

@@ -21,7 +21,19 @@ namespace UnityOpenMcpBridge.MetaTools
                 // isError:true on the MCP response and block agent workflows. Instead
                 // return success with an explicit `unavailable` warning + recovery
                 // guidance so the agent can proceed (e.g. fall back to validate_edit).
-                return ToolDispatchResult.Ok(BuildUnavailableResult(checkpointId));
+                //
+                // T5.4 — when the store is completely empty AND a specific id was
+                // requested, the most likely cause is a domain reload that wiped the
+                // in-memory store (the gate itself triggers reloads via asmdef_modify
+                // / package_add). Surface a distinct `checkpoint_lost_on_reload`
+                // reason so the agent can distinguish "wiped by reload" from "this id
+                // was never created in this session", and recommend checkpoint_create
+                // to re-establish the baseline.
+                bool storeEmpty = CheckpointStore.Count == 0;
+                return ToolDispatchResult.Ok(
+                    storeEmpty
+                        ? BuildLostOnReloadResult(checkpointId)
+                        : BuildUnavailableResult(checkpointId));
             }
 
             var paths = JsonBody.GetStringArray(body, "paths") ?? stored.Paths;
@@ -106,6 +118,34 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append("\"The pre-change baseline is gone, so a delta cannot be computed.\",");
             sb.Append("\"To verify current state directly, call unity_open_mcp_validate_edit (or unity_open_mcp_scan_paths) on the relevant paths.\",");
             sb.Append("\"For future delta checks, call unity_open_mcp_checkpoint_create immediately before mutating, then unity_open_mcp_delta right after.\"");
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        // T5.4 — payload returned when the store is empty (all checkpoints wiped)
+        // AND a specific id was requested. The most likely cause is a domain
+        // reload triggered by the gate flow itself (asmdef_modify / package_add /
+        // reimport_package force a recompile) or an editor restart. Distinct from
+        // BuildUnavailableResult (which fires when the id is unknown but other
+        // checkpoints still exist): here the whole store was reset, so the agent
+        // should re-create the baseline with checkpoint_create.
+        private static string BuildLostOnReloadResult(string checkpointId)
+        {
+            var sb = new StringBuilder(512);
+            sb.Append("{\"passed\":true");
+            sb.Append(",\"unavailable\":true");
+            sb.Append(",\"checkpointLostOnReload\":true");
+            sb.Append(",\"warning\":\"Checkpoint '")
+              .Append(Esc(checkpointId))
+              .Append("' is gone and the in-memory checkpoint store is empty. Checkpoints are " +
+                      "process-lifetime (in-memory) — any domain reload (script recompile, " +
+                      "package add/remove, asmdef edit) or editor restart wipes them. The gate " +
+                      "flow itself can trigger this (e.g. asmdef_modify / package_add force a " +
+                      "recompile). This does not indicate a problem with the project.\"");
+            sb.Append(",\"agentNextSteps\":[");
+            sb.Append("\"The checkpoint store was reset by a domain reload — the pre-change baseline is gone and a delta cannot be computed.\",");
+            sb.Append("\"To verify current state directly, call unity_open_mcp_validate_edit (or unity_open_mcp_scan_paths) on the relevant paths.\",");
+            sb.Append("\"To re-establish a baseline, call unity_open_mcp_checkpoint_create on the paths you intend to delta-check, then mutate, then unity_open_mcp_delta.\"");
             sb.Append("]}");
             return sb.ToString();
         }

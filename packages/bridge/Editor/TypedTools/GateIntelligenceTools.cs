@@ -731,6 +731,8 @@ namespace UnityOpenMcpBridge.TypedTools
                 case GateOutcome.Warned: return "warned";
                 case GateOutcome.Failed: return "failed";
                 case GateOutcome.Skipped: return "skipped";
+                // T5.3 — the mutation committed but the validate scan threw.
+                case GateOutcome.ValidateScanFailed: return "validate_scan_failed";
                 default: return outcome.ToString().ToLowerInvariant();
             }
         }

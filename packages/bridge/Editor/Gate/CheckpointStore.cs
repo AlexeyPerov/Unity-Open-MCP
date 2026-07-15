@@ -19,6 +19,27 @@ namespace UnityOpenMcpBridge
         public CheckpointFingerprint Fingerprint;
     }
 
+    // M13 T4.1 — in-memory checkpoint store for the gate delta flow.
+    //
+    // STORAGE CONTRACT (v1): checkpoints are process-lifetime and in-memory.
+    // The store uses static fields (_entries / _index), so ANY domain reload
+    // wipes every checkpoint. The gate flow itself triggers reloads:
+    //   - asmdef_create / asmdef_modify force a recompile + domain reload.
+    //   - package_add / package_remove resolve assemblies → domain reload.
+    //   - reimport_package calls RequestScriptCompilation → domain reload.
+    //   - execute_csharp / invoke_method can recompile.
+    // A script edit picked up by the asset database also forces a reload.
+    //
+    // After a reload, any checkpoint_id an agent holds is GONE. DeltaTool
+    // surfaces this as `checkpointLostOnReload: true` (when the store is empty)
+    // so the agent can distinguish "wiped by reload" from "id was never created"
+    // and re-establish the baseline via checkpoint_create. Disk persistence
+    // across reloads is explicitly backlog (see backlog-bridge-reload-
+    // recovery.md) — the v1 contract is: honest error + doc, not persistence.
+    //
+    // LRU eviction at capacity 20 (DefaultCapacity) is a SEPARATE concern: it
+    // drops the least-recently-accessed entry when the store is full, NOT on
+    // reload. Reload empties the store entirely; LRU only trims under pressure.
     public static class CheckpointStore
     {
         private const int DefaultCapacity = 20;
