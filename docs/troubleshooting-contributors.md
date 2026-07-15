@@ -34,7 +34,9 @@ one interactive Editor holds the project lock.
 The instance lock at `~/.unity-open-mcp/instances/<project-hash>.json` may show
 a **stale heartbeat** while the port is still held. The MCP server uses
 stale-heartbeat + live-PID to detect `bridge_compile_failed` (bridge assembly
-failed to reload). See `packages/bridge/AGENTS.md` §Instance discovery and
+failed to reload). See
+[`packages/bridge/AGENTS.md` — Multi-instance port and discovery](../packages/bridge/AGENTS.md#multi-instance-port-and-discovery)
+and
 `mcp-server/src/instance-discovery.ts` (`classifyInstance`).
 
 ## `InitTestScene*` modal after test runs

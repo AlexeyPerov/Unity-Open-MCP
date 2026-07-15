@@ -8,25 +8,12 @@ welcome.
 1. Search existing issues and pull requests before opening a new one.
 2. Use [Development setup](docs/setup/development-setup.md) to prepare a local
    checkout.
-3. Read the nearest `AGENTS.md` and package README for the area you will change.
-   These files own package-specific architecture, validation, and documentation
-   requirements.
+3. Repository contribution and automation guidance follows layered
+   [`AGENTS.md`](AGENTS.md) files: start at the root, then every touched
+   subtree. These files are not a substitute for user-facing docs under
+   `docs/`. The root layer inventory lists every local rule file.
 4. For embedded domains or community packs, also follow
    [Contributing — extensions](docs/contributing/extensions.md).
-
-The main ownership guides are:
-
-- [`packages/bridge/AGENTS.md`](packages/bridge/AGENTS.md) for bridge transport,
-  typed tools, registration, and mutation gates.
-- [`packages/verify/AGENTS.md`](packages/verify/AGENTS.md) for verification
-  rules, issue codes, and fixes.
-- [`packages/extensions/AGENTS.md`](packages/extensions/AGENTS.md) for community
-  packs.
-- [`mcp-server/AGENTS.md`](mcp-server/AGENTS.md) and
-  [`mcp-server/README.md`](mcp-server/README.md) for MCP tools, routing, and the
-  Node server.
-- [`hub/AGENTS.md`](hub/AGENTS.md) and [`hub/README.md`](hub/README.md) for
-  Unity Hub Pro.
 
 ## Issues
 

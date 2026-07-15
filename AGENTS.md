@@ -12,7 +12,10 @@
   - `packages/extensions/AGENTS.md` — community/third-party extension packs and their template.
   - `mcp-server/AGENTS.md` — MCP tools, routing, capabilities, and offline reads.
   - `hub/AGENTS.md` — SvelteKit/Tauri UI, state, data, and platform neutrality.
-  - `scripts/`, `skills/`, `demo/`, and `validation-suite/` — root rules only unless a local `AGENTS.md` is added.
+  - `scripts/AGENTS.md` — version sync, token-estimate codegen, and MCP test suites.
+  - `skills/AGENTS.md` — agent playbooks and client install-path manifest.
+  - `demo/AGENTS.md` — Unity integration fixture, manifest/`testables` sync.
+  - `validation-suite/AGENTS.md` — guided manual-validation app and scenarios.
 
 ## Universal contributor rules
 
