@@ -174,6 +174,7 @@ const EXPECTED_ALWAYS_VISIBLE = [
   "unity_open_mcp_list_rules",
   "unity_open_mcp_generate_skill",
   "unity_open_mcp_manage_tools",
+  "unity_open_mcp_ping",
   "unity_open_mcp_pull_events",
   "unity_senses_pull_events",
   "unity_open_mcp_read_compile_errors",
@@ -206,7 +207,10 @@ test("always-visible tools are visible alongside an activated opt-in group", () 
     tools(
       ...EXPECTED_ALWAYS_VISIBLE,
       "unity_open_mcp_navigation_surface_add",
-      "unity_open_mcp_ping", // core — deactivated, hidden
+      // execute_csharp is a core tool — with core deactivated it is hidden,
+      // demonstrating that only ALWAYS_VISIBLE_TOOLS survive the teardown.
+      // (ping is core too but is always-visible — covered above.)
+      "unity_open_mcp_execute_csharp",
     ),
     state,
   );
@@ -238,16 +242,42 @@ test("filterVisibleTools with a custom resolver uses it instead of the catalog",
   const state = new ToolSessionState();
   for (const id of DEFAULT_ENABLED_GROUPS) state.deactivate(id);
   const filtered = filterVisibleTools(
-    tools("unity_open_mcp_ping", "unity_open_mcp_manage_tools"),
+    // execute_csharp is a core tool (NOT always-visible) — the injected
+    // resolver sends it to a deactivated group, so it is hidden. ping is
+    // always-visible, so it survives regardless of the resolver.
+    tools("unity_open_mcp_execute_csharp", "unity_open_mcp_ping", "unity_open_mcp_manage_tools"),
     state,
     () => "deactivated-group",
   );
-  // ping now resolves to a deactivated group → hidden; manage_tools is still
-  // always-visible (the ALWAYS_VISIBLE check runs before the resolver).
-  assert.deepEqual(filtered.map((t) => t.name), ["unity_open_mcp_manage_tools"]);
+  // execute_csharp resolves to a deactivated group → hidden; ping and
+  // manage_tools are always-visible (the ALWAYS_VISIBLE check runs before the
+  // resolver).
+  assert.deepEqual(
+    filtered.map((t) => t.name),
+    ["unity_open_mcp_ping", "unity_open_mcp_manage_tools"],
+  );
 });
 
 test("filterVisibleTools returns an empty array for an empty input", () => {
   const state = new ToolSessionState();
   assert.deepEqual(filterVisibleTools([], state), []);
+});
+
+// T6.3 — ping is a health-check tool that must survive group deactivation. An
+// agent that just tore down the core group (e.g. to slim its tool surface)
+// still needs to re-probe the bridge before re-activating. ping is assigned to
+// the `core` group in the catalog, but ALWAYS_VISIBLE_TOOLS wins, so it stays
+// reachable here.
+test("ping stays visible after manage_tools(deactivate, core)", () => {
+  const state = new ToolSessionState();
+  assert.ok(state.deactivate("core"), "core should be deactivatable");
+  const filtered = filterVisibleTools(
+    tools("unity_open_mcp_ping", "unity_open_mcp_execute_csharp"),
+    state,
+  );
+  assert.deepEqual(
+    filtered.map((t) => t.name),
+    ["unity_open_mcp_ping"],
+    "ping survives core deactivation; execute_csharp (core, not always-visible) is hidden",
+  );
 });

@@ -317,6 +317,32 @@ test("buildMetaArgs omits timeout_ms when not supplied for compile_check", () =>
   assert.deepEqual(cli, ["compile_check"]);
 });
 
+// T6.1 — a caller passing timeout_ms:null must NOT produce `--timeout-ms null`
+// on the argv. The C# parser would try to parse "null" as an int. The guard is
+// typeof === "number" (not !== undefined), matching live-client.ts.
+test("buildMetaArgs omits --timeout-ms when timeout_ms is null (not 'null' on argv)", () => {
+  const cli = buildMetaArgs("compile_check", { timeout_ms: null });
+  assert.deepEqual(cli, ["compile_check"], "null timeout_ms must not emit --timeout-ms");
+});
+
+test("buildMetaArgs omits numeric flags when null for other numeric fields (null guard sweep)", () => {
+  // The same typeof guard applies to the other numeric argv fields so a null
+  // value never stringifies to "null" on the spawn line.
+  const findMembers = buildMetaArgs("find_members", { max_results: null, query: "Foo" });
+  assert.deepEqual(findMembers, ["find_members", "--query", "Foo"]);
+
+  const csharp = buildMetaArgs("execute_csharp", { code: "return;", max_depth: null, max_items: null });
+  assert.deepEqual(csharp, ["execute_csharp", "--code", "return;"]);
+
+  const invoke = buildMetaArgs("invoke_method", { type_name: "T", method_name: "M", max_depth: null, max_items: null });
+  assert.deepEqual(invoke, ["invoke_method", "--type-name", "T", "--method-name", "M"]);
+});
+
+test("buildVerifyArgs omits --regression-threshold when null", () => {
+  const cli = buildVerifyArgs("regression_check", { baseline_path: "b.json", regression_threshold: null });
+  assert.deepEqual(cli, ["regression_check", "--baseline-path", "b.json"]);
+});
+
 test("extractCompilerErrors pulls CSxxxx lines from raw output", () => {
   const out = [
     "Some preamble line",

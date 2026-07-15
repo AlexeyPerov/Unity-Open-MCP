@@ -51,12 +51,16 @@ Every other group is hidden until activated with
 The canonical domain dependency and activation table is
 [Extension domains](../extensions.md).
 
-Always-visible meta-tools have no group assignment:
+Always-visible meta-tools stay reachable regardless of session state:
 `unity_open_mcp_capabilities`, `unity_open_mcp_list_rules`,
 `unity_open_mcp_generate_skill`, `unity_open_mcp_manage_tools`,
 `unity_open_mcp_pull_events` / `unity_senses_pull_events`,
-`unity_open_mcp_read_compile_errors`, and
-`unity_open_mcp_bridge_status`.
+`unity_open_mcp_read_compile_errors`, `unity_open_mcp_bridge_status`, and
+`unity_open_mcp_ping`. Most of these have no group assignment; `ping` is an
+exception — it lives in the `core` group but is pinned always-visible so an
+agent that deactivates `core` (to slim its surface) can still probe the bridge
+before re-activating. Deactivating a group therefore never hides an
+always-visible tool.
 
 ## `manage_tools` actions
 

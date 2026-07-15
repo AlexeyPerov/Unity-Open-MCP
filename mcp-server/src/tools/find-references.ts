@@ -39,7 +39,14 @@ export const findReferences: Tool = {
           "Legacy compression level (alias for `profile`: summary=compact, normal=balanced, verbose=full). " +
           "Prefer `profile`; ignored when `profile` is set.",
       },
-      max_results: { type: "integer", default: 100, description: "Max referencing assets returned when page_size is omitted. Legacy alias of the single-page cap." },
+      max_results: {
+        type: "integer",
+        default: 100,
+        description:
+          "Max referencing assets returned when page_size is omitted. Legacy alias of the single-page cap. " +
+          "Callers should pass >= 1; the value 0 is a server-internal sentinel meaning 'unlimited (for paging)' " +
+          "and is emitted by the server itself when page_size is set — it is never a value a caller needs to pass.",
+      },
       max_per_file: { type: "integer", default: 5, description: "Verbose/full mode (offline): max field locations per file" },
       pattern_threshold: {
         type: "integer",
@@ -51,5 +58,6 @@ export const findReferences: Tool = {
       { required: ["asset_path"] },
       { required: ["guid"] },
     ],
+    additionalProperties: false,
   },
 };

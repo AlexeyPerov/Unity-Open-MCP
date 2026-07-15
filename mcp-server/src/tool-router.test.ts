@@ -430,6 +430,85 @@ test("route: find_references goes live when bridge is available", async () => {
   });
 });
 
+// T6.1 — the live find_references/dependencies drill-downs must tag _source=live
+// so the response is symmetric with the offline path's _source=offline. The fake
+// live returns a bridge-shaped body (flat referencedBy list) that the router
+// folds server-side; _source is injected after the fold.
+test("route: find_references tags _source=live when served by the bridge", async () => {
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [{ type: "text", text: JSON.stringify({ referencedBy: ["Assets/Foo.prefab", "Assets/Bar.mat"], totalCount: 2 }) }],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_find_references", { guid: "deadbeef" });
+  assert.equal(live.calls.length, 1);
+  assert.equal(parseBody(result)._source, "live");
+  assert.equal(routeOf(result), "live");
+});
+
+test("route: dependencies tags _source=live when served by the bridge", async () => {
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [{ type: "text", text: JSON.stringify({ forward: [], reverse: [], forwardCount: 0, reverseCount: 0 }) }],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_dependencies", { asset_path: "Assets/Foo.prefab" });
+  assert.equal(live.calls.length, 1);
+  assert.equal(live.calls[0].tool, "unity_open_mcp_dependencies");
+  assert.equal(parseBody(result)._source, "live");
+  assert.equal(routeOf(result), "live");
+});
+
+// ---------------------------------------------------------------------------
+// T6.4 — dispatch precedence: validate_edit / scan_paths have named routeHandlers
+// (routeVerifyResult) that win dispatch BEFORE the ALWAYS_BATCH_TOOLS lookup is
+// reached. They are NOT in BATCH_TOOL_NAMES, so even the named handler's
+// canBatch branch routes them live. This guards the invariant documented in
+// batch-spawn.ts's ALWAYS_BATCH_TOOLS comment: an entry there for them would be
+// dead code.
+// ---------------------------------------------------------------------------
+
+test("route: validate_edit hits the named handler and routes live (never batch)", async () => {
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [{ type: "text", text: JSON.stringify({ summary: { error: 0, warn: 0, info: 0 }, issues: [] }) }],
+      isError: false,
+    },
+  });
+  const batch = makeFakeBatch(); // isBatchTool(validate_edit) === false
+  const router = makeRouter(live, batch, "/proj", makeFakeEventStream());
+
+  await router.route("unity_open_mcp_validate_edit", { paths: ["Assets/Foo.prefab"] });
+  assert.equal(live.calls.length, 1, "validate_edit should be served live via the named handler");
+  assert.equal(live.calls[0].tool, "unity_open_mcp_validate_edit");
+  assert.equal(batch.calls.length, 0, "validate_edit must never reach the batch spawner");
+});
+
+test("route: scan_paths hits the named handler and routes live (never batch)", async () => {
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [{ type: "text", text: JSON.stringify({ summary: { error: 0, warn: 0, info: 0 }, issues: [] }) }],
+      isError: false,
+    },
+  });
+  const batch = makeFakeBatch();
+  const router = makeRouter(live, batch, "/proj", makeFakeEventStream());
+
+  await router.route("unity_open_mcp_scan_paths", { paths: ["Assets/Foo.prefab"] });
+  assert.equal(live.calls.length, 1, "scan_paths should be served live via the named handler");
+  assert.equal(batch.calls.length, 0, "scan_paths must never reach the batch spawner");
+});
+
 // ---------------------------------------------------------------------------
 // live routing — generic non-batch tool
 // ---------------------------------------------------------------------------

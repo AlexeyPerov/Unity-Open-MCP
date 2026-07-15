@@ -76,6 +76,25 @@ export interface RouteMeta {
   fallbackReason?: string;
 }
 
+/**
+ * Tag a CallToolResult's JSON body with `_source` so callers switching on the
+ * field see a defined value for live-routed drill-downs (find_references /
+ * dependencies). Mirrors the inline `_source: "offline"` / `_source: "local"`
+ * tags the offline/local paths set directly. A no-op when the first content
+ * block is not parseable JSON; preserves `isError` and other content blocks.
+ *
+ * (Plan 7 T7.3 folds this into a shared source/meta helper — the inline
+ * `injectRouteMeta` + `tagSource` pair is the minimal T6.1 fix.)
+ */
+function tagSource(
+  result: CallToolResult,
+  source: "live" | "offline" | "local",
+): CallToolResult {
+  const body = parseResultBody(result);
+  if (body === null) return result;
+  return withResultBody(result, { ...body, _source: source });
+}
+
 function injectRouteMeta(
   result: CallToolResult,
   meta: RouteMeta,
@@ -1472,14 +1491,19 @@ export class ToolRouter implements Router {
       console.error("[unity-open-mcp] Route: find_references -> live");
       // The live bridge only honors max_results (no detail/per-file/threshold).
       // Ask for the full set when paging so the cursor can walk it; otherwise
-      // honor the legacy max_results cap.
+      // honor the legacy max_results cap. The 0 here is the server-internal
+      // "unlimited" sentinel (documented in the find-references schema); callers
+      // never pass it — the schema declares minimum: 1 for caller-facing use.
       const liveArgs: Record<string, unknown> = {
         ...args,
         max_results: wantPaging ? 0 : (typeof args.max_results === "number" ? args.max_results : 100),
       };
       const result = await live.route("unity_open_mcp_find_references", liveArgs);
       const folded = foldFindReferencesLive(result, profile, wantPaging, args);
-      return injectRouteMeta(folded, { route: "live" });
+      // T6.1 — tag _source=live so the response matches the offline path's
+      // _source=offline tag (clients switching on _source get a defined value
+      // for the common live case instead of undefined).
+      return injectRouteMeta(tagSource(folded, "live"), { route: "live" });
     }
 
     console.error(
@@ -1512,6 +1536,8 @@ export class ToolRouter implements Router {
         guid,
         detail,
         // When paging, fetch the full set; otherwise honor the legacy cap.
+        // 0 is the server-internal "unlimited" sentinel (see find-references
+        // schema description); the schema's caller-facing minimum is 1.
         maxResults: wantPaging ? 0 : (typeof args.max_results === "number" ? args.max_results : 100),
         maxPerFile: typeof args.max_per_file === "number" ? args.max_per_file : 5,
         patternThreshold: typeof args.pattern_threshold === "number" ? args.pattern_threshold : 0,
@@ -1591,7 +1617,8 @@ export class ToolRouter implements Router {
         max_results: typeof args.max_results === "number" ? args.max_results : 100,
       };
       const result = await live.route("unity_open_mcp_dependencies", liveArgs);
-      return injectRouteMeta(result, { route: "live" });
+      // T6.1 — tag _source=live for parity with the offline route's _source.
+      return injectRouteMeta(tagSource(result, "live"), { route: "live" });
     }
 
     console.error(

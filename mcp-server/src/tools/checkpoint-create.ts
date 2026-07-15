@@ -13,5 +13,6 @@ export const checkpointCreate: Tool = {
       },
       label: { type: "string" },
     },
+    additionalProperties: false,
   },
 };

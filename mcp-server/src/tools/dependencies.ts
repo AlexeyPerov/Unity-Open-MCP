@@ -51,7 +51,10 @@ export const dependencies: Tool = {
       max_results: {
         type: "integer",
         default: 100,
-        description: "Maximum number of reverse-dependency entries to return. Forward edges are not capped (a single asset's forward set is bounded).",
+        description:
+          "Maximum number of reverse-dependency entries to return. Forward edges are not capped (a single asset's forward set is bounded). " +
+          "Callers should pass >= 1; the value 0 is a server-internal sentinel meaning 'unlimited' and is " +
+          "never a value a caller needs to pass.",
       },
       include_impact: {
         type: "boolean",
@@ -77,5 +80,6 @@ export const dependencies: Tool = {
       { required: ["asset_path"] },
       { required: ["guid"] },
     ],
+    additionalProperties: false,
   },
 };

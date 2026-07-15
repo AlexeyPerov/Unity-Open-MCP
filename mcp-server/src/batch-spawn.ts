@@ -35,9 +35,16 @@ export const VERIFY_BATCH_TOOL_NAMES: ReadonlySet<string> = new Set(
 // tool name → fallbackReason for the route-meta envelope. Single source of
 // truth for the router's pinned always-batch branch: compile_check spawns a
 // fresh Unity to recompile from scratch; verify-family tools need the headless
-// verify package and are NOT registered on the live bridge. validate_edit /
-// scan_paths are intentionally NOT here — those ARE live-registered and stay
-// live-first. Keep this map disjoint (a tool appears once).
+// verify package and are NOT registered on the live bridge.
+//
+// validate_edit / scan_paths are intentionally NOT here. They ARE verify-family
+// tools, but they are also registered on the live bridge and have named
+// routeHandlers in tool-router.ts (routeVerifyResult). Named-handler dispatch
+// runs FIRST in routeCore — before the ALWAYS_BATCH_TOOLS lookup is even
+// reached — so an entry here for them would be dead code. They stay live-first
+// (the bridge serves them when up; the named handler applies the output-profile
+// fold/paging server-side). Adding them here would have no effect and mislead
+// future contributors. Keep this map disjoint (a tool appears once).
 export const ALWAYS_BATCH_TOOLS: ReadonlyMap<string, string> = new Map<string, string>([
   ["unity_open_mcp_compile_check", "compile_check_always_batch"],
   ...[...VERIFY_BATCH_TOOL_NAMES].map((name) => [name, "verify_always_batch"] as [string, string]),
@@ -96,7 +103,7 @@ export function buildVerifyArgs(
     if (args.platform_profile) cli.push("--platform-profile", String(args.platform_profile));
   } else if (operation === "regression_check") {
     cli.push("--baseline-path", String(args.baseline_path));
-    if (args.regression_threshold !== undefined)
+    if (typeof args.regression_threshold === "number")
       cli.push("--regression-threshold", String(args.regression_threshold));
     // Per-category thresholds are an optional object: ruleId -> max delta.
     // Repeatable --per-category-threshold <ruleId>=<int> flags are emitted in a
@@ -128,9 +135,13 @@ export function buildMetaArgs(
     if (args.assembly_filter !== undefined) cli.push("--assembly-filter", String(args.assembly_filter));
     if (args.include_unity_editor !== undefined) cli.push("--include-unity-editor", String(args.include_unity_editor));
     if (args.include_project !== undefined) cli.push("--include-project", String(args.include_project));
-    if (args.max_results !== undefined) cli.push("--max-results", String(args.max_results));
+    if (typeof args.max_results === "number") cli.push("--max-results", String(args.max_results));
   } else if (operation === "compile_check") {
-    if (args.timeout_ms !== undefined) cli.push("--timeout-ms", String(args.timeout_ms));
+    // T6.1 — guard with typeof === "number" (not !== undefined) so a caller
+    // passing timeout_ms:null does not emit `--timeout-ms null` on the argv
+    // (null !== undefined). The C# parser would then try to parse "null" as an
+    // int. Mirrors the safe guard in live-client.ts postToolFetch.
+    if (typeof args.timeout_ms === "number") cli.push("--timeout-ms", String(args.timeout_ms));
   } else if (operation === "execute_csharp") {
     // The code payload is space-bearing and multi-line: it cannot round-trip
     // through argv splitting on spaces. Encode spaces as ASCII unit separator
@@ -143,8 +154,8 @@ export function buildMetaArgs(
     if (Array.isArray(args.object_ids)) {
       for (const id of args.object_ids) cli.push("--object-id", String(id));
     }
-    if (args.max_depth !== undefined) cli.push("--max-depth", String(args.max_depth));
-    if (args.max_items !== undefined) cli.push("--max-items", String(args.max_items));
+    if (typeof args.max_depth === "number") cli.push("--max-depth", String(args.max_depth));
+    if (typeof args.max_items === "number") cli.push("--max-items", String(args.max_items));
     // Deny-list bypass contract: confirm_bypass:true forces an explicit gate:"off".
     if (args.confirm_bypass === true) cli.push("--confirm-bypass", "true");
   } else if (operation === "invoke_method") {
@@ -162,8 +173,8 @@ export function buildMetaArgs(
     if (Array.isArray(args.generic_arg_types)) {
       for (const g of args.generic_arg_types) cli.push("--generic-arg-type", String(g));
     }
-    if (args.max_depth !== undefined) cli.push("--max-depth", String(args.max_depth));
-    if (args.max_items !== undefined) cli.push("--max-items", String(args.max_items));
+    if (typeof args.max_depth === "number") cli.push("--max-depth", String(args.max_depth));
+    if (typeof args.max_items === "number") cli.push("--max-items", String(args.max_items));
   } else if (operation === "execute_menu") {
     if (args.menu_path !== undefined) cli.push("--menu-path", String(args.menu_path));
   }

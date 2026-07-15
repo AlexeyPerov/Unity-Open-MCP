@@ -65,7 +65,9 @@ export const searchAssets: Tool = {
         type: "integer",
         default: 50,
         description:
-          "Max result files returned when page_size is omitted; extras counted in 'truncated'. Legacy alias of the single-page cap.",
+          "Max result files returned when page_size is omitted; extras counted in 'truncated'. Legacy alias of the single-page cap. " +
+          "Callers should pass >= 1; the value 0 is a server-internal sentinel meaning 'unlimited (for paging)' " +
+          "and is emitted by the server itself when page_size is set — it is never a value a caller needs to pass.",
       },
     },
     additionalProperties: false,

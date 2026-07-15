@@ -823,7 +823,10 @@ test("filterVisibleTools: deactivating core hides core tools, not meta-tools", (
   state.deactivate("core");
   const filtered = filterVisibleTools(
     tools(
-      "unity_open_mcp_ping", // core — now hidden
+      // execute_csharp is a core tool with no always-visible pin — hidden when
+      // core is deactivated. (ping is also core but is pinned always-visible so
+      // it survives; covered by tool-session-state.test.ts.)
+      "unity_open_mcp_execute_csharp",
       "unity_open_mcp_manage_tools", // meta — still visible
     ),
     state,

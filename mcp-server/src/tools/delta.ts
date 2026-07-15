@@ -14,5 +14,6 @@ export const delta: Tool = {
         description: "Re-validate scope; defaults to checkpoint paths",
       },
     },
+    additionalProperties: false,
   },
 };

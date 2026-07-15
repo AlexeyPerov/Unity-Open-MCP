@@ -42,12 +42,22 @@ export type ActivationSource = "default" | "manual" | "auto";
 /**
  * Names of always-visible tools (meta-tools with no group assignment). These
  * are never filtered by the session state — an agent can always reach them.
+ *
+ * `unity_open_mcp_ping` is included (T6.3): it is the precise connectivity
+ * health check (vs `bridge_status`, which is the coarse operator snapshot).
+ * A health probe must survive `manage_tools(deactivate, core)` — an agent that
+ * just tore down the core group still needs to re-probe the bridge before
+ * re-activating. ping is also assigned to the `core` group in
+ * `capabilities/tool-groups.ts`; the always-visible check runs first in
+ * {@link filterVisibleTools}, so the group assignment is a fallback that never
+ * applies.
  */
 const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
   "unity_open_mcp_capabilities",
   "unity_open_mcp_list_rules",
   "unity_open_mcp_generate_skill",
   "unity_open_mcp_manage_tools",
+  "unity_open_mcp_ping",
   "unity_open_mcp_pull_events",
   "unity_senses_pull_events",
   "unity_open_mcp_read_compile_errors",
