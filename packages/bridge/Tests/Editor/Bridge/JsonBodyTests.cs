@@ -122,6 +122,66 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsNull(JsonBody.GetString(null, "code"));
         }
 
+        // ----- HasKey / TryGetString: absent vs explicit-null distinction -----
+        //
+        // GetString collapses "key absent" and `"key": null` into one null
+        // return. Callers with a precedence chain (e.g. name_target → name)
+        // need to tell them apart so an explicit null does not fall through
+        // to the secondary key. HasKey / TryGetString expose the distinction.
+
+        [Test]
+        public static void HasKey_PresentValue_ReturnsTrue()
+        {
+            var json = "{\"code\":\"x\",\"timeout_ms\":5}";
+            Assert.IsTrue(JsonBody.HasKey(json, "code"));
+            Assert.IsTrue(JsonBody.HasKey(json, "timeout_ms"));
+        }
+
+        [Test]
+        public static void HasKey_ExplicitNull_ReturnsTrue()
+        {
+            // The load-bearing case: "key": null is present even though
+            // GetString returns null for it.
+            Assert.IsTrue(JsonBody.HasKey("{\"code\":null}", "code"));
+        }
+
+        [Test]
+        public static void HasKey_MissingKey_ReturnsFalse()
+        {
+            Assert.IsFalse(JsonBody.HasKey("{\"code\":\"x\"}", "usings"));
+            Assert.IsFalse(JsonBody.HasKey("{}", "code"));
+            Assert.IsFalse(JsonBody.HasKey("", "code"));
+            Assert.IsFalse(JsonBody.HasKey(null, "code"));
+        }
+
+        [Test]
+        public static void TryGetString_PresentString_ReturnsValueAndPresentTrue()
+        {
+            var value = JsonBody.TryGetString("{\"name_target\":\"Cube\"}", "name_target", out var present);
+            Assert.IsTrue(present);
+            Assert.AreEqual("Cube", value);
+        }
+
+        [Test]
+        public static void TryGetString_ExplicitNull_ReturnsNullAndPresentTrue()
+        {
+            // name_target: null — present is true so the caller does NOT fall
+            // through to the secondary `name` key.
+            var value = JsonBody.TryGetString("{\"name_target\":null}", "name_target", out var present);
+            Assert.IsTrue(present);
+            Assert.IsNull(value);
+        }
+
+        [Test]
+        public static void TryGetString_AbsentKey_ReturnsNullAndPresentFalse()
+        {
+            // name_target omitted — present is false so the caller DOES fall
+            // through to the secondary `name` key.
+            var value = JsonBody.TryGetString("{\"name\":\"Cube\"}", "name_target", out var present);
+            Assert.IsFalse(present);
+            Assert.IsNull(value);
+        }
+
         [Test]
         public static void GetLong_ParsesLargeValue()
         {

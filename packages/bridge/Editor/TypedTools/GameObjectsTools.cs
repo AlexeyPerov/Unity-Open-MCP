@@ -264,14 +264,17 @@ namespace UnityOpenMcpBridge.TypedTools
         public static ToolDispatchResult Modify(string body)
         {
             // Resolve the target with name_target so `name` stays free for
-            // the new value. Falls back to `name` when name_target is unset
-            // so callers without a rename still work via the standard key.
+            // the new value. Falls back to `name` ONLY when name_target is
+            // absent — an explicit `name_target: null` must not fall through
+            // to `name` (which is the new value), or the call would resolve
+            // the wrong object. JsonBody.TryGetString distinguishes the two
+            // null cases GetString collapses (absent vs explicit null).
             var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
             var path = JsonBody.GetString(body, "path");
-            var nameTarget = JsonBody.GetString(body, "name_target");
-            var resolveName = string.IsNullOrEmpty(nameTarget)
-                ? JsonBody.GetString(body, "name")
-                : nameTarget;
+            var nameTarget = JsonBody.TryGetString(body, "name_target", out var hasNameTarget);
+            var resolveName = hasNameTarget
+                ? nameTarget
+                : JsonBody.GetString(body, "name");
             var go = TypedTargets.ResolveGameObject(instanceId, path, resolveName);
             if (go == null)
                 return ToolDispatchResult.Fail("gameobject_not_found",

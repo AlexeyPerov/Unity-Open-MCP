@@ -1,5 +1,9 @@
+using System;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.TestTools;
 using UnityOpenMcpBridge;
 
 namespace UnityOpenMcpBridge.Tests
@@ -113,6 +117,39 @@ namespace UnityOpenMcpBridge.Tests
         public static void Check_EmptySetup_Allows()
         {
             Assert.IsTrue(SceneDirtyGuard.Check(new SceneSetup[0]).Allowed);
+        }
+
+        // ----- Check(Func): fail-open + observability -----
+        //
+        // Fail-open policy is intentional (refusing on an API failure would
+        // block every disruptive op), but the swallowed exception must be
+        // observable so a real failure (e.g. corrupted scene setup) is not
+        // silent. The Check(getSetup) overload lets the test inject a throwing
+        // provider and assert: (1) Allow is returned and (2) a warning is
+        // logged (not swallowed silently).
+
+        [Test]
+        public static void Check_ThrowingSetupProvider_AllowsAndLogsWarning()
+        {
+            // Expect the fail-open warning; LogAssert.Expect prevents the
+            // logged warning from failing the test run and asserts it fired.
+            LogAssert.Expect(LogType.Warning,
+                new Regex(@"SceneDirtyGuard could not read the scene setup.*corrupted"));
+
+            var result = SceneDirtyGuard.Check(() => throw new Exception("corrupted scene setup"));
+
+            Assert.IsTrue(result.Allowed, "Fail-open policy must still return Allow.");
+        }
+
+        [Test]
+        public static void Check_ThrowingSetupProvider_SwallowsWithoutThrowing()
+        {
+            // The guard must absorb the exception entirely — no propagation to
+            // the caller (BridgeHttpServer preflight). Verify via the overload
+            // that no exception escapes, regardless of the log channel.
+            LogAssert.Expect(LogType.Warning, new Regex(@"SceneDirtyGuard"));
+            Assert.DoesNotThrow(() =>
+                SceneDirtyGuard.Check(() => throw new Exception("boom")));
         }
 
         // ----- GuardResult factories -----

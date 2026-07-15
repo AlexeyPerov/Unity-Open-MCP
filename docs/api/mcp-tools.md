@@ -91,7 +91,10 @@ reports success. Gate modes are:
 applying. Unsafe fixes require an explicit replacement target. A top-level
 non-dry-run fix can restore touched files when application fails or introduces
 new enforced errors; non-dry-run fixes are refused inside `batch_execute`
-because that rollback snapshot is unavailable there.
+because that rollback snapshot is unavailable there. Applying a fix with
+`gate: "off"` commits without rollback protection; the response carries
+`rollbackDisabled: true` so the mutation is visible and the asset health must
+be verified manually afterward.
 
 Every issue can carry:
 
@@ -130,7 +133,13 @@ Runs multiple typed tools sequentially in one request to an already-open
 Editor. It uses one checkpoint/validation/delta cycle and one undo group.
 `commands` and the union `paths_hint` are required; `fail_fast` defaults to
 `true`; `gate` defaults to `enforce`. Successful earlier steps are not
-automatically rolled back when a later step fails.
+automatically rolled back when a later step fails. Nested steps that resolve
+to the `restart_then_settle` lifecycle (`scene_open` Single mode, `package_add`
+/ `package_remove`, `asmdef_create` / `asmdef_modify`, `build_set_target` /
+`build_set_defines`, `settings_set_player`, `reimport_package`) are refused
+with `batch_nested_reload_unsafe` — a domain reload or scene switch mid-batch
+would silently abort every later step. `batch_execute` itself and `compile_check`
+are also refused as nested steps.
 
 This is live request batching, not headless Unity fallback. See
 [Routing and lifecycle](routing-lifecycle.md).

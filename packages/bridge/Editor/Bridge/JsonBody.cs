@@ -25,6 +25,37 @@ namespace UnityOpenMcpBridge
             return ReadQuotedString(json, ref start);
         }
 
+        /// <summary>
+        /// Reports whether <paramref name="json"/> carries a top-level entry
+        /// for <paramref name="key"/>. Unlike <see cref="GetString"/>, this
+        /// distinguishes a missing key (false) from <c>"key": null</c> (true),
+        /// which callers need when an explicit null must not fall through to a
+        /// secondary resolution key (e.g. <c>name_target</c> vs <c>name</c>).
+        /// </summary>
+        public static bool HasKey(string json, string key)
+        {
+            if (string.IsNullOrEmpty(json)) return false;
+            var pattern = "\"" + key + "\"";
+            var idx = json.IndexOf(pattern, StringComparison.Ordinal);
+            if (idx < 0) return false;
+            var colonIdx = json.IndexOf(':', idx + pattern.Length);
+            return colonIdx >= 0;
+        }
+
+        /// <summary>
+        /// Resolve a string field that distinguishes "missing key" from an
+        /// explicit <c>null</c>. <paramref name="present"/> is set to true when
+        /// the key exists (even if its value is null); false when it is absent.
+        /// Use this for precedence chains where an explicit null must win over a
+        /// fallback key — <see cref="GetString"/> collapses both cases to null.
+        /// </summary>
+        public static string TryGetString(string json, string key, out bool present)
+        {
+            present = HasKey(json, key);
+            if (!present) return null;
+            return GetString(json, key);
+        }
+
         private static string ReadQuotedString(string json, ref int i)
         {
             var sb = new StringBuilder(64);

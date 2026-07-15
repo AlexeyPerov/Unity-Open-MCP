@@ -71,28 +71,65 @@ import {
   type OutputProfile,
 } from "./output-profile.js";
 
+export type SourceTag = "live" | "offline" | "local";
+
 export interface RouteMeta {
   route: "live" | "batch";
   fallbackReason?: string;
 }
 
 /**
+ * Single source of truth for the `_source` tag. Every route-tagging site goes
+ * through one of the two helpers below so live / offline / local stay
+ * symmetric — a new route adding `_source` inline (the omission that slipped
+ * through before T6.1) is caught by the "no inline `_source` outside the
+ * helper" rule and grep.
+ *
+ * - {@link withSource} stamps `_source` on a body object literal (the local /
+ *   offline paths that build the JSON themselves).
+ * - {@link tagSource} stamps `_source` on an already-built {@link
+ *   CallToolResult} (the live / offline-result paths that wrap a bridge or
+ *   disk result).
+ */
+function withSource<T extends Record<string, unknown>>(
+  body: T,
+  source: SourceTag,
+): T & { _source: SourceTag } {
+  return { ...body, _source: source };
+}
+
+/**
  * Tag a CallToolResult's JSON body with `_source` so callers switching on the
  * field see a defined value for live-routed drill-downs (find_references /
- * dependencies). Mirrors the inline `_source: "offline"` / `_source: "local"`
- * tags the offline/local paths set directly. A no-op when the first content
- * block is not parseable JSON; preserves `isError` and other content blocks.
- *
- * (Plan 7 T7.3 folds this into a shared source/meta helper — the inline
- * `injectRouteMeta` + `tagSource` pair is the minimal T6.1 fix.)
+ * dependencies). A no-op when the first content block is not parseable JSON;
+ * preserves `isError` and other content blocks.
  */
 function tagSource(
   result: CallToolResult,
-  source: "live" | "offline" | "local",
+  source: SourceTag,
 ): CallToolResult {
   const body = parseResultBody(result);
   if (body === null) return result;
-  return withResultBody(result, { ...body, _source: source });
+  return withResultBody(result, withSource(body, source));
+}
+
+/**
+ * Build a single-block CallToolResult from a body object, tagging it with
+ * `_source`. The common shape for local/offline routes that synthesize the
+ * entire response in the MCP server (no bridge tool endpoint). Accepts the
+ * typed result shapes (ListAssetsResult, CapabilitiesResult, …) returned by
+ * the offline/local builders.
+ */
+function sourceResult(
+  body: object,
+  source: SourceTag,
+  isError = false,
+): CallToolResult {
+  const tagged = withSource(body as Record<string, unknown>, source);
+  return {
+    content: [{ type: "text", text: JSON.stringify(tagged) }],
+    isError,
+  };
 }
 
 function injectRouteMeta(
@@ -125,12 +162,7 @@ function injectRouteMeta(
 // missing-parameter refusals before any side effect runs). Tagged _source=local
 // because it is resolved entirely in the MCP server.
 function localError(code: string, message: string): CallToolResult {
-  return {
-    content: [
-      { type: "text", text: JSON.stringify({ error: { code, message }, _source: "local" }) },
-    ],
-    isError: true,
-  };
+  return sourceResult({ error: { code, message } }, "local", true);
 }
 
 // M26 Plan 2 — gate-consistent envelope shape for the mutating Hub control
@@ -145,25 +177,24 @@ function hubMutationEnvelope(opts: {
   nextSteps: string[];
   isError: boolean;
 }): CallToolResult {
-  const body = {
-    mutation: {
-      success: opts.success,
-      output: opts.output,
-      error: opts.error,
+  return sourceResult(
+    {
+      mutation: {
+        success: opts.success,
+        output: opts.output,
+        error: opts.error,
+      },
+      gate: {
+        mode: "off",
+        skipped: true,
+        validation: null,
+        delta: null,
+      },
+      agentNextSteps: opts.nextSteps,
     },
-    gate: {
-      mode: "off",
-      skipped: true,
-      validation: null,
-      delta: null,
-    },
-    agentNextSteps: opts.nextSteps,
-    _source: "local",
-  };
-  return {
-    content: [{ type: "text", text: JSON.stringify(body) }],
-    isError: opts.isError,
-  };
+    "local",
+    opts.isError,
+  );
 }
 
 function activeGroupsEqual(
@@ -651,38 +682,32 @@ export class ToolRouter implements Router {
       if (stale.staleLogSuspected) staleLog = stale;
     }
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            status,
-            unhealthy: health.unhealthy,
-            headline: health.headline,
-            errorCount: errors.length,
-            errors,
-            // Package / assembly issues from the same log tail. Empty when the
-            // only red flags are compiler errors (the common case).
-            issues: health.issues,
-            issueCount: health.issues.length,
-            logPath,
-            tailBytes: tail.bytes,
-            // Present ONLY when at least one cited source file is newer than
-            // Editor.log — the log's most-recent error block may be stale and
-            // the agent should force a recompile before trusting the errors.
-            ...(staleLog
-              ? {
-                  staleLogSuspected: true,
-                  staleLogHint: staleLog.hint,
-                  staleLogNewerFiles: staleLog.newerFiles,
-                }
-              : {}),
-            _source: "offline",
-          }),
-        },
-      ],
-      isError: false,
-    };
+    return sourceResult(
+      {
+        status,
+        unhealthy: health.unhealthy,
+        headline: health.headline,
+        errorCount: errors.length,
+        errors,
+        // Package / assembly issues from the same log tail. Empty when the
+        // only red flags are compiler errors (the common case).
+        issues: health.issues,
+        issueCount: health.issues.length,
+        logPath,
+        tailBytes: tail.bytes,
+        // Present ONLY when at least one cited source file is newer than
+        // Editor.log — the log's most-recent error block may be stale and
+        // the agent should force a recompile before trusting the errors.
+        ...(staleLog
+          ? {
+              staleLogSuspected: true,
+              staleLogHint: staleLog.hint,
+              staleLogNewerFiles: staleLog.newerFiles,
+            }
+          : {}),
+      },
+      "offline",
+    );
   }
 
   private async routeListAssets(
@@ -695,10 +720,7 @@ export class ToolRouter implements Router {
         maxPerFolder: typeof args.max_per_folder === "number" ? args.max_per_folder : 30,
         projectRoot: this.projectPath,
       });
-      return {
-        content: [{ type: "text", text: JSON.stringify({ ...result, _source: "offline" }) }],
-        isError: false,
-      };
+      return sourceResult(result, "offline");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
@@ -796,12 +818,7 @@ export class ToolRouter implements Router {
       },
       { kind, includePlanned },
     );
-    return {
-      content: [
-        { type: "text", text: JSON.stringify({ ...result, _source: "local" }) },
-      ],
-      isError: false,
-    };
+    return sourceResult(result, "local");
   }
 
   private async routeListRules(
@@ -817,12 +834,7 @@ export class ToolRouter implements Router {
       { rules: RULE_CATALOG, fixes: FIX_CATALOG },
       { assetKind, extension, implementedOnly },
     );
-    return {
-      content: [
-        { type: "text", text: JSON.stringify({ ...result, _source: "local" }) },
-      ],
-      isError: false,
-    };
+    return sourceResult(result, "local");
   }
 
   private async routeGenerateSkill(
@@ -856,20 +868,14 @@ export class ToolRouter implements Router {
         clients: clients.length > 0 ? clients : undefined,
         includeWorkflow,
       });
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              skill: result.skill,
-              project: result.project,
-              written: result.written,
-              _source: "local",
-            }),
-          },
-        ],
-        isError: false,
-      };
+      return sourceResult(
+        {
+          skill: result.skill,
+          project: result.project,
+          written: result.written,
+        },
+        "local",
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
@@ -1015,27 +1021,21 @@ export class ToolRouter implements Router {
       };
     });
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({
-            groups,
-            activeGroups: this.sessionState.activeGroups(),
-            note:
-              "Activate a group to add its tools to your ListTools surface; " +
-              "deactivate to hide them. State is per-session and ephemeral — " +
-              "it resets to the five default-on groups when the MCP server restarts. " +
-              "Compiled-state availability (the `available` field) reflects " +
-              "whether the Unity domain dependency is compiled in; use " +
-              "unity_open_mcp_capabilities for the authoritative compiled-state " +
-              "report.",
-            _source: "local",
-          }),
-        },
-      ],
-      isError: false,
-    };
+    return sourceResult(
+      {
+        groups,
+        activeGroups: this.sessionState.activeGroups(),
+        note:
+          "Activate a group to add its tools to your ListTools surface; " +
+          "deactivate to hide them. State is per-session and ephemeral — " +
+          "it resets to the five default-on groups when the MCP server restarts. " +
+          "Compiled-state availability (the `available` field) reflects " +
+          "whether the Unity domain dependency is compiled in; use " +
+          "unity_open_mcp_capabilities for the authoritative compiled-state " +
+          "report.",
+      },
+      "local",
+    );
   }
 
   /**
@@ -1165,24 +1165,11 @@ export class ToolRouter implements Router {
   private manageToolsResult(
     body: Record<string, unknown>,
   ): CallToolResult {
-    return {
-      content: [
-        { type: "text", text: JSON.stringify({ ...body, _source: "local" }) },
-      ],
-      isError: false,
-    };
+    return sourceResult(body, "local");
   }
 
   private manageToolsError(code: string, message: string): CallToolResult {
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify({ error: { code, message }, _source: "local" }),
-        },
-      ],
-      isError: true,
-    };
+    return sourceResult({ error: { code, message } }, "local", true);
   }
 
   // testsuite-tauri phase-3 — bridge_status. Combines the instance-lock
@@ -1330,16 +1317,12 @@ export class ToolRouter implements Router {
           }
         : { reachable: false },
       nextStep: bridgeStatusNextStep(status),
-      _source: "local",
     };
 
     // bridge_status never reports an error — even a stopped bridge is a
     // successful status read. _source=local because the synthesis happens in
     // the MCP server (no bridge tool endpoint, no batch Unity).
-    return {
-      content: [{ type: "text", text: JSON.stringify(body) }],
-      isError: false,
-    };
+    return sourceResult(body, "local");
   }
 
   // ── M26 Plan 2 — Unity Hub control (local-routed) ────────────────
@@ -1353,30 +1336,23 @@ export class ToolRouter implements Router {
 
   private async routeHubListEditors(): Promise<CallToolResult> {
     const editors = this.hubBackend.listInstalledEditors();
-    const body = {
-      editors,
-      count: editors.length,
-      _source: "local",
-    };
-    return {
-      content: [{ type: "text", text: JSON.stringify(body) }],
-      isError: false,
-    };
+    return sourceResult(
+      { editors, count: editors.length },
+      "local",
+    );
   }
 
   private async routeHubAvailableReleases(): Promise<CallToolResult> {
     const result = await this.hubBackend.fetchAvailableReleases();
-    const body = {
-      entries: result.entries,
-      count: result.entries.length,
-      stale: result.stale,
-      fetchedAt: result.fetchedAt,
-      _source: "local",
-    };
-    return {
-      content: [{ type: "text", text: JSON.stringify(body) }],
-      isError: false,
-    };
+    return sourceResult(
+      {
+        entries: result.entries,
+        count: result.entries.length,
+        stale: result.stale,
+        fetchedAt: result.fetchedAt,
+      },
+      "local",
+    );
   }
 
   private async routeHubInstallEditor(
@@ -1444,16 +1420,11 @@ export class ToolRouter implements Router {
 
   private async routeHubGetInstallPath(): Promise<CallToolResult> {
     const res = this.hubBackend.getInstallPath();
-    const body = {
-      path: res.path,
-      source: res.source,
-      error: res.error,
-      _source: "local",
-    };
-    return {
-      content: [{ type: "text", text: JSON.stringify(body) }],
-      isError: res.error !== null,
-    };
+    return sourceResult(
+      { path: res.path, source: res.source, error: res.error },
+      "local",
+      res.error !== null,
+    );
   }
 
   private async routeHubSetInstallPath(
@@ -1548,12 +1519,7 @@ export class ToolRouter implements Router {
       const withPaging = wantPaging
         ? pageFindReferencesResult(result, args.page_size as number, typeof args.cursor === "string" ? (args.cursor as string) : undefined)
         : result;
-      return {
-        content: [
-          { type: "text", text: JSON.stringify({ ...withPaging, _source: "offline" }) },
-        ],
-        isError: false,
-      };
+      return sourceResult(withPaging, "offline");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {

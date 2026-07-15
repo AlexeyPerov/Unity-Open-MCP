@@ -53,16 +53,32 @@ namespace UnityOpenMcpBridge
         // loaded scene is dirty; otherwise Refuse with the dirty paths.
         public static GuardResult Check()
         {
+            return Check(() => EditorSceneManager.GetSceneManagerSetup());
+        }
+
+        // Overload that accepts the scene-setup provider so the fail-open path
+        // is unit-testable without synthesizing a live scene that throws. The
+        // production Check() supplies the real EditorSceneManager call.
+        //
+        // Fail-open policy is unchanged: if the provider throws, the guard
+        // returns Allow (refusing on an API failure would block every
+        // disruptive op in setups we can't introspect). The exception is now
+        // logged once as a warning so a real failure — e.g. a corrupted scene
+        // setup — is observable instead of silently disabling the guard.
+        public static GuardResult Check(System.Func<SceneSetup[]> getSetup)
+        {
             SceneSetup[] setup;
             try
             {
-                setup = EditorSceneManager.GetSceneManagerSetup();
+                setup = getSetup();
             }
-            catch
+            catch (System.Exception e)
             {
-                // If we can't read the setup, fall through to Allow — refusing
-                // on an API failure would block every disruptive op in setups
-                // we can't introspect.
+                UnityEngine.Debug.LogWarning(
+                    "[unity-open-mcp] SceneDirtyGuard could not read the scene " +
+                    "setup and fell back to Allow (fail-open). A disruptive op " +
+                    "may proceed without the dirty-scene preflight. Exception: "
+                    + e.Message);
                 return GuardResult.Allow();
             }
 

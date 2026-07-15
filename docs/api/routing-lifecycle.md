@@ -91,6 +91,12 @@ Every tool declares `capabilities.tools[].lifecycle` and may add a
 - An empty HTTP 200 body from a compile-reload tool is returned as
   `status: "triggered_reload"`. The mutation likely committed before the
   domain reload tore down the response. Verify post-state; do not retry it.
+- The gate's checkpoint store lives in memory. A domain reload (the same
+  recompile a `restart_then_settle` mutation triggers) clears it, so a later
+  `delta` call against a pre-reload `checkpoint_id` cannot compare and the
+  response carries `checkpointLostOnReload: true`. Capture a fresh checkpoint
+  after any reload and validate with `validate_edit` / `scan_paths` instead of
+  relying on a stale `delta`.
 
 ### Scene identity
 
