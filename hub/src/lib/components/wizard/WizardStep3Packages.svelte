@@ -81,14 +81,14 @@
         id="wiz-pkg-pin"
         type="text"
         class="wiz-input"
-        placeholder="bridge-v0.6.1"
+        placeholder="bridge-v0.7.0"
         value={state.packageVersionPin}
         disabled={state.useLocalPackages}
         oninput={(e) => handlers.setPackageVersionPin((e.currentTarget as HTMLInputElement).value)}
       />
       <p class="wiz-hint">
         Override the tag both packages pin to (e.g.
-        <code>bridge-v0.6.1</code>, <code>verify-v0.6.1</code>). Leave
+        <code>bridge-v0.7.0</code>, <code>verify-v0.7.0</code>). Leave
         empty to install the version matching this Hub build.
       </p>
     </div>

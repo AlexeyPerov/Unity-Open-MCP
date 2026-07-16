@@ -58,8 +58,8 @@ project folder, e.g. `MyGame/Packages/manifest.json`) and add two entries to the
 ```json
 {
   "dependencies": {
-    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.6.1",
-    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.6.1"
+    "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.7.0",
+    "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.7.0"
   }
 }
 ```
@@ -84,7 +84,7 @@ client-specific path and JSON/TOML/CLI envelope. Merge the documented
 
 What that means:
 
-- `npx -y unity-open-mcp@0.6.1` downloads and launches that exact MCP server
+- `npx -y unity-open-mcp@0.7.0` downloads and launches that exact MCP server
   version from npm. The `-y` accepts the first-run prompt; pinning the version
   keeps the server in lockstep with the bridge and verify packages, which share
   the same number. To move to a newer release, bump the version here and in your
@@ -129,8 +129,8 @@ are talking.
 ## 4) Optional CLI (CI and automation)
 
 ```bash
-npx -y unity-open-mcp@0.6.1 wait-for-ready --project /path/to/MyGame
-npx -y unity-open-mcp@0.6.1 run-tool unity_open_mcp_capabilities --project /path/to/MyGame --json
+npx -y unity-open-mcp@0.7.0 wait-for-ready --project /path/to/MyGame
+npx -y unity-open-mcp@0.7.0 run-tool unity_open_mcp_capabilities --project /path/to/MyGame --json
 ```
 
 On unattended machines, configure startup modal handling via

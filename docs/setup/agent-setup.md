@@ -14,7 +14,7 @@ Install both halves of Unity Open MCP for **one** Unity project:
 | Half | What you install |
 |---|---|
 | **Unity side** | Bridge + verify packages in `Packages/manifest.json` (Git URL pins) |
-| **AI side** | MCP client config that launches `npx -y unity-open-mcp@0.6.1` with `UNITY_PROJECT_PATH` |
+| **AI side** | MCP client config that launches `npx -y unity-open-mcp@0.7.0` with `UNITY_PROJECT_PATH` |
 
 Then install/update the core agent skill, hand off restarts to the human, and
 best-effort verify if tools become available.
@@ -52,8 +52,8 @@ Read `Packages/manifest.json`. Under `dependencies`, set (create or overwrite
 these two keys only — leave every other dependency untouched):
 
 ```json
-"com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.6.1",
-"com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.6.1"
+"com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.7.0",
+"com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.7.0"
 ```
 
 **Idempotent rules:**
@@ -74,11 +74,11 @@ client's target and envelope, and replace `/absolute/path/to/project` with the
 absolute path from Preconditions. If you fetched this procedure remotely,
 fetch
 `https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/client-configuration.md`.
-Use the pinned `npx -y unity-open-mcp@0.6.1` command shown there.
+Use the pinned `npx -y unity-open-mcp@0.7.0` command shown there.
 
 **Idempotent merge rules when `unity-open-mcp` already exists:**
 
-1. Update `command` / `args` (or equivalent) to the pinned `npx -y unity-open-mcp@0.6.1` form.
+1. Update `command` / `args` (or equivalent) to the pinned `npx -y unity-open-mcp@0.7.0` form.
 2. Set `UNITY_PROJECT_PATH` to **this** project’s absolute path.
 3. Preserve any other env keys already on the entry.
 4. Leave every other MCP server / unrelated config key untouched.
@@ -145,8 +145,8 @@ After the human confirms Unity is open and the client was restarted:
   MCP). Optionally they can run:
 
 ```bash
-npx -y unity-open-mcp@0.6.1 wait-for-ready --project /absolute/path/to/project
-npx -y unity-open-mcp@0.6.1 run-tool unity_open_mcp_capabilities --project /absolute/path/to/project --json
+npx -y unity-open-mcp@0.7.0 wait-for-ready --project /absolute/path/to/project
+npx -y unity-open-mcp@0.7.0 run-tool unity_open_mcp_capabilities --project /absolute/path/to/project --json
 ```
 
 ## Short troubleshooting
