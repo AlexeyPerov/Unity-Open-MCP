@@ -16,8 +16,7 @@ the `unity-open-mcp` MCP server.
 - The `sprite2d` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="sprite2d")` before
   invoking any Texture (or SpriteAtlas) tool.
-  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
-  `asset-intelligence`, `typed-editor`, and `diagnostics`.
+  Fresh sessions start with two default-on groups (`core` and `gate-and-verify`); activate the other groups you need on demand.
   Because `TextureImporter` is built-in, `capabilities`
   always reports the `sprite2d` group as `available: true` (no
   `domainDefine`).

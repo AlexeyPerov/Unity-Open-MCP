@@ -89,7 +89,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     description:
       "reserialize, read_asset, search_assets, list_assets — offline asset " +
       "reads and reference intelligence.",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     id: "typed-editor",
@@ -97,14 +97,14 @@ export const TOOL_GROUPS: ToolGroup[] = [
       "Typed editor surface: assets, materials, shaders, prefabs, GameObjects, " +
       "components, scenes, packages, console, editor state, selection, undo, " +
       "tags, layers, reflection, scripts, object data, build pipeline, project settings.",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     id: "diagnostics",
     description:
       "Profiler session controls: start/stop, config, modules, save/load data, " +
       "and script stats. Per-frame profiler reads belong to agent-senses.",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     id: "gate-intelligence",

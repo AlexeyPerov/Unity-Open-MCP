@@ -16,8 +16,7 @@ in a project through the `unity-open-mcp` MCP server.
 - The `lighting` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="lighting")` before
   invoking any lighting tool.
-  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
-  `asset-intelligence`, `typed-editor`, and `diagnostics`.
+  Fresh sessions start with two default-on groups (`core` and `gate-and-verify`); activate the other groups you need on demand.
   Because lighting is built-in, `capabilities` always reports the `lighting`
   group as `available: true` (no `domainDefine`).
 

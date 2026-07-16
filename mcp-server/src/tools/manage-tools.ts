@@ -14,14 +14,13 @@ export const manageTools: Tool = {
   name: "unity_open_mcp_manage_tools",
   description:
     "Manage which tool groups are visible in this session. Sessions start " +
-    "with five groups enabled: `core`, `gate-and-verify`, " +
-    "`asset-intelligence`, `typed-editor`, and `diagnostics`; activate other " +
+    "with two groups enabled: `core` and `gate-and-verify`; activate other " +
     "groups on demand to add their tools to your ListTools surface (and " +
     "deactivate to hide them). State is ephemeral and per-session — it resets " +
-    "to those five defaults when the MCP server restarts. Actions: " +
+    "to those two defaults when the MCP server restarts. Actions: " +
     "`list_groups` (show every group with active flag, description, and tool " +
     "roster), `activate` (enable a group — its tools become visible), " +
-    "`deactivate` (hide a group's tools), `reset` (restore the five default-on " +
+    "`deactivate` (hide a group's tools), `reset` (restore the two default-on " +
     "groups). Always call `list_groups` first to discover group ids. " +
     "Group availability also depends on the Unity domain dependency being " +
     "compiled in — see `unity_open_mcp_capabilities` for compiled-state " +
@@ -39,7 +38,7 @@ export const manageTools: Tool = {
         description:
           "list_groups: enumerate every group with active flag + tool roster. " +
           "activate / deactivate: toggle one group (requires `group`). " +
-          "reset: restore the five default-on groups.",
+          "reset: restore the two default-on groups.",
       },
       group: {
         type: "string",

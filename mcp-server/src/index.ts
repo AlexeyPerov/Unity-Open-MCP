@@ -153,8 +153,9 @@ export function createServer(
   });
 
   // ListTools filters per the session's active groups. A fresh session sees
-  // the five default-on groups plus always-visible meta-tools. Activating a
-  // group via manage_tools adds its tools to subsequent ListTools responses.
+  // the two default-on groups (core + gate-and-verify) plus always-visible
+  // meta-tools. Activating a group via manage_tools adds its tools to
+  // subsequent ListTools responses.
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: filterVisibleTools(ALL_TOOLS, sessionState),
   }));

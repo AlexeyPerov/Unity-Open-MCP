@@ -20,8 +20,7 @@ element modify) in a project through the `unity-open-mcp` MCP server.
 - The `ui` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="ui")` before invoking
   any UI tool.
-  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
-  `asset-intelligence`, `typed-editor`, and `diagnostics`.
+  Fresh sessions start with two default-on groups (`core` and `gate-and-verify`); activate the other groups you need on demand.
   Because uGUI is
   built-in, `capabilities` always reports the `ui` group as `available: true`
   (no `domainDefine`).

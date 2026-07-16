@@ -44,16 +44,36 @@ test("every group carries a non-empty description", () => {
 
 test("DEFAULT_ENABLED_GROUPS matches the catalog's defaultEnabled entries", () => {
   // Single source of truth: the set of groups marked `defaultEnabled: true`
-  // in the catalog. Today that is `core` plus the always-useful verify /
-  // asset / typed-editor / diagnostics groups (extended in the "Extended
-  // default-enabled tools" change). Asserting against the catalog keeps this
-  // test honest when defaults change instead of hard-coding a snapshot.
+  // in the catalog. The lean baseline is `core` (essential entry points) plus
+  // `gate-and-verify` (the safety surface) — every other group activates on
+  // demand or auto-activates when its Unity package is present. Asserting
+  // against the catalog keeps this test honest when defaults change instead of
+  // hard-coding a snapshot.
   const expected = TOOL_GROUPS.filter((g) => g.defaultEnabled)
     .map((g) => g.id)
     .sort();
   assert.deepEqual(Array.from(DEFAULT_ENABLED_GROUPS).sort(), expected);
   // `core` is always default-on — the essential entry points live there.
   assert.ok(DEFAULT_ENABLED_GROUPS.has("core"));
+});
+
+test("the lean default-on set is exactly core + gate-and-verify", () => {
+  // Session-ergonomics baseline: a fresh session advertises only these two
+  // groups from defaults (plus always-visible meta-tools and any package
+  // auto-activated groups). Anything else widening the surface is a regression
+  // — pin the exact ids so a catalog edit that re-enables a group is
+  // intentional.
+  assert.deepEqual(
+    Array.from(DEFAULT_ENABLED_GROUPS).sort(),
+    ["core", "gate-and-verify"],
+  );
+  // The three groups that moved off must NOT be default-on.
+  for (const id of ["asset-intelligence", "typed-editor", "diagnostics"]) {
+    assert.ok(
+      !DEFAULT_ENABLED_GROUPS.has(id),
+      `${id} must not be default-on (lean session surface)`,
+    );
+  }
 });
 
 test("every domain-gated group carries both domainDefine and unityPackage", () => {

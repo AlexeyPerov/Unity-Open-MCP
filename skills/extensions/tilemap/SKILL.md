@@ -24,8 +24,7 @@ in a Unity project through the `unity-open-mcp` MCP server.
 - The `tilemap` tool group is activated — call
   `unity_open_mcp_manage_tools(action="activate", group="tilemap")` before
   invoking any `tilemap_*` tool.
-  Fresh sessions start with five default-on groups: `core`, `gate-and-verify`,
-  `asset-intelligence`, `typed-editor`, and `diagnostics`.
+  Fresh sessions start with two default-on groups (`core` and `gate-and-verify`); activate the other groups you need on demand.
 
 ## Tool prefix
 

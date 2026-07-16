@@ -71,9 +71,10 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
  *  - Constructed once per stdio server process (one connected MCP client).
  *  - Initial active set is {@link DEFAULT_ENABLED_GROUPS} — the groups
  *    marked `defaultEnabled: true` in the canonical tool-group catalog
- *    (see `capabilities/tool-groups.ts`). Today that is `core` plus the
- *    always-useful `gate-and-verify` / `asset-intelligence` / `typed-editor`
- *    / `diagnostics` groups; the catalog is the single source of truth.
+ *    (see `capabilities/tool-groups.ts`). The lean baseline is `core` (the
+ *    essential entry points) plus `gate-and-verify` (the safety surface);
+ *    every other group activates on demand or auto-activates when its Unity
+ *    package is present. The catalog is the single source of truth.
  *  - Mutated only by {@link activate} / {@link deactivate} / {@link reset}
  *    (called from the manage_tools router).
  *  - Read by {@link isGroupActive} (manage_tools list_groups) and

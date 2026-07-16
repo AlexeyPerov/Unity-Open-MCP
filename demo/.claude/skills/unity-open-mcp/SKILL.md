@@ -23,7 +23,7 @@ Practical skill for AI agents driving a Unity project through the `unity-open-mc
 ## Fast start sequence
 
 1. `unity_open_mcp_capabilities` — discover surface (call first on a fresh project).
-2. `unity_open_mcp_manage_tools(action="list_groups")` — see which tool groups exist and their compiled-state availability. Sessions start with five default groups enabled: `core`, `gate-and-verify`, `asset-intelligence`, `typed-editor`, and `diagnostics`. Activate the group you need before calling other tools (e.g. `activate` `navigation` before `navigation_surface_add`). State is per-session and ephemeral.
+2. `unity_open_mcp_manage_tools(action="list_groups")` — see which tool groups exist and their compiled-state availability. Sessions start with two default groups enabled: `core` and `gate-and-verify`. Activate the group you need before calling other tools (e.g. `activate` `navigation` before `navigation_surface_add`, or `typed-editor` for GameObject/scene/component work). State is per-session and ephemeral.
 3. `unity_open_mcp_ping` — bridge health.
 4. `unity_open_mcp_find_members` — before reflection-heavy calls.
 5. Mutate with `gate: "enforce"` + scoped `paths_hint`.
@@ -32,13 +32,13 @@ Practical skill for AI agents driving a Unity project through the `unity-open-mc
 
 ## Tool groups and session visibility
 
-Sessions start with five main groups visible in `ListTools`. Every other group is hidden until you activate it (or auto-activates when its Unity package is installed — see below) — this keeps the **250+ tool** surface out of the prompt. Call `unity_open_mcp_manage_tools` to toggle:
+Sessions start with two main groups visible in `ListTools`: `core` and `gate-and-verify`. Every other group is hidden until you activate it (or auto-activates when its Unity package is installed — see below) — this keeps the **250+ tool** surface out of the prompt. Call `unity_open_mcp_manage_tools` to toggle:
 
 - `list_groups` — every group with active flag, compiled-state availability, and tool roster.
 - `activate` / `deactivate` — toggle one group for this session. When visibility actually changes, the MCP server emits `notifications/tools/list_changed`; clients that support `listChanged` refresh `ListTools` automatically (no reconnect required).
-- `reset` — restore the five default-on groups, clearing manual and auto activations beyond that baseline.
+- `reset` — restore the two default-on groups (`core` + `gate-and-verify`), clearing manual and auto activations beyond that baseline.
 
-Common groups: `gate-and-verify`, `asset-intelligence`, `typed-editor`, `diagnostics`, `gate-intelligence`, `build-settings`, `navigation`, `input-system`, `probuilder`, `particle-system`, `animation`, `splines`, `lighting`, `audio`, `ui`, `constraints`, `terrain`, `cinemachine`, `timeline`, `tilemap`, `shadergraph`, `vfx`, `memoryprofiler`, `agent-senses`, `unity-hub-control`. Compiled-state availability (`available: true/false/null`) reflects whether the Unity domain package compiled in (built-in modules like Lighting, Audio, UI, Constraints & LOD, and Terrain are always compiled — `available: true`; Cinemachine is reflection-gated — the assembly always compiles and per-call detection surfaces the install/upgrade error); the authoritative source is `unity_open_mcp_capabilities` → `toolGroups[].available`. **Auto-activation:** the `shadergraph`, `vfx`, and `memoryprofiler` groups activate automatically for the session when their Unity package (`com.unity.shadergraph`, `com.unity.visualeffectgraph`, `com.unity.memoryprofiler`) is installed (no manual `manage_tools` call) — `list_groups` reports them with `activationSource: "auto"`; all other groups stay manual-activation only. State resets to the five default-on groups on MCP-server restart; package-detected groups may reappear after the next `capabilities` or `list_groups` call.
+Common groups: `asset-intelligence`, `typed-editor`, `diagnostics`, `gate-intelligence`, `build-settings`, `navigation`, `input-system`, `probuilder`, `particle-system`, `animation`, `splines`, `lighting`, `audio`, `ui`, `constraints`, `terrain`, `cinemachine`, `timeline`, `tilemap`, `shadergraph`, `vfx`, `memoryprofiler`, `agent-senses`, `unity-hub-control`. Compiled-state availability (`available: true/false/null`) reflects whether the Unity domain package compiled in (built-in modules like Lighting, Audio, UI, Constraints & LOD, and Terrain are always compiled — `available: true`; Cinemachine is reflection-gated — the assembly always compiles and per-call detection surfaces the install/upgrade error); the authoritative source is `unity_open_mcp_capabilities` → `toolGroups[].available`. **Auto-activation:** the `shadergraph`, `vfx`, and `memoryprofiler` groups activate automatically for the session when their Unity package (`com.unity.shadergraph`, `com.unity.visualeffectgraph`, `com.unity.memoryprofiler`) is installed (no manual `manage_tools` call) — `list_groups` reports them with `activationSource: "auto"`; all other groups stay manual-activation only. State resets to the two default-on groups (`core` + `gate-and-verify`) on MCP-server restart; package-detected groups may reappear after the next `capabilities` or `list_groups` call.
 
 `unity-hub-control` covers Unity Hub operations that need **no running Unity or bridge**: `hub_list_editors` (installed editors + build-target platforms), `hub_available_releases` (download feed, with changesets), `hub_install_editor` / `hub_install_modules` (fire the `unityhub://` deep link — install runs inside the Hub), and `hub_get/set_install_path`. Activate it when a task needs to install a Unity version or inspect what editors are available. Mutating members are system-level ops (paths_hint N/A, gate-free); there is no in-call completion detection for installs — poll `hub_list_editors` afterwards.
 
@@ -393,7 +393,7 @@ Use `**search_assets`** to locate prefabs/components/GUIDs; each result tags *wh
 Raw Unity data is large. Prefer the cheap, structured reads before reaching for verbose output:
 
 - **`read_asset`** returns a folded `tree` + `cmp` table + counts, not raw YAML. Drill into a subtree with `component` / `path` + `field_limit` instead of re-reading the whole asset; the parsed model is session-cached (`_cache: "hit"`). `field_limit: 0` (default) returns field names only — bump it only for a `component` drill-down where you need values.
-- **`manage_tools(action="list_groups")`** — sessions start with five default-on groups; activate only the other group you need so the full **250+ tool** surface stays out of the prompt.
+- **`manage_tools(action="list_groups")`** — sessions start with two default-on groups (`core` + `gate-and-verify`); activate only the other group you need so the full **250+ tool** surface stays out of the prompt.
 - **`read_console`** with `detail: "summary"` returns messages only; reserve `detail: "verbose"` for when you need Unity-internal stack frames.
 - **`search_assets`** tags *why* each result matched, so you skip broad reads and go straight to the right drill-down.
 - **Output profiles + paging.** The heavy tools (`read_asset`, `search_assets`, `scene_get_data`, `find_references`, `validate_edit`, `scan_paths`, `component_get`) take `profile: compact|balanced|full` (`compact` is the default — the cheap folded/counts shape). Raise to `balanced`/`full` to expand. Page large results with `page_size` + the `pagination.next_cursor` token (omit `page_size` to get the whole payload at once). For `component_get`, start compact then use `property_path` or paging to expand one subtree. For `find_references` / `validate_edit` / `scan_paths`, the compact default returns counts/groupings only — pass `profile: "balanced"` to get the per-asset / per-issue lists those tools previously returned by default. (The legacy `detail` / `max_results` / `max_nodes` caps remain as aliases.)
@@ -464,11 +464,7 @@ For routing details, see the `routing` object on the capabilities response — n
 - [ ] Gate delta reviewed
 - [ ] Fixes applied / retried as needed
 - [ ] Compile verified (`read_console` `type: "error"`, or `read_compile_errors` if bridge down)
-- [ ] Tests run on affected assembly (one run at a time)
-
----
-
-# Project inventory — demo
+- [ ] Tests run on affected assembly (one run at a time)# Project inventory — demo
 
 > Project-specific section generated by `unity_open_mcp_generate_skill`. Regenerate after package or script changes.
 

@@ -5,13 +5,10 @@ active set through `ListTools`.
 
 ## Default visibility
 
-Sessions start with five groups enabled:
+Sessions start with two groups enabled:
 
 - `core`
 - `gate-and-verify`
-- `asset-intelligence`
-- `typed-editor`
-- `diagnostics`
 
 Every other group is hidden until activated with
 `unity_open_mcp_manage_tools`, except package-detected auto-activating groups.
@@ -22,9 +19,9 @@ Every other group is hidden until activated with
 |---|---|---|
 | `core` | on | Ping, C# execution, reflection, menu calls, method invocation, and editor status. |
 | `gate-and-verify` | on | Validation, checkpoints, deltas, references, dependency analysis, scans, baselines, regression checks, and fixes. |
-| `asset-intelligence` | on | Reserialize and structured asset read/search/list. |
-| `typed-editor` | on | Assets, materials, shaders, prefabs, GameObjects, components, scenes, packages, console, selection, undo, tags/layers, scripts, objects, ScriptableObjects, and asmdefs. |
-| `diagnostics` | on | Profiler session controls: start/stop, config, modules, save/load, and script stats. Per-frame senses live in `agent-senses`. |
+| `asset-intelligence` | off | Reserialize and structured asset read/search/list. |
+| `typed-editor` | off | Assets, materials, shaders, prefabs, GameObjects, components, scenes, packages, console, selection, undo, tags/layers, scripts, objects, ScriptableObjects, and asmdefs. |
+| `diagnostics` | off | Profiler session controls: start/stop, config, modules, save/load, and script stats. Per-frame senses live in `agent-senses`. |
 | `gate-intelligence` | off | Impact preview, gate-budget estimate, and mutation explanation. |
 | `build-settings` | off | Build pipeline, project settings, render/quality settings, and preferences. |
 | `agent-senses` | off | Tests, screenshots, Frame Debugger, console, profiler captures, memory/rendering reads, and spatial queries. |
@@ -83,12 +80,12 @@ roster.
 { "action": "reset" }
 ```
 
-`reset` restores the five default-on groups.
+`reset` restores the two default-on groups (`core` + `gate-and-verify`).
 
 ## State lifecycle
 
 - State is ephemeral, in memory, and scoped to one MCP server process.
-- Restarting the server restores the five default groups.
+- Restarting the server restores the two default groups (`core` + `gate-and-verify`).
 - `reset` clears manual and auto activations beyond that baseline. A
   package-detected group can reappear after the next reconciliation.
 - Concurrent server processes do not share activation state.
