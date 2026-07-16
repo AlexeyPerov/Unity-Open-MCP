@@ -51,6 +51,8 @@ Full procedure: [Agent setup](docs/setup/agent-setup.md).
 
 ## Documentation
 
+简体中文文档：[README.zh-CN.md](README.zh-CN.md)（Chinese translation of this README and the setup guides).
+
 For users:
 
 - [API index](docs/api.md) — MCP, bridge, resource, routing, and automation contracts.
