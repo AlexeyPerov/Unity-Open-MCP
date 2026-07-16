@@ -73,5 +73,23 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(result.Success);
             StringAssert.Contains("missing_parameter", result.Output);
         }
+
+        [Test]
+        public static void SpatialQuery_StringInstanceId_DoesNotThrowConvertError()
+        {
+            // Unity 6000.5+ wire form is a JSON string. ConvertValue must parse
+            // it to long — a regression returns execution_error with
+            // "String cannot be converted to Int64".
+            var result = BridgeToolRegistry.TryDispatch(
+                "unity_senses_spatial_query",
+                "{\"action\":\"bounds\",\"instance_id\":\"568105589213726936\"}");
+
+            Assert.IsNotNull(result);
+            Assert.IsTrue(result.Success, "Dispatch should succeed (error is in-payload)");
+            Assert.IsNotNull(result.Output);
+            StringAssert.DoesNotContain("cannot be converted to type 'System.Int64'", result.Output);
+            // No such GO in an empty test host — target_not_found is the happy path.
+            StringAssert.Contains("target_not_found", result.Output);
+        }
     }
 }

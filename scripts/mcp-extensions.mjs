@@ -150,7 +150,9 @@ function buildSuite() {
   // particle-system: needs a GameObject with a ParticleSystem. Create one via
   // execute_csharp, then get + modify.
   extStep(s, "particle_create_go", "A", "unity_open_mcp_execute_csharp", {
-    code: 'var go = new UnityEngine.GameObject("ET_Particle"); go.AddComponent<UnityEngine.ParticleSystem>(); return new { instanceId = go.GetInstanceID(); };',
+    // Unity 6000.5 treats Object.GetInstanceID() as CS0619 (error); use EntityId.
+    // Emit a string so 8-byte IDs survive JSON/JS Number.MAX_SAFE_INTEGER.
+    code: 'var go = new UnityEngine.GameObject("ET_Particle"); go.AddComponent<UnityEngine.ParticleSystem>(); return new { instanceId = ((long)UnityEngine.EntityId.ToULong(go.GetEntityId())).ToString() };',
     paths_hint: SCENE_HINT,
   }, { gate: true, after: (r, ctx) => { ctx.particleGoId = pluck(r, "mutation.output.instanceId"); } });
   extStep(s, "particle_get", "A", "unity_open_mcp_particle_system_get", {

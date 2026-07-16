@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge
 {
@@ -251,13 +253,25 @@ namespace UnityOpenMcpBridge
 
             if (targetType == typeof(int))
             {
-                if (int.TryParse(raw, out var v)) return v;
+                var s = StripJsonQuotes(raw);
+                if (int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v)) return v;
                 return 0;
+            }
+
+            // Unity 6000.5+ EntityIds exceed JS Number.MAX_SAFE_INTEGER, so the
+            // agent-facing wire form is a JSON string. Parse flexibly (quoted
+            // string or bare number) via InstanceId — do NOT fall through to the
+            // string-passthrough below or Method.Invoke throws
+            // "String cannot be converted to Int64".
+            if (targetType == typeof(long))
+            {
+                return InstanceId.Parse(StripJsonQuotes(raw));
             }
 
             if (targetType == typeof(float))
             {
-                if (float.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) return v;
+                var s = StripJsonQuotes(raw);
+                if (float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v)) return v;
                 return 0f;
             }
 
@@ -275,10 +289,10 @@ namespace UnityOpenMcpBridge
 
             if (targetType.IsEnum)
             {
-                var cleaned = raw.Trim('"');
+                var cleaned = StripJsonQuotes(raw);
                 if (Enum.IsDefined(targetType, cleaned))
                     return Enum.Parse(targetType, cleaned);
-                if (int.TryParse(cleaned, out var intVal))
+                if (int.TryParse(cleaned, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
                     return Enum.ToObject(targetType, intVal);
                 return Enum.GetValues(targetType).GetValue(0);
             }
@@ -286,6 +300,13 @@ namespace UnityOpenMcpBridge
             if (raw.StartsWith("\"") && raw.EndsWith("\""))
                 return raw.Substring(1, raw.Length - 2);
 
+            return raw;
+        }
+
+        private static string StripJsonQuotes(string raw)
+        {
+            if (raw != null && raw.Length >= 2 && raw[0] == '"' && raw[raw.Length - 1] == '"')
+                return raw.Substring(1, raw.Length - 2);
             return raw;
         }
 

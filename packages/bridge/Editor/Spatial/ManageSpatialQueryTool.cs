@@ -22,7 +22,8 @@ namespace UnityOpenMcpBridge.Spatial
     // they also see render-only objects.
     //
     // Targets may be addressed three ways, tried in priority order:
-    //   1. instance_id (int)   — canonical live handle; changes on domain reload.
+    //   1. instance_id (JSON string / long) — canonical live handle; changes on
+    //      domain reload. Wire form is a string (Unity 6000.5+ EntityId).
     //   2. path (string)       — hierarchy path "Root/Child/Leaf".
     //   3. name (string)       — first GameObject whose name matches.
     //
@@ -406,30 +407,7 @@ namespace UnityOpenMcpBridge.Spatial
         }
 
         private static GameObject FindByInstanceId(long instanceId)
-        {
-            for (var i = 0; i < SceneManager.sceneCount; i++)
-            {
-                var scene = SceneManager.GetSceneAt(i);
-                if (!scene.isLoaded) continue;
-                foreach (var root in scene.GetRootGameObjects())
-                {
-                    var found = FindInHierarchyById(root, instanceId);
-                    if (found != null) return found;
-                }
-            }
-            return null;
-        }
-
-        private static GameObject FindInHierarchyById(GameObject go, long instanceId)
-        {
-            if (InstanceId.Of(go) == instanceId) return go;
-            foreach (Transform child in go.transform)
-            {
-                var found = FindInHierarchyById(child.gameObject, instanceId);
-                if (found != null) return found;
-            }
-            return null;
-        }
+            => InstanceId.ToObject(instanceId) as GameObject;
 
         private static GameObject FindByPath(string path)
         {

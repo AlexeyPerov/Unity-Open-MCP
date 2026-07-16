@@ -112,7 +112,12 @@ function buildSuite() {
 
   // checkpoint_create → mutating step → delta with returned id (strict chain).
   s("checkpoint_create", "A", "unity_open_mcp_checkpoint_create", { label: "bt-checkpoint" }, {
-    after: (r, ctx) => { ctx.checkpointId = pluck(r, "checkpoint.id") ?? pluck(r, "id"); },
+    after: (r, ctx) => {
+      ctx.checkpointId =
+        pluck(r, "checkpointId") ??
+        pluck(r, "checkpoint.id") ??
+        pluck(r, "id");
+    },
   });
 
   // apply_fix with dry_run:false on a known issue from a fresh scan_paths.
@@ -179,19 +184,24 @@ function buildSuite() {
     after: (r, ctx) => { ctx.spatialProbeId = pluck(r, "mutation.output.instanceId") ?? pluck(r, "instanceId"); },
   });
   s("spatial_bounds", "B", "unity_senses_spatial_query", {
+    // instance_id is a JSON string on Unity 6000.5+ (EntityId wire form).
     resolveArgs: (ctx) => ({ action: "bounds", instance_id: ctx.spatialProbeId }),
   });
   s("spatial_raycast", "B", "unity_senses_spatial_query", {
-    action: "raycast", origin: [0, 5, 0], direction: [0, -1, 0], max_distance: 10,
+    action: "raycast", origin: "0,5,0", direction: "0,-1,0", max_distance: 10,
   });
   s("spatial_overlap", "B", "unity_senses_spatial_query", {
-    action: "overlap", position: [0, 2, 0], radius: 2,
+    action: "overlap", shape: "sphere", center: "0,2,0", radius: 2,
   });
-  s("spatial_spherecast", "B", "unity_senses_spatial_query", {
-    action: "spherecast", origin: [0, 5, 0], direction: [0, -1, 0], radius: 0.5,
+  s("spatial_ground_check", "B", "unity_senses_spatial_query", {
+    resolveArgs: (ctx) => ({
+      action: "ground_check", instance_id: ctx.spatialProbeId, max_distance: 10,
+    }),
   });
-  s("spatial_find", "B", "unity_senses_spatial_query", {
-    action: "find", name_contains: "BT_Spatial",
+  s("spatial_nearest", "B", "unity_senses_spatial_query", {
+    resolveArgs: (ctx) => ({
+      action: "nearest", instance_id: ctx.spatialProbeId, max: 5,
+    }),
   });
   s("spatial_probe_destroy", "B", "unity_open_mcp_gameobject_destroy", {
     resolveArgs: (ctx) => ({ instance_id: ctx.spatialProbeId, paths_hint: SCENE_HINT }),
@@ -244,12 +254,6 @@ function buildSuite() {
   s("asmdef_modify_strict", "C", "unity_open_mcp_asmdef_modify", {
     asset_path: FT_ASMDEF, add_references: ["Unity.InputSystem"], paths_hint: [FT_ASMDEF],
   }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable"], timeoutMs: 180_000 });
-
-  // reserialize — S0 tolerates bridge_response_unparsable. S1 re-tests strict
-  // on the fixture material (created in Band C). Run after material_create.
-  s("reserialize_strict", "C", "unity_open_mcp_reserialize", {
-    resolveArgs: () => ({ paths: [FT_MAT], gate: "enforce" }),
-  }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
 
   // frame_debugger: enable → list → disable (strict 3-step chain).
   s("frame_debugger_enable", "B", "unity_senses_frame_debugger", { action: "enable" });
@@ -310,10 +314,16 @@ function buildSuite() {
     after: (r, ctx) => { ctx.cubeId = pluck(r, "mutation.output.instanceId") ?? pluck(r, "instanceId"); },
   });
 
-  // material for reserialize strict test above
+  // material for reserialize strict test below
   s("material_create", "C", "unity_open_mcp_material_create", {
     asset_path: FT_MAT, shader_name: "Universal Render Pipeline/Lit", paths_hint: [FT_MAT],
   }, { gate: true, expect: "gate" });
+
+  // reserialize — S0 tolerates bridge_response_unparsable. S1 re-tests after
+  // material_create so FT_MAT exists (must stay after that step in this file).
+  s("reserialize_strict", "C", "unity_open_mcp_reserialize", {
+    resolveArgs: () => ({ paths: [FT_MAT], gate: "enforce" }),
+  }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
 
   // --- scene_open (absent from S0) ---
   // Open the demo Main scene additively (it's already open, so this is a no-op
@@ -379,13 +389,15 @@ function buildSuite() {
       fields: [{ key: "bounceBoost", value: pluck(ctx, "lightingSnapshot.bounceBoost") ?? 1 }],
       paths_hint: ["ProjectSettings/LightmapEditorSettings.asset"],
     }),
-  }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable"] });
+    // bounceBoost may be absent/read-only on this Unity version — route still exercised.
+  }, { gate: true, expect: "tolerate", tolerate: ["bridge_response_unparsable", "no_applicable_keys"] });
 
   // --- audio_mixer_set_parameter (absent from S0) ---
-  // No fixture mixer in demo; call with empty args and tolerate the missing-
-  // parameter error (proves the route + arg validation; the tool is reached).
+  // No fixture mixer in demo; empty args prove route + arg validation. Mutating
+  // tools require paths_hint, so that guard may fire before missing_parameter.
   s("audio_mixer_set_parameter", "C", "unity_open_mcp_audio_mixer_set_parameter", {}, {
-    expect: "tolerate", tolerate: ["missing_parameter", "mixer_not_found"],
+    expect: "tolerate",
+    tolerate: ["missing_parameter", "mixer_not_found", "paths_hint_required"],
   });
 
   // --- editor_set_state: play / pause / stop with dirty-scene recovery ---

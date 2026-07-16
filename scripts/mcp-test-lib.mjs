@@ -58,7 +58,8 @@ export { REPO_ROOT, CLI_BIN, DISMISS_MOD };
 //   reachable     → error.code !== tool_not_found  (compiled extension pack; minimal
 //                   args — missing-param / guard errors still prove registration)
 //   verify_timeout→ ok OR error.code === "timeout"  (known verify-family hang)
-//   ok_or_timeout → ok OR parsed._ft_timeout  (CLI timeout tolerated)
+//   ok_or_timeout → ok OR parsed._ft_timeout OR errCode==="test_results_timeout"
+//                  (CLI timeout OR run_tests poll timeout tolerated)
 //   tolerate      → ok OR error.code in step.tolerate[]  (known bugs; route exercised)
 // ---------------------------------------------------------------------------
 
@@ -76,6 +77,12 @@ export const LOCKED_CODES = new Set([
 // timeout for the verify-family tools so the rest of the suite can run; the
 // timeout itself is the finding, surfaced in the report.
 export const TIMEOUT_CODE = "timeout";
+// Server-side poll timeout returned by unity_senses_run_tests (mcp-server
+// pollTestResults) when the results file never appears within the poll budget
+// (default 60s). Unlike _ft_timeout (a CLI-process timeout sentinel), this
+// arrives as a normal HTTP response carrying error.code=test_results_timeout,
+// so ok_or_timeout must tolerate it explicitly. See specs/feedback.md.
+export const TEST_TIMEOUT_CODE = "test_results_timeout";
 
 export function classify(step, parsed) {
   const isError = parsed.isError === true;
@@ -133,9 +140,18 @@ export function classify(step, parsed) {
     }
     case "ok_or_timeout": {
       // Tolerate either a clean response OR a CLI timeout (the tool was reached;
-      // the hang is itself the signal). The runner marks timeouts with a sentinel.
-      const pass = !isError || parsed._ft_timeout === true;
-      return { pass, detail: parsed._ft_timeout ? "timed out (tolerated)" : "ok" };
+      // the hang is itself the signal). The runner marks CLI timeouts with a
+      // sentinel (_ft_timeout). unity_senses_run_tests returns a *server-side*
+      // poll timeout as a normal response with error.code=test_results_timeout,
+      // so tolerate that too — otherwise pass=false with a misleading "ok".
+      const pollTimeout = errCode === TEST_TIMEOUT_CODE;
+      const pass = !isError || parsed._ft_timeout === true || pollTimeout;
+      const detail = parsed._ft_timeout
+        ? "timed out (tolerated)"
+        : pollTimeout
+          ? "test_results_timeout (tolerated)"
+          : "ok";
+      return { pass, detail };
     }
     case "tolerate": {
       // Pass on a clean response OR any error code in step.tolerate (known tool

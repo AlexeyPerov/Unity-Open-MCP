@@ -9,9 +9,10 @@
     "bindAddress": "127.0.0.1",
     "auditLogEnabled": false,
     "verifyCacheTtlSeconds": 60,
-    "editorSettleCapMs": 5000,
-    "restartSettleCapMs": 60000,
+    "editorSettleCapMs": 1000,
+    "restartSettleCapMs": 120000,
     "fairQueueEnabled": true,
-    "fairQueueReadsPerFrame": 5,
-    "autoSaveDirtyScenes": true
+    "fairQueueReadsPerFrame": 50,
+    "autoSaveDirtyScenes": true,
+    "batchExecuteMaxCommands": 100
 }

@@ -89,6 +89,39 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(0, BridgeToolRegistry.ConvertValue("abc", typeof(int)));
         }
 
+        [Test]
+        public static void ConvertValue_Int_QuotedString_Parses()
+        {
+            Assert.AreEqual(42, BridgeToolRegistry.ConvertValue("\"42\"", typeof(int)));
+        }
+
+        // --- long (Unity 6000.5+ EntityId wire form is a JSON string) ---
+
+        [TestCase("42", ExpectedResult = 42L)]
+        [TestCase("0", ExpectedResult = 0L)]
+        [TestCase("-7", ExpectedResult = -7L)]
+        [TestCase("\"42\"", ExpectedResult = 42L)]
+        // Value exceeds JS Number.MAX_SAFE_INTEGER — must round-trip as a string.
+        [TestCase("\"568105589213726936\"", ExpectedResult = 568105589213726936L)]
+        [TestCase("568105589213726936", ExpectedResult = 568105589213726936L)]
+        public static object ConvertValue_Long_Parses(string raw)
+        {
+            return BridgeToolRegistry.ConvertValue(raw, typeof(long));
+        }
+
+        [Test]
+        public static void ConvertValue_Long_NotANumber_DefaultsToZero()
+        {
+            Assert.AreEqual(0L, BridgeToolRegistry.ConvertValue("abc", typeof(long)));
+        }
+
+        [Test]
+        public static void ConvertValue_NullableLong_ParsesQuotedEntityId()
+        {
+            var result = BridgeToolRegistry.ConvertValue("\"568105589213726936\"", typeof(long?));
+            Assert.AreEqual(568105589213726936L, result);
+        }
+
         // --- float ---
 
         [TestCase("3.14", ExpectedResult = 3.14f)]
