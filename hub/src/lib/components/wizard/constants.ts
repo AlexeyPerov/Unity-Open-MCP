@@ -166,6 +166,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     label: "Codex",
     kind: "file",
     category: "cli",
+    popular: true,
     sharedWith:
       "Format: TOML at .codex/config.toml (project). Emits a [mcp_servers.unity-open-mcp] table.",
   },
@@ -190,6 +191,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     label: "ZCode (global)",
     kind: "file",
     category: "ide",
+    popular: false,
     sharedWith:
       "Format: mcp.servers + type:stdio JSON (~/.zcode/cli/config.json). Skill installs to .agents/skills/. Shared by: ZCode.",
   },
@@ -198,6 +200,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     label: "ZCode (project)",
     kind: "file",
     category: "ide",
+    popular: true,
     sharedWith:
       "Format: mcp.servers + type:stdio JSON (project-local .zcode/cli/config.json). Skill installs to .agents/skills/. Shared by: ZCode.",
   },
@@ -207,7 +210,7 @@ export const MCP_CLIENT_OPTIONS: McpClientOption[] = [
     label: "Claude Code (CLI only)",
     kind: "cli",
     category: "cli",
-    popular: true,
+    popular: false,
     sharedWith:
       "CLI-only: renders a `claude mcp add` command (no config file is written). Skill installs to .claude/skills/.",
   },
