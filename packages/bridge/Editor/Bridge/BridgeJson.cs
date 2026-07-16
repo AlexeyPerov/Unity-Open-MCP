@@ -275,12 +275,18 @@ namespace UnityOpenMcpBridge
             {
                 if (result.CheckpointId != null)
                     sb.Append(",\"checkpointId\":\"").Append(EscapeStringContent(result.CheckpointId)).Append("\"");
-                sb.Append(",\"skipped\":true,\"validation\":null,\"delta\":null");
+                sb.Append(",\"skipped\":true,\"outcome\":\"").Append(result.Outcome.ToWireString());
+                sb.Append("\",\"validation\":null,\"delta\":null");
             }
             else
             {
                 sb.Append(",\"checkpointId\":\"").Append(EscapeStringContent(result.CheckpointId));
                 sb.Append("\",\"skipped\":false");
+                // Structured outcome token (review follow-up T5.3) — lets an
+                // agent distinguish validate_scan_failed / warned / failed /
+                // passed / skipped without parsing the agentNextSteps prose.
+                // validation.passed below stays as the boolean convenience.
+                sb.Append(",\"outcome\":\"").Append(result.Outcome.ToWireString()).Append("\"");
                 sb.Append(",\"validation\":{\"passed\":").Append(result.Outcome == GateOutcome.Passed ? "true" : "false");
                 sb.Append(",\"categoriesRun\":[");
                 if (result.CategoriesRun != null)

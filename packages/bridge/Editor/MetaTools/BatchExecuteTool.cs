@@ -68,6 +68,33 @@ namespace UnityOpenMcpBridge.MetaTools
             return policy == LifecyclePolicy.RestartThenSettle;
         }
 
+        // M30-polish review follow-up — scene_create is classified EditorSettle
+        // (it does not force a domain reload), so IsNestedReloadUnsafe above does
+        // NOT catch it. But scene_create defaults to NewSceneMode.Single, which
+        // replaces the active scene stack — a mid-batch Single create/open
+        // silently discards unsaved changes in the currently-open scenes, the
+        // same disruption class T5.2 targets. scene_open IS RestartThenSettle and
+        // is already caught by the lifecycle check, but scene_create is not, so
+        // it gets a dedicated param-aware guard here. Additive mode preserves the
+        // scene stack and is allowed.
+        private const string SingleModeReason =
+            "defaults to Single mode (or has mode:\"single\"), which replaces the " +
+            "active scene stack and can discard unsaved changes in open scenes";
+
+        private static bool IsNestedSceneStackUnsafe(string toolName, string paramsBody, out string reason)
+        {
+            reason = null;
+            if (toolName != "unity_open_mcp_scene_create")
+                return false;
+            var mode = JsonBody.GetString(paramsBody, "mode");
+            // Additive preserves the scene stack; anything else (absent default
+            // or explicit "single") replaces it.
+            if (!string.IsNullOrEmpty(mode) && mode.ToLowerInvariant() == "additive")
+                return false;
+            reason = SingleModeReason;
+            return true;
+        }
+
         public static ToolDispatchResult Execute(string body)
         {
             var sw = Stopwatch.StartNew();
@@ -142,6 +169,20 @@ namespace UnityOpenMcpBridge.MetaTools
                         $"{unsafePolicy.ToWireString()} and is not invokable inside a batch: " +
                         "it may trigger a domain reload or scene switch that silently aborts " +
                         "the remaining steps. Use it as a single top-level call instead.");
+                }
+
+                // Review follow-up — scene_create is EditorSettle (no domain
+                // reload) but its default Single mode replaces the scene stack.
+                // Block the Single/default case; allow additive. Same error code
+                // as the lifecycle deny so the contract stays consistent, with a
+                // message explaining the scene-stack reason.
+                if (IsNestedSceneStackUnsafe(tool, paramsBody, out var sceneReason))
+                {
+                    return ToolDispatchResult.Fail(
+                        "batch_nested_reload_unsafe",
+                        $"commands[{i}] tool '{tool}' is not invokable inside a batch: " +
+                        $"it {sceneReason}. Pass mode:\"additive\" or use it as a " +
+                        "single top-level call instead.");
                 }
 
                 steps.Add(new BatchStep { Tool = tool, ParamsBody = paramsBody });

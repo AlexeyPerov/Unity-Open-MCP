@@ -986,6 +986,18 @@ namespace UnityOpenMcpBridge.TypedTools
                             // serialization — mirror the name branch's guard so
                             // an out-of-range value surfaces a clear error
                             // instead.
+                            //
+                            // Note: this index-based path does not carve out
+                            // [Flags] enums (a combined numeric like 5 maps to
+                            // no single entry in enumNames). SerializedProperty
+                            // exposes the field's enum System.Type only via
+                            // `enumType`, which was added in Unity 6 (6000.0) and
+                            // is unavailable on the 2022.3 LTS floor. The
+                            // load-bearing [Flags] fix lives in the reflection
+                            // ConvertValue path (object_modify / jsonPatches),
+                            // which CAN see the attribute via GetCustomAttribute.
+                            // component_modify callers setting a [Flags] enum by
+                            // name (type:"name") remain supported.
                             var idx = ParseInt(valueRaw);
                             if (idx < 0 || idx >= sp.enumNames.Length)
                                 throw new System.FormatException(

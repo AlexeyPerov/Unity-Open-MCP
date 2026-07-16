@@ -725,16 +725,10 @@ namespace UnityOpenMcpBridge.TypedTools
 
         private static string OutcomeLabel(GateOutcome outcome)
         {
-            switch (outcome)
-            {
-                case GateOutcome.Passed: return "passed";
-                case GateOutcome.Warned: return "warned";
-                case GateOutcome.Failed: return "failed";
-                case GateOutcome.Skipped: return "skipped";
-                // T5.3 — the mutation committed but the validate scan threw.
-                case GateOutcome.ValidateScanFailed: return "validate_scan_failed";
-                default: return outcome.ToString().ToLowerInvariant();
-            }
+            // Delegates to the shared GateOutcomeExtensions.ToWireString mapping
+            // (single source of truth for the outcome token; also emitted as the
+            // structured gate.outcome field in the response envelope).
+            return outcome.ToWireString();
         }
 
         private static string BuildNarrative(

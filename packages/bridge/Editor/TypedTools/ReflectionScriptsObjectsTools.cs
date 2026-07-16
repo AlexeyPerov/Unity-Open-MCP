@@ -974,14 +974,27 @@ namespace UnityOpenMcpBridge.TypedTools
             {
                 var unquoted = StripQuotes(raw);
 
+                // [Flags] enums legitimately take combined numeric values (e.g.
+                // 5 for A|B where A=1,B=4) that match no single declared
+                // constant. Detect the attribute once and accept any numeric
+                // fitting the underlying type in that case; otherwise apply the
+                // strict declared-constant validation below (which rejects
+                // garbage ints like 42 on a 3-value enum).
+                bool isFlags = targetType.GetCustomAttribute<FlagsAttribute>() != null;
+
                 // Numeric form FIRST — Enum.TryParse accepts ANY numeric value
                 // that fits the underlying type, even when no declared enum
                 // constant has that value (e.g. "42" on a 3-value enum returns
                 // true with garbage). So we must validate numeric input against
                 // the declared constants ourselves before accepting it; a value
-                // that matches no constant is rejected with a clear error.
+                // that matches no constant is rejected with a clear error. For
+                // [Flags] enums any in-range numeric is valid (a combination),
+                // so the declared-constant check is skipped.
                 if (long.TryParse(unquoted, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numeric))
                 {
+                    if (isFlags)
+                        return Enum.ToObject(targetType, numeric);
+
                     foreach (var defined in Enum.GetValues(targetType))
                     {
                         if (Convert.ToInt64(defined, CultureInfo.InvariantCulture) == numeric)
@@ -995,6 +1008,8 @@ namespace UnityOpenMcpBridge.TypedTools
                 // Name form (case-insensitive). Enum.TryParse returns false for
                 // unknown names instead of throwing the cryptic ArgumentException
                 // that Enum.Parse emits, so we can surface a clear error here.
+                // It also accepts comma-separated combined names ("A, B") for
+                // [Flags] enums, so the flags case needs no special handling here.
                 if (Enum.TryParse(targetType, unquoted, ignoreCase: true, out object enumValue))
                     return enumValue;
 

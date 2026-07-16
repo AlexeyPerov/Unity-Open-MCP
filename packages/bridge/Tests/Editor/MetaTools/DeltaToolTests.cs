@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityOpenMcpBridge.MetaTools;
+using UnityOpenMcpVerify;
 
 namespace UnityOpenMcpBridge.Tests
 {
@@ -56,16 +57,19 @@ namespace UnityOpenMcpBridge.Tests
 
         // -------------------------------------------------------------------
         // T5.4 — when the store is empty (post-reload), a missing checkpoint
-        // surfaces checkpointLostOnReload so the agent can distinguish "wiped by
-        // reload" from "id was never created".
+        // surfaces checkpointLostOnReload. The empty-store signal alone cannot
+        // distinguish "wiped by reload" from "no checkpoint created this
+        // session" (the store tracks no process-lifetime marker), so the
+        // warning covers both; the flag still surfaces the reload hypothesis.
         // -------------------------------------------------------------------
 
         [Test]
         public void Execute_EmptyStore_MissingCheckpoint_SurfacesLostOnReload()
         {
-            // The store is empty (cleared by SetUp) — simulates a domain reload
-            // that wiped the in-memory checkpoints. A delta request must surface
-            // the checkpointLostOnReload flag + recommend checkpoint_create.
+            // The store is empty (cleared by SetUp) — the most likely cause is a
+            // domain reload that wiped the in-memory checkpoints (it could also
+            // be that none was ever created this session). A delta request must
+            // surface the checkpointLostOnReload flag + recommend checkpoint_create.
             Assert.AreEqual(0, CheckpointStore.Count, "store must be empty (post-reload state)");
 
             var result = DeltaTool.Execute("{\"checkpoint_id\":\"cp_lost_to_reload\"}");

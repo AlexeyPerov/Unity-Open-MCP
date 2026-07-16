@@ -77,6 +77,12 @@ export class AssetModelCache {
 }
 
 function makeResult(payload: unknown, cacheHit: boolean, source?: "offline" | "live"): CallToolResult {
+  // The inline `_source` spread here (and the `_cache` tag) are intentional —
+  // this layer merges route-meta into an already-built payload before a single
+  // JSON.stringify, alongside `_cache`. It does NOT use the tool-router
+  // withSource/sourceResult helpers (which stamp a fresh object post-stringify)
+  // because compressible results carry both `_cache` and `_source` in one
+  // envelope. See review T7.3 / offline/api.ts for the load-bearing note.
   return {
     content: [
       {

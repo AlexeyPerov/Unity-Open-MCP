@@ -687,6 +687,15 @@ export interface DependenciesOfflineResult {
    * YAML (e.g. a JSON-only kind or a binary asset read offline). The forward
    * arrays are empty and this names the reason; reverse edges are unaffected. */
   forwardSkipped?: string;
+  // NOTE: the inline `_source: "offline"` (here, in emptyDependencies, and in
+  // IntegrityScanResult) is intentional and load-bearing. These offline routes
+  // are returned by tool-router.routeDependencies / routeScanPaths via a DIRECT
+  // JSON.stringify (not wrapped in sourceResult/withSource), so the tag must be
+  // baked into the payload + declared on the result type. The tool-router
+  // helpers (withSource/sourceResult) are not used here because this layer
+  // builds the offline result shape; the router re-stamps _source idempotently
+  // only on the live drill-down paths. Migrating to the helper would require
+  // routing these offline results through sourceResult too (see review T7.3).
   _source: "offline";
 }
 
@@ -820,6 +829,7 @@ export async function dependenciesOffline(
     detail,
     truncated,
     ...(forwardSkipped ? { forwardSkipped } : {}),
+    // Inline tag is load-bearing — see the note on DependenciesOfflineResult._source.
     _source: "offline",
   };
 }
@@ -840,6 +850,7 @@ function emptyDependencies(
     reverseCount: 0,
     detail,
     truncated: 0,
+    // Inline tag is load-bearing — see the note on DependenciesOfflineResult._source.
     _source: "offline",
   };
 }
@@ -1035,6 +1046,8 @@ export interface IntegrityScanResult {
   byCode: Record<string, number>;
   totalIssues: number;
   assetsScanned: number;
+  // Inline tag is load-bearing — same reason as DependenciesOfflineResult._source
+  // (this route is stringified directly by the router, not wrapped in sourceResult).
   _source: "offline";
 }
 
@@ -1133,6 +1146,7 @@ export async function scanIntegrityOffline(
     byCode,
     totalIssues: issues.length,
     assetsScanned: allAssetPaths.size,
+    // Inline tag is load-bearing — see the note on IntegrityScanResult._source.
     _source: "offline",
   };
 }

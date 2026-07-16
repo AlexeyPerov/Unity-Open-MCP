@@ -122,13 +122,16 @@ namespace UnityOpenMcpBridge.MetaTools
             return sb.ToString();
         }
 
-        // T5.4 — payload returned when the store is empty (all checkpoints wiped)
-        // AND a specific id was requested. The most likely cause is a domain
-        // reload triggered by the gate flow itself (asmdef_modify / package_add /
-        // reimport_package force a recompile) or an editor restart. Distinct from
-        // BuildUnavailableResult (which fires when the id is unknown but other
-        // checkpoints still exist): here the whole store was reset, so the agent
-        // should re-create the baseline with checkpoint_create.
+        // T5.4 — payload returned when the store is empty AND a specific id was
+        // requested. The empty-store signal alone cannot distinguish "wiped by a
+        // domain reload" from "no checkpoint was ever created this session" (the
+        // store tracks no process-lifetime marker), so the wording must cover
+        // both. The most likely cause is a domain reload triggered by the gate
+        // flow itself (asmdef_modify / package_add / reimport_package force a
+        // recompile) or an editor restart. Distinct from BuildUnavailableResult
+        // (which fires when the id is unknown but other checkpoints still exist):
+        // here the whole store is empty, so the agent should re-create the
+        // baseline with checkpoint_create.
         private static string BuildLostOnReloadResult(string checkpointId)
         {
             var sb = new StringBuilder(512);
@@ -137,13 +140,14 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append(",\"checkpointLostOnReload\":true");
             sb.Append(",\"warning\":\"Checkpoint '")
               .Append(Esc(checkpointId))
-              .Append("' is gone and the in-memory checkpoint store is empty. Checkpoints are " +
-                      "process-lifetime (in-memory) — any domain reload (script recompile, " +
-                      "package add/remove, asmdef edit) or editor restart wipes them. The gate " +
-                      "flow itself can trigger this (e.g. asmdef_modify / package_add force a " +
-                      "recompile). This does not indicate a problem with the project.\"");
+              .Append("' was not found and the in-memory checkpoint store is empty. The most likely " +
+                      "cause is a domain reload (script recompile, package add/remove, asmdef edit) " +
+                      "or editor restart wiping the process-lifetime store — the gate flow itself can " +
+                      "trigger this (e.g. asmdef_modify / package_add force a recompile). It is also " +
+                      "possible no checkpoint has been created yet this session. Either way a delta " +
+                      "cannot be computed. This does not indicate a problem with the project.\"");
             sb.Append(",\"agentNextSteps\":[");
-            sb.Append("\"The checkpoint store was reset by a domain reload — the pre-change baseline is gone and a delta cannot be computed.\",");
+            sb.Append("\"The checkpoint store is empty — the pre-change baseline is gone (or was never created) and a delta cannot be computed.\",");
             sb.Append("\"To verify current state directly, call unity_open_mcp_validate_edit (or unity_open_mcp_scan_paths) on the relevant paths.\",");
             sb.Append("\"To re-establish a baseline, call unity_open_mcp_checkpoint_create on the paths you intend to delta-check, then mutate, then unity_open_mcp_delta.\"");
             sb.Append("]}");

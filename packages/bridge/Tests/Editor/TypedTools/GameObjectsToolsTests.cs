@@ -568,6 +568,52 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // Review follow-up — Duplicate re-applies the source's local
+        // position/rotation/scale to the clone (GameObjectsTools.cs:140-143),
+        // but the existing tests only covered prefab-connection + sibling
+        // index. This pins the local-pose half of the contract: a distinct
+        // non-default pose on the source must land on the clone verbatim.
+        [Test]
+        public void Duplicate_PlainGameObject_PreservesLocalPose()
+        {
+            var parent = new GameObject("__MCPTest_GO_DupPose_Parent");
+            var src = new GameObject("__MCPTest_GO_DupPose_Src");
+            src.transform.SetParent(parent.transform, false);
+            // Distinct, non-default local pose.
+            var pos = new Vector3(1.5f, -2f, 3.25f);
+            var rot = Quaternion.Euler(15f, 30f, 45f);
+            var scl = new Vector3(2f, 0.5f, 1.25f);
+            src.transform.localPosition = pos;
+            src.transform.localRotation = rot;
+            src.transform.localScale = scl;
+            try
+            {
+                var result = GameObjectsTools.Duplicate(
+                    "{\"instance_id\":" + InstanceId.Of(src) + "}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+
+                // Source + clone share the name (clone strips "(Clone)");
+                // the clone sits at the higher sibling index.
+                var siblings = new System.Collections.Generic.List<GameObject>();
+                foreach (Transform t in parent.transform)
+                    if (t.gameObject.name == "__MCPTest_GO_DupPose_Src") siblings.Add(t.gameObject);
+                Assert.AreEqual(2, siblings.Count, "source + clone expected");
+                siblings.Sort((x, y) => x.transform.GetSiblingIndex().CompareTo(y.transform.GetSiblingIndex()));
+                var clone = siblings[1]; // higher sibling index == the clone
+
+                Assert.AreEqual(pos, clone.transform.localPosition,
+                    "clone must inherit the source's localPosition");
+                Assert.AreEqual(rot, clone.transform.localRotation,
+                    "clone must inherit the source's localRotation");
+                Assert.AreEqual(scl, clone.transform.localScale,
+                    "clone must inherit the source's localScale");
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+            }
+        }
+
         [Test]
         public void Duplicate_PrefabInstance_KeepsPrefabConnection()
         {

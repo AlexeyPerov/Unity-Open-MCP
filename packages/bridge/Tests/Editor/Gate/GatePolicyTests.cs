@@ -1,5 +1,7 @@
+using System;
 using NUnit.Framework;
 using UnityOpenMcpBridge;
+using UnityOpenMcpVerify;
 
 namespace UnityOpenMcpBridge.Tests
 {
@@ -250,9 +252,60 @@ namespace UnityOpenMcpBridge.Tests
                 GatePolicy.ResolveOutcome(GateMode.Off, delta).outcome);
         }
 
+        // Review follow-up — the two tests above only assert the enum is
+        // distinct; they never exercise the actual validate-exception catch in
+        // GatePolicy.Execute (the validate adapter is a fully static call chain
+        // with no injection point, and VerifyRunner swallows per-rule throws).
+        // The ValidatePathsOverride seam lets a test inject a throwing validate
+        // scan and assert the real ValidateScanFailed envelope: mutation
+        // committed, distinct outcome, agentNextSteps recommend manual validate.
+        [Test]
+        public void Execute_ValidateScanThrows_ReturnsValidateScanFailed()
+        {
+            // Inject a validate scan that always throws.
+            GatePolicy.ValidatePathsOverride = (_, __, ___) =>
+                throw new InvalidOperationException("simulated scanner blowup");
+            try
+            {
+                var result = GatePolicy.Execute(
+                    GateMode.Enforce,
+                    new[] { "Assets/__MCPTest_GatePolicy_T53.mat" },
+                    // Mutation succeeds (commits); the validate scan then throws.
+                    () => ToolDispatchResult.Ok("{\"touched\":[\"Assets/__MCPTest_GatePolicy_T53.mat\"]}"));
+
+                // The mutation committed.
+                Assert.IsTrue(result.Mutation.Success,
+                    "mutation must be reported as committed despite the validate throw");
+                // Distinct outcome (not generic Failed).
+                Assert.AreEqual(GateOutcome.ValidateScanFailed, result.Outcome);
+                Assert.IsTrue(result.GateFailed, "GateFailed must be true so enforce surfaces non-passing");
+                // agentNextSteps recommend manual validate and embed the message.
+                Assert.IsNotNull(result.AgentNextSteps);
+                Assert.GreaterOrEqual(result.AgentNextSteps.Length, 1);
+                StringAssert.Contains("validate scan threw", result.AgentNextSteps[0],
+                    "agentNextSteps must explain the validate scan threw");
+                StringAssert.Contains("simulated scanner blowup", result.AgentNextSteps[0],
+                    "agentNextSteps must embed the exception message");
+                StringAssert.Contains("validate_edit", result.AgentNextSteps[0],
+                    "agentNextSteps must recommend manual validate_edit / scan_paths");
+            }
+            finally
+            {
+                GatePolicy.ValidatePathsOverride = null;
+            }
+        }
+
         // -------------------------------------------------------------------
         // helpers
         // -------------------------------------------------------------------
+
+        // Null the test seam after every test so a leaked override never poisons
+        // a later test (the seam is process-global static state).
+        [TearDown]
+        public void TearDown()
+        {
+            GatePolicy.ValidatePathsOverride = null;
+        }
 
         private static DeltaData Delta(
             int errors = 0, int warnings = 0,

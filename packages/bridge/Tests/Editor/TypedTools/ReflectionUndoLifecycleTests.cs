@@ -154,6 +154,50 @@ namespace UnityOpenMcpBridge.Tests
             }
             finally { Object.DestroyImmediate(so); }
         }
+
+        // Review follow-up — [Flags] enums legitimately take combined numeric
+        // values (e.g. 5 = A|B) that match no single declared constant. The
+        // Plan 4 strict validation rejected them; ConvertValue now carves out
+        // [Flags] via FlagsAttribute detection.
+        [Test]
+        public void ObjectModify_FlagsEnum_CombinedNumericValue_IsAccepted()
+        {
+            var so = ScriptableObject.CreateInstance<FlagsEnumTestScriptableObject>();
+            so.flags = FlagsTestEnum.None;
+            try
+            {
+                // 5 == A(1) | B(4) — a valid combined value, not a single constant.
+                var result = ReflectionScriptsObjectsTools.ObjectModify(
+                    "{\"instance_id\":" + InstanceId.Of(so) +
+                    ",\"fields\":[{\"name\":\"flags\",\"value\":5}]}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                // No per-entry error for a valid flags combination.
+                StringAssert.DoesNotContain("\"errors\":", result.Output ?? "",
+                    "A valid [Flags] combined numeric value must not surface an error.");
+                Assert.AreEqual(FlagsTestEnum.A | FlagsTestEnum.B, so.flags,
+                    "Combined flags value 5 (A|B) must be accepted and set.");
+            }
+            finally { Object.DestroyImmediate(so); }
+        }
+
+        // [Flags] name form ("A, B") is handled by Enum.TryParse and must also
+        // be accepted. Confirms the name branch did not regress for flags.
+        [Test]
+        public void ObjectModify_FlagsEnum_CombinedNameValue_IsAccepted()
+        {
+            var so = ScriptableObject.CreateInstance<FlagsEnumTestScriptableObject>();
+            so.flags = FlagsTestEnum.None;
+            try
+            {
+                var result = ReflectionScriptsObjectsTools.ObjectModify(
+                    "{\"instance_id\":" + InstanceId.Of(so) +
+                    ",\"fields\":[{\"name\":\"flags\",\"value\":\"A, C\"}]}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.AreEqual(FlagsTestEnum.A | FlagsTestEnum.C, so.flags,
+                    "Combined flags names 'A, C' must parse and set.");
+            }
+            finally { Object.DestroyImmediate(so); }
+        }
     }
 
     // Test fixture SO with an enum field exercising the ConvertValue enum path.
@@ -167,5 +211,22 @@ namespace UnityOpenMcpBridge.Tests
         A = 0,
         B = 1,
         C = 2,
+    }
+
+    // Test fixture SO with a [Flags] enum field exercising the flags carve-out
+    // in ConvertValue. Bit values chosen so combinations (e.g. 5=A|B) match no
+    // single declared constant — exactly the case Plan 4 rejected.
+    public class FlagsEnumTestScriptableObject : ScriptableObject
+    {
+        public FlagsTestEnum flags = FlagsTestEnum.None;
+    }
+
+    [System.Flags]
+    public enum FlagsTestEnum
+    {
+        None = 0,
+        A = 1,
+        B = 4,
+        C = 8,
     }
 }

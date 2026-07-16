@@ -32,6 +32,27 @@ namespace UnityOpenMcpBridge
         ValidateScanFailed
     }
 
+    // Wire token for the gate outcome. Emitted as the structured `gate.outcome`
+    // field in the response envelope so an agent can distinguish
+    // validate_scan_failed from a real failed delta without parsing prose in
+    // agentNextSteps. Shared by BuildGateEnvelope and the gate-intelligence
+    // narrative summary (single source of truth for the token mapping).
+    public static class GateOutcomeExtensions
+    {
+        public static string ToWireString(this GateOutcome outcome)
+        {
+            switch (outcome)
+            {
+                case GateOutcome.Passed: return "passed";
+                case GateOutcome.Warned: return "warned";
+                case GateOutcome.Failed: return "failed";
+                case GateOutcome.Skipped: return "skipped";
+                case GateOutcome.ValidateScanFailed: return "validate_scan_failed";
+                default: return outcome.ToString().ToLowerInvariant();
+            }
+        }
+    }
+
     public class DeltaData
     {
         public int NewErrors;
@@ -89,6 +110,16 @@ namespace UnityOpenMcpBridge
     public static class GatePolicy
     {
         private const long GateBudgetMs = 2000;
+
+        // Test seam for the validate-scan step (M30-polish review T5.3). The
+        // call chain Execute -> VerifyGateAdapter.ValidatePaths ->
+        // VerifyRunner.RunScoped is fully static with no injection point, and
+        // RunScoped swallows per-rule exceptions, so a test cannot otherwise
+        // reach the ValidateScanFailed catch block below. When non-null,
+        // Execute routes the validate scan through this delegate instead of the
+        // real adapter; production callers leave it null. InternalsVisibleTo
+        // the test assembly is declared in OutputSerializer.cs.
+        internal static Func<string[], string[], string, VerifyResult> ValidatePathsOverride;
 
         public static GateDispatchResult Execute(
             GateMode mode,
@@ -183,7 +214,10 @@ namespace UnityOpenMcpBridge
             VerifyResult validation;
             try
             {
-                validation = VerifyGateAdapter.ValidatePaths(pathsHint, null, UnityOpenMcpVerify.Cache.VerifyCacheService.SourceGate);
+                // Honor the test seam when set (see ValidatePathsOverride above).
+                validation = ValidatePathsOverride != null
+                    ? ValidatePathsOverride(pathsHint, null, UnityOpenMcpVerify.Cache.VerifyCacheService.SourceGate)
+                    : VerifyGateAdapter.ValidatePaths(pathsHint, null, UnityOpenMcpVerify.Cache.VerifyCacheService.SourceGate);
             }
             catch (Exception e)
             {

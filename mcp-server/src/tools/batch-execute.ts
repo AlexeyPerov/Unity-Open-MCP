@@ -31,7 +31,9 @@ export const batchExecute: Tool = {
     "scene_open, asmdef_create / asmdef_modify, build_set_target / build_set_defines, " +
     "settings_set_player, execute_csharp / invoke_method / execute_menu) is refused up-front with a " +
     "`batch_nested_reload_unsafe` error — a domain reload or scene switch mid-batch would silently " +
-    "abort the remaining steps. Use those tools as single top-level calls instead.",
+    "abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its " +
+    "default Single mode replaces the active scene stack and can discard unsaved changes in open " +
+    "scenes). Use those tools as single top-level calls instead.",
   inputSchema: {
     type: "object",
     required: ["commands", "paths_hint"],

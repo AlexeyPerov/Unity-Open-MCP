@@ -357,6 +357,64 @@ namespace UnityOpenMcpVerify.Tests
                 "material B must have a dependency_cycle issue");
         }
 
+        // Review follow-up — the 2-node A↔B test has no "interior" node, so it
+        // does not exercise the cycle.Count - 1 loop bound in Scanner.cs:147
+        // (ExtractCycle appends a trailing repeat of the entry node, and the
+        // loop attributes to indices 0..count-2). A ≥3-node cycle A→B→C→A has
+        // an interior node B that only this shape reaches: B is neither the
+        // entry nor the back-edge target, so it is attributed solely by the
+        // loop bound. All three nodes must get a dependency_cycle issue.
+        [UnityTest]
+        public System.Collections.IEnumerator DependencyCycle_ThreeNodeCycle_AllNodesGetIssue()
+        {
+            var rule = new DependenciesRule();
+
+            var matAPath = FixtureRoot + "/Cycle3A.mat";
+            var matBPath = FixtureRoot + "/Cycle3B.mat";
+            var matCPath = FixtureRoot + "/Cycle3C.mat";
+            AssetDatabase.CreateAsset(new Material(Shader.Find("Standard")), matAPath);
+            AssetDatabase.CreateAsset(new Material(Shader.Find("Standard")), matBPath);
+            AssetDatabase.CreateAsset(new Material(Shader.Find("Standard")), matCPath);
+            AssetDatabase.Refresh();
+            yield return null;
+
+            var guidA = AssetDatabase.AssetPathToGUID(matAPath);
+            var guidB = AssetDatabase.AssetPathToGUID(matBPath);
+            var guidC = AssetDatabase.AssetPathToGUID(matCPath);
+            Assume.That(string.IsNullOrEmpty(guidA), Is.False, "material A must have a GUID");
+            Assume.That(string.IsNullOrEmpty(guidB), Is.False, "material B must have a GUID");
+            Assume.That(string.IsNullOrEmpty(guidC), Is.False, "material C must have a GUID");
+
+            // A→B→C→A edges.
+            InjectAssetGuidReference(matAPath, guidB);
+            InjectAssetGuidReference(matBPath, guidC);
+            InjectAssetGuidReference(matCPath, guidA);
+            AssetDatabase.ImportAsset(matAPath, ImportAssetOptions.ForceUpdate);
+            AssetDatabase.ImportAsset(matBPath, ImportAssetOptions.ForceUpdate);
+            AssetDatabase.ImportAsset(matCPath, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { matAPath, matBPath, matCPath });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var cycleIssues = sink.Where(i => i.IssueCode == "dependency_cycle").ToList();
+            Assert.GreaterOrEqual(cycleIssues.Count, 3,
+                "all three cycle nodes must get a dependency_cycle issue. " +
+                $"Got {cycleIssues.Count} cycle issues. " +
+                $"All issues: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+
+            // All three paths must appear — B is the interior node whose
+            // attribution depends on the loop bound, not the back-edge.
+            var cycleAssetPaths = cycleIssues.Select(i => i.AssetPath).Distinct().ToList();
+            CollectionAssert.Contains(cycleAssetPaths, matAPath,
+                "material A (cycle entry) must have a dependency_cycle issue");
+            CollectionAssert.Contains(cycleAssetPaths, matBPath,
+                "material B (interior node) must have a dependency_cycle issue");
+            CollectionAssert.Contains(cycleAssetPaths, matCPath,
+                "material C (back-edge node) must have a dependency_cycle issue");
+        }
+
         // -------------------------------------------------------------------
         // Fixture helpers
         // -------------------------------------------------------------------

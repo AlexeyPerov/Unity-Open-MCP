@@ -165,6 +165,51 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // -------------------------------------------------------------------
+        // Review follow-up — scene_create is EditorSettle (no domain reload),
+        // so IsNestedReloadUnsafe does NOT catch it. But its default Single
+        // mode replaces the active scene stack. The param-aware guard refuses
+        // Single/default scene_create; additive is allowed.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void Execute_SceneCreate_DefaultMode_RefusedAsNestedReloadUnsafe()
+        {
+            // No mode → defaults to Single → replaces the scene stack.
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_scene_create\",\"params\":{\"path\":\"Assets/__MCPTest_Scene.unity\"}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
+            StringAssert.Contains("scene_create", result.ErrorMessage);
+            StringAssert.Contains("Single mode", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_SceneCreate_SingleMode_RefusedAsNestedReloadUnsafe()
+        {
+            // Explicit Single mode is refused for the same reason.
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_scene_create\",\"params\":{\"path\":\"Assets/__MCPTest_Scene.unity\",\"mode\":\"single\"}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
+            StringAssert.Contains("scene_create", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_SceneCreate_AdditiveMode_NotRefusedBySceneStackGuard()
+        {
+            // Additive mode preserves the scene stack and must pass the
+            // scene-stack guard. It may still fail later for unrelated
+            // asset-path reasons, but it must NOT fail with the scene-stack
+            // batch_nested_reload_unsafe error.
+            var body = "{\"commands\":[{\"tool\":\"unity_open_mcp_scene_create\",\"params\":{\"path\":\"Assets/__MCPTest_Scene_Additive.unity\",\"mode\":\"additive\"}}]}";
+            var result = BatchExecuteTool.Execute(body);
+            // The scene-stack guard specifically must not have fired.
+            Assert.AreNotEqual("batch_nested_reload_unsafe", result.ErrorCode,
+                "Additive scene_create must not be refused by the scene-stack guard. " +
+                "Got: " + result.ErrorCode + " — " + result.ErrorMessage);
+        }
+
+        // -------------------------------------------------------------------
         // Happy path: 3× gameobject_create
         // -------------------------------------------------------------------
 
