@@ -18,7 +18,7 @@ definitions live in `mcp-server/src/tools/`.
 
 | Document | Owns |
 |---|---|
-| [Tool groups and session visibility](tool-groups.md) | Default groups, `manage_tools`, availability vs activation, reset/restart, and auto-activation. |
+| [Tool groups and session visibility](tool-groups.md) | Default groups, `manage_tools` actions (list/activate/deactivate/reset + intent-driven `suggest`/`activate_for`), availability vs activation, reset/restart, and auto-activation. |
 | [Routing, offline, and lifecycle contracts](routing-lifecycle.md) | Live/batch/offline/local selection, offline coverage, lifecycle recovery, batch behavior, errors, and multi-agent scheduling. |
 | [CLI and automation](cli-automation.md) | CLI commands, options, JSON output, and links to canonical CI behavior. |
 | [CI templates](../ci/README.md) | Pipeline shape, CLI exit codes, baselines, and provider templates. |

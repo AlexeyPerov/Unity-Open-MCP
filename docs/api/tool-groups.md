@@ -82,6 +82,51 @@ roster.
 
 `reset` restores the two default-on groups (`core` + `gate-and-verify`).
 
+### Intent-driven activation (`suggest` / `activate_for`)
+
+The intent path maps a task to the right groups in one call, so you don't have
+to know group ids up front. Pass a free-text `intent` and/or explicit `tags`:
+
+```json
+{
+  "action": "activate_for",
+  "intent": "bake a NavMesh for the dungeon scene"
+}
+```
+
+```json
+{ "action": "suggest", "tags": ["audio", "lighting"] }
+```
+
+- **`suggest`** is read-only. It returns the recommended groups with reasons,
+  whether each is already active, and the same per-group compiled-state
+  availability `list_groups` reports. It never changes session state.
+- **`activate_for`** activates the recommended set in one call. It is a union
+  with the current active groups — it never deactivates anything — and is
+  idempotent (re-calls are no-ops). When the visible surface changes it emits
+  `notifications/tools/list_changed`.
+
+`tags` accept canonical tag names (`navigation`, `animation`, `audio`,
+`profiler`, `qa`, `verify`, `risk`, …), catalog keywords (`navmesh`,
+`particles`, `build`, …), or group ids (`terrain`, `vfx`, …). Unknown tags are
+reported in `unmatchedTags` and otherwise ignored.
+
+Mutating or verify-related intents additionally recommend `gate-intelligence`
+(impact preview, gate-budget estimate, mutation explain) so the pre/post-
+mutation intelligence surface is visible before mutations run. Read-only
+intents never surface it.
+
+Unknown or empty intent returns a structured empty recommendation (`empty: true`)
+with a `hint` pointing at `list_groups` — the server never invents groups.
+
+Recommended groups whose Unity domain dependency is missing are reported in the
+`unavailable` list with `availableReason`. Today's session model still activates
+them (their tools appear in `ListTools` but error at call time); the response
+calls out the gap so you can install the package or pick a different group.
+
+Prefer `activate_for` over hand-picking ids whenever you can state the task in
+words; fall back to `list_groups` + `activate` to browse or hand-pick.
+
 ## State lifecycle
 
 - State is ephemeral, in memory, and scoped to one MCP server process.

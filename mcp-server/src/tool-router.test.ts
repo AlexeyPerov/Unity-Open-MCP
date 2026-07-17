@@ -1067,6 +1067,338 @@ test("route: manage_tools list_groups does not notify", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// M31 Plan 2 / T31.2 — manage_tools suggest / activate_for (intent → groups)
+// ---------------------------------------------------------------------------
+
+test("route: manage_tools suggest returns recommendations without changing state", async () => {
+  const session = new ToolSessionState();
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    session,
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "suggest",
+    intent: "bake a navmesh for the dungeon",
+  });
+  const body = parseBody(result);
+  assert.equal(result.isError, false);
+  assert.equal(body._source, "local");
+  assert.equal(body.action, "suggest");
+  assert.equal(body.empty, false);
+  const groups = body.groups as Array<{ id: string; alreadyActive: boolean }>;
+  const ids = groups.map((g) => g.id);
+  assert.ok(ids.includes("navigation"), "navigation should be recommended");
+  // suggest must NOT mutate session state.
+  assert.deepEqual(session.activeGroups(), expectedDefaultActive());
+});
+
+test("route: manage_tools suggest with explicit tags returns the implied groups", async () => {
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "suggest",
+    tags: ["audio", "lighting"],
+  });
+  const body = parseBody(result);
+  const ids = (body.groups as Array<{ id: string }>).map((g) => g.id);
+  assert.ok(ids.includes("audio"));
+  assert.ok(ids.includes("lighting"));
+});
+
+test("route: manage_tools suggest with unknown intent returns empty + hint", async () => {
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "suggest",
+    intent: "zzz qqq xxx yyy",
+  });
+  const body = parseBody(result);
+  assert.equal(body.empty, true);
+  assert.equal((body.groups as unknown[]).length, 0);
+  assert.match(String(body.hint), /list_groups/);
+  assert.equal(result.isError, false, "empty recommendation is not an error");
+});
+
+test("route: manage_tools suggest with no intent and no tags returns empty", async () => {
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "suggest",
+  });
+  const body = parseBody(result);
+  assert.equal(body.empty, true);
+});
+
+test("route: manage_tools suggest adds gate-intelligence for a mutating intent", async () => {
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "suggest",
+    intent: "create and modify several gameobjects",
+  });
+  const body = parseBody(result);
+  const ids = (body.groups as Array<{ id: string }>).map((g) => g.id);
+  assert.ok(ids.includes("gate-intelligence"), "mutating intent surfaces gate-intelligence");
+  assert.ok(ids.includes("typed-editor"), "gameobject intent surfaces typed-editor");
+});
+
+test("route: manage_tools suggest reports unmatched caller tags", async () => {
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "suggest",
+    tags: ["navigation", "floob"],
+  });
+  const body = parseBody(result);
+  const intent = body.intent as { unmatchedTags: string[] };
+  assert.deepEqual(intent.unmatchedTags, ["floob"]);
+});
+
+test("route: manage_tools suggest does not notify", async () => {
+  let notifyCount = 0;
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    new ToolSessionState(),
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("unity_open_mcp_manage_tools", {
+    action: "suggest",
+    intent: "bake a navmesh",
+  });
+  assert.equal(notifyCount, 0, "suggest is read-only and must not notify");
+});
+
+test("route: manage_tools activate_for activates the recommended groups", async () => {
+  const session = new ToolSessionState();
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    session,
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "activate_for",
+    intent: "bake a navmesh for the dungeon",
+  });
+  const body = parseBody(result);
+  assert.equal(result.isError, false);
+  assert.equal(body.action, "activate_for");
+  assert.ok((body.activated as string[]).includes("navigation"));
+  // Session state reflects the activation.
+  assert.ok(session.isGroupActive("navigation"));
+  // activeGroups in the response includes navigation.
+  assert.ok((body.activeGroups as string[]).includes("navigation"));
+});
+
+test("route: manage_tools activate_for notifies when visibility changes", async () => {
+  let notifyCount = 0;
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    new ToolSessionState(),
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("unity_open_mcp_manage_tools", {
+    action: "activate_for",
+    intent: "bake a navmesh",
+  });
+  assert.equal(notifyCount, 1, "activate_for must notify when groups come online");
+});
+
+test("route: manage_tools activate_for does not notify when nothing changes", async () => {
+  let notifyCount = 0;
+  const session = new ToolSessionState();
+  // Pre-activate navigation so the recommend set is already fully active.
+  session.activate("navigation");
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    session,
+    () => {
+      notifyCount++;
+    },
+  );
+  await router.route("unity_open_mcp_manage_tools", {
+    action: "activate_for",
+    tags: ["navigation"],
+  });
+  assert.equal(notifyCount, 0, "idempotent activate_for must not notify");
+});
+
+test("route: manage_tools activate_for is idempotent (changed=false on second call)", async () => {
+  const session = new ToolSessionState();
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    session,
+  );
+  await router.route("unity_open_mcp_manage_tools", {
+    action: "activate_for",
+    intent: "bake a navmesh",
+  });
+  const second = await router.route("unity_open_mcp_manage_tools", {
+    action: "activate_for",
+    intent: "bake a navmesh",
+  });
+  const body = parseBody(second);
+  assert.equal(body.changed, false);
+  assert.deepEqual(body.activated as string[], []);
+  assert.ok((body.skipped as string[]).includes("navigation"));
+});
+
+test("route: manage_tools activate_for with unknown intent returns empty + hint, no state change", async () => {
+  const session = new ToolSessionState();
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    session,
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "activate_for",
+    intent: "zzz qqq xxx",
+  });
+  const body = parseBody(result);
+  assert.equal(body.empty, true);
+  assert.equal(result.isError, false);
+  // No state change, no notification needed.
+  assert.deepEqual(session.activeGroups(), expectedDefaultActive());
+});
+
+test("route: manage_tools activate_for surfaces unavailable recommended groups honestly", async () => {
+  // navigation is package-gated; with an empty bridge inventory its
+  // availability is `false` (tools not compiled in). The recommended group
+  // must surface in `unavailable` AND still be activated (today's model lets
+  // an agent activate an unavailable group — the tools appear but error at
+  // call time).
+  const session = new ToolSessionState();
+  const live = makeFakeLive({ available: true, bridgeTools: new Set() });
+  const router = makeRouter(
+    live,
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    session,
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "activate_for",
+    tags: ["navigation"],
+  });
+  const body = parseBody(result);
+  const unavailable = body.unavailable as Array<{ id: string; reason: string | null }>;
+  assert.ok(
+    unavailable.some((u) => u.id === "navigation"),
+    "navigation must be reported unavailable when its package is absent",
+  );
+  // Still activated (today's session model).
+  assert.ok((body.activated as string[]).includes("navigation"));
+  // And the augmented group carries available:false.
+  const nav = (body.groups as Array<{ id: string; available: boolean | null }>)
+    .find((g) => g.id === "navigation");
+  assert.ok(nav);
+  assert.equal(nav!.available, false);
+});
+
+test("route: manage_tools suggest also surfaces compiled-state availability", async () => {
+  // suggest is read-only but must still report availability so the agent
+  // knows whether activation would be useful.
+  const live = makeFakeLive({ available: true, bridgeTools: new Set() });
+  const router = makeRouter(
+    live,
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "suggest",
+    tags: ["navigation"],
+  });
+  const body = parseBody(result);
+  const nav = (body.groups as Array<{ id: string; available: boolean | null }>)
+    .find((g) => g.id === "navigation");
+  assert.ok(nav);
+  assert.equal(nav!.available, false);
+});
+
+test("route: manage_tools unknown_action error lists the new actions", async () => {
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "bogus",
+  });
+  assert.equal(result.isError, true);
+  assert.equal(errorCode(result), "unknown_action");
+  const body = parseBody(result);
+  const msg = (body.error as { message: string }).message;
+  assert.match(msg, /suggest/);
+  assert.match(msg, /activate_for/);
+});
+
+test("route: manage_tools activate_for with intent + tags merges both signals", async () => {
+  const session = new ToolSessionState();
+  const router = makeRouter(
+    makeFakeLive(),
+    makeFakeBatch(),
+    "/proj",
+    makeFakeEventStream(),
+    session,
+  );
+  const result = await router.route("unity_open_mcp_manage_tools", {
+    action: "activate_for",
+    intent: "verify the scene references",
+    tags: ["navigation"],
+  });
+  const body = parseBody(result);
+  const activated = body.activated as string[];
+  // verify → gate-and-verify is already default-on (skipped) but gate-intelligence is added.
+  assert.ok(activated.includes("gate-intelligence"));
+  // navigation comes from the explicit tag.
+  assert.ok(activated.includes("navigation"));
+});
+
+// ---------------------------------------------------------------------------
 // testsuite-tauri phase-3 — bridge_status
 //
 // bridge_status is server-resolved: it reads the instance lock from disk

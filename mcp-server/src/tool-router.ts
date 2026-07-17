@@ -14,7 +14,13 @@ import {
   TOOL_GROUPS,
   AUTO_ACTIVATE_GROUPS,
   groupToTools,
+  getGroup,
 } from "./capabilities/tool-groups.js";
+import {
+  recommendGroups,
+  type Recommendation,
+  type RecommendedGroup,
+} from "./capabilities/intent-groups.js";
 import { listRules } from "./capabilities/list-rules.js";
 import { generateSkill } from "./skill/generate-skill.js";
 import { knownClientKeys } from "./skill/client-paths.js";
@@ -915,6 +921,31 @@ export class ToolRouter implements Router {
       return this.manageToolsListGroups(live);
     }
 
+    // M31 Plan 2 / T31.2 — intent-driven actions. `suggest` is the read-only
+    // path (returns recommendations without changing state); `activate_for`
+    // activates the recommended set in one call. Both share the recommend
+    // engine + the per-group compiled-state availability, so an agent sees
+    // the same honesty about unavailable groups as `list_groups` (the
+    // recommendation lists them as `unavailable` with `availableReason`
+    // instead of pretending activation succeeded).
+    if (action === "suggest" || action === "activate_for") {
+      const intent =
+        typeof args.intent === "string" ? args.intent : "";
+      const tags = Array.isArray(args.tags)
+        ? args.tags.filter((t): t is string => typeof t === "string")
+        : [];
+      // Recommend against an empty input is a structured empty result, not an
+      // error — the agent gets the `list_groups` hint and can retry. This
+      // matches the spec ("unmatched intent returns a structured empty
+      // recommendation + hint to list_groups (no hallucinated groups)").
+      const rec = recommendGroups({ intent, tags });
+
+      if (action === "suggest") {
+        return this.manageToolsSuggest(rec, live);
+      }
+      return this.manageToolsActivateFor(rec, live);
+    }
+
     if (action === "reset") {
       const before = this.sessionState.activeGroups();
       this.sessionState.reset();
@@ -969,7 +1000,8 @@ export class ToolRouter implements Router {
 
     return this.manageToolsError(
       "unknown_action",
-      `Unknown action '${action}'. Valid actions: list_groups, activate, deactivate, reset.`,
+      `Unknown action '${action}'. Valid actions: list_groups, activate, ` +
+        `deactivate, reset, suggest, activate_for.`,
     );
   }
 
@@ -1037,6 +1069,162 @@ export class ToolRouter implements Router {
       },
       "local",
     );
+  }
+
+  // M31 Plan 2 / T31.2 — `suggest` handler. Read-only: returns the
+  // recommendation with per-group compiled-state availability so the agent
+  // sees the same honesty as `list_groups` (a recommended group whose domain
+  // dependency is missing surfaces with `unavailable: true` +
+  // `availableReason`, never as a silent success). Reconciles auto-activation
+  // first so the `alreadyActive` flags reflect packages that came online.
+  private async manageToolsSuggest(
+    rec: Recommendation,
+    live: LiveClient,
+  ): Promise<CallToolResult> {
+    const inventory = await this.fetchInventoryAndReconcile(live);
+    const compiledAvailability = this.computeCompiledAvailability(
+      inventory,
+      groupToTools(),
+    );
+
+    const groups = rec.groups.map((g) =>
+      this.augmentRecommendation(g, compiledAvailability),
+    );
+
+    return sourceResult(
+      {
+        action: "suggest",
+        intent: rec,
+        groups,
+        activeGroups: this.sessionState.activeGroups(),
+        // `empty` surfaces at the top level too so agents branching on a
+        // miss don't have to dig into `intent.empty`.
+        empty: rec.empty,
+        ...(rec.empty ? { hint: rec.hint } : {}),
+        note:
+          "Read-only recommendation. Pass the same intent/tags to " +
+          "action=\"activate_for\" to activate the recommended groups in one " +
+          "call, or activate individual ids with action=\"activate\".",
+      },
+      "local",
+    );
+  }
+
+  // M31 Plan 2 / T31.2 — `activate_for` handler. Activates the recommended
+  // set (union with the current active groups — never deactivates anything).
+  // `unavailable` recommended groups are reported honestly: today's session
+  // model lets an agent activate a group whose domain dependency is missing
+  // (the tools appear in ListTools but error at call time), so we DO activate
+  // them but the response calls out the gap via `unavailable` + the standard
+  // `availableReason`. Emits `notifications/tools/list_changed` exactly once
+  // when the visible set changed (idempotent when already active).
+  private async manageToolsActivateFor(
+    rec: Recommendation,
+    live: LiveClient,
+  ): Promise<CallToolResult> {
+    const inventory = await this.fetchInventoryAndReconcile(live);
+    const compiledAvailability = this.computeCompiledAvailability(
+      inventory,
+      groupToTools(),
+    );
+
+    const before = this.sessionState.activeGroups();
+    const activated: string[] = [];
+    const skipped: string[] = [];
+    const unavailable: Array<{ id: string; reason: string | null }> = [];
+    for (const g of rec.groups) {
+      const changed = this.sessionState.activate(g.id);
+      if (changed) {
+        activated.push(g.id);
+      } else {
+        skipped.push(g.id);
+      }
+      const avail = compiledAvailability.get(g.id);
+      if (avail && (avail.available === false || avail.available === null)) {
+        unavailable.push({ id: g.id, reason: avail.reason });
+      }
+    }
+    await this.maybeNotifyToolListChanged(before);
+
+    const groups = rec.groups.map((g) =>
+      this.augmentRecommendation(g, compiledAvailability),
+    );
+
+    const anyChange = activated.length > 0;
+    const message = rec.empty
+      ? rec.hint
+      : anyChange
+        ? `Activated ${activated.length} group(s) for the intent: ` +
+          `${activated.join(", ")}. MCP clients that support listChanged ` +
+          `will refresh ListTools automatically.`
+        : `All recommended groups were already active.`;
+
+    return sourceResult(
+      {
+        action: "activate_for",
+        intent: rec,
+        groups,
+        activated,
+        skipped,
+        unavailable,
+        activeGroups: this.sessionState.activeGroups(),
+        changed: anyChange,
+        empty: rec.empty,
+        message,
+        ...(unavailable.length > 0
+          ? {
+              unavailableNote:
+                "One or more recommended groups have a missing Unity domain " +
+                "dependency — their tools will appear in ListTools but error " +
+                "at call time. Use unity_open_mcp_capabilities for the " +
+                "authoritative compiled-state report, or install the cited " +
+                "Unity package and reconcile via list_groups.",
+            }
+          : {}),
+      },
+      "local",
+    );
+  }
+
+  /**
+   * Fetch the live bridge inventory (or null when offline) and reconcile auto-
+   * activation against it. Shared by `suggest` / `activate_for` so both see the
+   * same compiled-state + auto-activated snapshot as `list_groups` without
+   * duplicating the GET /tools hop.
+   */
+  private async fetchInventoryAndReconcile(live: LiveClient): Promise<{
+    tools: ReadonlySet<string>;
+  } | null> {
+    const liveAvailable = await live.isLiveAvailable();
+    const inventory = liveAvailable ? await live.listBridgeTools() : null;
+    await this.reconcileAutoActivation(
+      inventory ? { tools: inventory.tools } : null,
+    );
+    return inventory;
+  }
+
+  /**
+   * Augment a {@link RecommendedGroup} with the session + compiled-state
+   * fields the agent needs to act on it: whether it is already active, its
+   * availability, and its catalog description / Unity package dependency.
+   */
+  private augmentRecommendation(
+    g: RecommendedGroup,
+    compiledAvailability: Map<string, { available: boolean | null; reason: string | null }>,
+  ) {
+    const entry = getGroup(g.id);
+    const avail = compiledAvailability.get(g.id);
+    return {
+      id: g.id,
+      reason: g.reason,
+      matchedTags: g.matchedTags,
+      ...(g.fromMutationSignal ? { fromMutationSignal: true } : {}),
+      description: entry?.description ?? null,
+      alreadyActive: this.sessionState.isGroupActive(g.id),
+      available: avail?.available ?? null,
+      availableReason: avail?.reason ?? null,
+      unityPackage: entry?.unityPackage ?? null,
+    };
   }
 
   /**
