@@ -51,7 +51,7 @@ Full procedure: [Agent setup](docs/setup/agent-setup.md).
 
 ## Documentation
 
-简体中文文档：[README.zh-CN.md](README.zh-CN.md)（Chinese translation of this README and the setup guides).
+Translations: [简体中文](README.zh-CN.md) · [Русский](README.ru.md) (this README and the setup guides).
 
 For users:
 
