@@ -5,8 +5,9 @@
 // session state. Every MCP-server restart restores the catalog's default-on
 // groups. One stdio server process has one connected client and one store.
 //
-// `unity_open_mcp_manage_tools` is the only mutator of this state. ListTools
-// reads it via `filterVisibleTools` to drop tools whose group is not active.
+// `unity_open_mcp_manage_tools` is the only mutator of the tool-group state.
+// ListTools reads it via `filterVisibleTools` to drop tools whose group is not
+// active.
 //
 // The store is intentionally not keyed by session id — the stdio MCP server
 // has exactly one client per process. HTTP/SSE MCP transports would need a
@@ -20,6 +21,11 @@
 // tools compiled in (i.e. its Unity package is present), the router calls
 // `activateAuto`. The store itself never probes packages — it only records
 // the outcome. Auto-activation is ephemeral and idempotent within a session.
+//
+// M31 Plan 3 / T31.4 — the store ALSO carries the session-scoped fd-sample
+// ring for `resource_pressure`. The samples live here (not on disk, per the
+// offline-read no-cache philosophy) and are cleared on `reset()` / server
+// restart. See `process-diagnostics.ts` for the probe + trend math.
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -29,6 +35,20 @@ import {
   getGroup,
   groupFor,
 } from "./capabilities/tool-groups.js";
+// M31 Plan 3 / T31.4 — fd-sample type shared with process-diagnostics.ts.
+// type-only import keeps the module dependency graph clean (no runtime cycle:
+// process-diagnostics does not import tool-session-state).
+import type { FdSample } from "./process-diagnostics.js";
+
+/**
+ * M31 Plan 3 / T31.4 — capacity of the session-scoped fd-sample ring. Enough
+ * samples to detect a monotonic climb across several domain reloads (the leak
+ * signature) without unbounded growth. The trend math in
+ * `process-diagnostics.ts` only needs ≥3 same-PID known-count samples to flag
+ * `leaking`, so 20 is comfortably above the minimum and keeps the response
+ * payload small.
+ */
+export const FD_SAMPLE_RING_CAPACITY = 20;
 
 /**
  * Why a group is active in the current session.
@@ -62,6 +82,11 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
   "unity_senses_pull_events",
   "unity_open_mcp_read_compile_errors",
   "unity_open_mcp_bridge_status",
+  // M31 Plan 3 — operator-only recovery + prediction surfaces for the
+  // Editor fd-exhaustion failure mode. Sibling to bridge_status: they act on
+  // the OS process, not project assets, and must survive any group teardown.
+  "unity_open_mcp_restart_editor",
+  "unity_open_mcp_resource_pressure",
 ]);
 
 /**
@@ -90,6 +115,15 @@ export class ToolSessionState {
    * is not active.
    */
   private source = new Map<string, ActivationSource>();
+
+  /**
+   * M31 Plan 3 / T31.4 — session-scoped ring of recent fd samples for the
+   * `resource_pressure` trend signal. In-memory only (no disk cache, per the
+   * offline-read no-cache philosophy); LRU-evicted at capacity; cleared on
+   * `reset()` and on server restart. Kept on the session store because it is
+   * per-client ephemeral state, exactly like the tool-group active set.
+   */
+  private fdSamples: FdSample[] = [];
 
   constructor() {
     for (const id of DEFAULT_ENABLED_GROUPS) this.source.set(id, "default");
@@ -189,7 +223,37 @@ export class ToolSessionState {
     this.active = new Set(DEFAULT_ENABLED_GROUPS);
     this.source = new Map();
     for (const id of DEFAULT_ENABLED_GROUPS) this.source.set(id, "default");
+    // M31 Plan 3 / T31.4 — clear the fd-sample ring too. The trend signal is
+    // session-scoped; a reset means "start over" and stale samples from a
+    // prior workflow would mislead the trend detector.
+    this.fdSamples = [];
     return true;
+  }
+
+  // -------------------------------------------------------------------------
+  // M31 Plan 3 / T31.4 — session-scoped fd samples for resource_pressure.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Record one fd sample at the tail of the ring. Capacity-bounded (LRU on
+   * insertion). A `null` count is recorded too — the trend detector needs to
+   * see probe-failure gaps so it does not falsely interpolate across them.
+   */
+  recordFdSample(sample: FdSample): void {
+    this.fdSamples.push(sample);
+    if (this.fdSamples.length > FD_SAMPLE_RING_CAPACITY) {
+      this.fdSamples.shift();
+    }
+  }
+
+  /** Snapshot of the recorded fd samples (oldest-first). */
+  fdSamplesSnapshot(): readonly FdSample[] {
+    return this.fdSamples.slice();
+  }
+
+  /** Drop all recorded fd samples without touching the tool-group state. */
+  clearFdSamples(): void {
+    this.fdSamples = [];
   }
 }
 

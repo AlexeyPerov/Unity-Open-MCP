@@ -153,6 +153,9 @@ commands and the hard maximum is 100.
 | `editor_instance_locked` | Headless Unity cannot open a project held by the Editor. | Close the Editor or use the live/offline alternative named in `agentNextSteps`. |
 | `unity_not_discovered` | No Unity executable was found. | Install under a standard Hub path or set `UNITY_PATH`. |
 | `unity_spawn_refused` | The configured Unity binary could not execute. | Correct `UNITY_PATH`; do not retry unchanged. |
+| `restart_confirmation_required` | `restart_editor` was called without `confirm: true`. | Re-call with `confirm: true` after `read_compile_errors` confirms an `editor_fd_exhaustion` issue. |
+| `restart_signature_absent` | `restart_editor` was asked to kill but the `editor_fd_exhaustion` signature is NOT in the recent Editor.log tail. | Re-run `read_compile_errors`; do not kill the Editor for a fixable compile failure. |
+| `unity_process_not_found` | `restart_editor` / `resource_pressure` could not resolve a live Unity PID for this project. | Open Unity for this project (with `-projectPath`), or pass an explicit `pid` to `resource_pressure`. |
 | `batch_spawn_failed` | Headless Unity produced no classifiable result. | Inspect compile errors, package state, project lock, and path. |
 | `scene_dirty` | A disruptive mutation was refused because a scene has unsaved work. | Save/discard first or deliberately opt into the documented risk. |
 | `bridge_response_unparsable` | A substantial bridge response could not be parsed. | Do not trust partial output; check bridge health before retrying. |
@@ -192,3 +195,33 @@ merely because the bridge is offline. `dead_bridge` includes a
 Bridge start/stop tools are not exposed. Start/stop currently exists only in
 the Unity toolbar, and stopping through the same HTTP listener would risk
 tearing down the connection before its response is delivered.
+
+## Editor fd-exhaustion recovery and prediction
+
+Two always-visible local tools cover the Bee build-driver fd-exhaustion hang
+(`System.NotSupportedException: Could not register to wait for file descriptor
+N`) that wedges a long-running Editor after many domain reloads. The bridge is
+the thing that dies in this failure mode, so both tools act on the OS process
+and never depend on a reachable bridge.
+
+- **`unity_open_mcp_restart_editor`** (reactive). After `read_compile_errors`
+  reports an `editor_fd_exhaustion` issue, terminate the hung Unity with
+  explicit `confirm: true`. The tool refuses when the signature is absent (no
+  restart on a fixable compile failure) and surfaces unsaved-scene risk when
+  the bridge is still reachable. SIGTERM → SIGKILL on macOS/Linux,
+  `taskkill /T /F` on Windows. Relaunch is NOT automatic — the response tells
+  the operator to relaunch via the Hub (the interactive-Editor launch recipe
+  is not knowable from the server).
+- **`unity_open_mcp_resource_pressure`** (proactive). Sample the live Unity
+  process's fd usage and report headroom against Mono's internal ~1024 fd
+  ceiling — the real trip point, NOT the OS soft limit (`ulimit -n` /
+  `launchctl limit maxfiles`), which is only a loose upper bound and is
+  misleading for a GUI-launched Unity on macOS. Returns `state` (`ok` / `warn`
+  at ≥80% / `critical` at ≥90% / `unknown`), a `trend` (`stable` / `rising` /
+  `leaking` — a monotonic climb across successive samples is the leak
+  signature), and the session-scoped sample ring. No disk cache — samples are
+  in-memory and clear on server restart.
+
+Use `resource_pressure` after heavy automation (many recompiles / domain
+reloads) to catch fd growth before the Editor hangs; escalate to
+`read_compile_errors` → `restart_editor` once the hang has happened.

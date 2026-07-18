@@ -464,11 +464,28 @@ import { hubSetInstallPath } from "./hub-set-install-path.js";
 // in BATCH_TOOL_NAMES). One HTTP round trip runs many typed tools sequentially
 // inside the already-open Editor, wrapped in a single batch-level gate cycle.
 import { batchExecute } from "./batch-execute.js";
+// M31 Plan 3 — Editor fd-exhaustion auto-recovery (restart_editor, kill half)
+// + prediction (resource_pressure, proactive fd-usage monitoring). Both are
+// operator-only surfaces: no group assignment in tool-groups.ts, always
+// visible (the ALWAYS_VISIBLE_TOOLS list in tool-session-state.ts). Local-
+// routed (they act on the OS process, like bridge_status — no bridge round-
+// trip, no Unity spawn). restart_editor requires explicit `confirm: true` and
+// refuses when the editor_fd_exhaustion signature is absent.
+import { restartEditor } from "./restart-editor.js";
+import { resourcePressure } from "./resource-pressure.js";
 
 // M27 Plan 4 — batch_execute ships as a core meta-tool so agents can always
 // discover it. It is the agent ergonomics counterpart to the M26 headless batch
 // spawn axis (different concern: live sequential invoke vs headless fallback).
 export const M27_PLAN4_TOOLS: Tool[] = [batchExecute];
+
+// M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor is the
+// reactive kill half (acts AFTER the Editor is hung; requires the
+// editor_fd_exhaustion signature + explicit confirmation); resource_pressure
+// is the proactive prediction half (samples fd usage BEFORE exhaustion so an
+// agent can warn the operator to save + restart while the bridge is healthy).
+// Both are always-visible meta-tools (no group assignment); local-routed.
+export const M31_PLAN3_TOOLS: Tool[] = [restartEditor, resourcePressure];
 
 export const M2_TOOLS: Tool[] = [
   ping,
@@ -1139,4 +1156,5 @@ export const ALL_TOOLS: Tool[] = [
   ...M20_PLAN9_2D_TOOLS,
   ...M26_PLAN2_HUB_TOOLS,
   ...M27_PLAN4_TOOLS,
+  ...M31_PLAN3_TOOLS,
 ];

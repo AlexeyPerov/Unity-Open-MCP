@@ -17,9 +17,14 @@ import type { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream, PullResult } from "./event-stream.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { ToolSessionState } from "./tool-session-state.js";
+import { ToolSessionState, filterVisibleTools } from "./tool-session-state.js";
 import { DEFAULT_ENABLED_GROUPS } from "./capabilities/tool-groups.js";
 import { setUnityProcessScannerForTest } from "./running-unity.js";
+import { ALL_TOOLS } from "./tools/index.js";
+// M31 Plan 3 — injectable seams for the restart_editor + resource_pressure
+// routes (no real process.kill / lsof / /proc in unit tests).
+import { setProcessKillerForTest } from "./editor-process-control.js";
+import { setFdProbeForTest } from "./process-diagnostics.js";
 
 // The default-active group set is the single source of truth in
 // `capabilities/tool-groups.ts` (the catalog's `defaultEnabled: true`
@@ -2053,3 +2058,661 @@ test("default route (no override) still uses the default LiveClient", async () =
   assert.equal((overrideLive as unknown as { calls: LiveCall[] }).calls.length, 0);
 });
 
+
+// ---------------------------------------------------------------------------
+// M31 Plan 3 — restart_editor (reactive kill) + resource_pressure (proactive
+// fd-usage prediction). Both are local-routed operator surfaces that act on
+// the OS process, not the bridge. Tests inject a fake process scanner (for the
+// PID), a fake ProcessKiller (no real signal), and a fake FdProbe (no real
+// lsof / /proc) — same seam pattern as the bridge_status cold-Safe-Mode tests.
+// ---------------------------------------------------------------------------
+
+// A log body that carries the editor_fd_exhaustion signature (the exact line
+// read_compile_errors matches on). Planting this in <tmp>/Logs/Editor.log
+// makes restart_editor's signature check pass.
+const FD_EXHAUSTION_LOG =
+  "Unhandled exception during build: System.NotSupportedException: " +
+  "Could not register to wait for file descriptor 1194\n" +
+  "  at System.IOSelector.Add(intptr,System.IOSelectorJob)\n";
+
+// A log body with a plain compile error but NO fd-exhaustion signature — used
+// to prove restart_editor refuses on a fixable dead_bridge.
+const PLAIN_COMPILE_ERROR_LOG =
+  "Assets/Scripts/Bridge.cs(10,14): error CS0118: 'T' is a namespace but is used like a type\n";
+
+/** Helper: write <tmp>/Logs/Editor.log with the given content. */
+async function plantEditorLog(tmp: string, content: string): Promise<void> {
+  await mkdir(join(tmp, "Logs"), { recursive: true });
+  await writeFile(join(tmp, "Logs", "Editor.log"), content);
+}
+
+/** Fake LiveClient that answers scene_get_dirty_summary with canned scenes. */
+function makeDirtySummaryFakeLive(opts: {
+  available?: boolean;
+  dirtyScenes?: Array<{ name: string; path: string; isDirty: boolean }>;
+}): LiveClient & { calls: LiveCall[] } {
+  const calls: LiveCall[] = [];
+  const available = opts.available ?? true;
+  return {
+    calls,
+    async isLiveAvailable() {
+      return available;
+    },
+    async route(tool: string, args: Record<string, unknown>) {
+      calls.push({ tool, args });
+      const body =
+        tool === "unity_open_mcp_scene_get_dirty_summary"
+          ? { scenes: opts.dirtyScenes ?? [] }
+          : { ok: true };
+      return {
+        content: [{ type: "text", text: JSON.stringify(body) }],
+        isError: false,
+      } as CallToolResult;
+    },
+    async listBridgeTools() {
+      return { tools: new Set<string>(), groups: [] };
+    },
+  } as unknown as LiveClient & { calls: LiveCall[] };
+}
+
+// --- restart_editor: dry-run (confirm absent) -----------------------------
+
+test("route: restart_editor dry-run returns the diagnosis + wouldKillPid without side effect", async () => {
+  await withTmp("router-restart-dryrun-", async (tmp) => {
+    await setupProject(tmp);
+    await plantEditorLog(tmp, FD_EXHAUSTION_LOG);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 4242, projectPath: tmp }];
+      },
+    });
+    const restoreKiller = setProcessKillerForTest({
+      async kill() {
+        throw new Error("dry-run must not call the killer");
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_restart_editor", {});
+      const body = parseBody(result);
+      assert.equal(result.isError, false, "dry-run is not an error");
+      assert.equal(body.confirm, false);
+      assert.equal(body.dryRun, true);
+      assert.equal(body.signaturePresent, true);
+      assert.equal(body.wouldKillPid, 4242);
+    } finally {
+      restoreKiller();
+      restoreScan();
+    }
+  });
+});
+
+// --- restart_editor: refuses without confirmation when called with confirm:false ---
+
+test("route: restart_editor refuses to kill when confirm is false", async () => {
+  await withTmp("router-restart-refuse-confirm-", async (tmp) => {
+    await setupProject(tmp);
+    await plantEditorLog(tmp, FD_EXHAUSTION_LOG);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 4242, projectPath: tmp }];
+      },
+    });
+    let killerCalled = false;
+    const restoreKiller = setProcessKillerForTest({
+      async kill() {
+        killerCalled = true;
+        return { terminated: true, pid: 4242, method: "sigterm", elapsedMs: 1 };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_restart_editor", {
+        confirm: false,
+      });
+      const body = parseBody(result);
+      assert.equal(result.isError, false, "refusal is a structured dry-run, not an error");
+      assert.equal(body.dryRun, true);
+      assert.equal(killerCalled, false, "killer must not run without confirmation");
+    } finally {
+      restoreKiller();
+      restoreScan();
+    }
+  });
+});
+
+// --- restart_editor: refuses when signature absent (plain compile error) ---
+
+test("route: restart_editor refuses with restart_signature_absent on a plain dead_bridge log", async () => {
+  await withTmp("router-restart-no-sig-", async (tmp) => {
+    await setupProject(tmp);
+    await plantEditorLog(tmp, PLAIN_COMPILE_ERROR_LOG);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 4242, projectPath: tmp }];
+      },
+    });
+    let killerCalled = false;
+    const restoreKiller = setProcessKillerForTest({
+      async kill() {
+        killerCalled = true;
+        return { terminated: true, pid: 4242, method: "sigterm", elapsedMs: 1 };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_restart_editor", {
+        confirm: true,
+      });
+      const body = parseBody(result);
+      assert.equal(result.isError, true, "signature-absent refusal is an error");
+      const err = body.error as { code?: string; message?: string };
+      assert.equal(err.code, "restart_signature_absent");
+      assert.equal(killerCalled, false, "must not kill on a fixable compile failure");
+    } finally {
+      restoreKiller();
+      restoreScan();
+    }
+  });
+});
+
+// --- restart_editor: refuses when no Unity process matches ---
+
+test("route: restart_editor refuses with unity_process_not_found when the scanner finds no match", async () => {
+  await withTmp("router-restart-no-proc-", async (tmp) => {
+    await setupProject(tmp);
+    await plantEditorLog(tmp, FD_EXHAUSTION_LOG);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [];
+      },
+    });
+    const restoreKiller = setProcessKillerForTest({
+      async kill() {
+        throw new Error("must not be called");
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_restart_editor", {
+        confirm: true,
+      });
+      const body = parseBody(result);
+      assert.equal(result.isError, true);
+      const err = body.error as { code?: string };
+      assert.equal(err.code, "unity_process_not_found");
+    } finally {
+      restoreKiller();
+      restoreScan();
+    }
+  });
+});
+
+// --- restart_editor: happy path (signature + confirm + PID) kills + reports ---
+
+test("route: restart_editor kills the Editor and reports the killed PID when signature + confirm are present", async () => {
+  await withTmp("router-restart-kill-", async (tmp) => {
+    await setupProject(tmp);
+    await plantEditorLog(tmp, FD_EXHAUSTION_LOG);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 4242, projectPath: tmp }];
+      },
+    });
+    let killCall: { pid: number; graceMs: number } | null = null;
+    const restoreKiller = setProcessKillerForTest({
+      async kill(pid, graceMs) {
+        killCall = { pid, graceMs };
+        return { terminated: true, pid, method: "sigterm", elapsedMs: 250 };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_restart_editor", {
+        confirm: true,
+      });
+      const body = parseBody(result);
+      assert.equal(result.isError, false, "successful kill is not an error");
+      assert.equal(body.killed, true);
+      assert.equal(body.pid, 4242);
+      assert.equal(body.method, "sigterm");
+      assert.equal(body.elapsedMs, 250);
+      assert.equal(body.confirm, true);
+      assert.ok(Array.isArray(body.nextSteps), "nextSteps surfaced for relaunch");
+      const captured = killCall as { pid: number; graceMs: number } | null;
+      assert.ok(
+        captured !== null && captured.pid === 4242,
+        "killer dispatched with the resolved PID",
+      );
+    } finally {
+      restoreKiller();
+      restoreScan();
+    }
+  });
+});
+
+// --- restart_editor: surfaces dirty scenes when the bridge is still reachable ---
+
+test("route: restart_editor surfaces dirtyScenesWarning when the bridge reports unsaved scenes", async () => {
+  await withTmp("router-restart-dirty-", async (tmp) => {
+    await setupProject(tmp);
+    await plantEditorLog(tmp, FD_EXHAUSTION_LOG);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 4242, projectPath: tmp }];
+      },
+    });
+    const restoreKiller = setProcessKillerForTest({
+      async kill(pid) {
+        return { terminated: true, pid, method: "sigterm", elapsedMs: 1 };
+      },
+    });
+    try {
+      const live = makeDirtySummaryFakeLive({
+        available: true,
+        dirtyScenes: [
+          { name: "Main", path: "Assets/Scenes/Main.unity", isDirty: true },
+          { name: "UI", path: "Assets/Scenes/UI.unity", isDirty: false },
+        ],
+      });
+      const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+      const result = await router.route("unity_open_mcp_restart_editor", {
+        confirm: true,
+      });
+      const body = parseBody(result);
+      assert.equal(body.killed, true);
+      const warning = body.dirtyScenesWarning as
+        | Array<{ name: string; path: string; isDirty: boolean }>
+        | undefined;
+      assert.ok(Array.isArray(warning), "dirtyScenesWarning surfaced");
+      assert.equal(warning!.length, 1, "only the dirty scene is reported");
+      assert.equal(warning![0].name, "Main");
+    } finally {
+      restoreKiller();
+      restoreScan();
+    }
+  });
+});
+
+// --- restart_editor: kill failure surfaces an error + the reason ---
+
+test("route: restart_editor surfaces a failed kill with the killer's reason", async () => {
+  await withTmp("router-restart-fail-", async (tmp) => {
+    await setupProject(tmp);
+    await plantEditorLog(tmp, FD_EXHAUSTION_LOG);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 4242, projectPath: tmp }];
+      },
+    });
+    const restoreKiller = setProcessKillerForTest({
+      async kill(pid) {
+        return {
+          terminated: false,
+          pid,
+          reason: "timeout",
+          message: "fake: did not exit",
+        };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_restart_editor", {
+        confirm: true,
+      });
+      const body = parseBody(result);
+      assert.equal(result.isError, true, "failed kill is an error");
+      assert.equal(body.killed, false);
+      assert.equal(body.reason, "timeout");
+    } finally {
+      restoreKiller();
+      restoreScan();
+    }
+  });
+});
+
+// --- restart_editor: tool is registered + always-visible ------------------
+
+test("route: restart_editor is registered in ALL_TOOLS and always-visible", () => {
+  const names = ALL_TOOLS.map((t) => t.name);
+  assert.ok(
+    names.includes("unity_open_mcp_restart_editor"),
+    "restart_editor is in ALL_TOOLS",
+  );
+  const visible = filterVisibleTools(ALL_TOOLS, new ToolSessionState()).map(
+    (t) => t.name,
+  );
+  assert.ok(
+    visible.includes("unity_open_mcp_restart_editor"),
+    "restart_editor is always-visible (no group assignment)",
+  );
+});
+
+// --- resource_pressure: happy path with a resolved PID --------------------
+
+test("route: resource_pressure samples fd usage and reports headroom against the Mono ceiling", async () => {
+  await withTmp("router-rp-sample-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return { count: 900, method: "lsof", approximate: false };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      assert.equal(result.isError, false);
+      assert.equal(body.pid, 7777);
+      assert.equal(body.fdCount, 900);
+      assert.equal(body.fdMethod, "lsof");
+      assert.equal(body.ceiling, 1024);
+      // 900/1024 ≈ 0.879 → warn band (≥0.8, <0.9).
+      assert.equal(body.state, "warn");
+      assert.equal(body.reliable, true);
+      const ratio = Number(body.pressureRatio);
+      assert.ok(ratio >= 0.8 && ratio < 0.9, `pressureRatio in warn band, got ${ratio}`);
+      // The sample is recorded in the session ring for trend detection.
+      assert.equal(body.sampleCount, 1);
+      assert.ok(
+        typeof body.launchContextCaveat === "string" &&
+          body.launchContextCaveat.includes("Mono"),
+        "launch-context caveat surfaced",
+      );
+      // warn state surfaces an agentNextSteps array.
+      assert.ok(Array.isArray(body.agentNextSteps));
+      const warning = body.warning as { level?: string } | undefined;
+      assert.equal(warning!.level, "warn");
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+// --- resource_pressure: critical state at ≥90% ----------------------------
+
+test("route: resource_pressure reports critical state at ≥90% of the ceiling", async () => {
+  await withTmp("router-rp-critical-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return { count: 980, method: "lsof", approximate: false };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      assert.equal(body.state, "critical");
+      const warning = body.warning as { level?: string };
+      assert.equal(warning.level, "critical");
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+// --- resource_pressure: ok state stays silent (no warning block) ----------
+
+test("route: resource_pressure ok state omits the warning block", async () => {
+  await withTmp("router-rp-ok-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return { count: 100, method: "proc", approximate: false };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      assert.equal(body.state, "ok");
+      assert.equal(body.warning, undefined, "no warning on a healthy fd count");
+      assert.equal(body.agentNextSteps, undefined);
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+// --- resource_pressure: trend detection across successive samples ---------
+
+test("route: resource_pressure detects a leaking trend across successive samples", async () => {
+  await withTmp("router-rp-trend-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    // Climb 600 → 700 → 800 → 900: monotonic, delta 300 ≥ 10% of 1024.
+    const counts = [600, 700, 800, 900];
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        const next = counts.shift();
+        if (next === undefined) return { count: 900, method: "lsof", approximate: false };
+        return { count: next, method: "lsof", approximate: false };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      // First three calls build the trend (no leak warning yet on the early
+      // samples — the trend needs ≥3 to call it leaking).
+      for (let i = 0; i < 3; i++) {
+        await router.route("unity_open_mcp_resource_pressure", {});
+      }
+      // The fourth call (900 fds) is itself warn-level; the trend across the
+      // four samples is `leaking`.
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      const trend = body.trend as { state: string; delta: number; sampleCount: number };
+      assert.equal(trend.state, "leaking");
+      assert.equal(trend.delta, 300);
+      assert.equal(trend.sampleCount, 4);
+      // leaking surfaces a warning even when the absolute count would only be
+      // warn-level — the trend is the actionable signal.
+      const warning = body.warning as { level?: string };
+      assert.equal(warning.level, "leaking");
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+// --- resource_pressure: probe failure surfaces unknown state + reason -----
+
+test("route: resource_pressure surfaces probe failure with fdCount:null + probeReason", async () => {
+  await withTmp("router-rp-fail-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [{ pid: 7777, projectPath: tmp }];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return {
+          count: null,
+          method: "lsof",
+          reason: "not_found",
+          message: "no such process",
+        };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      assert.equal(result.isError, false, "probe failure is not a tool error");
+      assert.equal(body.fdCount, null);
+      assert.equal(body.state, "unknown");
+      assert.equal(body.probeReason, "not_found");
+      assert.equal(body.reliable, false);
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+// --- resource_pressure: explicit pid arg skips the scan -------------------
+
+test("route: resource_pressure honors an explicit pid arg and skips the process scan", async () => {
+  await withTmp("router-rp-explicit-", async (tmp) => {
+    await setupProject(tmp);
+    let scanCalled = false;
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        scanCalled = true;
+        return [];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        return { count: 50, method: "lsof", approximate: false };
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_resource_pressure", {
+        pid: 9999,
+      });
+      const body = parseBody(result);
+      assert.equal(body.pid, 9999);
+      assert.equal(scanCalled, false, "explicit pid skips the scan");
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+// --- resource_pressure: refuses when no PID resolves ----------------------
+
+test("route: resource_pressure refuses with unity_process_not_found when no scan match + no pid arg", async () => {
+  await withTmp("router-rp-nopid-", async (tmp) => {
+    await setupProject(tmp);
+    const restoreScan = setUnityProcessScannerForTest({
+      scan() {
+        return [];
+      },
+    });
+    const restoreProbe = setFdProbeForTest({
+      count() {
+        throw new Error("probe must not run without a PID");
+      },
+    });
+    try {
+      const router = makeRouter(
+        makeFakeLive(),
+        makeFakeBatch(),
+        tmp,
+        makeFakeEventStream(),
+      );
+      const result = await router.route("unity_open_mcp_resource_pressure", {});
+      const body = parseBody(result);
+      assert.equal(result.isError, true);
+      const err = body.error as { code?: string };
+      assert.equal(err.code, "unity_process_not_found");
+    } finally {
+      restoreProbe();
+      restoreScan();
+    }
+  });
+});
+
+// --- resource_pressure: tool is registered + always-visible --------------
+
+test("route: resource_pressure is registered in ALL_TOOLS and always-visible", () => {
+  const names = ALL_TOOLS.map((t) => t.name);
+  assert.ok(
+    names.includes("unity_open_mcp_resource_pressure"),
+    "resource_pressure is in ALL_TOOLS",
+  );
+  const visible = filterVisibleTools(ALL_TOOLS, new ToolSessionState()).map(
+    (t) => t.name,
+  );
+  assert.ok(
+    visible.includes("unity_open_mcp_resource_pressure"),
+    "resource_pressure is always-visible (no group assignment)",
+  );
+});

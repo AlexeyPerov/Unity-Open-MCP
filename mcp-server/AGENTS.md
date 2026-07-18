@@ -35,6 +35,11 @@ registration, transport, gate execution, and the port formula —
 - Local handlers may use an optional read-only `GET /tools` probe; it must
   fail open so offline Unity never makes the tool unusable.
 - `capabilities`, `generate_skill`, `manage_tools` are local-only.
+- `bridge_status`, `restart_editor`, and `resource_pressure` are local-only
+  operator surfaces that act on the OS process (instance lock + /ping;
+  process kill; fd-count probe), not the bridge. Like `read_compile_errors`
+  they stay reachable when the bridge is down — by design, since the bridge
+  is the thing that dies in the failure modes they recover from.
 - New route types update `docs/architecture.md` and
   `docs/api/routing-lifecycle.md`.
 

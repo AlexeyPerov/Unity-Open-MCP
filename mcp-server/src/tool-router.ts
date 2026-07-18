@@ -6,7 +6,7 @@ import type { BridgeEventStream } from "./event-stream.js";
 import { AssetModelCache, isCompressible, routeCompressible } from "./compressible-router.js";
 import { listAssetsOffline, findReferencesOffline, dependenciesOffline } from "./offline.js";
 import { resolveEditorLogPath, readLogTail, DEFAULT_LOG_TAIL_BYTES, detectStaleLog } from "./unity-log.js";
-import { summarizeProjectHealth } from "./project-health.js";
+import { summarizeProjectHealth, extractProjectHealthIssues } from "./project-health.js";
 import { buildCapabilities } from "./capabilities/build-capabilities.js";
 import { RULE_CATALOG, FIX_CATALOG } from "./capabilities/rule-catalog.js";
 import {
@@ -28,6 +28,23 @@ import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
 import { PORT_ENV_VAR } from "./constants.js";
 import { findUnityForProject } from "./running-unity.js";
+// M31 Plan 3 — Editor fd-exhaustion auto-recovery (restart_editor) + prediction
+// (resource_pressure). Both act on the OS process, not the bridge, so they
+// share the local route classification with bridge_status.
+import {
+  killEditorProcess,
+  DEFAULT_KILL_GRACE_MS,
+  MAX_KILL_WAIT_MS,
+  type KillResult,
+} from "./editor-process-control.js";
+import {
+  countFileDescriptors,
+  computeFdHeadroom,
+  analyzeFdTrend,
+  LAUNCH_CONTEXT_CAVEAT,
+  FD_CEILING,
+  type FdCountResult,
+} from "./process-diagnostics.js";
 import {
   listInstalledEditors,
   fetchAvailableReleases,
@@ -434,6 +451,13 @@ export class ToolRouter implements Router {
       ["unity_open_mcp_generate_skill", (_l, a) => this.routeGenerateSkill(a)],
       ["unity_open_mcp_manage_tools", (l, a) => this.routeManageTools(a, l)],
       ["unity_open_mcp_bridge_status", (l, a) => this.routeBridgeStatus(a, l)],
+      // M31 Plan 3 — Editor fd-exhaustion operator surfaces. restart_editor
+      // is the reactive kill half (acts AFTER the Editor is hung);
+      // resource_pressure is the proactive prediction half (samples fd usage
+      // BEFORE exhaustion). Both are local-routed: they act on the OS process,
+      // not the bridge, like bridge_status.
+      ["unity_open_mcp_restart_editor", (l, a) => this.routeRestartEditor(a, l)],
+      ["unity_open_mcp_resource_pressure", (_l, a) => this.routeResourcePressure(a)],
       // Hub control tools (local-routed; system-level ops).
       ["unity_open_mcp_hub_list_editors", () => this.routeHubListEditors()],
       ["unity_open_mcp_hub_available_releases", () => this.routeHubAvailableReleases()],
@@ -1512,6 +1536,383 @@ export class ToolRouter implements Router {
     // successful status read. _source=local because the synthesis happens in
     // the MCP server (no bridge tool endpoint, no batch Unity).
     return sourceResult(body, "local");
+  }
+
+  // ── M31 Plan 3 — Editor fd-exhaustion operator surfaces (local-routed) ──
+  //
+  // restart_editor (T31.3, reactive kill) + resource_pressure (T31.4,
+  // proactive prediction). Both resolve entirely inside the MCP server: they
+  // act on the OS process (kill / lsof / /proc), never on the bridge. The
+  // bridge is the thing that dies on fd-exhaustion, so neither tool may
+  // depend on it for its primary path. restart_editor still consults the
+  // bridge opportunistically for the active-scene-dirty signal — the Editor
+  // is hung, but the HTTP listener might still be up long enough to answer
+  // a read-only status call before the kill.
+
+  /**
+   * T31.3 — terminate the hung Unity Editor after confirming the
+   * `editor_fd_exhaustion` signature is present in Editor.log. Requires
+   * explicit `confirm: true`. The relaunch half is intentionally deferred
+   * (the Hub owns the interactive-Editor launch recipe); the response tells
+   * the operator/agent to relaunch via the Hub.
+   *
+   * Safety contract (the plan's "explicit confirmation" requirement):
+   *   1. Refuses unless `confirm: true` is passed. A dry-run call (confirm
+   *      false or absent) returns the PID + diagnosis it would act on, no
+   *      side effect.
+   *   2. Refuses when the fd-exhaustion signature is ABSENT from Editor.log.
+   *      Never restart on a plain `dead_bridge` (usually a fixable compile
+   *      failure) or a merely offline bridge.
+   *   3. Surfaces unsaved-scene risk when the bridge is still reachable
+   *      enough to report dirty scenes. Does NOT block the kill — the Editor
+   *      is hung — but makes the risk visible in the response.
+   */
+  private async routeRestartEditor(
+    args: Record<string, unknown>,
+    live: LiveClient,
+  ): Promise<CallToolResult> {
+    const confirm = args.confirm === true;
+    const graceMs =
+      typeof args.kill_grace_ms === "number" &&
+      Number.isInteger(args.kill_grace_ms) &&
+      args.kill_grace_ms >= 0 &&
+      args.kill_grace_ms <= MAX_KILL_WAIT_MS
+        ? args.kill_grace_ms
+        : DEFAULT_KILL_GRACE_MS;
+
+    // 1. Resolve the fd-exhaustion signature from Editor.log FIRST. This is
+    //    the gate: the tool must NEVER restart on a plain dead_bridge / a
+    //    fixable compile failure. We reuse the same offline log read +
+    //    health-issue extractor as read_compile_errors so the diagnosis is
+    //    identical to what the agent already saw.
+    const logPath = resolveEditorLogPath(this.projectPath);
+    const tail = readLogTail(logPath, DEFAULT_LOG_TAIL_BYTES);
+    let signaturePresent = false;
+    let logWarning: string | null = null;
+    if (tail.error || !tail.exists) {
+      // Without the log we cannot confirm the signature — refuse for safety.
+      logWarning = tail.error
+        ? `Editor.log unreadable at ${logPath}: ${tail.error}`
+        : `No Editor.log found at ${logPath}.`;
+    } else {
+      const issues = extractProjectHealthIssues(tail.content);
+      signaturePresent = issues.some((i) => i.kind === "editor_fd_exhaustion");
+      if (!signaturePresent) {
+        logWarning =
+          "The editor_fd_exhaustion signature is NOT present in the recent " +
+          "Editor.log tail. The Editor may be slow/stuck for a different " +
+          "reason (a fixable compile failure, a modal, an unresponsive main " +
+          "thread). Re-run unity_open_mcp_read_compile_errors to confirm " +
+          "the diagnosis before killing the Editor.";
+      }
+    }
+
+    // 2. Resolve the live Unity PID via the process scan (same primitive
+    //    bridge_status uses for cold-Safe-Mode detection). The bridge may
+    //    already be down (it dies on fd-exhaustion), so we cannot rely on
+    //    the instance lock's pid alone.
+    let pid: number | null = null;
+    try {
+      const proc = findUnityForProject(this.projectPath);
+      pid = proc ? proc.pid : null;
+    } catch {
+      pid = null;
+    }
+
+    // 3. Dry-run branch: confirm was false/absent. Return the diagnosis +
+    //    the PID the tool WOULD kill, with no side effect. Lets an agent
+    //    preview before committing.
+    if (!confirm) {
+      return sourceResult(
+        {
+          action: "restart_editor",
+          confirm: false,
+          dryRun: true,
+          signaturePresent,
+          ...(pid !== null ? { wouldKillPid: pid } : {}),
+          ...(logWarning !== null ? { warning: logWarning } : {}),
+          projectPath: this.projectPath,
+          message:
+            "Dry-run preview. Pass confirm: true to actually terminate the " +
+            "hung Unity Editor. Only do so after read_compile_errors " +
+            "confirms an editor_fd_exhaustion issue — killing the Editor " +
+            "can destroy unsaved scene work and in-flight asset imports.",
+        },
+        "local",
+      );
+    }
+
+    // 4. Confirmed-path refusals. Each guard surfaces a structured code so
+    //    an agent can branch on why the kill did not happen.
+    if (logWarning !== null && !signaturePresent) {
+      return sourceResult(
+        {
+          error: {
+            code: "restart_signature_absent",
+            message: logWarning,
+            logPath,
+          },
+        },
+        "local",
+        true,
+      );
+    }
+    if (pid === null) {
+      return sourceResult(
+        {
+          error: {
+            code: "unity_process_not_found",
+            message:
+              "No live Unity process matches this project's path. The " +
+              "Editor may have already exited, or it was launched without " +
+              "-projectPath (the scanner cannot match a bare editor " +
+              "launch). Relaunch Unity for this project via the Hub.",
+            projectPath: this.projectPath,
+          },
+        },
+        "local",
+        true,
+      );
+    }
+
+    // 5. Opportunistic active-scene-dirty check. The Editor is hung, but the
+    //    bridge HTTP listener might still be up long enough to answer a
+    //    read-only status call. If so, surface dirtyScenes[] as a warning so
+    //    the operator knows what unsaved work the kill will lose. This does
+    //    NOT block the kill — the Editor is hung, saving is not an option.
+    let dirtyScenesWarning: Array<{ name: string; path: string; isDirty: boolean }> | null = null;
+    try {
+      const liveAvailable = await live.isLiveAvailable();
+      if (liveAvailable) {
+        const dirtyResult = await live.route(
+          "unity_open_mcp_scene_get_dirty_summary",
+          {},
+        );
+        const dirtyBody = parseResultBody(dirtyResult);
+        if (dirtyBody && Array.isArray(dirtyBody.scenes)) {
+          const dirty = (dirtyBody.scenes as Array<Record<string, unknown>>)
+            .filter((s) => s.isDirty === true)
+            .map((s) => ({
+              name: typeof s.name === "string" ? s.name : "",
+              path: typeof s.path === "string" ? s.path : "",
+              isDirty: true,
+            }));
+          if (dirty.length > 0) dirtyScenesWarning = dirty;
+        }
+      }
+    } catch {
+      // The bridge is unreachable (expected on fd-exhaustion). Swallow — the
+      // dirty-scene signal is opportunistic, not load-bearing.
+    }
+
+    // 6. Kill the Editor.
+    const kill = await killEditorProcess(pid, graceMs);
+    return this.restartEditorKillResponse(pid, graceMs, kill, dirtyScenesWarning);
+  }
+
+  /** Build the confirmed-kill response from a {@link KillResult}. */
+  private restartEditorKillResponse(
+    pid: number,
+    graceMs: number,
+    kill: KillResult,
+    dirtyScenesWarning: Array<{ name: string; path: string; isDirty: boolean }> | null,
+  ): CallToolResult {
+    if (kill.terminated) {
+      return sourceResult(
+        {
+          action: "restart_editor",
+          confirm: true,
+          killed: true,
+          pid: kill.pid,
+          method: kill.method,
+          elapsedMs: kill.elapsedMs,
+          graceMs,
+          ...(dirtyScenesWarning !== null
+            ? {
+                dirtyScenesWarning,
+                dirtyScenesNote:
+                  "These scenes had unsaved changes when the Editor was " +
+                  "killed — that work is lost. Saving is not an option when " +
+                  "the Editor is hung mid-build; surface this to the operator.",
+              }
+            : {}),
+          nextSteps: [
+            "Editor terminated. Relaunch Unity for this project via the Hub " +
+              "(the MCP server does not own the interactive-Editor launch " +
+              "recipe — flags the Hub used at original launch are not " +
+              "knowable from here).",
+            "After relaunch, poll unity_open_mcp_bridge_status until it " +
+              "returns status: \"running\" to confirm the bridge reconnected " +
+              "and wrote a fresh instance lock.",
+            "Once running, call unity_open_mcp_resource_pressure to sample " +
+              "the fresh Editor's fd baseline — the leak accumulates across " +
+              "domain reloads, so a fresh process starts back near zero.",
+          ],
+        },
+        "local",
+      );
+    }
+    // Kill failed — the Editor is still alive (or its state is unknown).
+    return sourceResult(
+      {
+        action: "restart_editor",
+        confirm: true,
+        killed: false,
+        pid: kill.pid,
+        reason: kill.reason,
+        message: kill.message,
+        graceMs,
+        nextSteps: [
+          "The automated kill did not terminate the Editor. The operator " +
+            "must force-quit Unity manually (Activity Monitor / Task " +
+            "Manager / `kill -9 <pid>`).",
+          kill.reason === "not_found"
+            ? "The PID vanished between the scan and the kill — the Editor " +
+              "may have exited on its own. Re-run unity_open_mcp_bridge_status " +
+              "to confirm state before retrying."
+            : "After a manual force-quit, relaunch Unity via the Hub and " +
+              "poll unity_open_mcp_bridge_status until running.",
+        ],
+      },
+      "local",
+      true,
+    );
+  }
+
+  /**
+   * T31.4 — sample the live Unity process's file-descriptor usage and report
+   * headroom against Mono's ~1024 fd ceiling (the real trip point for the Bee
+   * build-driver hang). Proactive counterpart to restart_editor: lets an agent
+   * warn the operator to save + restart BEFORE the Editor hangs, while the
+   * bridge is still healthy. The probe runs server-side (lsof / /proc / Handle
+   * Count) and does NOT require the bridge to be reachable — the bridge is
+   * what dies on fd-exhaustion.
+   *
+   * Records the sample in the session-scoped in-memory ring so successive
+   * calls build a trend (monotonic climb = leak in progress). No disk cache.
+   */
+  private async routeResourcePressure(
+    args: Record<string, unknown>,
+  ): Promise<CallToolResult> {
+    // 1. Resolve the PID. An explicit pid arg wins; otherwise scan for the
+    //    live Unity process for this project (same primitive bridge_status
+    //    uses). The probe must NOT depend on the bridge.
+    let pid: number | null = null;
+    if (typeof args.pid === "number" && Number.isInteger(args.pid) && args.pid > 0) {
+      pid = args.pid;
+    } else {
+      try {
+        const proc = findUnityForProject(this.projectPath);
+        pid = proc ? proc.pid : null;
+      } catch {
+        pid = null;
+      }
+    }
+    if (pid === null) {
+      return sourceResult(
+        {
+          error: {
+            code: "unity_process_not_found",
+            message:
+              "No live Unity process matches this project's path, and no " +
+              "explicit pid was supplied. resource_pressure samples the OS " +
+              "process directly (it does not depend on the bridge) — open " +
+              "Unity for this project first, or pass an explicit pid.",
+            projectPath: this.projectPath,
+          },
+        },
+        "local",
+        true,
+      );
+    }
+
+    // 2. Probe + record the sample. A failed probe still records a sample
+    //    (count: null) so the trend detector sees the gap and does not
+    //    interpolate across it.
+    const probe = countFileDescriptors(pid);
+    const count = probe.count;
+    const headroom = computeFdHeadroom(count, "approximate" in probe ? probe.approximate : false);
+    const ts = Date.now();
+    this.sessionState.recordFdSample({ ts, pid, count });
+    const samples = this.sessionState.fdSamplesSnapshot();
+    const trend = analyzeFdTrend(samples);
+
+    // 3. Build the response. The launchContextCaveat is always present so an
+    //    agent (and the operator) understands the Mono-ceiling-vs-OS-soft-
+    //    limit nuance. warningState is non-null only when there is something
+    //    to surface (warn/critical/leaking); ok+stable stays silent.
+    const fdMethod = probe.method;
+    const approximate = "approximate" in probe ? probe.approximate : false;
+    const probeReason = "reason" in probe ? probe.reason : null;
+    const probeMessage = "message" in probe ? probe.message : null;
+
+    const warningState =
+      headroom.state === "warn" || headroom.state === "critical" || trend.state === "leaking"
+        ? {
+            level:
+              headroom.state === "critical"
+                ? "critical"
+                : trend.state === "leaking"
+                  ? "leaking"
+                  : "warn",
+            message:
+              headroom.state === "critical"
+                ? `Editor fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
+                  `Mono's ${FD_CEILING}-descriptor ceiling — the next domain reload is ` +
+                  `likely to trip the Bee build-driver hang. Save scene work and restart ` +
+                  `Unity via the Hub now, before the Editor hangs.`
+                : trend.state === "leaking"
+                  ? `Editor fd usage is climbing monotonically across samples (leak in ` +
+                    `progress): trend delta ${trend.delta} over ${trend.sampleCount} ` +
+                    `sample(s). Save scene work and plan a restart before the count ` +
+                    `crosses the ${FD_CEILING}-descriptor ceiling.`
+                  : `Editor fd usage is at ${Math.round(headroom.pressureRatio * 100)}% of ` +
+                    `Mono's ${FD_CEILING}-descriptor ceiling. Monitor the trend; if it ` +
+                    `keeps climbing across domain reloads, save scene work and restart ` +
+                    `Unity via the Hub before the Editor hangs.`,
+          }
+        : null;
+
+    return sourceResult(
+      {
+        pid,
+        fdCount: count,
+        fdMethod,
+        approximate,
+        ceiling: FD_CEILING,
+        headroom: headroom.headroom,
+        pressureRatio: headroom.pressureRatio,
+        state: headroom.state,
+        reliable: headroom.reliable,
+        trend,
+        samples: samples.map((s) => ({
+          ts: s.ts,
+          pid: s.pid,
+          count: s.count,
+        })),
+        sampleCount: samples.length,
+        launchContextCaveat: LAUNCH_CONTEXT_CAVEAT,
+        ...(probeReason !== null ? { probeReason } : {}),
+        ...(probeMessage !== null ? { probeMessage } : {}),
+        ...(warningState !== null
+          ? {
+              warning: warningState,
+              agentNextSteps: [
+                "Surface this to the operator — the Editor is approaching " +
+                  "fd-exhaustion and the bridge (the thing that dies on " +
+                  "exhaustion) cannot recover on its own.",
+                "If scene work is unsaved, recommend saving now while the " +
+                  "bridge is still healthy.",
+                "When the operator is ready, restart Unity via the Hub. " +
+                  "After relaunch, call resource_pressure again to sample " +
+                  "the fresh Editor's fd baseline (a fresh process starts " +
+                  "back near zero).",
+              ],
+            }
+          : {}),
+      },
+      "local",
+    );
   }
 
   // ── M26 Plan 2 — Unity Hub control (local-routed) ────────────────
