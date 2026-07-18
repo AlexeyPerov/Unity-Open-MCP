@@ -1402,3 +1402,499 @@ test("substantial corrupt body on compile-reload tool STILL surfaces as unparsab
     disposeSandbox(s);
   }
 });
+
+// ----- M31-optimizations Plan 1 / H1 — PingCache short-circuits ensureReady -----
+//
+// ensureReady() used to fire `GET /ping` before every tool POST, doubling
+// perceived latency even though a PingCache existed and was updated on every
+// successful probe. The fix consults pingCache.fresh() first: a fresh,
+// connected, idle snapshot short-circuits the probe. A stale / compiling /
+// disconnected snapshot falls through to the existing network path. These
+// tests assert both halves via an injected /ping hit counter.
+
+/**
+ * Bridge stub that serves idle 200 /ping + a direct body on /tools/*, and
+ * counts every /ping it serves. Used to assert ensureReady's short-circuit
+ * behavior: a fresh PingCache snapshot → zero /ping probes on the next call.
+ */
+function pingCountingIdleHandler(
+  pingHits: { count: number },
+): (req: IncomingMessage, res: ServerResponse) => void {
+  return (req, res) => {
+    if (req.url === "/ping") pingHits.count++;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (req.url === "/ping") {
+      res.end(
+        JSON.stringify({
+          connected: true,
+          projectPath: REFRESH_PROJECT,
+          unityVersion: "6000.0.0f1",
+          bridgeVersion: "0.1.0",
+          mode: "live",
+          compiling: false,
+          isPlaying: false,
+        }),
+      );
+      return;
+    }
+    res.end(JSON.stringify({ ok: true }));
+  };
+}
+
+test("H1: a second tool call within the TTL issues ZERO /ping probes (cache hit)", async () => {
+  // The first call probes /ping (cache cold) and records the snapshot. The
+  // second call within the TTL must short-circuit ensureReady via
+  // pingCache.fresh() — zero /ping probes on the second call.
+  const s = makeSandbox();
+  const pingHits: { count: number } = { count: 0 };
+  try {
+    const bridge = await startBridgeStub(pingCountingIdleHandler(pingHits));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    // First call — cache cold, one /ping expected.
+    await client.route("unity_open_mcp_editor_get_tags", {});
+    const afterFirst = pingHits.count;
+    assert.equal(
+      afterFirst,
+      1,
+      `first call (cold cache) must issue exactly one /ping, got ${afterFirst}`,
+    );
+
+    // Second call immediately after — cache fresh, must short-circuit.
+    await client.route("unity_open_mcp_editor_get_tags", {});
+    assert.equal(
+      pingHits.count,
+      afterFirst,
+      "second call within TTL must issue ZERO additional /ping probes",
+    );
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("H1: a `compiling` cache snapshot forces a fresh /ping probe (never short-circuit)", async () => {
+  // Record a `compiling=true` snapshot directly into the cache, then call.
+  // pingCache.fresh() must return null on a compiling snapshot, so ensureReady
+  // falls through to the network probe exactly as before.
+  const s = makeSandbox();
+  const pingHits: { count: number } = { count: 0 };
+  try {
+    const bridge = await startBridgeStub(pingCountingIdleHandler(pingHits));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const cache = new PingCache();
+    // Pre-seed a compiling snapshot that would short-circuit if fresh() did
+    // not check the compiling flag.
+    cache.record({
+      connected: true,
+      projectPath: REFRESH_PROJECT,
+      unityVersion: "6000.0.0f1",
+      bridgeVersion: "0.1.0",
+      mode: "live",
+      compiling: true,
+      isPlaying: false,
+    });
+    const client = new LiveClient(
+      bridge.port,
+      cache,
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    await client.route("unity_open_mcp_editor_get_tags", {});
+    assert.ok(
+      pingHits.count >= 1,
+      "a compiling snapshot must force a fresh /ping probe (not short-circuit)",
+    );
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("H1: a disconnected cache snapshot forces a fresh /ping probe", async () => {
+  // Record a `connected=false` snapshot; fresh() must return null so the
+  // probe runs and recovery (bridge reconnects) is observed.
+  const s = makeSandbox();
+  const pingHits: { count: number } = { count: 0 };
+  try {
+    const bridge = await startBridgeStub(pingCountingIdleHandler(pingHits));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const cache = new PingCache();
+    cache.record({
+      connected: false,
+      projectPath: REFRESH_PROJECT,
+      unityVersion: "6000.0.0f1",
+      bridgeVersion: "0.1.0",
+      mode: "live",
+      compiling: false,
+      isPlaying: false,
+    });
+    const client = new LiveClient(
+      bridge.port,
+      cache,
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    await client.route("unity_open_mcp_editor_get_tags", {});
+    assert.ok(
+      pingHits.count >= 1,
+      "a disconnected snapshot must force a fresh /ping probe",
+    );
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("H1: POST-path 503 / transient-offline handling unchanged when the cache was used for the pre-flight", async () => {
+  // Regression guard: a cache-hit short-circuit must not bypass the POST
+  // path's own 503 handling. After a cache-hit pre-flight, a 503 from the
+  // POST must still route through waitForCompile (the bridge "compiling"
+  // signal). The test forces a 503 on the FIRST /tools POST, then flips the
+  // bridge to idle so the compile-wait settles and the call succeeds.
+  const s = makeSandbox();
+  let bridge: BridgeStub | null = null;
+  // Pin the compile poll interval small so waitForCompile settles fast once
+  // the bridge flips to idle (default is 1s; we want sub-100ms).
+  const prevPollInterval = process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+  process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = "20";
+  try {
+    bridge = await startBridgeStub((req, res) => {
+      // IMPORTANT: branch on URL BEFORE writeHead so the 503 path does not
+      // race a 200 header write (which would throw "headers already sent"
+      // and corrupt the response).
+      if (req.url === "/ping") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      // First POST → 503 (bridge compiling). The client must enter
+      // waitForCompile, which polls /ping; the flip below clears the 503 by
+      // swapping in idleOkHandler so the re-POST succeeds.
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ connected: false, compiling: true }));
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+
+    const cache = new PingCache();
+    // Pre-seed a fresh ready snapshot so ensureReady short-circuits (the
+    // scenario under test: pre-flight was cache-served).
+    cache.record({
+      connected: true,
+      projectPath: REFRESH_PROJECT,
+      unityVersion: "6000.0.0f1",
+      bridgeVersion: "0.1.0",
+      mode: "live",
+      compiling: false,
+      isPlaying: false,
+    });
+    const client = new LiveClient(
+      bridge.port,
+      cache,
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    // Flip the bridge to idle-ok shortly so waitForCompile settles and the
+    // re-POST succeeds.
+    const flip = setTimeout(() => bridge!.setHandler(idleOkHandler), 50);
+
+    const result = await client.route("unity_open_mcp_validate_edit", {
+      paths: ["Assets"],
+    });
+    clearTimeout(flip);
+    assert.equal(
+      result.isError,
+      false,
+      "503 from the POST must route through waitForCompile and recover (cache-hit pre-flight does not change POST handling)",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevPollInterval === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = prevPollInterval;
+    disposeSandbox(s);
+  }
+});
+
+// ----- M31-optimizations Plan 1 / M3 — TTL cache for listBridgeTools -----
+//
+// The meta-tools re-fetched `GET /tools` per call. The TTL cache collapses
+// that: two calls within the window share one fetch; a call after the window
+// refetches; a transient-offline signal invalidates so the next call refetches
+// even within the window. Tests pin all three behaviors via a /tools counter.
+
+function toolsCountingHandler(
+  toolsHits: { count: number },
+): (req: IncomingMessage, res: ServerResponse) => void {
+  return (req, res) => {
+    if (req.url === "/tools") toolsHits.count++;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (req.url === "/ping") {
+      res.end(
+        JSON.stringify({
+          connected: true,
+          projectPath: REFRESH_PROJECT,
+          unityVersion: "6000.0.0f1",
+          bridgeVersion: "0.1.0",
+          mode: "live",
+          compiling: false,
+          isPlaying: false,
+        }),
+      );
+      return;
+    }
+    if (req.url === "/tools") {
+      res.end(
+        JSON.stringify({
+          tools: ["unity_open_mcp_ping"],
+          groups: [],
+        }),
+      );
+      return;
+    }
+    res.end(JSON.stringify({ ok: true }));
+  };
+}
+
+test("M3: two listBridgeTools calls within the TTL issue ONE /tools GET (cache hit)", async () => {
+  const s = makeSandbox();
+  const toolsHits: { count: number } = { count: 0 };
+  try {
+    const bridge = await startBridgeStub(toolsCountingHandler(toolsHits));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const first = await client.listBridgeTools();
+    assert.ok(first);
+    const afterFirst = toolsHits.count;
+    assert.equal(afterFirst, 1, "first call fetches /tools");
+
+    const second = await client.listBridgeTools();
+    assert.ok(second);
+    assert.equal(
+      toolsHits.count,
+      afterFirst,
+      "second call within TTL must reuse the cache (zero extra /tools GETs)",
+    );
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
+test("M3: a call after TTL expiry issues a fresh /tools GET", async () => {
+  // Disable the env override so the default TTL applies, then drive the cache
+  // with a 0 TTL via the public API surface indirectly: the simplest way to
+  // assert the expiry path is to wait it out, but that adds minutes to the
+  // suite. Instead assert via the cache unit test (bridge-tools-cache.test.ts)
+  // and here assert the contract end-to-end: with a 0 TTL env override, every
+  // call hits the network.
+  const prev = process.env.UNITY_OPEN_MCP_TOOLS_CACHE_TTL_MS;
+  process.env.UNITY_OPEN_MCP_TOOLS_CACHE_TTL_MS = "0";
+  const s = makeSandbox();
+  const toolsHits: { count: number } = { count: 0 };
+  try {
+    const bridge = await startBridgeStub(toolsCountingHandler(toolsHits));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    await client.listBridgeTools();
+    await client.listBridgeTools();
+    assert.equal(
+      toolsHits.count,
+      2,
+      "a 0 TTL disables caching — every call fetches (this is the same code path as a TTL expiry)",
+    );
+    await bridge.close();
+  } finally {
+    if (prev === undefined) delete process.env.UNITY_OPEN_MCP_TOOLS_CACHE_TTL_MS;
+    else process.env.UNITY_OPEN_MCP_TOOLS_CACHE_TTL_MS = prev;
+    disposeSandbox(s);
+  }
+});
+
+test("M3: a transient-offline signal invalidates the cache (next call refetches within TTL)", async () => {
+  // Warm the cache via listBridgeTools, verify a second call within the TTL
+  // is served from cache (no fetch), then trigger a transient-offline signal
+  // by routing a tool call when the bridge listener has been closed. The
+  // resulting handleTransientOffline invalidates the cache. The next
+  // listBridgeTools call must refetch — which we drive by re-establishing
+  // the bridge on the SAME port via a deterministic-port stub.
+  //
+  // To keep the test deterministic about the port, we DON'T use the
+  // random-port startBridgeStub; instead we toggle the SAME stub between
+  // "responding" and "connection-reset" states. A connection-reset on /ping
+  // drives handleTransientOffline (ECONNREFUSED-equivalent), invalidating
+  // the cache without losing the listener.
+  const s = makeSandbox();
+  const toolsHits: { count: number } = { count: 0 };
+  let bridge: BridgeStub | null = null;
+  // Retry + compile tunables resolved at construction — pin small.
+  const prevAttempts = process.env.UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS;
+  const prevBackoff = process.env.UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS;
+  const prevPollInterval = process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+  process.env.UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS = "1";
+  process.env.UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS = "5";
+  process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = "10";
+  try {
+    bridge = await startBridgeStub(toolsCountingHandler(toolsHits));
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    // 1) Warm the cache.
+    await client.listBridgeTools();
+    assert.equal(toolsHits.count, 1, "warm-up fetched /tools");
+
+    // 2) Second call within TTL — served from cache (no fetch).
+    await client.listBridgeTools();
+    assert.equal(
+      toolsHits.count,
+      1,
+      "second call within TTL is served from cache",
+    );
+
+    // 3) Flip the bridge to "always connection-reset" so the next /ping
+    //    throws — driving handleTransientOffline, which invalidates the
+    //    cache as a side effect.
+    bridge.setHandler((_req, res) => {
+      // Destroy the socket WITHOUT responding — the client's fetch throws a
+      // TypeError ("fetch failed"), which is the ECONNREFUSED-equivalent that
+      // handleTransientOffline classifies as a transient refusal.
+      res.socket?.destroy();
+    });
+    await client
+      .route("unity_open_mcp_editor_get_tags", {})
+      .catch(() => undefined);
+
+    // 4) Restore the bridge and call listBridgeTools again. The cache was
+    //    invalidated, so this MUST refetch even though the TTL has not
+    //    elapsed.
+    bridge.setHandler(toolsCountingHandler(toolsHits));
+    await client.listBridgeTools();
+    assert.ok(
+      toolsHits.count > 1,
+      "after a transient-offline signal, the cache must be invalidated and the next call refetches",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevAttempts === undefined) delete process.env.UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS;
+    else process.env.UNITY_OPEN_MCP_TRANSIENT_RETRY_ATTEMPTS = prevAttempts;
+    if (prevBackoff === undefined) delete process.env.UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS;
+    else process.env.UNITY_OPEN_MCP_TRANSIENT_BACKOFF_MS = prevBackoff;
+    if (prevPollInterval === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = prevPollInterval;
+    disposeSandbox(s);
+  }
+});
+
+test("M3: captureCompileSnapshot bypasses the TTL cache (compile-verify needs the real count)", async () => {
+  // Regression guard: captureCompileSnapshot uses fetchBridgeToolsNow to
+  // bypass the cache so the no-op-vs-real compile detector sees the actual
+  // post-recompile count. We assert the OBSERVABLE property: a compile-reload
+  // tool call hits /tools (the snapshot fetch), even when listBridgeTools
+  // would have served the same inventory from cache. If a future change made
+  // captureCompileSnapshot consult the cache, this test would fail because
+  // the compile-reload call would not add a /tools hit beyond the warm-up.
+  //
+  // Drive execute_csharp (a compile-reload tool) against a handler that
+  // counts /tools hits and returns a small-but-valid direct body for the
+  // tool POST. The compile-reload lifecycle triggers captureCompileSnapshot
+  // (before) + annotateCompileVerify (after), each fetching /tools fresh.
+  const s = makeSandbox();
+  const toolsHits: { count: number } = { count: 0 };
+  let bridge: BridgeStub | null = null;
+  // Compile-reload tools have a generous compile-wait; pin it small so the
+  // test does not block on a 503 (the handler never returns 503 here, but
+  // the tunable is read at construction so we set it defensively).
+  const prevCompileWait = process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+  const prevPollInterval = process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+  process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = "1000";
+  process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = "50";
+  try {
+    bridge = await startBridgeStub((req, res) => {
+      if (req.url === "/tools") toolsHits.count++;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      if (req.url === "/tools") {
+        res.end(JSON.stringify({ tools: ["unity_open_mcp_ping"], groups: [] }));
+        return;
+      }
+      // execute_csharp POST: a valid direct body so shapeToolResult succeeds.
+      res.end(JSON.stringify({ ok: true, value: 1 }));
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    // Prime the cache with one normal call.
+    await client.listBridgeTools();
+    const hitsAfterWarm = toolsHits.count;
+    assert.equal(hitsAfterWarm, 1);
+
+    // A compile-reload tool captures a before-snapshot via
+    // fetchBridgeToolsNow — must NOT be served from cache.
+    await client.route("unity_open_mcp_execute_csharp", { code: "return 1;" });
+    assert.ok(
+      toolsHits.count > hitsAfterWarm,
+      "captureCompileSnapshot must bypass the cache (the compile-verify detector needs the real count)",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevCompileWait === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = prevCompileWait;
+    if (prevPollInterval === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = prevPollInterval;
+    disposeSandbox(s);
+  }
+});
+

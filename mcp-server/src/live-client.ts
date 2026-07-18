@@ -2,6 +2,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import type { MutationEnvelope } from "./gate-error.js";
 import type { PingCache } from "./ping-cache.js";
+import type { BridgeToolsInventory } from "./bridge-tools-cache.js";
+import { BridgeToolsCache } from "./bridge-tools-cache.js";
 import { deriveIsError } from "./gate-error.js";
 import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -192,6 +194,14 @@ function buildOfflineHint(projectPath: string | undefined): string {
 export class LiveClient implements Router {
   private baseUrl: string;
   private pingCache: PingCache;
+  /**
+   * M31-optimizations Plan 1 / M3 — short-TTL cache for the compiled-state
+   * tool inventory (`GET /tools`). The compiled-tool set changes only on a
+   * bridge recompile, but the meta-tools re-fetched it per call. Invalidated
+   * from the same lifecycle hooks as PingCache (handleTransientOffline,
+   * waitForCompile settle) so a reload or compile is observed promptly.
+   */
+  private bridgeToolsCache: BridgeToolsCache;
   private dismissEnabled: boolean;
   private dismissTimeoutMs: number;
   private dismissIntervalMs: number;
@@ -246,6 +256,7 @@ export class LiveClient implements Router {
   ) {
     this.baseUrl = bridgeBaseUrl(port);
     this.pingCache = pingCache;
+    this.bridgeToolsCache = new BridgeToolsCache();
     this.authToken = authToken;
     this.projectPath = projectPath;
     this.retry = readRetryTunables();
@@ -799,6 +810,19 @@ export class LiveClient implements Router {
   }
 
   private async ensureReady(): Promise<CallToolResult | null> {
+    // M31-optimizations Plan 1 / H1 — short-circuit the pre-flight probe when
+    // the PingCache has a fresh-enough ready snapshot (connected && !compiling
+    // && within TTL). The cache is updated on every successful /ping, every
+    // waitForCompile poll, and every isLiveAvailable call, so a burst of tool
+    // calls within the TTL collapses to zero extra probes. A `compiling` or
+    // disconnected snapshot forces a fresh probe (never short-circuit those),
+    // and the POST path's 503 / handleTransientOffline handling is unchanged
+    // when a cache hit turns out to be stale — the worst case is the existing
+    // network-probe path.
+    if (this.pingCache.fresh() !== null) {
+      return null;
+    }
+
     try {
       const res = await this.fetchWithTimeout("/ping", { method: "GET" });
 
@@ -920,6 +944,14 @@ export class LiveClient implements Router {
     // entry 4A). refreshEndpointFromLock is a no-op when an env-port override
     // is in force or nothing has changed.
     this.refreshEndpointFromLock();
+
+    // M31-optimizations Plan 1 / M3 — a transient-offline signal means the
+    // bridge may have recompiled or moved endpoints, so the cached tool
+    // inventory is no longer trustworthy. Drop it; the next listBridgeTools
+    // call refetches even within the TTL. (The ping-cache short-circuit in
+    // ensureReady already probes fresh after a transient failure, so the two
+    // caches stay consistent.)
+    this.bridgeToolsCache.invalidate();
 
     // Dead bridge assembly — not recoverable by waiting. Fail fast so the
     // agent can fetch compile errors instead of hanging on /ping.
@@ -1205,7 +1237,14 @@ export class LiveClient implements Router {
 
           const body = (await res.json()) as PingResponse;
 
-          if (!body.compiling && body.connected) return null;
+          if (!body.compiling && body.connected) {
+            // M31-optimizations Plan 1 / M3 — a compile settle means the
+            // bridge recompiled, so its tool inventory likely changed (new /
+            // removed scripts, asmdef edits, package_add/remove, …). Drop the
+            // cache so the next listBridgeTools refetches the fresh set.
+            this.bridgeToolsCache.invalidate();
+            return null;
+          }
         } catch {
           // Network failure during the poll — normal during a domain reload
           // (the listener is torn down and rebuilt). But if the instance lock
@@ -1292,14 +1331,32 @@ export class LiveClient implements Router {
    * group availability in `unity_open_mcp_capabilities` and
    * `unity_open_mcp_manage_tools(list_groups)`.
    *
+   * M31-optimizations Plan 1 / M3 — backed by a short-TTL session cache. A
+   * second meta-tool call within the TTL reuses the cached inventory instead
+   * of re-issuing `GET /tools`. The cache is invalidated on dead-bridge /
+   * reload detection ({@link handleTransientOffline}) and on a compile settle
+   * ({@link waitForCompile} exit), so a recompile is observed promptly.
+   *
    * Returns null when the bridge is unreachable or the response is malformed
    * — callers fall back to `available: null` (unknown) so the agent is
    * directed at manage_tools when the bridge comes back up.
    */
-  async listBridgeTools(): Promise<{
-    tools: Set<string>;
-    groups: Array<{ id: string; tools: string[] }>;
-  } | null> {
+  async listBridgeTools(): Promise<BridgeToolsInventory | null> {
+    const cached = this.bridgeToolsCache.get();
+    if (cached !== null) return cached;
+    const fresh = await this.fetchBridgeToolsNow();
+    if (fresh !== null) this.bridgeToolsCache.record(fresh);
+    return fresh;
+  }
+
+  /**
+   * Fetch the bridge inventory RIGHT NOW, bypassing the TTL cache. Used by
+   * {@link captureCompileSnapshot}, which needs the *actual* post-recompile
+   * tool count to detect a no-op vs. real compile (a cached count would mask
+   * the delta the detector is built around). Also the underlying fetch for
+   * {@link listBridgeTools} when the cache is empty/expired.
+   */
+  private async fetchBridgeToolsNow(): Promise<BridgeToolsInventory | null> {
     try {
       const res = await this.fetchWithTimeout(
         "/tools",
@@ -1339,7 +1396,10 @@ export class LiveClient implements Router {
   private async captureCompileSnapshot(): Promise<CompileVerifySnapshot> {
     const snap: CompileVerifySnapshot = {};
     try {
-      const inventory = await this.listBridgeTools();
+      // Bypass the TTL cache — the compile-verify detector compares before/
+      // after tool counts to flag a no-op vs. real compile, so a cached count
+      // would mask the very delta the detector is built around.
+      const inventory = await this.fetchBridgeToolsNow();
       if (inventory) snap.bridgeToolCount = inventory.tools.size;
     } catch {
       // best-effort — undefined count is a valid "unknown" snapshot

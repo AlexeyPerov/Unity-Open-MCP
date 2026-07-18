@@ -28,6 +28,28 @@ import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
 import { PORT_ENV_VAR } from "./constants.js";
 import { findUnityForProject } from "./running-unity.js";
+
+// M31-optimizations Plan 1 / L14 — opt-in route-logging gate. Resolved once at
+// module load into a boolean; the per-dispatch log sites read the boolean
+// (not process.env on every call) so the hot path stays a single branch.
+// Default-off: silent in production; set UNITY_OPEN_MCP_DEBUG=1 (or pass
+// --verbose to the server) to re-enable the [unity-open-mcp] Route: trace.
+// Genuine error-path logging is unconditional and never gated by this flag.
+//
+// Exported (ROUTE_LOG_ENABLED + logRoute) so the test suite can pin both
+// halves of the L14 contract: the env-resolution semantics (via
+// resolveRouteLogEnabled, the pure helper) and the default-off posture (via
+// the captured boolean, which reflects whatever the env was at module load).
+export function resolveRouteLogEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.UNITY_OPEN_MCP_DEBUG === "1" || env.UNITY_OPEN_MCP_VERBOSE === "1";
+}
+export const ROUTE_LOG_ENABLED = resolveRouteLogEnabled();
+
+/** Log a happy-path route trace iff the opt-in env flag is set. No-op by
+ *  default so high-throughput agents do not pay a console.error per dispatch. */
+export function logRoute(message: string): void {
+  if (ROUTE_LOG_ENABLED) console.error(message);
+}
 // M31 Plan 3 — Editor fd-exhaustion auto-recovery (restart_editor) + prediction
 // (resource_pressure). Both act on the OS process, not the bridge, so they
 // share the local route classification with bridge_status.
@@ -181,6 +203,64 @@ function injectRouteMeta(
   }
 }
 
+// ===========================================================================
+// M31-optimizations Plan 1 / H2 — single parse+stringify for the live result
+// post-processors (fold + _source + _route).
+//
+// The live find_references / dependencies paths previously chained THREE
+// CallToolResult transforms — foldFindReferencesLive → tagSource →
+// injectRouteMeta — each doing its own JSON.parse + JSON.stringify on the
+// same payload (3 cycles per call). The helpers below collapse that to ONE
+// parse and ONE stringify by operating on the parsed body object directly.
+// `transformLiveResult` is the single entry point; it parses once, applies a
+// caller-supplied body transform (fold / paging / nothing), stamps `_source`
+// and `_route`, and stringifies exactly once.
+//
+// The legacy `tagSource` / `injectRouteMeta` helpers stay for the many call
+// sites that only need ONE of the two stamps (so they incur just one
+// parse+stringify each — not the triple-cycle chain the live routes had).
+// ===========================================================================
+
+/**
+ * Apply a body-level transform pipeline to a {@link CallToolResult} in ONE
+ * parse + ONE stringify cycle. Used by the live find_references /
+ * dependencies / verify routes that previously chained
+ * fold→tagSource→injectRouteMeta (three parse+stringify cycles each).
+ *
+ * Steps:
+ *   1. Parse the first text content block ONCE.
+ *   2. Hand the parsed body to `transform` (may return null to signal "leave
+ *      the body as-is" — the error / unparsable cases).
+ *   3. Stamp `_source` and `_route` on the (possibly transformed) body.
+ *   4. Stringify ONCE into the result's first text block; preserve isError
+ *      and any other content blocks (e.g. an MCP image block).
+ *
+ * `transform` defaults to identity. When the body fails to parse or the
+ * transform returns null, the result is returned unchanged (no stamps).
+ */
+function transformLiveResult(
+  result: CallToolResult,
+  source: SourceTag,
+  meta: RouteMeta,
+  transform?: (
+    body: Record<string, unknown>,
+  ) => Record<string, unknown> | null,
+): CallToolResult {
+  const body = parseResultBody(result);
+  // parseResultBody returns null when there is no text block OR the block is
+  // not a JSON object. In either case there is nothing to stamp — return the
+  // result verbatim, matching tagSource/injectRouteMeta's no-op behavior.
+  if (body === null) return result;
+  const transformed = transform ? transform(body) : body;
+  if (transformed === null) return result;
+  const stamped = {
+    ...transformed,
+    _source: source,
+    _route: meta,
+  };
+  return withResultBody(result, stamped);
+}
+
 // M26 Plan 2 — local-routed error result (used by the Hub control tools for
 // missing-parameter refusals before any side effect runs). Tagged _source=local
 // because it is resolved entirely in the MCP server.
@@ -305,19 +385,26 @@ function pageFindReferencesResult<T extends { referencedBy?: unknown }>(
 }
 
 /**
- * Fold + page the LIVE find_references result. The bridge returns a flat
+ * Fold + page the LIVE find_references result body. The bridge returns a flat
  * `referencedBy` path list (no byKind/byFolder groupings, no locations); we
  * derive the compact grouping server-side and page when requested.
+ *
+ * M31-optimizations Plan 1 / H2 — operates on a parsed body object (not a
+ * re-stringified {@link CallToolResult}) so it can be chained with
+ * {@link tagSourceBody} / {@link injectRouteMetaBody} in a single
+ * parse+stringify cycle via {@link transformLiveResult}.
+ *
+ * Returns null when the body should NOT be folded (it is not a parseable
+ * object, or it carries a top-level `error`), signalling the caller to leave
+ * the result untouched.
  */
-function foldFindReferencesLive(
-  result: CallToolResult,
+function foldFindReferencesLiveBody(
+  body: Record<string, unknown>,
   profile: OutputProfile | undefined,
   wantPaging: boolean,
   args: Record<string, unknown>,
-): CallToolResult {
-  const body = parseResultBody(result);
-  if (body === null) return result;
-  if (body.error) return result;
+): Record<string, unknown> | null {
+  if (body.error) return null;
 
   // Bridge shape: { referencedBy: string[], totalCount, ... } (flat paths).
   const rawList = Array.isArray(body.referencedBy) ? body.referencedBy : [];
@@ -329,22 +416,21 @@ function foldFindReferencesLive(
     const { referencedBy: _dropped, ...rest } = body;
     void _dropped;
     const byKind = groupLiveRefsByKind(rawList as string[]);
-    return withResultBody(result, {
+    return {
       ...rest,
       totalCount: rawList.length,
       byKind,
       referencedBy: [],
-    });
+    };
   }
 
   // balanced / full: keep the path list (paged when requested).
   if (pageSize > 0) {
     const { page, block } = applyPaging(rawList as string[], "find_references", { page_size: pageSize, cursor });
-    const withPage = attachPagination({ ...body, referencedBy: page, totalCount: rawList.length }, block);
-    return withResultBody(result, withPage);
+    return attachPagination({ ...body, referencedBy: page, totalCount: rawList.length }, block);
   }
 
-  return withResultBody(result, { ...body, totalCount: rawList.length });
+  return { ...body, totalCount: rawList.length };
 }
 
 /** Derive a byKind grouping from flat referenced paths for the live compact view. */
@@ -566,7 +652,7 @@ export class ToolRouter implements Router {
     // second pinned branch for a new always-batch tool — extend the map.
     const alwaysBatchReason = ALWAYS_BATCH_TOOLS.get(toolName);
     if (alwaysBatchReason !== undefined) {
-      console.error(
+      logRoute(
         `[unity-open-mcp] Route: ${toolName} -> batch (always-batch: ${alwaysBatchReason})`,
       );
       const result = await this.batch.route(toolName, args);
@@ -584,12 +670,12 @@ export class ToolRouter implements Router {
     const liveAvailable = await live.isLiveAvailable();
 
     if (liveAvailable) {
-      console.error(`[unity-open-mcp] Route: ${toolName} -> live`);
+      logRoute(`[unity-open-mcp] Route: ${toolName} -> live`);
       const result = await live.route(toolName, args);
       return injectRouteMeta(result, { route: "live" });
     }
 
-    console.error(
+    logRoute(
       `[unity-open-mcp] Route: ${toolName} -> batch (live bridge unavailable)`,
     );
 
@@ -2049,7 +2135,7 @@ export class ToolRouter implements Router {
 
     const liveAvailable = await live.isLiveAvailable();
     if (liveAvailable) {
-      console.error("[unity-open-mcp] Route: find_references -> live");
+      logRoute("[unity-open-mcp] Route: find_references -> live");
       // The live bridge only honors max_results (no detail/per-file/threshold).
       // Ask for the full set when paging so the cursor can walk it; otherwise
       // honor the legacy max_results cap. The 0 here is the server-internal
@@ -2060,14 +2146,19 @@ export class ToolRouter implements Router {
         max_results: wantPaging ? 0 : (typeof args.max_results === "number" ? args.max_results : 100),
       };
       const result = await live.route("unity_open_mcp_find_references", liveArgs);
-      const folded = foldFindReferencesLive(result, profile, wantPaging, args);
-      // T6.1 — tag _source=live so the response matches the offline path's
-      // _source=offline tag (clients switching on _source get a defined value
-      // for the common live case instead of undefined).
-      return injectRouteMeta(tagSource(folded, "live"), { route: "live" });
+      // M31-optimizations Plan 1 / H2 — fold + tag _source=live + stamp _route
+      // in ONE parse + ONE stringify. Previously this was three cycles:
+      // foldFindReferencesLive → tagSource → injectRouteMeta. T6.1's _source
+      // contract is preserved (clients switching on _source still see "live").
+      return transformLiveResult(
+        result,
+        "live",
+        { route: "live" },
+        (body) => foldFindReferencesLiveBody(body, profile, wantPaging, args),
+      );
     }
 
-    console.error(
+    logRoute(
       "[unity-open-mcp] Route: find_references -> offline (live bridge unavailable)",
     );
 
@@ -2164,7 +2255,7 @@ export class ToolRouter implements Router {
     // offline path even if the bridge is up — the live DependenciesTool has no
     // transitive-closure surface yet.
     if (!includeImpact && liveAvailable) {
-      console.error("[unity-open-mcp] Route: dependencies -> live");
+      logRoute("[unity-open-mcp] Route: dependencies -> live");
       // The live tool honors asset_path/guid/detail/max_results only.
       const liveArgs: Record<string, unknown> = {
         asset_path: assetPath,
@@ -2173,11 +2264,13 @@ export class ToolRouter implements Router {
         max_results: typeof args.max_results === "number" ? args.max_results : 100,
       };
       const result = await live.route("unity_open_mcp_dependencies", liveArgs);
-      // T6.1 — tag _source=live for parity with the offline route's _source.
-      return injectRouteMeta(tagSource(result, "live"), { route: "live" });
+      // M31-optimizations Plan 1 / H2 — tag _source=live + stamp _route in ONE
+      // parse + ONE stringify. Previously this was two cycles:
+      // tagSource → injectRouteMeta. T6.1's _source=live contract preserved.
+      return transformLiveResult(result, "live", { route: "live" });
     }
 
-    console.error(
+    logRoute(
       includeImpact && liveAvailable
         ? "[unity-open-mcp] Route: dependencies -> offline (include_impact is offline-only)"
         : "[unity-open-mcp] Route: dependencies -> offline (live bridge unavailable)",
@@ -2228,26 +2321,42 @@ export class ToolRouter implements Router {
     // Forward to live/batch exactly as the generic path would. The bridge
     // ignores the unknown profile/page_size/cursor keys (JsonBody substring-
     // searches only for keys it asks for), so they pass through harmlessly.
+    // M31-optimizations Plan 1 / H2 — defer the _route stamp to the single-
+    // parse fold below (saves one parse+stringify per call vs. the previous
+    // injectRouteMeta → parseResultBody → withResultBody chain).
     const canBatch = this.batch.isBatchTool(toolName);
     let raw: CallToolResult;
+    let routeMeta: RouteMeta;
     if (!canBatch) {
       raw = await live.route(toolName, args);
-      raw = injectRouteMeta(raw, { route: "live" });
+      routeMeta = { route: "live" };
     } else {
       const liveAvailable = await live.isLiveAvailable();
       if (liveAvailable) {
         raw = await live.route(toolName, args);
-        raw = injectRouteMeta(raw, { route: "live" });
+        routeMeta = { route: "live" };
       } else {
         raw = await this.batch.route(toolName, args);
-        raw = injectRouteMeta(raw, { route: "batch", fallbackReason: "live_unavailable" });
+        routeMeta = { route: "batch", fallbackReason: "live_unavailable" };
       }
     }
 
     const body = parseResultBody(raw);
-    if (body === null) return raw;
-    if (body.error) return raw;
+    if (body === null) {
+      // Body not parseable — fall back to the legacy injectRouteMeta path so
+      // _route is still stamped (matches pre-change behavior on this edge).
+      return injectRouteMeta(raw, routeMeta);
+    }
+    if (body.error) {
+      return injectRouteMeta(raw, routeMeta);
+    }
 
+    // Stamp _route on the parsed body BEFORE folding so the key order matches
+    // the pre-change chain (injectRouteMeta ran first, then foldVerifyResult
+    // spread its result on top). foldVerifyResult's spreads (`...rest` /
+    // `...result`) carry `_route` through unchanged, preserving byte-identical
+    // output. Single stringify via withResultBody below.
+    body._route = routeMeta;
     const folded = foldVerifyResult(body, toolName, profile, { page_size: pageSize, cursor });
     return withResultBody(raw, folded);
   }

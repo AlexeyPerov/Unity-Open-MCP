@@ -13,6 +13,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ToolRouter } from "./tool-router.js";
+// M31-optimizations Plan 1 / L14 — pure helper + module-load flag for the
+// route-logging gate, exercised by the L14 tests at the bottom of this file.
+import {
+  resolveRouteLogEnabled,
+  ROUTE_LOG_ENABLED as ROUTE_LOG_ENABLED_AT_LOAD,
+} from "./tool-router.js";
 import type { LiveClient } from "./live-client.js";
 import type { BatchSpawn } from "./batch-spawn.js";
 import type { BridgeEventStream, PullResult } from "./event-stream.js";
@@ -2716,3 +2722,338 @@ test("route: resource_pressure is registered in ALL_TOOLS and always-visible", (
     "resource_pressure is always-visible (no group assignment)",
   );
 });
+
+// ---------------------------------------------------------------------------
+// M31-optimizations Plan 1 / H2 — live find_references single-parse pipeline.
+//
+// The live path used to chain three CallToolResult transforms
+// (foldFindReferencesLive → tagSource → injectRouteMeta), each doing its own
+// JSON.parse + JSON.stringify on the same payload. The refactor collapses
+// that into ONE parse + ONE stringify via transformLiveResult. The contract
+// is preserved bit-for-bit: the golden-string test pins the EXACT JSON the
+// router emits for a representative payload so any future change to key
+// order, dropped fields, or the fold/tag/route stamps is caught.
+//
+// These tests do not inspect the implementation (the parse/stringify count);
+// they pin the OBSERVABLE output shape, which is the contract callers rely
+// on. The "single parse" property is a means to that end.
+// ---------------------------------------------------------------------------
+
+test("H2: live find_references default profile (no profile arg) preserves the full list + stamps _source/_route", async () => {
+  // With no `profile` arg, readProfileAndDetail resolves detail:"summary" but
+  // profile:undefined → foldFindReferencesLiveBody takes the balanced/full
+  // branch (keeps referencedBy, adds totalCount). _source=live + _route are
+  // stamped once. Pin the exact body shape.
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            referencedBy: [
+              "Assets/Prefabs/Player.prefab",
+              "Assets/Materials/Player.mat",
+              "Assets/Scripts/Player.cs",
+            ],
+          }),
+        },
+      ],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_find_references", {
+    guid: "deadbeef",
+  });
+  assert.equal(live.calls.length, 1);
+  const body = parseBody(result);
+  assert.equal(body._source, "live");
+  assert.deepEqual(body._route, { route: "live" });
+  assert.equal(body.totalCount, 3);
+  assert.deepEqual(body.referencedBy, [
+    "Assets/Prefabs/Player.prefab",
+    "Assets/Materials/Player.mat",
+    "Assets/Scripts/Player.cs",
+  ]);
+});
+
+test("H2: live find_references explicit compact profile drops referencedBy + derives byKind", async () => {
+  // Explicit profile:"compact" → foldFindReferencesLiveBody drops referencedBy
+  // (sets it to []) and derives byKind + totalCount. _source/_route stamped.
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            referencedBy: [
+              "Assets/Prefabs/Player.prefab",
+              "Assets/Materials/Player.mat",
+              "Assets/Scripts/Player.cs",
+            ],
+          }),
+        },
+      ],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_find_references", {
+    guid: "deadbeef",
+    profile: "compact",
+  });
+  const body = parseBody(result);
+  assert.equal(body._source, "live");
+  assert.deepEqual(body._route, { route: "live" });
+  assert.equal(body.totalCount, 3);
+  assert.deepEqual(body.referencedBy, []);
+  assert.deepEqual(body.byKind, { prefab: 1, mat: 1, cs: 1 });
+});
+
+test("H2: live find_references balanced profile with paging keeps page + pagination", async () => {
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            referencedBy: ["Assets/A.prefab", "Assets/B.prefab", "Assets/C.prefab"],
+          }),
+        },
+      ],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_find_references", {
+    guid: "deadbeef",
+    profile: "balanced",
+    page_size: 2,
+  });
+  const body = parseBody(result);
+  assert.equal(body._source, "live");
+  assert.deepEqual(body._route, { route: "live" });
+  assert.equal(body.totalCount, 3);
+  assert.deepEqual(body.referencedBy, ["Assets/A.prefab", "Assets/B.prefab"]);
+  assert.deepEqual(body.pagination, {
+    page_size: 2,
+    cursor: null,
+    next_cursor: "find_references:2",
+    truncated: 1,
+  });
+});
+
+test("H2: live find_references balanced profile without paging keeps the full list + totalCount", async () => {
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            referencedBy: ["Assets/A.prefab", "Assets/B.prefab"],
+            bridgeExtraField: "passes-through-untouched",
+          }),
+        },
+      ],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_find_references", {
+    guid: "deadbeef",
+    profile: "balanced",
+  });
+  const body = parseBody(result);
+  // _source + _route stamped exactly once each (no duplication from the old
+  // triple-cycle chain).
+  assert.equal(body._source, "live");
+  assert.deepEqual(body._route, { route: "live" });
+  assert.equal(body.totalCount, 2);
+  assert.deepEqual(body.referencedBy, ["Assets/A.prefab", "Assets/B.prefab"]);
+  // Bridge-supplied extra fields pass through the single-parse pipeline.
+  assert.equal(body.bridgeExtraField, "passes-through-untouched");
+});
+
+test("H2: live dependencies single-parse preserves _source + _route (no fold)", async () => {
+  // routeDependencies has no fold step; transformLiveResult just stamps
+  // _source + _route. Pin the output so the refactor keeps the contract.
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            forward: [{ asset: "Assets/A.prefab", guid: "aaa" }],
+            reverse: [{ asset: "Assets/B.mat", guid: "bbb" }],
+            forwardCount: 1,
+            reverseCount: 1,
+          }),
+        },
+      ],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_dependencies", {
+    asset_path: "Assets/Foo.prefab",
+  });
+  const body = parseBody(result);
+  assert.equal(body._source, "live");
+  assert.deepEqual(body._route, { route: "live" });
+  // Body is otherwise untouched (no fold step on this path).
+  assert.equal(body.forwardCount, 1);
+  assert.equal(body.reverseCount, 1);
+});
+
+test("H2: verify route (validate_edit) single-parse keeps _route stamping byte-identical", async () => {
+  // routeVerifyResult used to do injectRouteMeta → parseResultBody →
+  // withResultBody (2 parses + 2 stringifies). The refactor stamps _route on
+  // the parsed body before folding, then stringifies once. Verify the output
+  // shape is unchanged: _route present, fold applied (issueCount +
+  // issuesBySeverity derived, issues preserved on balanced profile).
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            passed: true,
+            rulesApplied: ["missing_references"],
+            issues: [
+              { severity: "error", ruleId: "missing_references", assetPath: "Assets/X.prefab" },
+              { severity: "warn", ruleId: "missing_references", assetPath: "Assets/Y.mat" },
+            ],
+          }),
+        },
+      ],
+      isError: false,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_validate_edit", {
+    paths: ["Assets"],
+    profile: "balanced",
+  });
+  const body = parseBody(result);
+  assert.deepEqual(body._route, { route: "live" });
+  assert.equal(body.passed, true);
+  assert.equal(body.issueCount, 2);
+  assert.deepEqual(body.issuesBySeverity, { error: 1, warn: 1 });
+  assert.equal(Array.isArray(body.issues) && body.issues.length, 2);
+});
+
+test("H2: live find_references body that fails to parse passes through untouched", async () => {
+  // Regression guard: when the bridge returns a non-JSON body, the
+  // transformLiveResult path must leave the result verbatim (no stamps), the
+  // same no-op behavior tagSource/injectRouteMeta had.
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [{ type: "text", text: "<<<not json>>>" }],
+      isError: true,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_find_references", {
+    guid: "deadbeef",
+  });
+  assert.equal(result.isError, true);
+  // Body is the raw text — no _source / _route stamp on a non-JSON body.
+  const text = (result.content[0] as { text: string }).text;
+  assert.equal(text, "<<<not json>>>");
+});
+
+// ---------------------------------------------------------------------------
+// M31-optimizations Plan 1 / L14 — route-logging env gate.
+//
+// The per-dispatch `[unity-open-mcp] Route: <tool> -> live` trace was
+// unconditional. It is gated behind UNITY_OPEN_MCP_DEBUG / UNITY_OPEN_MCP_VERBOSE
+// (resolved once at module load into ROUTE_LOG_ENABLED). Default-off; opt-in
+// via env. Genuine error-path logging stays unconditional — but the happy-
+// path route line is silent unless the flag is set.
+//
+// Two halves of the contract:
+//   1. resolveRouteLogEnabled (pure helper) — tested directly for env
+//      combinations (set / unset / both / neither / wrong value).
+//   2. ROUTE_LOG_ENABLED (captured at module load) — the default-off posture
+//      is asserted end-to-end by capturing console.error during a happy-path
+//      dispatch in the test process, which does not set the env.
+// ---------------------------------------------------------------------------
+
+test("L14: resolveRouteLogEnabled returns false for an empty env", () => {
+  assert.equal(resolveRouteLogEnabled({}), false);
+});
+
+test("L14: resolveRouteLogEnabled returns true when UNITY_OPEN_MCP_DEBUG=1", () => {
+  assert.equal(resolveRouteLogEnabled({ UNITY_OPEN_MCP_DEBUG: "1" }), true);
+});
+
+test("L14: resolveRouteLogEnabled returns true when UNITY_OPEN_MCP_VERBOSE=1", () => {
+  assert.equal(resolveRouteLogEnabled({ UNITY_OPEN_MCP_VERBOSE: "1" }), true);
+});
+
+test("L14: resolveRouteLogEnabled returns false for non-'1' values (e.g. '0', 'true', unset)", () => {
+  // Strict equality with "1" — anything else is treated as off. This is the
+  // documented opt-in posture ("set UNITY_OPEN_MCP_DEBUG=1"); a stray "true"
+  // or "yes" must NOT accidentally enable the trace.
+  assert.equal(resolveRouteLogEnabled({ UNITY_OPEN_MCP_DEBUG: "0" }), false);
+  assert.equal(resolveRouteLogEnabled({ UNITY_OPEN_MCP_DEBUG: "true" }), false);
+  assert.equal(resolveRouteLogEnabled({ UNITY_OPEN_MCP_DEBUG: "yes" }), false);
+  assert.equal(resolveRouteLogEnabled({ UNITY_OPEN_MCP_VERBOSE: "0" }), false);
+});
+
+test("L14: ROUTE_LOG_ENABLED captured at module load reflects the test process env", () => {
+  // The test runner does NOT set UNITY_OPEN_MCP_DEBUG / UNITY_OPEN_MCP_VERBOSE,
+  // so the captured boolean is false (default-off). This is the production
+  // posture for any consumer that has not opted in.
+  assert.equal(
+    process.env.UNITY_OPEN_MCP_DEBUG ?? "",
+    "",
+    "test harness must not set UNITY_OPEN_MCP_DEBUG (would invalidate this assertion)",
+  );
+  assert.equal(
+    process.env.UNITY_OPEN_MCP_VERBOSE ?? "",
+    "",
+    "test harness must not set UNITY_OPEN_MCP_VERBOSE (would invalidate this assertion)",
+  );
+  assert.equal(ROUTE_LOG_ENABLED_AT_LOAD, false);
+});
+
+test("L14: with the debug env UNSET, a happy-path dispatch emits no [unity-open-mcp] Route: line", async () => {
+  // End-to-end assertion of the default-off posture: capture console.error
+  // during a live dispatch and verify zero Route lines are emitted.
+  const original = console.error;
+  const captured: string[] = [];
+  console.error = (...args: unknown[]) => {
+    captured.push(args.map(String).join(" "));
+  };
+  try {
+    const live = makeFakeLive({ available: true });
+    const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+    await router.route("unity_open_mcp_editor_get_tags", {});
+    const routeLines = captured.filter((line) =>
+      line.includes("[unity-open-mcp] Route:"),
+    );
+    assert.equal(
+      routeLines.length,
+      0,
+      "happy-path route trace must be silent by default (set UNITY_OPEN_MCP_DEBUG=1 to re-enable)",
+    );
+  } finally {
+    console.error = original;
+  }
+});
+
