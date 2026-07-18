@@ -1739,7 +1739,7 @@ export class ToolRouter implements Router {
           nextSteps: [
             "Editor terminated. Relaunch Unity for this project via the Hub " +
               "(the MCP server does not own the interactive-Editor launch " +
-              "recipe — flags the Hub used at original launch are not " +
+              "recipe — the flags the Hub used at original launch are not " +
               "knowable from here).",
             "After relaunch, poll unity_open_mcp_bridge_status until it " +
               "returns status: \"running\" to confirm the bridge reconnected " +

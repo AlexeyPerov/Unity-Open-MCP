@@ -79,8 +79,18 @@ export interface FdCountOk {
 export interface FdCountFailed {
   count: null;
   method: FdCountMethod;
-  /** Machine-readable reason for branching. */
-  reason: "not_found" | "proc_unreadable" | "lsof_failed" | "unsupported_platform";
+  /**
+   * Machine-readable reason for branching. Each reason is paired with the
+   * matching {@link FdCountMethod} — `lsof_failed` only comes from the macOS
+   * probe, `proc_unreadable` only from the Linux probe, and
+   * `handle_count_failed` only from the Windows probe.
+   */
+  reason:
+    | "not_found"
+    | "proc_unreadable"
+    | "lsof_failed"
+    | "handle_count_failed"
+    | "unsupported_platform";
   message: string;
 }
 
@@ -218,7 +228,7 @@ function probeWindows(pid: number): FdCountResult {
     return {
       count: null,
       method: "handle_count",
-      reason: "lsof_failed",
+      reason: "handle_count_failed",
       message: `PowerShell handle-count probe failed for PID ${pid}: ${
         err instanceof Error ? err.message : String(err)
       }`,
@@ -238,7 +248,7 @@ function probeWindows(pid: number): FdCountResult {
     return {
       count: null,
       method: "handle_count",
-      reason: "lsof_failed",
+      reason: "handle_count_failed",
       message: `Unparseable HandleCount '${trimmed}' for PID ${pid}.`,
     };
   }

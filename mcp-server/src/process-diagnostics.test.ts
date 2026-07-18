@@ -275,6 +275,30 @@ test("countFileDescriptors surfaces proc_unreadable from the Linux probe", () =>
   }
 });
 
+test("countFileDescriptors surfaces handle_count_failed from the Windows probe (never lsof_failed)", () => {
+  // Windows PowerShell failures must report handle_count_failed, not
+  // lsof_failed — lsof does not exist on Windows and the reason code is
+  // surfaced to agents as a branching signal.
+  const fake = makeFakeProbe({
+    count: null,
+    method: "handle_count",
+    reason: "handle_count_failed",
+    message: "PowerShell blew up",
+  });
+  const restore = setFdProbeForTest(fake);
+  try {
+    const r = countFileDescriptors(31415);
+    if (r.count === null) {
+      assert.equal(r.reason, "handle_count_failed");
+      assert.notEqual(r.reason, "lsof_failed");
+    } else {
+      assert.fail("expected null count");
+    }
+  } finally {
+    restore();
+  }
+});
+
 test("LAUNCH_CONTEXT_CAVEAT mentions Mono and the GUI-launch nuance", () => {
   assert.ok(LAUNCH_CONTEXT_CAVEAT.includes("Mono"));
   assert.ok(

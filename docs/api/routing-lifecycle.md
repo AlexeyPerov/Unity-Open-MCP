@@ -27,7 +27,8 @@ Pinned exceptions:
   `regression_check`.
 - Always offline: `list_assets`, `read_compile_errors`.
 - Always local: `capabilities`, `manage_tools`, `generate_skill`,
-  `bridge_status`, `hub_*`, and event-pull meta-tools.
+  `bridge_status`, `restart_editor`, `resource_pressure`, `hub_*`, and
+  event-pull meta-tools.
 - Always offline when transitive impact is requested: `dependencies` with
   `include_impact=true`.
 
@@ -153,8 +154,7 @@ commands and the hard maximum is 100.
 | `editor_instance_locked` | Headless Unity cannot open a project held by the Editor. | Close the Editor or use the live/offline alternative named in `agentNextSteps`. |
 | `unity_not_discovered` | No Unity executable was found. | Install under a standard Hub path or set `UNITY_PATH`. |
 | `unity_spawn_refused` | The configured Unity binary could not execute. | Correct `UNITY_PATH`; do not retry unchanged. |
-| `restart_confirmation_required` | `restart_editor` was called without `confirm: true`. | Re-call with `confirm: true` after `read_compile_errors` confirms an `editor_fd_exhaustion` issue. |
-| `restart_signature_absent` | `restart_editor` was asked to kill but the `editor_fd_exhaustion` signature is NOT in the recent Editor.log tail. | Re-run `read_compile_errors`; do not kill the Editor for a fixable compile failure. |
+| `restart_signature_absent` | `restart_editor` was asked to kill but the `editor_fd_exhaustion` signature is NOT in the recent Editor.log tail. | Re-run `read_compile_errors`; do not kill the Editor for a fixable compile failure. A call with `confirm` absent/false is NOT an error — it returns a structured dry-run preview the agent can inspect before committing. |
 | `unity_process_not_found` | `restart_editor` / `resource_pressure` could not resolve a live Unity PID for this project. | Open Unity for this project (with `-projectPath`), or pass an explicit `pid` to `resource_pressure`. |
 | `batch_spawn_failed` | Headless Unity produced no classifiable result. | Inspect compile errors, package state, project lock, and path. |
 | `scene_dirty` | A disruptive mutation was refused because a scene has unsaved work. | Save/discard first or deliberately opt into the documented risk. |
