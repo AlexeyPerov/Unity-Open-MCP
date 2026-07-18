@@ -46,12 +46,17 @@ import {
   buildGUIDIndex,
   buildScriptIndex,
   buildScriptIndexForQuery,
+  buildGuidAndScriptIndex,
+  buildGuidScriptAndNameIndex,
   collectFiles,
+  collectMetaTriples,
+  parallelMap,
   resolveGUIDPaths,
   safeReadMetaGUID,
   scriptGUIDs,
   walkFiles,
   walkMeta,
+  type MetaTriple,
 } from "./index-builders.js";
 import { toAssetPath, relativeDir } from "./paths.js";
 import { resolveReferences, OVERRIDE_LABEL_HELPERS } from "./references.js";
@@ -130,11 +135,18 @@ export async function readAssetOffline(
   parsed.kind = kind;
   parsed.guid = guid;
 
+  // M31-optimizations Plan 2 / H5 — build both the script (.cs subset) and
+  // field-GUID indices in a SINGLE meta walk by unioning the wanted sets.
+  // Previously this was buildScriptIndex (which itself walks the meta tree
+  // via buildGUIDIndex) followed by another buildGUIDIndex walk — every cold
+  // read_asset paid two back-to-back walks of the same tree.
   const wantedScripts = scriptGUIDs(parsed);
-  const scriptIndex = await buildScriptIndex(opts.projectRoot, wantedScripts);
   const wantedGUIDs = collectFieldGUIDs(parsed);
-  const guidIndex = await buildGUIDIndex(opts.projectRoot, wantedGUIDs);
-  for (const [g, p] of scriptIndex) guidIndex.set(g, p);
+  const { guidIndex, scriptIndex } = await buildGuidAndScriptIndex(
+    opts.projectRoot,
+    wantedGUIDs,
+    wantedScripts,
+  );
 
   const integrity = runYamlIntegrityChecks(parsed, guidIndex);
   return {
@@ -174,7 +186,13 @@ export async function searchAssetsOffline(
   const maxResults = opts.maxResults ?? 50;
   const searchDir = join(opts.projectRoot, folder);
 
-  const scriptIndex = componentQuery
+  // M31-optimizations Plan 2 / L2 — when a component query is present, build
+  // the script-name → guid → path index from the same single walk that would
+  // already populate the guid + script indices. Previously this was a
+  // separate buildScriptIndexForQuery walk. The guid-query path still uses
+  // resolveGUIDPaths (its early-exit-on-first-match optimization is worth
+  // more than collapsing its walk into this one).
+  const scriptIndex: ScriptIndex = componentQuery
     ? await buildScriptIndexForQuery(opts.projectRoot, componentQuery)
     : new Map<string, string>();
 
@@ -510,7 +528,8 @@ export async function findReferencesOffline(
     let content: string;
     try { content = await readFile(absPath, "utf-8"); } catch { continue; }
 
-    // Fast filter: skip files that don't mention the GUID at all.
+    // Fast filter: skip files that don't mention the GUID at all. This stays
+    // on the joined content (the cheap fast-reject before any per-line work).
     if (!content.includes(targetGuid)) continue;
 
     const assetPath = toAssetPath(opts.projectRoot, absPath);
@@ -529,7 +548,14 @@ export async function findReferencesOffline(
     };
 
     if (detail === "verbose") {
-      entry.locations = extractReferenceLocations(content, targetGuid, maxPerFile);
+      // M31-optimizations Plan 2 / L4 — split content into lines ONCE and
+      // pass the line array downstream. Previously extractReferenceLocations
+      // re-split the same content it was given; now the single split is
+      // visible at the call site and the per-line scan reuses it. The
+      // substring pre-filter above already ran on the joined content (the
+      // fast-reject), so this is the ONLY split for the verbose path.
+      const lines = content.split("\n");
+      entry.locations = extractReferenceLocationsFromLines(lines, targetGuid, maxPerFile);
     }
 
     hits.push(entry);
@@ -592,13 +618,19 @@ export async function findReferencesOffline(
   };
 }
 
-function extractReferenceLocations(
-  content: string,
+/**
+ * M31-optimizations Plan 2 / L4 — extract field-location labels for a target
+ * GUID from a pre-split line array. The caller ({@link findReferencesOffline})
+ * splits the content once and passes the lines here so the verbose path does
+ * not re-split the same content downstream. The per-line scan iterates the
+ * array directly.
+ */
+function extractReferenceLocationsFromLines(
+  lines: string[],
   targetGuid: string,
   maxPerFile: number,
 ): string[] {
   const locations: string[] = [];
-  const lines = content.split("\n");
 
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].includes(targetGuid)) continue;
@@ -777,27 +809,49 @@ export async function dependenciesOffline(
     }
   }
 
-  // ---- Reverse edges ---- (reuse the findReferencesOffline machinery).
-  const refResult = await findReferencesOffline({
-    assetPath: targetPath || undefined,
-    guid: targetGuid,
-    detail: "normal",
-    projectRoot: opts.projectRoot,
-  });
+  // ---- Reverse edges ----
+  // M31-optimizations Plan 2 / H4 + M5 — build the project-wide reverse-edge
+  // graph ONCE per dependenciesOffline call when impact is requested.
+  // Previously the single reverse-edge lookup called findReferencesOffline
+  // (one full project walk), and computeTransitiveImpact called
+  // findReferencesOffline per BFS frontier node — re-walking the whole
+  // project K times for a closure of size K (O(closure × project size)). The
+  // graph is a Map<guid, ReverseEdge[]> built in a single pass over
+  // parseable assets; both the direct reverse-edge lookup and the impact BFS
+  // consult it via pure Map.get, so no per-node project walk remains. The
+  // graph is a local variable (per-call only; root AGENTS.md forbids disk
+  // caches).
+  //
+  // When impact is NOT requested, skip the graph build — the direct reverse-
+  // edge lookup via findReferencesOffline is cheaper than building the whole
+  // project graph (it early-exits the candidate scan as soon as it has read
+  // each file once, and produces the verbose-fold fields dependenciesOffline
+  // does not need but finds cheaper to inherit than to re-derive).
+  const reverseEdgeGraph = includeImpact
+    ? await buildReverseEdgeGraph(opts.projectRoot)
+    : null;
 
-  const reverseEdges: ReverseEdge[] = refResult.referencedBy.map((e) => ({
-    assetPath: e.assetPath,
-    guid: e.guid ?? "",
-    kind: e.kind,
-  }));
+  const reverseEdges: ReverseEdge[] = reverseEdgeGraph
+    ? findReferencesFromGraph(reverseEdgeGraph.graph, targetGuid, targetPath)
+    : (await findReferencesOffline({
+        assetPath: targetPath || undefined,
+        guid: targetGuid,
+        detail: "normal",
+        projectRoot: opts.projectRoot,
+      })).referencedBy.map((e) => ({
+        assetPath: e.assetPath,
+        guid: e.guid ?? "",
+        kind: e.kind,
+      }));
 
   // ---- Transitive impact (optional) ----
   let impact: DependenciesOfflineResult["impact"];
-  if (includeImpact) {
-    impact = await computeTransitiveImpact(
+  if (includeImpact && reverseEdgeGraph) {
+    impact = await computeTransitiveImpactFromGraph(
       targetGuid,
       targetPath,
-      opts.projectRoot,
+      reverseEdgeGraph.graph,
+      reverseEdgeGraph.pathToGuid,
       maxImpactDepth,
     );
   }
@@ -970,11 +1024,104 @@ async function detectCyclesOffline(
   return cycles;
 }
 
-/** Transitive impact closure via BFS over reverse edges. */
-async function computeTransitiveImpact(
+/**
+ * M31-optimizations Plan 2 / H4 + M5 — build the project-wide reverse-edge
+ * graph in a SINGLE pass over parseable assets. Returns:
+ *   - graph: Map<referenced-guid, ReverseEdge[]> — every asset that references
+ *     each guid. Each edge carries the referencing asset's path + kind + its
+ *     OWN guid (so the BFS can resolve a frontier node's guid without an
+ *     extra .meta read).
+ *   - pathToGuid: Map<asset-path, own-guid> — the inverse lookup for the BFS.
+ *
+ * Used by {@link dependenciesOffline} to serve both the direct reverse-edge
+ * lookup AND the transitive impact BFS via pure Map.get, eliminating the
+ * O(closure × project size) re-walk the previous per-node
+ * findReferencesOffline calls incurred.
+ *
+ * In-memory, per-call only (a local variable in dependenciesOffline). Root
+ * AGENTS.md forbids disk caches; this is the same category as
+ * detectCyclesOffline's edgeCache.
+ *
+ * Edge semantics mirror findReferencesOffline: a file references a guid when
+ * its content contains the guid substring. Self-references are filtered at
+ * lookup time (findReferencesFromGraph), not here, so the graph captures
+ * every edge regardless of the eventual target.
+ */
+async function buildReverseEdgeGraph(
+  projectRoot: string,
+): Promise<{
+  graph: Map<string, ReverseEdge[]>;
+  pathToGuid: Map<string, string>;
+}> {
+  const graph = new Map<string, ReverseEdge[]>();
+  const pathToGuid = new Map<string, string>();
+  const candidates = await collectFiles(join(projectRoot, "Assets"));
+  // Read each parseable asset once. Scan it for every guid: reference and
+  // append the asset's edge to each referenced guid's edge list. Also record
+  // the asset's own guid (from its .meta) so the impact BFS can resolve a
+  // frontier node's guid without re-reading .meta per hop.
+  await parallelMap(candidates, async (absPath) => {
+    const ext = extname(absPath).toLowerCase();
+    if (!OFFLINE_PARSEABLE_EXTENSIONS.has(ext)) return;
+    let content: string;
+    try { content = await readFile(absPath, "utf-8"); } catch { return; }
+    if (!content.includes("guid:")) return;
+    const assetPath = toAssetPath(projectRoot, absPath);
+    const kind = kindForPath(absPath);
+    // Resolve the asset's own guid once (cheap .meta read, OS-cached).
+    const ownGuid = (await safeReadMetaGUID(absPath + ".meta")).toLowerCase();
+    const edge: ReverseEdge = { assetPath, guid: ownGuid, kind };
+    if (ownGuid !== "") pathToGuid.set(assetPath, ownGuid);
+    // findGUIDs returns every guid: substring in the content (lowercased).
+    // Dedup within this file via a Set so a guid referenced N times in one
+    // asset still produces one edge entry (matches findReferencesOffline,
+    // which pushes at most one entry per referencing file).
+    const referenced = new Set(findGUIDs(content));
+    for (const guid of referenced) {
+      let list = graph.get(guid);
+      if (!list) { list = []; graph.set(guid, list); }
+      list.push(edge);
+    }
+  });
+  return { graph, pathToGuid };
+}
+
+/**
+ * M31-optimizations Plan 2 / H4 — consult the precomputed reverse-edge graph
+ * for a single target guid, mirroring findReferencesOffline's reverse-edge
+ * semantics (skip self-references; one entry per referencing asset). Pure
+ * Map.get — no I/O. The graph is keyed by lowercased guid; the target guid
+ * is already lowercased by dependenciesOffline's resolution path.
+ */
+function findReferencesFromGraph(
+  graph: Map<string, ReverseEdge[]>,
+  targetGuid: string,
+  targetPath: string,
+): ReverseEdge[] {
+  const list = graph.get(targetGuid);
+  if (!list) return [];
+  const out: ReverseEdge[] = [];
+  for (const edge of list) {
+    if (edge.assetPath === targetPath) continue; // self-reference
+    out.push(edge);
+  }
+  return out;
+}
+
+/**
+ * M31-optimizations Plan 2 / H4 — graph-driven transitive impact BFS.
+ * Replaces the previous computeTransitiveImpact, which called
+ * findReferencesOffline per frontier node (re-walking the project K times
+ * for a closure of size K — O(closure × project size)). The BFS is now pure
+ * Map.get on the precomputed reverse-edge graph; the only remaining per-node
+ * work is the pathToGuid lookup (a Map.get, not a .meta read — the asset's
+ * own guid was captured once during buildReverseEdgeGraph).
+ */
+async function computeTransitiveImpactFromGraph(
   startGuid: string,
   startPath: string,
-  projectRoot: string,
+  graph: Map<string, ReverseEdge[]>,
+  pathToGuid: Map<string, string>,
   maxDepth: number,
 ): Promise<NonNullable<DependenciesOfflineResult["impact"]>> {
   const affected: ImpactEntry[] = [];
@@ -982,13 +1129,8 @@ async function computeTransitiveImpact(
   let frontier: string[] = [];
   let truncated = false;
 
-  const seed = await findReferencesOffline({
-    assetPath: startPath || undefined,
-    guid: startGuid,
-    detail: "normal",
-    projectRoot,
-  });
-  for (const e of seed.referencedBy) {
+  const seed = findReferencesFromGraph(graph, startGuid, startPath);
+  for (const e of seed) {
     if (seen.has(e.assetPath)) continue;
     seen.add(e.assetPath);
     frontier.push(e.assetPath);
@@ -999,14 +1141,15 @@ async function computeTransitiveImpact(
     if (frontier.length === 0) break;
     const next: string[] = [];
     for (const nodePath of frontier) {
-      const nodeGuid = await safeReadMetaGUID(join(projectRoot, nodePath + ".meta"));
-      if (nodeGuid === "") continue;
-      const res = await findReferencesOffline({
-        guid: nodeGuid,
-        detail: "normal",
-        projectRoot,
-      });
-      for (const e of res.referencedBy) {
+      // Resolve the frontier node's guid via the precomputed pathToGuid
+      // index — a Map.get, no .meta read. A node whose .meta was missing/
+      // blank during the graph build contributes no outgoing edges here,
+      // matching the previous safeReadMetaGUID-based path's `if (nodeGuid
+      // === "") continue;` guard.
+      const nodeGuid = pathToGuid.get(nodePath);
+      if (nodeGuid === undefined) continue;
+      const referencedByNode = findReferencesFromGraph(graph, nodeGuid, nodePath);
+      for (const e of referencedByNode) {
         if (seen.has(e.assetPath)) continue;
         seen.add(e.assetPath);
         next.push(e.assetPath);
@@ -1055,37 +1198,55 @@ export async function scanIntegrityOffline(
   opts: { projectRoot: string },
 ): Promise<IntegrityScanResult> {
   const issues: IntegrityScanEntry[] = [];
-  const assetsDir = join(opts.projectRoot, "Assets");
 
+  // M31-optimizations Plan 2 / H3 — single meta walk for the whole scan.
+  // Previously this walked the meta tree 4× (collectFiles, per-file
+  // safeReadMetaGUID, walkMeta for orphans, buildGUIDIndex for integrity).
+  // The triples carry everything the scan needs: guidByPath, allAssetPaths,
+  // orphan detection, and the full GUID index (no second/third walk).
+  const triples = await collectMetaTriples(opts.projectRoot);
+
+  // Derive guidByPath and the full GUID index from the single meta-walk pass.
+  // `t.assetPath` is absolute (collectMetaTriples strips the .meta suffix
+  // from the absolute metaPath); convert to project-relative once.
   const guidByPath = new Map<string, string>();
-  const allAssetPaths = new Set<string>();
-
-  const assetFiles = await collectFiles(assetsDir);
-  for (const absPath of assetFiles) {
-    const assetPath = toAssetPath(opts.projectRoot, absPath);
-    allAssetPaths.add(assetPath);
-    const metaGuid = await safeReadMetaGUID(absPath + ".meta");
-    if (metaGuid !== "") {
-      guidByPath.set(assetPath, metaGuid);
+  const fullGuidIndex: GUIDIndex = new Map();
+  for (const t of triples) {
+    const assetRel = toAssetPath(opts.projectRoot, t.assetPath);
+    if (t.guid !== "") {
+      guidByPath.set(assetRel, t.guid);
+      fullGuidIndex.set(t.guid, assetRel);
     }
   }
-
-  const metaOnlyPaths = new Set<string>();
-  await walkMeta(assetsDir, async (metaPath) => {
-    const assetPath = toAssetPath(opts.projectRoot, metaPath.slice(0, -5));
-    if (!allAssetPaths.has(assetPath)) {
-      metaOnlyPaths.add(assetPath);
-    }
-  });
+  // allAssetPaths: every real asset on disk (not just those with .meta), used
+  // for orphan detection (a .meta whose companion asset is missing) and the
+  // assetsScanned count. The previous implementation derived this from a
+  // collectFiles walk; that walk is NOT a meta-walk, so keeping it does not
+  // regress H3 (which only consolidates the meta walks). The collectFiles
+  // walk is bounded-parallel (Plan 2 / M4) and shares the same readdir-order
+  // traversal as collectMetaTriples, so iteration order stays byte-identical.
+  const assetsDir = join(opts.projectRoot, "Assets");
+  const assetFiles = await collectFiles(assetsDir);
+  const allAssetPaths = new Set<string>();
+  for (const absPath of assetFiles) {
+    allAssetPaths.add(toAssetPath(opts.projectRoot, absPath));
+  }
 
   // ---- orphan_meta: .meta whose companion asset is gone ----
-  for (const path of metaOnlyPaths) {
-    issues.push({
-      path: path + ".meta",
-      code: "orphan_meta",
-      severity: "warning",
-      detail: `meta file has no companion asset at ${path}`,
-    });
+  // An orphan is a triple whose companion asset path is NOT in the on-disk
+  // asset file set. (Previously detected via a second walkMeta pass diffing
+  // against allAssetPaths; now derived from the single triples pass + the
+  // one collectFiles walk we already needed for the integrity loop.)
+  for (const t of triples) {
+    const assetRel = toAssetPath(opts.projectRoot, t.assetPath);
+    if (!allAssetPaths.has(assetRel)) {
+      issues.push({
+        path: assetRel + ".meta",
+        code: "orphan_meta",
+        severity: "warning",
+        detail: `meta file has no companion asset at ${assetRel}`,
+      });
+    }
   }
 
   // ---- duplicate_guid: GUID shared by 2+ assets ----
@@ -1095,6 +1256,11 @@ export async function scanIntegrityOffline(
     if (list) list.push(assetPath);
     else pathsByGuid.set(guid, [assetPath]);
   }
+  // M31-optimizations Plan 2 / H3 — preserve the previous iteration order so
+  // duplicate_guid issue ordering stays byte-identical. The previous impl
+  // iterated guidByPath (Map insertion order = assetFiles walk order); the
+  // triples-derived guidByPath preserves that same order because triples
+  // are pushed in walkMeta's readdir-order walk (matching collectFiles).
   for (const [guid, paths] of pathsByGuid) {
     if (paths.length < 2) continue;
     for (const p of paths) {
@@ -1109,7 +1275,10 @@ export async function scanIntegrityOffline(
   }
 
   // ---- aggregated missing references (the per-read check, project-wide) ----
-  const fullGuidIndex = await buildGUIDIndex(opts.projectRoot);
+  // fullGuidIndex was populated from the single triples pass above — no
+  // separate buildGUIDIndex walk. The asset-body reads below are inherent to
+  // scanning (each YAML asset must be parsed to surface its missing refs);
+  // this plan only collapsed the meta walks, not the body reads.
   for (const absPath of assetFiles) {
     const ext = extname(absPath).toLowerCase();
     if (!OFFLINE_PARSEABLE_EXTENSIONS.has(ext)) continue;

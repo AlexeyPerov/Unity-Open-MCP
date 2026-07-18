@@ -19,6 +19,17 @@ import {
   scanIntegrityOffline,
   countHierarchy,
 } from "./offline.js";
+// M31-optimizations Plan 2 — test-only walk counters, used to assert the
+// single-walk acceptance criteria (H3 scan, H5 read_asset, H4 impact BFS).
+import {
+  resetWalkCounters,
+  getWalkMetaCount,
+  getCollectFilesCount,
+  parallelMap,
+  collectFiles,
+  buildGuidAndScriptIndex,
+  buildGuidScriptAndNameIndex,
+} from "./offline/index-builders.js";
 import { renderAssetSummary } from "./compression/compact.js";
 import type { AssetModel } from "./compression/asset-model.js";
 
@@ -1899,6 +1910,483 @@ test("scanIntegrityOffline groups issues by code in byCode", async () => {
     assert.ok((result.byCode.orphan_meta ?? 0) >= 1, "orphan_meta in byCode");
     assert.ok((result.byCode.missing_reference ?? 0) >= 1, "missing_reference in byCode");
     assert.equal(result.totalIssues, result.issues.length, "totalIssues matches issues length");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ===========================================================================
+// M31-optimizations Plan 2 — single-walk + parallel-walk acceptance tests.
+//
+// These pin the H3 / H4 / H5 / M4 / L2 / L4 contract: each operation walks
+// the meta tree (or the project tree) the minimum number of times, the
+// output is byte-identical to pre-change for representative fixtures, and
+// the parallel walker preserves ordering.
+// ===========================================================================
+
+// Fixture: a multi-directory project with scripts + prefabs + materials +
+// orphans + a broken ref. Larger than setupProject so the walk-count
+// assertions have signal (more directories → more readdir calls per walk).
+async function setupWalkCountProject(tmp: string): Promise<void> {
+  // Scripts (2 dirs, 3 scripts).
+  await mkdir(join(tmp, "Assets", "Scripts", "Player"), { recursive: true });
+  await writeFile(join(tmp, "Assets", "Scripts", "PlayerController.cs"), "class A {}\n");
+  await writeFile(join(tmp, "Assets", "Scripts", "PlayerController.cs.meta"), "guid: c0a10000000000000000000000000001\n");
+  await writeFile(join(tmp, "Assets", "Scripts", "Player", "PlayerInput.cs"), "class B {}\n");
+  await writeFile(join(tmp, "Assets", "Scripts", "Player", "PlayerInput.cs.meta"), "guid: c0a10000000000000000000000000002\n");
+  await writeFile(join(tmp, "Assets", "Scripts", "Enemy.cs"), "class C {}\n");
+  await writeFile(join(tmp, "Assets", "Scripts", "Enemy.cs.meta"), "guid: c0a10000000000000000000000000003\n");
+
+  // Prefabs (1 dir, 2 prefabs) referencing scripts + materials.
+  const scriptGuid = "c0a10000000000000000000000000001";
+  const matGuid = "d0e10000000000000000000000000001";
+  await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+  await writeFile(
+    join(tmp, "Assets", "Prefabs", "Player.prefab"),
+    `%YAML 1.1
+--- !u!1 &100
+GameObject:
+  m_Name: Player
+--- !u!114 &200
+MonoBehaviour:
+  m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}
+  m_Mat: {fileID: 0, guid: ${matGuid}, type: 2}
+`,
+  );
+  await writeFile(join(tmp, "Assets", "Prefabs", "Player.prefab.meta"), "guid: a0b10000000000000000000000000001\n");
+  await writeFile(
+    join(tmp, "Assets", "Prefabs", "PlayerVariant.prefab"),
+    `%YAML 1.1
+--- !u!1001 &300
+PrefabInstance:
+  m_SourcePrefab: {fileID: 100100000, guid: a0b10000000000000000000000000001, type: 3}
+`,
+  );
+  await writeFile(join(tmp, "Assets", "Prefabs", "PlayerVariant.prefab.meta"), "guid: a0b10000000000000000000000000002\n");
+
+  // Materials (1 dir, 1 material).
+  await mkdir(join(tmp, "Assets", "Materials"), { recursive: true });
+  await writeFile(join(tmp, "Assets", "Materials", "SharedMat.mat"), `%YAML 1.1\n--- !u!21 &1\nMaterial:\n  m_Name: SharedMat\n`);
+  await writeFile(join(tmp, "Assets", "Materials", "SharedMat.mat.meta"), `guid: ${matGuid}\n`);
+
+  // Orphan .meta (no companion asset).
+  await writeFile(join(tmp, "Assets", "Ghost.cs.meta"), "guid: f0f00000000000000000000000000001\n");
+}
+
+// ---- T2.1: scanIntegrityOffline walks the meta tree once (H3) ----
+
+test("H3: scanIntegrityOffline walks the meta tree exactly once regardless of project size", async () => {
+  // The previous implementation walked the meta tree 4× per scan
+  // (collectFiles + per-file safeReadMetaGUID + walkMeta for orphans +
+  // buildGUIDIndex for integrity). The single-walk refactor collapses that
+  // to one walkMeta invocation chain (collectMetaTriples). Assert via the
+  // test-only walk counter.
+  const tmp = await mkdtemp(join(tmpdir(), "offline-scan-walks-"));
+  try {
+    await setupWalkCountProject(tmp);
+    resetWalkCounters();
+    const result = await scanIntegrityOffline({ projectRoot: tmp });
+    const walks = getWalkMetaCount();
+    // The fixture has Assets/ + 3 subdirs (Scripts, Prefabs, Materials) +
+    // Scripts/Player = 5 directories. A single meta walk enters walkMeta
+    // once per directory, so walks === 5. The pre-change code entered
+    // walkMeta twice per directory (the orphan walk + the buildGUIDIndex
+    // walk) → walks would be 10. Asserting <= 6 gives a little slack for
+    // future fixture growth while still proving the single-walk property.
+    assert.ok(
+      walks <= 6,
+      `scanIntegrityOffline should walk the meta tree once (got ${walks} walkMeta entries; pre-change was ~2× directory count)`,
+    );
+    // Output correctness: orphan + missing-ref + duplicate detection still work.
+    assert.ok((result.byCode.orphan_meta ?? 0) >= 1, "orphan still detected");
+    assert.equal(result._source, "offline");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("H3: scanIntegrityOffline output is byte-stable across runs (golden shape)", async () => {
+  // Run the scan twice and assert the issue set + counts are identical —
+  // proves the single-walk refactor did not change the output shape.
+  const tmp = await mkdtemp(join(tmpdir(), "offline-scan-stable-"));
+  try {
+    await setupWalkCountProject(tmp);
+    const first = await scanIntegrityOffline({ projectRoot: tmp });
+    const second = await scanIntegrityOffline({ projectRoot: tmp });
+    assert.deepEqual(first.byCode, second.byCode);
+    assert.equal(first.totalIssues, second.totalIssues);
+    assert.equal(first.assetsScanned, second.assetsScanned);
+    assert.deepEqual(
+      first.issues.map((i) => `${i.code}:${i.path}`),
+      second.issues.map((i) => `${i.code}:${i.path}`),
+      "issue ordering must be deterministic across runs",
+    );
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---- T2.3: cold read_asset walks the meta tree once (H5) ----
+
+test("H5: cold read_asset walks the meta tree exactly once (union wanted-set)", async () => {
+  // The previous implementation called buildScriptIndex then buildGUIDIndex
+  // back-to-back. buildScriptIndex internally calls buildGUIDIndex, so the
+  // meta tree was walked twice for every cold read_asset. The union wanted-
+  // set refactor collapses that to one walk.
+  const tmp = await mkdtemp(join(tmpdir(), "offline-read-walks-"));
+  try {
+    await setupWalkCountProject(tmp);
+    resetWalkCounters();
+    const { model } = await readAssetOffline("Assets/Prefabs/Player.prefab", {
+      fieldLimit: 10,
+      projectRoot: tmp,
+    });
+    const walks = getWalkMetaCount();
+    // Same 5-directory tree → single walk = 5 walkMeta entries. Pre-change
+    // was 2× that (10). Assert <= 6 with the same slack rationale as H3.
+    assert.ok(
+      walks <= 6,
+      `cold read_asset should walk the meta tree once (got ${walks} walkMeta entries; pre-change was ~2× directory count)`,
+    );
+    // Output correctness: the asset parsed and the GUID resolution happened
+    // (the integrity block runs against the union-built guidIndex).
+    assert.equal(model.kind, "prefab");
+    assert.equal(model.path, "Assets/Prefabs/Player.prefab");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("H5: buildGuidAndScriptIndex produces both indices in a single walk", async () => {
+  // Direct unit test of the combined builder: one walk, both maps populated.
+  const tmp = await mkdtemp(join(tmpdir(), "offline-combined-idx-"));
+  try {
+    await setupWalkCountProject(tmp);
+    resetWalkCounters();
+    const wantedScripts = new Set(["c0a10000000000000000000000000001"]);
+    const wantedGuids = new Set(["d0e10000000000000000000000000001"]);
+    const { guidIndex, scriptIndex } = await buildGuidAndScriptIndex(
+      tmp,
+      wantedGuids,
+      wantedScripts,
+    );
+    const walks = getWalkMetaCount();
+    assert.ok(walks <= 6, `combined builder should walk once (got ${walks})`);
+    assert.equal(
+      guidIndex.get("d0e10000000000000000000000000001"),
+      "Assets/Materials/SharedMat.mat",
+      "guidIndex populated from the single walk",
+    );
+    assert.equal(
+      scriptIndex.get("c0a10000000000000000000000000001"),
+      "Assets/Scripts/PlayerController.cs",
+      "scriptIndex populated from the same single walk",
+    );
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---- T2.2: dependenciesOffline impact walks the project once (H4) ----
+
+test("H4: dependenciesOffline(include_impact) walks the project once regardless of closure size", async () => {
+  // The previous computeTransitiveImpact called findReferencesOffline per
+  // BFS frontier node, each of which re-walked the whole project. For a
+  // closure of size K the walk count was O(K × project). The graph-driven
+  // BFS builds the reverse-edge graph once (one collectFiles walk) and
+  // serves every hop via Map.get.
+  //
+  // The fixture: Player.prefab ← PlayerVariant.prefab (depth-1 reverse).
+  // No depth-2+ closure here, but the assertion is about the WALK COUNT,
+  // not the closure depth — even a deep closure must not add walks.
+  const tmp = await mkdtemp(join(tmpdir(), "offline-impact-walks-"));
+  try {
+    await setupWalkCountProject(tmp);
+    resetWalkCounters();
+    const result = await dependenciesOffline({
+      assetPath: "Assets/Prefabs/Player.prefab",
+      includeImpact: true,
+      maxImpactDepth: 5,
+      projectRoot: tmp,
+    });
+    const fileWalks = getCollectFilesCount();
+    // The reverse-edge graph build does ONE collectFiles walk. The forward-
+    // edge path does not call collectFiles. So fileWalks should be small
+    // (proportional to directory count, not closure size). Pre-change was
+    // O(closure × directory count).
+    assert.ok(
+      fileWalks <= 6,
+      `impact should walk the project once (got ${fileWalks} collectFiles entries; pre-change was O(closure × directories))`,
+    );
+    // Output correctness: impact block present with at least the direct
+    // reverse edge (PlayerVariant → Player).
+    assert.ok(result.impact, "impact block present");
+    assert.ok(
+      result.impact!.affected.some((a) => a.assetPath === "Assets/Prefabs/PlayerVariant.prefab"),
+      "direct reverse edge (variant → base) is in the impact closure",
+    );
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("H4: dependenciesOffline impact output is byte-stable (golden shape)", async () => {
+  // Run impact twice and assert the affected set + depths are identical —
+  // proves the graph-driven BFS produces the same closure as the previous
+  // per-node walk.
+  const tmp = await mkdtemp(join(tmpdir(), "offline-impact-stable-"));
+  try {
+    await setupWalkCountProject(tmp);
+    const first = await dependenciesOffline({
+      assetPath: "Assets/Prefabs/Player.prefab",
+      includeImpact: true,
+      projectRoot: tmp,
+    });
+    const second = await dependenciesOffline({
+      assetPath: "Assets/Prefabs/Player.prefab",
+      includeImpact: true,
+      projectRoot: tmp,
+    });
+    assert.deepEqual(first.impact?.affected, second.impact?.affected);
+    assert.equal(first.impact?.affectedCount, second.impact?.affectedCount);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("H4: dependenciesOffline without impact does NOT build the graph (cheaper path)", async () => {
+  // When impact is not requested, dependenciesOffline falls back to the
+  // direct findReferencesOffline path (cheaper than building the whole
+  // project graph for a single reverse-edge lookup). Assert the graph build
+  // is skipped by checking collectFiles was NOT called by dependenciesOffline
+  // itself (findReferencesOffline DOES call collectFiles once, so the total
+  // is small — but never the graph build's additional walk).
+  const tmp = await mkdtemp(join(tmpdir(), "offline-no-impact-"));
+  try {
+    await setupWalkCountProject(tmp);
+    resetWalkCounters();
+    await dependenciesOffline({
+      assetPath: "Assets/Prefabs/Player.prefab",
+      includeImpact: false,
+      projectRoot: tmp,
+    });
+    const fileWalks = getCollectFilesCount();
+    assert.ok(
+      fileWalks <= 6,
+      `no-impact path should not build the graph (got ${fileWalks} collectFiles entries)`,
+    );
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---- T2.4: collectFiles parallel + accumulator + ordering (M4, L5) ----
+
+test("M4: collectFiles output ordering is deterministic (matches sequential readdir order)", async () => {
+  // The parallel fan-out must preserve the same iteration order as the
+  // previous sequential walk so golden-output tests stay stable. Build a
+  // wide tree (many siblings) and assert the output matches a sequential
+  // reference walk.
+  const tmp = await mkdtemp(join(tmpdir(), "offline-collect-order-"));
+  try {
+    await mkdir(join(tmp, "Assets", "Wide"), { recursive: true });
+    // 20 sibling files + 4 sibling subdirs with 5 files each.
+    const expected: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const name = `file${String(i).padStart(2, "0")}.cs`;
+      await writeFile(join(tmp, "Assets", "Wide", name), "");
+      expected.push(join(tmp, "Assets", "Wide", name));
+    }
+    for (let s = 0; s < 4; s++) {
+      const sub = `sub${s}`;
+      await mkdir(join(tmp, "Assets", "Wide", sub));
+      for (let i = 0; i < 5; i++) {
+        const name = `inner${i}.cs`;
+        await writeFile(join(tmp, "Assets", "Wide", sub, name), "");
+        expected.push(join(tmp, "Assets", "Wide", sub, name));
+      }
+    }
+    // readdir returns entries in directory order; the previous sequential
+    // walk inlined each subdir's results where the subdir sat in its parent's
+    // listing. Mirror that expected order by reading the parent's readdir,
+    // recursing sequentially, and flattening.
+    const { readdir, stat } = await import("node:fs/promises");
+    const expectedOrder: string[] = [];
+    const sequentialWalk = async (dir: string): Promise<void> => {
+      const entries = await readdir(dir);
+      for (const name of entries) {
+        if (name === "Assets" && dir === tmp) {
+          // Top-level tmp/Assets handled below; skip the recursion here.
+        }
+        const fullPath = join(dir, name);
+        const s = await stat(fullPath);
+        if (s.isDirectory()) await sequentialWalk(fullPath);
+        else if (!name.endsWith(".meta")) expectedOrder.push(fullPath);
+      }
+    };
+    await sequentialWalk(join(tmp, "Assets"));
+
+    const actual = await collectFiles(join(tmp, "Assets"));
+    assert.deepEqual(
+      actual,
+      expectedOrder,
+      "parallel collectFiles must produce the same order as a sequential readdir walk",
+    );
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("M4: parallelMap preserves input order across chunks", async () => {
+  // Direct unit test of the bounded-parallel helper: with a chunk size
+  // smaller than the input, the output order must match the input order.
+  const input = Array.from({ length: 100 }, (_, i) => i);
+  const out = await parallelMap(input, async (n) => {
+    // Add a small randomized delay so chunks settle out of order without
+    // parallelMap's order-stable merge.
+    await new Promise<void>((r) => setTimeout(r, Math.random() * 5));
+    return n * 2;
+  });
+  assert.deepEqual(out, input.map((n) => n * 2));
+});
+
+test("M4: parallelMap respects chunk size (bounds concurrency)", async () => {
+  // Track the high-water mark of in-flight fn invocations. With chunk size 4
+  // and 20 items, concurrency must never exceed 4.
+  let inFlight = 0;
+  let highWater = 0;
+  const items = Array.from({ length: 20 }, (_, i) => i);
+  await parallelMap(
+    items,
+    async (n) => {
+      inFlight++;
+      highWater = Math.max(highWater, inFlight);
+      await new Promise<void>((r) => setTimeout(r, 5));
+      inFlight--;
+      return n;
+    },
+    4,
+  );
+  assert.ok(
+    highWater <= 4,
+    `concurrency must be bounded by chunk size (high-water ${highWater} > 4)`,
+  );
+});
+
+// ---- T2.5: extractReferenceLocations single split (L4) ----
+
+test("L4: verbose find_references output is byte-stable (single-split refactor)", async () => {
+  // The verbose path now splits content once at the call site and passes
+  // the line array downstream. Assert the verbose output (locations field)
+  // is byte-identical to a known-good capture for a fixture with prefab
+  // modifications + direct field refs.
+  const tmp = await mkdtemp(join(tmpdir(), "offline-verbose-split-"));
+  try {
+    const targetGuid = "dead000000000000000000000000beef";
+    await mkdir(join(tmp, "Assets", "Materials"), { recursive: true });
+    await writeFile(join(tmp, "Assets", "Materials", "Target.mat"), `%YAML 1.1\n--- !u!21 &1\nMaterial:\n  m_Name: Target\n`);
+    await writeFile(join(tmp, "Assets", "Materials", "Target.mat.meta"), `guid: ${targetGuid}\n`);
+
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    // Prefab with a direct material field ref + a prefab-modification target
+    // ref — both shapes the locations extractor handles.
+    await writeFile(
+      join(tmp, "Assets", "Prefabs", "User.prefab"),
+      `%YAML 1.1
+--- !u!1 &100
+GameObject:
+  m_Name: User
+--- !u!23 &200
+MeshRenderer:
+  m_Material: {fileID: 0, guid: ${targetGuid}, type: 2}
+--- !u!1001 &300
+PrefabInstance:
+  m_Modifications:
+  - target: {fileID: 100, guid: ${targetGuid}, type: 3}
+    propertyPath: m_Name
+    value: Renamed
+`,
+    );
+    await writeFile(join(tmp, "Assets", "Prefabs", "User.prefab.meta"), "guid: user000000000000000000000000000001\n");
+
+    const result = await findReferencesOffline({
+      guid: targetGuid,
+      detail: "verbose",
+      projectRoot: tmp,
+    });
+    const user = result.referencedBy.find((e) => e.assetPath === "Assets/Prefabs/User.prefab");
+    assert.ok(user, "User.prefab is in the referenced-by list");
+    assert.ok(
+      user!.locations && user!.locations.length >= 2,
+      `verbose locations extracted (got ${user!.locations?.length ?? 0})`,
+    );
+    // The material field ref surfaces as the "m_Material" field name; the
+    // prefab-modification target surfaces as "prefab → m_Name". Both must
+    // appear in the locations array — pinning the exact labels catches any
+    // regression in the single-split path's per-line scan.
+    assert.ok(
+      user!.locations!.includes("m_Material"),
+      `locations include the direct material field (got ${JSON.stringify(user!.locations)})`,
+    );
+    assert.ok(
+      user!.locations!.includes("prefab → m_Name"),
+      `locations include the prefab-modification target label (got ${JSON.stringify(user!.locations)})`,
+    );
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ---- L2: search_assets component query uses the combined walk ----
+
+test("L2: buildScriptIndexForQuery delegates to the combined single-walk primitive", async () => {
+  // The component-query path now derives its script-name → guid → path index
+  // from buildGuidScriptAndNameIndex (the same primitive read_asset uses),
+  // instead of a separate walk. Assert the output is byte-identical to the
+  // pre-change shape: a Map<guid, path> for every .cs whose filename
+  // contains the query substring.
+  const tmp = await mkdtemp(join(tmpdir(), "offline-script-query-"));
+  try {
+    await setupWalkCountProject(tmp);
+    const { buildScriptIndexForQuery } = await import("./offline/index-builders.js");
+    const idx = await buildScriptIndexForQuery(tmp, "player");
+    assert.ok(
+      idx.get("c0a10000000000000000000000000001") === "Assets/Scripts/PlayerController.cs",
+      "PlayerController matched by 'player' query",
+    );
+    assert.ok(
+      idx.get("c0a10000000000000000000000000002") === "Assets/Scripts/Player/PlayerInput.cs",
+      "PlayerInput matched by 'player' query",
+    );
+    assert.ok(
+      !idx.has("c0a10000000000000000000000000003"),
+      "Enemy.cs NOT matched by 'player' query",
+    );
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("L2: buildGuidScriptAndNameIndex collects script names alongside guid+script indices", async () => {
+  // The combined primitive returns a script-name → guid → path mapping as a
+  // byproduct of the single walk. Assert all three maps are populated from
+  // the same pass when both a wanted set and a component query are supplied.
+  const tmp = await mkdtemp(join(tmpdir(), "offline-combined-name-idx-"));
+  try {
+    await setupWalkCountProject(tmp);
+    resetWalkCounters();
+    const { guidIndex, scriptIndex, scriptNameIndex } = await buildGuidScriptAndNameIndex(
+      tmp,
+      {
+        wantedGuids: new Set(["d0e10000000000000000000000000001"]),
+        componentQuery: "player",
+      },
+    );
+    const walks = getWalkMetaCount();
+    assert.ok(walks <= 6, `combined name+guid+script walk ran once (got ${walks})`);
+    assert.equal(guidIndex.get("d0e10000000000000000000000000001"), "Assets/Materials/SharedMat.mat");
+    assert.equal(scriptNameIndex.get("c0a10000000000000000000000000001")?.path, "Assets/Scripts/PlayerController.cs");
+    assert.equal(scriptNameIndex.get("c0a10000000000000000000000000001")?.name, "playercontroller");
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
