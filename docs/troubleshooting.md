@@ -81,7 +81,7 @@ live tools time out. Errors mention **`dead_bridge`** or **`main_thread_blocked`
 2. Check your MCP client config uses the **same absolute project path** as the
    open Unity project (`UNITY_PROJECT_PATH`).
 3. See [MCP client configuration](setup/client-configuration.md) for client
-   paths and envelopes,
+   paths and snippets,
    [Agent setup](setup/agent-setup.md) for the AI-driven install path, and
    [Wizard setup](setup/wizard-setup.md) for guided verification.
 
@@ -114,6 +114,6 @@ client.
 
 - [Dialog policy](dialog-policy.md) — startup and steady-state modal handling
 - [Agent setup](setup/agent-setup.md) — AI-driven install procedure
-- [MCP client configuration](setup/client-configuration.md) — client paths and envelopes
+- [MCP client configuration](setup/client-configuration.md) — client paths and copy-paste snippets
 - [Bridge HTTP API](api/bridge-http.md) — `/ping` and listener contract
 - [Routing and lifecycle](api/routing-lifecycle.md) — route classes and recovery

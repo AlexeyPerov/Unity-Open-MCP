@@ -114,7 +114,7 @@ Pick the AI client to connect. The first viewport shows a short **Popular** list
 
 Each option shows whether it writes a config file, is CLI-only, or copies a
 snippet, with the target path and format in its tooltip. The complete path and
-envelope catalog lives in
+snippet catalog lives in
 [MCP client configuration](client-configuration.md).
 
 Review the generated config preview (JSON or TOML, or a CLI command for Claude Code), then write it. Writes are merge-safe: unrelated keys and sibling MCP servers are preserved, and a `.bak` backup is left next to the original file.

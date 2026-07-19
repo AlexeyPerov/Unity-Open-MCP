@@ -9,14 +9,23 @@ extension UPM package for shipped domains.
 
 ## Quick start
 
-1. **Install the Unity package** for the domain (Hub AI Setup wizard or
-   `Packages/manifest.json`). Built-in modules (lighting, audio, terrain, …)
-   need no manifest entry.
+1. **Install the Unity package** for the domain (Hub AI Setup wizard,
+   `Packages/manifest.json`, or the in-Editor panel below). Built-in modules
+   (lighting, audio, terrain, …) need no manifest entry.
 2. **Activate the tool group** for the session — unless the group
    **auto-activates** when its package is installed (see table below).
 3. **Check availability** — call `unity_open_mcp_capabilities` or
    `unity_open_mcp_manage_tools(action="list_groups")` to see which groups are
    compiled in (`available`) and active (`active`).
+
+### In-Editor dependency panel
+
+After the bridge is installed, open **Tools → Unity Open MCP Bridge →
+Extensions** and use the **Optional Unity dependencies** panel: one row per
+domain shows installed / missing status, with **Install…** / **Remove…** for
+each UPM package. Unity re-imports the manifest and recompiles; embedded tools
+register (or stop compiling) on the next domain reload. The Unity Hub Pro
+project settings modal mirrors this as a read-only status panel.
 
 ```text
 unity_open_mcp_manage_tools(action="activate", group="navigation")

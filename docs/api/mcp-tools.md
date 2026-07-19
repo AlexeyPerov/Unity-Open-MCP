@@ -6,7 +6,7 @@ and CLI automation.
 
 > **Install / connect.** See [Manual setup](../setup/manual-setup.md) for the
 > Unity packages and [MCP client configuration](../setup/client-configuration.md)
-> for client paths, envelopes, and environment variables.
+> for client paths, snippets, and environment variables.
 
 For exact runtime schemas, call `unity_open_mcp_capabilities`. Source
 definitions live in `mcp-server/src/tools/`.

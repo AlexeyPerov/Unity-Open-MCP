@@ -69,10 +69,10 @@ these two keys only — leave every other dependency untouched):
 **Prefer project-local config** whenever the client supports it. Use a global
 config only if the human explicitly asks.
 
-Read [MCP client configuration](client-configuration.md), select the detected
-client's target and envelope, and replace `/absolute/path/to/project` with the
-absolute path from Preconditions. If you fetched this procedure remotely,
-fetch
+Follow [MCP client configuration](client-configuration.md): find the detected
+client in the table, copy its snippet, and replace `/absolute/path/to/project`
+with the absolute path from Preconditions. If you fetched this procedure
+remotely, fetch
 `https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/client-configuration.md`.
 Use the pinned `npx -y unity-open-mcp@0.7.0` command shown there.
 
@@ -85,9 +85,9 @@ Use the pinned `npx -y unity-open-mcp@0.7.0` command shown there.
 5. Create parent directories if missing. If the file does not exist, create it with
    the correct top-level envelope for that client.
 
-Do not guess an envelope from memory: the shared reference is the owner for
-client paths and JSON/TOML/CLI shapes. If Claude Desktop's OS-global file cannot
-be located, ask the human for its path.
+Do not guess a config shape from memory: the shared reference owns client paths
+and JSON/TOML/CLI snippets. If Claude Desktop's OS-global file cannot be
+located, ask the human for its path.
 
 ## Step 3 — Install / update the core skill
 
@@ -163,7 +163,7 @@ More detail: [Troubleshooting](../troubleshooting.md), [Dialog policy](../dialog
 
 ## Related docs
 
-- [MCP client configuration](client-configuration.md) — client paths and envelopes
+- [MCP client configuration](client-configuration.md) — client paths and copy-paste snippets
 - [Manual setup](manual-setup.md) — human DIY installation flow
 - [Development setup](development-setup.md) — local checkout / contributor path
 - [Skills](../skills.md) — what the playbook covers after install

@@ -44,7 +44,7 @@ npm install
 npm run build
 ```
 
-在 [MCP 客户端配置](client-configuration.md)中使用本地检出命令，并保留你客户端对应的配置结构：
+在 [MCP 客户端配置](client-configuration.md)中使用本地检出命令，并保留你客户端对应的配置形态：
 
 ```json
 {

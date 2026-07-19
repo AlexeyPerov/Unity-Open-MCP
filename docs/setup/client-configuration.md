@@ -1,61 +1,51 @@
 # MCP client configuration
 
-This is the reference for connecting an MCP client to one Unity
-project.
+Connect an MCP client to one Unity project: find your client, copy the snippet,
+set your project path, save the file, restart the client.
 
-## Before you configure a client
+## Do this
 
-- Install Node.js 18 or newer.
-- Resolve the absolute Unity project root: the folder containing `Assets/`,
-  `Packages/`, and `ProjectSettings/`.
-- Prefer project-local configuration when the client supports it.
-- Use the server version that matches the bridge and verify package pins. See
-  [Versioning](../versioning.md) before changing one side independently.
+1. Find your client in the [table](#where-to-put-it) and note the config file path.
+2. Copy the matching snippet from [Copy these](#copy-these).
+3. Replace `/absolute/path/to/project` with the absolute Unity project root
+   (the folder that contains `Assets/`, `Packages/`, and `ProjectSettings/`).
+4. Write that content to the file. If the file already has other MCP servers,
+   add only the `unity-open-mcp` entry — do not wipe siblings.
+5. Restart the MCP client so it reloads the config.
 
-The standard server entry is:
+Pin the same server version as your bridge/verify packages (`0.7.0` below).
+See [Versioning](../versioning.md) when upgrading. The first `npx` launch can
+take 10–60 seconds while the package downloads; later launches are fast.
 
-```json
-{
-  "command": "npx",
-  "args": ["-y", "unity-open-mcp@0.7.0"],
-  "env": {
-    "UNITY_PROJECT_PATH": "/absolute/path/to/project"
-  }
-}
-```
+## Where to put it
 
-`npx` downloads and launches that exact version. The first launch can take
-10–60 seconds; later launches use npm's cache. To upgrade, change the npm pin
-and the bridge/verify package pins together.
-
-## Client files and envelopes
-
-| Client | Preferred config | Envelope |
+| Client | Config file | Snippet |
 |---|---|---|
-| Cursor | `<project>/.cursor/mcp.json` | `mcpServers` |
-| Claude Desktop | OS global config | `mcpServers` |
-| Claude Code | CLI registration | `claude mcp add` |
-| VS Code Copilot | `<project>/.vscode/mcp.json` | `servers` with `type: "stdio"` |
-| Visual Studio Copilot | `<project>/.vs/mcp.json` | `servers` with `type: "stdio"` |
-| OpenCode | `<project>/opencode.json` | `mcp`; command array; `environment` |
-| ZCode | `<project>/.zcode/cli/config.json` | `mcp.servers` with `type: "stdio"` |
-| Codex | `<project>/.codex/config.toml` | TOML `mcp_servers` table |
-| Cline | Client global MCP settings | `mcpServers` |
-| Gemini CLI | `<project>/.gemini/settings.json` | `mcpServers` |
-| GitHub Copilot CLI | `<project>/.mcp.json` | `mcpServers` |
-| Kilo Code | `<project>/.kilocode/mcp.json` | `mcpServers` |
-| Rider (Junie) | `<project>/.junie/mcp/mcp.json` | `mcpServers` |
-| Unity AI | `<project>/UserSettings/mcp.json` | `mcpServers` |
-| ZooCode | `<project>/.roo/mcp.json` | `mcpServers` |
-| Antigravity | Global Antigravity MCP config | `mcpServers` |
+| Cursor | `<project>/.cursor/mcp.json` | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
+| Claude Desktop | OS global config | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
+| Claude Code | CLI (no file) | [`Claude Code`](#claude-code) |
+| VS Code Copilot | `<project>/.vscode/mcp.json` | [VS Code](#vs-code-and-visual-studio-copilot) |
+| Visual Studio Copilot | `<project>/.vs/mcp.json` | [VS Code](#vs-code-and-visual-studio-copilot) |
+| OpenCode | `<project>/opencode.json` | [OpenCode](#opencode) |
+| ZCode | `<project>/.zcode/cli/config.json` | [ZCode](#zcode) |
+| Codex | `<project>/.codex/config.toml` | [Codex](#codex) |
+| Cline | Client global MCP settings | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
+| Gemini CLI | `<project>/.gemini/settings.json` | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
+| GitHub Copilot CLI | `<project>/.mcp.json` | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
+| Kilo Code | `<project>/.kilocode/mcp.json` | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
+| Rider (Junie) | `<project>/.junie/mcp/mcp.json` | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
+| Unity AI | `<project>/UserSettings/mcp.json` | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
+| ZooCode | `<project>/.roo/mcp.json` | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
+| Antigravity | Global Antigravity MCP config | [`mcpServers`](#mcpservers-cursor-and-most-clients) |
 
-If a config already exists, merge the `unity-open-mcp` entry without replacing
-unrelated settings or sibling MCP servers.
+Prefer the project-local path when the client supports it.
 
-### `mcpServers` clients
+## Copy these
 
-Use this shape for Cursor, Claude Desktop, Cline, Gemini CLI, GitHub Copilot
-CLI, Kilo Code, Rider, Unity AI, ZooCode, and Antigravity:
+### `mcpServers` (Cursor and most clients)
+
+Use for Cursor, Claude Desktop, Cline, Gemini CLI, GitHub Copilot CLI, Kilo
+Code, Rider, Unity AI, ZooCode, and Antigravity:
 
 ```json
 {
@@ -142,49 +132,22 @@ claude mcp add unity-open-mcp \
 If the server is already registered, remove and re-add it when the command,
 version pin, or project path must change.
 
-## Environment
+## Optional
 
 | Variable | Required | Purpose |
 |---|---|---|
 | `UNITY_PROJECT_PATH` | yes | Absolute Unity project root. |
 | `UNITY_OPEN_MCP_BRIDGE_PORT` | no | Pin a bridge port instead of path-based discovery. |
-| `UNITY_PATH` | no | Explicit Unity executable for batch fallback when auto-discovery is unavailable. |
+| `UNITY_PATH` | no | Explicit Unity executable for batch fallback. |
 
-Startup and steady-state modal handling has additional environment variables.
-The complete list, defaults, safety opt-ins, and policy matrix live in
-[Dialog policy](../dialog-policy.md).
+Startup modal env vars: [Dialog policy](../dialog-policy.md).
 
-## Alternative server commands
-
-For a global install:
-
-```bash
-npm install -g unity-open-mcp
-```
-
-Use `"command": "unity-open-mcp"` with no arguments (or the equivalent command
-array for OpenCode). Update it explicitly with
+**Global install** (instead of `npx`): `npm install -g unity-open-mcp`, then use
+`"command": "unity-open-mcp"` with no `args`. Update with
 `npm update -g unity-open-mcp`.
 
-For a local checkout, build `mcp-server/` and replace the `npx` entry with:
+**Local checkout:** build `mcp-server/` and point at
+`node /absolute/path/to/unity-open-mcp/mcp-server/dist/index.js` — see
+[Development setup](development-setup.md).
 
-```json
-{
-  "command": "node",
-  "args": ["/absolute/path/to/unity-open-mcp/mcp-server/dist/index.js"],
-  "env": {
-    "UNITY_PROJECT_PATH": "/absolute/path/to/project"
-  }
-}
-```
-
-See [Development setup](development-setup.md) for the complete contributor
-workflow.
-
-## After editing configuration
-
-Restart the MCP client so it reloads the file, open the same Unity project, and
-wait for compilation to finish. Then call `unity_open_mcp_ping` or
-`unity_open_mcp_capabilities`.
-
-For connection and bridge recovery, use [Troubleshooting](../troubleshooting.md).
+For connection problems after setup, see [Troubleshooting](../troubleshooting.md).

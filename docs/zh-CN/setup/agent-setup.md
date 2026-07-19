@@ -62,7 +62,7 @@
 
 只要客户端支持，**优先使用项目级配置**。仅当人类明确要求时才使用全局配置。
 
-阅读 [MCP 客户端配置](client-configuration.md)，选择所检测客户端的目标位置与配置结构，并把 `/absolute/path/to/project` 替换为前置条件中确定的绝对路径。如果你是从网络获取本流程的，请获取
+按 [MCP 客户端配置](client-configuration.md) 操作：在表格中找到所检测的客户端，复制其片段，并将 `/absolute/path/to/project` 替换为前置条件中的绝对路径。如果你是从网络获取本流程的，请获取
 `https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/client-configuration.md`。
 使用其中所示的锁定命令 `npx -y unity-open-mcp@0.7.0`。
 
@@ -74,7 +74,7 @@
 4. 其他 MCP 服务器 / 无关配置键一律保持不变。
 5. 如父目录缺失则创建。如果文件不存在，用该客户端正确的顶层结构创建它。
 
-不要凭记忆猜测配置结构：共享参考文档是客户端路径与 JSON/TOML/CLI 形态的唯一权威。如果 Claude Desktop 的 OS 全局文件无法定位，请向人类询问其路径。
+不要凭记忆猜测配置形态：共享参考文档拥有客户端路径与 JSON/TOML/CLI 片段。如果 Claude Desktop 的 OS 全局文件无法定位，请向人类询问其路径。
 
 ## 第 3 步 — 安装 / 更新核心技能
 
@@ -145,7 +145,7 @@ npx -y unity-open-mcp@0.7.0 run-tool unity_open_mcp_capabilities --project /abso
 
 ## 相关文档
 
-- [MCP 客户端配置](client-configuration.md) — 客户端路径与配置结构
+- [MCP 客户端配置](client-configuration.md) — 客户端路径与可复制片段
 - [手动安装](manual-setup.md) — 人类自助安装流程
 - [开发安装](development-setup.md) — 本地检出 / 贡献者路径
 - [技能](../../skills.md) — 安装后操作手册涵盖的内容

@@ -47,7 +47,7 @@ npm run build
 ```
 
 Use the local-checkout command in
-[MCP client configuration](client-configuration.md), preserving the envelope
+[MCP client configuration](client-configuration.md), preserving the config shape
 for your client:
 
 ```json

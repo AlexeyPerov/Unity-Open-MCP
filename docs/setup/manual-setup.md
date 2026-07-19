@@ -4,47 +4,32 @@ Set up Unity Open MCP without Unity Hub Pro.
 
 ## Who is this for
 
-This is the most typical way to setup Unity Open MCP using terminal.
+This is the most typical way to set up Unity Open MCP from the terminal: add the
+Unity packages, then point your MCP client at the server.
 
-If you do not want to deal with terminal then see the **wizard** path at [wizard-setup.md](wizard-setup.md). It does everything below automatically and explains each step.
+Prefer a GUI? Use the **wizard** path in [wizard-setup.md](wizard-setup.md).
+Want an AI agent to perform the install? See [agent-setup.md](agent-setup.md).
+Working on this repository itself? See [development-setup.md](development-setup.md).
 
-## How Unity Open MCP fits together (two halves)
-
-Unity Open MCP has two independent halves that talk to each other over your
-machine's loopback network:
-
-| Half | Lives in | Installed from | What it does |
-|---|---|---|---|
-| **AI side** | a small Node program (the MCP server) | **npm** (`npx`) | Your AI client (Cursor, Claude, …) launches it; it exposes the MCP tools. |
-| **Unity side** | two Unity Editor packages (bridge + verify) | **Unity Package Manager** (Git URL) | Runs inside Unity and carries out each tool call. |
-
-You need **both**. The AI side never touches Unity directly — it asks the Unity
-side over HTTP. The steps below install each half in turn.
-
-For working on the packages themselves (local checkout, building the MCP server,
-contributor and maintainer workflows), see [development-setup.md](development-setup.md).
+Unity Open MCP has two halves you must install: the **Unity side** (bridge +
+verify packages in the Editor) and the **AI side** (a small Node MCP server your
+client launches). The steps below cover each in turn.
 
 ## Requirements
 
 - **Unity 2022.3 LTS or newer**.
-- **Node.js 18 or newer** — this is *only* needed because the MCP server is a
-  small Node program your AI client launches in the background. You will **not**
-  be writing JavaScript or running it interactively.
-  - Don't have Node? Install it from <https://nodejs.org/> (the **LTS** button is
-    fine). Restart your terminal afterwards so the `node`/`npx` commands are on
-    your PATH. Verify with `node --version`.
+- **Node.js 18 or newer** — required only so your MCP client can launch the
+  server (`npx`). Install from <https://nodejs.org/> (LTS), restart the
+  terminal, and verify with `node --version`.
 - **An MCP client that supports stdio MCP servers** — Cursor, Claude Desktop,
   Claude Code, OpenCode, ZCode, Cline, Codex, VS Code Copilot, Gemini CLI, or
-  any compatible MCP client. The Hub wizard configures all of these in one
-  click; the snippets below cover the most common manual shapes.
+  any compatible client. Copy-paste snippets live in
+  [MCP client configuration](client-configuration.md).
 
-## 1) Add the Unity packages (Unity side)
+## 1) Add the Unity packages
 
-Open `Packages/manifest.json` in your Unity project (it's at the root of the
-project folder, e.g. `MyGame/Packages/manifest.json`) and add two entries to the
-`dependencies` object.
-
-### Git install (recommended)
+Open `Packages/manifest.json` in your Unity project (for example
+`MyGame/Packages/manifest.json`) and add these entries to `dependencies`:
 
 ```json
 {
@@ -55,94 +40,51 @@ project folder, e.g. `MyGame/Packages/manifest.json`) and add two entries to the
 }
 ```
 
-### Optional Unity domain dependencies
+Pin the same version on the MCP server side (step 2). See
+[Versioning](../versioning.md) when upgrading.
 
-Domain tools are bundled with the bridge. Some need a matching Unity package
-before they compile in, and most need explicit session activation. Use
-[Extensions](../extensions.md) for the canonical dependency catalog,
-activation table, and package examples.
+Optional domain packages (NavMesh, Input System, …) and the in-Editor install
+panel are covered in [Extensions](../extensions.md) — not required for a basic
+install.
 
-### Optional dependencies (in-Editor)
+## 2) Configure your MCP client
 
-Once the bridge is installed, you can add or remove Unity domain dependencies without editing the manifest by hand. Open **Tools → Unity Open MCP Bridge → Extensions** and use the **Optional Unity dependencies** panel: one row per domain shows installed / missing status, with a one-click **Install…** / **Remove…** action for each UPM package. Unity re-imports the manifest and recompiles; the embedded tools register (or stop compiling) on the next domain reload. The Unity Hub Pro project settings modal mirrors this as a read-only status panel.
+1. Open [MCP client configuration](client-configuration.md).
+2. Find your client in the table and note the config file path.
+3. Copy that client’s snippet.
+4. Replace `/absolute/path/to/project` with the absolute path to your Unity
+   project root (the folder with `Assets/`, `Packages/`, `ProjectSettings/`).
+5. Save the file (if it already has other MCP servers, add only the
+   `unity-open-mcp` entry).
 
-## 2) Configure your MCP client (AI side)
+## 3) Open Unity and verify
 
-Now point your AI client at the MCP server. Use
-[MCP client configuration](client-configuration.md) for the canonical
-client-specific path and JSON/TOML/CLI envelope. Merge the documented
-`unity-open-mcp` entry into your client without replacing unrelated settings.
+1. Open the **same** Unity project (`UNITY_PROJECT_PATH`) in the Editor.
+2. Wait for scripts to compile (status bar, bottom-right).
+3. Restart your MCP client so it re-reads the config from step 2.
+4. In Unity, open **Tools → Unity Open MCP Bridge** — it should show
+   **connected**. If it does, you are done.
 
-What that means:
+Ask your AI client to run any Unity Open MCP tool (for example, list
+capabilities). If it returns Unity data, both halves are talking.
 
-- `npx -y unity-open-mcp@0.7.0` downloads and launches that exact MCP server
-  version from npm. The `-y` accepts the first-run prompt; pinning the version
-  keeps the server in lockstep with the bridge and verify packages, which share
-  the same number. To move to a newer release, bump the version here and in your
-  Unity `manifest.json` together — see [Versioning](../versioning.md).
-- **First run can take 10–60 seconds** while the package is downloaded — that's
-  normal, not a hang. Subsequent launches are fast.
-- Prefer a one-time install instead? `npm install -g unity-open-mcp` puts it on
-  your PATH, then use `"command": "unity-open-mcp"` (no `npx`/`args`). You update
-  manually with `npm update -g unity-open-mcp`.
+## Optional next steps
 
-> ⚠️ **`UNITY_PROJECT_PATH` is the #1 setup gotcha.** It must be the **absolute**
-> path to your Unity project root (the folder that contains `Assets/`,
-> `Packages/`, and `ProjectSettings/`). The server exits immediately if it's
-> missing, and a wrong path means the AI can drive a different Unity project
-> than the one you have open.
-
-Core project, port, and batch environment variables are summarized in the
-shared client reference. The complete startup-dialog environment-variable
-matrix and safety policy live only in [Dialog policy](../dialog-policy.md).
-
-## 3) Launch Unity and verify
-
-1. Open the **same** Unity project (the one `UNITY_PROJECT_PATH` points at) in the Editor.
-2. Wait for scripts to compile — watch the status bar in the bottom-right corner.
-3. Restart your MCP client (so it re-reads the config from step 2).
-4. The easiest check: in Unity, open **Tools → Unity Open MCP Bridge** — the
-   window should show a **connected** status. If it does, you're done.
-5. Prefer the terminal? Confirm the bridge is reachable:
-
-```bash
-curl -s "http://127.0.0.1:<port>/ping"
-```
-
-The port is derived from your project path automatically; if you set
-`UNITY_OPEN_MCP_BRIDGE_PORT`, use that. You can also read it from the bridge
-window in step 4. A successful ping returns JSON with `"connected": true`.
-
-Finally, ask your AI client to run any Unity Open MCP tool (for example, have it
-list the available capabilities) — if it responds with Unity data, the two halves
-are talking.
-
-## 4) Optional CLI (CI and automation)
-
-```bash
-npx -y unity-open-mcp@0.7.0 wait-for-ready --project /path/to/MyGame
-npx -y unity-open-mcp@0.7.0 run-tool unity_open_mcp_capabilities --project /path/to/MyGame --json
-```
-
-On unattended machines, configure startup modal handling via
-[Dialog policy](../dialog-policy.md) (`UNITY_OPEN_MCP_DIALOG_POLICY` and related env vars).
+- Domain packages and activation — [Extensions](../extensions.md)
+- CI / CLI automation — [CLI and automation](../api/cli-automation.md)
+- Startup modals on unattended machines — [Dialog policy](../dialog-policy.md)
 
 ## Troubleshooting
 
-For this path, first confirm Unity is open on the same absolute
-`UNITY_PROJECT_PATH`, compilation finished, and the MCP client was restarted.
-For connection, listener, modal, and dead-bridge recovery, follow the complete
-[Troubleshooting](../troubleshooting.md) guide. Modal policy and macOS
-Accessibility details live in [Dialog policy](../dialog-policy.md).
+Confirm Unity is open on the same absolute `UNITY_PROJECT_PATH`, compilation
+finished, and the MCP client was restarted. Then follow
+[Troubleshooting](../troubleshooting.md). Modal policy and macOS Accessibility
+details are in [Dialog policy](../dialog-policy.md).
 
 ## Related docs
 
-- [Agent setup](agent-setup.md) — let an AI agent perform this install
-- [MCP client configuration](client-configuration.md) — client paths and envelopes
-- [Troubleshooting](../troubleshooting.md) — bridge start failures and connectivity recovery
-- [Dialog policy](../dialog-policy.md)
+- [Agent setup](agent-setup.md)
+- [MCP client configuration](client-configuration.md)
 - [Wizard setup](wizard-setup.md)
-- [Development setup](development-setup.md) — local checkout, contributor and maintainer workflows.
+- [Development setup](development-setup.md)
 - [Unity Hub Pro](../unity-hub-pro.md)
-- [Bridge HTTP API](../api/bridge-http.md)
-- [MCP tools API](../api/mcp-tools.md)
