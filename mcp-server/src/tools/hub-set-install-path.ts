@@ -1,13 +1,13 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { makeTool } from "./schema-fragments.js";
 
 // M26 Plan 2 — Unity Hub control: set install path. Local-routed (shells out
 // to the Hub headless CLI; never hits the Unity bridge). This is the one Hub
 // operation the unityhub:// deep link cannot perform, so it genuinely requires
 // the Hub binary. MUTATING system-level op — paths_hint is N/A, gate-free.
-export const hubSetInstallPath: Tool = {
-  name: "unity_open_mcp_hub_set_install_path",
-  description:
-    "Set the default installation directory for Unity Editors managed by " +
+export const hubSetInstallPath = makeTool(
+  "unity_open_mcp_hub_set_install_path",
+  "Set the default installation directory for Unity Editors managed by " +
     "Unity Hub, via the Hub headless CLI (`Unity Hub --headless install-path " +
     "--set <path>`). This is the one Hub operation the unityhub:// deep link " +
     "transport cannot perform, so it requires the Hub binary directly. " +
@@ -18,15 +18,13 @@ export const hubSetInstallPath: Tool = {
     "locations: '/Applications/Unity Hub.app/Contents/MacOS/Unity Hub' " +
     "(macOS), 'C:\\Program Files\\Unity Hub\\Unity Hub.exe' (Windows), " +
     "'~/Unity Hub/Unity Hub' (Linux).",
-  inputSchema: {
-    type: "object",
+  {
     required: ["path"],
-    properties: {
-      path: {
-        type: "string",
-        description: "New default installation directory for Unity Editors.",
-      },
-    },
-    additionalProperties: false,
+        properties: {
+          path: {
+            type: "string",
+            description: "New default installation directory for Unity Editors.",
+          },
+        },
   },
-};
+);

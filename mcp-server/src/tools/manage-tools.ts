@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { makeTool } from "./schema-fragments.js";
 
 // manage_tools meta-tool for per-session tool-group visibility.
 //
@@ -19,10 +20,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // set in one call and emits `notifications/tools/list_changed` when the
 // visible surface changes. Unknown intent returns a structured empty
 // recommendation (no invented groups) and points the caller at `list_groups`.
-export const manageTools: Tool = {
-  name: "unity_open_mcp_manage_tools",
-  description:
-    "Manage which tool groups are visible in this session. Sessions start " +
+export const manageTools = makeTool(
+  "unity_open_mcp_manage_tools",
+  "Manage which tool groups are visible in this session. Sessions start " +
     "with two groups enabled: `core` and `gate-and-verify`; activate other " +
     "groups on demand to add their tools to your ListTools surface (and " +
     "deactivate to hide them). State is ephemeral and per-session — it resets " +
@@ -45,50 +45,48 @@ export const manageTools: Tool = {
     "is present) — these surface in `list_groups` with " +
     "`activationSource: \"auto\"` and require no manual call; deactivate to " +
     "hide them.",
-  inputSchema: {
-    type: "object",
+  {
     required: ["action"],
-    properties: {
-      action: {
-        enum: ["list_groups", "activate", "deactivate", "reset", "suggest", "activate_for"],
-        description:
-          "list_groups: enumerate every group with active flag + tool roster. " +
-          "activate / deactivate: toggle one group (requires `group`). " +
-          "reset: restore the two default-on groups. " +
-          "suggest: recommend groups for an `intent` and/or `tags` WITHOUT " +
-          "changing state (read-only). " +
-          "activate_for: activate the recommended groups for an `intent` " +
-          "and/or `tags` in one call (idempotent; emits list_changed when " +
-          "the visible set changes).",
-      },
-      group: {
-        type: "string",
-        description:
-          "Group id (required for activate / deactivate). Valid ids are " +
-          "returned by list_groups. Unknown ids return a structured error.",
-      },
-      intent: {
-        type: "string",
-        description:
-          "Free-text task intent for `suggest` / `activate_for` (e.g. " +
-          "\"bake a NavMesh for the dungeon scene\", \"verify the prefab " +
-          "references and run a scan\"). The text is tokenized and matched " +
-          "against the intent/tag catalog; mutating/verify verbs additionally " +
-          "surface `gate-intelligence`. Unknown intent returns an empty " +
-          "recommendation (no invented groups).",
-      },
-      tags: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "Explicit tags for `suggest` / `activate_for`. Accepted forms: " +
-          "canonical tag names (navigation, animation, audio, profiler, qa, " +
-          "verify, risk, …), catalog keywords (navmesh, particles, build, …), " +
-          "or group ids (terrain, vfx, …). Unknown tags are reported in " +
-          "`unmatchedTags` and otherwise ignored. Combine with `intent` to " +
-          "narrow the recommendation.",
-      },
-    },
-    additionalProperties: false,
+        properties: {
+          action: {
+            enum: ["list_groups", "activate", "deactivate", "reset", "suggest", "activate_for"],
+            description:
+              "list_groups: enumerate every group with active flag + tool roster. " +
+              "activate / deactivate: toggle one group (requires `group`). " +
+              "reset: restore the two default-on groups. " +
+              "suggest: recommend groups for an `intent` and/or `tags` WITHOUT " +
+              "changing state (read-only). " +
+              "activate_for: activate the recommended groups for an `intent` " +
+              "and/or `tags` in one call (idempotent; emits list_changed when " +
+              "the visible set changes).",
+          },
+          group: {
+            type: "string",
+            description:
+              "Group id (required for activate / deactivate). Valid ids are " +
+              "returned by list_groups. Unknown ids return a structured error.",
+          },
+          intent: {
+            type: "string",
+            description:
+              "Free-text task intent for `suggest` / `activate_for` (e.g. " +
+              "\"bake a NavMesh for the dungeon scene\", \"verify the prefab " +
+              "references and run a scan\"). The text is tokenized and matched " +
+              "against the intent/tag catalog; mutating/verify verbs additionally " +
+              "surface `gate-intelligence`. Unknown intent returns an empty " +
+              "recommendation (no invented groups).",
+          },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Explicit tags for `suggest` / `activate_for`. Accepted forms: " +
+              "canonical tag names (navigation, animation, audio, profiler, qa, " +
+              "verify, risk, …), catalog keywords (navmesh, particles, build, …), " +
+              "or group ids (terrain, vfx, …). Unknown tags are reported in " +
+              "`unmatchedTags` and otherwise ignored. Combine with `intent` to " +
+              "narrow the recommendation.",
+          },
+        },
   },
-};
+);

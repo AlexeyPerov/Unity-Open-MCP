@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { makeTool } from "./schema-fragments.js";
 
 // M20 Plan 7 / T20.7.3 — Memory Profiler snapshot capture. Compile-gated in
 // the bridge (UNITY_OPEN_MCP_EXT_MEMORYPROFILER on com.unity.memoryprofiler) +
@@ -16,10 +17,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 //
 // Pairs with profiler_get_script_stats / profiler_capture_frame for a fuller
 // performance picture than a standalone memory tool.
-export const memorySnapshotCapture: Tool = {
-  name: "unity_senses_memory_snapshot_capture",
-  description:
-    "Capture a Memory Profiler snapshot to a .snap file using the " +
+export const memorySnapshotCapture = makeTool(
+  "unity_senses_memory_snapshot_capture",
+  "Capture a Memory Profiler snapshot to a .snap file using the " +
     "com.unity.memoryprofiler package API. Pairs with the existing profiler " +
     "family (profiler_get_script_stats / profiler_capture_frame) for a fuller " +
     "performance picture — capture the snapshot, then read CPU/frame context " +
@@ -35,31 +35,29 @@ export const memorySnapshotCapture: Tool = {
     "returns a structured memoryprofiler_api_unavailable error — capture " +
     "manually from the Memory Profiler window (Window > Analysis > Memory " +
     "Profiler).",
-  inputSchema: {
-    type: "object",
+  {
     properties: {
-      output_path: {
-        type: "string",
-        description:
-          "Destination .snap path. Either an 'Assets/.../*.snap' path (persists " +
-          "the snapshot in the project) or an absolute path. When omitted, the " +
-          "snapshot is written to a timestamped temp path (snapshots can be " +
-          "hundreds of MB+, so the default avoids writing into Assets/). The " +
-          ".snap extension is enforced when omitted on a supplied path — the " +
-          "Memory Profiler window only opens .snap files.",
-      },
-      timeout_ms: {
-        type: "integer",
-        description:
-          "Maximum milliseconds to wait for the callback-based capture to " +
-          "finish (default 60000, clamped to 300000). The capture blocks until " +
-          "the snapshot file is written; if it times out the tool returns " +
-          "memoryprofiler_capture_timeout.",
-        default: 60000,
-        minimum: 1000,
-        maximum: 300000,
-      },
-    },
-    additionalProperties: false,
+          output_path: {
+            type: "string",
+            description:
+              "Destination .snap path. Either an 'Assets/.../*.snap' path (persists " +
+              "the snapshot in the project) or an absolute path. When omitted, the " +
+              "snapshot is written to a timestamped temp path (snapshots can be " +
+              "hundreds of MB+, so the default avoids writing into Assets/). The " +
+              ".snap extension is enforced when omitted on a supplied path — the " +
+              "Memory Profiler window only opens .snap files.",
+          },
+          timeout_ms: {
+            type: "integer",
+            description:
+              "Maximum milliseconds to wait for the callback-based capture to " +
+              "finish (default 60000, clamped to 300000). The capture blocks until " +
+              "the snapshot file is written; if it times out the tool returns " +
+              "memoryprofiler_capture_timeout.",
+            default: 60000,
+            minimum: 1000,
+            maximum: 300000,
+          },
+        },
   },
-};
+);

@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { makeTool } from "./schema-fragments.js";
 
 // M31 Plan 3 / T31.4 — Editor fd-exhaustion prediction (proactive fd-usage
 // monitoring).
@@ -19,10 +20,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // cost on the frequently-called status path. The signal can be upgraded to an
 // inline `bridge_status` field once thresholds are validated against real leak
 // rates.
-export const resourcePressure: Tool = {
-  name: "unity_open_mcp_resource_pressure",
-  description:
-    "Sample the live Unity process's file-descriptor usage and report headroom " +
+export const resourcePressure = makeTool(
+  "unity_open_mcp_resource_pressure",
+  "Sample the live Unity process's file-descriptor usage and report headroom " +
     "against Mono's internal ~1024 fd ceiling — the real trip point for the " +
     "Bee build-driver fd-exhaustion hang ('Could not register to wait for file " +
     "descriptor N'). Proactive counterpart to `restart_editor` (reactive kill) " +
@@ -46,20 +46,18 @@ export const resourcePressure: Tool = {
     "ceiling. Use this after heavy automation (many recompiles / domain " +
     "reloads) to catch fd growth across reloads. No disk cache — samples live " +
     "in the session store and are cleared on MCP-server restart.",
-  inputSchema: {
-    type: "object",
+  {
     properties: {
-      pid: {
-        type: "integer",
-        minimum: 1,
-        description:
-          "Optional explicit Unity PID to probe. When omitted, the tool " +
-          "resolves the live Unity process for this project via the process " +
-          "scan (same as `bridge_status` cold-Safe-Mode detection). Pass an " +
-          "explicit PID only when you have one from a prior call and want to " +
-          "skip the scan.",
-      },
-    },
-    additionalProperties: false,
+          pid: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "Optional explicit Unity PID to probe. When omitted, the tool " +
+              "resolves the live Unity process for this project via the process " +
+              "scan (same as `bridge_status` cold-Safe-Mode detection). Pass an " +
+              "explicit PID only when you have one from a prior call and want to " +
+              "skip the scan.",
+          },
+        },
   },
-};
+);

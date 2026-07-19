@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { makeTool } from "./schema-fragments.js";
 
 // Operator-only bridge health snapshot (testsuite-tauri phase-3). A thin
 // wrapper over the existing instance-lock classifier (classifyInstance in
@@ -21,10 +22,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // deferred: the bridge has no HTTP route for start/stop today (only the
 // Unity toolbar toggles it), and `stop` has a self-disconnect hazard. See
 // the deferred rationale in docs/api/routing-lifecycle.md.
-export const bridgeStatus: Tool = {
-  name: "unity_open_mcp_bridge_status",
-  description:
-    "Operator-only bridge health snapshot. Wraps the instance-lock " +
+export const bridgeStatus = makeTool(
+  "unity_open_mcp_bridge_status",
+  "Operator-only bridge health snapshot. Wraps the instance-lock " +
     "classifier (instance-discovery.ts#classifyInstance) plus a single " +
     "/ping probe and returns a coarse `status` token: " +
     "`running` (bridge connected, idle), `compiling` (bridge connected, " +
@@ -54,9 +54,7 @@ export const bridgeStatus: Tool = {
     "general agent health check (use unity_open_mcp_ping for that). " +
     "Read-only, gate-free, never spawns Unity. The /ping fetch uses the " +
     "bridge's standard 5s timeout; this tool takes no arguments.",
-  inputSchema: {
-    type: "object",
+  {
     properties: {},
-    additionalProperties: false,
   },
-};
+);

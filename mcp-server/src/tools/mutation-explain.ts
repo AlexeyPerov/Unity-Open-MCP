@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { makeTool } from "./schema-fragments.js";
 
 // M16 Plan 8 — gate intelligence. mutation_explain turns a finished gate run
 // (or an explicit checkpoint) into a human-readable narrative alongside a
@@ -17,32 +18,29 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 //
 // Read-only and gate-free. Composed from existing checkpoint/delta/run-history
 // foundations; no equivalent in the broader tool landscape.
-export const mutationExplain: Tool = {
-  name: "unity_open_mcp_mutation_explain",
-  description:
-    "Explain a finished mutation + gate delta in human-readable form. By default projects the most " +
+export const mutationExplain = makeTool(
+  "unity_open_mcp_mutation_explain",
+  "Explain a finished mutation + gate delta in human-readable form. By default projects the most " +
     "recent gate run into a narrative + structured summary (outcome, new/resolved error & warning " +
     "counts, gate durations, agentNextSteps). Pass `checkpoint_id` to compare a known checkpoint " +
     "against current project state, or `tool_name` to target the latest run of a specific mutating " +
     "tool. Read-only and gate-free. When the gate was skipped or the run predates current editor " +
     "state, the delta may be empty — pass checkpoint_id for a scoped comparison.",
-  inputSchema: {
-    type: "object",
+  {
     properties: {
-      checkpoint_id: {
-        type: "string",
-        description:
-          "Optional. When set, the explanation compares this checkpoint against the CURRENT project " +
-          "state (fresh delta). Useful for 'what changed since I took this checkpoint?'. Mutually " +
-          "preferred over tool_name when both are set.",
-      },
-      tool_name: {
-        type: "string",
-        description:
-          "Optional. When set (and no checkpoint_id), explain the latest recorded gate run whose " +
-          "mutating tool name matches (e.g. 'unity_open_mcp_prefab_apply').",
-      },
-    },
-    additionalProperties: false,
+          checkpoint_id: {
+            type: "string",
+            description:
+              "Optional. When set, the explanation compares this checkpoint against the CURRENT project " +
+              "state (fresh delta). Useful for 'what changed since I took this checkpoint?'. Mutually " +
+              "preferred over tool_name when both are set.",
+          },
+          tool_name: {
+            type: "string",
+            description:
+              "Optional. When set (and no checkpoint_id), explain the latest recorded gate run whose " +
+              "mutating tool name matches (e.g. 'unity_open_mcp_prefab_apply').",
+          },
+        },
   },
-};
+);

@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { makeTool } from "./schema-fragments.js";
 
 // Offline, filesystem-only tool: reads the tail of Unity's Editor.log and
 // extracts BOTH C# compiler errors AND package / assembly-level red flags AND
@@ -37,10 +38,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 //         "Could not register to wait for file descriptor N" exception). This
 //         is NOT a code error and has no CSxxxx fix; the Editor must be
 //         restarted to recover. The hint carries restart instructions.
-export const readCompileErrors: Tool = {
-  name: "unity_open_mcp_read_compile_errors",
-  description:
-    "Read C# compiler errors AND package/assembly red flags AND an Editor " +
+export const readCompileErrors = makeTool(
+  "unity_open_mcp_read_compile_errors",
+  "Read C# compiler errors AND package/assembly red flags AND an Editor " +
     "hang signal directly from Unity's Editor.log (offline, no bridge, no " +
     "Unity spawn). Returns structured CSxxxx compiler errors " +
     "(file/line/code/message) PLUS an `issues` list of red flags with " +
@@ -68,21 +68,19 @@ export const readCompileErrors: Tool = {
     "compiler no-op'd the recompile). Force a genuine recompile via " +
     "unity_open_mcp_reimport_package (local package) or " +
     "unity_open_mcp_compile_check before trusting the errors.",
-  inputSchema: {
-    type: "object",
+  {
     properties: {
-      tail_bytes: {
-        type: "integer",
-        default: 262144,
-        minimum: 4096,
-        maximum: 1048576,
-        description:
-          "Maximum number of bytes to read from the END of Editor.log " +
-          "(default 256KB). Compiler errors AND assembly-resolution failures " +
-          "are written in contiguous blocks near the end, so a modest tail " +
-          "is ample. Increase only if errors or issues are reported missing.",
-      },
-    },
-    additionalProperties: false,
+          tail_bytes: {
+            type: "integer",
+            default: 262144,
+            minimum: 4096,
+            maximum: 1048576,
+            description:
+              "Maximum number of bytes to read from the END of Editor.log " +
+              "(default 256KB). Compiler errors AND assembly-resolution failures " +
+              "are written in contiguous blocks near the end, so a modest tail " +
+              "is ample. Increase only if errors or issues are reported missing.",
+          },
+        },
   },
-};
+);

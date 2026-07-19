@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 
 // M27 Plan 4 — live `batch_execute`. One HTTP round trip runs many typed tools
 // sequentially inside the already-open Editor. NOT the headless batch fallback
@@ -9,10 +10,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 //
 // Default cap is 25 commands (hard max 100), configurable in
 // `.unity-open-mcp/settings.json` (`batchExecuteMaxCommands`).
-export const batchExecute: Tool = {
-  name: "unity_open_mcp_batch_execute",
-  description:
-    "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — " +
+export const batchExecute = makeTool(
+  "unity_open_mcp_batch_execute",
+  "Run many typed tools sequentially inside the already-open Editor in a single HTTP round trip — " +
     "cuts agent↔Unity latency and token cost for multi-object setup (e.g. spawn N cubes + create " +
     "materials + assign in one call). Each entry in `commands` carries a full tool id " +
     "(`unity_open_mcp_*` / `unity_senses_*`) plus its `params` object. Lives in the `core` group " +
@@ -34,65 +34,51 @@ export const batchExecute: Tool = {
     "abort the remaining steps. `scene_create` is also refused unless `mode: \"additive\"` (its " +
     "default Single mode replaces the active scene stack and can discard unsaved changes in open " +
     "scenes). Use those tools as single top-level calls instead.",
-  inputSchema: {
-    type: "object",
+  {
     required: ["commands", "paths_hint"],
-    properties: {
-      commands: {
-        type: "array",
-        minItems: 1,
-        items: {
-          type: "object",
-          required: ["tool", "params"],
-          properties: {
-            tool: {
-              type: "string",
-              description:
-                "Full MCP tool id (`unity_open_mcp_gameobject_create`, etc.). Must be a " +
-                "live-bridge typed tool; not `batch_execute`, `compile_check`, or a meta-tool.",
-            },
-            params: {
+        properties: {
+          commands: {
+            type: "array",
+            minItems: 1,
+            items: {
               type: "object",
-              description:
-                "The tool's input object (its normal `args`). Omit the outer `paths_hint` / " +
-                "`gate` — the batch supplies those for the whole sequence.",
+              required: ["tool", "params"],
+              properties: {
+                tool: {
+                  type: "string",
+                  description:
+                    "Full MCP tool id (`unity_open_mcp_gameobject_create`, etc.). Must be a " +
+                    "live-bridge typed tool; not `batch_execute`, `compile_check`, or a meta-tool.",
+                },
+                params: {
+                  type: "object",
+                  description:
+                    "The tool's input object (its normal `args`). Omit the outer `paths_hint` / " +
+                    "`gate` — the batch supplies those for the whole sequence.",
+                },
+              },
+              additionalProperties: false,
             },
+            description:
+              "Ordered list of tool calls to run sequentially. Default cap 25, hard max 100 " +
+              "(`batchExecuteMaxCommands`).",
           },
-          additionalProperties: false,
+          fail_fast: {
+            type: "boolean",
+            default: true,
+            description:
+              "Stop on the first step failure and mark later entries `skipped` (default true). " +
+              "Set false to run every step and collect per-step errors.",
+          },
+          gate: { ...GATE_PROP, description: "Gate mode applied to the WHOLE batch (one checkpoint → N steps → one validate/delta). " + "Default `enforce`." },
+          paths_hint: { ...PATHS_HINT_TYPE, description: "Mutation scope for the whole batch — the union of all paths the nested commands may " + "touch (scene paths, asset paths). Required when any nested command is mutating." },
+          parallel: {
+            type: "boolean",
+            default: false,
+            description:
+              "Accepted but ignored in v1 — Unity's API is main-thread, so execution is always " +
+              "sequential. The flag is kept for source compatibility with Coplay agents.",
+          },
         },
-        description:
-          "Ordered list of tool calls to run sequentially. Default cap 25, hard max 100 " +
-          "(`batchExecuteMaxCommands`).",
-      },
-      fail_fast: {
-        type: "boolean",
-        default: true,
-        description:
-          "Stop on the first step failure and mark later entries `skipped` (default true). " +
-          "Set false to run every step and collect per-step errors.",
-      },
-      gate: {
-        enum: ["enforce", "warn", "off"],
-        default: "enforce",
-        description:
-          "Gate mode applied to the WHOLE batch (one checkpoint → N steps → one validate/delta). " +
-          "Default `enforce`.",
-      },
-      paths_hint: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "Mutation scope for the whole batch — the union of all paths the nested commands may " +
-          "touch (scene paths, asset paths). Required when any nested command is mutating.",
-      },
-      parallel: {
-        type: "boolean",
-        default: false,
-        description:
-          "Accepted but ignored in v1 — Unity's API is main-thread, so execution is always " +
-          "sequential. The flag is kept for source compatibility with Coplay agents.",
-      },
-    },
-    additionalProperties: false,
   },
-};
+);

@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { makeTool } from "./schema-fragments.js";
 
 // M16 Plan 8 — gate intelligence. impact_preview is a read-only, gate-free
 // pre-mutation projection of what the gate would look at for a given scope.
@@ -11,44 +12,41 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // Heuristic only — confidence bounds are surfaced in the response so an agent
 // treats the risk band as guidance, not ground truth. Composed from existing
 // gate/verify foundations; no equivalent in the broader tool landscape.
-export const impactPreview: Tool = {
-  name: "unity_open_mcp_impact_preview",
-  description:
-    "Project the gate's view of a planned mutation scope WITHOUT mutating. Resolves the auto-selected " +
+export const impactPreview = makeTool(
+  "unity_open_mcp_impact_preview",
+  "Project the gate's view of a planned mutation scope WITHOUT mutating. Resolves the auto-selected " +
     "verify rule set for the given `paths_hint`, classifies each path (exists / folder / asset kind / " +
     "rules-for-extension), and reports a coarse risk band (low / moderate / high) with an explicit " +
     "confidence level. Read-only and gate-free — it does not run a rule scan, only projects scope. " +
     "Use validate_edit to confirm actual issues before or after mutating.",
-  inputSchema: {
-    type: "object",
+  {
     required: ["paths_hint"],
-    properties: {
-      paths_hint: {
-        type: "array",
-        items: { type: "string" },
-        minItems: 1,
-        description:
-          "Scope to project — the same vocabulary the gate uses. Asset paths, folder scopes " +
-          "(Assets/-rooted), Packages/manifest.json, or ProjectSettings/*.asset.",
-      },
-      categories: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "Optional explicit verify rule IDs. Auto-selected from paths when omitted (same semantics " +
-          "as validate_edit / scan_paths).",
-      },
-      include_rules: {
-        type: "array",
-        items: { type: "string" },
-        description: "Allow-list applied to the resolved rule set (same semantics as validate_edit).",
-      },
-      exclude_rules: {
-        type: "array",
-        items: { type: "string" },
-        description: "Deny-list. Always wins over categories and include_rules.",
-      },
-    },
-    additionalProperties: false,
+        properties: {
+          paths_hint: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            description:
+              "Scope to project — the same vocabulary the gate uses. Asset paths, folder scopes " +
+              "(Assets/-rooted), Packages/manifest.json, or ProjectSettings/*.asset.",
+          },
+          categories: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional explicit verify rule IDs. Auto-selected from paths when omitted (same semantics " +
+              "as validate_edit / scan_paths).",
+          },
+          include_rules: {
+            type: "array",
+            items: { type: "string" },
+            description: "Allow-list applied to the resolved rule set (same semantics as validate_edit).",
+          },
+          exclude_rules: {
+            type: "array",
+            items: { type: "string" },
+            description: "Deny-list. Always wins over categories and include_rules.",
+          },
+        },
   },
-};
+);

@@ -1,11 +1,10 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { makeTool } from "./schema-fragments.js";
 
-export const ping: Tool = {
-  name: "unity_open_mcp_ping",
-  description: "Bridge health check.",
-  inputSchema: {
-    type: "object",
+export const ping = makeTool(
+  "unity_open_mcp_ping",
+  "Bridge health check.",
+  {
     properties: {},
-    additionalProperties: false,
   },
-};
+);

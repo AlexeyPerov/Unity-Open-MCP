@@ -1,9 +1,9 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { GATE_PROP, makeTool } from "./schema-fragments.js";
 
-export const applyFix: Tool = {
-  name: "unity_open_mcp_apply_fix",
-  description:
-    "Apply a verify rule fix action. Supports dry_run (default true) to preview the fix before applying. " +
+export const applyFix = makeTool(
+  "unity_open_mcp_apply_fix",
+  "Apply a verify rule fix action. Supports dry_run (default true) to preview the fix before applying. " +
     "Returns gate envelope when dry_run is false (dry_run short-circuits the gate entirely). " +
     "Implemented fixes: remove_missing_script (safe), relink_broken_guid (unsafe — needs target_guid), " +
     "remove_orphan_meta (safe), fix_duplicate_guid (unsafe), " +
@@ -14,55 +14,47 @@ export const applyFix: Tool = {
     "snapshot is active so a corrupting fix is automatically reverted on failure or new errors. " +
     "Use gate: \"off\" ONLY when you accept that the fix commits with no rollback — the response then " +
     "carries `rollbackDisabled: true` to flag that no automatic restore is available.",
-  inputSchema: {
-    type: "object",
+  {
     required: ["issue_id"],
-    properties: {
-      fix_id: {
-        type: "string",
-        description:
-          "Fix action id from issue payload (e.g. remove_missing_script, relink_broken_guid). " +
-          "If omitted, the response lists every fix that can resolve the given issue_id.",
-      },
-      issue_id: {
-        type: "string",
-        description:
-          "Issue key from validate_edit or scan_paths (format: ruleId|severity|assetPath|issueCode). " +
-          "Severity is case-insensitive and accepts any of error/warn/warning — copy the key verbatim " +
-          "from a scan_paths issue's ruleId|severity|assetPath|issueCode fields.",
-      },
-      target_guid: {
-        type: "string",
-        description:
-          "Optional. Replacement GUID for relink_broken_guid — the chosen target out of the " +
-          "candidates the dry_run preview advertises. Ignored by other fixes.",
-      },
-      target_texture: {
-        type: "string",
-        description:
-          "Optional. The chosen texture for reassign_missing_texture — an asset path or 32-hex GUID " +
-          "out of the candidates the dry_run preview advertises. Ignored by other fixes.",
-      },
-      target_shader: {
-        type: "string",
-        description:
-          "Optional. The chosen shader for reassign_missing_shader — a shader name (e.g. 'Standard') " +
-          "or asset path, out of the candidates the dry_run preview advertises. Ignored by other fixes.",
-      },
-      dry_run: {
-        type: "boolean",
-        default: true,
-        description:
-          "Preview the fix without applying. Default true. dry_run skips the gate entirely.",
-      },
-      gate: {
-        enum: ["enforce", "warn", "off"],
-        default: "enforce",
-        description: "Gate mode when dry_run is false. Ignored for dry_run. Non-dry-run applies are " +
-          "always gate-runner-mediated (rollback snapshot active). Use gate: \"off\" only when you " +
-          "accept the fix commits with no rollback — the response then carries rollbackDisabled: true.",
-      },
-    },
-    additionalProperties: false,
+        properties: {
+          fix_id: {
+            type: "string",
+            description:
+              "Fix action id from issue payload (e.g. remove_missing_script, relink_broken_guid). " +
+              "If omitted, the response lists every fix that can resolve the given issue_id.",
+          },
+          issue_id: {
+            type: "string",
+            description:
+              "Issue key from validate_edit or scan_paths (format: ruleId|severity|assetPath|issueCode). " +
+              "Severity is case-insensitive and accepts any of error/warn/warning — copy the key verbatim " +
+              "from a scan_paths issue's ruleId|severity|assetPath|issueCode fields.",
+          },
+          target_guid: {
+            type: "string",
+            description:
+              "Optional. Replacement GUID for relink_broken_guid — the chosen target out of the " +
+              "candidates the dry_run preview advertises. Ignored by other fixes.",
+          },
+          target_texture: {
+            type: "string",
+            description:
+              "Optional. The chosen texture for reassign_missing_texture — an asset path or 32-hex GUID " +
+              "out of the candidates the dry_run preview advertises. Ignored by other fixes.",
+          },
+          target_shader: {
+            type: "string",
+            description:
+              "Optional. The chosen shader for reassign_missing_shader — a shader name (e.g. 'Standard') " +
+              "or asset path, out of the candidates the dry_run preview advertises. Ignored by other fixes.",
+          },
+          dry_run: {
+            type: "boolean",
+            default: true,
+            description:
+              "Preview the fix without applying. Default true. dry_run skips the gate entirely.",
+          },
+          gate: { ...GATE_PROP, description: "Gate mode when dry_run is false. Ignored for dry_run. Non-dry-run applies are " + "always gate-runner-mediated (rollback snapshot active). Use gate: \"off\" only when you " + "accept the fix commits with no rollback — the response then carries rollbackDisabled: true." },
+        },
   },
-};
+);

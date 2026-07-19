@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { GATE_PROP, PATHS_HINT_TYPE, makeTool } from "./schema-fragments.js";
 
 // Force a reimport of a LOCAL (file:-linked) package so Unity recompiles its
 // assembly. Fills the gap left by assets_refresh / execute_csharp, which no-op
@@ -12,10 +13,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 // dllMtimeBefore / dllMtimeAfter so an agent can DETECT when the recompile
 // was a no-op and fall back to a standalone Roslyn compile (documented in the
 // agentNextSteps on a no-op).
-export const reimportPackage: Tool = {
-  name: "unity_open_mcp_reimport_package",
-  description:
-    "Force-reimport a LOCAL (file:-linked) UPM package's source so Unity recompiles its assembly. " +
+export const reimportPackage = makeTool(
+  "unity_open_mcp_reimport_package",
+  "Force-reimport a LOCAL (file:-linked) UPM package's source so Unity recompiles its assembly. " +
     "Use this when unity_open_mcp_assets_refresh or unity_open_mcp_execute_csharp(RequestScriptCompilation) " +
     "fail to recompile a local package whose source lives outside Assets/ (Unity's incremental compiler " +
     "no-ops on it). Mutating: force-reimports every .cs + .asmdef under the package's resolved source root " +
@@ -26,32 +26,18 @@ export const reimportPackage: Tool = {
     "not_local_package for registry/git/embedded packages (they have nothing outside Assets/ to reimport — " +
     "use unity_open_mcp_assets_refresh instead). The package id IS the scope: paths_hint is optional and " +
     "defaults to [\"Packages/<package_id>\"].",
-  inputSchema: {
-    type: "object",
+  {
     required: ["package_id"],
-    properties: {
-      package_id: {
-        type: "string",
-        description:
-          "Package name, packageId, or displayName to reimport, e.g. 'com.alexeyperov.unity-open-mcp-bridge'. " +
-          "A trailing '@<version>' is stripped. Must resolve to an installed LOCAL (file:-linked) package; " +
-          "non-local packages return not_local_package.",
-      },
-      paths_hint: {
-        type: "array",
-        items: { type: "string" },
-        description:
-          "Optional mutation scope. Defaults to [\"Packages/<package_id>\"] — the bridge fills it in from " +
-          "package_id, so callers usually omit it. The package's real source lives outside Assets/, so " +
-          "there is no Assets/ path for the gate to validate; the default scope exists only to give the " +
-          "gate a non-empty hint.",
-      },
-      gate: {
-        enum: ["enforce", "warn", "off"],
-        default: "enforce",
-        description: "Gate mode. Default 'enforce' — fails the call if the reimport surfaces new errors.",
-      },
-    },
-    additionalProperties: false,
+        properties: {
+          package_id: {
+            type: "string",
+            description:
+              "Package name, packageId, or displayName to reimport, e.g. 'com.alexeyperov.unity-open-mcp-bridge'. " +
+              "A trailing '@<version>' is stripped. Must resolve to an installed LOCAL (file:-linked) package; " +
+              "non-local packages return not_local_package.",
+          },
+          paths_hint: { ...PATHS_HINT_TYPE, description: "Optional mutation scope. Defaults to [\"Packages/<package_id>\"] — the bridge fills it in from " + "package_id, so callers usually omit it. The package's real source lives outside Assets/, so " + "there is no Assets/ path for the gate to validate; the default scope exists only to give the " + "gate a non-empty hint." },
+          gate: { ...GATE_PROP, description: "Gate mode. Default 'enforce' — fails the call if the reimport surfaces new errors." },
+        },
   },
-};
+);

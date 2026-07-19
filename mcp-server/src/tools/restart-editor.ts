@@ -1,4 +1,5 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { makeTool } from "./schema-fragments.js";
 
 // M31 Plan 3 / T31.3 — Editor fd-exhaustion auto-recovery (kill half).
 //
@@ -28,10 +29,9 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 //      unsaved scene work and in-flight asset imports.
 //   4. SIGTERM → grace period → SIGKILL fallback on macOS/Linux; `taskkill /T
 //      /F` on Windows.
-export const restartEditor: Tool = {
-  name: "unity_open_mcp_restart_editor",
-  description:
-    "Auto-recover from Editor file-descriptor exhaustion by terminating the " +
+export const restartEditor = makeTool(
+  "unity_open_mcp_restart_editor",
+  "Auto-recover from Editor file-descriptor exhaustion by terminating the " +
     "hung Unity process. Use ONLY after `read_compile_errors` reports an " +
     "`editor_fd_exhaustion` issue (the Bee build-driver hang signature: " +
     "'Could not register to wait for file descriptor N'). The Editor is hung " +
@@ -51,33 +51,31 @@ export const restartEditor: Tool = {
     "active-scene-dirty signal is checked when the bridge is still reachable " +
     "and surfaced as a `dirtyScenesWarning` in the response (it does NOT " +
     "block the kill — the Editor is hung).",
-  inputSchema: {
-    type: "object",
+  {
     properties: {
-      confirm: {
-        type: "boolean",
-        default: false,
-        description:
-          "Must be `true` to actually terminate the Editor. When false or " +
-          "absent the call is a dry-run: it returns the PID + diagnosis it " +
-          "would act on without any side effect. Killing the Editor is " +
-          "destructive (unsaved scene work, in-flight imports) — never pass " +
-          "this without first confirming the fd-exhaustion signature via " +
-          "`read_compile_errors`.",
-      },
-      kill_grace_ms: {
-        type: "integer",
-        default: 5000,
-        minimum: 0,
-        maximum: 15000,
-        description:
-          "SIGTERM→SIGKILL grace window in milliseconds on macOS/Linux. " +
-          "Default 5000ms. Ignored on Windows (taskkill /F is forced). Raise " +
-          "to give Unity more time to flush its log + release the per-project " +
-          "lock on a cooperative shutdown; lower to fail faster when the " +
-          "Editor is fully wedged.",
-      },
-    },
-    additionalProperties: false,
+          confirm: {
+            type: "boolean",
+            default: false,
+            description:
+              "Must be `true` to actually terminate the Editor. When false or " +
+              "absent the call is a dry-run: it returns the PID + diagnosis it " +
+              "would act on without any side effect. Killing the Editor is " +
+              "destructive (unsaved scene work, in-flight imports) — never pass " +
+              "this without first confirming the fd-exhaustion signature via " +
+              "`read_compile_errors`.",
+          },
+          kill_grace_ms: {
+            type: "integer",
+            default: 5000,
+            minimum: 0,
+            maximum: 15000,
+            description:
+              "SIGTERM→SIGKILL grace window in milliseconds on macOS/Linux. " +
+              "Default 5000ms. Ignored on Windows (taskkill /F is forced). Raise " +
+              "to give Unity more time to flush its log + release the per-project " +
+              "lock on a cooperative shutdown; lower to fail faster when the " +
+              "Editor is fully wedged.",
+          },
+        },
   },
-};
+);
