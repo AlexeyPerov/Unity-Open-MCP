@@ -176,6 +176,23 @@ test("groupToTools covers every catalog group", () => {
   }
 });
 
+// M31-optimizations Plan 4 / T4.1 (M1) — the inverse map is frozen once at
+// module load (TOOL_GROUP_ASSIGNMENT is a module-level constant mutated only
+// by the assign() calls during first import). Every call site in tool-router
+// (manage_tools list_groups / activate_for / reconcileAutoActivation /
+// resolveCompiledAvailability) now shares one object reference. Identity is
+// the contract: a regression that re-introduces a per-call rebuild would
+// fail this assertion.
+test("groupToTools returns the same object reference across calls", () => {
+  const a = groupToTools();
+  const b = groupToTools();
+  assert.equal(a, b, "groupToTools must return the memoized constant");
+  // Inner arrays are frozen too — same reference for the same group id.
+  for (const g of TOOL_GROUPS) {
+    assert.equal(a[g.id], b[g.id], `${g.id} roster must be the same reference`);
+  }
+});
+
 test("groupToTools rosters are sorted and match groupFor", () => {
   const map = groupToTools();
   for (const [groupId, tools] of Object.entries(map)) {
@@ -853,4 +870,147 @@ test("filterVisibleTools: deactivating core hides core tools, not meta-tools", (
   );
   const names = filtered.map((t) => t.name);
   assert.deepEqual(names, ["unity_open_mcp_manage_tools"]);
+});
+
+// ---------------------------------------------------------------------------
+// M31-optimizations Plan 4 / T4.5 (L13) — TOOL_CATEGORY derivation parity
+// ---------------------------------------------------------------------------
+//
+// `TOOL_CATEGORY` is now DERIVED from TOOL_GROUP_ASSIGNMENT at module load
+// (group = category for ~95% of tools), with a small documented override map
+// for the exceptions. The tests below assert:
+//
+//   1. Every tool in ALL_TOOLS resolves to a category — no silent `"other"`
+//      fallback for a tool that should have one. A new tool added to ALL_TOOLS
+//      without a group assignment AND without an override entry fails loudly.
+//
+//   2. The `"other"` category is allowed ONLY for the documented
+//      ALLOWED_OTHER_CATEGORY_TOOLS set (operator/debug meta-tools + the two
+//      preserved pre-change `dependencies` / `reimport_package` overrides).
+//
+//   3. The override map is small and every entry resolves to its override
+//      category (not the derived-from-group one).
+//
+// `buildCapabilities` is in a separate module that imports this one; we lazy-
+// import it inside the test body to avoid pulling the tool index into every
+// test file that imports tool-groups.
+
+test("TOOL_CATEGORY is derived from TOOL_GROUP_ASSIGNMENT for the agreed majority", async () => {
+  const { buildCapabilities, TOOL_CATEGORY_OVERRIDES } = await import("./build-capabilities.js");
+  const { ALL_TOOLS } = await import("../tools/index.js");
+  const { RULE_CATALOG, FIX_CATALOG } = await import("./rule-catalog.js");
+
+  const caps = buildCapabilities({
+    tools: ALL_TOOLS,
+    batchToolNames: new Set(),
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+  });
+  const catByName = new Map(caps.tools.map((t) => [t.name, t.category]));
+
+  // Every grouped tool whose name is NOT in the override map must have
+  // category === group. This is the single-source-of-truth contract.
+  const overrideNames = new Set(Object.keys(TOOL_CATEGORY_OVERRIDES));
+  let derivedCount = 0;
+  for (const tool of ALL_TOOLS) {
+    const g = groupFor(tool.name);
+    if (g === null || overrideNames.has(tool.name)) continue;
+    assert.equal(
+      catByName.get(tool.name),
+      g,
+      `${tool.name}: category must equal group ${g} when not overridden`,
+    );
+    derivedCount++;
+  }
+  // Sanity: the derived majority is the bulk of the catalog (>90%).
+  const total = ALL_TOOLS.filter((t) => groupFor(t.name) !== null).length;
+  assert.ok(
+    derivedCount > total * 0.9,
+    `derived majority sanity: ${derivedCount}/${total} grouped tools derive category from group`,
+  );
+});
+
+test("every tool in ALL_TOOLS resolves to a category (no silent other fallback)", async () => {
+  // The parity test: adding a tool to ALL_TOOLS without a group assignment AND
+  // without an override entry fails loudly here. Pre-change, `dependencies`
+  // and `reimport_package` silently fell through to "other"; the allowlist
+  // now documents them as deliberate exceptions.
+  const { buildCapabilities, ALLOWED_OTHER_CATEGORY_TOOLS } = await import("./build-capabilities.js");
+  const { ALL_TOOLS } = await import("../tools/index.js");
+  const { RULE_CATALOG, FIX_CATALOG } = await import("./rule-catalog.js");
+
+  const caps = buildCapabilities({
+    tools: ALL_TOOLS,
+    batchToolNames: new Set(),
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+  });
+  const catByName = new Map(caps.tools.map((t) => [t.name, t.category]));
+
+  const unallowableOther: string[] = [];
+  for (const tool of ALL_TOOLS) {
+    const cat = catByName.get(tool.name);
+    assert.ok(cat, `${tool.name} must resolve to a category string`);
+    if (cat === "other" && !ALLOWED_OTHER_CATEGORY_TOOLS.has(tool.name)) {
+      unallowableOther.push(tool.name);
+    }
+  }
+  assert.deepEqual(
+    unallowableOther,
+    [],
+    `tools with category="other" not in the allowlist (add a group assignment, an override, or an allowlist entry): ${unallowableOther.join(", ")}`,
+  );
+});
+
+test("TOOL_CATEGORY_OVERRIDES is small and every entry wins over the group", async () => {
+  const { buildCapabilities, TOOL_CATEGORY_OVERRIDES } = await import("./build-capabilities.js");
+  const { ALL_TOOLS } = await import("../tools/index.js");
+  const { RULE_CATALOG, FIX_CATALOG } = await import("./rule-catalog.js");
+
+  // The override map must stay small (T4.5: "small and documented"). Pin a
+  // sane ceiling so a regression that floods it back to a parallel table
+  // fails the test.
+  const overrideCount = Object.keys(TOOL_CATEGORY_OVERRIDES).length;
+  assert.ok(
+    overrideCount <= 12,
+    `override map should stay small (got ${overrideCount}); the majority must derive from the group`,
+  );
+
+  const caps = buildCapabilities({
+    tools: ALL_TOOLS,
+    batchToolNames: new Set(),
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+  });
+  const catByName = new Map(caps.tools.map((t) => [t.name, t.category]));
+
+  for (const [tool, expectedCat] of Object.entries(TOOL_CATEGORY_OVERRIDES)) {
+    const actual = catByName.get(tool);
+    assert.equal(
+      actual,
+      expectedCat,
+      `${tool}: override category must win (${expectedCat}), got ${actual}`,
+    );
+  }
+});
+
+test("capabilities category for compile_check is diagnostics (override)", async () => {
+  // The one grouped tool whose category intentionally diverges from its group:
+  // compile_check is in the gate-and-verify GROUP (session visibility alongside
+  // validate_edit / scan_paths) but classified under diagnostics (it is a
+  // compile-error probe, not a verify-rule runner). Pin the contract.
+  const { buildCapabilities } = await import("./build-capabilities.js");
+  const { ALL_TOOLS } = await import("../tools/index.js");
+  const { RULE_CATALOG, FIX_CATALOG } = await import("./rule-catalog.js");
+  const caps = buildCapabilities({
+    tools: ALL_TOOLS,
+    batchToolNames: new Set(),
+    rules: RULE_CATALOG,
+    fixes: FIX_CATALOG,
+  });
+  const compileCheck = caps.tools.find((t) => t.name === "unity_open_mcp_compile_check");
+  assert.ok(compileCheck);
+  assert.equal(compileCheck!.category, "diagnostics");
+  // The GROUP stays gate-and-verify (session visibility).
+  assert.equal(groupFor("unity_open_mcp_compile_check"), "gate-and-verify");
 });

@@ -16,6 +16,7 @@ import type {
   FixCapability,
   RuleIssueDescriptor,
 } from "./rule-catalog.js";
+import { FIX_CATALOG, getFixIndex, buildFixIndex } from "./rule-catalog.js";
 
 export type Severity = "Error" | "Warning";
 
@@ -65,22 +66,13 @@ export interface ListRulesDeps {
   fixes: FixCapability[];
 }
 
-// Build a fix-id lookup keyed by issue code so each rule can flatten its
-// available fixes without scanning the fix catalog per issue.
-function buildFixIndex(fixes: FixCapability[]): Map<string, string[]> {
-  const index = new Map<string, string[]>();
-  for (const fix of fixes) {
-    if (!fix.implemented) continue;
-    for (const code of fix.issueCodes) {
-      const list = index.get(code);
-      if (list) {
-        if (!list.includes(fix.id)) list.push(fix.id);
-      } else {
-        index.set(code, [fix.id]);
-      }
-    }
-  }
-  return index;
+// M31-optimizations Plan 4 / T4.2 (M2) — `buildFixIndex` moved to
+// rule-catalog.ts as a reusable helper + a lazy singleton over FIX_CATALOG.
+// `listRules` reuses the singleton when the caller passed FIX_CATALOG (the
+// production path); tests that pass a different fix list fall through to a
+// fresh build via `buildFixIndex(deps.fixes)`.
+function resolveFixIndex(fixes: FixCapability[]): Map<string, string[]> {
+  return fixes === FIX_CATALOG ? getFixIndex() : buildFixIndex(fixes);
 }
 
 function deriveDefaultSeverity(issues: RuleIssueDescriptor[]): Severity {
@@ -131,7 +123,10 @@ export function listRules(
   deps: ListRulesDeps,
   filter: ListRulesFilter = {},
 ): ListRulesResult {
-  const fixIndex = buildFixIndex(deps.fixes);
+  // M31-optimizations Plan 4 / T4.2 — reuse the FIX_CATALOG fix-index singleton
+  // on the production path (routeListRules always passes FIX_CATALOG). Tests
+  // that pass a different fix list fall through to a fresh build.
+  const fixIndex = resolveFixIndex(deps.fixes);
 
   const entries: ListRulesEntry[] = [];
   for (const rule of deps.rules) {

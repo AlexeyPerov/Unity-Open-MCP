@@ -21,6 +21,7 @@ import {
   TOOL_GROUPS,
   DEFAULT_ENABLED_GROUPS,
   groupFor,
+  toolGroupAssignment,
   type ToolGroup,
 } from "./tool-groups.js";
 import {
@@ -33,6 +34,19 @@ import {
   type LifecycleClass,
   type LifecycleBlock,
 } from "./lifecycle.js";
+import { getFixIndex } from "./rule-catalog.js";
+
+// ---------------------------------------------------------------------------
+// M31-optimizations Plan 4 / T4.2 (M2) — module-level singletons for the
+// constant capability structures. `buildCostHints()` and `buildLifecycle()`
+// derive purely from module-level constants (their own catalogs) — the inline
+// comment at the former call site even said "Constant, so no per-call
+// computation" yet rebuilt them on every `buildCapabilities` call. Both are
+// now computed once at first import. `getFixIndex()` is the lazy singleton
+// for `FIX_CATALOG`'s issue-code → fix-id index (see rule-catalog.ts).
+// ---------------------------------------------------------------------------
+const COST_HINTS: CostHintsBlock = buildCostHints();
+const LIFECYCLE_BLOCK: LifecycleBlock = buildLifecycle();
 
 // ---------------------------------------------------------------------------
 // Route metadata — mirrors tool-router.ts / compressible-router.ts decisions
@@ -64,431 +78,119 @@ function routePolicyFor(toolName: string): RoutePolicy {
 // ---------------------------------------------------------------------------
 // Tool categories — semantic grouping that does not leak milestone IDs
 // ---------------------------------------------------------------------------
+//
+// M31-optimizations Plan 4 / T4.5 (L13) — `TOOL_CATEGORY` is now DERIVED from
+// `TOOL_GROUP_ASSIGNMENT` (tool-groups.ts) at module load, not hand-maintained
+// as a parallel ~270-entry record. The group vocabulary and the category
+// vocabulary agree for ~95% of tools (a tool in group `core` has category
+// `core`, etc.); the small remainder where category ≠ group, plus the
+// always-visible meta-tools (group=null) that need a real category, live in
+// the explicit `TOOL_CATEGORY_OVERRIDES` map below.
+//
+// The parity test in capabilities/tool-groups.test.ts asserts every tool in
+// ALL_TOOLS resolves to a non-`"other"` category — adding a tool without a
+// group assignment AND without an override now fails loudly instead of
+// silently falling through to `"other"`.
 
-const TOOL_CATEGORY: Record<string, string> = {
-  unity_open_mcp_ping: "core",
-  unity_open_mcp_execute_csharp: "core",
-  unity_open_mcp_invoke_method: "core",
-  unity_open_mcp_execute_menu: "core",
-  unity_open_mcp_find_members: "core",
+/**
+ * The handful of tools whose category intentionally diverges from their
+ * group, plus the always-visible meta-tools (group=null) that need a real
+ * category. Two cases:
+ *
+ *   1. **Grouped tools where category ≠ group** — historical reasons where
+ *      the session-visibility group and the capability-classification
+ *      category split (e.g. `compile_check` is in the `gate-and-verify`
+ *      group for session visibility but classified as `diagnostics`).
+ *
+ *   2. **Meta-tools (group=null)** — always-visible server meta-tools that
+ *      are not in any group (they bypass the manage_tools visibility
+ *      system) but still need a category label for the capabilities surface.
+ *
+ * Documented exhaustively so the parity test can enforce that every entry
+ * here is a real, deliberate exception. Exported so the parity test can
+ * inspect the override surface directly.
+ */
+export const TOOL_CATEGORY_OVERRIDES: Record<string, string> = {
+  // --- Case 1: grouped tools whose category diverges from their group --------
+  // compile_check is in the gate-and-verify GROUP (so it shows up alongside
+  // validate_edit / scan_paths in manage_tools) but classified under
+  // diagnostics in capabilities (it's a compile-error probe, not a verify
+  // rule runner). The split is deliberate and surfaces in lifecycle too
+  // (compile_check carries the editor_instance_locked note).
   unity_open_mcp_compile_check: "diagnostics",
-  unity_open_mcp_editor_status: "core",
-  unity_open_mcp_validate_edit: "gate-and-verify",
-  unity_open_mcp_checkpoint_create: "gate-and-verify",
-  unity_open_mcp_delta: "gate-and-verify",
-  unity_open_mcp_find_references: "gate-and-verify",
-  unity_open_mcp_scan_paths: "gate-and-verify",
-  unity_open_mcp_apply_fix: "gate-and-verify",
-  unity_open_mcp_scan_all: "gate-and-verify",
-  unity_open_mcp_baseline_create: "gate-and-verify",
-  unity_open_mcp_regression_check: "gate-and-verify",
-  unity_open_mcp_reserialize: "asset-intelligence",
-  unity_open_mcp_read_asset: "asset-intelligence",
-  unity_open_mcp_search_assets: "asset-intelligence",
-  unity_open_mcp_list_assets: "asset-intelligence",
-  // M16 Plan 1 — typed project & asset management tools.
-  unity_open_mcp_assets_create_folder: "typed-editor",
-  unity_open_mcp_assets_copy: "typed-editor",
-  unity_open_mcp_assets_move: "typed-editor",
-  unity_open_mcp_assets_delete: "typed-editor",
-  unity_open_mcp_assets_refresh: "typed-editor",
-  unity_open_mcp_material_create: "typed-editor",
-  unity_open_mcp_material_get_properties: "typed-editor",
-  unity_open_mcp_material_set_property: "typed-editor",
-  unity_open_mcp_material_get_keywords: "typed-editor",
-  unity_open_mcp_material_set_keyword: "typed-editor",
-  unity_open_mcp_material_set_shader: "typed-editor",
-  unity_open_mcp_shader_list_all: "typed-editor",
-  unity_open_mcp_shader_get_data: "typed-editor",
-  unity_open_mcp_prefab_instantiate: "typed-editor",
-  unity_open_mcp_prefab_create: "typed-editor",
-  unity_open_mcp_prefab_open: "typed-editor",
-  unity_open_mcp_prefab_close: "typed-editor",
-  unity_open_mcp_prefab_save: "typed-editor",
-  unity_open_mcp_prefab_apply: "typed-editor",
-  unity_open_mcp_prefab_revert: "typed-editor",
-  unity_open_mcp_prefab_unpack: "typed-editor",
-  unity_open_mcp_prefab_get_overrides: "typed-editor",
-  unity_open_mcp_prefab_status: "typed-editor",
-  // M16 Plan 2 — typed GameObject & component tools.
-  unity_open_mcp_gameobject_create: "typed-editor",
-  unity_open_mcp_gameobject_destroy: "typed-editor",
-  unity_open_mcp_gameobject_duplicate: "typed-editor",
-  unity_open_mcp_gameobject_find: "typed-editor",
-  unity_open_mcp_gameobject_modify: "typed-editor",
-  unity_open_mcp_gameobject_set_parent: "typed-editor",
-  unity_open_mcp_component_add: "typed-editor",
-  unity_open_mcp_component_destroy: "typed-editor",
-  unity_open_mcp_component_get: "typed-editor",
-  unity_open_mcp_component_modify: "typed-editor",
-  unity_open_mcp_component_list_all: "typed-editor",
-  // M16 Plan 3 — typed scene management tools.
-  unity_open_mcp_scene_create: "typed-editor",
-  unity_open_mcp_scene_open: "typed-editor",
-  unity_open_mcp_scene_save: "typed-editor",
-  unity_open_mcp_scene_unload: "typed-editor",
-  unity_open_mcp_scene_set_active: "typed-editor",
-  unity_open_mcp_scene_list_opened: "typed-editor",
-  unity_open_mcp_scene_get_data: "typed-editor",
-  unity_open_mcp_scene_get_dirty_summary: "typed-editor",
-  unity_open_mcp_scene_focus: "typed-editor",
-  unity_open_mcp_sceneview_get_camera: "typed-editor",
-  unity_open_mcp_sceneview_set_camera: "typed-editor",
-  // M16 Plan 4 — typed Package Manager tools.
-  unity_open_mcp_package_list: "typed-editor",
-  unity_open_mcp_package_search: "typed-editor",
-  unity_open_mcp_package_add: "typed-editor",
-  unity_open_mcp_package_remove: "typed-editor",
-  unity_open_mcp_package_get_info: "typed-editor",
-  unity_open_mcp_package_get_dependencies: "typed-editor",
-  unity_open_mcp_package_check: "typed-editor",
-  // M16 Plan 5 — typed console / editor state / selection / undo / tags / layers.
-  unity_open_mcp_console_clear: "typed-editor",
-  unity_open_mcp_console_log: "typed-editor",
-  unity_open_mcp_editor_set_state: "typed-editor",
-  unity_open_mcp_selection_get: "typed-editor",
-  unity_open_mcp_selection_set: "typed-editor",
-  unity_open_mcp_editor_undo: "typed-editor",
-  unity_open_mcp_editor_redo: "typed-editor",
-  unity_open_mcp_editor_undo_history: "typed-editor",
-  unity_open_mcp_editor_clear_history: "typed-editor",
-  unity_open_mcp_editor_get_tags: "typed-editor",
-  unity_open_mcp_editor_get_layers: "typed-editor",
-  unity_open_mcp_editor_add_tag: "typed-editor",
-  unity_open_mcp_editor_add_layer: "typed-editor",
-  // M16 Plan 6 — typed reflection / scripts / object data tools.
-  // type_schema / script_read / object_get_data are read-only; script_write /
-  // script_delete / object_modify are mutating (paths_hint scoped).
-  unity_open_mcp_type_schema: "typed-editor",
-  unity_open_mcp_script_read: "typed-editor",
-  unity_open_mcp_script_write: "typed-editor",
-  unity_open_mcp_script_delete: "typed-editor",
-  unity_open_mcp_object_get_data: "typed-editor",
-  unity_open_mcp_object_modify: "typed-editor",
-  // M16 Plan 7 — typed profiler session / diagnostics tools. Most mutate
-  // editor state (no asset writes) — gate-free direct-response tools.
-  // profiler_save_data is the lone asset-writing mutator (paths_hint scoped
-  // to the destination .json).
-  unity_open_mcp_profiler_start: "diagnostics",
-  unity_open_mcp_profiler_stop: "diagnostics",
-  unity_open_mcp_profiler_get_status: "diagnostics",
-  unity_open_mcp_profiler_get_config: "diagnostics",
-  unity_open_mcp_profiler_set_config: "diagnostics",
-  unity_open_mcp_profiler_list_modules: "diagnostics",
-  unity_open_mcp_profiler_enable_module: "diagnostics",
-  unity_open_mcp_profiler_clear_data: "diagnostics",
-  unity_open_mcp_profiler_save_data: "diagnostics",
-  unity_open_mcp_profiler_load_data: "diagnostics",
-  unity_open_mcp_profiler_get_script_stats: "diagnostics",
-  // M16 Plan 8 — typed gate intelligence tools. All read-only, gate-free
-  // direct-response tools that compose checkpoint / validate / delta / verify
-  // / run-history foundations. impact_preview + gate_budget_estimate are
-  // pre-mutation; mutation_explain is post-mutation.
-  unity_open_mcp_impact_preview: "gate-intelligence",
-  unity_open_mcp_gate_budget_estimate: "gate-intelligence",
-  unity_open_mcp_mutation_explain: "gate-intelligence",
-  // M16 Plan 9 — typed build pipeline + project-settings tools. Reads are
-  // gate-free; build_set_target / build_set_scenes / build_set_defines /
-  // build_start / settings_set_* run the full gate path (build_start also
-  // requires the deny bypass — BuildPipeline.BuildPlayer is on the deny list).
-  unity_open_mcp_build_get_targets: "build-settings",
-  unity_open_mcp_build_get_active_target: "build-settings",
-  unity_open_mcp_build_set_target: "build-settings",
-  unity_open_mcp_build_get_scenes: "build-settings",
-  unity_open_mcp_build_set_scenes: "build-settings",
-  unity_open_mcp_build_start: "build-settings",
-  unity_open_mcp_build_get_defines: "build-settings",
-  unity_open_mcp_build_set_defines: "build-settings",
-  unity_open_mcp_settings_get_player: "build-settings",
-  unity_open_mcp_settings_set_player: "build-settings",
-  unity_open_mcp_settings_get_quality: "build-settings",
-  unity_open_mcp_settings_set_quality: "build-settings",
-  unity_open_mcp_settings_get_physics: "build-settings",
-  unity_open_mcp_settings_set_physics: "build-settings",
-  unity_open_mcp_settings_get_lighting: "build-settings",
-  unity_open_mcp_settings_set_lighting: "build-settings",
-  // M20 Plan 9 / T20.9.2 — KV preferences. PlayerPrefs + EditorPrefs are
-  // mutating editor-state writes to the registry / Library/PlayerPreferences
-  // (NOT project assets), so they route as gate-free direct-response tools like
-  // editor_undo. set / delete are mutating in catalog terms (the toggle / Tools
-  // tab reflect it) even though the asset gate has nothing to validate.
-  // playerprefs_set calls PlayerPrefs.Save(); EditorPrefs writes through
-  // immediately. playerprefs_delete_all is deliberately omitted (irreversible
-  // project-wide wipe — route through execute_csharp with an explicit confirm).
-  unity_open_mcp_playerprefs_get: "build-settings",
-  unity_open_mcp_playerprefs_set: "build-settings",
-  unity_open_mcp_playerprefs_delete: "build-settings",
-  unity_open_mcp_editorprefs_get: "build-settings",
-  unity_open_mcp_editorprefs_set: "build-settings",
-  unity_open_mcp_editorprefs_delete: "build-settings",
-  // M20 Plan 9 / T20.9.3 — Project Settings remainder. set_time +
-  // set_quality_level write ProjectSettings/*.asset (full gate path,
-  // EditorSettle); get_time + get_render_pipeline are gate-free reads.
-  // get_render_pipeline has no setter — switching SRP is a package-level
-  // operation (package_add / package_remove).
-  unity_open_mcp_settings_get_time: "build-settings",
-  unity_open_mcp_settings_set_time: "build-settings",
-  unity_open_mcp_settings_get_render_pipeline: "build-settings",
-  unity_open_mcp_settings_set_quality_level: "build-settings",
-  // M16 Plan 10 / T6.6.2 — Navigation (NavMesh) extension tools. Extension
-  // pack tools ship tool definitions in the core MCP server (so capabilities
-  // advertises the surface) but require the matching extension UPM package
-  // installed in the target project for the bridge-side handler to exist.
-  unity_open_mcp_navigation_surface_add: "navigation",
-  unity_open_mcp_navigation_set_bake_settings: "navigation",
-  unity_open_mcp_navigation_surface_bake: "navigation",
-  unity_open_mcp_navigation_modifier_add: "navigation",
-  unity_open_mcp_navigation_modifier_volume_add: "navigation",
-  unity_open_mcp_navigation_link_add: "navigation",
-  unity_open_mcp_navigation_agent_add: "navigation",
-  unity_open_mcp_navigation_agent_set_destination: "navigation",
-  unity_open_mcp_navigation_list: "navigation",
-  unity_open_mcp_navigation_get: "navigation",
-  unity_open_mcp_navigation_modify: "navigation",
-  // M16 Plan 10 / T6.6.4 — Input System extension tools. Extension pack tools
-  // ship tool definitions in the core MCP server (so capabilities advertises
-  // the surface) but require the matching extension UPM package installed in
-  // the target project for the bridge-side handler to exist.
-  unity_open_mcp_inputsystem_asset_create: "input-system",
-  unity_open_mcp_inputsystem_actionmap_add: "input-system",
-  unity_open_mcp_inputsystem_action_add: "input-system",
-  unity_open_mcp_inputsystem_binding_add: "input-system",
-  unity_open_mcp_inputsystem_binding_composite_add: "input-system",
-  unity_open_mcp_inputsystem_controlscheme_add: "input-system",
-  unity_open_mcp_inputsystem_get: "input-system",
-  // M16 Plan 10 / T6.6.5 — ProBuilder extension tools.
-  unity_open_mcp_probuilder_create_shape: "probuilder",
-  unity_open_mcp_probuilder_get_mesh_info: "probuilder",
-  unity_open_mcp_probuilder_extrude: "probuilder",
-  unity_open_mcp_probuilder_delete_faces: "probuilder",
-  unity_open_mcp_probuilder_set_face_material: "probuilder",
-  // M16 Plan 10 / T6.6.9 — Particle System extension tools. Extension pack
-  // tools ship tool definitions in the core MCP server (so capabilities
-  // advertises the surface) but require the matching extension UPM package
-  // installed in the target project for the bridge-side handler to exist.
-  unity_open_mcp_particle_system_get: "particle-system",
-  unity_open_mcp_particle_system_modify: "particle-system",
-  // M16 Plan 10 / T6.6.10 — Animation extension tools (AnimationClip +
-  // AnimatorController). Extension pack tools ship tool definitions in the
-  // core MCP server (so capabilities advertises the surface) but require the
-  // matching extension UPM package installed in the target project for the
-  // bridge-side handler to exist.
-  unity_open_mcp_animation_create: "animation",
-  unity_open_mcp_animation_get_data: "animation",
-  unity_open_mcp_animation_modify: "animation",
-  unity_open_mcp_animator_create: "animation",
-  unity_open_mcp_animator_get_data: "animation",
-  unity_open_mcp_animator_modify: "animation",
-  // M18 Plan 7 / T18.7.3 — Splines extension tools. First backlog domain
-  // shipped under the embedded + grouped model. Compile-gated on
-  // com.unity.splines in the bridge; the tool definitions live in core so
-  // capabilities discovery advertises the surface even before the package is
-  // installed. Mutating members (container_create / add_knot / set_knot /
-  // set_tangent_mode / modify) run the full gate path; read-only members
-  // (evaluate / get_knots) are gate-free.
-  unity_open_mcp_splines_container_create: "splines",
-  unity_open_mcp_splines_add_knot: "splines",
-  unity_open_mcp_splines_set_knot: "splines",
-  unity_open_mcp_splines_set_tangent_mode: "splines",
-  unity_open_mcp_splines_evaluate: "splines",
-  unity_open_mcp_splines_get_knots: "splines",
-  unity_open_mcp_splines_modify: "splines",
-  // M20 Plan 2 / T20.2 — Lighting domain tools. Built-in lighting module
-  // (Light / ReflectionProbe / RenderSettings / Lightmapping) — ungated in the
-  // bridge, always compiled. Mutating members (light_add / light_set /
-  // light_modify / reflection_probe_bake / skybox_set) run the full gate path;
-  // reflection_probe_bake is the long mutation (EditorSettle). Read-only
-  // members (reflection_probe_get / skybox_get) are gate-free.
-  unity_open_mcp_light_add: "lighting",
-  unity_open_mcp_light_set: "lighting",
-  unity_open_mcp_light_modify: "lighting",
-  unity_open_mcp_reflection_probe_bake: "lighting",
-  unity_open_mcp_reflection_probe_get: "lighting",
-  unity_open_mcp_skybox_set: "lighting",
-  unity_open_mcp_skybox_get: "lighting",
-  // M20 Plan 3 / T20.3.1 — Audio domain tools. Built-in audio module
-  // (AudioSource / AudioListener / AudioMixer / AudioMixerGroup from
-  // UnityEngine.AudioModule) — ungated in the bridge, always compiled. Mutating
-  // members (audio_source_add / audio_source_modify / audio_mixer_set_parameter)
-  // run the full gate path; read-only members (audio_listener_get /
-  // audio_mixer_get_parameter) are gate-free.
-  unity_open_mcp_audio_source_add: "audio",
-  unity_open_mcp_audio_source_modify: "audio",
-  unity_open_mcp_audio_mixer_set_parameter: "audio",
-  unity_open_mcp_audio_listener_get: "audio",
-  unity_open_mcp_audio_mixer_get_parameter: "audio",
-  // M20 Plan 3 / T20.3.2 — UI (uGUI) domain tools. Built-in UI module (Canvas /
-  // CanvasScaler / GraphicRaycaster / Image / Text / Button / Slider / Toggle /
-  // InputField / layout groups / EventSystem) — ungated in the bridge, always
-  // compiled. All four members (ui_canvas_add / ui_element_add /
-  // ui_layout_group_add / ui_element_modify) are mutating and run the full gate
-  // path. TextMesh Pro (TMP_Text) is optional and detected at call time.
-  unity_open_mcp_ui_canvas_add: "ui",
-  unity_open_mcp_ui_element_add: "ui",
-  unity_open_mcp_ui_layout_group_add: "ui",
-  unity_open_mcp_ui_element_modify: "ui",
-  // M20 Plan 3 / T20.3.3 — Constraints & LOD domain tools. Built-in engine
-  // modules (PositionConstraint / RotationConstraint / AimConstraint /
-  // ParentConstraint / ScaleConstraint from UnityEngine.AnimationModule +
-  // LODGroup from UnityEngine.CoreModule) — ungated in the bridge, always
-  // compiled. All three members (constraint_add / lod_group_configure /
-  // lod_add_level) are mutating and run the full gate path. One `constraints`
-  // group covers both concerns (Constraints & LOD are small and closely
-  // related).
-  unity_open_mcp_constraint_add: "constraints",
-  unity_open_mcp_lod_group_configure: "constraints",
-  unity_open_mcp_lod_add_level: "constraints",
-  // M20 Plan 4 / T20.4 — Terrain domain tools. Built-in Terrain module
-  // (Terrain / TerrainData / TreePrototype / TerrainLayer) — ungated in the
-  // bridge, always compiled. All five members (terrain_create /
-  // terrain_set_heights / terrain_paint_layer / terrain_place_trees /
-  // terrain_set_neighbors) are mutating and run the full gate path. The
-  // large-array cap (513x513) pushes agents toward tiled heightmap / splat
-  // writes.
-  unity_open_mcp_terrain_create: "terrain",
-  unity_open_mcp_terrain_set_heights: "terrain",
-  unity_open_mcp_terrain_paint_layer: "terrain",
-  unity_open_mcp_terrain_place_trees: "terrain",
-  unity_open_mcp_terrain_set_neighbors: "terrain",
-  // M20 Plan 6 / T20.6.1 — Cinemachine extension tools. The only reflection-
-  // gated domain pack in the bridge: the assembly always compiles, Cinemachine
-  // 3.x presence is detected at call time. Six mutating members
-  // (create_camera / set_targets / set_lens / set_body / set_noise /
-  // brain_ensure) run the full gate path; the read-only member (camera_list)
-  // is gate-free.
-  unity_open_mcp_cinemachine_create_camera: "cinemachine",
-  unity_open_mcp_cinemachine_set_targets: "cinemachine",
-  unity_open_mcp_cinemachine_set_lens: "cinemachine",
-  unity_open_mcp_cinemachine_set_body: "cinemachine",
-  unity_open_mcp_cinemachine_set_noise: "cinemachine",
-  unity_open_mcp_cinemachine_brain_ensure: "cinemachine",
-  unity_open_mcp_cinemachine_camera_list: "cinemachine",
-  // M20 Plan 6 / T20.6.2 — Timeline extension tools. Compile-gated on
-  // com.unity.timeline in the bridge (UNITY_OPEN_MCP_EXT_TIMELINE). All five
-  // members are mutating and run the full gate path.
-  unity_open_mcp_timeline_create: "timeline",
-  unity_open_mcp_timeline_track_add: "timeline",
-  unity_open_mcp_timeline_clip_add: "timeline",
-  unity_open_mcp_timeline_director_bind: "timeline",
-  unity_open_mcp_timeline_modify: "timeline",
-  // M20 Plan 6 / T20.6.3 — Tilemap extension tools. Compile-gated on
-  // com.unity.2d.tilemap (UNITY_OPEN_MCP_EXT_TILEMAP) with an inner guard on
-  // com.unity.2d.tilemap.extras (UNITY_OPEN_MCP_EXT_TILEMAP_EXTRAS) for
-  // create_rule_tile. All five members are mutating and run the full gate path.
-  unity_open_mcp_tilemap_create: "tilemap",
-  unity_open_mcp_tilemap_set_tile: "tilemap",
-  unity_open_mcp_tilemap_box_fill: "tilemap",
-  unity_open_mcp_tilemap_create_tile_asset: "tilemap",
-  unity_open_mcp_tilemap_create_rule_tile: "tilemap",
-  // M20 Plan 7 / T20.7.1 — Shader Graph extension tools. Compile-gated on
-  // com.unity.shadergraph (UNITY_OPEN_MCP_EXT_SHADERGRAPH) + auto-activating
-  // (the first domain under the package-detection auto-activation model). The
-  // first two members are create/open; node_add / node_connect mutate the
-  // graph. open is read-only (Gate = Off); create / node_add / node_connect
-  // run the full gate path with paths_hint scoped to the .shadergraph asset
-  // path. The editing API is wrapped behind a reflection helper so the tools
-  // degrade gracefully (shadergraph_api_unavailable) across package versions.
-  unity_open_mcp_shader_graph_create: "shadergraph",
-  unity_open_mcp_shader_graph_open: "shadergraph",
-  unity_open_mcp_shader_graph_node_add: "shadergraph",
-  unity_open_mcp_shader_graph_node_connect: "shadergraph",
-  // M20 Plan 7 / T20.7.2 — VFX Graph extension tools. Compile-gated on
-  // com.unity.visualeffectgraph (UNITY_OPEN_MCP_EXT_VFX) + auto-activating
-  // (the second domain under the package-detection auto-activation model).
-  // list / open are read-only (Gate = Off) returning a structured
-  // context/block/property summary; block_edit is the lone mutating member
-  // (Gate = Enforce, paths_hint = .vfx asset path). VFX Graph's editor graph
-  // model is internal/unstable — list/open work over the public runtime
-  // VisualEffectAsset type (version-stable); block_edit requires the VFX Graph
-  // window to be open and degrades to a structured
-  // vfx_block_edit_requires_editor_window error otherwise.
-  unity_open_mcp_vfx_list: "vfx",
-  unity_open_mcp_vfx_open: "vfx",
-  unity_open_mcp_vfx_block_edit: "vfx",
-  // M20 Plan 7 / T20.7.3 — Memory Profiler snapshot capture. Compile-gated on
-  // com.unity.memoryprofiler (UNITY_OPEN_MCP_EXT_MEMORYPROFILER) + auto-
-  // activating (the third domain under the package-detection auto-activation
-  // model). Sense-prefixed (unity_senses_*) because it pairs with the existing
-  // senses profiler family rather than the typed-editor surface. Read-only re:
-  // game/project state but produces a file — Gate = Off, ReadOnlyHint = true,
-  // Lifecycle = EditorSettle. The capture is callback-based (async); the bridge
-  // blocks until the callback fires.
-  unity_senses_memory_snapshot_capture: "memoryprofiler",
-  // M20 Plan 9 / T20.9.1 — 2D art pipeline (SpriteAtlas + Texture import)
-  // domain tools. Built-in 2D module (SpriteAtlas / SpriteAtlasAsset /
-  // SpriteAtlasPackingSettings / SpriteAtlasTextureSettings in UnityEngine.U2D
-  // / UnityEditor.U2D + TextureImporter in UnityEditor) — ungated in the
-  // bridge, always compiled. Five mutating spriteatlas members (create /
-  // add_packable / remove_packable / modify / delete) run the full gate path
-  // with EditorSettle and paths_hint scoped to the .spriteatlas asset path
-  // (delete is destructive); two read-only spriteatlas members (get / list)
-  // are gate-free. Two mutating texture members (set_import / reimport) run
-  // the full gate path with EditorSettle (reimport can take seconds / trigger
-  // a platform-switch domain reload); two read-only texture members
-  // (get_importer / get) are gate-free.
-  unity_open_mcp_spriteatlas_create: "sprite2d",
-  unity_open_mcp_spriteatlas_get: "sprite2d",
-  unity_open_mcp_spriteatlas_add_packable: "sprite2d",
-  unity_open_mcp_spriteatlas_remove_packable: "sprite2d",
-  unity_open_mcp_spriteatlas_modify: "sprite2d",
-  unity_open_mcp_spriteatlas_delete: "sprite2d",
-  unity_open_mcp_spriteatlas_list: "sprite2d",
-  unity_open_mcp_texture_get_importer: "sprite2d",
-  unity_open_mcp_texture_set_import: "sprite2d",
-  unity_open_mcp_texture_reimport: "sprite2d",
-  unity_open_mcp_texture_get: "sprite2d",
-  // M20 Plan 5 / T20.5 — typed ScriptableObject + Assembly Definition tools.
-  // Both sets are core (always-on) typed-editor tools with no Unity package
-  // dependency. scriptableobject_create is mutating (EditorSettle);
-  // list_assets_of_type is read-only (offline-routeable in principle). The
-  // asmdef family parses .asmdef as JSON: list/get are read-only (offline-
-  // routeable); create/modify use RestartThenSettle (a recompile + domain
-  // reload follows).
-  unity_open_mcp_scriptableobject_create: "typed-editor",
-  unity_open_mcp_list_assets_of_type: "typed-editor",
-  unity_open_mcp_asmdef_list: "typed-editor",
-  unity_open_mcp_asmdef_get: "typed-editor",
-  unity_open_mcp_asmdef_create: "typed-editor",
-  unity_open_mcp_asmdef_modify: "typed-editor",
+  // dependencies + reimport_package are grouped (gate-and-verify /
+  // typed-editor) but previously had NO entry in the hand-maintained
+  // TOOL_CATEGORY record, silently falling through to "other". The
+  // pre-change category is preserved here as a documented override so the
+  // capabilities output stays byte-identical (T4.5 acceptance: "same
+  // category for every tool"). A future deliberate reclassification can
+  // flip these to their group id; until then the parity test treats them
+  // as allowed-other.
+  unity_open_mcp_dependencies: "other",
+  unity_open_mcp_reimport_package: "other",
+
+  // --- Case 2: always-visible meta-tools (group=null) -----------------------
+  // The three capability-discovery entry points share one category so agents
+  // reading the capabilities surface see them grouped. They have null group
+  // because they MUST stay always-visible (an agent needs to reach
+  // capabilities / list_rules / generate_skill before any other tool).
   unity_open_mcp_capabilities: "capability-discovery",
   unity_open_mcp_list_rules: "capability-discovery",
   unity_open_mcp_generate_skill: "capability-discovery",
-  unity_senses_run_tests: "agent-senses",
-  unity_senses_screenshot: "agent-senses",
-  // M20 Plan 1 / T20.1.1 — senses parity residual. Two new read-only senses
-  // tools extending the screenshot surface.
-  unity_senses_screenshot_camera: "agent-senses",
-  unity_senses_capture_inline: "agent-senses",
-  // M20 Plan 1 / T20.1.2 — EditorWindow capture (Win-only full-fidelity,
-  // cross-platform best-effort readback).
-  unity_senses_screenshot_window: "agent-senses",
-  // M20 Plan 1 / T20.1.3 — Frame Debugger control + draw-call list
-  // (reflection over Unity's internal Frame Debugger API; non-mutating Editor
-  // state change, gate-free).
-  unity_senses_frame_debugger: "agent-senses",
-  // M20 Plan 1 / T20.1.4 — single-frame deep profiler capture. Returns one
-  // frame's full sample tree for the requested modules.
-  unity_senses_profiler_capture_frame: "agent-senses",
-  unity_senses_read_console: "agent-senses",
-  unity_senses_profiler_capture: "agent-senses",
-  unity_senses_profiler_memory: "agent-senses",
-  unity_senses_profiler_rendering: "agent-senses",
-  unity_senses_spatial_query: "agent-senses",
-  // M26 Plan 2 — Unity Hub control tools. Local-routed (no bridge/batch);
-  // mutating members are system-level ops (paths_hint N/A, gate-free).
-  unity_open_mcp_hub_list_editors: "unity-hub-control",
-  unity_open_mcp_hub_available_releases: "unity-hub-control",
-  unity_open_mcp_hub_install_editor: "unity-hub-control",
-  unity_open_mcp_hub_install_modules: "unity-hub-control",
-  unity_open_mcp_hub_get_install_path: "unity-hub-control",
-  unity_open_mcp_hub_set_install_path: "unity-hub-control",
-  // M27 Plan 4 — batch_execute is a core meta-tool (always visible, live-only).
-  // One HTTP round trip runs many typed tools sequentially inside the open
-  // Editor, wrapped in a single batch-level gate + one undo group. NOT
-  // headless batchCapable (not in BATCH_TOOL_NAMES) — there is no batch spawn
-  // fallback; the live bridge must be up.
-  unity_open_mcp_batch_execute: "core",
+  // The remaining meta-tools (pull_events, read_compile_errors,
+  // bridge_status, manage_tools, restart_editor, resource_pressure) carry
+  // the default `"other"` category — they are operator/debug surfaces that
+  // do not fit any capability classification bucket. They are intentionally
+  // NOT in this override map so the parity test can distinguish "deliberate
+  // other" (these) from "missing category" (a new tool added without
+  // thought). See ALLOWED_OTHER_CATEGORY_TOOLS below.
 };
+
+/**
+ * Tools that intentionally carry the default `"other"` category. Two flavors:
+ *
+ *   - **Meta-tools** (group=null) — always-visible operator/debug surfaces
+ *     that have no group assignment and no override. The parity test allows
+ *     them through `"other"` explicitly so a NEW tool that lands in neither
+ *     bucket fails loudly.
+ *
+ *   - **Grouped tools whose override is `"other"`** — `dependencies` and
+ *     `reimport_package` (preserved pre-change behavior; see overrides).
+ *
+ * Documented; adding one means updating both this set and the test. Exported
+ * so the parity test can enumerate the allowed-other surface.
+ */
+export const ALLOWED_OTHER_CATEGORY_TOOLS: ReadonlySet<string> = new Set([
+  // Meta-tools (group=null, no override).
+  "unity_open_mcp_manage_tools",
+  "unity_senses_pull_events",
+  "unity_open_mcp_read_compile_errors",
+  "unity_open_mcp_bridge_status",
+  "unity_open_mcp_restart_editor",
+  "unity_open_mcp_resource_pressure",
+  // Grouped tools whose override preserves the pre-change "other".
+  "unity_open_mcp_dependencies",
+  "unity_open_mcp_reimport_package",
+]);
+
+/**
+ * The derived tool → category map. Built once at module load: starts from
+ * the group assignment (group = category for the agreed majority), then
+ * applies {@link TOOL_CATEGORY_OVERRIDES} for the documented exceptions.
+ * The result is frozen so callers cannot mutate it.
+ */
+const TOOL_CATEGORY: Readonly<Record<string, string>> = (() => {
+  const out: Record<string, string> = {};
+  // Step 1: derive category === group for every grouped tool.
+  for (const [tool, group] of Object.entries(toolGroupAssignment())) {
+    out[tool] = group;
+  }
+  // Step 2: apply the documented exceptions (overrides win).
+  for (const [tool, category] of Object.entries(TOOL_CATEGORY_OVERRIDES)) {
+    out[tool] = category;
+  }
+  return out;
+})();
 
 function categoryFor(toolName: string): string {
   return TOOL_CATEGORY[toolName] ?? "other";
@@ -788,22 +490,17 @@ export function buildCapabilities(
 ): CapabilitiesResult {
   const includePlanned = filter.includePlanned !== false;
 
-  const implementedTools: ToolCapability[] = deps.tools.map((tool) => {
-    const lifecycle = lifecycleFor(tool.name);
-    return {
-      name: tool.name,
-      implemented: true,
-      status: "implemented",
-      category: categoryFor(tool.name),
-      description: tool.description ?? "",
-      routePolicy: routePolicyFor(tool.name),
-      batchCapable: deps.batchToolNames.has(tool.name),
-      inputSchema: tool.inputSchema,
-      group: groupFor(tool.name),
-      lifecycle: lifecycle.class,
-      lifecycleNote: lifecycle.note ?? null,
-    };
-  });
+  // M31-optimizations Plan 4 / T4.2 (M2) — the per-tool ToolCapability[] is
+  // the most expensive per-call structure (~270 tools, each with a
+  // `lifecycleFor` lookup). The inputs (`deps.tools` + `deps.batchToolNames`)
+  // are module-level constants on the production path (ALL_TOOLS /
+  // BATCH_TOOL_NAMES), so memoize on their identity: production hits, tests
+  // with fixture arrays miss (and rebuild — the prior behavior). The cached
+  // array is reused as-is; downstream consumers do not mutate it.
+  const implementedTools = implementedToolCapabilities(
+    deps.tools,
+    deps.batchToolNames,
+  );
 
   const plannedTools: ToolCapability[] = includePlanned
     ? PLANNED_TOOLS.map((p) => ({
@@ -849,30 +546,30 @@ export function buildCapabilities(
     counts: {
       toolsImplemented: implementedTools.length,
       toolsPlanned: plannedTools.length,
-      rulesImplemented: deps.rules.filter((r) => r.implemented).length,
-      rulesPlanned: includePlanned
-        ? deps.rules.filter((r) => !r.implemented).length
-        : 0,
-      fixesImplemented: deps.fixes.filter((f) => f.implemented).length,
-      fixesPlanned: includePlanned
-        ? deps.fixes.filter((f) => !f.implemented).length
-        : 0,
+      // M31-optimizations Plan 4 / T4.2 — single-pass counts. Previously the
+      // rules/fixes catalog was scanned four times (.filter().length for
+      // implemented + planned on each). Now one walk tallies all four in a
+      // single pass; planned counts short-circuit to 0 when includePlanned is
+      // false (the prior code computed them and then discarded the result).
+      ...countRulesAndFixes(deps.rules, deps.fixes, includePlanned),
       toolGroupsDefaultEnabled: TOOL_GROUPS.filter((g) => g.defaultEnabled).length,
       toolGroupsTotal: TOOL_GROUPS.length,
     },
     // The routing summary is independent of the kind filter — agents
     // that ask for `kind: "rules"` still benefit from the routing
-    // narrative. It is constant, so no per-call computation.
+    // narrative. M31-optimizations Plan 4 / T4.2 — hoisted to a module-level
+    // constant (ROUTING_SUMMARY already is one).
     routing: ROUTING_SUMMARY,
     // M22 Plan 1 / T22.1.5 — cost hints are independent of the kind filter for
     // the same reason as routing: an agent asking for rules/fixes still wants
-    // to know how to budget its next heavy-tool call. Constant, so no per-call
-    // computation.
-    costHints: buildCostHints(),
+    // to know how to budget its next heavy-tool call. M31-optimizations Plan
+    // 4 / T4.2 — hoisted to COST_HINTS (computed once at module load).
+    costHints: COST_HINTS,
     // Lifecycle taxonomy is independent of the kind filter for the same
     // reason: an agent asking for rules/fixes still benefits from the recovery
-    // narrative. Constant, so no per-call computation.
-    lifecycleBlock: buildLifecycle(),
+    // narrative. M31-optimizations Plan 4 / T4.2 — hoisted to LIFECYCLE_BLOCK
+    // (computed once at module load).
+    lifecycleBlock: LIFECYCLE_BLOCK,
     // specs/feedback.md 2026-07-03 — surface bridge reachability at the top
     // level so a caller can distinguish "group genuinely not compiled in"
     // (available:false + reason) from "I can't tell because the bridge is
@@ -881,6 +578,84 @@ export function buildCapabilities(
     // compile-state gap.
     bridgeReachable: deps.availableBridgeTools !== undefined,
   };
+}
+
+// ---------------------------------------------------------------------------
+// M31-optimizations Plan 4 / T4.2 (M2) — memoization helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Single cache entry for the per-tool {@link ToolCapability} list. Keyed by
+ * the identity of (`tools`, `batchToolNames`) — both are module-level
+ * constants on the production path, so the cache always hits there. Tests
+ * that pass fixture arrays get distinct identities and rebuild (the prior
+ * per-call behavior), which keeps them honest about the inputs they pass.
+ */
+interface ToolCapabilitiesCacheEntry {
+  tools: Tool[];
+  batchToolNames: ReadonlySet<string>;
+  capabilities: ToolCapability[];
+}
+
+let toolCapabilitiesCache: ToolCapabilitiesCacheEntry | null = null;
+
+function implementedToolCapabilities(
+  tools: Tool[],
+  batchToolNames: ReadonlySet<string>,
+): ToolCapability[] {
+  const cached = toolCapabilitiesCache;
+  if (cached && cached.tools === tools && cached.batchToolNames === batchToolNames) {
+    return cached.capabilities;
+  }
+  const capabilities = tools.map((tool) => {
+    const lifecycle = lifecycleFor(tool.name);
+    return {
+      name: tool.name,
+      implemented: true,
+      status: "implemented" as CapabilityStatus,
+      category: categoryFor(tool.name),
+      description: tool.description ?? "",
+      routePolicy: routePolicyFor(tool.name),
+      batchCapable: batchToolNames.has(tool.name),
+      inputSchema: tool.inputSchema,
+      group: groupFor(tool.name),
+      lifecycle: lifecycle.class,
+      lifecycleNote: lifecycle.note ?? null,
+    };
+  });
+  toolCapabilitiesCache = { tools, batchToolNames, capabilities };
+  return capabilities;
+}
+
+/**
+ * Tally implemented + planned counts for rules and fixes in a single pass
+ * over each catalog. Returns the four `counts` fields. When `includePlanned`
+ * is false the planned counters short-circuit to 0 (the prior code computed
+ * them via `.filter(!implemented).length` and then discarded the result).
+ */
+function countRulesAndFixes(
+  rules: RuleCapability[],
+  fixes: FixCapability[],
+  includePlanned: boolean,
+): {
+  rulesImplemented: number;
+  rulesPlanned: number;
+  fixesImplemented: number;
+  fixesPlanned: number;
+} {
+  let rulesImplemented = 0;
+  let rulesPlanned = 0;
+  for (const r of rules) {
+    if (r.implemented) rulesImplemented++;
+    else if (includePlanned) rulesPlanned++;
+  }
+  let fixesImplemented = 0;
+  let fixesPlanned = 0;
+  for (const f of fixes) {
+    if (f.implemented) fixesImplemented++;
+    else if (includePlanned) fixesPlanned++;
+  }
+  return { rulesImplemented, rulesPlanned, fixesImplemented, fixesPlanned };
 }
 
 // ---------------------------------------------------------------------------

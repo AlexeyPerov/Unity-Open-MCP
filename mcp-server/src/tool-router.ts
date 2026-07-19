@@ -23,7 +23,7 @@ import {
 } from "./capabilities/intent-groups.js";
 import { listRules } from "./capabilities/list-rules.js";
 import { generateSkill } from "./skill/generate-skill.js";
-import { knownClientKeys } from "./skill/client-paths.js";
+import { getKnownClientKeys } from "./skill/client-paths.js";
 import { ALL_TOOLS } from "./tools/index.js";
 import { lockPath, readInstanceLock, classifyInstance, isPidAlive, type InstanceLock } from "./instance-discovery.js";
 import { PORT_ENV_VAR } from "./constants.js";
@@ -963,7 +963,11 @@ export class ToolRouter implements Router {
     const rawClients = Array.isArray(args.clients) ? args.clients : [];
     // Client allowlist comes from the single-source manifest at
     // `skills/client-paths.json`. Do not add a literal union here.
-    const allowedClients = new Set(knownClientKeys());
+    // M31-optimizations Plan 4 / T4.4 (L6) — reuse the module-level
+    // `KNOWN_CLIENT_KEYS` singleton instead of allocating a fresh Set per
+    // call. The Set is built once on first access and re-derived only when
+    // the manifest cache is reset (tests).
+    const allowedClients = getKnownClientKeys();
     const clients = rawClients.filter(
       (c): c is string => typeof c === "string" && allowedClients.has(c),
     );
@@ -1420,7 +1424,7 @@ export class ToolRouter implements Router {
   // (capabilities, list_groups) can avoid a second GET /tools hop.
   private computeCompiledAvailability(
     inventory: { tools: ReadonlySet<string> } | null,
-    groupsList: Record<string, string[]>,
+    groupsList: Record<string, readonly string[]>,
   ): Map<string, { available: boolean | null; reason: string | null }> {
     const out = new Map<string, { available: boolean | null; reason: string | null }>();
 

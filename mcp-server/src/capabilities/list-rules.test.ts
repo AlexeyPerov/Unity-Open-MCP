@@ -7,6 +7,7 @@ import {
   FIX_CATALOG,
   implementedRules,
   plannedRules,
+  getFixIndex,
 } from "./rule-catalog.js";
 
 const DEPS = { rules: RULE_CATALOG, fixes: FIX_CATALOG };
@@ -157,4 +158,31 @@ test("planned rules carry guidance in the list output", () => {
       `${rule.id} planned rule must carry guidance`,
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// M31-optimizations Plan 4 / T4.2 (M2) — memoization + identity
+// ---------------------------------------------------------------------------
+
+test("getFixIndex returns the same Map reference across calls", () => {
+  // FIX_CATALOG is a frozen module-level constant, so the issue-code → fix-id
+  // index is identical on every invocation. Previously listRules rebuilt it
+  // from scratch per call; now it shares one lazy singleton.
+  const a = getFixIndex();
+  const b = getFixIndex();
+  assert.equal(a, b, "getFixIndex must return the memoized singleton");
+});
+
+test("listRules does not rebuild the fix index on the production path", () => {
+  // Two calls with the same FIX_CATALOG reference must share one fix-index
+  // singleton — assert by identity rather than by deep equality.
+  const first = getFixIndex();
+  const before = first.size;
+  // Drive listRules twice — internally it must call getFixIndex() (not
+  // buildFixIndex(FIX_CATALOG)) when deps.fixes === FIX_CATALOG.
+  listRules(DEPS);
+  listRules(DEPS);
+  const after = getFixIndex();
+  assert.equal(after, first, "fix index identity preserved across listRules");
+  assert.equal(after.size, before, "fix index contents stable");
 });

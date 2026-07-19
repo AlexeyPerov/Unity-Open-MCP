@@ -192,9 +192,14 @@ export function resolveTemplateSkillPath(): string | null {
  * `UNITY_OPEN_MCP_TOOLKIT_ROOT` after a prior test already warmed the
  * cache need this to observe the override. Do not call from runtime
  * code.
+ *
+ * M31-optimizations Plan 4 / T4.4 — also clears the derived client-keys
+ * singleton so the next `getKnownClientKeys()` reflects the re-resolved
+ * manifest.
  */
 export function _clearClientPathsCacheForTests(): void {
   cached = null;
+  cachedClientKeys = null;
 }
 
 /**
@@ -217,7 +222,50 @@ export function clientSkillRelativePath(clientKey: string): string {
  * All known client keys from the manifest — used to derive the
  * `unity_open_mcp_generate_skill` `clients` enum and the allowlist in
  * the tool router.
+ *
+ * M31-optimizations Plan 4 / T4.4 (L6) — returns `Array.from(KNOWN_CLIENT_KEYS)`
+ * so callers that need an array share the underlying ReadonlySet singleton
+ * instead of allocating a fresh `Object.keys(...)` array per call.
  */
 export function knownClientKeys(): string[] {
-  return Object.keys(loadClientPathsManifest().clients);
+  return Array.from(getKnownClientKeys());
+}
+
+// ---------------------------------------------------------------------------
+// M31-optimizations Plan 4 / T4.4 (L6) — module-level ReadonlySet over the
+// resolved manifest's client keys. Mirrors the manifest cache: derived once on
+// first access and re-derived when the manifest cache is cleared
+// (`_clearClientPathsCacheForTests`). `routeGenerateSkill` previously
+// allocated `new Set(knownClientKeys())` per call; it now imports this
+// accessor and reuses one Set reference.
+//
+// Exposed as `getKnownClientKeys()` rather than a top-level `const` so the
+// laziness can mirror `getResolvedManifest` (which itself is lazy). The
+// function returns the SAME Set reference on every call after the first —
+// identity is the contract (asserted by a unit test).
+// ---------------------------------------------------------------------------
+let cachedClientKeys: ReadonlySet<string> | null = null;
+
+/**
+ * The set of known client keys from the resolved skill manifest. Lazy on
+ * first access (the manifest itself is lazy); re-derived if the manifest
+ * cache is reset for tests. Returns the same Set reference on every call,
+ * so callers can compare by identity and avoid per-call allocation.
+ */
+export function getKnownClientKeys(): ReadonlySet<string> {
+  if (cachedClientKeys === null) {
+    cachedClientKeys = new Set(Object.keys(loadClientPathsManifest().clients));
+  }
+  return cachedClientKeys;
+}
+
+/**
+ * @internal Test-only cache reset. Mirrors
+ * `_clearClientPathsCacheForTests`: clears the lazy client-keys singleton so
+ * a test that mutates `UNITY_OPEN_MCP_TOOLKIT_ROOT` and resets the manifest
+ * cache observes the new client-keys set on the next access. Do not call
+ * from runtime code.
+ */
+export function _clearKnownClientKeysCacheForTests(): void {
+  cachedClientKeys = null;
 }

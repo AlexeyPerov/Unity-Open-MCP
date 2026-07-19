@@ -386,12 +386,16 @@ export function getGroup(id: string): ToolGroup | undefined {
 // ---------------------------------------------------------------------------
 // Per-tool group assignment — the authoritative mapping from a registered MCP
 // tool name to its group id. Tools not listed here default to `null` (always
-// visible). Mirrors the capability categories in build-capabilities.ts; the
-// group vocabulary is the curated, session-visibility-relevant subset.
+// visible). Single source of truth for the session-visibility group AND (since
+// M31-optimizations Plan 4 / T4.5) for the capability category: build-
+// capabilities.ts derives TOOL_CATEGORY from this table at module load, so
+// adding a tool here automatically gives it category === group. The handful of
+// tools where category ≠ group live in the documented TOOL_CATEGORY_OVERRIDES
+// map in build-capabilities.ts; the parity test there catches any new tool
+// added without a group assignment.
 //
-// KEEP THIS TABLE ALIGNED with TOOL_CATEGORY in build-capabilities.ts when
-// adding tools. A tool that gets a non-`core` category in capabilities should
-// map to the matching group id here, and vice versa.
+// Old `KEEP THIS TABLE ALIGNED with TOOL_CATEGORY` note retired — the
+// alignment is now automatic (one derives from the other).
 // ---------------------------------------------------------------------------
 
 const TOOL_GROUP_ASSIGNMENT: Record<string, string> = {};
@@ -950,11 +954,32 @@ export function groupFor(toolName: string): string | null {
 }
 
 /**
+ * M31-optimizations Plan 4 / T4.5 (L13) — read-only view of the
+ * tool → group assignment map. Exposed so `build-capabilities.ts` can derive
+ * `TOOL_CATEGORY` from the group assignment (single source of truth for the
+ * ~95% of tools where category === group) instead of hand-maintaining a
+ * parallel table. The returned record is the live module constant — callers
+ * MUST NOT mutate it.
+ */
+export function toolGroupAssignment(): Readonly<Record<string, string>> {
+  return TOOL_GROUP_ASSIGNMENT;
+}
+
+/**
  * Inverse map: group id → sorted tool names. Used by manage_tools
  * `list_groups` to enumerate every group with its tool roster. Tools with a
  * null group are intentionally omitted (they are always-visible meta-tools).
+ *
+ * M31-optimizations Plan 4 / T4.1 (M1) — computed ONCE at module load and
+ * frozen. `TOOL_GROUP_ASSIGNMENT` is a module-level constant mutated only by
+ * the `assign()` calls above (all of which run before this line on first
+ * import), so the inverse map is identical across every call. Previously this
+ * was rebuilt (re-bucket + re-sort) on every invocation, and `manage_tools`
+ * alone called it twice per request (once in `fetchInventoryAndReconcile` →
+ * `reconcileAutoActivation`, again at the call site). All call sites now share
+ * one frozen object reference — the identity is asserted by a unit test.
  */
-export function groupToTools(): Record<string, string[]> {
+const GROUP_TO_TOOLS: Readonly<Record<string, readonly string[]>> = (() => {
   const out: Record<string, string[]> = {};
   for (const group of TOOL_GROUPS) {
     out[group.id] = [];
@@ -965,4 +990,8 @@ export function groupToTools(): Record<string, string[]> {
   }
   for (const names of Object.values(out)) names.sort();
   return out;
+})();
+
+export function groupToTools(): Record<string, readonly string[]> {
+  return GROUP_TO_TOOLS;
 }

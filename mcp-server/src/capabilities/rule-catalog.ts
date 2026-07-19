@@ -1037,3 +1037,48 @@ export function plannedRules(): RuleCapability[] {
 export function implementedFixes(): FixCapability[] {
   return FIX_CATALOG.filter((f) => f.implemented);
 }
+
+// ---------------------------------------------------------------------------
+// M31-optimizations Plan 4 / T4.2 (M2) — module-level lazy singleton for the
+// fix-id index. `listRules` rebuilds this map (issue-code → fix-id[]) from
+// `FIX_CATALOG` on every call; `FIX_CATALOG` is a frozen module-level constant,
+// so the index is identical across every invocation. The first call computes
+// it; every later call (within the process) reuses the reference. Identity is
+// asserted by a unit test.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the fix-id index keyed by issue code. Each implemented fix contributes
+ * its id to every issue code it addresses. Exposed so `listRules` can share
+ * one index across calls instead of rebuilding it per invocation.
+ */
+export function buildFixIndex(fixes: FixCapability[]): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+  for (const fix of fixes) {
+    if (!fix.implemented) continue;
+    for (const code of fix.issueCodes) {
+      const list = index.get(code);
+      if (list) {
+        if (!list.includes(fix.id)) list.push(fix.id);
+      } else {
+        index.set(code, [fix.id]);
+      }
+    }
+  }
+  return index;
+}
+
+let cachedFixIndex: Map<string, string[]> | null = null;
+
+/**
+ * The fix-id index for {@link FIX_CATALOG} — the catalog is a module-level
+ * constant, so this index is constant too. Computed lazily on first access
+ * and reused for the lifetime of the process. Callers that pass a different
+ * fix list (tests) should call {@link buildFixIndex} directly.
+ */
+export function getFixIndex(): Map<string, string[]> {
+  if (cachedFixIndex === null) {
+    cachedFixIndex = buildFixIndex(FIX_CATALOG);
+  }
+  return cachedFixIndex;
+}

@@ -10,6 +10,14 @@
 // The cache key includes field_limit and depth (the parameters that change what
 // the source returns); detail/component/path/id are pure TS-side render options
 // and do not invalidate the cache.
+//
+// M31-optimizations Plan 4 / T4.3 (M6) — the cache key now normalizes
+// `asset_path` via `normalizeAssetPath` (reused from offline/paths.ts) so the
+// four documented spellings of one file (`Assets/Foo.prefab`,
+// `./Assets/Foo.prefab`, `Assets/../Assets/Foo.prefab`, `Assets\Foo.prefab`)
+// collapse to one entry. The key additionally folds the on-disk mtime so an
+// edit between two `read_asset` calls invalidates the cached model instead of
+// serving stale data — see the `mtime invalidation` note below.
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { LiveClient } from "./live-client.js";
@@ -28,6 +36,9 @@ import {
   attachPagination,
   isOutputProfile,
 } from "./output-profile.js";
+import { normalizeAssetPath } from "./offline/paths.js";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 
 const COMPRESSIBLE = new Set([
   "unity_open_mcp_read_asset",
@@ -42,24 +53,44 @@ const CACHE_LIMIT = 8;
 
 interface CacheEntry {
   model: AssetModel;
+  /**
+   * M31-optimizations Plan 4 / T4.3 — the on-disk mtime (ms) the cached model
+   * was parsed from, or `null` for live-bridge-sourced models (no local file
+   * to stat). A subsequent `read_asset` whose `stat(...).mtimeMs` differs
+   * invalidates the entry even when the path + fieldLimit + depth match.
+   */
+  mtimeMs: number | null;
 }
 
 /** Session-scoped LRU for the last few AssetModels read by `read_asset`. */
 export class AssetModelCache {
   private entries = new Map<string, CacheEntry>();
 
-  get(key: string): AssetModel | null {
+  /**
+   * Fetch a cached model. `mtimeMs` is the caller-measured on-disk mtime
+   * (or `null` when there is no local file to stat — e.g. a live-bridge
+   * fallback). An entry is a hit only when both the key AND the mtime match;
+   * an mtime mismatch evicts the stale entry and reports a miss so the caller
+   * re-parses.
+   */
+  get(key: string, mtimeMs: number | null): AssetModel | null {
     const entry = this.entries.get(key);
     if (!entry) return null;
+    if (entry.mtimeMs !== mtimeMs) {
+      // Stale — on-disk file changed since the model was cached. Evict and
+      // report a miss so the caller re-parses the current content.
+      this.entries.delete(key);
+      return null;
+    }
     // Move-to-end so the LRU eviction order updates.
     this.entries.delete(key);
     this.entries.set(key, entry);
     return entry.model;
   }
 
-  set(key: string, model: AssetModel): void {
+  set(key: string, model: AssetModel, mtimeMs: number | null): void {
     if (this.entries.has(key)) this.entries.delete(key);
-    this.entries.set(key, { model });
+    this.entries.set(key, { model, mtimeMs });
     while (this.entries.size > CACHE_LIMIT) {
       const oldest = this.entries.keys().next().value;
       if (oldest === undefined) break;
@@ -73,6 +104,30 @@ export class AssetModelCache {
 
   get size(): number {
     return this.entries.size;
+  }
+}
+
+/**
+ * M31-optimizations Plan 4 / T4.3 (M6) — measure the on-disk mtime (ms) for a
+ * project-relative asset path so the AssetModelCache can invalidate on file
+ * edit. Returns `null` when the file cannot be stat'd (binary-only asset
+ * resolved via the live bridge, missing file, permission error) — in that
+ * case the cache entry behaves like the prior mtime-less cache for that key.
+ *
+ * Resolves against `projectPath` so the stat target matches what the offline
+ * parser would read. `normalizeAssetPath` has already collapsed `.`/`..`/
+ * backslashes, so `join` is operating on a canonical relative path.
+ */
+async function measureMtimeMs(
+  projectPath: string,
+  normalizedAssetPath: string,
+): Promise<number | null> {
+  try {
+    const abs = join(projectPath, normalizedAssetPath);
+    const stats = await stat(abs);
+    return stats.mtimeMs;
+  } catch {
+    return null;
   }
 }
 
@@ -129,9 +184,21 @@ async function routeReadAsset(
 
   const fieldLimit = typeof args.field_limit === "number" ? args.field_limit : 0;
   const depth = typeof args.depth === "number" ? args.depth : -1;
-  const cacheKey = `${assetPath}|${fieldLimit}|${depth}`;
+  // M31-optimizations Plan 4 / T4.3 (M6) — normalize the path so the four
+  // documented spellings of one file collapse to one cache entry. The
+  // normalized form is what the cache key is built from; the ORIGINAL
+  // `assetPath` is still passed to the offline parser / live bridge so
+  // downstream behavior is byte-identical (only the cache key changes).
+  const normalizedPath = normalizeAssetPath(assetPath);
+  // mtime invalidation: stat the absolute file once up-front. A failure
+  // (binary-only asset, missing file, permission) yields `null` and the
+  // cache entry behaves like the prior mtime-less cache for that key. This
+  // is the documented behavior tightening — long sessions with on-disk edits
+  // now re-parse instead of serving stale until LRU eviction.
+  const mtimeMs = await measureMtimeMs(projectPath, normalizedPath);
+  const cacheKey = `${normalizedPath}|${fieldLimit}|${depth}`;
 
-  let model = cache.get(cacheKey);
+  let model = cache.get(cacheKey, mtimeMs);
   let cacheHit = true;
   let source: "offline" | "live" = "offline";
 
@@ -143,7 +210,7 @@ async function routeReadAsset(
         const result = await readAssetOffline(assetPath, { fieldLimit, projectRoot: projectPath });
         model = result.model;
         source = "offline";
-        cache.set(cacheKey, model);
+        cache.set(cacheKey, model, mtimeMs);
       } catch {
         // Offline parse failed — fall through to live bridge.
         model = null;
@@ -173,7 +240,7 @@ async function routeReadAsset(
       }
       model = parsed as unknown as AssetModel;
       source = "live";
-      cache.set(cacheKey, model);
+      cache.set(cacheKey, model, mtimeMs);
     }
   }
 

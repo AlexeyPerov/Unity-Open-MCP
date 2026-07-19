@@ -1096,3 +1096,145 @@ test("fix catalog has no duplicate ids", () => {
   const ids = FIX_CATALOG.map((f) => f.id);
   assert.equal(new Set(ids).size, ids.length);
 });
+
+// ---------------------------------------------------------------------------
+// M31-optimizations Plan 4 / T4.2 (M2) — memoization + single-pass counts
+// ---------------------------------------------------------------------------
+
+test("buildCapabilities reuses the per-tool capabilities cache on identity-stable inputs", () => {
+  // The per-tool ToolCapability[] is memoized on the identity of
+  // (deps.tools, deps.batchToolNames). Two calls passing the SAME array +
+  // Set references must return identical ToolCapability object references
+  // for the implemented tools. (Production always passes ALL_TOOLS +
+  // BATCH_TOOL_NAMES, so this always hits.)
+  const a = buildCapabilities(DEPS);
+  const b = buildCapabilities(DEPS);
+  // The outer CapabilitiesResult.tools is a fresh array per call
+  // ([...implementedTools, ...plannedTools]); the cached piece is the inner
+  // ToolCapability object graph. Assert identity of the first implemented
+  // entry — if it is the same reference, the whole implemented list is shared.
+  const aFirst = a.tools.find((t) => t.implemented);
+  const bFirst = b.tools.find((t) => t.implemented);
+  assert.ok(aFirst && bFirst);
+  assert.equal(
+    aFirst,
+    bFirst,
+    "implemented ToolCapability objects should be shared for identity-stable deps",
+  );
+});
+
+test("buildCapabilities rebuilds the per-tool list when the tool input identity changes", () => {
+  // Defensive: tests that pass a fresh fixture array (different identity from
+  // the prior DEPS) must NOT get a stale cached list. Pass a fresh array with
+  // one extra tool and confirm the new capabilities reflect it.
+  const moreTools: Tool[] = [
+    ...FIXTURE_TOOLS,
+    {
+      name: "unity_open_mcp_gameobject_create",
+      description: "GameObject create (fixture).",
+      inputSchema: { type: "object", properties: {} },
+    },
+  ];
+  const caps = buildCapabilities({ ...DEPS, tools: moreTools });
+  assert.equal(
+    caps.counts.toolsImplemented,
+    FIXTURE_TOOLS.length + 1,
+    "fresh tools array must produce a fresh (non-cached) capabilities list",
+  );
+  assert.ok(
+    caps.tools.find((t) => t.name === "unity_open_mcp_gameobject_create"),
+  );
+});
+
+test("buildCapabilities counts are correct for every kind + include_planned combination", () => {
+  // Single-pass counts (countRulesAndFixes) must agree with the catalog.
+  // Drive every combination and cross-check against the catalog filters.
+  for (const kind of [undefined, "tools", "rules", "fixes"] as const) {
+    for (const includePlanned of [true, false]) {
+      const caps = buildCapabilities(DEPS, { kind, includePlanned });
+      assert.equal(
+        caps.counts.rulesImplemented,
+        implementedRules().length,
+        `rulesImplemented mismatch for kind=${kind}, includePlanned=${includePlanned}`,
+      );
+      assert.equal(
+        caps.counts.rulesPlanned,
+        includePlanned ? plannedRules().length : 0,
+        `rulesPlanned mismatch for kind=${kind}, includePlanned=${includePlanned}`,
+      );
+      assert.equal(
+        caps.counts.fixesImplemented,
+        FIX_CATALOG.filter((f) => f.implemented).length,
+        `fixesImplemented mismatch for kind=${kind}, includePlanned=${includePlanned}`,
+      );
+      assert.equal(
+        caps.counts.fixesPlanned,
+        includePlanned ? FIX_CATALOG.filter((f) => !f.implemented).length : 0,
+        `fixesPlanned mismatch for kind=${kind}, includePlanned=${includePlanned}`,
+      );
+    }
+  }
+});
+
+test("buildCapabilities costHints + lifecycleBlock are constant references", () => {
+  // The two blocks are hoisted to module-level singletons (COST_HINTS /
+  // LIFECYCLE_BLOCK). Two calls must share the same reference — the prior
+  // code rebuilt them per call despite the inline comment saying "Constant,
+  // so no per-call computation".
+  const a = buildCapabilities(DEPS);
+  const b = buildCapabilities(DEPS);
+  assert.equal(a.costHints, b.costHints, "costHints must be a shared constant");
+  assert.equal(
+    a.lifecycleBlock,
+    b.lifecycleBlock,
+    "lifecycleBlock must be a shared constant",
+  );
+});
+
+test("buildCapabilities walks the rules/fixes catalog ONCE for counts (single-pass)", () => {
+  // M31-optimizations Plan 4 / T4.2 acceptance: "do not re-iterate the full
+  // catalog on cache-hit inputs (counter spy on RULE_CATALOG iteration)".
+  // Wrap the rules + fixes arrays in iteration-counting proxies and assert
+  // each is iterated exactly once when includePlanned=true. Pre-change, the
+  // 4 `.filter(...).length` count passes iterated each catalog twice even
+  // when planned was included (rulesImplemented + rulesPlanned = 2 walks;
+  // fixesImplemented + fixesPlanned = 2 walks). Post-change the single-pass
+  // countRulesAndFixes walk replaces them with one iteration of each.
+  //
+  // (When includePlanned=false there is one additional iteration for the
+  // output `.filter()` — that is the output slice, not the counts, and is
+  // outside the single-pass-counts contract.)
+  let ruleIterations = 0;
+  let fixIterations = 0;
+  const spyRules = new Proxy(RULE_CATALOG, {
+    get(target, prop, receiver) {
+      if (prop === Symbol.iterator) {
+        return () => {
+          ruleIterations++;
+          return target[Symbol.iterator]();
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+  const spyFixes = new Proxy(FIX_CATALOG, {
+    get(target, prop, receiver) {
+      if (prop === Symbol.iterator) {
+        return () => {
+          fixIterations++;
+          return target[Symbol.iterator]();
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+
+  buildCapabilities({
+    tools: FIXTURE_TOOLS,
+    batchToolNames: FIXTURE_BATCH_NAMES,
+    rules: spyRules as unknown as typeof RULE_CATALOG,
+    fixes: spyFixes as unknown as typeof FIX_CATALOG,
+  }, { includePlanned: true });
+  assert.equal(ruleIterations, 1, "rules catalog must be iterated exactly once for counts");
+  assert.equal(fixIterations, 1, "fixes catalog must be iterated exactly once for counts");
+});

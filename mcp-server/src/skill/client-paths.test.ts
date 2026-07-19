@@ -7,6 +7,7 @@ import {
   loadClientPathsManifest,
   clientSkillRelativePath,
   knownClientKeys,
+  getKnownClientKeys,
   resolveTemplateSkillPath,
   _clearClientPathsCacheForTests,
   BUNDLED_MANIFEST,
@@ -115,6 +116,47 @@ test("knownClientKeys lists the canonical + extended clients", () => {
   ]) {
     assert.ok(keys.includes(k), `knownClientKeys missing ${k}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// M31-optimizations Plan 4 / T4.4 (L6) — getKnownClientKeys singleton
+// ---------------------------------------------------------------------------
+
+test("getKnownClientKeys returns the same Set reference across calls", () => {
+  // The manifest is immutable for process lifetime (cached after first
+  // resolution), so the derived client-keys Set is too. routeGenerateSkill
+  // previously allocated `new Set(knownClientKeys())` per call; it now
+  // imports this singleton. Identity is the contract.
+  _clearClientPathsCacheForTests();
+  const a = getKnownClientKeys();
+  const b = getKnownClientKeys();
+  assert.equal(a, b, "getKnownClientKeys must return the memoized singleton");
+  // The singleton's contents match knownClientKeys().
+  assert.deepEqual(
+    Array.from(a).sort(),
+    knownClientKeys().sort(),
+    "singleton contents must match knownClientKeys()",
+  );
+});
+
+test("getKnownClientKeys re-derives after the manifest cache is cleared", () => {
+  // Tests that mutate UNITY_OPEN_MCP_TOOLKIT_ROOT and clear the manifest
+  // cache must observe a fresh client-keys Set on the next access. This
+  // mirrors `_clearClientPathsCacheForTests`'s existing contract.
+  const before = getKnownClientKeys();
+  _clearClientPathsCacheForTests();
+  const after = getKnownClientKeys();
+  assert.notEqual(
+    before,
+    after,
+    "clearing the manifest cache must re-derive the client-keys Set",
+  );
+  // Contents are still equivalent (same manifest resolves in this repo).
+  assert.deepEqual(
+    Array.from(before).sort(),
+    Array.from(after).sort(),
+    "contents equivalent after re-derivation in the same repo",
+  );
 });
 
 // ---------------------------------------------------------------------------
