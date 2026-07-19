@@ -180,16 +180,59 @@ export interface AssignedNode {
   renderOnly: boolean;
 }
 
+/**
+ * Classify a node's component list in a single pass, producing the names list
+ * plus the two boolean signals (focus / render-only) that the renderer needs.
+ *
+ * M31 Plan 6 / T6.2 — previously `flattenAndAssign` built `componentNames` via
+ * `.map` and then called `hasFocusComponent` (which iterated the names again)
+ * and `isRenderOnly` (which iterated them a third time), walking each node's
+ * component array 3× for classification. This collapses all three into one
+ * walk so the names list, the focus flag, and the render-only flag come out of
+ * a single loop.
+ */
+function classifyNode(
+  components: AssetComponent[],
+): { names: string[]; focus: boolean; renderOnly: boolean } {
+  if (components.length === 0) {
+    return { names: [], focus: false, renderOnly: false };
+  }
+  const names: string[] = [];
+  let hasNonTrivial = false; // → focus when any component is non-trivial
+  let hasRenderer = false; // render-only requires at least one renderer
+  let allTrivial = true; // render-only requires every component trivial
+  for (const component of components) {
+    const name = component.name;
+    names.push(name);
+    if (isTrivialComponent(name)) {
+      if (name !== "Transform" && name !== "RectTransform") hasRenderer = true;
+    } else {
+      hasNonTrivial = true;
+      allTrivial = false;
+    }
+  }
+  // renderOnly mirrors isRenderOnly(): at least one renderer, all trivial,
+  // and a non-empty list (guaranteed by the early return above).
+  const renderOnly = allTrivial && hasRenderer;
+  return { names, focus: hasNonTrivial, renderOnly };
+}
+
 export function flattenAndAssign(
   roots: HierarchyNode[],
-): { rows: AssignedNode[]; sets: ComponentSetDeclaration[] } {
+): { rows: AssignedNode[]; sets: ComponentSetDeclaration[]; setByCode: Map<string, ComponentSetDeclaration> } {
   const rows: AssignedNode[] = [];
   const codeByKey = new Map<string, string>();
   const sets: ComponentSetDeclaration[] = [];
+  // M31 Plan 6 / T6.3 — code → declaration index so toTreeNode can do an O(1)
+  // lookup instead of `sets.find(...)` per inline-rendered row. Built in the
+  // same pass that declares the sets.
+  const setByCode = new Map<string, ComponentSetDeclaration>();
 
   const walk = (nodes: HierarchyNode[]) => {
     for (const node of nodes) {
-      const componentNames = node.components.map((c) => c.name);
+      // T6.2 — single-pass classification: names + focus + renderOnly in one
+      // walk over `node.components` (previously a .map + two .some/for loops).
+      const { names: componentNames, focus, renderOnly } = classifyNode(node.components);
       const key = componentNames.join("\u0000");
       let code: string | null = null;
       if (key !== "") {
@@ -199,7 +242,9 @@ export function flattenAndAssign(
         } else {
           code = `c${sets.length + 1}`;
           codeByKey.set(key, code);
-          sets.push({ code, names: componentNames });
+          const decl: ComponentSetDeclaration = { code, names: componentNames };
+          sets.push(decl);
+          setByCode.set(code, decl);
         }
       }
       rows.push({
@@ -207,14 +252,14 @@ export function flattenAndAssign(
         index: rows.length,
         componentNames,
         componentSet: code,
-        focus: hasFocusComponent(componentNames),
-        renderOnly: isRenderOnly(componentNames),
+        focus,
+        renderOnly,
       });
       walk(node.children);
     }
   };
   walk(roots);
-  return { rows, sets };
+  return { rows, sets, setByCode };
 }
 
 // ===========================================================================
@@ -461,7 +506,7 @@ export function renderAssetSummary(
   }
 
   // Default / --path / detail: folded TREE.
-  const { rows, sets } = flattenAndAssign(model.roots);
+  const { rows, sets, setByCode } = flattenAndAssign(model.roots);
 
   if (sets.length > 0) {
     const cmp: Record<string, string[]> = {};
@@ -469,8 +514,11 @@ export function renderAssetSummary(
     result.cmp = cmp;
   }
 
+  // T6.4 — lowercase the path filter once for the whole call (the needle is
+  // constant across every row). The haystack still has to be lowercased per
+  // row, which is the unavoidable cost; the win is doing the needle once.
   const scopedRows = opts.path
-    ? rows.filter((r) => containsFold(r.node.path, opts.path!))
+    ? rows.filter((r) => containsFold(r.node.path, opts.path!.toLowerCase()))
     : rows;
 
   const folded = foldHierarchy(scopedRows, {
@@ -479,7 +527,7 @@ export function renderAssetSummary(
     fold: detail !== "verbose",
   });
 
-  result.tree = folded.rows.map((row) => toTreeNode(row, detail, sets));
+  result.tree = folded.rows.map((row) => toTreeNode(row, detail, setByCode));
   if (opts.depth !== undefined && opts.depth >= 0) result.depth = opts.depth;
   if (opts.path) result.pathScope = opts.path;
 
@@ -499,7 +547,9 @@ export function renderAssetSummary(
 function toTreeNode(
   row: FoldedRow,
   detail: DetailLevel,
-  sets: ComponentSetDeclaration[],
+  // T6.3 — O(1) code → declaration lookup instead of `sets.find(...)` per
+  // inline-rendered row. The map is built once in flattenAndAssign.
+  setByCode: Map<string, ComponentSetDeclaration>,
 ): TreeNodeOut {
   const node: TreeNodeOut = {
     idx: row.index,
@@ -514,7 +564,7 @@ function toTreeNode(
   const hasCode = row.componentSet !== null;
   const showInline = detail === "verbose" || (detail === "normal" && !hasCode);
   if (showInline && !row.folded && row.componentSet !== null) {
-    const decl = sets.find((s) => s.code === row.componentSet);
+    const decl = setByCode.get(row.componentSet);
     if (decl && decl.names.length > 0) node.components = decl.names;
   }
   return node;
@@ -584,8 +634,15 @@ function defaultLimit(detail: DetailLevel): number {
   }
 }
 
-function containsFold(haystack: string, needle: string): boolean {
-  return haystack.toLowerCase().includes(needle.toLowerCase());
+/**
+ * Case-insensitive substring test for the `--path` filter.
+ *
+ * M31 Plan 6 / T6.4 — the caller (renderAssetSummary) lowercases the needle
+ * once per call; this function lowercases only the per-row haystack (the
+ * unavoidable cost). Previously the needle was re-lowercased on every row.
+ */
+function containsFold(haystack: string, lowercasedNeedle: string): boolean {
+  return haystack.toLowerCase().includes(lowercasedNeedle);
 }
 
 // ===========================================================================
@@ -664,10 +721,23 @@ function toSearchMatchOut(match: SearchMatch, objectLimit: number): SearchMatchO
   return out;
 }
 
+// M31 Plan 6 / T6.5 — hoisted regexes for compactPath's per-path hot path.
+// Previously two regex literals (`/\\/g` and `/^\\.\\//`) were recompiled on
+// every match path; they are constant and belong at module scope. The offline
+// parser has its own `BACKSLASH_RE` in offline/paths.ts (different module —
+// no shared regex-helpers module was introduced in Plan 3, so these stay
+// local to compact.ts).
+const COMPACT_BACKSLASH_RE = /\\/g;
+const COMPACT_LEADING_DOT_SLASH_RE = /^\.\//;
+
 /** Drop the Assets/ prefix (declared once via EXT) and normalize slashes. */
 export function compactPath(path: string): string {
-  let p = path.replace(/\\/g, "/").replace(/^\.\//, "");
-  if (p.toLowerCase().startsWith("assets/")) p = p.slice("assets/".length);
+  let p = path.replace(COMPACT_BACKSLASH_RE, "/").replace(COMPACT_LEADING_DOT_SLASH_RE, "");
+  // `assets/` prefix check is a plain substring compare after lowercasing the
+  // head — no regex adds value here. slice() is the documented third step.
+  if (p.length >= "assets/".length && p.slice(0, "assets/".length).toLowerCase() === "assets/") {
+    p = p.slice("assets/".length);
+  }
   return p;
 }
 

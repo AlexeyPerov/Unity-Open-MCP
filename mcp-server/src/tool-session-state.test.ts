@@ -14,8 +14,12 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   ToolSessionState,
   filterVisibleTools,
+  FD_SAMPLE_RING_CAPACITY,
   type ActivationSource,
 } from "./tool-session-state.js";
+// M31 Plan 6 / T6.1 — type-only import for the fdSample fixture builder; the
+// ring tests in this file pin the bulk-splice overflow contract.
+import type { FdSample } from "./process-diagnostics.js";
 import { DEFAULT_ENABLED_GROUPS, GROUP_IDS } from "./capabilities/tool-groups.js";
 
 // ---------------------------------------------------------------------------
@@ -280,4 +284,75 @@ test("ping stays visible after manage_tools(deactivate, core)", () => {
     ["unity_open_mcp_ping"],
     "ping survives core deactivation; execute_csharp (core, not always-visible) is hidden",
   );
+});
+
+// ---------------------------------------------------------------------------
+// M31 Plan 6 / T6.1 — fdSamples ring bulk-splice overflow
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a minimal FdSample for the ring tests. Only `ts` varies so we can
+ * assert eviction order; `pid` and `count` are constants the ring math does
+ * not inspect here.
+ */
+function fdSample(ts: number): FdSample {
+  return { ts, pid: 12345, count: 100 };
+}
+
+test("fdSamples ring: under-capacity push keeps every sample", () => {
+  const s = new ToolSessionState();
+  for (let i = 0; i < 5; i++) s.recordFdSample(fdSample(i));
+  const snap = s.fdSamplesSnapshot();
+  assert.equal(snap.length, 5, "5 pushes under capacity → 5 samples");
+  assert.deepEqual(
+    snap.map((x) => x.ts),
+    [0, 1, 2, 3, 4],
+    "samples are oldest-first, no eviction",
+  );
+});
+
+test("fdSamples ring: bulk-splice overflow drops the oldest excess in one go", () => {
+  // Capacity is FD_SAMPLE_RING_CAPACITY (=20). Pushing 25 must drop the
+  // oldest 5 and keep the newest 20. The old shift()-per-excess loop and the
+  // new single splice() must both produce this exact shape — this test pins
+  // the contract so a future rewrite cannot regress the eviction order.
+  const s = new ToolSessionState();
+  for (let i = 0; i < 25; i++) s.recordFdSample(fdSample(i));
+  const snap = s.fdSamplesSnapshot();
+  assert.equal(snap.length, FD_SAMPLE_RING_CAPACITY, "ring is exactly at capacity");
+  // Oldest 5 (ts 0..4) evicted; newest 20 (ts 5..24) retained, oldest-first.
+  assert.deepEqual(
+    snap.map((x) => x.ts),
+    Array.from({ length: FD_SAMPLE_RING_CAPACITY }, (_, k) => 5 + k),
+    "overflow drops the oldest excess; newest samples retained in order",
+  );
+});
+
+test("fdSamples ring: a single push past capacity drops exactly one", () => {
+  // Fill to capacity, then push exactly one more. Only ts=0 should be gone.
+  const s = new ToolSessionState();
+  for (let i = 0; i < FD_SAMPLE_RING_CAPACITY; i++) s.recordFdSample(fdSample(i));
+  s.recordFdSample(fdSample(999));
+  const snap = s.fdSamplesSnapshot();
+  assert.equal(snap.length, FD_SAMPLE_RING_CAPACITY);
+  assert.equal(snap[0].ts, 1, "oldest (ts=0) evicted");
+  assert.equal(snap[snap.length - 1].ts, 999, "newest (ts=999) retained");
+});
+
+test("fdSamples ring: clearFdSamples empties the ring without touching groups", () => {
+  const s = new ToolSessionState();
+  s.recordFdSample(fdSample(1));
+  s.activate("navigation");
+  s.clearFdSamples();
+  assert.equal(s.fdSamplesSnapshot().length, 0, "ring cleared");
+  assert.equal(s.isGroupActive("navigation"), true, "group state untouched");
+});
+
+test("fdSamples ring: reset clears the ring alongside group state", () => {
+  const s = new ToolSessionState();
+  s.recordFdSample(fdSample(1));
+  s.activate("navigation");
+  s.reset();
+  assert.equal(s.fdSamplesSnapshot().length, 0, "reset clears the ring");
+  assert.equal(s.isGroupActive("navigation"), false, "reset clears opt-in groups");
 });

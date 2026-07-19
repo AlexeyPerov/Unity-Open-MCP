@@ -10,29 +10,22 @@
 // (index.ts) then falls through to the stdio MCP server. That keeps a single
 // `bin` working for both `npx unity-open-mcp wait-for-ready` and an MCP client
 // spawning `node dist/index.js`.
+//
+// M31 Plan 6 / T6.6 — `./commands.js` and `../routers.js` are loaded
+// dynamically (via `await import(...)`) ONLY when a real subcommand is
+// dispatched. `commands.js` imports `ALL_TOOLS` (the full ~270-tool surface),
+// and `routers.js` pulls in the whole live/batch/router stack — evaluating
+// that graph on every `--version` / `--help` / no-command invocation was pure
+// overhead. The light fast-path deps (`parseCliArgs` from args.ts, the
+// `helpText`/`versionText` formatters from help-text.ts, `writeAndDrain`, and
+// `readPackageVersion`) stay static so `--version` / `--help` never touch the
+// heavy import graph. This is the documented exceptional lazy-load permitted
+// by mcp-server/AGENTS.md ("test isolation, justified Node built-ins,
+// documented exceptional lazy-loading").
 
 import { parseCliArgs } from "./args.js";
-import {
-  runPingCommand,
-  runWaitForReadyCommand,
-  runStatusCommand,
-  runRunToolCommand,
-  runStreamEventsCommand,
-  runVerifyCommand,
-  runBaselineCommand,
-  runRegressionCommand,
-  helpText,
-  versionText,
-  DEFAULT_WAIT_TIMEOUT_MS,
-  DEFAULT_POLL_INTERVAL_MS,
-  type CliCommandResult,
-} from "./commands.js";
-import {
-  resolveEnv,
-  buildRouterStack,
-  ResolveEnvError,
-  type RouterStack,
-} from "../routers.js";
+import { helpText, versionText } from "./help-text.js";
+import { readPackageVersion } from "../package-version.js";
 
 const PING_DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -52,6 +45,12 @@ export interface CliRunOutcome {
   exitCode: number;
 }
 
+// M31 Plan 6 / T6.6 — `CliCommandResult` is imported from the heavy
+// `./commands.js` module. Declared as a type-only alias at module scope so the
+// `emitResult` helper (and any other static reference) can name it without a
+// runtime import; the value is produced by the dynamic import inside runCli.
+type CliCommandResult = import("./commands.js").CliCommandResult;
+
 /**
  * Run the CLI. Returns whether the invocation was a CLI subcommand (handled)
  * so index.ts can decide whether to fall through to the stdio server.
@@ -65,15 +64,22 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
   const parsed = parseCliArgs(argv);
   const binName = opts.binName ?? "unity-open-mcp";
 
-  // --help / --version short-circuit before any project-path requirement.
-  // Every stdout/stderr write goes through writeAndDrain so the caller's
-  // process.exit() can't truncate output that's still in the pipe buffer.
+  // --help / --version short-circuit before any project-path requirement AND
+  // before the heavy command/router modules are imported. Every stdout/stderr
+  // write goes through writeAndDrain so the caller's process.exit() can't
+  // truncate output that's still in the pipe buffer.
   if (parsed.command === "help") {
     await writeAndDrain(process.stdout, helpText(binName) + "\n");
     return { handled: true, exitCode: 0 };
   }
   if (parsed.command === "version") {
-    await writeAndDrain(process.stdout, versionText(opts.version) + "\n");
+    // The caller (index.ts) passes the already-read PACKAGE_VERSION, so the
+    // --version path is zero-overhead: no ALL_TOOLS, no router stack, no
+    // package.json re-read. opts.version is authoritative when present; the
+    // fallback readPackageVersion() covers direct invocations of runCli from
+    // tests that don't thread a version through.
+    const version = opts.version || readPackageVersion();
+    await writeAndDrain(process.stdout, versionText(version) + "\n");
     return { handled: true, exitCode: 0 };
   }
 
@@ -89,6 +95,30 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     );
     return { handled: true, exitCode: 2 };
   }
+
+  // M31 Plan 6 / T6.6 — first real subcommand: dynamically import the heavy
+  // command/router modules. `commands.js` transitively imports ALL_TOOLS; up
+  // to this point (help / version / no-command) none of that graph ran.
+  // The two modules are independent so the parallel `Promise.all` loads them
+  // concurrently.
+  const [routers, commandModule] = await Promise.all([
+    import("../routers.js"),
+    import("./commands.js"),
+  ]);
+  type RouterStack = import("../routers.js").RouterStack;
+  const { resolveEnv, buildRouterStack, ResolveEnvError } = routers;
+  const {
+    runPingCommand,
+    runWaitForReadyCommand,
+    runStatusCommand,
+    runRunToolCommand,
+    runStreamEventsCommand,
+    runVerifyCommand,
+    runBaselineCommand,
+    runRegressionCommand,
+    DEFAULT_WAIT_TIMEOUT_MS,
+    DEFAULT_POLL_INTERVAL_MS,
+  } = commandModule;
 
   // Build the router stack. Every command needs a project path + resolved
   // bridge port.

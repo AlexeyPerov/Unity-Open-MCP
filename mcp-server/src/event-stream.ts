@@ -198,9 +198,14 @@ export class BridgeEventStream {
 
   private enqueue(evt: BridgeEvent): void {
     this.queue.push(evt);
-    while (this.queue.length > QUEUE_CAPACITY) {
-      this.queue.shift();
-      this.dropped++;
+    // M31 Plan 6 / T6.1 — single O(n) bulk drop instead of a while+shift loop.
+    // `shift()` is O(n) per call because it re-indexes the array; under sustained
+    // overflow the loop was O(n²). One splice drops the excess in a single
+    // re-index and the `dropped` counter still counts every evicted event.
+    const excess = this.queue.length - QUEUE_CAPACITY;
+    if (excess > 0) {
+      this.queue.splice(0, excess);
+      this.dropped += excess;
     }
   }
 

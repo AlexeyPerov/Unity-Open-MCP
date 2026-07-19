@@ -194,3 +194,101 @@ test("BridgeEventStream: omits Authorization when no token was provided", async 
     await stub.close();
   }
 });
+
+// ----- M31 Plan 6 / T6.1 — bulk-splice overflow -----
+
+/**
+ * Stub that floods `count` log events in one SSE response, then ends the
+ * stream. Used to drive BridgeEventStream past QUEUE_CAPACITY (500) so the
+ * bulk-splice overflow path runs and the `dropped` counter accumulates.
+ */
+function startFloodStub(count: number): Promise<StubHandle> {
+  return new Promise((resolve) => {
+    const server = createServer((_req: IncomingMessage, res: ServerResponse) => {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      // One SSE block per event. seq is unique so parseSseBlock produces 600
+      // distinct BridgeEvents — enough to overflow the 500-deep queue by 100.
+      const blocks: string[] = [];
+      for (let i = 0; i < count; i++) {
+        blocks.push(
+          `event: log\ndata: {"seq":${i},"ts":"2026-07-19T00:00:00.000Z","type":"log","logType":"log","message":"e${i}"}\n\n`,
+        );
+      }
+      res.write(blocks.join(""));
+      res.end();
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      resolve({
+        server,
+        port,
+        close: () => new Promise<void>((r) => server.close(() => r())),
+      });
+    });
+  });
+}
+
+test("BridgeEventStream: bulk-splice overflow drops the exact excess and preserves counter semantics", async () => {
+  // M31 Plan 6 / T6.1 — flooding 600 events into a 500-deep queue must drop
+  // exactly 100 (the excess), and the `dropped` counter must equal that
+  // number. The old while+shift loop would have produced the same count but
+  // re-indexed the array 100 times; the bulk splice does it once. This test
+  // pins the counter-semantics contract (every dropped event counted) so a
+  // future rewrite of the overflow path cannot silently regress it.
+  const FLOOD = 600;
+  const CAPACITY = 500; // QUEUE_CAPACITY in event-stream.ts
+  const expectedDropped = FLOOD - CAPACITY;
+  const stub = await startFloodStub(FLOOD);
+  try {
+    const stream = new BridgeEventStream(
+      `http://127.0.0.1:${stub.port}`,
+      "overflow-sub",
+    );
+    stream.ensureSubscription();
+    // Wait for the flood to land and the reader to drain the response. The
+    // stub writes everything in one chunk and closes, so a few ticks is enough.
+    await new Promise((r) => setTimeout(r, 150));
+    const result = stream.pull(1000);
+    assert.equal(
+      result.dropped,
+      expectedDropped,
+      `dropped must equal the exact excess (flood=${FLOOD}, capacity=${CAPACITY})`,
+    );
+    // Surviving events + dropped == flood total. The queue may have been
+    // partially drained by pull, so we check events.length + dropped + (any
+    // already-drained) — simplest invariant: nothing beyond CAPACITY survives.
+    assert.ok(
+      result.events.length <= CAPACITY,
+      `events returned (${result.events.length}) must not exceed capacity (${CAPACITY})`,
+    );
+    stream.stop();
+  } finally {
+    await stub.close();
+  }
+});
+
+test("BridgeEventStream: under-capacity flood drops nothing", async () => {
+  // Counter-semantics complement: a flood below capacity must not drop a
+  // single event. Guards against an off-by-one in the splice math.
+  const FLOOD = 100;
+  const stub = await startFloodStub(FLOOD);
+  try {
+    const stream = new BridgeEventStream(
+      `http://127.0.0.1:${stub.port}`,
+      "under-cap-sub",
+    );
+    stream.ensureSubscription();
+    await new Promise((r) => setTimeout(r, 150));
+    const result = stream.pull(1000);
+    assert.equal(result.dropped, 0, "under-capacity flood must drop nothing");
+    assert.equal(result.events.length, FLOOD, "all events survive");
+    stream.stop();
+  } finally {
+    await stub.close();
+  }
+});

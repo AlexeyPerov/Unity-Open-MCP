@@ -241,9 +241,12 @@ export class ToolSessionState {
    */
   recordFdSample(sample: FdSample): void {
     this.fdSamples.push(sample);
-    if (this.fdSamples.length > FD_SAMPLE_RING_CAPACITY) {
-      this.fdSamples.shift();
-    }
+    // M31 Plan 6 / T6.1 — single O(n) bulk drop instead of a shift() per excess
+    // element. Same shape as the BridgeEventStream overflow fix; capacity is
+    // small (FD_SAMPLE_RING_CAPACITY = 20) so this is a consistency cleanup,
+    // not a perf-critical path.
+    const excess = this.fdSamples.length - FD_SAMPLE_RING_CAPACITY;
+    if (excess > 0) this.fdSamples.splice(0, excess);
   }
 
   /** Snapshot of the recorded fd samples (oldest-first). */
