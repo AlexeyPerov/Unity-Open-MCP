@@ -1,13 +1,19 @@
+# Unity Open MCP
+
 [![Docs](https://img.shields.io/badge/Docs-unity--mcp-4f46e5)](https://alexeyperov.github.io/unity-open-mcp/)
-[![](https://img.shields.io/badge/Unity-000000?style=flat&logo=unity&logoColor=blue 'Unity')](https://unity.com/releases/editor/archive)
 [![](https://badge.mcpx.dev?status=on 'MCP Enabled')](https://modelcontextprotocol.io/introduction)
+[![](https://img.shields.io/badge/Unity-000000?style=flat&logo=unity&logoColor=white 'Unity')](https://unity.com/releases/editor/archive)
+[![](https://img.shields.io/badge/Node.js-339933?style=flat&logo=nodedotjs&logoColor=white 'Node.js')](https://nodejs.org/en/download/)
+[![](https://img.shields.io/github/stars/AlexeyPerov/Unity-Open-MCP 'Stars')](https://github.com/AlexeyPerov/Unity-Open-MCP/stargazers)
+[![](https://img.shields.io/github/last-commit/AlexeyPerov/Unity-Open-MCP 'Last Commit')](https://github.com/AlexeyPerov/Unity-Open-MCP/commits/master)
 [![](https://img.shields.io/badge/License-MIT-red.svg 'MIT License')](https://opensource.org/licenses/MIT)
 
-<p align="center">
-  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="250">
-</p>
+| [🇺🇸 English](README.md) | [🇨🇳 简体中文](README.zh-CN.md) | [🇷🇺 Русский](README.ru.md) |
+|-------------------------|--------------------------------|------------------------------|
 
-# Unity Open MCP
+<p align="center">
+  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="Unity Open MCP" width="250">
+</p>
 
 Unity Open MCP gives AI agents a typed, safety-gated tool surface for Unity
 projects.
@@ -17,15 +23,71 @@ validation, asset intelligence, diagnostics, and embedded domain groups.
 
 ## Key features
 
-- Safe mutations with automatic validation, checkpoints, deltas, regression
-  checks, and targeted fixes.
-- Structured asset search, inspection, reserialization, and reference analysis.
-- Live Unity bridge, batch fallback for supported tools, and offline readers.
-- Typed editor and embedded-domain workflows, surfaced through per-session tool
-  groups.
-- Unity Hub Pro for guided setup and maintainer workflows.
+### Safety-gated mutations
 
-For the full catalog and contracts, see [docs/api/mcp-tools.md](docs/api/mcp-tools.md).
+Mutations run `checkpoint → mutate → validate → delta`, with regression checks
+and targeted fixes.
+
+> **Example:** "Duplicate the Enemy prefab five times, then report gate deltas
+> and fix any new missing-script issues."
+
+### Asset intelligence
+
+Structured search, inspection, reserialization, and reference / dependency
+analysis — including offline readers when Unity is closed.
+
+> **Example:** "Find all Prefabs that reference `PlayerController` and summarize
+> inbound dependencies."
+
+### Live bridge, batch fallback, offline reads
+
+Prefer the live Editor; fall back to headless batch for supported tools; read
+assets and compile errors from disk when needed.
+
+> **Example:** "Bridge is offline — show me the latest compile errors from the
+> Editor log."
+
+### Typed editor + embedded domains
+
+GameObjects, scenes, prefabs, materials, packages, plus package-gated domains
+(NavMesh, Input System, Cinemachine, Timeline, Shader Graph, and more).
+
+> **Example:** "Activate `cinemachine` and create a follow camera for the Player."
+
+### Agent senses and diagnostics
+
+Test runner, screenshots, console, profiler / memory snapshots, and event pull
+for closed-loop agent workflows.
+
+> **Example:** "Run Play Mode tests for the Combat assembly and capture a
+> Game-view screenshot on failure."
+
+### Session tool groups and skills
+
+Default groups stay small; activate domains on demand. Project skills teach
+agents the mutate → gate → fix loop.
+
+> **Example:** "Reset tool groups, then activate only `core` and
+> `gate-and-verify`."
+
+### CI, baselines, and regression
+
+Scan projects, create verify baselines, and fail automation when new blocking
+issues appear — live or via batch/CLI.
+
+> **Example:** "Create a verify baseline for this project, then report any new
+> blocking issues since the last baseline."
+
+### Unity Hub Pro
+
+Optional desktop app for project management, AI Setup wizard, and maintainer
+actions — not required for the MCP path.
+
+> **Example:** use the Hub **AI** action on a project row (see
+> [Unity Hub Pro](docs/unity-hub-pro.md)).
+
+More example prompts: [docs/api/mcp-tools.md](docs/api/mcp-tools.md#example-prompts).
+Full catalog and contracts: [docs/api/mcp-tools.md](docs/api/mcp-tools.md).
 
 ## Quick setup
 
@@ -50,8 +112,6 @@ Full procedure: [Agent setup](docs/setup/agent-setup.md).
    [Wizard setup](docs/setup/wizard-setup.md).
 
 ## Documentation
-
-Translations: [简体中文](README.zh-CN.md) · [Русский](README.ru.md) (this README and the setup guides).
 
 For users:
 

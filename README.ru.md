@@ -1,36 +1,92 @@
-[English](README.md) · Русский
-
-[![Docs](https://img.shields.io/badge/Docs-unity--mcp-4f46e5)](https://alexeyperov.github.io/unity-open-mcp/)
-[![](https://img.shields.io/badge/Unity-000000?style=flat&logo=unity&logoColor=blue 'Unity')](https://unity.com/releases/editor/archive)
-[![](https://badge.mcpx.dev?status=on 'MCP Enabled')](https://modelcontextprotocol.io/introduction)
-[![](https://img.shields.io/badge/License-MIT-red.svg 'MIT License')](https://opensource.org/licenses/MIT)
-
-<p align="center">
-  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="MCP for Unity" width="250">
-</p>
-
 # Unity Open MCP
 
-Unity Open MCP предоставляет ИИ-агентам типизированный, защищённый шлюзами
-набор инструментов для работы с проектами Unity.
+[![Docs](https://img.shields.io/badge/Docs-unity--mcp-4f46e5)](https://alexeyperov.github.io/unity-open-mcp/)
+[![](https://badge.mcpx.dev?status=on 'MCP Enabled')](https://modelcontextprotocol.io/introduction)
+[![](https://img.shields.io/badge/Unity-000000?style=flat&logo=unity&logoColor=white 'Unity')](https://unity.com/releases/editor/archive)
+[![](https://img.shields.io/badge/Node.js-339933?style=flat&logo=nodedotjs&logoColor=white 'Node.js')](https://nodejs.org/en/download/)
+[![](https://img.shields.io/github/stars/AlexeyPerov/Unity-Open-MCP 'Stars')](https://github.com/AlexeyPerov/Unity-Open-MCP/stargazers)
+[![](https://img.shields.io/github/last-commit/AlexeyPerov/Unity-Open-MCP 'Last Commit')](https://github.com/AlexeyPerov/Unity-Open-MCP/commits/master)
+[![](https://img.shields.io/badge/License-MIT-red.svg 'MIT License')](https://opensource.org/licenses/MIT)
 
-MCP-сервер открывает **250+ инструментов** для типизированных рабочих процессов
-редактора, шлюзов и валидации, анализа ресурсов, диагностики и встроенных
-доменных групп.
+| [🇺🇸 English](README.md) | [🇨🇳 简体中文](README.zh-CN.md) | [🇷🇺 Русский](README.ru.md) |
+|-------------------------|--------------------------------|------------------------------|
+
+<p align="center">
+  <img src="hub/src-tauri/icons/Square310x310Logo.png" alt="Unity Open MCP" width="250">
+</p>
+
+Unity Open MCP открывает ИИ-агентам набор инструментов для работы с проектами Unity.
+
+Сам MCP-сервер состоит из **250+ инструментов** для типовых рабочих задач Unity
+редактора, а также из дополнительных методов проверок результатов работы и валидации, анализа ресурсов, диагностики.
 
 ## Ключевые возможности
 
-- Безопасные изменения с автоматической валидацией, чекпоинтами, дельтами,
-  регрессионными проверками и точечными исправлениями.
-- Структурированный поиск, инспекция, пересериализация и анализ ссылок на
-  ресурсы.
-- Живой мост Unity, пакетный откат для поддерживаемых инструментов и офлайн-ридеры.
-- Типизированные рабочие процессы редактора и встроенных доменов, доступные через
-  группируемые по сессии наборы инструментов.
-- Unity Hub Pro для управляемой установки и сопровождающих рабочих процессов.
+### Безопасные изменения со шлюзом
 
-Полный каталог и контракты — в [docs/api/mcp-tools.md](docs/api/mcp-tools.md)
-(на английском).
+Изменения проходят `checkpoint → mutate → validate → delta`, с регрессионными
+проверками и точечными исправлениями.
+
+> **Пример:** «Продублируй префаб Enemy пять раз, покажи дельты шлюза и исправь
+> новые missing-script.»
+
+### Интеллект по ассетам
+
+Структурированный поиск, инспекция, пересериализация и анализ ссылок /
+зависимостей — включая офлайн-чтение, когда Unity закрыт.
+
+> **Пример:** «Найди все префабы, ссылающиеся на `PlayerController`, и кратко
+> опиши входящие зависимости.»
+
+### Живой мост, batch-fallback и офлайн-чтение
+
+Предпочтителен живой Editor; для поддерживаемых инструментов — headless batch;
+ассеты и ошибки компиляции можно читать с диска.
+
+> **Пример:** «Мост офлайн — покажи последние ошибки компиляции из Editor.log.»
+
+### Типизированный редактор и встроенные домены
+
+GameObject, сцены, префабы, материалы, пакеты, плюс домены с зависимостями от
+пакетов (NavMesh, Input System, Cinemachine, Timeline, Shader Graph и другие).
+
+> **Пример:** «Активируй `cinemachine` и создай follow-камеру для Player.»
+
+### Сенсоры агента и диагностика
+
+Test Runner, скриншоты, консоль, profiler / memory snapshots и event pull для
+замкнутых агентских циклов.
+
+> **Пример:** «Запусти Play Mode тесты сборки Combat и сделай скриншот Game View
+> при падении.»
+
+### Группы инструментов и скилы
+
+По умолчанию поверхность «тонкая»; домены включаются по запросу. Скилы проекта
+учат агентов циклу mutate → gate → fix.
+
+> **Пример:** «Сбрось группы инструментов, затем активируй только `core` и
+> `gate-and-verify`.»
+
+### CI, базовые линии и регрессия
+
+Сканирование проекта, verify-baseline и падение автоматизации при новых
+блокирующих проблемах — live или через batch/CLI.
+
+> **Пример:** «Создай verify-baseline для проекта и сообщи о новых блокирующих
+> проблемах с прошлого baseline.»
+
+### Unity Hub Pro
+
+Опциональное настольное приложение для управления проектами, мастера AI Setup и
+сопровождающих действий — MCP-путь работает и без него.
+
+> **Пример:** кнопка **AI** в строке проекта Hub (см.
+> [Unity Hub Pro](docs/unity-hub-pro.md), англ.).
+
+Больше примеров промптов: [docs/api/mcp-tools.md](docs/api/mcp-tools.md#example-prompts)
+(англ.). Полный каталог и контракты — в
+[docs/api/mcp-tools.md](docs/api/mcp-tools.md) (англ.).
 
 ## Быстрая установка
 

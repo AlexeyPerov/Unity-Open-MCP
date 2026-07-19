@@ -16,8 +16,8 @@
  * of the 2–5s band cited in the plan: long enough to collapse the
  * double-fetch across the capabilities / list_groups / activate_for triad in
  * a single agent turn, short enough that a real bridge recompile (which
-// flips `compiling` and invalidates via {@link BridgeToolsCache.invalidate}
-// anyway) is observed promptly even without the explicit invalidation.
+ * flips `compiling` and invalidates via {@link BridgeToolsCache.invalidate}
+ * anyway) is observed promptly even without the explicit invalidation.
  * Override with `UNITY_OPEN_MCP_TOOLS_CACHE_TTL_MS=<millis>`.
  */
 export const DEFAULT_BRIDGE_TOOLS_TTL_MS = 3_000;

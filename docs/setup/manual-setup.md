@@ -4,18 +4,9 @@ Set up Unity Open MCP without Unity Hub Pro.
 
 ## Who is this for
 
-This is the **do-it-yourself** path. It's a good fit if you:
+This is the most typical way to setup Unity Open MCP using terminal.
 
-- already edit Unity `manifest.json` and MCP-client config files by hand, or
-- prefer to control exactly what gets installed and pinned, or
-- are on a headless/CI machine where the Hub GUI isn't an option.
-
-Prefer letting an AI agent do the install? See [agent-setup.md](agent-setup.md)
-(paste the README prompt into your AI client).
-
-If you've never opened a terminal or edited JSON, the **wizard** path is much
-easier — see [wizard-setup.md](wizard-setup.md). It does everything below
-automatically and explains each step.
+If you do not want to deal with terminal then see the **wizard** path at [wizard-setup.md](wizard-setup.md). It does everything below automatically and explains each step.
 
 ## How Unity Open MCP fits together (two halves)
 

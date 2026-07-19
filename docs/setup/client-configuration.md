@@ -1,8 +1,7 @@
 # MCP client configuration
 
-This is the canonical reference for connecting an MCP client to one Unity
-project. Setup guides link here for client-specific file locations and config
-envelopes.
+This is the reference for connecting an MCP client to one Unity
+project.
 
 ## Before you configure a client
 

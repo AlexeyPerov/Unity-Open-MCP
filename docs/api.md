@@ -8,7 +8,7 @@ This file is the index for external interfaces and protocol contracts exposed by
 |---|---|
 | `dialog-policy.md` | Startup/steady-state Unity modal auto-dismiss, `UNITY_OPEN_MCP_DIALOG_POLICY`, and related env vars. |
 | `api/bridge-http.md` | Unity bridge HTTP endpoints (`/ping`, `/tools/*`, `/resources*`), envelopes, and errors. |
-| `api/mcp-tools.md` | MCP tool-family overview and focused-reference index. |
+| `api/mcp-tools.md` | MCP tool-family overview, example prompts, and focused-reference index. |
 | `api/tool-groups.md` | Session defaults, group activation, compiled availability, and auto-activation. |
 | `api/routing-lifecycle.md` | Live/batch/offline/local routing, lifecycle recovery, offline coverage, and errors. |
 | `api/cli-automation.md` | CLI command and automation reference; links to canonical CI behavior. |

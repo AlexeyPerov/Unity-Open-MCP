@@ -54,6 +54,30 @@ definitions live in `mcp-server/src/tools/`.
 The canonical embedded-domain dependency and activation table is
 [Extension domains](../extensions.md).
 
+## Example prompts
+
+Natural-language prompts an agent can act on with the tool surface. Prefer
+calling `unity_open_mcp_capabilities` and activating the right tool group before
+a multi-step workflow. For session groups, see [Tool groups](tool-groups.md).
+
+| Theme | Example prompt |
+|---|---|
+| Safety gate | Duplicate the Enemy prefab five times, then report gate deltas and fix any new missing-script issues. |
+| Asset intelligence | Find all Prefabs that reference `PlayerController` and summarize inbound dependencies. |
+| Offline / recovery | Bridge is offline — show me the latest compile errors from the Editor log. |
+| Typed editor | Create scene `Assets/Scenes/Level1.unity`, add a Player cube, and parent a Camera under it. |
+| Embedded domains | Activate `cinemachine` and create a follow camera for the Player. |
+| Agent senses | Run Play Mode tests for the Combat assembly and capture a Game-view screenshot on failure. |
+| Tool groups | Reset tool groups, then activate only `core` and `gate-and-verify`. |
+| Batch mutations | In one batch: create ten empty GameObjects named `Enemy_1`…`Enemy_10` under an `Enemies` parent. |
+| Verify / CI | Create a verify baseline for this project, then report any new blocking issues since the last baseline. |
+| Skills | Install or regenerate the Unity Open MCP skill for Cursor in this project. |
+| Power tools | Reflect the fields on `PlayerController` and set `moveSpeed` to 8. |
+| Hub control | List installed Unity Editors and show which one this project would launch with. |
+
+These are illustrative starting points, not a complete catalog. Exact tool names
+and schemas come from `unity_open_mcp_capabilities`.
+
 ## Discover tools programmatically
 
 Call `unity_open_mcp_capabilities` first:

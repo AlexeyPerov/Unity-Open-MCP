@@ -230,13 +230,18 @@ function injectRouteMeta(
  * Steps:
  *   1. Parse the first text content block ONCE.
  *   2. Hand the parsed body to `transform` (may return null to signal "leave
- *      the body as-is" — the error / unparsable cases).
- *   3. Stamp `_source` and `_route` on the (possibly transformed) body.
+ *      the body as-is" — the error case; the transform has nothing useful to
+ *      do on an error body).
+ *   3. Stamp `_source` and `_route` on the (possibly transformed) body — also
+ *      when the transform returned null, falling back to the original body.
+ *      This preserves the pre-change chain's contract (`tagSource` +
+ *      `injectRouteMeta` always stamped a parseable body, error or not), so
+ *      error responses still carry `_source` / `_route` for agent routing.
  *   4. Stringify ONCE into the result's first text block; preserve isError
  *      and any other content blocks (e.g. an MCP image block).
  *
- * `transform` defaults to identity. When the body fails to parse or the
- * transform returns null, the result is returned unchanged (no stamps).
+ * `transform` defaults to identity. When the body fails to parse, the result
+ * is returned unchanged (no stamps — there is no JSON object to stamp).
  */
 function transformLiveResult(
   result: CallToolResult,
@@ -249,12 +254,16 @@ function transformLiveResult(
   const body = parseResultBody(result);
   // parseResultBody returns null when there is no text block OR the block is
   // not a JSON object. In either case there is nothing to stamp — return the
-  // result verbatim, matching tagSource/injectRouteMeta's no-op behavior.
+  // result verbatim, matching tagSource/injectRouteMeta's no-op behavior on
+  // an unparsable body.
   if (body === null) return result;
+  // A null transform signals "leave the body as-is" (e.g. the fold has
+  // nothing to do on an error body). Fall through to identity so the stamps
+  // still land — matching the pre-change chain, where tagSource/injectRouteMeta
+  // stamped any parseable body regardless of an `error` field.
   const transformed = transform ? transform(body) : body;
-  if (transformed === null) return result;
   const stamped = {
-    ...transformed,
+    ...(transformed ?? body),
     _source: source,
     _route: meta,
   };

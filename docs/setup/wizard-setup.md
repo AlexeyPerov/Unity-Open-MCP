@@ -5,10 +5,7 @@ Use the AI Setup wizard in Unity Hub Pro to connect a Unity project to `unity-op
 ## Who is this for
 
 This is the **simplest** path — no terminal, no hand-editing JSON, no Git URLs.
-It's ideal if you're an artist or designer prototyping a game with AI, or a
-developer who hasn't used Node/npm before. The wizard walks you through every
-step, checks your environment, edits `manifest.json` and your MCP-client config
-for you, and verifies the connection at the end.
+So if you don't want to open terminal then this approach is for you.
 
 For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md).
 Prefer letting an AI agent install for you? See [agent-setup.md](agent-setup.md).

@@ -2976,6 +2976,43 @@ test("H2: live find_references body that fails to parse passes through untouched
   assert.equal(text, "<<<not json>>>");
 });
 
+test("H2: live find_references ERROR body still carries _source / _route stamps (parity with pre-change)", async () => {
+  // Regression guard for the transformLiveResult single-parse pipeline: the
+  // pre-change chain (foldFindReferencesLive → tagSource → injectRouteMeta)
+  // stamped `_source=live` and `_route` on ANY parseable body, including
+  // error responses. foldFindReferencesLiveBody returns null on `body.error`,
+  // which the early transformLiveResult draft treated as "skip stamping" —
+  // producing `{error: {...}}` with no route metadata. An agent that switches
+  // on `_source` to know whether a find_references error came from the live
+  // bridge vs the offline path would silently lose that signal. Pin the
+  // contract: error bodies MUST still carry both stamps.
+  const live = makeFakeLive({
+    available: true,
+    result: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            error: { code: "asset_not_found", message: "no such guid" },
+          }),
+        },
+      ],
+      isError: true,
+    },
+  });
+  const router = makeRouter(live, makeFakeBatch(), "/proj", makeFakeEventStream());
+
+  const result = await router.route("unity_open_mcp_find_references", {
+    guid: "deadbeef",
+  });
+  assert.equal(result.isError, true);
+  const body = parseBody(result);
+  assert.equal(body._source, "live", "error body must still tag _source=live");
+  assert.deepEqual(body._route, { route: "live" }, "error body must still stamp _route");
+  // The error payload itself is preserved (the fold does not touch it).
+  assert.deepEqual(body.error, { code: "asset_not_found", message: "no such guid" });
+});
+
 // ---------------------------------------------------------------------------
 // M31-optimizations Plan 1 / L14 — route-logging env gate.
 //
