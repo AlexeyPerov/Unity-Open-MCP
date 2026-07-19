@@ -44,6 +44,36 @@ export interface ParsedAsset {
   guid: string;
   objects: ParsedObject[];
   byID: Map<string, ParsedObject>;
+  /**
+   * M31-optimizations Plan 3 / H8 + L3 — per-asset hierarchy caches, built
+   * lazily on the first {@link buildHierarchy} call and reused by
+   * {@link objectPath} (goID→node lookup) and {@link componentsFor}
+   * (goID→components lookup). The asset is immutable after parse, so the
+   * cache has no invalidation path; building it once per asset eliminates the
+   * per-FileID hierarchy rebuild + flatten + linear scan that the previous
+   * objectPath/componentsFor hot loops incurred.
+   *
+   * Optional — absent until the first buildHierarchy call (e.g. on a freshly
+   * parsed asset that has not been read yet, or the EMPTY_PARSED stand-in).
+   * Additive only: no existing field renamed or removed.
+   */
+  hierarchyCache?: HierarchyCache;
+}
+
+/**
+ * M31-optimizations Plan 3 / H8 + L3 — per-asset caches built alongside the
+ * GameObject tree. Three indices:
+ *   - roots: the hierarchy root list (so buildHierarchy is idempotent on a
+ *     cached asset — repeated calls return the same node objects).
+ *   - nodesByGoID: goID → HierarchyResult for O(1) objectPath lookups.
+ *   - componentsByGoID: goID → components declared on that GameObject
+ *     (resolved from componentIDs + the gameObjectID backref scan), so
+ *     componentsFor is O(1) on cache hit instead of O(objects).
+ */
+export interface HierarchyCache {
+  roots: HierarchyResult[];
+  nodesByGoID: Map<string, HierarchyResult>;
+  componentsByGoID: Map<string, ParsedObject[]>;
 }
 
 export type ScriptIndex = Map<string, string>;

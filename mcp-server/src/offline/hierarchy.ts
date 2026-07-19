@@ -22,11 +22,25 @@ import { skipFieldNames } from "./types.js";
 import { shortGUID } from "./primitives.js";
 import { displayFieldName } from "./names.js";
 
+// M31-optimizations Plan 3 / L8-offline — module-scope regex. Previously an
+// inline `trim.split(/\s+/).join(" ")` literal inside summarizeNested's per-
+// line loop (a hot path during read_asset field rendering). Hoisting makes
+// the single-compile guarantee explicit.
+const WHITESPACE_RE = /\s+/;
+
 // ===========================================================================
 // Hierarchy — build GameObject tree from Transform parent links.
 // ===========================================================================
 
 export function buildHierarchy(asset: ParsedAsset): HierarchyResult[] {
+  // M31-optimizations Plan 3 / H8 + L3 — return the cached root list when the
+  // per-asset hierarchy cache exists. The cache is built on the first call
+  // (see the bottom of this function) and the asset is immutable after parse,
+  // so subsequent calls — including those from objectPath/componentsFor
+  // re-entering buildHierarchy defensively — reuse the same node objects.
+  // Previously every objectPath call rebuilt + flattened the whole tree.
+  if (asset.hierarchyCache) return asset.hierarchyCache.roots;
+
   const transformToGO = new Map<string, string>();
   const goToTransform = new Map<string, string>();
   const parentTransform = new Map<string, string>();
@@ -64,6 +78,46 @@ export function buildHierarchy(asset: ParsedAsset): HierarchyResult[] {
 
   sortNodes(roots);
   for (const root of roots) assignNodePath(root, "", 0);
+
+  // M31-optimizations Plan 3 / H8 + L3 — build the per-asset lookup indices
+  // alongside the tree, in the same pass that walks it. nodesByGoID is the
+  // flattened goID→node map (assignNodePath already set .path on each node);
+  // componentsByGoID is the goID→components map (one walk over asset.objects
+  // collecting components by their gameObjectID backref, plus the GameObject's
+  // own componentIDs list). Both are consulted by objectPath / componentsFor
+  // for O(1) lookups; before this, objectPath re-flattened the tree per call
+  // and componentsFor did a linear scan over all objects per node.
+  const nodesByGoID = new Map<string, HierarchyResult>();
+  for (const node of nodes.values()) nodesByGoID.set(node.gameObject.id, node);
+
+  const componentsByGoID = new Map<string, ParsedObject[]>();
+  // Seed from each GameObject's declared componentIDs (the authoritative
+  // component list for types that declare m_Component).
+  for (const go of gameObjects) {
+    if (go.componentIDs.length === 0) continue;
+    const comps: ParsedObject[] = [];
+    for (const compID of go.componentIDs) {
+      const compObj = asset.byID.get(compID);
+      if (compObj) comps.push(compObj);
+    }
+    if (comps.length > 0) componentsByGoID.set(go.id, comps);
+  }
+  // Fold in components that declare a gameObjectID backref but are NOT in the
+  // GameObject's componentIDs list (the secondary scan the previous
+  // componentsFor ran per call). Append-only: do not duplicate componentIDs
+  // entries (matched via the seen set).
+  for (const compObj of asset.objects) {
+    if (compObj.type === "GameObject") continue;
+    if (compObj.gameObjectID === "") continue;
+    let comps = componentsByGoID.get(compObj.gameObjectID);
+    if (!comps) {
+      comps = [];
+      componentsByGoID.set(compObj.gameObjectID, comps);
+    }
+    if (!comps.includes(compObj)) comps.push(compObj);
+  }
+
+  asset.hierarchyCache = { roots, nodesByGoID, componentsByGoID };
   return roots;
 }
 
@@ -108,8 +162,22 @@ export function flattenHierarchy(nodes: HierarchyResult[]): HierarchyResult[] {
 }
 
 export function objectPath(asset: ParsedAsset, goID: string): string {
-  for (const node of flattenNodes(asset)) {
-    if (node.gameObject.id === goID) return node.path;
+  // M31-optimizations Plan 3 / H8 — consult the per-asset goID→node cache
+  // built alongside the hierarchy. Previously this called flattenNodes(asset)
+  // (which rebuilt + flattened the whole tree via buildHierarchy) on every
+  // invocation, and objectPath is called once per FileID in every field value
+  // during resolveReferences — O(fields × nodes). The cache hit is O(1).
+  // Defensive fallback: if the cache is absent (e.g. asset was constructed
+  // without going through buildHierarchy, or the EMPTY_PARSED stand-in),
+  // fall back to the flatten+scan so the function stays correct everywhere.
+  const cache = asset.hierarchyCache;
+  if (cache) {
+    const node = cache.nodesByGoID.get(goID);
+    if (node) return node.path;
+  } else {
+    for (const node of flattenNodes(asset)) {
+      if (node.gameObject.id === goID) return node.path;
+    }
   }
   const obj = asset.byID.get(goID);
   return obj ? obj.name : "";
@@ -126,6 +194,31 @@ export function componentsFor(
 ): { object: ParsedObject; name: string; scriptPath: string }[] {
   const goObj = asset.byID.get(goID);
   if (!goObj) return [];
+
+  // M31-optimizations Plan 3 / L3 — consult the per-asset goID→components
+  // cache built alongside the hierarchy. The cache stores the resolved
+  // ParsedObject list (componentIDs-first, then backref-only — the exact
+  // order the previous linear scan produced). On a cache hit this is O(out)
+  // — no linear scan over all objects. The cache is built once per asset
+  // during buildHierarchy; the fallback below preserves the previous
+  // per-call scan for assets without a cache (defensive — should not happen
+  // in normal flow since buildHierarchy is always called first).
+  const cache = asset.hierarchyCache;
+  if (cache) {
+    const cached = cache.componentsByGoID.get(goID);
+    if (cached) {
+      const out: { object: ParsedObject; name: string; scriptPath: string }[] = [];
+      for (const compObj of cached) {
+        const { name, scriptPath } = componentName(compObj, scriptIndex);
+        out.push({ object: compObj, name, scriptPath });
+      }
+      return out;
+    }
+    // No components recorded for this goID (e.g. a GameObject whose
+    // componentIDs list is empty and nothing backrefs it). The previous
+    // scan would have returned [] here too.
+    return [];
+  }
 
   const out: { object: ParsedObject; name: string; scriptPath: string }[] = [];
   const seen = new Set<string>();
@@ -262,7 +355,7 @@ export function summarizeNested(lines: string[], start: number): string {
       sequenceIndex = 0;
       continue;
     } else {
-      parts.push(trim.split(/\s+/).join(" "));
+      parts.push(trim.split(WHITESPACE_RE).join(" "));
     }
     if (parts.length >= maxParts) break;
   }

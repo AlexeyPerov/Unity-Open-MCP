@@ -8,7 +8,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { GUIDIndex, ParsedAsset, ScriptIndex } from "./types.js";
-import { shouldSkipDir, toAssetPath } from "./paths.js";
+import { shouldSkipDir, toAssetPath, extractExtension } from "./paths.js";
 import { readMetaGUID } from "./primitives.js";
 
 // ===========================================================================
@@ -259,10 +259,14 @@ export async function buildGuidScriptAndNameIndex(
     // .cs.meta — derive the script name from the path (no file body read
     // needed; the name is the filename without extension). Mirror
     // buildScriptIndexForQuery's name-extraction exactly so the substring
-    // filter matches byte-for-byte.
+    // filter matches byte-for-byte. M31-optimizations Plan 3 / L8-offline —
+    // extension extraction delegates to the shared extractExtension helper
+    // (was an inline `scriptPath.match(/\.[^.]+$/)` literal on the hot
+    // meta-walk path; hoisted to paths.ts so this and overrides.ts share one
+    // compile).
     const scriptPath = metaPath.slice(0, -5);
     const base = scriptPath.split("/").pop() ?? scriptPath;
-    const ext = scriptPath.match(/\.[^.]+$/)?.[0] ?? "";
+    const ext = extractExtension(scriptPath);
     const name = (ext ? base.slice(0, -ext.length) : base).toLowerCase();
     const assetPath = toAssetPath(projectRoot, scriptPath);
     let guid = "";

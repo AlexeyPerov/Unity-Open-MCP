@@ -22,6 +22,7 @@ import type {
 } from "./types.js";
 import { displayFieldName } from "./names.js";
 import { cleanScalar, extractFileID, extractGUID } from "./primitives.js";
+import { extractExtension } from "./paths.js";
 
 // ===========================================================================
 // Prefab override name resolution — runs at parse time.
@@ -303,8 +304,11 @@ function labelForParsedObject(
 
 // Re-export basename-derived helper for the script-path name extraction so the
 // hierarchy module's componentName can share it without re-importing node:path.
+// M31-optimizations Plan 3 / L8-offline — extension extraction delegates to
+// the shared extractExtension helper (was an inline `path.match(/\.[^.]+$/)`
+// literal duplicating index-builders.ts's copy; both now share one regex).
 export function scriptBaseName(path: string): string {
   const base = basename(path);
-  const ext = path.match(/\.[^.]+$/)?.[0] ?? "";
+  const ext = extractExtension(path);
   return ext ? base.slice(0, -ext.length) : base;
 }

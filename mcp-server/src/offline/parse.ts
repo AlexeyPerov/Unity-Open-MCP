@@ -25,11 +25,8 @@ import type {
 import { EMPTY_PARSED } from "./types.js";
 import {
   parseHeaderLine,
-  readComponentIDs,
-  readFileIDField,
-  readGUIDField,
-  readScalar,
   scanObjectTypeLine,
+  extractKnownFields,
 } from "./primitives.js";
 import { applyPrefabNameOverrides } from "./overrides.js";
 
@@ -83,25 +80,37 @@ function finishObject(
   objects: ParsedObject[],
   byID: Map<string, ParsedObject>,
 ): void {
+  // M31-optimizations Plan 3 / H7 — single-pass known-field extraction.
+  // Previously finishObject called up to 6 independent scanners on o.lines
+  // (readScalar, readFileIDField ×N, readGUIDField ×N, readComponentIDs),
+  // each restarting from line 0 (O(6 × lines) per object). extractKnownFields
+  // walks the line array exactly once and returns every field finishObject
+  // needs. The per-type switch below picks the relevant subset — the same
+  // shape as the previous implementation, so parsed-object output is
+  // byte-identical. The type switch is preserved because the previous code
+  // only populated certain fields for certain types (e.g. componentIDs only
+  // for GameObject); extractKnownFields returns every field it finds, but
+  // only the ones this object's type would have read are assigned here.
   if (o.lines.length > 0) {
-    o.name = readScalar(o.lines, "m_Name");
+    const f = extractKnownFields(o.lines);
+    o.name = f.name;
     switch (o.type) {
       case "GameObject":
-        o.componentIDs = readComponentIDs(o.lines);
+        o.componentIDs = f.componentIDs;
         break;
       case "Transform":
       case "RectTransform":
-        o.gameObjectID = readFileIDField(o.lines, "m_GameObject");
-        o.fatherTransformID = readFileIDField(o.lines, "m_Father");
+        o.gameObjectID = f.gameObjectID;
+        o.fatherTransformID = f.fatherTransformID;
         break;
       default:
-        o.gameObjectID = readFileIDField(o.lines, "m_GameObject");
+        o.gameObjectID = f.gameObjectID;
         break;
     }
-    o.sourceObjectID = readFileIDField(o.lines, "m_CorrespondingSourceObject");
-    o.sourceGUID = readGUIDField(o.lines, "m_CorrespondingSourceObject");
+    o.sourceObjectID = f.sourceObjectID;
+    o.sourceGUID = f.sourceGUID;
     if (o.type === "MonoBehaviour") {
-      o.scriptGUID = readGUIDField(o.lines, "m_Script");
+      o.scriptGUID = f.scriptGUID;
     }
   }
   objects.push(o);

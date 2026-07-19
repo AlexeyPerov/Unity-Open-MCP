@@ -268,9 +268,17 @@ function checkMatch(
   }
 
   const hierarchy = buildHierarchy(parsed);
+  // M31-optimizations Plan 3 / L3 — flatten the hierarchy exactly once per
+  // asset and reuse the flattened list for both the name-query and component-
+  // query scans. Previously checkMatch called flattenHierarchy(hierarchy)
+  // twice (once per query branch), each producing a fresh flattened array.
+  // componentsFor now also consults the per-asset goID→components cache built
+  // during buildHierarchy above, so each node's component set is an O(1)
+  // Map lookup instead of a linear scan over all objects.
+  const flatNodes = flattenHierarchy(hierarchy);
 
   if (nameQuery) {
-    for (const node of flattenHierarchy(hierarchy)) {
+    for (const node of flatNodes) {
       if (node.gameObject.name.toLowerCase().includes(nameQuery)) {
         const comps = componentsFor(parsed, node.gameObject.id, scriptIndex);
         objects.push({ path: node.path, components: comps.map((c) => c.name) });
@@ -281,7 +289,7 @@ function checkMatch(
 
   if (componentQuery) {
     let componentMatch = false;
-    for (const node of flattenHierarchy(hierarchy)) {
+    for (const node of flatNodes) {
       const comps = componentsFor(parsed, node.gameObject.id, scriptIndex);
       const matching = comps.filter(
         (c) => c.name.toLowerCase().includes(componentQuery) ||
@@ -911,41 +919,68 @@ function emptyDependencies(
 
 /** Collect the forward edges declared by a single asset. */
 function collectForwardEdges(parsed: ParsedAsset): ForwardEdge[] {
-  const edges: ForwardEdge[] = [];
+  // M31-optimizations Plan 3 / H6 — single pass over parsed.objects.
+  // Previously this ran three separate `for (const obj of parsed.objects)`
+  // loops (one per edge kind), each re-scanning all objects (+ all lines for
+  // the pptr kind) — O(3 × objects × lines). The single pass below branches
+  // on obj.type and on whether the line declares an m_Script / m_SourcePrefab
+  // / generic guid: field, accumulating into three per-kind buffers that are
+  // concatenated at the end. The concatenation order (prefab_source, then
+  // script, then pptr) preserves the exact edge ordering the previous
+  // three-pass implementation produced, so the forwardDependencies output
+  // stays byte-identical. The shared `seen` set dedupes within each kind
+  // (a guid can appear as both a prefab_source and a pptr edge — different
+  // seen keys, same as before).
+  const prefabEdges: ForwardEdge[] = [];
+  const scriptEdges: ForwardEdge[] = [];
+  const pptrEdges: ForwardEdge[] = [];
   const seen = new Set<string>();
 
-  // 1. PrefabInstance.m_SourcePrefab — the base-prefab edge of a variant.
   for (const obj of parsed.objects) {
-    if (obj.type !== "PrefabInstance") continue;
-    const sourceGuid = readGUIDField(obj.lines, "m_SourcePrefab");
-    if (sourceGuid !== "" && seen.add(`prefab:${sourceGuid}`)) {
-      edges.push({ guid: sourceGuid, assetPath: "", kind: "prefab_source", resolved: false });
+    // 1. PrefabInstance.m_SourcePrefab — the base-prefab edge of a variant.
+    //    Read once via readGUIDField (the previous pass-1 scanner); the line
+    //    scan below still picks up target: GUIDs inside m_Modifications as
+    //    pptr edges, so variant overrides still count.
+    if (obj.type === "PrefabInstance") {
+      const sourceGuid = readGUIDField(obj.lines, "m_SourcePrefab");
+      if (sourceGuid !== "" && seen.add(`prefab:${sourceGuid}`)) {
+        prefabEdges.push({ guid: sourceGuid, assetPath: "", kind: "prefab_source", resolved: false });
+      }
     }
-  }
 
-  // 2. m_Script GUIDs on MonoBehaviours — the script-class edge.
-  for (const obj of parsed.objects) {
-    if (obj.type !== "MonoBehaviour") continue;
-    if (obj.scriptGUID !== "" && seen.add(`script:${obj.scriptGUID}`)) {
-      edges.push({ guid: obj.scriptGUID, assetPath: "", kind: "script", resolved: false });
+    // 2. m_Script GUIDs on MonoBehaviours — the script-class edge. The
+    //    parsed object already carries scriptGUID (extracted during
+    //    finishObject), so no line re-scan is needed for this kind.
+    if (obj.type === "MonoBehaviour" && obj.scriptGUID !== "") {
+      if (seen.add(`script:${obj.scriptGUID}`)) {
+        scriptEdges.push({ guid: obj.scriptGUID, assetPath: "", kind: "script", resolved: false });
+      }
     }
-  }
 
-  // 3. Every other guid: field — material refs, asset refs, animation clips,
-  //    etc. m_Script is handled above; m_SourcePrefab target: GUIDs inside
-  //    PrefabInstance.m_Modifications are included here so variant overrides
-  //    count as forward edges too.
-  for (const obj of parsed.objects) {
+    // 3. Every other guid: field on every object — material refs, asset refs,
+    //    animation clips, etc. m_Script lines are excluded (handled above);
+    //    the m_SourcePrefab field's GUID is captured as a prefab_source edge
+    //    in branch 1, but a `guid:` token appearing on the m_SourcePrefab
+    //    line would ALSO match here — the original code had the same
+    //    overlap, deduped via the per-kind seen key (prefab: vs pptr:), so
+    //    the same guid legitimately produces both edges. The line.includes
+    //    fast-reject mirrors the previous pass-3 loop.
     for (const line of obj.lines) {
       if (!line.includes("guid:")) continue;
       if (line.includes("m_Script:")) continue;
       for (const g of findGUIDs(line)) {
         if (!seen.add(`pptr:${g}`)) continue;
-        edges.push({ guid: g, assetPath: "", kind: "pptr", resolved: false });
+        pptrEdges.push({ guid: g, assetPath: "", kind: "pptr", resolved: false });
       }
     }
   }
 
+  // Concatenate in the previous implementation's kind order so the
+  // forwardDependencies array stays byte-identical.
+  const edges: ForwardEdge[] = [];
+  for (const e of prefabEdges) edges.push(e);
+  for (const e of scriptEdges) edges.push(e);
+  for (const e of pptrEdges) edges.push(e);
   return edges;
 }
 
@@ -999,18 +1034,28 @@ async function detectCyclesOffline(
   }
 
   const visiting = new Set<string>();
-  async function dfs(current: string, trail: string[]): Promise<void> {
+  // M31-optimizations Plan 3 / L12 — push/pop trail mutation. The previous
+  // recursion built the trail immutably via `[...trail, edge.assetPath]` per
+  // call (O(n²) path-build via spread). The trail is now a single mutable
+  // array pushed before recursing and popped after; the only place an
+  // immutable copy is needed is when emitting a discovered cycle (slice).
+  const trail: string[] = [];
+  async function dfs(current: string): Promise<void> {
     if (trail.length > maxDepth) return;
     const edges = await edgesOf(current);
     for (const edge of edges) {
       if (!edge.resolved || edge.assetPath === "") continue;
       if (edge.assetPath === startPath) {
+        // Snapshot the trail + the closing startPath — the only immutable
+        // copy (the previous code's [...trail, startPath] at emit time).
         cycles.push([...trail, startPath]);
         continue;
       }
       if (visiting.has(edge.assetPath)) continue;
       visiting.add(edge.assetPath);
-      await dfs(edge.assetPath, [...trail, edge.assetPath]);
+      trail.push(edge.assetPath);
+      await dfs(edge.assetPath);
+      trail.pop();
       visiting.delete(edge.assetPath);
     }
   }
@@ -1019,7 +1064,12 @@ async function detectCyclesOffline(
     if (!edge.resolved || edge.assetPath === "" || edge.assetPath === startPath) continue;
     visiting.clear();
     visiting.add(edge.assetPath);
-    await dfs(edge.assetPath, [startPath, edge.assetPath]);
+    // Seed the mutable trail with [startPath, edge.assetPath] — the same
+    // starting state the previous dfs(edge.assetPath, [startPath, edge.assetPath])
+    // used. Pop both before the next seed so the trail is empty again.
+    trail.length = 0;
+    trail.push(startPath, edge.assetPath);
+    await dfs(edge.assetPath);
   }
   return cycles;
 }
