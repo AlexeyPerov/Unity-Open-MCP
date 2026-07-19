@@ -2,11 +2,11 @@
 
 # 向导安装（Unity Hub Pro）
 
-使用 Unity Hub Pro 中的 AI 安装向导，把一个 Unity 项目连接到 `unity-open-mcp`。
+本文说明如何通过 Unity Hub Pro 安装 Unity Open MCP。
 
 ## 适用人群
 
-这是**最简单**的路径 — 无需终端、无需手工编辑 JSON、无需 Git URL。如果你是用 AI 进行游戏原型的美术或设计师，或是没用过 Node/npm 的开发者，都很合适。向导会带你走过每一步，检查环境，替你修改 `manifest.json` 与 MCP 客户端配置，并在最后校验连接。
+这是无需终端、无需手工编辑 JSON、无需 Git URL 的安装方式。也就是说，如果你不想打开命令行，请用这篇指南。
 
 自助路径（不使用 Hub 应用）见 [manual-setup.md](manual-setup.md)。
 想让 AI 智能体代为安装？见 [agent-setup.md](agent-setup.md)。

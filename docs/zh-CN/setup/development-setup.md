@@ -2,7 +2,7 @@
 
 # 开发安装
 
-使用本地检出在 bridge、verify 包、MCP 服务器、Hub 或社区包上工作。用户安装路径见[手动安装](manual-setup.md)与[Agent 安装](agent-setup.md)。
+本文说明如何为本地检出配置开发环境。常规安装见[手动安装](manual-setup.md)与[Agent 安装](agent-setup.md)。
 
 ## 环境要求
 

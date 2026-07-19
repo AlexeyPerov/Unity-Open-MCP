@@ -2,7 +2,7 @@
 
 # 手动安装
 
-不使用 Unity Hub Pro 来安装 Unity Open MCP。
+本文说明如何通过命令行进行 Unity Open MCP 的常规安装。
 
 ## 适用人群
 

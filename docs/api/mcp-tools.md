@@ -62,7 +62,7 @@ a multi-step workflow. For session groups, see [Tool groups](tool-groups.md).
 
 | Theme | Example prompt |
 |---|---|
-| Safety gate | Duplicate the Enemy prefab five times, then report gate deltas and fix any new missing-script issues. |
+| Safety gate | Remove the Enemy prefab — but stop and ask for confirmation if the gate preview shows new missing references. |
 | Asset intelligence | Find all Prefabs that reference `PlayerController` and summarize inbound dependencies. |
 | Offline / recovery | Bridge is offline — show me the latest compile errors from the Editor log. |
 | Typed editor | Create scene `Assets/Scenes/Level1.unity`, add a Player cube, and parent a Camera under it. |

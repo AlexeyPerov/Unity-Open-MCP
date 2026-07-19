@@ -23,14 +23,6 @@ validation, asset intelligence, diagnostics, and embedded domain groups.
 
 ## Key features
 
-### Safety-gated mutations
-
-Mutations run `checkpoint → mutate → validate → delta`, with regression checks
-and targeted fixes.
-
-> **Example:** "Duplicate the Enemy prefab five times, then report gate deltas
-> and fix any new missing-script issues."
-
 ### Asset intelligence
 
 Structured search, inspection, reserialization, and reference / dependency
@@ -85,6 +77,20 @@ actions — not required for the MCP path.
 
 > **Example:** use the Hub **AI** action on a project row (see
 > [Unity Hub Pro](docs/unity-hub-pro.md)).
+
+### Safety-gated mutations
+
+Mutations run `checkpoint → mutate → validate → delta`, with regression checks
+and targeted fixes — so agents can stop before a “successful” edit leaves the
+project broken.
+
+> **User:** Remove that prefab.  
+> **Agent:** Checking impact for `Enemy`…  
+> **Gate:** Deleting it would introduce new missing references on `Level1` and
+> `SpawnPoint`.  
+> **Agent:** Unity Open MCP flagged that regression in the gate preview. I am
+> **not** removing the prefab without your confirmation — those scenes would
+> break. Want me to delete it and then fix the references, or leave it?
 
 More example prompts: [docs/api/mcp-tools.md](docs/api/mcp-tools.md#example-prompts).
 Full catalog and contracts: [docs/api/mcp-tools.md](docs/api/mcp-tools.md).
