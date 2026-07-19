@@ -21,7 +21,9 @@ projects.
 The MCP server exposes **250+ tools** across typed editor workflows, gate and
 validation, asset intelligence, diagnostics, and embedded domain groups.
 
-#### Open MCP
+---
+Part of Open MCP toolset
+---
 [![Unity Open MCP](https://img.shields.io/badge/Unity-Open%20MCP-000000?style=flat&logo=unity&logoColor=white)](https://github.com/AlexeyPerov/Unity-Open-MCP) [![Unreal Open MCP](https://img.shields.io/badge/Unreal-Open%20MCP-0E1128?style=flat&logo=unrealengine&logoColor=white)](https://github.com/AlexeyPerov/Unreal-Open-MCP) [![Godot Open MCP](https://img.shields.io/badge/Godot-Open%20MCP-478CBF?style=flat&logo=godotengine&logoColor=white)](https://github.com/AlexeyPerov/Godot-Open-MCP)
 ---
 
