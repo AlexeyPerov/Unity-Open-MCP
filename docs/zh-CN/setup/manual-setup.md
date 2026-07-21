@@ -9,7 +9,7 @@
 这是最常见的终端安装方式：添加 Unity 包，再把 MCP 客户端指向服务器。
 
 更想用 GUI？走 **向导** 路径：[wizard-setup.md](wizard-setup.md)。
-想让 AI 智能体执行安装？见 [agent-setup.md](agent-setup.md)。
+想尝试实验性的 AI 智能体安装？见 [agent-setup.md](agent-setup.md)。
 在本仓库上开发？见 [development-setup.md](development-setup.md)。
 
 Unity Open MCP 有两边都需要安装：**Unity 侧**（编辑器中的 bridge + verify 包）和

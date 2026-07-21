@@ -10,7 +10,7 @@
 Unity, затем указать MCP-клиенту на сервер.
 
 Нужен GUI? Путь через **мастер** — [wizard-setup.md](wizard-setup.md).
-Хотите, чтобы установку выполнил ИИ-агент? См. [agent-setup.md](agent-setup.md).
+Хотите экспериментальную установку ИИ-агентом? См. [agent-setup.md](agent-setup.md).
 Работаете с этим репозиторием? См. [development-setup.md](development-setup.md).
 
 У Unity Open MCP две половины, которые нужно установить: **сторона Unity**

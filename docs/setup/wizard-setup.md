@@ -8,7 +8,7 @@ This is the **simplest** path — no terminal, no hand-editing JSON, no Git URLs
 So if you don't want to open terminal then this approach is for you.
 
 For the do-it-yourself path (no Hub app), see [manual-setup.md](manual-setup.md).
-Prefer letting an AI agent install for you? See [agent-setup.md](agent-setup.md).
+Prefer an experimental AI-agent install? See [agent-setup.md](agent-setup.md).
 
 ## Requirements
 

@@ -4,8 +4,22 @@
 Unity project. Do every agent step yourself. Stop and tell the human only when a
 **USER ACTION** block says so.
 
-Humans: paste the prompt from the repo [README](../../README.md#quick-setup) into
-your AI client, or follow [Manual setup](manual-setup.md) yourself.
+Humans: this path is **experimental**. Prefer [Manual setup](manual-setup.md) or
+[Wizard setup](wizard-setup.md). To try agent install anyway, paste the prompt
+from the repo [README](../../README.md#quick-setup) into your AI client.
+
+## Hard rules (do not skip)
+
+1. **Never invent version numbers.** Do not recall `0.x.y` from training data or
+   prior chats. The only allowed version is the one you resolve in
+   [Step 0](#step-0--resolve-the-release-version).
+2. **Fetch this procedure fresh** (or read it from a local monorepo checkout).
+   Do not improvise an alternate install from memory.
+3. **Copy the skill by bytes** (`curl` / `cp`). Do not rewrite, summarize,
+   expand, or “improve” `SKILL.md`. Do **not** call
+   `unity_open_mcp_generate_skill` during setup.
+4. **Write one client skill path** (the detected client). Do not fan out to
+   every client folder unless the human asks.
 
 ## Goal
 
@@ -14,10 +28,10 @@ Install both halves of Unity Open MCP for **one** Unity project:
 | Half | What you install |
 |---|---|
 | **Unity side** | Bridge + verify packages in `Packages/manifest.json` (Git URL pins) |
-| **AI side** | MCP client config that launches `npx -y unity-open-mcp@0.7.0` with `UNITY_PROJECT_PATH` |
+| **AI side** | MCP client config that launches `npx -y unity-open-mcp@<VERSION>` with `UNITY_PROJECT_PATH` |
 
-Then install/update the core agent skill, hand off restarts to the human, and
-best-effort verify if tools become available.
+Then copy the core agent skill (byte-for-byte), hand off restarts to the human,
+and best-effort verify if tools become available.
 
 Do **not** install optional Unity domain packages (NavMesh, Input System, …)
 unless the human asks. Point them at [Extensions](../extensions.md) instead.
@@ -46,10 +60,47 @@ Before editing anything:
    - Codex → `.codex/`
    - Otherwise ask: “Which AI client should I configure?”
 
+## Step 0 — Resolve the release version
+
+Read the release pin **before** any manifest or MCP edit.
+
+1. Fetch (or read locally if this monorepo is open):
+
+   `https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/version.json`
+
+   Local checkout: `version.json` at the repo root.
+2. Parse JSON and set `VERSION` to the `version` field (e.g. `"0.7.0"` →
+   `VERSION=0.7.0`).
+3. Optionally confirm published npm matches:
+
+   ```bash
+   npm view unity-open-mcp version
+   ```
+
+   If npm’s latest and `VERSION` differ, **prefer `VERSION` from `version.json`**
+   (that is the documented release pin for this procedure) and tell the human.
+4. From here on, every pin uses that same `VERSION`:
+
+   | Artifact | Pin |
+   |---|---|
+   | npm MCP server | `unity-open-mcp@<VERSION>` |
+   | Bridge UPM | `…/packages/bridge#bridge-v<VERSION>` |
+   | Verify UPM | `…/packages/verify#verify-v<VERSION>` |
+
+**Stop** if you cannot read `version.json`. Do not guess.
+
 ## Step 1 — Merge Unity packages (`Packages/manifest.json`)
 
 Read `Packages/manifest.json`. Under `dependencies`, set (create or overwrite
-these two keys only — leave every other dependency untouched):
+these two keys only — leave every other dependency untouched), substituting the
+`VERSION` from Step 0:
+
+```json
+"com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v<VERSION>",
+"com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v<VERSION>"
+```
+
+Example when `VERSION=0.7.0`:
 
 ```json
 "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.7.0",
@@ -70,15 +121,17 @@ these two keys only — leave every other dependency untouched):
 config only if the human explicitly asks.
 
 Follow [MCP client configuration](client-configuration.md): find the detected
-client in the table, copy its snippet, and replace `/absolute/path/to/project`
-with the absolute path from Preconditions. If you fetched this procedure
-remotely, fetch
+client in the table, copy its snippet, replace `/absolute/path/to/project` with
+the absolute path from Preconditions, and replace every npm version in the
+snippet with **`VERSION` from Step 0** (the shared doc may lag a release; your
+resolved `VERSION` wins). If you fetched this procedure remotely, fetch
 `https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/client-configuration.md`.
-Use the pinned `npx -y unity-open-mcp@0.7.0` command shown there.
+
+Use: `npx -y unity-open-mcp@<VERSION>`.
 
 **Idempotent merge rules when `unity-open-mcp` already exists:**
 
-1. Update `command` / `args` (or equivalent) to the pinned `npx -y unity-open-mcp@0.7.0` form.
+1. Update `command` / `args` (or equivalent) to `npx -y unity-open-mcp@<VERSION>`.
 2. Set `UNITY_PROJECT_PATH` to **this** project’s absolute path.
 3. Preserve any other env keys already on the entry.
 4. Leave every other MCP server / unrelated config key untouched.
@@ -89,16 +142,30 @@ Do not guess a config shape from memory: the shared reference owns client paths
 and JSON/TOML/CLI snippets. If Claude Desktop's OS-global file cannot be
 located, ask the human for its path.
 
-## Step 3 — Install / update the core skill
+## Step 3 — Copy the core skill (bytes only)
 
-Always install or overwrite the shipped core playbook for the detected client(s).
+Install the shipped playbook for the **one** detected client. This file is large
+on purpose; agents must **not** author it.
 
-1. Fetch the template:
-   `https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/skills/unity-open-mcp/SKILL.md`
-   (If this monorepo is already open locally, copy from
-   `skills/unity-open-mcp/SKILL.md` instead.)
-2. Write it to the client skill path(s) below (create directories as needed).
-   Overwrite the stock path if a file already exists.
+1. Create the destination directory if needed (table below).
+2. Copy with a shell tool — do **not** paste or regenerate the markdown:
+
+   ```bash
+   # Remote (typical):
+   curl -fsSL \
+     "https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/skills/unity-open-mcp/SKILL.md" \
+     -o "<PROJECT_ROOT>/<client-skill-path>"
+
+   # Local monorepo checkout instead:
+   # cp skills/unity-open-mcp/SKILL.md "<PROJECT_ROOT>/<client-skill-path>"
+   ```
+
+3. Overwrite if the file already exists.
+4. Confirm the written file is non-trivial (roughly hundreds of lines / tens of
+   KB). If you only wrote a short stub, delete it and re-run the `curl`/`cp`.
+5. **Forbidden during setup:** rewriting the skill, summarizing it, appending
+   project inventory by hand, or calling `unity_open_mcp_generate_skill`.
+   Project-specific regeneration is optional later (see [Skills](../skills.md)).
 
 | Client family | Skill path (under project root) |
 |---|---|
@@ -116,8 +183,22 @@ Always install or overwrite the shipped core playbook for the detected client(s)
 | Visual Studio | `.vs/skills/unity-open-mcp/SKILL.md` |
 | GitHub Copilot CLI | `.github/skills/unity-open-mcp/SKILL.md` |
 
-If the client mapping is ambiguous, write Cursor + Claude + OpenCode + agents
-paths (the safe default set).
+If the client mapping is still ambiguous after asking once, write **only** the
+`.agents/skills/unity-open-mcp/SKILL.md` path (generic agents folder), not every
+client.
+
+## Step 3b — Pre-handoff report (required)
+
+Before the USER ACTION checklist, print exactly:
+
+1. `VERSION` resolved from `version.json`
+2. The two UPM dependency strings you wrote
+3. The MCP launch command you wrote (`npx -y unity-open-mcp@…`)
+4. The single skill path written, plus `wc -l` / file size of that file
+5. Confirmation that you did **not** invent the version and did **not** rewrite
+   the skill
+
+If any pin is not equal to Step 0’s `VERSION`, fix it before continuing.
 
 ## Step 4 — USER ACTION handoff (required)
 
@@ -142,11 +223,11 @@ After the human confirms Unity is open and the client was restarted:
   - Failure → print the short troubleshooting list below; do not loop endlessly.
 - If tools are **not** visible yet → tell the human the config/skill/manifest are
   in place and they still need a client restart (or a new agent chat that loads
-  MCP). Optionally they can run:
+  MCP). Optionally they can run (substitute `VERSION` and the project path):
 
 ```bash
-npx -y unity-open-mcp@0.7.0 wait-for-ready --project /absolute/path/to/project
-npx -y unity-open-mcp@0.7.0 run-tool unity_open_mcp_capabilities --project /absolute/path/to/project --json
+npx -y unity-open-mcp@<VERSION> wait-for-ready --project /absolute/path/to/project
+npx -y unity-open-mcp@<VERSION> run-tool unity_open_mcp_capabilities --project /absolute/path/to/project --json
 ```
 
 ## Short troubleshooting
@@ -158,6 +239,8 @@ npx -y unity-open-mcp@0.7.0 run-tool unity_open_mcp_capabilities --project /abso
 - **Tools missing after config edit:** restart the MCP client.
 - **Wrong project driven:** `UNITY_PROJECT_PATH` must be absolute and point at
   the folder that contains `Assets/`, `Packages/`, `ProjectSettings/`.
+- **Wrong / old version installed:** re-read Step 0 `version.json` and rewrite
+  the UPM pins + MCP `@<VERSION>`; do not keep a memorized older pin.
 
 More detail: [Troubleshooting](../troubleshooting.md), [Dialog policy](../dialog-policy.md).
 

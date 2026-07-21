@@ -105,23 +105,28 @@ Full catalog and contracts: [docs/api/mcp-tools.md](docs/api/mcp-tools.md).
 
 Requires **Unity 2022.3 LTS or newer**.
 
-1. **Easiest (AI agent):** paste this prompt into your AI client (Cursor, Claude, …) and let it install for you:
+1. **Manual:** edit the package and MCP client configuration yourself with
+   [Manual setup](docs/setup/manual-setup.md).
+2. **Unity Hub Pro:** use the UI flow in
+   [Wizard setup](docs/setup/wizard-setup.md).
+3. **Local checkout:** build and run the repository with
+   [Development setup](docs/setup/development-setup.md).
+4. **Experimental — AI agent:** paste this prompt into your AI client
+   (Cursor, Claude, …). Prefer Manual or Wizard when you want a predictable
+   install.
 
 ```text
 Install Unity Open MCP in this Unity project by following
 https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/docs/setup/agent-setup.md
-exactly. Do every agent step yourself; stop and tell me only when a human action is required.
-If this monorepo is already open locally, read docs/setup/agent-setup.md from disk instead of fetching.
+exactly (fetch it fresh; do not improvise from memory).
+First read version.json from the same repo and use ONLY that version for all pins —
+never invent or recall an older 0.x.y. Copy SKILL.md with curl/cp; do not rewrite it
+or call generate_skill. Do every agent step yourself; stop and tell me only when a
+human action is required. If this monorepo is already open locally, read
+docs/setup/agent-setup.md and version.json from disk instead of fetching.
 ```
 
 Full procedure: [Agent setup](docs/setup/agent-setup.md).
-
-2. **Manual:** edit the package and MCP client configuration yourself with
-   [Manual setup](docs/setup/manual-setup.md).
-3. **Local checkout:** build and run the repository with
-   [Development setup](docs/setup/development-setup.md).
-4. **Unity Hub Pro:** use the UI flow in
-   [Wizard setup](docs/setup/wizard-setup.md).
 
 ## Documentation
 

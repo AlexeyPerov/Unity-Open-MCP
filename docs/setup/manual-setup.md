@@ -8,7 +8,7 @@ This is the most typical way to set up Unity Open MCP from the terminal: add the
 Unity packages, then point your MCP client at the server.
 
 Prefer a GUI? Use the **wizard** path in [wizard-setup.md](wizard-setup.md).
-Want an AI agent to perform the install? See [agent-setup.md](agent-setup.md).
+Want an experimental AI-agent install instead? See [agent-setup.md](agent-setup.md).
 Working on this repository itself? See [development-setup.md](development-setup.md).
 
 Unity Open MCP has two halves you must install: the **Unity side** (bridge +

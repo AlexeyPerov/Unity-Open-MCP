@@ -9,7 +9,7 @@
 这是无需终端、无需手工编辑 JSON、无需 Git URL 的安装方式。也就是说，如果你不想打开命令行，请用这篇指南。
 
 自助路径（不使用 Hub 应用）见 [manual-setup.md](manual-setup.md)。
-想让 AI 智能体代为安装？见 [agent-setup.md](agent-setup.md)。
+想尝试实验性的 AI 智能体安装？见 [agent-setup.md](agent-setup.md)。
 
 ## 环境要求
 
