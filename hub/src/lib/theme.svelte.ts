@@ -24,7 +24,17 @@ export function resolveTheme(theme: Theme): "dark" | "light" {
     : "dark";
 }
 
+// We retain both the media-query list and the handler so an explicit
+// dark/light choice can actually detach the OS listener. Nulling only the
+// handler (the old code) orphaned the MediaQueryList and left the listener
+// attached forever — its callback then overrode an explicit palette on the
+// next OS switch, and each system→explicit→system cycle leaked a new one.
+let mediaMq: MediaQueryList | null = null;
 let mediaListener: ((e: MediaQueryListEvent) => void) | null = null;
+// Tracks the theme the user has currently selected so the media-query
+// callback knows whether it is still authoritative. An explicit dark/light
+// choice makes the listener a no-op even before it is detached.
+let currentTheme: Theme | null = null;
 let lastSystem: "dark" | "light" = "dark";
 let lastApplied: { theme: Theme; system: "dark" | "light" } | null = null;
 
@@ -61,15 +71,13 @@ export function applyTheme(theme: Theme): void {
     installMediaListener();
   } else {
     root.setAttribute("data-theme", theme);
-    if (mediaListener) {
-      // The user picked an explicit palette — drop the OS listener
-      // so the next OS change does not flicker the UI. We do not
-      // remove the listener if they were already on `system`
-      // because the listener is idempotent and the cost of keeping
-      // it around is one media-query check per OS change.
-      mediaListener = null;
-    }
+    // The user picked an explicit palette — detach the OS listener so
+    // the next OS change does not silently override their choice. We
+    // keep `mediaMq` cached so a later switch back to `system` reuses
+    // the same MediaQueryList instead of leaking a new one.
+    detachMediaListener();
   }
+  currentTheme = theme;
   lastApplied = { theme, system: lastSystem };
   // Mirror the choice to localStorage so the `app.html` inline
   // script can pick it up on the next launch and the first paint
@@ -80,24 +88,51 @@ export function applyTheme(theme: Theme): void {
 function installMediaListener() {
   if (typeof window === "undefined") return;
   if (mediaListener) return;
-  const mq = window.matchMedia("(prefers-color-scheme: light)");
-  mediaListener = (e) => {
+  // Reuse the cached MediaQueryList across install/detach cycles so a
+  // system→explicit→system toggle does not pile up listeners.
+  if (!mediaMq) mediaMq = window.matchMedia("(prefers-color-scheme: light)");
+  const mq = mediaMq;
+  const handler = (e: MediaQueryListEvent) => {
+    // Only the `system` theme should react to OS changes — an explicit
+    // dark/light choice is authoritative and must not be overridden.
+    // This guard also covers the window between detach being requested
+    // and the listener actually firing.
+    if (currentTheme !== "system") return;
     const next: "dark" | "light" = e.matches ? "light" : "dark";
     lastSystem = next;
     document.documentElement.setAttribute("data-theme", next);
   };
+  mediaListener = handler;
   // `addEventListener` is the modern API; the older `addListener`
-  // fallback is kept for very old WebKit. Both are no-ops on the
-  // second call so the idempotent guard is enough.
+  // fallback is kept for very old WebKit.
   if (typeof mq.addEventListener === "function") {
-    mq.addEventListener("change", mediaListener);
+    mq.addEventListener("change", handler);
   } else if (typeof (mq as MediaQueryList & {
     addListener?: (cb: (e: MediaQueryListEvent) => void) => void;
   }).addListener === "function") {
     // Legacy WebKit: MediaQueryList#addListener is the pre-2018 API.
     (mq as MediaQueryList & {
       addListener: (cb: (e: MediaQueryListEvent) => void) => void;
-    }).addListener(mediaListener);
+    }).addListener(handler);
+  }
+}
+
+function detachMediaListener() {
+  if (!mediaListener) return;
+  const mq = mediaMq;
+  const handler = mediaListener;
+  // Clear first so a re-entrant applyTheme("system") re-installs cleanly.
+  mediaListener = null;
+  if (!mq) return;
+  if (typeof mq.removeEventListener === "function") {
+    mq.removeEventListener("change", handler);
+  } else if (typeof (mq as MediaQueryList & {
+    removeListener?: (cb: (e: MediaQueryListEvent) => void) => void;
+  }).removeListener === "function") {
+    // Legacy WebKit: MediaQueryList#removeListener is the pre-2018 API.
+    (mq as MediaQueryList & {
+      removeListener: (cb: (e: MediaQueryListEvent) => void) => void;
+    }).removeListener(handler);
   }
 }
 

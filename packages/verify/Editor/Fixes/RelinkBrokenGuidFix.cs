@@ -251,11 +251,19 @@ namespace UnityOpenMcpVerify.Fixes
 
             // Match every `guid: <brokenGuid>` occurrence on the asset — a single
             // broken GUID is typically referenced once, but the same target may
-            // be wired into several PPtr fields. Anchor to start-of-line (multi-
-            // line mode) so we only match the YAML `guid:` key, not substrings
-            // like `m_guid:` or `second_guid:`. Mirrors FixDuplicateGuidFix.
+            // be wired into several PPtr fields. In .prefab/.unity/.mat YAML these
+            // references live INLINE in flow-style PPtr maps
+            // (`m_Mesh: {fileID: 10303, guid: <guid>, type: 2}`), so a line-start
+            // anchor (`^\s*guid:`) would never match them. Instead we anchor on
+            // the key boundary: `guid:` must NOT be preceded by a word character,
+            // which excludes incidental substrings like `m_guid:` or
+            // `second_guid:` (the preceding `_` is a `\w`) while still matching
+            // both line-start (`guid:` at column 0 in a .meta) and inline
+            // (`... guid: <guid> ...`) occurrences. This mirrors the key-scope of
+            // the scanner's SharedRegex.ExternalFileAndGuid, not the .meta-only
+            // FixDuplicateGuidFix pattern.
             var pattern = new Regex(
-                @"(?m)^\s*guid:\s*" + Regex.Escape(brokenGuid) + @"\b",
+                @"(?<![\w])guid:\s*" + Regex.Escape(brokenGuid) + @"\b",
                 RegexOptions.Compiled);
 
             if (!pattern.IsMatch(contents))
