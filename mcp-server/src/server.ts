@@ -197,9 +197,16 @@ export function createServer(
       // lock (when one exists). The agent id travels as X-Agent-Id so the
       // target bridge's fair queue can schedule it.
       const overrideAuth = resolveAuthToken(projectPath, routing.portOverride);
+      // M23 Plan 3 review (M2) — the override client targets a different bridge
+      // port than the default client, so it must NOT share the default
+      // PingCache: a fresh snapshot from the default bridge would let a call
+      // to bridge B short-circuit its own /ping and bypass
+      // bridge_not_connected / compile-wait checks. A private per-client cache
+      // (matching the client's per-request, session-bypassing nature) keeps
+      // each port's ready-state isolated.
       const overrideLive = new LiveClient(
         routing.portOverride,
-        pingCache,
+        new PingCache(),
         overrideAuth,
         projectPath,
         routing.agentId,

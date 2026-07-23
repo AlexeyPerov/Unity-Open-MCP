@@ -14,13 +14,11 @@ namespace UnityOpenMcpBridge.MetaTools
         private static readonly HashSet<string> ReadOnlyMenuAllowlist = new(StringComparer.OrdinalIgnoreCase)
         {
             "Assets/Refresh",
-            "Assets/Reimport All",
             "Assets/Reveal in Finder",
             "Assets/Show in Explorer",
             "Edit/Selection",
             "Edit/Project Settings",
             "File/Open Scene",
-            "File/Open Project",
             "GameObject/Align with View",
             "GameObject/Move to View",
             "Window/General/Hierarchy",
@@ -50,9 +48,21 @@ namespace UnityOpenMcpBridge.MetaTools
         public static bool IsReadOnlyMenu(string menuPath)
         {
             if (string.IsNullOrEmpty(menuPath)) return false;
+            // Exact, case-insensitive match against the allow-list — OR a
+            // parent-segment match where the allow-listed entry is a real menu
+            // ancestor (e.g. allow-listing "Edit/Selection" covers the submenu
+            // "Edit/Selection/Select All"). The previous StartsWith check
+            // over-matched: any path prefixed by an allow-listed string
+            // (e.g. "Assets/Refresh XYZ") was treated as read-only. Matching on
+            // the "/" segment boundary keeps the parent-child behavior without
+            // the false positives.
             foreach (var allowed in ReadOnlyMenuAllowlist)
             {
-                if (menuPath.StartsWith(allowed, StringComparison.OrdinalIgnoreCase))
+                if (menuPath.Equals(allowed, StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (menuPath.Length > allowed.Length
+                    && menuPath[allowed.Length] == '/'
+                    && menuPath.StartsWith(allowed + "/", StringComparison.OrdinalIgnoreCase))
                     return true;
             }
             return false;

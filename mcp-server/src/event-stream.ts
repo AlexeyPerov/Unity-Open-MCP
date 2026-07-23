@@ -57,6 +57,9 @@ export class BridgeEventStream {
   private abortController: AbortController | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
+  // True after stop() so the pump's finally/catch know not to schedule a
+  // reconnect for the AbortError they observe when the stream is torn down.
+  private stopped = false;
 
   constructor(
     private readonly baseUrl: string,
@@ -80,6 +83,9 @@ export class BridgeEventStream {
 
   private connect(): void {
     if (this.abortController) return;
+    // (Re)starting after a stop() — clear the stopped flag so genuine failures
+    // can drive reconnects again.
+    this.stopped = false;
     this.abortController = new AbortController();
     const url = `${this.baseUrl}/events?subscriber=${encodeURIComponent(
       this.subscriberId,
@@ -108,7 +114,13 @@ export class BridgeEventStream {
         const message =
           err instanceof Error ? err.message : String(err);
         // AbortError means we intentionally stopped; treat as clean disconnect.
-        this.lastError = message.includes("abort") ? null : message;
+        // stop() clears the abort controller itself and sets `stopped`, so the
+        // catch only schedules a reconnect for genuine connection failures.
+        if (this.stopped || message.includes("abort")) {
+          this.lastError = null;
+          return;
+        }
+        this.lastError = message;
         this.scheduleReconnect();
       });
   }
@@ -133,13 +145,18 @@ export class BridgeEventStream {
         }
       }
     } catch (err: unknown) {
-      // Network drop mid-stream — schedule a reconnect.
+      // Network drop mid-stream — schedule a reconnect unless stop() was
+      // called, in which case the AbortError is the expected teardown signal
+      // and must not pollute lastError or re-open the stream.
+      if (this.stopped) return;
       const message = err instanceof Error ? err.message : String(err);
-      this.lastError = message;
+      // AbortError (intentional stop) is filtered to avoid noise; any other
+      // message is a genuine failure worth surfacing.
+      if (!message.includes("abort")) this.lastError = message;
     } finally {
       this.connected = false;
       try { await reader.cancel(); } catch { /* ignore */ }
-      this.scheduleReconnect();
+      if (!this.stopped) this.scheduleReconnect();
     }
   }
 
@@ -242,6 +259,9 @@ export class BridgeEventStream {
 
   /** Stop the reader and clear state. Idempotent; used in tests. */
   stop(): void {
+    // Set first so the in-flight pump's finally and the connect()'s catch
+    // treat the AbortError as intentional and skip scheduleReconnect().
+    this.stopped = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

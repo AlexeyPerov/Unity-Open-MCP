@@ -36,6 +36,27 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
+        public static void IsReadOnlyMenu_OverMatchingPrefix_ReturnsFalse()
+        {
+            // A path merely prefixed by an allow-listed string is NOT read-only.
+            // StartsWith previously treated "Assets/Refresh (Force)" as a child
+            // of the read-only "Assets/Refresh" entry; the boundary check now
+            // requires a real "/" parent-segment separator.
+            Assert.IsFalse(ExecuteMenuTool.IsReadOnlyMenu("Assets/Refresh XYZ"));
+            Assert.IsFalse(ExecuteMenuTool.IsReadOnlyMenu("Assets/Refresh_Extra"));
+        }
+
+        [Test]
+        public static void IsReadOnlyMenu_RemovedMutatingEntries_ReturnsFalse()
+        {
+            // Assets/Reimport All (full-project mutation) and File/Open Project
+            // (project switch) were removed from the read-only allow-list so
+            // they can never bypass the paths_hint / gate scope.
+            Assert.IsFalse(ExecuteMenuTool.IsReadOnlyMenu("Assets/Reimport All"));
+            Assert.IsFalse(ExecuteMenuTool.IsReadOnlyMenu("File/Open Project"));
+        }
+
+        [Test]
         public static void IsReadOnlyMenu_BlockedMenu_ReturnsFalse()
         {
             Assert.IsFalse(ExecuteMenuTool.IsReadOnlyMenu("File/Quit"));

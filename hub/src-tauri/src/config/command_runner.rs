@@ -27,10 +27,18 @@ use crate::config::schemas::ProjectKind;
 
 /// Per-(project, panel) tracked process. Holds the child PID (when
 /// running) so the stop command can kill the whole process tree.
+///
+/// `generation` is a monotonically increasing identity stamped into the entry
+/// on every spawn/stop. The exit-wait thread captures the generation at spawn
+/// time and only flips the entry's running flag when the map still holds the
+/// SAME generation — otherwise a newer command has replaced this entry and the
+/// stale thread must leave it alone (otherwise it would clear the newer
+/// command's running flag and drop its PID, so it could no longer be stopped).
 #[derive(Default, Clone)]
 pub struct TrackedProc {
     pub pid: Option<u32>,
     pub running: bool,
+    pub generation: u64,
 }
 
 /// All tracked processes for the command runner. Managed as a single
@@ -431,16 +439,23 @@ fn spawn_tracked(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
-    {
+    // Stamp a fresh generation so a late wait thread from a *previous* command
+    // on this key can detect that its entry has been replaced and must not
+    // clear the running flag / PID of this newer command.
+    let generation = {
         let mut procs = state.procs.lock().unwrap();
+        let prev = procs.get(&k).map(|p| p.generation).unwrap_or(0);
+        let next = prev.wrapping_add(1);
         procs.insert(
             k.clone(),
             TrackedProc {
                 pid: Some(pid),
                 running: true,
+                generation: next,
             },
         );
-    }
+        next
+    };
 
     let app_clone = app.clone();
     let project_id_owned = project_id.to_string();
@@ -469,7 +484,11 @@ fn spawn_tracked(
     }
 
     // Wait thread: blocks until the child exits, then emits cmd-exit
-    // and flips the running flag.
+    // and flips the running flag. The generation captured at spawn is checked
+    // before mutating the entry: if the map now holds a different generation,
+    // a newer command has replaced this one (stop then re-spawn on the same
+    // panel) and this stale thread must NOT touch the entry — otherwise it
+    // would clear the newer command's running flag and drop its PID.
     let app4 = app_clone.clone();
     let panel4 = panel_owned.clone();
     let project_id4 = project_id_owned.clone();
@@ -480,8 +499,10 @@ fn spawn_tracked(
         let k = key(&project_id4, &panel4);
         let mut procs = procs_arc.lock().unwrap();
         if let Some(p) = procs.get_mut(&k) {
-            p.running = false;
-            p.pid = None;
+            if p.generation == generation {
+                p.running = false;
+                p.pid = None;
+            }
         }
     });
 
@@ -972,6 +993,76 @@ mod tests {
         let p = TrackedProc::default();
         assert!(!p.running);
         assert!(p.pid.is_none());
+        assert_eq!(p.generation, 0);
+    }
+
+    #[test]
+    fn stale_wait_thread_does_not_clear_newer_command() {
+        // Reproduces the M4 race: command A is spawned (generation 1), then
+        // stopped, then command B is spawned on the same panel (generation 2).
+        // A's late wait thread must NOT clear B's entry — otherwise B shows
+        // not-running and its PID is lost so it can't be stopped.
+        let procs = Arc::new(Mutex::new(HashMap::<String, TrackedProc>::new()));
+        let k = key("proj", "build");
+
+        // Command A spawned.
+        {
+            let mut g = procs.lock().unwrap();
+            g.insert(
+                k.clone(),
+                TrackedProc {
+                    pid: Some(111),
+                    running: true,
+                    generation: 1,
+                },
+            );
+        }
+        let a_generation = 1u64;
+
+        // A is stopped (running flag + PID cleared; generation unchanged so A's
+        // own wait thread can still reconcile).
+        {
+            let mut g = procs.lock().unwrap();
+            if let Some(p) = g.get_mut(&k) {
+                p.running = false;
+                p.pid = None;
+            }
+        }
+
+        // Command B spawned on the same key — generation advances to 2.
+        {
+            let mut g = procs.lock().unwrap();
+            let prev = g.get(&k).map(|p| p.generation).unwrap_or(0);
+            g.insert(
+                k.clone(),
+                TrackedProc {
+                    pid: Some(222),
+                    running: true,
+                    generation: prev.wrapping_add(1),
+                },
+            );
+        }
+
+        // A's late wait thread runs (captured generation 1). It must detect
+        // the generation mismatch and leave B's entry untouched.
+        {
+            let mut g = procs.lock().unwrap();
+            if let Some(p) = g.get_mut(&k) {
+                if p.generation == a_generation {
+                    p.running = false;
+                    p.pid = None;
+                }
+            }
+        }
+
+        let final_state = procs.lock().unwrap().get(&k).cloned().unwrap();
+        assert!(final_state.running, "B's running flag was clobbered by A's stale thread");
+        assert_eq!(
+            final_state.pid,
+            Some(222),
+            "B's PID was dropped by A's stale thread"
+        );
+        assert_eq!(final_state.generation, 2);
     }
 
     #[test]
