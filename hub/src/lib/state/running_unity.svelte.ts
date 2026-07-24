@@ -28,6 +28,10 @@ class RunningUnityStore {
   private timer: ReturnType<typeof setInterval> | null = null;
   private currentIntervalMs = 0;
   private inFlight = false;
+  // Whether a consumer (the Projects tab) is currently mounted and wants
+  // live polling. applyInterval uses this to avoid arming a setInterval
+  // that spawns ps/PowerShell with nobody reading the results.
+  private active = false;
 
   isRunningForPid(pid: number | undefined | null): boolean {
     if (pid === undefined || pid === null || pid === 0) return false;
@@ -47,6 +51,10 @@ class RunningUnityStore {
    * again for subsequent interval-driven ticks.
    */
   async start(onFirstScanDone?: () => void): Promise<void> {
+    // L7 — mark that a consumer is mounted before arming the timer, so a
+    // concurrent settings write (which also calls applyInterval) does not
+    // leave a dangling timer once this start() arms it.
+    this.active = true;
     this.applyInterval();
     // Run an immediate scan so the first render after Projects tab mount
     // already reflects the current process list, even if the user has
@@ -55,6 +63,7 @@ class RunningUnityStore {
   }
 
   stop(): void {
+    this.active = false;
     if (this.timer !== null) {
       clearInterval(this.timer);
       this.timer = null;
@@ -65,6 +74,11 @@ class RunningUnityStore {
    * Recompute the timer whenever the scan interval changes. Called from
    * `applyInterval` after settings load/save, and also as a public
    * method so the Settings UI can call it after a write.
+   *
+   * Only arms a setInterval when a consumer is mounted (`active`); when the
+   * Projects tab is unmounted (no consumer), this just records the desired
+   * interval so the next `start()` picks it up. Otherwise every Settings
+   * write would spawn a ps/PowerShell poll loop with nobody reading it.
    */
   applyInterval(): void {
     const seconds = this.resolveIntervalSeconds();
@@ -75,7 +89,11 @@ class RunningUnityStore {
     this.currentIntervalMs = ms;
     if (this.timer !== null) {
       clearInterval(this.timer);
+      this.timer = null;
     }
+    // No consumer: remember the desired cadence but do not arm a timer. The
+    // next start() will create one using the recorded currentIntervalMs.
+    if (!this.active) return;
     this.timer = setInterval(() => {
       void this.tick();
     }, ms);

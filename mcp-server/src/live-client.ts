@@ -261,7 +261,17 @@ export class LiveClient implements Router {
     this.projectPath = projectPath;
     this.retry = readRetryTunables();
     this.agentId = agentId;
-    this.envPort = envPort;
+    // A port of 0 / negative / non-integer is not a real env override. Treating
+    // 0 as authoritative would permanently disable the mid-session endpoint
+    // refresh that re-points at a restarted Unity bridge (refreshEndpointFromLock
+    // bails when envPort is a number). Normalize those to undefined so the
+    // lock-driven self-healing path stays live. getEnv() already filters this,
+    // but the client is the contract owner and is also reached by per-request
+    // port overrides, so defend here too.
+    this.envPort =
+      typeof envPort === "number" && Number.isInteger(envPort) && envPort >= 1
+        ? envPort
+        : undefined;
     // M13 T4.5 + M23 Plan 2 — startup dialog auto-dismissal. Resolved once at
     // construction; the env vars do not change mid-process. The feature is
     // enabled by default and runs concurrently with every compile/bridge
@@ -328,6 +338,40 @@ export class LiveClient implements Router {
   private async handlePing(): Promise<CallToolResult> {
     try {
       const res = await this.fetchWithTimeout("/ping", { method: "GET" });
+
+      // L3 — mirror ensureReady's status discipline. A 503 is the bridge's
+      // "compiling / listener starting" signal (non-JSON body): report it as
+      // compiling, never as a generic offline or a successful ping. A non-OK
+      // status (401/500/…) must not be parsed as PingResponse and cached — the
+      // error body would set `connected`/`compiling` to undefined and be
+      // reported as isError:false on later cache hits. Only a 2xx carries a
+      // valid PingResponse worth recording.
+      if (res.status === 503) {
+        return makeErrorResult({
+          code: "compiling",
+          message: `Bridge at ${this.baseUrl} is compiling / restarting its listener (HTTP 503).`,
+          detail: {
+            error: {
+              code: "compiling",
+              message: "Bridge listener is not ready (HTTP 503).",
+            },
+          },
+        });
+      }
+
+      if (!res.ok) {
+        return makeErrorResult({
+          code: "bridge_error",
+          message: `Bridge /ping returned unexpected HTTP ${res.status}.`,
+          detail: {
+            error: {
+              code: "bridge_error",
+              message: `HTTP ${res.status}`,
+            },
+          },
+        });
+      }
+
       const body: PingResponse = await res.json();
       this.pingCache.record(body);
       this.maybeWarnCompat(body.bridgeVersion);
@@ -1043,7 +1087,7 @@ export class LiveClient implements Router {
    */
   private refreshEndpointFromLock(): boolean {
     if (!this.projectPath) return false;
-    if (typeof this.envPort === "number") return false; // env override wins
+    if (this.envPort !== undefined) return false; // env override wins
     let lock: InstanceLock | null;
     try {
       lock = readInstanceLock(this.projectPath);

@@ -72,12 +72,17 @@ export function getEnv(): { projectPath: string; port: number; authToken?: strin
     process.exit(1);
   }
   const rawEnvPort = process.env[PORT_ENV_VAR];
+  // A port of 0 is a valid integer but an invalid *bridge* port: it would be
+  // treated as an authoritative env override and, because LiveClient checks
+  // only `typeof envPort === "number"`, permanently disable the mid-session
+  // endpoint refresh that re-points at a bridge after a Unity restart. Require
+  // >= 1 so 0/NaN/non-numeric values all fall through to instance discovery.
   const envPort = rawEnvPort ? parseInt(rawEnvPort, 10) : undefined;
-  const resolvedEnvPort =
-    rawEnvPort && Number.isInteger(envPort) ? envPort : undefined;
+  const hasValidEnvPort = typeof envPort === "number" && Number.isInteger(envPort) && envPort >= 1;
+  const resolvedEnvPort = rawEnvPort && hasValidEnvPort ? envPort : undefined;
   const port = resolvePort(projectPath, resolvedEnvPort);
   const source =
-    rawEnvPort && Number.isInteger(envPort)
+    rawEnvPort && hasValidEnvPort
       ? "env override"
       : "instance discovery";
   console.error(
@@ -89,7 +94,7 @@ export function getEnv(): { projectPath: string; port: number; authToken?: strin
   // Authorization header and the bridge must be in authMode "none".
   const authToken = resolveAuthToken(
     projectPath,
-    Number.isInteger(envPort) ? envPort : undefined,
+    hasValidEnvPort ? envPort : undefined,
   );
   if (authToken) {
     console.error("[unity-open-mcp] Bridge auth token discovered from instance lock.");

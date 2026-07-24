@@ -862,8 +862,29 @@ namespace UnityOpenMcpBridge
                 GateDispatchResult result = null;
                 System.Exception dispatchError = null;
 
+                // L5 — timed-out requests must not run their mutation after the
+                // caller has already been told the call timed out. The queue has
+                // no built-in cancellation: on timeout the worker returns a
+                // timeout envelope, but the enqueued Work is still pending and
+                // ProcessQueue will invoke it on a later main-thread frame. A
+                // client retry would then apply a non-idempotent mutation twice.
+                // This flag is set on the worker thread when the wait times out
+                // and checked on the main thread before DispatchWithGate. A
+                // StrongBox<bool> is a reference type so both threads share one
+                // box; Volatile.Read/Write provide the memory barrier (a plain
+                // captured bool has no release/acquire fence and could be
+                // reordered). The remaining race (Work already in flight when
+                // the wait times out) is inherent to Unity's non-cancelable
+                // main-thread dispatch and is safe here: the worker has already
+                // returned, so the late result is simply discarded.
+                var timedOut = new System.Runtime.CompilerServices.StrongBox<bool>(false);
+
                 var queueTask = BridgeRequestQueue.Enqueue(agentId, toolName, isMutating, () =>
                 {
+                    // If the caller already received a timeout, skip the
+                    // dispatch entirely — running the mutation now would double-
+                    // apply it on the caller's inevitable retry.
+                    if (System.Threading.Volatile.Read(ref timedOut.Value)) return;
                     try
                     {
                         result = DispatchWithGate(toolName, body, effectiveGateMode, pathsHint);
@@ -879,6 +900,10 @@ namespace UnityOpenMcpBridge
                 // built-in timeout). Wait for either completion or the deadline.
                 if (!queueTask.Wait(timeoutMs))
                 {
+                    // Flip the flag BEFORE sending the response so a main-thread
+                    // frame that runs the Work just after this returns sees the
+                    // cancellation and skips the dispatch.
+                    System.Threading.Volatile.Write(ref timedOut.Value, true);
                     sw.Stop();
                     BridgeActivityRecorder.ApplyToolFailureToActivity(activity, "timeout", $"Tool {toolName} timed out after {timeoutMs}ms", sw.ElapsedMilliseconds);
                     BridgeHttpResponse.SendJson(context, 200, BridgeJson.BuildTimeoutEnvelope(toolName, effectiveGateMode, timeoutMs));

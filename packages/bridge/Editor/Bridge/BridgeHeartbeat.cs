@@ -136,6 +136,28 @@ namespace UnityOpenMcpBridge
                 {
                     _forcedPending = false;
                 }
+                // L6 — the transitional play-mode states have no matching
+                // clear branch above, so a force set in OnPlayModeStateChanged
+                // could pin "entering_playmode"/"exiting_playmode" until the
+                // next Force() if the transition was aborted (e.g. a compile
+                // error cancels entering play mode and the editor settles back
+                // to idle). Clear them when the editor has reached a state the
+                // transition targets or visibly abandoned it:
+                //   - entering_playmode → resolved once playing (reached it) or
+                //     idle without compiling (gave up — no domain reload in
+                //     flight to still produce play mode).
+                //   - exiting_playmode  → resolved once back in edit mode
+                //     (!isPlaying) and not mid-reload.
+                else if (_forcedState == BridgeInstanceLock.StateEnteringPlaymode
+                    && (isPlaying || (!isCompiling && !isPlaying)))
+                {
+                    _forcedPending = false;
+                }
+                else if (_forcedState == BridgeInstanceLock.StateExitingPlaymode
+                    && !isPlaying && !isCompiling)
+                {
+                    _forcedPending = false;
+                }
             }
             else if (isCompiling)
             {

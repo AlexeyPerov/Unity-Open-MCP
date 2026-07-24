@@ -36,7 +36,7 @@ export interface BridgeEvent {
 export interface PullResult {
   subscriberId: string;
   events: BridgeEvent[];
-  /** Count of events dropped from the queue before this pull (overflow). */
+  /** Events dropped from the queue due to overflow since the previous pull. */
   dropped: number;
   /** Whether the SSE reader is currently connected. */
   connected: boolean;
@@ -247,10 +247,17 @@ export class BridgeEventStream {
   pull(maxEvents: number): PullResult {
     const started = this.ensureSubscription();
     const events = this.drain(maxEvents);
+    // L4 — `dropped` counts queue overflows. It is surfaced as a per-pull
+    // value (how many events were lost since the last pull), so reset it to 0
+    // once it has been reported. A polling agent that re-pulls must see 0 when
+    // nothing new overflowed, not the same stale total forever — otherwise it
+    // cannot tell a single old overflow from continuous loss.
+    const dropped = this.dropped;
+    this.dropped = 0;
     return {
       subscriberId: this.subscriberId,
       events,
-      dropped: this.dropped,
+      dropped,
       connected: this.connected,
       started,
       lastError: this.lastError,

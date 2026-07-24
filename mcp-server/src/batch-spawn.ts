@@ -307,9 +307,19 @@ export class BatchSpawn implements Router {
       lock?.projectPath ??
       "";
 
-    this.timeoutMs = process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS
-      ? parseInt(process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS, 10)
+    // Parse the timeout env override with a finiteness/positivity guard:
+    // a non-numeric value (e.g. "abc") parses to NaN, and setTimeout(fn, NaN)
+    // fires immediately, making every batch time out before Unity even starts.
+    // Fall back to the documented default for unset/invalid values, matching
+    // retry-policy.ts's parsePositiveInt discipline.
+    const rawTimeout = process.env.UNITY_OPEN_MCP_BATCH_TIMEOUT_MS;
+    const parsedTimeout = rawTimeout
+      ? parseInt(rawTimeout, 10)
       : DEFAULT_BATCH_TIMEOUT_MS;
+    this.timeoutMs =
+      Number.isFinite(parsedTimeout) && parsedTimeout > 0
+        ? parsedTimeout
+        : DEFAULT_BATCH_TIMEOUT_MS;
   }
 
   isBatchTool(toolName: string): boolean {

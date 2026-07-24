@@ -403,8 +403,16 @@ fn spawn_tracked(
     mut cmd: Command,
 ) -> Result<(), CommandRunnerError> {
     let k = key(project_id, panel);
-    {
-        let procs = state.procs.lock().unwrap();
+    // L8 — close the TOCTOU between the already-running check and the spawn.
+    // Previously the check released the lock before cmd.spawn() + insert, so
+    // two concurrent invokes for the same key could both pass the check and
+    // both spawn. Reserve the slot atomically: under the same lock that reads
+    // `running`, insert a placeholder (running: true, pid: None) stamped with
+    // the next generation. A second concurrent caller now sees running: true
+    // and bails with AlreadyRunning. If spawn then fails, the placeholder is
+    // rolled back so the key is free for the next attempt.
+    let generation = {
+        let mut procs = state.procs.lock().unwrap();
         if let Some(p) = procs.get(&k) {
             if p.running {
                 return Err(CommandRunnerError::AlreadyRunning {
@@ -413,7 +421,18 @@ fn spawn_tracked(
                 });
             }
         }
-    }
+        let prev = procs.get(&k).map(|p| p.generation).unwrap_or(0);
+        let next = prev.wrapping_add(1);
+        procs.insert(
+            k.clone(),
+            TrackedProc {
+                pid: None,
+                running: true,
+                generation: next,
+            },
+        );
+        next
+    };
 
     cmd.current_dir(cwd);
     cmd.stdin(Stdio::null());
@@ -432,30 +451,38 @@ fn spawn_tracked(
     cmd.env("NO_COLOR", "1");
     cmd.env("FORCE_COLOR", "0");
 
-    let mut child = cmd.spawn().map_err(|e| CommandRunnerError::SpawnFailed {
-        message: e.to_string(),
-    })?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            // Spawn failed: roll back the placeholder reservation so the key
+            // is not left pinned as running: true with no child to stop.
+            let mut procs = state.procs.lock().unwrap();
+            if let Some(p) = procs.get_mut(&k) {
+                if p.generation == generation {
+                    p.running = false;
+                    p.pid = None;
+                }
+            }
+            return Err(CommandRunnerError::SpawnFailed {
+                message: e.to_string(),
+            });
+        }
+    };
     let pid = child.id();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
-    // Stamp a fresh generation so a late wait thread from a *previous* command
-    // on this key can detect that its entry has been replaced and must not
-    // clear the running flag / PID of this newer command.
-    let generation = {
+    // Stamp the reserved entry with the real PID. The generation was already
+    // assigned at reservation time; a late wait thread from a *previous*
+    // command on this key detects the mismatch and must not clear this entry.
+    {
         let mut procs = state.procs.lock().unwrap();
-        let prev = procs.get(&k).map(|p| p.generation).unwrap_or(0);
-        let next = prev.wrapping_add(1);
-        procs.insert(
-            k.clone(),
-            TrackedProc {
-                pid: Some(pid),
-                running: true,
-                generation: next,
-            },
-        );
-        next
-    };
+        if let Some(p) = procs.get_mut(&k) {
+            if p.generation == generation {
+                p.pid = Some(pid);
+            }
+        }
+    }
 
     let app_clone = app.clone();
     let project_id_owned = project_id.to_string();
