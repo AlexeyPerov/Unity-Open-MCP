@@ -372,6 +372,149 @@ test("runStreamEventsCommand: bridge unavailable + no events → exit 3 (timeout
   assert.equal(result.exitCode, 3);
 });
 
+// M7 (round-2 review) — follow mode must write each batch to the `writer`
+// sink as it arrives and must NOT retain events (the loop runs until SIGINT,
+// so retaining would grow unboundedly and the summary return value is never
+// emitted). Previously the follow loop only pushed into `allEvents` with no
+// write and no exit condition, so the documented CI log-tap emitted zero
+// output while accumulating every event until the process was killed.
+
+/**
+ * Fake router that returns successive CallToolResults on each `route` call,
+ * clamping to the last result once the sequence is exhausted (so a follow
+ * loop with N batches keeps returning a well-formed body for any extra calls).
+ */
+function makeSequentialRouter(results: CallToolResult[]): ToolRouter {
+  let i = 0;
+  return {
+    async route(_tool: string, _args: Record<string, unknown>) {
+      const idx = Math.min(i, results.length - 1);
+      i++;
+      return results[idx];
+    },
+  } as unknown as ToolRouter;
+}
+
+function pullResult(events: unknown[], connected = true, lastError: string | null = null): CallToolResult {
+  return {
+    content: [
+      { type: "text", text: JSON.stringify({ events, connected, lastError, dropped: 0 }) },
+    ],
+    isError: false,
+  };
+}
+
+test("M7: follow mode writes each batch to the writer sink (JSON / NDJSON)", async () => {
+  const seq = makeSequentialRouter([
+    pullResult([{ seq: 1, ts: "t1", type: "log", logType: "log", message: "first" }]),
+    pullResult([
+      { seq: 2, ts: "t2", type: "log", logType: "warning", message: "second" },
+      { seq: 3, ts: "t3", type: "editor_state", state: "idle", isCompiling: false, isPlaying: false },
+    ]),
+    pullResult([]),
+  ]);
+  const stack = makeStack({ router: seq });
+  const written: string[] = [];
+  const result = await runStreamEventsCommand(stack, {
+    json: true,
+    maxEvents: 50,
+    follow: true,
+    intervalMs: 1,
+    maxBatches: 2,
+    writer: (chunk) => { written.push(chunk); },
+  });
+  assert.equal(result.exitCode, 0);
+  // The first batch (1 event) + two follow polls (2 events, then 0 events)
+  // were drained. The empty third batch must NOT produce a write.
+  // Each non-empty batch is one NDJSON line per event.
+  const lines = written.join("").split("\n").filter((l) => l.length > 0);
+  assert.equal(lines.length, 3, `3 event lines total (1 + 2 + 0), got ${lines.length}: ${JSON.stringify(lines)}`);
+  // Every line parses as JSON and carries the event payload.
+  for (const line of lines) {
+    const obj = JSON.parse(line) as { event?: unknown; connected?: boolean };
+    assert.equal(obj.connected, true);
+    assert.ok(obj.event, "each NDJSON line carries an event");
+  }
+});
+
+test("M7: follow mode writes each batch to the writer sink (human format)", async () => {
+  const seq = makeSequentialRouter([
+    pullResult([{ seq: 1, ts: "t1", type: "log", logType: "log", message: "hello" }]),
+    pullResult([{ seq: 2, ts: "t2", type: "editor_state", state: "playing", isCompiling: false, isPlaying: true }]),
+  ]);
+  const stack = makeStack({ router: seq });
+  const written: string[] = [];
+  await runStreamEventsCommand(stack, {
+    json: false,
+    maxEvents: 50,
+    follow: true,
+    intervalMs: 1,
+    maxBatches: 1,
+    writer: (chunk) => { written.push(chunk); },
+  });
+  const text = written.join("");
+  assert.match(text, /\[log log\] hello/);
+  assert.match(text, /\[state\] playing \(playing\)/);
+});
+
+test("M7: follow mode does NOT retain events (summary eventCount is 0, events empty)", async () => {
+  const seq = makeSequentialRouter([
+    pullResult([{ seq: 1, ts: "t1", type: "log", logType: "log", message: "x" }]),
+    pullResult([{ seq: 2, ts: "t2", type: "log", logType: "log", message: "y" }]),
+    pullResult([{ seq: 3, ts: "t3", type: "log", logType: "log", message: "z" }]),
+  ]);
+  const stack = makeStack({ router: seq });
+  const result = await runStreamEventsCommand(stack, {
+    json: true,
+    maxEvents: 50,
+    follow: true,
+    intervalMs: 1,
+    maxBatches: 2,
+    writer: () => { /* discard */ },
+  });
+  const json = result.json as { eventCount: number; events: unknown[] };
+  assert.equal(json.eventCount, 0, "follow mode must not retain a cumulative count");
+  assert.deepEqual(json.events, [], "follow mode must not retain events");
+});
+
+test("M7: follow mode writes the first batch before the first poll interval", async () => {
+  // The first pull's events must reach the writer immediately (before any
+  // sleep), so events seen before the first poll are not held until SIGINT.
+  const seq = makeSequentialRouter([
+    pullResult([{ seq: 1, ts: "t1", type: "log", logType: "log", message: "immediate" }]),
+  ]);
+  const stack = makeStack({ router: seq });
+  const written: string[] = [];
+  await runStreamEventsCommand(stack, {
+    json: true,
+    maxEvents: 50,
+    follow: true,
+    intervalMs: 1,
+    maxBatches: 0, // exit after the first pull, before any follow poll
+    writer: (chunk) => { written.push(chunk); },
+  });
+  const lines = written.join("").split("\n").filter((l) => l.length > 0);
+  assert.equal(lines.length, 1, "first batch written immediately");
+  const obj = JSON.parse(lines[0]) as { event?: { message?: string } };
+  assert.equal(obj.event?.message, "immediate");
+});
+
+test("M7: follow mode exit code is TIMEOUT when bridge was never reachable", async () => {
+  const seq = makeSequentialRouter([
+    pullResult([], false, "connect ECONNREFUSED"),
+  ]);
+  const stack = makeStack({ router: seq });
+  const result = await runStreamEventsCommand(stack, {
+    json: true,
+    maxEvents: 50,
+    follow: true,
+    intervalMs: 1,
+    maxBatches: 0,
+    writer: () => { /* no events to write */ },
+  });
+  assert.equal(result.exitCode, 3);
+});
+
 // ---------------------------------------------------------------------------
 // verify
 // ---------------------------------------------------------------------------

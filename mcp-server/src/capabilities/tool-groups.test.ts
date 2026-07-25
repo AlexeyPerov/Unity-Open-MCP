@@ -754,21 +754,29 @@ test("reconcileAutoActivation preserves a manually-activated group when its pack
 });
 
 test("reconcileAutoActivation does not re-flip a manually-deactivated group", () => {
-  // The agent deactivated an auto-activated group; reconcile must not flip it
-  // back to "auto" even when the package is present. (Manual intent wins.)
+  // M8 (round-2 review) — the agent deactivated an auto-activated group;
+  // reconcile must not flip it back to "auto" even when the package is still
+  // present. (Manual intent wins; the deactivation is sticky for the session.)
+  //
+  // Previously deactivate CLEARED the source entry, leaving no record of the
+  // operator's intent; the next reconcile then re-activated the group as
+  // "auto" and fired a spurious tools/list_changed — contradicting the
+  // documented contract that "deactivate to hide them" is sticky. The fix
+  // (M8) records a "suppressed" source state on deactivate, and reconcile
+  // refuses to resurrect a suppressed group. This test was previously pinning
+  // the BUGGY behavior (reconcile re-activates); it now pins the fixed one.
   const s = new ToolSessionState();
   s.activateAuto("shadergraph");
   s.deactivate("shadergraph");
   assert.equal(s.isGroupActive("shadergraph"), false);
+  assert.equal(s.activationSource("shadergraph"), "suppressed");
   const changed = s.reconcileAutoActivation(new Set(["shadergraph"]));
-  // deactivate cleared the source; reconcile would re-activate. But the
-  // resolved decision is that a deliberate deactivate is sticky for the
-  // session only if the agent re-deactivates after each reconcile. We document
-  // the actual behavior here: reconcile re-activates because the source was
-  // cleared on deactivate (there is no "manually-deactivated" sentinel). This
-  // test pins the contract so a future change is intentional.
-  assert.deepEqual(changed, ["shadergraph"]);
-  assert.equal(s.activationSource("shadergraph"), "auto");
+  assert.deepEqual(changed, [], "suppressed group must NOT be resurrected by reconcile");
+  assert.equal(s.isGroupActive("shadergraph"), false);
+  assert.equal(s.activationSource("shadergraph"), "suppressed");
+  // An explicit activate clears the suppression (source → "manual").
+  assert.equal(s.activate("shadergraph"), true);
+  assert.equal(s.activationSource("shadergraph"), "manual");
 });
 
 test("reconcileAutoActivation reports no change when nothing changes", () => {

@@ -862,6 +862,20 @@ export async function dependenciesOffline(
         assetPath: targetPath || undefined,
         guid: targetGuid,
         detail: "normal",
+        // M5 — fetch the FULL reverse-edge set and let the outer cap below be
+        // the single source of truth for truncation. Previously this call
+        // omitted maxResults, so findReferencesOffline applied its inner
+        // default of 100, pre-truncated `referencedBy`, and discarded its own
+        // `truncated` count. `reverseEdges` was then silently capped at 100,
+        // `totalCount` was computed from the already-truncated list, and the
+        // outer `totalCount > maxResults` check could never fire — so an agent
+        // using `dependencies` as a pre-delete impact check got a list that
+        // claimed to be complete (`truncated: 0`) while omitting the tail.
+        // `0` is the documented "unlimited (for paging)" sentinel both layers
+        // already agree on (M2 normalized findReferencesOffline to treat `<= 0`
+        // as unlimited). The outer cap at lines below then slices + reports
+        // `truncated` correctly against the true count.
+        maxResults: 0,
         projectRoot: opts.projectRoot,
       })).referencedBy.map((e) => ({
         assetPath: e.assetPath,

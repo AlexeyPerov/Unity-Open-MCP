@@ -1947,6 +1947,87 @@ test("dependenciesOffline sets forwardSkipped for a non-YAML asset", async () =>
   }
 });
 
+// M5 (round-2 review) — the non-impact reverse-edge path must NOT silently cap
+// at the inner default of 100. Previously dependenciesOffline called
+// findReferencesOffline WITHOUT forwarding maxResults, so the inner lookup
+// capped referencedBy at 100, discarded its own `truncated` count, and the
+// outer totalCount > maxResults check could never fire. An agent using
+// `dependencies` as a pre-delete impact check got a list that claimed to be
+// complete (truncated: 0) while omitting the tail. This fixture builds 120
+// referencing prefabs and asserts that:
+//   - max_results: 500 returns all 120 with truncated: 0 (the bug case), AND
+//   - max_results: 50 returns exactly 50 with truncated: 70 (the cap works),
+//   AND
+//   - the default (omitted) returns all 120 with truncated: 0 (the cap does
+//     not under-report when the caller asks for more than the default).
+test("M5: dependenciesOffline honors max_results > 100 on the reverse-edge path (no silent 100 cap)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-deps-m5-cap-"));
+  try {
+    const matGuid = "c5a50000000000000000000000000001";
+    // A shared material referenced by 120 prefabs.
+    await mkdir(join(tmp, "Assets", "Materials"), { recursive: true });
+    await writeFile(join(tmp, "Assets", "Materials", "Shared.mat"), `%YAML 1.1\n--- !u!21 &2100000\nMaterial:\n  m_Name: Shared\n`);
+    await writeFile(join(tmp, "Assets", "Materials", "Shared.mat.meta"), `guid: ${matGuid}\n`);
+    await mkdir(join(tmp, "Assets", "Prefabs"), { recursive: true });
+    for (let i = 0; i < 120; i++) {
+      const idx = String(i).padStart(3, "0");
+      const guid = `c5a50000000000000000000000${idx}`;
+      await writeFile(
+        join(tmp, "Assets", "Prefabs", `Ref_${idx}.prefab`),
+        `%YAML 1.1
+--- !u!1 &100
+GameObject:
+  m_Component:
+  - {fileID: 200}
+  m_Name: Ref_${idx}
+--- !u!4 &200
+Transform:
+  m_GameObject: {fileID: 100}
+  m_Father: {fileID: 0}
+--- !u!23 &300
+MeshRenderer:
+  m_GameObject: {fileID: 100}
+  m_Material: {fileID: 0, guid: ${matGuid}, type: 2}
+`,
+      );
+      await writeFile(join(tmp, "Assets", "Prefabs", `Ref_${idx}.prefab.meta`), `guid: ${guid}\n`);
+    }
+
+    // Case 1 — max_results above the old 100 cap: all 120 must come back.
+    const big = await dependenciesOffline({
+      assetPath: "Assets/Materials/Shared.mat",
+      maxResults: 500,
+      projectRoot: tmp,
+    });
+    assert.equal(big.reverseCount, 120, `reverseCount should be 120, got ${big.reverseCount}`);
+    assert.equal(big.reverseDependencies.length, 120, `reverseDependencies should have 120, got ${big.reverseDependencies.length}`);
+    assert.equal(big.truncated, 0, `truncated should be 0 for max_results:500, got ${big.truncated}`);
+
+    // Case 2 — max_results below the count: cap + truncated must be correct
+    // against the TRUE count (not the old inner-capped 100).
+    const small = await dependenciesOffline({
+      assetPath: "Assets/Materials/Shared.mat",
+      maxResults: 50,
+      projectRoot: tmp,
+    });
+    assert.equal(small.reverseCount, 120, `reverseCount (true total) should be 120, got ${small.reverseCount}`);
+    assert.equal(small.reverseDependencies.length, 50, `reverseDependencies should be capped at 50, got ${small.reverseDependencies.length}`);
+    assert.equal(small.truncated, 70, `truncated should be 70 (120-50), got ${small.truncated}`);
+
+    // Case 3 — default (omitted max_results → router supplies 100): the true
+    // count is still reported; the cap slices 100 and reports 20 truncated.
+    const def = await dependenciesOffline({
+      assetPath: "Assets/Materials/Shared.mat",
+      projectRoot: tmp,
+    });
+    assert.equal(def.reverseCount, 120, `default reverseCount should be 120, got ${def.reverseCount}`);
+    assert.equal(def.reverseDependencies.length, 100, `default reverseDependencies should be capped at 100, got ${def.reverseDependencies.length}`);
+    assert.equal(def.truncated, 20, `default truncated should be 20, got ${def.truncated}`);
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // scanIntegrityOffline — project-wide orphan_meta + duplicate_guid + missing
 // refs (T24.2 item 3).

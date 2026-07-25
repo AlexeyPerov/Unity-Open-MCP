@@ -76,8 +76,9 @@ export const readAsset = makeTool(
           },
           limit: {
             type: "integer",
-            default: 0,
-            description: "Max TREE rows after folding. 0 = unlimited. Dropped rows counted in 'moreHidden'.",
+            description:
+              "Max TREE rows after folding. 0 = unlimited (no cap). Omit to use the profile default " +
+              "(compact=60, balanced=120, full=unlimited); Dropped rows counted in 'moreHidden'.",
           },
           field_limit: {
             type: "integer",

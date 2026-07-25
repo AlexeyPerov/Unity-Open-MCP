@@ -56,8 +56,15 @@ export const FD_SAMPLE_RING_CAPACITY = 20;
  * - `"manual"`   — activated via `unity_open_mcp_manage_tools(action=activate)`.
  * - `"auto"`     — M20 Plan 7 / T20.7.0 auto-activated because the group's
  *                  Unity package dependency is detected as installed.
+ * - `"suppressed"` — M8 (round-2 review): the group was explicitly deactivated
+ *                  by the operator and must NOT be resurrected by a later
+ *                  {@link reconcileAutoActivation} pass. A suppressed group is
+ *                  NOT active (it is absent from the active set); the source
+ *                  entry is retained solely so reconciliation can see the
+ *                  deactivation intent. Clearing it requires `activate` /
+ *                  `activateAuto` (which overwrite the source) or `reset`.
  */
-export type ActivationSource = "default" | "manual" | "auto";
+export type ActivationSource = "default" | "manual" | "auto" | "suppressed";
 
 /**
  * Names of always-visible tools (meta-tools with no group assignment). These
@@ -108,11 +115,17 @@ const ALWAYS_VISIBLE_TOOLS: ReadonlySet<string> = new Set([
 export class ToolSessionState {
   private active = new Set<string>(DEFAULT_ENABLED_GROUPS);
   /**
-   * Per-active-group source tracking. Default-on groups map to `"default"`;
-   * manually-activated groups map to `"manual"`; auto-activated groups map to
-   * `"auto"`. A group that was auto-activated and then manually re-activated
-   * flips to `"manual"` (manual intent wins). Absent from the map ⇒ the group
-   * is not active.
+   * Per-group source tracking. Active groups carry `"default"` / `"manual"` /
+   * `"auto"` (see {@link ActivationSource}). A group that was auto-activated
+   * and then manually re-activated flips to `"manual"` (manual intent wins).
+   *
+   * M8 (round-2 review): a group the operator explicitly deactivated is
+   * recorded here as `"suppressed"` instead of being deleted, so a subsequent
+   * {@link reconcileAutoActivation} pass can see the deactivation intent and
+   * refuse to resurrect it. A suppressed group is NOT in the active set. An
+   * entry is absent from the map only when the group has never been touched
+   * this session (initial state for opt-in groups) — for those,
+   * {@link activationSource} returns `null`.
    */
   private source = new Map<string, ActivationSource>();
 
@@ -139,7 +152,15 @@ export class ToolSessionState {
     return this.active.has(groupId);
   }
 
-  /** Why the group is active, or `null` when it is not active. */
+  /**
+   * Why the group is in its current state, or `null` when the group has never
+   * been touched this session (initial opt-in state). Active groups report
+   * `"default"` / `"manual"` / `"auto"`. A group the operator explicitly
+   * deactivated reports `"suppressed"` (M8) — it is NOT active, but the
+   * intent is retained so {@link reconcileAutoActivation} does not resurrect
+   * it on the next meta-tool call. Callers that only care about "is it
+   * active" should use {@link isGroupActive}; this method exposes the WHY.
+   */
   activationSource(groupId: string): ActivationSource | null {
     return this.source.get(groupId) ?? null;
   }
@@ -148,6 +169,10 @@ export class ToolSessionState {
    * Activate a group. Returns true if state changed (group was not active).
    * Unknown groups are rejected with `false` — callers should validate via
    * {@link GROUP_IDS} first and surface a structured error.
+   *
+   * M8 — activating a previously-suppressed group clears the suppression
+   * (the source is overwritten to `"manual"`), so a later reconcile pass can
+   * auto-deactivate/reactivate it normally again.
    */
   activate(groupId: string): boolean {
     if (!GROUP_IDS.has(groupId)) return false;
@@ -163,6 +188,15 @@ export class ToolSessionState {
    * is already active. Manual activation wins: a group that was manually
    * activated or deactivated is NOT silently flipped back to `"auto"`.
    * Returns true if state changed (group was not active).
+   *
+   * M8 — note this method is the DIRECT auto-activation entry (called when
+   * the package is first detected). It does NOT clear a `"suppressed"` record:
+   * {@link reconcileAutoActivation} is the path that respects suppression, and
+   * it refuses to re-add a suppressed group. A direct `activateAuto` call on a
+   * suppressed group is treated as a fresh auto-activation (the operator did
+   * not call `manage_tools(activate)`, so the suppression was a transient
+   * state). This preserves the documented "Idempotent" contract while keeping
+   * suppression meaningful on the reconcile path every meta-tool call drives.
    */
   activateAuto(groupId: string): boolean {
     if (!GROUP_IDS.has(groupId)) return false;
@@ -178,12 +212,21 @@ export class ToolSessionState {
    * is allowed — the meta-tools (capabilities, manage_tools) stay reachable
    * via {@link ALWAYS_VISIBLE_TOOLS}, but the rest of the core surface goes
    * dark until the session re-activates it.
+   *
+   * M8 (round-2 review) — the deactivation is recorded as `"suppressed"` in
+   * the source map (not deleted), so a subsequent {@link reconcileAutoActivation}
+   * pass sees the operator's intent and does NOT resurrect an auto-activate
+   * group whose package is still installed. Previously `deactivate` deleted
+   * the source entry, leaving no record; the next meta-tool call's reconcile
+   * then re-added the group as `"auto"` and fired a spurious
+   * `tools/list_changed`, contradicting the documented contract that
+   * "deactivate to hide them" is sticky for the session.
    */
   deactivate(groupId: string): boolean {
     if (!GROUP_IDS.has(groupId)) return false;
     if (!this.active.has(groupId)) return false;
     this.active.delete(groupId);
-    this.source.delete(groupId);
+    this.source.set(groupId, "suppressed");
     return true;
   }
 
@@ -203,13 +246,21 @@ export class ToolSessionState {
       const satisfied = satisfiedGroupIds.has(groupId);
       const active = this.active.has(groupId);
       const src = this.source.get(groupId);
-      if (satisfied && !active) {
+      if (satisfied && !active && src !== "suppressed") {
+        // M8 — a group the operator explicitly deactivated is recorded as
+        // "suppressed"; do NOT resurrect it just because its package is still
+        // installed. The deactivation is sticky for the session (cleared only
+        // by `activate` / `activateAuto` overwriting the source, or by reset).
+        // Without this guard the next meta-tool call's reconcile re-added the
+        // group as "auto" and fired a spurious tools/list_changed.
         this.active.add(groupId);
         this.source.set(groupId, "auto");
         changed.push(groupId);
       } else if (!satisfied && active && src === "auto") {
         // Package removed and the group was only auto-activated (not manually
         // re-activated) → drop it so the "install X" UX surfaces again.
+        // Note: a suppressed group is already inactive, so it falls through
+        // both branches harmlessly when its package later disappears.
         this.active.delete(groupId);
         this.source.delete(groupId);
         changed.push(groupId);

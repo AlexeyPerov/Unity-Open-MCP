@@ -323,6 +323,48 @@ test("normal detail is smaller than verbose but larger than summary", () => {
   assert.ok(normal <= verbose, `normal(${normal}) should be <= verbose(${verbose})`);
 });
 
+// M6 (round-2 review) — the schema default `limit: 0` was injected by
+// withSchemaDefaults on every read_asset call, and `opts.limit ?? defaultLimit(detail)`
+// kept 0 (?? does not treat 0 as absent), so the profile cap (60/120) was dead
+// code on every MCP path and the token-budget guarantee was off. The fix drops
+// `default: 0` from the schema: when the caller omits `limit`, `opts.limit` is
+// `undefined` and `defaultLimit(detail)` applies; when the caller explicitly
+// passes `limit: 0`, it means unlimited. These tests pin the renderer's half
+// of that contract (the schema half is covered by tool-schema-parity.test.ts).
+test("M6: omitted limit applies the profile default cap (summary = 60)", () => {
+  // 80 top-level nodes, each with a UNIQUE component set so none fold together.
+  const nodes = Array.from({ length: 80 }, (_, i) =>
+    node(`N_${String(i).padStart(2, "0")}`, [comp("Transform"), comp(`Unique_${i}`)]),
+  );
+  const model = makePrefab(nodes);
+  // No limit → defaultLimit("summary") = 60 applies.
+  const out = renderAssetSummary(model, { detail: "summary" }) as { tree?: unknown[]; moreHidden?: number };
+  assert.equal(out.tree?.length, 60, `omitted limit should cap at 60, got ${out.tree?.length}`);
+  assert.equal(out.moreHidden, 20, `20 rows dropped past the cap, got ${out.moreHidden}`);
+});
+
+test("M6: explicit limit: 0 means unlimited (no cap, no moreHidden)", () => {
+  const nodes = Array.from({ length: 80 }, (_, i) =>
+    node(`N_${String(i).padStart(2, "0")}`, [comp("Transform"), comp(`Unique_${i}`)]),
+  );
+  const model = makePrefab(nodes);
+  // Explicit limit: 0 → unlimited (the documented caller opt-out).
+  const out = renderAssetSummary(model, { detail: "summary", limit: 0 }) as { tree?: unknown[]; moreHidden?: number };
+  assert.equal(out.tree?.length, 80, `limit:0 should keep all 80 rows, got ${out.tree?.length}`);
+  assert.equal(out.moreHidden, undefined, `no moreHidden when unlimited, got ${out.moreHidden}`);
+});
+
+test("M6: explicit limit > 0 wins over the profile default", () => {
+  const nodes = Array.from({ length: 80 }, (_, i) =>
+    node(`N_${String(i).padStart(2, "0")}`, [comp("Transform"), comp(`Unique_${i}`)]),
+  );
+  const model = makePrefab(nodes);
+  // Explicit limit: 10 overrides the profile default of 60.
+  const out = renderAssetSummary(model, { detail: "summary", limit: 10 }) as { tree?: unknown[]; moreHidden?: number };
+  assert.equal(out.tree?.length, 10, `explicit limit:10 should cap at 10, got ${out.tree?.length}`);
+  assert.equal(out.moreHidden, 70, `70 rows dropped, got ${out.moreHidden}`);
+});
+
 // ---------------------------------------------------------------------------
 // Search rendering.
 // ---------------------------------------------------------------------------

@@ -162,14 +162,23 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
         });
         break;
       case "stream-events": {
-        // stream-events owns its stdout writes in --follow mode so events
+        // M7 — stream-events owns its stdout writes in --follow mode so events
         // stream incrementally to the CI log instead of buffering until exit.
-        // We still go through emitResult for the non-follow summary shape.
+        // The follow loop drains each batch through `writer` directly to
+        // stdout (NDJSON under --json, human lines otherwise) and does NOT
+        // retain events, so memory stays flat over a long run. Non-follow
+        // mode still goes through emitResult for the single summary shape.
         const streamOpts = {
           json: parsed.json,
           maxEvents: parsed.maxEvents ?? 50,
           follow: parsed.follow,
           intervalMs: DEFAULT_POLL_INTERVAL_MS,
+          // Per-batch sink: drain to stdout so a CI log shows events as they
+          // arrive. writeAndDrain waits for the OS-level write to complete so
+          // a SIGINT-driven process.exit cannot truncate the last batch.
+          writer: parsed.follow
+            ? (chunk: string) => writeAndDrain(process.stdout, chunk)
+            : undefined,
         };
         result = await runStreamEventsCommand(stack, streamOpts);
         break;
@@ -222,6 +231,15 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
     } catch {
       // best-effort
     }
+  }
+
+  // M7 — in follow mode every batch was already written to stdout through the
+  // per-batch sink; the returned summary is a placeholder (events are streamed
+  // and forgotten, so eventCount is 0). Skip the final emitResult so we do not
+  // append a bogus summary line after the live stream. Non-follow still emits
+  // its single summary through emitResult as before.
+  if (parsed.command === "stream-events" && parsed.follow) {
+    return { handled: true, exitCode: result.exitCode };
   }
 
   await emitResult(result, parsed.json);

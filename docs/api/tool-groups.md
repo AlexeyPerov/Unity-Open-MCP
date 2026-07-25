@@ -168,7 +168,14 @@ Reconciliation runs lazily during `capabilities` and
 `manage_tools(list_groups)`. Auto-activation is still ephemeral and produces
 the same list-changed notification. The response identifies
 `activationSource: "auto"`, `autoActivated: true`, and the package dependency.
+`activationSource` is one of `"default"` (default-on), `"manual"` (activated via
+`manage_tools`), `"auto"` (package-detected), or `"suppressed"` (deactivated and
+held inactive for the session — see below); it is `null` for an untouched
+opt-in group.
 
-A deliberate manual deactivation wins over automatic activation. Removing a
-package only drops a group that was auto-activated; a group reactivated by hand
-remains a manual session choice.
+A deliberate manual deactivation wins over automatic activation: a deactivated
+group is recorded as `"suppressed"` and a later reconcile pass will NOT
+resurrect it even when its package is still installed (the deactivation is
+sticky for the session, cleared only by an explicit `activate` or by `reset`).
+Removing a package only drops a group that was auto-activated; a group
+reactivated by hand remains a manual session choice.

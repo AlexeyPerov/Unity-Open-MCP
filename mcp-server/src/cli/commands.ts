@@ -383,6 +383,71 @@ export interface StreamEventsCommandOptions {
   follow: boolean;
   /** Poll interval in ms when following. Defaults to 1s. */
   intervalMs?: number;
+  /**
+   * M7 — per-batch sink for follow mode. Each drained batch (including the
+   * first) is handed to this callback as it arrives, so a CI log shows events
+   * incrementally instead of buffering until the process is killed. The CLI
+   * dispatcher wires this to a `writeAndDrain(process.stdout, …)` wrapper;
+   * tests pass a capturing sink. Ignored when `follow` is false (the non-follow
+   * path returns a single summary shape through `emitResult`).
+   *
+   * Each call receives one batch's events already formatted for output:
+   * `--json` → one compact JSON object per line (NDJSON), else the human
+   * rendering used by {@link formatStreamEventsHuman} for a single batch.
+   */
+  writer?: (chunk: string) => Promise<void> | void;
+  /**
+   * M7 — follow-loop iteration cap. Production callers omit it (the loop runs
+   * until SIGINT, as documented); tests pass a small number so the follow path
+   * is exercisable without relying on signal delivery. The first pull counts as
+   * iteration 0, so `maxBatches: 1` drains the first pull + one follow poll.
+   */
+  maxBatches?: number;
+}
+
+/**
+ * M7 — render a single batch of events for streaming output. Mirrors the
+ * per-event shape of {@link formatStreamEventsHuman} (so `--follow` without
+ * `--json` produces the same log lines as the non-follow summary, just
+ * incrementally) and the NDJSON shape for `--json` (one compact object per
+ * line so a downstream log parser can split on newlines without a trailing
+ * delimiter).
+ */
+function formatStreamEventsBatch(
+  events: unknown[],
+  connected: boolean,
+  lastError: string | null,
+  json: boolean,
+): string {
+  if (json) {
+    // NDJSON: one compact object per line. The `connected`/`lastError` fields
+    // ride every batch so a log reader sees the bridge-state transitions
+    // inline (the SSE reader auto-reconnects; the state is per-batch).
+    const lines: string[] = [];
+    for (const evt of events) {
+      lines.push(JSON.stringify({ connected, lastError, event: evt }));
+    }
+    return lines.length > 0 ? lines.join("\n") + "\n" : "";
+  }
+  const lines: string[] = [];
+  for (const evt of events) {
+    const e = evt as Record<string, unknown>;
+    if (typeof e === "object" && e !== null) {
+      const type = e.type ?? "event";
+      if (type === "log") {
+        lines.push(`[log ${e.logType ?? "log"}] ${e.message ?? ""}`);
+      } else if (type === "editor_state") {
+        lines.push(
+          `[state] ${e.state ?? ""}${e.isCompiling === true ? " (compiling)" : ""}${e.isPlaying === true ? " (playing)" : ""}`,
+        );
+      } else {
+        lines.push(`[${type}] ${JSON.stringify(e)}`);
+      }
+    } else {
+      lines.push(String(evt));
+    }
+  }
+  return lines.length > 0 ? lines.join("\n") + "\n" : "";
 }
 
 export async function runStreamEventsCommand(
@@ -390,7 +455,11 @@ export async function runStreamEventsCommand(
   opts: StreamEventsCommandOptions,
 ): Promise<CliCommandResult> {
   const intervalMs = opts.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-  const allEvents: unknown[] = [];
+  // M7 — in follow mode events are streamed per-batch and NOT retained (the
+  // loop runs until SIGINT, so retaining would grow unboundedly and the
+  // summary return value is never emitted). In non-follow mode the single
+  // drain populates the summary returned to the dispatcher.
+  const allEvents: unknown[] = opts.follow ? [] : [];
   let firstPull: unknown = null;
   let connected = false;
   let lastError: string | null = null;
@@ -408,24 +477,55 @@ export async function runStreamEventsCommand(
   const firstBatch = extractEvents(firstPull);
   connected = extractConnected(firstPull);
   lastError = extractLastError(firstPull);
-  for (const evt of firstBatch) allEvents.push(evt);
 
   if (opts.follow) {
-    // Keep draining until interrupted. The dispatcher's stdout writes happen
-    // per-batch in JSON-lines shape so a CI log shows events as they arrive.
-    let moreToRead = true;
-    while (moreToRead) {
+    // M7 — write the first batch immediately so events seen before the first
+    // poll interval are not held until SIGINT. The writer is the per-batch
+    // sink wired by the CLI dispatcher (or a capturing sink in tests).
+    const writer = opts.writer ?? (() => { /* no-op default; dispatcher always wires one */ });
+    if (firstBatch.length > 0) {
+      await writer(formatStreamEventsBatch(firstBatch, connected, lastError, opts.json));
+    }
+    // Keep draining until interrupted. The loop only ends on SIGINT (the CLI
+    // dispatcher installs the handler and calls process.exit), or — in tests —
+    // when maxBatches is reached. We do NOT break on bridge disconnect: the
+    // SSE reader auto-reconnects, and surfacing the state inline is the point.
+    let batchIndex = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (opts.maxBatches !== undefined && batchIndex >= opts.maxBatches) break;
+      batchIndex++;
       await sleep(intervalMs);
       const batch = await pullOnce(opts.maxEvents);
       connected = extractConnected(batch);
       lastError = extractLastError(batch);
       const events = extractEvents(batch);
-      for (const evt of events) allEvents.push(evt);
-      // In follow mode the loop only ends on interruption (Ctrl-C → SIGINT →
-      // process.exit from the dispatcher). We do not break on bridge disconnect
-      // because the SSE reader auto-reconnects; surface the state in output.
+      if (events.length > 0) {
+        await writer(formatStreamEventsBatch(events, connected, lastError, opts.json));
+      }
     }
+    // Follow mode never reaches a normal return in production (SIGINT exits
+    // first). The summary shape is still populated for the test path so the
+    // returned CliCommandResult is well-formed; the dispatcher's emitResult
+    // is skipped because cli.ts routes follow-mode writes through `writer`.
+    const unreachable = !connected && firstBatch.length === 0 && lastError !== null;
+    return {
+      exitCode: unreachable ? EXIT.TIMEOUT : EXIT.SUCCESS,
+      json: {
+        command: "stream-events",
+        connected,
+        lastError,
+        // Cumulative count is not tracked in follow mode (events are streamed
+        // and forgotten); the per-batch writes are the source of truth.
+        eventCount: 0,
+        events: [],
+      },
+      human: formatStreamEventsHuman({ connected, lastError, eventCount: 0, events: [] }),
+      errorLabel: unreachable ? "bridge_unavailable" : undefined,
+    };
   }
+
+  for (const evt of firstBatch) allEvents.push(evt);
 
   const json = {
     command: "stream-events",

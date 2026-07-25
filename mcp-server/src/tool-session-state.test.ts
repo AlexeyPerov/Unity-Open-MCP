@@ -42,10 +42,12 @@ test("activationSource returns null for an inactive group", () => {
 test("activate sets source to 'manual' for a previously-default group that was deactivated", () => {
   // Deactivate a default-on group then re-activate it manually: the source
   // must be 'manual', not 'default' — the re-activation is an explicit act.
+  // M8: deactivate records 'suppressed' (not null) so reconcile can see the
+  // intent; activate then overwrites it to 'manual'.
   const s = new ToolSessionState();
   const id = Array.from(DEFAULT_ENABLED_GROUPS)[0];
   assert.equal(s.deactivate(id), true);
-  assert.equal(s.activationSource(id), null);
+  assert.equal(s.activationSource(id), "suppressed");
   assert.equal(s.activate(id), true);
   assert.equal(s.activationSource(id), "manual");
 });
@@ -121,12 +123,73 @@ test("reconcileAutoActivation drops an auto group but preserves a co-active manu
 // deactivate + reset interactions with source tracking
 // ---------------------------------------------------------------------------
 
-test("deactivate clears the source (activationSource → null)", () => {
+// M8 (round-2 review) — deactivate now records the intent as "suppressed"
+// instead of deleting the source entry, so reconcileAutoActivation cannot
+// resurrect an auto-activate group the operator explicitly hid. The group is
+// NOT active (isGroupActive → false); activationSource surfaces the WHY.
+test("deactivate records the source as 'suppressed' (activationSource → 'suppressed', not active)", () => {
   const s = new ToolSessionState();
   s.activate("navigation");
   assert.equal(s.activationSource("navigation"), "manual");
   s.deactivate("navigation");
-  assert.equal(s.activationSource("navigation"), null);
+  assert.equal(s.isGroupActive("navigation"), false);
+  assert.equal(s.activationSource("navigation"), "suppressed");
+});
+
+// M8 — a suppressed group is NOT resurrected by reconcileAutoActivation even
+// when its package is satisfied. Previously deactivate deleted the source
+// entry, so the next reconcile re-added the group as "auto" and fired a
+// spurious tools/list_changed. This is the regression the round-2 review
+// flagged: "Deactivating an auto-activate group is undone by the next
+// meta-tool call."
+test("M8: reconcileAutoActivation does NOT resurrect a suppressed auto-activate group", () => {
+  const s = new ToolSessionState();
+  // shadergraph auto-activates because its package is present.
+  s.reconcileAutoActivation(new Set(["shadergraph"]));
+  assert.equal(s.isGroupActive("shadergraph"), true);
+  assert.equal(s.activationSource("shadergraph"), "auto");
+  // Operator explicitly hides it.
+  assert.equal(s.deactivate("shadergraph"), true);
+  assert.equal(s.isGroupActive("shadergraph"), false);
+  assert.equal(s.activationSource("shadergraph"), "suppressed");
+  // Next meta-tool call reconciles again — package still present, but the
+  // group must NOT come back.
+  const changed = s.reconcileAutoActivation(new Set(["shadergraph"]));
+  assert.deepEqual(changed, [], "suppressed group must not be resurrected");
+  assert.equal(s.isGroupActive("shadergraph"), false);
+  assert.equal(s.activationSource("shadergraph"), "suppressed");
+});
+
+// M8 — a non-auto-activate group that was suppressed stays suppressed too
+// (the source record is uniform), and a fresh activate clears the suppression.
+test("M8: activate clears the suppressed state (source → 'manual')", () => {
+  const s = new ToolSessionState();
+  s.activate("navigation");
+  s.deactivate("navigation");
+  assert.equal(s.activationSource("navigation"), "suppressed");
+  assert.equal(s.activate("navigation"), true);
+  assert.equal(s.activationSource("navigation"), "manual");
+  assert.equal(s.isGroupActive("navigation"), true);
+});
+
+// M8 — a suppressed auto-activate group whose package later disappears, then
+// reappears, is NOT auto-reactivated (the suppression survives the package
+// churn). Only an explicit activate (or reset) clears it.
+test("M8: suppression survives package removal + re-add (only activate/reset clears it)", () => {
+  const s = new ToolSessionState();
+  s.reconcileAutoActivation(new Set(["shadergraph"]));
+  s.deactivate("shadergraph");
+  // Package removed — suppressed group stays suppressed (not active).
+  let changed = s.reconcileAutoActivation(new Set());
+  assert.deepEqual(changed, [], "no change when a suppressed group's package leaves");
+  assert.equal(s.activationSource("shadergraph"), "suppressed");
+  // Package re-added — still suppressed, NOT auto-reactivated.
+  changed = s.reconcileAutoActivation(new Set(["shadergraph"]));
+  assert.deepEqual(changed, [], "suppressed group not reactivated on package re-add");
+  assert.equal(s.isGroupActive("shadergraph"), false);
+  // reset clears suppression (restores defaults).
+  s.reset();
+  assert.equal(s.activationSource("shadergraph"), null);
 });
 
 test("reset restores every default group to source 'default'", () => {
