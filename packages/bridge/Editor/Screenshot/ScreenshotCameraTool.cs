@@ -67,7 +67,9 @@ namespace UnityOpenMcpBridge.Screenshot
             return new Vector3(x, y, z);
         }
 
-        private static string BuildSuccessJson(
+        // Internal so the locale-invariance regression test (B15) can call it
+        // directly without spinning up a render device.
+        internal static string BuildSuccessJson(
             Vector3 position, Vector3 rotation, float fov,
             int width, int height, string filePath)
         {
@@ -75,15 +77,26 @@ namespace UnityOpenMcpBridge.Screenshot
             sb.Append('{');
             sb.Append("\"status\":\"ok\",");
             sb.Append("\"camera\":{");
-            sb.Append("\"position\":[").Append(position.x).Append(',').Append(position.y).Append(',').Append(position.z).Append("],");
-            sb.Append("\"rotation\":[").Append(rotation.x).Append(',').Append(rotation.y).Append(',').Append(rotation.z).Append("],");
-            sb.Append("\"fov\":").Append(fov);
+            // Numbers MUST be formatted with the invariant culture so a
+            // comma-decimal locale (de/fr/ru → "1,5") cannot split the
+            // position array into six elements or inject a stray member via
+            // `"fov":60,5`. The same file already parses input with
+            // InvariantCulture (ParseVector3); the output path was asymmetric.
+            sb.Append("\"position\":[").Append(Num(position.x)).Append(',').Append(Num(position.y)).Append(',').Append(Num(position.z)).Append("],");
+            sb.Append("\"rotation\":[").Append(Num(rotation.x)).Append(',').Append(Num(rotation.y)).Append(',').Append(Num(rotation.z)).Append("],");
+            sb.Append("\"fov\":").Append(Num(fov));
             sb.Append("},");
             sb.Append("\"resolution\":\"").Append(width).Append('x').Append(height).Append("\",");
             sb.Append("\"filePath\":").Append(Esc(filePath));
             sb.Append('}');
             return sb.ToString();
         }
+
+        // Invariant-culture float formatter so JSON numbers stay valid across
+        // locales. Matches the Num() helper the sibling tools (e.g.
+        // ProfilerCaptureFrameTool) already use for the same reason.
+        private static string Num(float f) =>
+            f.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         private static string ErrorJson(string code, string message)
         {

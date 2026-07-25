@@ -385,6 +385,7 @@ namespace UnityOpenMcpVerify.Fixes
                 {
                     // No PPtr triple matched — fall back to the bare-guid path
                     // below, which catches `.meta` / standalone `guid:` lines.
+                    newContents = null;
                 }
                 else
                 {

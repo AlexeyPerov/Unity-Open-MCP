@@ -234,6 +234,87 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual("no_applicable_keys", result.ErrorCode);
         }
 
+        // B16 regression: AsBool must honour the wire-quoted JSON form of a
+        // bool. valueRaw arrives from JsonBody.GetRawValue with quotes
+        // attached, so a false wire value lands as the literal "false". The
+        // old code compared against the bare word and "false" fell through to
+        // the truthy-string arm, coercing it to true (numeric 0 likewise).
+        [Test]
+        public void AsBool_QuotedFalse_ReturnsFalse_NotTruthy()
+        {
+            Assert.IsFalse(BuildSettingsTools.AsBool("\"false\""),
+                "quoted \"false\" must coerce to false, not truthy");
+            Assert.IsTrue(BuildSettingsTools.AsBool("\"true\""),
+                "quoted \"true\" must coerce to true");
+        }
+
+        [Test]
+        public void AsBool_BareLiterals_StillWork()
+        {
+            // Bare booleans (no quotes) and the empty/null cases.
+            Assert.IsTrue(BuildSettingsTools.AsBool("true"));
+            Assert.IsFalse(BuildSettingsTools.AsBool("false"));
+            Assert.IsFalse(BuildSettingsTools.AsBool(""));
+            Assert.IsFalse(BuildSettingsTools.AsBool(null));
+            Assert.IsFalse(BuildSettingsTools.AsBool("0"),
+                "numeric 0 must not coerce to true via the truthy-string arm");
+        }
+
+        [Test]
+        public void AsBool_NonEmptyQuotedString_IsTruthy()
+        {
+            // A non-empty quoted string (e.g. "yes") stays truthy — the
+            // documented contract for non-bool string settings.
+            Assert.IsTrue(BuildSettingsTools.AsBool("\"yes\""));
+            Assert.IsFalse(BuildSettingsTools.AsBool("\"\""),
+                "empty quoted string must be falsy");
+        }
+
+        // B16 mirror defect: BridgeToolRegistry.ConvertValue must honour the
+        // wire-quoted JSON form of a bool. The registry path receives the raw
+        // wire value (with quotes) for bool parameters, so "true"/"false"
+        // literal comparisons alone silently produced false for a quoted true.
+        [Test]
+        public void ConvertValue_QuotedBoolLiterals_ParseCorrectly()
+        {
+            Assert.AreEqual(true, BridgeToolRegistry.ConvertValue("\"true\"", typeof(bool)),
+                "quoted \"true\" must coerce to true");
+            Assert.AreEqual(false, BridgeToolRegistry.ConvertValue("\"false\"", typeof(bool)),
+                "quoted \"false\" must coerce to false");
+            // Bare literals still work (non-quoted JSON booleans).
+            Assert.AreEqual(true, BridgeToolRegistry.ConvertValue("true", typeof(bool)));
+            Assert.AreEqual(false, BridgeToolRegistry.ConvertValue("false", typeof(bool)));
+        }
+
+        // B16 end-to-end: when an agent sends a bool as a JSON string
+        // ("value": "false"), GetRawValue returns the quoted form and the old
+        // AsBool coerced it to true (truthy-string arm), flipping the setting
+        // the opposite of what the agent asked. We round-trip runInBackground
+        // to pin the direction.
+        [Test]
+        public void SettingsSetPlayer_QuotedFalseBool_DoesNotCoerceToTrue()
+        {
+            bool original = UnityEditor.PlayerSettings.runInBackground;
+            try
+            {
+                // Start from true so a buggy coerce-to-true is observable as
+                // "no change". The fix must land false.
+                UnityEditor.PlayerSettings.runInBackground = true;
+
+                var result = BuildSettingsTools.SettingsSetPlayer(
+                    "{\"fields\":[{\"key\":\"runInBackground\",\"value\":\"false\"}]}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"applied\":[\"runInBackground\"]", result.Output);
+
+                Assert.IsFalse(UnityEditor.PlayerSettings.runInBackground,
+                    "string-form \"false\" must set runInBackground=false, not coerce to true");
+            }
+            finally
+            {
+                UnityEditor.PlayerSettings.runInBackground = original;
+            }
+        }
+
         [Test]
         public void SettingsSetQuality_MissingFields_ReturnsMissingParameter()
         {

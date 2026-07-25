@@ -277,8 +277,14 @@ namespace UnityOpenMcpBridge
 
             if (targetType == typeof(bool))
             {
-                if (raw == "true") return true;
-                if (raw == "false") return false;
+                // Strip surrounding JSON quotes first: GetRawValue returns the
+                // literal wire form, so a bool lands as the quoted "true"/
+                // "false". Without stripping, "false" matched neither branch
+                // and fell through to the default false (so a true wire value
+                // silently became false). Strip first, then compare.
+                var b = StripJsonQuotes(raw);
+                if (b == "true") return true;
+                if (b == "false") return false;
                 return false;
             }
 

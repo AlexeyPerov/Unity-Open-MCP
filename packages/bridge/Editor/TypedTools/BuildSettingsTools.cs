@@ -1377,14 +1377,20 @@ namespace UnityOpenMcpBridge.TypedTools
             return v;
         }
 
-        private static bool AsBool(string valueRaw)
+        // Internal so the coercion regression test (B16) can call it directly.
+        internal static bool AsBool(string valueRaw)
         {
             if (string.IsNullOrEmpty(valueRaw)) return false;
-            var v = valueRaw.Trim();
+            // Strip surrounding JSON quotes first: valueRaw arrives from
+            // JsonBody.GetRawValue, so a wire bool lands as the quoted
+            // literal "true"/"false". Without stripping, "false" matched
+            // neither branch and fell through to the truthy-string arm,
+            // coercing it to true (and numeric 0 likewise).
+            var v = AsString(valueRaw).Trim();
             if (v == "true") return true;
             if (v == "false") return false;
             // A non-empty quoted string is truthy.
-            return !string.IsNullOrEmpty(AsString(valueRaw));
+            return !string.IsNullOrEmpty(v);
         }
 
         private static int AsInt(string valueRaw)

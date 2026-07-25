@@ -297,13 +297,20 @@ namespace UnityOpenMcpBridge.ProfilerExt
             // Poll ProfilerDriver.lastFrameIndex for a short window so a cold
             // capture (profiler was off) still has a frame to read. Bounded so
             // the tool returns promptly even in a headless EditMode context.
-            int sleepMs = 50;
-            int budgetMs = 1000;
-            int elapsed = 0;
-            while (ProfilerDriver.lastFrameIndex < 0 && elapsed < budgetMs)
+            //
+            // Tool dispatch runs synchronously on EditorApplication.update
+            // (BridgeRequestQueue.ProcessQueue), so a plain Thread.Sleep blocks
+            // the editor loop and the profiler can never advance — burning the
+            // whole budget and always reporting profiler_empty. Instead we pump
+            // the player loop each iteration so a frame can land.
+            const int sleepMs = 50;
+            const int budgetMs = 1000;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (ProfilerDriver.lastFrameIndex < 0 && sw.ElapsedMilliseconds < budgetMs)
             {
+                try { UnityEditor.EditorApplication.QueuePlayerLoopUpdate(); }
+                catch { /* best-effort pump; ignore pump failures */ }
                 System.Threading.Thread.Sleep(sleepMs);
-                elapsed += sleepMs;
             }
         }
 

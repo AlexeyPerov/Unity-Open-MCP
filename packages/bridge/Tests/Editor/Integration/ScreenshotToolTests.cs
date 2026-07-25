@@ -69,6 +69,76 @@ namespace UnityOpenMcpBridge.Tests
                 "screenshot_camera should map to the agent-senses group");
         }
 
+        // B15 regression: screenshot_camera's success JSON must format floats
+        // with the invariant culture so a comma-decimal locale (de/fr/ru) can
+        // not turn "position":[1.5,...] into a 6-element array or inject a
+        // stray member via "fov":60,5. We exercise the JSON builder directly
+        // under a comma-decimal culture so the test does not depend on a
+        // render device (unreliable in headless EditMode).
+        [Test]
+        public static void ScreenshotCamera_SuccessJson_IsLocaleInvariant()
+        {
+            var savedCulture = System.Threading.Thread.CurrentThread.CurrentCulture;
+            var savedUiCulture = System.Threading.Thread.CurrentThread.CurrentUICulture;
+            // ru-RU uses comma as the decimal separator — the worst case.
+            var commaCulture = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+            try
+            {
+                System.Threading.Thread.CurrentThread.CurrentCulture = commaCulture;
+                System.Threading.Thread.CurrentThread.CurrentUICulture = commaCulture;
+
+                var json = Tool_ScreenshotCamera.BuildSuccessJson(
+                    new Vector3(1.5f, -2.25f, 3.75f),
+                    new Vector3(0f, 90f, 0f),
+                    60.5f, 1280, 720, "/tmp/shot.png");
+
+                // Structural check: JsonUtility.FromJson throws on malformed
+                // JSON. A locale-formatted number would inject a stray comma
+                // (e.g. "fov":60,5 → "fov":60 followed by a bare "5" member)
+                // and FromJson would fail. The wrapper maps position/rotation
+                // arrays onto Vector3 fields so the values round-trip too.
+                var parsed = JsonUtility.FromJson<CameraSuccessEnvelope>(json);
+                Assert.IsNotNull(parsed.camera, "camera block must parse: " + json);
+                Assert.AreEqual(60.5f, parsed.camera.fov, 0.0001f, "fov must round-trip: " + json);
+                Assert.AreEqual(new Vector3(1.5f, -2.25f, 3.75f), parsed.camera.position,
+                    "position must round-trip as a 3-element array: " + json);
+                Assert.AreEqual(new Vector3(0f, 90f, 0f), parsed.camera.rotation,
+                    "rotation must round-trip as a 3-element array: " + json);
+
+                // Belt-and-braces: the literal invariant decimal form must be
+                // present (a comma-decimal locale would have produced 1,5).
+                StringAssert.Contains("\"position\":[1.5,-2.25,3.75]", json,
+                    "position floats must be invariant-formatted: " + json);
+                StringAssert.Contains("\"fov\":60.5", json,
+                    "fov must be invariant-formatted: " + json);
+            }
+            finally
+            {
+                System.Threading.Thread.CurrentThread.CurrentCulture = savedCulture;
+                System.Threading.Thread.CurrentThread.CurrentUICulture = savedUiCulture;
+            }
+        }
+
+        // Envelope mirrors Tool_ScreenshotCamera.BuildSuccessJson's output so
+        // JsonUtility can structurally validate it. JsonUtility maps a JSON
+        // 3-element array onto a Vector3 field.
+        [System.Serializable]
+        private class CameraSuccessEnvelope
+        {
+            public string status;
+            public CameraBlock camera;
+            public string resolution;
+            public string filePath;
+        }
+
+        [System.Serializable]
+        private class CameraBlock
+        {
+            public Vector3 position;
+            public Vector3 rotation;
+            public float fov;
+        }
+
         [Test]
         public static void ScreenshotCamera_RendersNamedPoseAndWritesPng()
         {

@@ -156,7 +156,7 @@ namespace UnityOpenMcpBridge.Tests
             var now = 1_000_000_000L; // arbitrary fixed "now"
             var stale = now - TestRunnerState.PendingTtlMs - 1;
             Assert.IsTrue(TestRunnerState.IsPendingStale(stale, now),
-                $"createdAt {stale} (>{PendingTtlMs}ms before {now}) must be stale");
+                $"createdAt {stale} (>{TestRunnerState.PendingTtlMs}ms before {now}) must be stale");
         }
 
         [Test]
@@ -166,7 +166,7 @@ namespace UnityOpenMcpBridge.Tests
             var now = 1_000_000_000L;
             var fresh = now - TestRunnerState.PendingTtlMs + 1;
             Assert.IsFalse(TestRunnerState.IsPendingStale(fresh, now),
-                $"createdAt {fresh} (<={PendingTtlMs}ms before {now}) must not be stale");
+                $"createdAt {fresh} (<={TestRunnerState.PendingTtlMs}ms before {now}) must not be stale");
         }
 
         [Test]

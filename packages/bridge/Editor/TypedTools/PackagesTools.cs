@@ -687,12 +687,23 @@ namespace UnityOpenMcpBridge.TypedTools
         // Polling wait for a UPM request. Returns true when the request
         // completed within the timeout, false on timeout. Package-manager
         // worker progress advances independently of the polling thread.
+        //
+        // Tool dispatch runs synchronously on EditorApplication.update
+        // (BridgeRequestQueue.ProcessQueue), so a plain Thread.Sleep on this
+        // thread freezes the editor loop (heartbeat, queue, settle-wait) for
+        // the whole 90 s budget per request — three sequential waits in
+        // Search would wedge the bridge for minutes. We pump the player loop
+        // each iteration so update delegates (including the bridge's own
+        // RefreshVolatileState / heartbeat ticks) keep firing while the UPM
+        // worker thread advances IsCompleted.
         private static bool WaitForRequest<T>(T request) where T : Request
         {
             var deadline = System.DateTime.UtcNow.AddMilliseconds(RequestTimeoutMs);
             while (!request.IsCompleted)
             {
                 if (System.DateTime.UtcNow > deadline) return false;
+                try { UnityEditor.EditorApplication.QueuePlayerLoopUpdate(); }
+                catch { /* best-effort pump; ignore pump failures */ }
                 System.Threading.Thread.Sleep(PollIntervalMs);
             }
             return true;
