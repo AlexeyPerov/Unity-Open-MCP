@@ -439,6 +439,15 @@ export interface LaunchResult {
   pid: number;
   unityVersion?: string;
   executablePath: string;
+  /**
+   * The post-launch `ProjectEntry` the backend just persisted (with the
+   * incremented `frecency`, `lastLaunchAt`, `lastLaunchPid`, and any
+   * refreshed `unityVersion` already applied). Merge this directly into
+   * the store instead of round-tripping a pre-launch snapshot, which
+   * would silently revert the frecency bump and delete `lastLaunchAt`.
+   * See H2 in the round-2 review.
+   */
+  project: ProjectEntry;
 }
 
 export interface VersionRefreshResult {
@@ -858,6 +867,7 @@ export interface MigrateResult {
 export type MigrateError =
   | { type: "projectNotFound"; projectId: string }
   | { type: "sourceNotADirectory"; path: string }
+  | { type: "sourceOverlapsPackage"; source: string; packagePath: string }
   | { type: "persistFailed"; message: string };
 
 export async function migratePackageFiles(
@@ -1692,7 +1702,10 @@ export type McpClientIdWire =
   | "unityAi"
   | "vscodeCopilot"
   | "vsCopilot"
-  | "zoocode"
+  // H7: must match the Rust `McpClientId` camelCase name (`ZooCode` →
+  // `"zooCode"`). The previous `"zoocode"` was rejected by the Rust
+  // serde side as "unknown variant" and broke every ZooCode invoke.
+  | "zooCode"
   | "antigravity"
   | "custom";
 
@@ -1821,7 +1834,10 @@ export type McpClientWire =
   | "unityAi"
   | "vscodeCopilot"
   | "vsCopilot"
-  | "zoocode"
+  // H7: must match the Rust `McpClientId` camelCase name (`ZooCode` →
+  // `"zooCode"`). The previous `"zoocode"` was rejected by the Rust
+  // serde side as "unknown variant" and broke every ZooCode invoke.
+  | "zooCode"
   | "antigravity"
   | "custom";
 

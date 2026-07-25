@@ -294,11 +294,19 @@ export function clientToWire(id: McpClientId): McpClientWire {
     case "unity-ai":
       return "unityAi";
     case "vscode-copilot":
-      return "vsCopilot";
+      // H6: VS Code Copilot writes `.vscode/mcp.json`. `vsCopilot` is the
+      // wire id for Visual Studio (`.vs/mcp.json`); routing VS Code
+      // there hides the server from VS Code while the wizard reports
+      // success.
+      return "vscodeCopilot";
     case "vs-copilot":
       return "vsCopilot";
     case "zoocode":
-      return "zoocode";
+      // H7: `McpClientId` is `#[serde(rename_all = "camelCase")]` and
+      // the variant carries no `#[serde(rename)]`, so `ZooCode`
+      // deserialises from `"zooCode"`. `"zoocode"` is rejected by the
+      // Rust side as "unknown variant", breaking every ZooCode invoke.
+      return "zooCode";
     case "antigravity":
       return "antigravity";
     case "custom":

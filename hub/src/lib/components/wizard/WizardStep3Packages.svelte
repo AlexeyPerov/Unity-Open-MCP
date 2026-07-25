@@ -24,6 +24,24 @@
   // "always-on" cards because the Unity module ships with the Editor.
   const installableDomains = installableEmbeddedDomains();
   const builtinDomains = builtinEmbeddedDomains();
+
+  // H9: the Install action gate is distinct from the navigation predicate
+  // (`state.manifestReady`, used for "Next" / "Skip"). The navigation
+  // predicate is satisfied only by an *already-present* selection
+  // (`kind === "unchanged" || "upgrade"`), so reusing it for Install
+  // disabled the button precisely when there was something to install.
+  // Install is enabled when there is a real selection, a resolved merge
+  // plan with no parse error, no write in flight, and (when the plan
+  // contains upgrades) the user has acknowledged them.
+  let canInstall = $derived(
+    !!state.mergePlan &&
+      !state.manifestParseError &&
+      (state.installBridge ||
+        state.installVerify ||
+        state.selectedUnityDomainDeps.size > 0) &&
+      !state.mergeWriting &&
+      !(state.hasRealChanges && state.mergePlan.hasUpgrades && !state.upgradeAcknowledged)
+  );
 </script>
 
 <section class="wiz-section">
@@ -176,7 +194,7 @@
       <p class="wiz-hint wiz-hint-warn">
         Pick at least one package to install.
       </p>
-    {:else if !state.toolkitRoot.trim() || !state.toolkitValidation?.ok}
+    {:else if state.useLocalPackages && (!state.toolkitRoot.trim() || !state.toolkitValidation?.ok)}
       <p class="wiz-hint wiz-hint-warn">
         Validate the toolkit root on the MCP server source step first.
       </p>
@@ -264,11 +282,7 @@
     <Button
       variant="primary"
       onclick={handlers.installManifest}
-      disabled={
-        !state.manifestReady ||
-        state.mergeWriting ||
-        Boolean(state.mergePlan?.hasUpgrades && state.hasRealChanges && !state.upgradeAcknowledged)
-      }
+      disabled={!canInstall}
     >
       {state.mergeWriting
         ? "Installing…"

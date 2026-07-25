@@ -16,7 +16,23 @@ fn backup_corrupt(path: &Path) {
 
 fn atomic_write(path: &Path, data: &str) -> std::io::Result<()> {
     paths::ensure_config_dir()?;
-    let tmp_path = path.with_extension("json.tmp");
+    atomic_write_at(path, data)
+}
+
+/// Write `data` to `path` via tmp + rename, with the tmp file created
+/// as a sibling of `path` (same directory) so the rename is atomic on
+/// every platform and never crosses a filesystem boundary. Unlike
+/// [`atomic_write`] this does not assume `path` lives under the central
+/// config directory, so callers writing to arbitrary project paths
+/// (e.g. a package `package.json` inside the project tree) can use it
+/// directly. See H4 in the round-2 review.
+pub fn atomic_write_at(path: &Path, data: &str) -> std::io::Result<()> {
+    // Stage to a sibling tmp file so the rename stays intra-directory
+    // (cross-directory rename is non-atomic on Windows and slow on
+    // Unix). Using a unique suffix avoids clobbering any `.json.tmp`
+    // already present from a different writer (the central-config
+    // `atomic_write` reuses one fixed name; this one is per-path).
+    let tmp_path = path.with_extension("json.tmp-merge");
     {
         let mut tmp = fs::File::create(&tmp_path)?;
         tmp.write_all(data.as_bytes())?;

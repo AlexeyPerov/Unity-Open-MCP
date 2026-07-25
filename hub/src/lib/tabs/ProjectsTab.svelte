@@ -661,7 +661,21 @@
     return sorted;
   });
 
-  function closeContextMenu() {
+  // H1 fix: closing the context menu must not fire on a click *inside*
+  // the menu. Svelte 5 attaches delegated `click` handlers in the bubble
+  // phase to the mount root, while this listener is registered in the
+  // **capture** phase via `addEventListener(..., true)` (see `onMount`),
+  // so a bubble-phase `stopPropagation` on the menu div cannot undo the
+  // capture close. Without this guard, every menu item click runs
+  // `closeContextMenu()` first — clearing `contextMenu` to null — and the
+  // item's `onclick` then reads a stale `$derived` `ctxProject` that
+  // recomputes to null, throwing `TypeError`. Checking `closest('.ctx-menu')`
+  // lets clicks inside the menu proceed while clicks anywhere else still
+  // dismiss it.
+  function closeContextMenu(e?: MouseEvent) {
+    if (e && e.target instanceof Element && e.target.closest(".ctx-menu")) {
+      return;
+    }
     contextMenu = null;
   }
 
@@ -770,12 +784,12 @@
     launching = id;
     try {
       const result = await launchProject(id, activePalette());
-      const updated: ProjectEntry = {
-        ...project,
-        lastLaunchPid: result.pid,
-        unityVersion: result.unityVersion ?? project.unityVersion,
-      };
-      await projectsStore.update(updated);
+      // H2: merge the backend's authoritative post-launch entry (with the
+      // incremented frecency / `lastLaunchAt` / `lastLaunchPid`) rather
+      // than a pre-launch snapshot — round-tripping the snapshot would
+      // revert the frecency bump and delete `lastLaunchAt`, deadening the
+      // default frecency sort forever.
+      await projectsStore.update(result.project);
       S.appendDrawerLog(
         `launched ${project.name} (pid ${result.pid}, ${result.unityVersion ?? "version unknown"})`
       );

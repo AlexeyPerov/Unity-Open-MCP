@@ -67,6 +67,14 @@ pub enum MigrateError {
     SourceNotADirectory { path: String },
     #[serde(rename_all = "camelCase")]
     PersistFailed { message: String },
+    /// The source folder resolves to the package itself, an ancestor of
+    /// the package, or a descendant of the package. Any of these would
+    /// let a basename match its own file: `fs::copy` opens the src
+    /// RDONLY, opens the dst `O_WRONLY|O_CREAT|O_TRUNC`, then reads —
+    /// yielding a 0-byte file (silent irreversible source loss). Reject
+    /// up-front so the user never reaches the destructive `fs::copy`.
+    #[serde(rename_all = "camelCase")]
+    SourceOverlapsPackage { source: String, package_path: String },
 }
 
 /// Returns true when `rel_path` points inside a `~`-suffixed folder
@@ -75,6 +83,30 @@ pub enum MigrateError {
 /// does).
 fn is_inside_tilde_folder(rel_path: &str) -> bool {
     rel_path.split('/').any(|seg| seg.ends_with('~'))
+}
+
+/// `true` when `a` and `b` resolve to the same underlying file (same
+/// canonical path or, on unix, the same `(device, inode)` pair after
+/// symlink resolution). Used by the migrate copy step to refuse to
+/// copy a file onto itself — `fs::copy` has no same-file guard and the
+/// open order (`O_TRUNC` before read) produces a 0-byte file. H3.
+#[cfg(unix)]
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let ma = match fs::metadata(a) {
+        Ok(m) => m,
+        Err(_) => return a == b,
+    };
+    let mb = match fs::metadata(b) {
+        Ok(m) => m,
+        Err(_) => return a == b,
+    };
+    ma.dev() == mb.dev() && ma.ino() == mb.ino()
+}
+
+#[cfg(not(unix))]
+fn same_file(a: &Path, b: &Path) -> bool {
+    fs::canonicalize(a).ok() == fs::canonicalize(b).ok()
 }
 
 /// Directory and file names to skip during the walk — the same set
@@ -201,6 +233,24 @@ fn migrate_replace_only(
                         rel_path: dst_rel.clone(),
                         action: "skipped-meta".into(),
                     });
+                } else if same_file(src_abs, dst_abs) {
+                    // H3 defense-in-depth: the top-level overlap guard
+                    // catches a source == package tree. This per-pair
+                    // check catches the residual case of two distinct
+                    // folders that share a file via hardlink/symlink —
+                    // `fs::copy` would truncate-then-read the same inode
+                    // and emit a 0-byte file. Report and skip rather
+                    // than destroy.
+                    *skipped_duplicate += 1;
+                    entries.push(MigrateEntry {
+                        rel_path: dst_rel.clone(),
+                        action: "skipped-duplicate".into(),
+                    });
+                    errors.push(format!(
+                        "copy {} → {}: source and destination resolve to the same file",
+                        src_abs.display(),
+                        dst_abs.display(),
+                    ));
                 } else if let Err(e) = fs::copy(src_abs, dst_abs) {
                     errors.push(format!(
                         "copy {} → {}: {}",
@@ -265,6 +315,25 @@ pub fn migrate_package_files(
         });
     }
     let dst = PathBuf::from(&entry.path);
+
+    // H3: refuse to migrate when the source folder canonicalizes to the
+    // package itself, an ancestor of the package, or a descendant of the
+    // package. Pointing the free "Browse…" picker at the package folder
+    // (or any ancestor) makes every uniquely-named file match *itself*,
+    // and Rust's `fs::copy` has no same-file guard — the open order
+    // (src RDONLY, dst `O_TRUNC`, then read) yields a 0-byte file: silent
+    // irreversible source loss. `canonicalize` resolves symlinks, so a
+    // symlink aliasing the package counts too.
+    let src_canon = std::fs::canonicalize(&src).ok();
+    let dst_canon = std::fs::canonicalize(&dst).ok();
+    if let (Some(s), Some(d)) = (src_canon.as_ref(), dst_canon.as_ref()) {
+        if s == d || s.starts_with(d) || d.starts_with(s) {
+            return Err(MigrateError::SourceOverlapsPackage {
+                source: source_folder,
+                package_path: entry.path.clone(),
+            });
+        }
+    }
 
     let src_by_name = collect_files_by_name(&src);
     let dst_by_name = collect_files_by_name(&dst);
@@ -377,6 +446,26 @@ mod tests {
         );
         assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
         (entries, replaced, skipped_meta, skipped_new, untouched, skipped_duplicate)
+    }
+
+    #[test]
+    fn same_file_detects_identical_paths_and_hardlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.txt");
+        fs::write(&a, "hello").unwrap();
+        // Same path → same file.
+        assert!(same_file(&a, &a));
+        // Distinct paths, distinct inodes → not same file.
+        let b = tmp.path().join("b.txt");
+        fs::write(&b, "hello").unwrap();
+        assert!(!same_file(&a, &b));
+        // Hardlink → same inode.
+        #[cfg(unix)]
+        {
+            let h = tmp.path().join("link.txt");
+            fs::hard_link(&a, &h).unwrap();
+            assert!(same_file(&a, &h));
+        }
     }
 
     #[test]

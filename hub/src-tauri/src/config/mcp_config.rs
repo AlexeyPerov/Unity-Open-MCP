@@ -1056,8 +1056,21 @@ pub(crate) fn merge_key_path(client: McpClientId) -> Vec<&'static str> {
         // Codex writes TOML; the JSON path is only used for the diff
         // projection. The real table is `[mcp_servers.<name>]`.
         McpClientId::Codex => vec!["mcp_servers", MCP_SERVER_KEY],
-        // CLI / clipboard-only clients have no merge key.
-        _ => Vec::new(),
+        // H8: Manual / Custom are clipboard-only — they never touch a
+        // file. But the wizard renders a "copy this JSON" snippet from
+        // `proposed_json`, and the doc comment on `manual_root_for`
+        // states the intent that "the snippet matches what a real
+        // Cursor / Claude Desktop merge would emit". A real merge
+        // emits `mcpServers.<name>`; the previous `_ => Vec::new()`
+        // made `insert_by_path` a no-op, so the entry `build_entry_json`
+        // produced was discarded and the snippet came out as `{}`.
+        // Returning the canonical `mcpServers` path here makes the
+        // snippet useful. Safe for the file writer and clear pass —
+        // neither visits Manual / Custom targets (see `McpScopeSkip::Manual`
+        // and `FILE_BACKED_CLIENTS` in clear.rs).
+        McpClientId::Manual | McpClientId::Custom => vec!["mcpServers", MCP_SERVER_KEY],
+        // CLI-only clients (`ClaudeCode`) emit a shell command, not JSON.
+        McpClientId::ClaudeCode => Vec::new(),
     }
 }
 
@@ -3152,6 +3165,46 @@ mod tests {
         ] {
             assert!(!mcp_client_wire_key(client).is_empty());
         }
+    }
+
+    #[test]
+    fn plan_manual_renders_non_empty_mcp_servers_snippet() {
+        // H8: the Manual / "copy JSON" client must produce a snippet
+        // that looks like what a real Cursor / Claude Desktop merge
+        // would emit — `mcpServers.unity-open-mcp` with command/args/env.
+        // The previous fall-through returned an empty `{}` object.
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_client_params(McpClientId::Manual, &project);
+        let plan = plan_mcp_config_at(&params, dir.path()).unwrap();
+        assert!(plan.target_path.is_none(), "Manual has no file target");
+        assert!(plan.would_write, "Manual still reports a would-write snippet");
+        let proposed_str = plan.proposed_json.expect("Manual renders a snippet");
+        let proposed: Value = serde_json::from_str(&proposed_str).unwrap();
+        let server = proposed
+            .get("mcpServers")
+            .and_then(|m| m.get(MCP_SERVER_KEY))
+            .expect("snippet contains mcpServers.unity-open-mcp");
+        assert!(server.get("command").is_some());
+        assert!(server.get("args").is_some());
+        assert!(server.get("env").is_some());
+    }
+
+    #[test]
+    fn plan_custom_renders_non_empty_mcp_servers_snippet() {
+        // H8 parity for the Custom client (same clipboard-only code path).
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("proj");
+        fs::create_dir_all(&project).unwrap();
+        let params = make_client_params(McpClientId::Custom, &project);
+        let plan = plan_mcp_config_at(&params, dir.path()).unwrap();
+        let proposed_str = plan.proposed_json.expect("Custom renders a snippet");
+        let proposed: Value = serde_json::from_str(&proposed_str).unwrap();
+        assert!(proposed
+            .get("mcpServers")
+            .and_then(|m| m.get(MCP_SERVER_KEY))
+            .is_some());
     }
 
 }

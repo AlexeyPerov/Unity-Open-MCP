@@ -47,6 +47,15 @@ pub struct LaunchResult {
     pub pid: u32,
     pub unity_version: Option<String>,
     pub executable_path: String,
+    /// The full, post-launch `ProjectEntry` — the row the backend just
+    /// persisted (with `lastLaunchPid`, `lastLaunchAt`, the incremented
+    /// `frecency`, and the refreshed `unityVersion` already applied).
+    ///
+    /// Returned so the frontend merges this exact entry into its store
+    /// instead of round-tripping a pre-launch snapshot (which silently
+    /// reverts the frecency increment and deletes `lastLaunchAt`).
+    /// See H2 in the round-2 review.
+    pub project: crate::config::schemas::ProjectEntry,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -231,13 +240,12 @@ pub fn launch_project(
                 Some(resolved_theme),
             );
             record_launch(record);
-            // Strip the helpers we added to the success path; the public
-            // LaunchResult shape is unchanged for frontend consumers.
             Ok(LaunchResult {
                 project_id: result.project_id,
                 pid: result.pid,
-                unity_version: result.unity_version,
-                executable_path: result.executable_path,
+                unity_version: result.unity_version.clone(),
+                executable_path: result.executable_path.clone(),
+                project: result.project,
             })
         }
         Err(err) => {
@@ -274,6 +282,11 @@ pub struct InnerLaunchResult {
     pub executable_path: String,
     pub launch_args: Vec<String>,
     pub build_target: Option<String>,
+    /// The full `ProjectEntry` the backend just persisted (post-launch
+    /// frecency bump, `lastLaunchAt`, `lastLaunchPid`, refreshed
+    /// `unityVersion`). Returned so the frontend merges the authoritative
+    /// entry instead of round-tripping a stale snapshot (H2).
+    pub project: crate::config::schemas::ProjectEntry,
 }
 
 #[derive(Debug, Clone)]
@@ -503,6 +516,14 @@ fn launch_project_inner(
             p.unity_version = refreshed_version.clone();
         }
     }
+    // H2: capture the post-launch entry so the success path can return it
+    // to the frontend. Round-tripping a pre-launch snapshot would silently
+    // revert the frecency bump and delete `lastLaunchAt`.
+    let updated_project = projects
+        .projects
+        .iter()
+        .find(|p| p.id == project_id)
+        .cloned();
 
     if let Err(e) = persistence::save_projects(&projects) {
         log::error!("Failed to persist launch data: {}", e);
@@ -522,6 +543,7 @@ fn launch_project_inner(
         executable_path: executable.to_string_lossy().to_string(),
         launch_args: args,
         build_target,
+        project: updated_project.expect("entry exists — it was just mutated"),
     })
 }
 
@@ -636,6 +658,37 @@ pub fn run_unity_install(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::schemas::{ProjectEntry, ProjectKind};
+    use std::collections::BTreeMap;
+
+    /// Minimal `ProjectEntry` for tests that only need a populated row.
+    fn sample_project_entry(id: &str) -> ProjectEntry {
+        ProjectEntry {
+            id: id.to_string(),
+            name: "P".to_string(),
+            path: format!("/tmp/{}", id),
+            unity_version: None,
+            last_opened_at: None,
+            last_modified_at: None,
+            launch_args: None,
+            platform_intent: None,
+            last_launch_pid: None,
+            last_launch_at: None,
+            frecency: 0,
+            git_branch: None,
+            source: "manual".to_string(),
+            hidden: false,
+            stale: false,
+            env_vars: BTreeMap::new(),
+            render_pipeline: None,
+            default_build_target: None,
+            kind: ProjectKind::Unity,
+            package_manifest_path: None,
+            migrate_source_folder: None,
+            line_count_stats: None,
+            ai_setup_wizard: None,
+        }
+    }
 
     #[test]
     fn read_project_version_parses_version_line() {
@@ -758,6 +811,7 @@ mod tests {
             pid: 12345,
             unity_version: Some("6000.0.1f1".to_string()),
             executable_path: "/path/to/Unity".to_string(),
+            project: sample_project_entry("abc"),
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"projectId\""));

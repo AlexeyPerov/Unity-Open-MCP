@@ -5,12 +5,23 @@
 //! URL fields). We model the complete Unity package.json spec so the
 //! Package settings popup can edit every field Unity recognizes,
 //! including the dependency map.
+//!
+//! H4 (round-2 review): real-world manifests carry many fields the Hub
+//! does not model (`license`, `repository`, `homepage`, `bugs`, `main`,
+//! `files`, `scripts`, `devDependencies`, `publishConfig`, `_upm`,
+//! `dist`, `upmCi`, …). A `read → edit → write` round-trip with a struct
+//! that lacks an overflow field would silently drop every unknown key on
+//! the first save. We capture the unknown keys into the `extra` map on
+//! deserialize and re-serialize them verbatim, so the file the Hub
+//! writes back contains every key the user's manifest started with
+//! (plus whatever they edited through the form).
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::State;
 
 use crate::config::commands::AppState;
@@ -21,6 +32,16 @@ use crate::config::persistence;
 /// and skipped on serialize when empty/none so round-tripping a
 /// minimal manifest stays compact. Field order follows Unity's
 /// documented layout so the written file reads naturally.
+///
+/// H4: `extra` is a `#[serde(flatten)]` overflow map. Every key the
+/// struct does not model (`license`, `repository`, `homepage`, `bugs`,
+/// `main`, `files`, `scripts`, `devDependencies`, `publishConfig`,
+/// `_upm`, `dist`, `upmCi`, …) lands here on deserialize and is
+/// re-serialized verbatim. Without it, the first Hub save of a
+/// real-world manifest would silently drop every unknown key. The map
+/// is also `skip_serializing_if = "BTreeMap::is_empty"` so a manifest
+/// written from scratch (no unknown fields) does not grow a trailing
+/// `"extra": {}` block.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PackageManifest {
@@ -56,6 +77,13 @@ pub struct PackageManifest {
     pub changelog_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub licenses_url: Option<String>,
+    /// Overflow for keys the struct does not model — preserves
+    /// `license` / `repository` / `homepage` / `bugs` / `main` /
+    /// `files` / `scripts` / `devDependencies` / `publishConfig` /
+    /// `_upm` / `dist` / `upmCi` / … across a read → edit → write
+    /// round-trip. See H4 in the round-2 review.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -111,6 +139,11 @@ pub fn read_manifest_at(path: &PathBuf) -> Result<PackageManifest, ManifestError
 /// Writes `manifest` to `path` with 2-space indentation and a trailing
 /// newline, matching the Go tool's `writePackageManifest` and Unity's
 /// own serialization shape.
+///
+/// H4: writes via tmp + rename (sibling tmp file → atomic rename) so a
+/// crash mid-write never leaves a truncated manifest on disk. The
+/// `extra` overflow field on [`PackageManifest`] preserves every key
+/// the original file carried that the struct does not model.
 pub fn write_manifest_at(
     path: &PathBuf,
     manifest: &PackageManifest,
@@ -121,9 +154,11 @@ pub fn write_manifest_at(
         path: path.display().to_string(),
         message: e.to_string(),
     })?;
-    fs::write(path, format!("{}\n", json)).map_err(|e| ManifestError::WriteFailed {
-        path: path.display().to_string(),
-        message: e.to_string(),
+    persistence::atomic_write_at(path, &format!("{}\n", json)).map_err(|e| {
+        ManifestError::WriteFailed {
+            path: path.display().to_string(),
+            message: e.to_string(),
+        }
     })
 }
 
@@ -288,5 +323,68 @@ mod tests {
         // still emits; that is acceptable (Unity reads it fine) and
         // matches the Go tool's behaviour.
         assert!(out.contains("author"));
+    }
+
+    #[test]
+    fn round_trip_preserves_unknown_keys() {
+        // H4: a real-world manifest carries many fields the Hub struct
+        // does not model. They must survive a read → edit → write cycle.
+        let json = r#"{
+            "name": "com.foo.bar",
+            "version": "1.0.0",
+            "license": "MIT",
+            "repository": { "type": "git", "url": "https://example.com" },
+            "homepage": "https://example.com",
+            "main": "Runtime/index.js",
+            "files": ["Runtime/", "package.json"],
+            "scripts": { "test": "echo test" },
+            "devDependencies": { "typescript": "^5.0.0" },
+            "publishConfig": { "access": "public" },
+            "_upm": { "name": "extra" }
+        }"#;
+        let m: PackageManifest = serde_json::from_str(json).unwrap();
+        // The Hub-edited field changes; the unknown fields are untouched
+        // in the overflow map.
+        let mut edited = m.clone();
+        edited.version = Some("1.1.0".into());
+        let out = serde_json::to_string_pretty(&edited).unwrap();
+        let restored: PackageManifest = serde_json::from_str(&out).unwrap();
+        assert_eq!(restored.version.as_deref(), Some("1.1.0"));
+        // Every unknown key round-trips verbatim.
+        assert_eq!(restored.extra.get("license").and_then(|v| v.as_str()), Some("MIT"));
+        assert_eq!(restored.extra.get("main").and_then(|v| v.as_str()), Some("Runtime/index.js"));
+        assert!(restored.extra.get("files").unwrap().is_array());
+        assert!(restored.extra.get("scripts").unwrap().is_object());
+        assert!(restored.extra.get("devDependencies").unwrap().is_object());
+        assert!(restored.extra.get("publishConfig").unwrap().is_object());
+        assert!(restored.extra.get("_upm").unwrap().is_object());
+        // And the unknown block is absent from a manifest written from
+        // scratch (no extra fields → empty map → skipped on serialize).
+        let fresh = PackageManifest {
+            name: Some("x".into()),
+            version: Some("1.0.0".into()),
+            ..Default::default()
+        };
+        let fresh_out = serde_json::to_string(&fresh).unwrap();
+        assert!(!fresh_out.contains("\"extra\""));
+    }
+
+    #[test]
+    fn write_manifest_at_uses_atomic_rename() {
+        // H4: the writer stages via a sibling tmp file and renames; a
+        // partial write must never produce a truncated manifest.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("package.json");
+        let original = PackageManifest {
+            name: Some("com.x".into()),
+            version: Some("1.0.0".into()),
+            ..Default::default()
+        };
+        write_manifest_at(&path, &original).unwrap();
+        assert!(path.exists());
+        // No leftover tmp file after a successful write.
+        assert!(!tmp.path().join("package.json.tmp-merge").exists());
+        let read_back = read_manifest_at(&path).unwrap();
+        assert_eq!(read_back.name.as_deref(), Some("com.x"));
     }
 }

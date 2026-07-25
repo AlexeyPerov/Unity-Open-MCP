@@ -191,6 +191,16 @@
   let pickToolkitInFlight = $state(false);
   let useLocalCheckout = $state(false);
   let useGlobalInstall = $state(false);
+  // H11: the exclusive MCP launch-source mode the user picked on Step 2.
+  // Kept as an explicit `$state` (rather than only `$derived` from the
+  // legacy booleans) so `setMcpSourceMode("custom")` can enter custom
+  // mode *before* the user types an override path — the previous
+  // derive-from-booleans model inferred custom only from a non-empty
+  // `mcpIndexOverride`, so the override input was unreachable from the
+  // default npx state. `null` ⇒ fall back to the derived value for draft
+  // hydration (a persisted draft carrying the legacy booleans hydrates
+  // the correct mode on first paint).
+  let mcpSourceModeSelected = $state<McpLaunchSourceMode | null>(null);
 
   // Step 3 — packages state.
   let installBridge = $state(true);
@@ -329,6 +339,15 @@
     bridgePort = state.bridgePort;
     skillOverwriteAck = state.skillOverwriteAck;
     selectedPresetId = state.selectedPresetId;
+    // H11: seed the explicit selected-mode field from the hydrated
+    // legacy booleans + override so a persisted draft paints the right
+    // radio on first render. Subsequent `setMcpSourceMode` calls write
+    // this field directly.
+    mcpSourceModeSelected = resolveLaunchSourceMode({
+      mcpIndexOverride: state.mcpIndexOverride,
+      useLocalCheckout: state.useLocalCheckout,
+      useGlobalInstall: state.useGlobalInstall,
+    });
   }
 
   function hydrateFromProject() {
@@ -444,6 +463,10 @@
 
   function onUseLocalCheckoutChange(checked: boolean) {
     useLocalCheckout = checked;
+    // H11: keep the explicit selected-mode field in sync with the legacy
+    // checkbox so preset application (which flips `useLocalCheckout`)
+    // updates the Step 2 radio too.
+    mcpSourceModeSelected = checked ? "local" : "npx";
     if (!checked) {
       toolkitError = null;
     }
@@ -455,6 +478,13 @@
    *  preserves an existing override, or clears to empty if the user is
    *  switching into custom fresh (they type the path next). */
   function setMcpSourceMode(mode: McpLaunchSourceMode) {
+    // H11: the selected mode is the source of truth. We still mirror the
+    // legacy booleans + override so draft persistence, `wireModeForSourceMode`,
+    // and the legacy-derive fallbacks stay consistent, but the UI no longer
+    // depends on deriving the mode from those fields (which made "custom"
+    // unreachable until the user typed an override — a field that only
+    // renders once custom is already selected).
+    mcpSourceModeSelected = mode;
     switch (mode) {
       case "npx":
         useLocalCheckout = false;
@@ -473,9 +503,8 @@
         break;
       case "custom":
         // Preserve an existing override path when switching into custom; only
-        // clear the checkout/global flags so resolveLaunchSourceMode plus
-        // wireModeForSourceMode no longer collapses to local/localOverride
-        // by precedence.
+        // clear the checkout/global flags so wireModeForSourceMode resolves
+        // to localOverride rather than collapsing to local by precedence.
         useLocalCheckout = false;
         useGlobalInstall = false;
         break;
@@ -549,6 +578,22 @@
     if (patch.installVerify !== undefined) installVerify = patch.installVerify;
     if (patch.selectedUnityDomainDeps !== undefined) {
       selectedUnityDomainDeps = new Set(patch.selectedUnityDomainDeps);
+    }
+    // H11: a preset can flip the legacy `useLocalCheckout` / `useGlobalInstall`
+    // booleans directly (above). Re-derive the explicit selected-mode field
+    // from the post-patch state so the Step 2 radio reflects the preset.
+    // We only re-derive when the preset touched one of the mode fields;
+    // otherwise we leave the user's explicit selection alone.
+    if (
+      patch.useLocalCheckout !== undefined ||
+      patch.useGlobalInstall !== undefined ||
+      patch.mcpIndexOverride !== undefined
+    ) {
+      mcpSourceModeSelected = resolveLaunchSourceMode({
+        mcpIndexOverride,
+        useLocalCheckout,
+        useGlobalInstall,
+      });
     }
     if (patch.mcpClient !== undefined) mcpClient = patch.mcpClient;
     S.appendDrawerLog(
@@ -774,7 +819,14 @@
 
   $effect(() => {
     if (currentStep !== "step3" && !expressActive) return;
-    if (!toolkitRoot.trim()) return;
+    // H10: the toolkit root is only required for `useLocalPackages` mode
+    // (the `file:` path derivation needs a checkout to point at). For the
+    // default npx flow the backend derives the git remote from
+    // `DEFAULT_GIT_REMOTE` when no root is set (`derive_package_urls` →
+    // `read_git_origin` returns None for an empty path), so requiring a
+    // root here dead-ended the wizard on Step 3 — Step 2 (the only place
+    // to enter a root) is auto-skipped for the npx default.
+    if (useLocalPackages && !toolkitRoot.trim()) return;
     const deps = selectedUnityDepInstalls();
     if (!installBridge && !installVerify && deps.length === 0) {
       mergePlan = null;
@@ -824,16 +876,18 @@
     return `${toolkitRoot.replace(/[\\/]+$/, "")}/mcp-server/dist/index.js`;
   });
 
-  // Plan 2 — exclusive launch-source mode. Derived from the legacy draft
-  // fields so a persisted draft hydrates the radio selector correctly. The
-  // handler writes the legacy fields back so presets + draft persistence are
-  // unchanged.
+  // Plan 2 — exclusive launch-source mode. H11: the explicit
+  // `mcpSourceModeSelected` field (set by `setMcpSourceMode` and seeded on
+  // hydration) wins; the legacy-derived value is only used before the user
+  // has interacted with the Step 2 radio (e.g. mid-hydration). This makes
+  // `custom` selectable without first typing an override.
   let mcpSourceMode = $derived(
-    resolveLaunchSourceMode({
-      mcpIndexOverride,
-      useLocalCheckout,
-      useGlobalInstall,
-    }),
+    mcpSourceModeSelected ??
+      resolveLaunchSourceMode({
+        mcpIndexOverride,
+        useLocalCheckout,
+        useGlobalInstall,
+      }),
   );
 
   let mcpSourceReady = $derived(
@@ -1402,9 +1456,11 @@
   /** Plan 2 — whether the express path is offered. Shown on Preflight when the
    *  Recommended preset is active (or no preset yet), preflight is green, and
    *  the project is not already fully configured (that case gets its own
-   *  short-circuit banner). The express packages phase needs a toolkit root
-   *  to derive the git remote — when packages are already installed we offer
-   *  express regardless (it skips straight to MCP + verify). */
+   *  short-circuit banner). The express packages phase can install from the
+   *  published git remote when no toolkit root is set (npx default flow —
+   *  H10); a root is only required when the user opted into local `file:`
+   *  packages. When packages are already installed we offer express
+   *  regardless (it skips straight to MCP + verify). */
   function expressEligible(): boolean {
     if (expressActive) return false;
     if (alreadyConfigured) return false;
@@ -1416,10 +1472,16 @@
       return false;
     }
     if (!isProjectReady({ detection, nodeProbe })) return false;
-    // Need either packages already installed or a toolkit root to install from.
+    // H10: the default npx flow does not require a toolkit root — the
+    // backend's `derive_package_urls` falls back to `DEFAULT_GIT_REMOTE`
+    // when no root is set, so express is offered. Local-packages mode
+    // still needs a validated root to point the `file:` paths at.
     const packagesOk =
       !!detection && detection.bridgeInstalled && detection.verifyInstalled;
-    if (!packagesOk && !toolkitRoot.trim()) return false;
+    if (packagesOk) return true;
+    // Need to be able to install: local-packages mode requires a
+    // validated root; the npx/git-remote flow does not.
+    if (useLocalPackages && !toolkitRoot.trim()) return false;
     return true;
   }
 

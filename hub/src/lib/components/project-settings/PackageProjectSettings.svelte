@@ -45,6 +45,17 @@
     manifestError = null;
     try {
       const m = await readPackageManifest(project.id);
+      // H5: `author` is `Option<ManifestAuthor>` and a minimal manifest
+      // deserializes with `author: undefined`. The two `bind:value`
+      // inputs below dereference `manifest.author!.name` / `.url`, and
+      // Svelte's `!` is a compile-time assertion only — at runtime the
+      // binding reads `undefined` during render and the Manifest tab
+      // body never paints. Default to an empty object on load so a
+      // manifest without an `author` block is still editable (and a
+      // blank author round-trips to an empty `{}` block on save, which
+      // matches the existing `empty_author_is_skipped_on_serialize`
+      // behavior in the Rust tests).
+      if (!m.author) m.author = {};
       manifest = m;
       originalVersion = m.version;
       keywordsText = (m.keywords ?? []).join(", ");
