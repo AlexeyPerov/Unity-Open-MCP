@@ -315,7 +315,9 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             "gate-free.")]
         public static string AudioListenerGet()
         {
-            var listeners = Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Include);
+            // SceneQuery centralizes the FindObjectsByType (2023.1+) /
+            // FindObjectsOfType (pre-2023.1) version dance — see SceneQuery.cs.
+            var listeners = SceneQuery.FindAllOfType<AudioListener>(SceneQuery.Inactive.Include);
             int enabledCount = 0;
             foreach (var l in listeners)
                 if (l.enabled) enabledCount++;

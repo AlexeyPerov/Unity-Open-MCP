@@ -92,7 +92,7 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
             // name-only fallback (first active match).
             if (!string.IsNullOrEmpty(name))
             {
-                var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude);
+                var roots = SceneQuery.FindRootTransforms();
                 foreach (var root in roots)
                 {
                     if (root.gameObject.name == name) return root.gameObject;
@@ -105,7 +105,7 @@ namespace UnityOpenMcpBridge.Extensions.TerrainExt
         public static GameObject FindByPath(string path)
         {
             var parts = path.Split('/');
-            var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude);
+            var roots = SceneQuery.FindRootTransforms();
             foreach (var root in roots)
             {
                 if (root.gameObject.name == parts[0])

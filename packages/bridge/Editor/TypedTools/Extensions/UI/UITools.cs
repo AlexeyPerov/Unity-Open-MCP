@@ -719,7 +719,9 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
         // Returns true when this call created one.
         private static bool EnsureEventSystem()
         {
-            var existing = Object.FindObjectsByType<EventSystem>(FindObjectsInactive.Include);
+            // SceneQuery centralizes the FindObjectsByType (2023.1+) /
+            // FindObjectsOfType (pre-2023.1) version dance — see SceneQuery.cs.
+            var existing = SceneQuery.FindAllOfType<EventSystem>(SceneQuery.Inactive.Include);
             if (existing != null && existing.Length > 0) return false;
 
             var esGo = new GameObject("EventSystem");

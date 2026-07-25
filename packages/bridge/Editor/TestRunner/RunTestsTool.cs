@@ -109,6 +109,15 @@ namespace UnityOpenMcpBridge.TestRunner
                     // terminal state instead of waiting on a never-written file.
                     TestRunnerService.WriteErrorFile(runId, mode, "test_run_failed", e.Message);
                     Object.DestroyImmediate(api);
+                    // B9 — clear the pending marker so it does not linger. The
+                    // onFinished callback (the only other ClearPending site)
+                    // never fires for a rejected Execute, so without this the
+                    // marker would persist forever and OnAfterAssemblyReload
+                    // would reattach on EVERY subsequent recompile — arming the
+                    // B8 bug (unwanted PlayMode run) for the rest of the
+                    // session. Same defense if a domain reload lands between
+                    // MarkPending and this delayCall closure firing.
+                    TestRunnerState.ClearPending(runId);
                 }
             };
         }

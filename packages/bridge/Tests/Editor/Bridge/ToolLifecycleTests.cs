@@ -68,6 +68,19 @@ namespace UnityOpenMcpBridge.Tests
             return ToolLifecycle.Resolve(tool);
         }
 
+        // Regression: code-review finding B11 — scene_create used to be
+        // EditorSettle, which left it outside the dirty guard even though its
+        // default 'single' mode closes every open scene without saving (one
+        // scene_create threw away a user's unsaved scene work and reported
+        // success). It now joins scene_open on RestartThenSettle so the
+        // centralized SceneDirtyGuard preflights it.
+        [TestCase("unity_open_mcp_scene_create", ExpectedResult = LifecyclePolicy.RestartThenSettle)]
+        [TestCase("unity_open_mcp_scene_open", ExpectedResult = LifecyclePolicy.RestartThenSettle)]
+        public static LifecyclePolicy Resolve_SceneSingleModeTools_RestartThenSettle(string tool)
+        {
+            return ToolLifecycle.Resolve(tool);
+        }
+
         // ----- CustomConfirmation: external completion signal -----
 
         [Test]
@@ -123,6 +136,11 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_execute_csharp"));
             Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_invoke_method"));
             Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_execute_menu"));
+            // B11 — scene_create / scene_open default to Single mode, which
+            // closes every open scene without saving: the dirty guard must
+            // preflight them.
+            Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_scene_create"));
+            Assert.IsTrue(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_scene_open"));
 
             Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_apply_fix"));
             Assert.IsFalse(ToolLifecycle.RequiresDirtyGuard("unity_open_mcp_reserialize"));

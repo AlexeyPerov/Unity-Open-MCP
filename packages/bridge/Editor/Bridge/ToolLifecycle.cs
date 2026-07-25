@@ -74,13 +74,20 @@ namespace UnityOpenMcpBridge
             { "unity_open_mcp_component_add",       LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_component_destroy",   LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_component_modify",    LifecyclePolicy.EditorSettle },
-            // M16 Plan 3 — typed scene mutators. scene_create/save/unload/
-            // set_active/focus touch the scene setup or SceneView without
-            // forcing a domain reload, so EditorSettle is enough. scene_open
-            // is RestartThenSettle: Single-mode open can lose unsaved changes
-            // in currently-open scenes, so the active-scene dirty guard must
-            // preflight it (see SceneDirtyGuard.AppliesTo).
-            { "unity_open_mcp_scene_create",        LifecyclePolicy.EditorSettle },
+            // M16 Plan 3 — typed scene mutators. scene_save/unload/set_active/
+            // focus touch the scene setup or SceneView without forcing a domain
+            // reload, so EditorSettle is enough. scene_create AND scene_open are
+            // RestartThenSettle: both default to Single mode, which closes all
+            // open scenes without prompting or saving — the active-scene dirty
+            // guard must preflight them so a user's unsaved scene work is not
+            // silently discarded (see SceneDirtyGuard.AppliesTo). scene_create
+            // with mode:"additive" still routes through the guard, but the guard
+            // returns Allow when no scene is dirty, so additive use stays
+            // frictionless; the explicit opt-out is ignore_scene_dirty:true.
+            // (BatchExecuteTool additionally refuses a nested scene_create
+            // unless mode:"additive" — the single-dispatch path is the one the
+            // dirty guard protects.)
+            { "unity_open_mcp_scene_create",        LifecyclePolicy.RestartThenSettle },
             { "unity_open_mcp_scene_open",          LifecyclePolicy.RestartThenSettle },
             { "unity_open_mcp_scene_save",          LifecyclePolicy.EditorSettle },
             { "unity_open_mcp_scene_unload",        LifecyclePolicy.EditorSettle },

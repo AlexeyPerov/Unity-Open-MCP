@@ -34,6 +34,23 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("invalid_paths",
                     $"asset_path must end with '.mat': '{normalized}'.");
 
+            // B10 — refuse to clobber an existing asset. Unity's
+            // AssetDatabase.CreateAsset DELETES whatever is already at the path
+            // and hands the replacement a NEW guid, so every scene/prefab/
+            // renderer reference to the old material silently becomes a missing
+            // reference — and the tool used to return status:"ok". Sibling
+            // create paths already guard this (AssemblyDefinitionTools.Create
+            // via File.Exists; AssetsTools.Copy/Move refuse on existing dest).
+            // overwrite:true is the explicit, documented footgun opt-in.
+            if (!JsonBody.GetBool(body, "overwrite", false)
+                && AssetDatabase.LoadMainAssetAtPath(normalized) != null)
+            {
+                return ToolDispatchResult.Fail("asset_exists",
+                    $"An asset already exists at '{normalized}'. Pass overwrite:true to replace it " +
+                    "(WARNING: this re-GUIDs the asset and breaks every existing scene/prefab reference " +
+                    "to it — prefer material_set_property / material_set_shader to edit in place).");
+            }
+
             var shaderName = JsonBody.GetString(body, "shader_name");
             var shader = ResolveCreateShader(shaderName);
             if (shader == null)

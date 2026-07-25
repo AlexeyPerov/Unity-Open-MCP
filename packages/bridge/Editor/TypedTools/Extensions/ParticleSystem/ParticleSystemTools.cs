@@ -324,7 +324,7 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
         private static GameObject FindByPath(string path)
         {
             var parts = path.Split('/');
-            var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude);
+            var roots = SceneQuery.FindRootTransforms();
             foreach (var root in roots)
             {
                 if (root.gameObject.name == parts[0])
@@ -345,7 +345,7 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
 
         private static GameObject FindByName(string name)
         {
-            var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude);
+            var roots = SceneQuery.FindRootTransforms();
             foreach (var root in roots)
                 if (root.gameObject.name == name) return root.gameObject;
             return null;

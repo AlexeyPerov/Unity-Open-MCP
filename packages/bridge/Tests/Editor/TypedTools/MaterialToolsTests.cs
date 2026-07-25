@@ -1,10 +1,30 @@
 using NUnit.Framework;
+using UnityEditor;
 using UnityOpenMcpBridge.TypedTools;
 
 namespace UnityOpenMcpBridge.Tests
 {
     public class MaterialToolsTests
     {
+        private const string TmpRoot = "Assets/TmpMaterialTests";
+
+        [SetUp]
+        public void EnsureTmpRoot()
+        {
+            if (!AssetDatabase.IsValidFolder(TmpRoot))
+                AssetDatabase.CreateFolder("Assets", "TmpMaterialTests");
+        }
+
+        [TearDown]
+        public void CleanTmpRoot()
+        {
+            if (AssetDatabase.IsValidFolder(TmpRoot))
+            {
+                AssetDatabase.DeleteAsset(TmpRoot);
+                AssetDatabase.Refresh();
+            }
+        }
+
         [Test]
         public void Create_MissingAssetPath_ReturnsMissingParameter()
         {
@@ -162,6 +182,49 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(result.Success);
             Assert.AreEqual("missing_parameter", result.ErrorCode);
             StringAssert.Contains("'asset_path'", result.ErrorMessage);
+        }
+
+        // -------------------------------------------------------------------
+        // Regression: code-review finding B10 — material_create had no
+        // existence check before AssetDatabase.CreateAsset, which DELETES any
+        // asset already at the path and hands the replacement a NEW guid. Every
+        // scene/prefab/renderer reference to the old material silently became a
+        // missing reference while the tool returned status:"ok". The fix refuses
+        // with `asset_exists` unless `overwrite:true` is passed.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void Create_ExistingAsset_NoOverwrite_ReturnsAssetExists()
+        {
+            var path = TmpRoot + "/Dup.mat";
+            // First create succeeds and writes the asset.
+            var first = MaterialTools.Create(
+                "{\"asset_path\":\"" + path + "\",\"shader_name\":\"Standard\"}");
+            Assert.IsTrue(first.Success, "first create should succeed: " + first.ErrorMessage);
+            Assert.IsNotNull(AssetDatabase.LoadMainAssetAtPath(path),
+                "first create should leave a material on disk");
+
+            // Second create without overwrite must refuse — NOT silently destroy
+            // the first material and re-GUID it.
+            var second = MaterialTools.Create(
+                "{\"asset_path\":\"" + path + "\",\"shader_name\":\"Standard\"}");
+            Assert.IsFalse(second.Success, "second create must refuse without overwrite:true");
+            Assert.AreEqual("asset_exists", second.ErrorCode);
+            StringAssert.Contains("overwrite", second.ErrorMessage);
+        }
+
+        [Test]
+        public void Create_ExistingAsset_WithOverwrite_Succeeds()
+        {
+            var path = TmpRoot + "/Over.mat";
+            var first = MaterialTools.Create(
+                "{\"asset_path\":\"" + path + "\",\"shader_name\":\"Standard\"}");
+            Assert.IsTrue(first.Success, first.ErrorMessage);
+
+            // overwrite:true is the explicit footgun opt-in — must succeed.
+            var second = MaterialTools.Create(
+                "{\"asset_path\":\"" + path + "\",\"shader_name\":\"Standard\",\"overwrite\":true}");
+            Assert.IsTrue(second.Success, "overwrite:true should allow replace: " + second.ErrorMessage);
         }
     }
 }

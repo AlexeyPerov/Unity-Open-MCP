@@ -10,7 +10,10 @@ export const materialCreate = makeTool(
     "named shader. Intermediate folders are created if missing. Defaults `shader_name` to " +
     "'Standard' (or 'Universal Render Pipeline/Lit' if found). Mutating: runs the full gate " +
     "path; `paths_hint` must be [\"<new .mat path>\"]. Use unity_open_mcp_shader_list_all first " +
-    "to discover a valid shader name.",
+    "to discover a valid shader name. Refuses to clobber an existing asset at `asset_path` " +
+    "unless `overwrite: true` is passed (CreateAsset re-GUIDs the replacement, breaking every " +
+    "existing scene/prefab reference — prefer material_set_property / material_set_shader to " +
+    "edit in place).",
   {
     required: ["asset_path", "paths_hint"],
         properties: {
@@ -23,6 +26,15 @@ export const materialCreate = makeTool(
             description:
               "Shader name resolvable via Shader.Find (e.g. 'Standard', 'Universal Render Pipeline/Lit', 'Sprites/Default'). " +
               "Defaults to 'Standard' (or 'Universal Render Pipeline/Lit' if present).",
+          },
+          overwrite: {
+            type: "boolean",
+            default: false,
+            description:
+              "Allow replacing an existing asset at `asset_path`. DANGEROUS: AssetDatabase.CreateAsset " +
+              "deletes the old asset and the replacement gets a NEW guid, so every scene/prefab/renderer " +
+              "reference to the old material becomes a missing reference. Prefer material_set_property / " +
+              "material_set_shader to edit a material in place. Defaults to false (refuses with `asset_exists`).",
           },
           paths_hint: { ...PATHS_HINT_TYPE, description: "New .mat path (the gate's validation scope). No whole-project fallback." },
           gate: { ...GATE_PROP },

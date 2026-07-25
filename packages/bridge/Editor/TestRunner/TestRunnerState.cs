@@ -12,6 +12,17 @@ namespace UnityOpenMcpBridge.TestRunner
     [InitializeOnLoad]
     public static class TestRunnerState
     {
+        // B9 — pending markers from a failed/crashed run (Execute threw, the
+        // editor was force-quit mid-run, the onFinished callback never fired)
+        // would otherwise linger forever and make OnAfterAssemblyReload
+        // reattach callbacks on every subsequent recompile — arming the B8 bug
+        // (unwanted PlayMode run) for the rest of the session. A pending marker
+        // older than this TTL is treated as stale: skipped AND deleted on
+        // reattach. One hour is far longer than any real test run (PlayMode
+        // including a recompile finishes in minutes); only a leaked marker
+        // survives that long.
+        internal const long PendingTtlMs = 60 * 60 * 1000; // 1 hour
+
         static TestRunnerState()
         {
             AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
@@ -42,6 +53,12 @@ namespace UnityOpenMcpBridge.TestRunner
                 // fresh PlayMode run on every recompile, even for EditMode).
                 sb.Append("\"playMode\":").Append(playMode ? "true" : "false").Append(',');
                 sb.Append("\"includePasses\":").Append(includePasses ? "true" : "false");
+                // B9 — record when the marker was written so OnAfterAssemblyReload
+                // can discard a stale one (failed Execute, force-quit, lost
+                // onFinished) instead of reattaching on every future recompile.
+                sb.Append(",\"createdAt\":").Append(
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                        .ToString(System.Globalization.CultureInfo.InvariantCulture));
                 sb.Append('}');
                 File.WriteAllText(PendingFilePath(runId), sb.ToString());
             }
@@ -63,11 +80,27 @@ namespace UnityOpenMcpBridge.TestRunner
             try
             {
                 Directory.CreateDirectory(TestRunnerService.StatusDir);
+                var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 foreach (var file in Directory.GetFiles(TestRunnerService.StatusDir, "test-pending-*.json"))
                 {
                     var json = File.ReadAllText(file);
                     var runId = JsonBody.GetString(json, "runId");
                     if (string.IsNullOrEmpty(runId)) continue;
+
+                    // B9 — discard stale markers. A pending file older than the
+                    // TTL is from a failed/crashed run (Execute threw and the
+                    // catch cleared it, OR the editor was force-quit before
+                    // onFinished fired, OR an even older pre-fix leak). Reattaching
+                    // would arm the B8 bug on every future recompile. createdAt
+                    // is absent on pending files written before this fix landed;
+                    // those are assumed fresh (0 → not stale) so an in-flight run
+                    // from a just-upgraded editor is not discarded.
+                    var createdAtMs = JsonBody.GetLong(json, "createdAt", 0);
+                    if (IsPendingStale(createdAtMs, nowMs))
+                    {
+                        try { File.Delete(file); } catch { }
+                        continue;
+                    }
 
                     var assemblyName = JsonBody.GetString(json, "assemblyName");
                     var testNamespace = JsonBody.GetString(json, "testNamespace");
@@ -92,6 +125,16 @@ namespace UnityOpenMcpBridge.TestRunner
             {
                 Debug.LogWarning($"[TestRunnerState] OnAfterAssemblyReload error: {ex.Message}");
             }
+        }
+
+        // B9 — is a pending marker stale? Pure decision split out so the TTL
+        // boundary is unit-testable without synthesizing clock skew. A marker
+        // with createdAt == 0 (absent — pre-fix file, or MarkPending failed
+        // mid-write) is treated as fresh so an in-flight run is not discarded.
+        internal static bool IsPendingStale(long createdAtMs, long nowMs)
+        {
+            if (createdAtMs <= 0) return false;
+            return (nowMs - createdAtMs) > PendingTtlMs;
         }
 
         // B8 — reattach MUST only re-register callbacks, never call Execute.

@@ -23,6 +23,7 @@ using System.Text;
 using UnityEngine;
 using UnityEditor;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 using Object = UnityEngine.Object;
 
 namespace UnityOpenMcpBridge.Extensions.CinemachineExt
@@ -526,7 +527,10 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             if (!CinemachineVersion.Supported) return CinemachineVersion.VersionTooOldError();
 
             var type = CinemachineVersion.CameraType;
-            var cameras = Object.FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include);
+            // SceneQuery centralizes the FindObjectsByType (2023.1+) /
+            // FindObjectsOfType (pre-2023.1) version dance — see SceneQuery.cs.
+            // Include degrades to active-only on pre-2023.1 with a warning.
+            var cameras = SceneQuery.FindAllOfType<MonoBehaviour>(SceneQuery.Inactive.Include);
             var sb = new StringBuilder(512);
             sb.Append("\"cameras\":[");
             bool first = true;

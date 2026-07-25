@@ -108,5 +108,75 @@ namespace UnityOpenMcpBridge.Tests
                 Clear(runId);
             }
         }
+
+        // -------------------------------------------------------------------
+        // Regression: code-review finding B9 — a failed TestRunnerApi.Execute
+        // (or a domain reload landing between MarkPending and the delayCall
+        // closure firing) left the test-pending-*.json marker on disk forever,
+        // because ClearPending ran only in onFinished, which never fired. That
+        // permanently poisoned the editor: every subsequent script recompile
+        // triggered OnAfterAssemblyReload → ReattachCallbacks → (pre-fix B8) a
+        // fresh PlayMode run. The fix clears the marker in the Execute catch
+        // AND stamps createdAt on every pending file so OnAfterAssemblyReload
+        // can discard a stale marker (failed run, force-quit) instead of
+        // reattaching forever.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void MarkPending_WritesCreatedAtTimestamp()
+        {
+            // createdAt is what lets OnAfterAssemblyReload tell a fresh marker
+            // (in-flight run) from a stale one (leaked from a failed run). It
+            // must be present and a positive unix-ms value.
+            var runId = RunId("ts");
+            try
+            {
+                var before = ((System.DateTimeOffset)System.DateTime.UtcNow).ToUnixTimeMilliseconds();
+                TestRunnerState.MarkPending(runId, null, null, null, null,
+                    playMode: false, includePasses: true);
+                var after = ((System.DateTimeOffset)System.DateTime.UtcNow).ToUnixTimeMilliseconds();
+                var json = File.ReadAllText(TestRunnerService.PendingFilePath(runId));
+
+                var createdAt = JsonBody.GetLong(json, "createdAt", 0);
+                Assert.Greater(createdAt, 0, "createdAt must be present and positive: " + json);
+                Assert.GreaterOrEqual(createdAt, before, "createdAt must be >= pre-call time");
+                Assert.LessOrEqual(createdAt, after, "createdAt must be <= post-call time");
+            }
+            finally
+            {
+                Clear(runId);
+            }
+        }
+
+        [Test]
+        public void IsPendingStale_OlderThanTtl_IsStale()
+        {
+            // A marker older than the TTL is from a leaked run — must be
+            // treated as stale so OnAfterAssemblyReload discards it.
+            var now = 1_000_000_000L; // arbitrary fixed "now"
+            var stale = now - TestRunnerState.PendingTtlMs - 1;
+            Assert.IsTrue(TestRunnerState.IsPendingStale(stale, now),
+                $"createdAt {stale} (>{PendingTtlMs}ms before {now}) must be stale");
+        }
+
+        [Test]
+        public void IsPendingStale_WithinTtl_IsNotStale()
+        {
+            // A fresh marker is an in-flight run — must NOT be discarded.
+            var now = 1_000_000_000L;
+            var fresh = now - TestRunnerState.PendingTtlMs + 1;
+            Assert.IsFalse(TestRunnerState.IsPendingStale(fresh, now),
+                $"createdAt {fresh} (<={PendingTtlMs}ms before {now}) must not be stale");
+        }
+
+        [Test]
+        public void IsPendingStale_AbsentCreatedAt_IsNotStale()
+        {
+            // A pending file written before this fix landed has no createdAt
+            // field (parsed as 0). Treat it as fresh so an in-flight run on a
+            // just-upgraded editor is not silently discarded.
+            Assert.IsFalse(TestRunnerState.IsPendingStale(0, 1_000_000_000L),
+                "absent createdAt (0) must be treated as fresh, not stale");
+        }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
+using UnityOpenMcpBridge.ObjectRefs;
 using Object = UnityEngine.Object;
 
 namespace UnityOpenMcpBridge.Screenshot
@@ -77,7 +78,9 @@ namespace UnityOpenMcpBridge.Screenshot
         {
             // Try as hierarchy path first (slash-separated from root).
             var parts = path.Split('/');
-            var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude);
+            // SceneQuery centralizes the FindObjectsByType (2023.1+) /
+            // FindObjectsOfType (pre-2023.1) version dance — see SceneQuery.cs.
+            var roots = SceneQuery.FindRootTransforms();
 
             foreach (var root in roots)
             {

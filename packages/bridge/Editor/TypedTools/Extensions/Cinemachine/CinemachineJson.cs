@@ -22,6 +22,7 @@ using System.Text;
 using UnityEngine;
 using UnityEditor;
 using UnityOpenMcpBridge;
+using UnityOpenMcpBridge.ObjectRefs;
 using Object = UnityEngine.Object;
 
 namespace UnityOpenMcpBridge.Extensions.CinemachineExt
@@ -135,7 +136,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
 
             if (!string.IsNullOrEmpty(name))
             {
-                var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude);
+                var roots = SceneQuery.FindRootTransforms();
                 foreach (var root in roots)
                 {
                     if (root.gameObject.name == name) return root.gameObject;
@@ -148,7 +149,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
         public static GameObject FindByPath(string path)
         {
             var parts = path.Split('/');
-            var roots = Object.FindObjectsByType<Transform>(FindObjectsInactive.Exclude);
+            var roots = SceneQuery.FindRootTransforms();
             foreach (var root in roots)
             {
                 if (root.gameObject.name == parts[0])

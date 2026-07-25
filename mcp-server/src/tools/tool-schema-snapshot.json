@@ -1825,7 +1825,7 @@
     }
   },
   "unity_open_mcp_material_create": {
-    "description": "Create a new Material asset at a given Assets/-rooted path ending in .mat, using the named shader. Intermediate folders are created if missing. Defaults `shader_name` to 'Standard' (or 'Universal Render Pipeline/Lit' if found). Mutating: runs the full gate path; `paths_hint` must be [\"<new .mat path>\"]. Use unity_open_mcp_shader_list_all first to discover a valid shader name.",
+    "description": "Create a new Material asset at a given Assets/-rooted path ending in .mat, using the named shader. Intermediate folders are created if missing. Defaults `shader_name` to 'Standard' (or 'Universal Render Pipeline/Lit' if found). Mutating: runs the full gate path; `paths_hint` must be [\"<new .mat path>\"]. Use unity_open_mcp_shader_list_all first to discover a valid shader name. Refuses to clobber an existing asset at `asset_path` unless `overwrite: true` is passed (CreateAsset re-GUIDs the replacement, breaking every existing scene/prefab reference — prefer material_set_property / material_set_shader to edit in place).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -1840,6 +1840,11 @@
             "warn",
             "off"
           ]
+        },
+        "overwrite": {
+          "default": false,
+          "description": "Allow replacing an existing asset at `asset_path`. DANGEROUS: AssetDatabase.CreateAsset deletes the old asset and the replacement gets a NEW guid, so every scene/prefab/renderer reference to the old material becomes a missing reference. Prefer material_set_property / material_set_shader to edit a material in place. Defaults to false (refuses with `asset_exists`).",
+          "type": "boolean"
         },
         "paths_hint": {
           "description": "New .mat path (the gate's validation scope). No whole-project fallback.",
@@ -3191,7 +3196,7 @@
     }
   },
   "unity_open_mcp_scene_create": {
-    "description": "Create a new scene asset and save it at the given `.unity` path, opening it in the editor. Mutating: runs the full gate path; `paths_hint` should be the new `.unity` asset path. Returns the new scene's name, path, isDirty, isLoaded, rootCount, and buildIndex so the agent can chain scene_get_data / gameobject_create / scene_save without an extra lookup. Prefer this over raw execute_csharp EditorSceneManager.NewScene — schema-validated, undo-recorded, and the gate surfaces asset-reference fallout.",
+    "description": "Create a new scene asset and save it at the given `.unity` path, opening it in the editor. Mutating: runs the full gate path; `paths_hint` should be the new `.unity` asset path. Returns the new scene's name, path, isDirty, isLoaded, rootCount, and buildIndex so the agent can chain scene_get_data / gameobject_create / scene_save without an extra lookup. Prefer this over raw execute_csharp EditorSceneManager.NewScene — schema-validated, undo-recorded, and the gate surfaces asset-reference fallout. The default 'single' mode closes all currently-open scenes without saving, so the active-scene dirty guard preflights this tool (refuses with `scene_dirty` when any loaded scene has unsaved changes); pass `ignore_scene_dirty: true` to accept the risk, or `mode: 'additive'` to keep open scenes.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -3202,6 +3207,11 @@
             "warn",
             "off"
           ]
+        },
+        "ignore_scene_dirty": {
+          "default": false,
+          "description": "Bypass the active-scene dirty guard. The default 'single' mode closes every open scene without saving, so a dirty scene would trigger Unity's native save modal mid-flow; the guard refuses preflight instead. Set true to proceed and accept the risk of losing unsaved changes. No effect for 'additive' mode (it does not close open scenes).",
+          "type": "boolean"
         },
         "mode": {
           "default": "single",

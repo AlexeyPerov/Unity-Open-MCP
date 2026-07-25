@@ -1020,7 +1020,9 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
         {
             if (!first) sb.Append(',');
             sb.Append('"').Append(key).Append("\":[");
-            var all = Object.FindObjectsByType<T>(FindObjectsInactive.Exclude);
+            // SceneQuery centralizes the FindObjectsByType (2023.1+) /
+            // FindObjectsOfType (pre-2023.1) version dance — see SceneQuery.cs.
+            var all = SceneQuery.FindAllOfType<T>(SceneQuery.Inactive.Exclude);
             for (int i = 0; i < all.Length; i++)
             {
                 if (i > 0) sb.Append(',');
