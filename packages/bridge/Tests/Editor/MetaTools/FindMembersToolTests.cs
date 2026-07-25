@@ -126,6 +126,64 @@ namespace UnityOpenMcpBridge.Tests
                 "include_signatures:true must emit a signature field: " + result.Output);
         }
 
+        // -------------------------------------------------------------------
+        // Regression: code-review finding B5 — find_members' include_project
+        // filter was a no-op. ShouldIncludeAssembly identified a project
+        // (non-engine) assembly correctly but then returned true from BOTH
+        // branches, so include_project:false silently returned project types
+        // anyway. The fix returns false from the inner (project-assembly)
+        // branch, so the filter actually excludes project assemblies.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public static void Execute_IncludeProjectFalse_ExcludesProjectTypes()
+        {
+            // This test assembly (com.alexeyperov.unity-open-mcp-bridge.Editor.Tests)
+            // is a project assembly — it is not UnityEngine/UnityEditor/System/
+            // mscorlib/Microsoft/netstandard. A query for a type only this
+            // assembly defines must therefore return ZERO matches when
+            // include_project:false, proving the filter now excludes it.
+            var result = FindMembersTool.Execute(
+                "{\"query\":\"FindMembersToolTests\",\"kind\":\"type\"," +
+                "\"include_project\":false,\"max_results\":50}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            var parsed = JsonUtility.FromJson<MembersEnvelope>(result.Output);
+            // The pre-fix bug returned this type despite include_project:false.
+            Assert.AreEqual(0, parsed.count,
+                "include_project:false must exclude project types, but got: " + result.Output);
+            Assert.AreEqual(0, parsed.truncated);
+        }
+
+        [Test]
+        public static void Execute_IncludeProjectTrue_IncludesProjectTypes()
+        {
+            // Regression guard: the fix must not break the default path.
+            // With include_project:true (the default), project types ARE
+            // returned.
+            var result = FindMembersTool.Execute(
+                "{\"query\":\"FindMembersToolTests\",\"kind\":\"type\"," +
+                "\"include_project\":true,\"max_results\":50}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            var parsed = JsonUtility.FromJson<MembersEnvelope>(result.Output);
+            Assert.GreaterOrEqual(parsed.count, 1,
+                "include_project:true must include project types: " + result.Output);
+        }
+
+        [Test]
+        public static void Execute_IncludeProjectFalse_StillReturnsEngineTypes()
+        {
+            // include_project:false must NOT exclude engine assemblies — only
+            // project assemblies. A well-known UnityEngine type must still be
+            // discoverable so the filter is useful (introspect Unity APIs only).
+            var result = FindMembersTool.Execute(
+                "{\"query\":\"Transform\",\"kind\":\"type\"," +
+                "\"include_project\":false,\"max_results\":5}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            var parsed = JsonUtility.FromJson<MembersEnvelope>(result.Output);
+            Assert.GreaterOrEqual(parsed.count, 1,
+                "include_project:false must still return UnityEngine types: " + result.Output);
+        }
+
         [System.Serializable]
         private class MembersEnvelope
         {

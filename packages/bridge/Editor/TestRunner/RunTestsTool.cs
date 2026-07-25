@@ -51,7 +51,7 @@ namespace UnityOpenMcpBridge.TestRunner
             // dead_bridge and poison every subsequent tool call (feedback entry).
             // ClearPending in the onFinished callback below is unconditional for
             // the same reason.
-            TestRunnerState.MarkPending(run_id, assembly_name, test_namespace, test_class, test_method, include_passes);
+            TestRunnerState.MarkPending(run_id, assembly_name, test_namespace, test_class, test_method, play_mode, include_passes);
 
             // specs/feedback.md 2026-07-03 — TestRunnerApi.Execute is the
             // blocking call that wedged the bridge: EditMode runs execute

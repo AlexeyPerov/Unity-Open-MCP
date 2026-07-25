@@ -283,5 +283,87 @@ namespace UnityOpenMcpBridge.Tests
                 new SerializeOptions { IncludeProperties = false });
             Assert.IsFalse(result.Contains("$ref"), result);
         }
+
+        // -------------------------------------------------------------------
+        // Regression: code-review finding B7 — object_get_data resolves a
+        // UnityEngine.Object and asks for a depth-limited reflective walk
+        // (the documented contract for ScriptableObjects, Materials, etc.).
+        // The regular Serialize entry point short-circuits every
+        // UnityEngine.Object to a compact {objectId,type,name,assetPath}
+        // handle before any reflection runs, so the four options were dead
+        // at the call root. SerializeReflectiveRoot skips that short-circuit
+        // for the top-level object only; nested UnityEngine.Object references
+        // still collapse to handles.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public static void SerializeReflectiveRoot_UnityEngineObject_WalksFields()
+        {
+            // A ScriptableObject is a UnityEngine.Object with public fields
+            // (if any are declared on the subclass). We use a temporary
+            // Material because it has well-known public properties (name,
+            // color, etc.) that the reflective walk must surface — the
+            // pre-fix Serialize() returned only a compact handle.
+            var mat = new Material(Shader.Find("Hidden/InternalErrorShader"));
+            try
+            {
+                mat.name = "__MCPTest_ReflectiveRoot";
+                var opts = new SerializeOptions { MaxDepth = 2, MaxListItems = 5 };
+                var result = OutputSerializer.SerializeReflectiveRoot(mat, opts);
+                // The reflective root must start the composite shape ($type),
+                // NOT the compact ObjectHandle shape (which starts with objectId).
+                StringAssert.Contains("\"$type\":\"Material\"", result);
+                // Material.name is a public property — the walk must surface it.
+                StringAssert.Contains("\"name\":\"__MCPTest_ReflectiveRoot\"", result);
+                // The compact handle keys must NOT dominate the root (they
+                // appear only on nested UnityEngine.Object references, if any).
+                // The pre-fix bug returned a handle whose first key was objectId.
+                Assert.IsFalse(result.StartsWith("{\"objectId\":"),
+                    "SerializeReflectiveRoot must not emit a compact handle at the root: " + result);
+            }
+            finally
+            {
+                Object.DestroyImmediate(mat);
+            }
+        }
+
+        [Test]
+        public static void SerializeReflectiveRoot_Null_ReturnsJsonNull()
+        {
+            Assert.AreEqual("null", OutputSerializer.SerializeReflectiveRoot(null, new SerializeOptions()));
+        }
+
+        [Test]
+        public static void SerializeReflectiveRoot_Poco_StillReflects()
+        {
+            // A non-UnityEngine.Object root must still go through the normal
+            // reflective walk (no regression for plain POCOs).
+            var result = OutputSerializer.SerializeReflectiveRoot(new SamplePoco(), new SerializeOptions());
+            StringAssert.Contains("\"$type\":\"SamplePoco\"", result);
+            StringAssert.Contains("\"Number\":7", result);
+        }
+
+        [Test]
+        public static void Serialize_UnityEngineObject_StillEmitsCompactHandle()
+        {
+            // Regression guard: the regular Serialize entry point must STILL
+            // short-circuit UnityEngine.Object to a compact handle (this is
+            // the correct behaviour for invoke_method/execute_csharp return
+            // values, where unbounded GameObject/Component graphs must not be
+            // walked). Only SerializeReflectiveRoot bypasses the short-circuit.
+            var mat = new Material(Shader.Find("Hidden/InternalErrorShader"));
+            try
+            {
+                var result = OutputSerializer.Serialize(mat);
+                Assert.IsTrue(result.StartsWith("{\"objectId\":"),
+                    "Serialize must still emit a compact handle for UnityEngine.Object: " + result);
+                Assert.IsFalse(result.Contains("\"$type\":\"Material\""),
+                    "Serialize must not reflect into a UnityEngine.Object: " + result);
+            }
+            finally
+            {
+                Object.DestroyImmediate(mat);
+            }
+        }
     }
 }

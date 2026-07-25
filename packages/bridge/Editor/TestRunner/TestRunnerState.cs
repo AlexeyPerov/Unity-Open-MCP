@@ -23,6 +23,7 @@ namespace UnityOpenMcpBridge.TestRunner
             string testNamespace,
             string testClass,
             string testMethod,
+            bool playMode,
             bool includePasses = true)
         {
             try
@@ -35,6 +36,11 @@ namespace UnityOpenMcpBridge.TestRunner
                 sb.Append("\"testNamespace\":").Append(TestRunnerService.EscapeString(testNamespace ?? "")).Append(',');
                 sb.Append("\"testClass\":").Append(TestRunnerService.EscapeString(testClass ?? "")).Append(',');
                 sb.Append("\"testMethod\":").Append(TestRunnerService.EscapeString(testMethod ?? "")).Append(',');
+                // B8 — persist the real test mode so OnAfterAssemblyReload can
+                // reattach callbacks for the correct run without guessing
+                // (the previous form always assumed PlayMode and started a
+                // fresh PlayMode run on every recompile, even for EditMode).
+                sb.Append("\"playMode\":").Append(playMode ? "true" : "false").Append(',');
                 sb.Append("\"includePasses\":").Append(includePasses ? "true" : "false");
                 sb.Append('}');
                 File.WriteAllText(PendingFilePath(runId), sb.ToString());
@@ -67,6 +73,11 @@ namespace UnityOpenMcpBridge.TestRunner
                     var testNamespace = JsonBody.GetString(json, "testNamespace");
                     var testClass = JsonBody.GetString(json, "testClass");
                     var testMethod = JsonBody.GetString(json, "testMethod");
+                    // B8 — read the persisted mode. Pending files written before
+                    // this fix lacked the field; default to PlayMode to preserve
+                    // the prior behaviour for in-flight PlayMode runs (the only
+                    // case where reattach is meaningful).
+                    var playMode = JsonBody.GetBool(json, "playMode", true);
                     var includePasses = JsonBody.GetBool(json, "includePasses", true);
 
                     if (assemblyName == "") assemblyName = null;
@@ -74,7 +85,7 @@ namespace UnityOpenMcpBridge.TestRunner
                     if (testClass == "") testClass = null;
                     if (testMethod == "") testMethod = null;
 
-                    ReattachCallbacks(runId, assemblyName, testNamespace, testClass, testMethod, includePasses);
+                    ReattachCallbacks(runId, playMode, includePasses);
                 }
             }
             catch (Exception ex)
@@ -83,15 +94,27 @@ namespace UnityOpenMcpBridge.TestRunner
             }
         }
 
-        private static void ReattachCallbacks(
-            string runId,
-            string assemblyName,
-            string testNamespace,
-            string testClass,
-            string testMethod,
-            bool includePasses)
+        // B8 — reattach MUST only re-register callbacks, never call Execute.
+        // The previous form built a PlayMode filter unconditionally and called
+        // api.Execute(...), which STARTS A NEW RUN rather than resuming the
+        // in-flight one. Unity's TestRunnerApi tracks the running run by GUID;
+        // after a domain reload the framework resumes automatically and
+        // delivers events to callbacks re-registered via RegisterCallbacks
+        // (the canonical [InitializeOnLoad] pattern from the Unity docs).
+        // Re-calling Execute made the Editor enter PlayMode and run PlayMode
+        // tests unasked on every recompile while a pending file existed —
+        // including the recompile an EditMode run can trigger — and the
+        // spurious run's onFinished then overwrote the real results file with
+        // a 0-test summary, so an agent polling for EditMode results got a
+        // bogus "all passed".
+        //
+        // If the original run already finished (EditMode runs are synchronous
+        // and don't reload; or the PlayMode run completed before this hook),
+        // the results file was already written by the original onFinished and
+        // these re-registered callbacks simply never fire — harmless.
+        private static void ReattachCallbacks(string runId, bool playMode, bool includePasses)
         {
-            var filter = TestRunnerService.BuildFilter(true, assemblyName, testNamespace, testClass, testMethod);
+            var mode = playMode ? "PlayMode" : "EditMode";
             var results = new List<TestResultInfo>();
             TestRunnerApi api = null;
 
@@ -101,12 +124,12 @@ namespace UnityOpenMcpBridge.TestRunner
                 {
                     if (api != null) Object.DestroyImmediate(api);
                     ClearPending(runId);
-                    TestRunnerService.WriteResultsFile(runId, "PlayMode", results, includePasses);
+                    TestRunnerService.WriteResultsFile(runId, mode, results, includePasses);
                 });
 
             api = ScriptableObject.CreateInstance<TestRunnerApi>();
             api.RegisterCallbacks(callbacks);
-            api.Execute(new ExecutionSettings(filter));
+            // Deliberately NOT calling api.Execute(...) — see the B8 note above.
         }
 
         private static string PendingFilePath(string runId) =>

@@ -491,7 +491,14 @@ namespace UnityOpenMcpBridge.TypedTools
                 : "\"" + OutputSerializer.EscapeJsonString(assetPath) + "\"");
             sb.Append("},\"data\":");
 
-            var serialized = OutputSerializer.Serialize(target, options);
+            // B7 — route the resolved UnityEngine.Object through the reflective
+            // root entry point instead of the regular Serialize, which
+            // short-circuits every UnityEngine.Object to a compact handle
+            // before any reflection runs (making all four options dead at the
+            // call root). SerializeReflectiveRoot walks public fields/
+            // properties at depth 0; nested UnityEngine.Object references
+            // still collapse to handles so payload size stays bounded.
+            var serialized = OutputSerializer.SerializeReflectiveRoot(target, options);
             sb.Append(serialized ?? "null");
             sb.Append(",\"options\":{");
             sb.Append("\"maxDepth\":").Append(options.MaxDepth);

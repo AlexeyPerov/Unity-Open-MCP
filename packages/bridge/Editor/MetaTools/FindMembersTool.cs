@@ -132,6 +132,12 @@ namespace UnityOpenMcpBridge.MetaTools
                     return false;
             }
 
+            // B5 — the previous form short-circuited on every assembly
+            // because both branches `return true`. The inner condition
+            // correctly identifies a project (non-engine) assembly; the
+            // fix is to EXCLUDE it by returning false there, so
+            // include_project:false actually filters project assemblies
+            // instead of silently returning them anyway.
             if (!includeProject)
             {
                 if (!name.StartsWith("UnityEngine", StringComparison.OrdinalIgnoreCase) &&
@@ -141,7 +147,7 @@ namespace UnityOpenMcpBridge.MetaTools
                     !name.StartsWith("mscorlib", StringComparison.OrdinalIgnoreCase) &&
                     !name.StartsWith("Microsoft", StringComparison.OrdinalIgnoreCase) &&
                     !name.StartsWith("netstandard", StringComparison.OrdinalIgnoreCase))
-                    return true;
+                    return false;
                 return true;
             }
 

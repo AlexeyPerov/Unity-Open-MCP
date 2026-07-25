@@ -289,6 +289,65 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // -------------------------------------------------------------------
+        // Regression: code-review finding B6 — scene_get_data emitted a
+        // dangling comma once max_nodes was hit. The root loop wrote the
+        // separator unconditionally, but SerializeNode emits nothing when the
+        // node budget is exhausted, producing `"roots":[{…},]` — invalid JSON.
+        // Reachable with defaults on any scene where the first root's subtree
+        // exceeds the budget and a second root exists. The fix mirrors the
+        // children loop's `emittedHere` guard: only emit the separator when
+        // the previous root actually wrote something.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void GetData_MaxNodesCap_MultipleRoots_ProducesValidJson()
+        {
+            // Two roots, cap of 1: the first root consumes the entire budget,
+            // the second root is skipped. The pre-fix bug emitted a separator
+            // for the second root even though SerializeNode wrote nothing,
+            // yielding `"roots":[{…},]`.
+            var rootA = new GameObject("__MCPTest_DanglingComma_A");
+            var rootB = new GameObject("__MCPTest_DanglingComma_B");
+            try
+            {
+                var result = ScenesTools.GetData("{\"detail\":\"summary\",\"max_nodes\":1}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                var output = result.Output;
+                // The dangling-comma signature: `,]` inside the roots array.
+                // The pre-fix malformed shape was `"roots":[{…},]`.
+                Assert.IsFalse(output.Contains(",]"),
+                    "roots array must not end with a dangling comma (B6): " + output);
+                // The whole body must be valid JSON — parse the roots array.
+                // JsonUtility round-trips through a minimal envelope so a
+                // structural break (extra comma) fails to deserialize.
+                var parsed = JsonUtility.FromJson<SceneDataEnvelope>(output);
+                Assert.IsNotNull(parsed.scene, "envelope must deserialize: " + output);
+            }
+            finally
+            {
+                if (rootA != null) Object.DestroyImmediate(rootA);
+                if (rootB != null) Object.DestroyImmediate(rootB);
+            }
+        }
+
+        [System.Serializable]
+        private class SceneDataEnvelope
+        {
+            public SceneDataScene scene;
+        }
+
+        [System.Serializable]
+        private class SceneDataScene
+        {
+            public string name;
+            public string path;
+            public int rootCount;
+            // truncated lives inside the scene object in the wire shape
+            // (ScenesTools appends it before closing the scene brace).
+            public int truncated;
+        }
+
         // ----------------------- Focus -----------------------------------
 
         [Test]

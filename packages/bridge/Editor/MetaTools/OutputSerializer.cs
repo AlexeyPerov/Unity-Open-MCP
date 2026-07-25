@@ -45,6 +45,29 @@ namespace UnityOpenMcpBridge.MetaTools
             return SerializeInternal(value, 0, options, new HashSet<object>(ReferenceComparer.Instance));
         }
 
+        // B7 — object_get_data resolves a UnityEngine.Object and asks for a
+        // depth-limited reflective walk over its public fields/properties
+        // (the documented contract for ScriptableObjects, Materials, etc.).
+        // The regular Serialize entry point short-circuits every
+        // UnityEngine.Object to a compact {objectId,type,name,assetPath}
+        // handle before any reflection runs, so the four options
+        // (max_depth/max_items/include_fields/include_properties) were dead
+        // at the call root. This entry point skips that short-circuit for
+        // the top-level object only — nested UnityEngine.Object references
+        // still collapse to handles (cyclic GameObject↔Component graphs,
+        // throwing property access), so payload size stays bounded.
+        public static string SerializeReflectiveRoot(object value, SerializeOptions options)
+        {
+            if (options == null) options = new SerializeOptions();
+            var visited = new HashSet<object>(ReferenceComparer.Instance);
+            if (value == null) return JsonNull;
+            // Unity "fake null": a destroyed UnityEngine.Object reads as null
+            // via the overloaded == operator; mirror SerializeInternal's guard.
+            if (value is UnityEngine.Object fakeNull && fakeNull == null) return JsonNull;
+            if (!value.GetType().IsValueType) visited.Add(value);
+            return SerializeComposite(value, value.GetType(), 0, options, visited);
+        }
+
         // JSON null literal. Composite emitters concatenate the return value of
         // SerializeInternal verbatim into the output buffer
         // (`items.Add("\"" + key + "\":" + val)`), so returning a C# null

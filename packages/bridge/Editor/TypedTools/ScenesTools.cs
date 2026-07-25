@@ -402,10 +402,29 @@ namespace UnityOpenMcpBridge.TypedTools
               .Append(",\"maxNodes\":").Append(maxNodes)
               .Append(",\"roots\":[");
 
+            // B6 — the root loop previously emitted the separator unconditionally,
+            // but SerializeNode emits nothing once the node budget is exhausted
+            // (`if (!counter.CanEmit) { counter.Truncated++; return; }`). That
+            // produced `"roots":[{…},]` when the first root's subtree exhausted
+            // the budget and a second root followed. The nested children loop
+            // already guards this correctly with `emittedHere` (see below), so we
+            // apply the same shape here: only emit the separator when the
+            // previous root actually wrote something.
+            int emittedRoots = 0;
             for (int i = 0; i < roots.Length; i++)
             {
-                if (i > 0) sb.Append(',');
+                if (!counter.CanEmit)
+                {
+                    // Budget exhausted before this root was written. SerializeNode
+                    // would no-op, so count the remaining roots as truncated and
+                    // stop without emitting a separator (avoiding the dangling
+                    // comma).
+                    counter.Truncated += roots.Length - i;
+                    break;
+                }
+                if (emittedRoots > 0) sb.Append(',');
                 SerializeNode(sb, roots[i], detail, depth, 0, counter);
+                emittedRoots++;
             }
             sb.Append("],\"moreHidden\":[");
             for (int i = 0; i < counter.MoreHidden.Count; i++)
