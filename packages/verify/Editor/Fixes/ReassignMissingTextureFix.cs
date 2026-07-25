@@ -12,6 +12,12 @@ namespace UnityOpenMcpVerify.Fixes
     // the fix is Safe=false and surfaces candidates via Describe; Apply
     // requires a chosen target_texture (asset path or GUID).
     //
+    // Apply narrows to a single slot when target_property is supplied (sourced
+    // by the caller from the issue's evidence.property). Without it the fix
+    // fills every null texture slot — which on a Standard material corrupts
+    // _BumpMap/_OcclusionMap/_EmissionMap/etc. with the chosen texture, so
+    // callers should pass target_property whenever the issue names one.
+    //
     // Producer: the `materials` rule emits `missing_texture` with the .mat
     // path as the issue's asset path.
     public class ReassignMissingTextureFix : IFixProvider
@@ -33,9 +39,12 @@ namespace UnityOpenMcpVerify.Fixes
             var desc = candidates.Count > 0
                 ? $"Reassign a texture to the null texture slot(s) on '{assetPath}'. " +
                   $"{candidates.Count} candidate texture(s) found by name. " +
-                  "Provide one via apply_fix with target_texture (asset path or GUID) to apply."
+                  "Provide one via apply_fix with target_texture (asset path or GUID) to apply. " +
+                  "Pass target_property (from the issue's evidence.property) to narrow to a single slot — " +
+                  "without it the texture is written into every null slot, which corrupts optional slots like _BumpMap."
                 : $"Reassign a texture to the null texture slot(s) on '{assetPath}'. No automatic candidates found — " +
-                  "use unity_open_mcp_find_references or list_assets to identify the intended texture before applying.";
+                  "use unity_open_mcp_find_references or list_assets to identify the intended texture before applying. " +
+                  "Pass target_property (from the issue's evidence.property) to narrow to a single slot.";
 
             return new FixDescription
             {
@@ -51,10 +60,19 @@ namespace UnityOpenMcpVerify.Fixes
 
         public FixResult Apply(string issueId)
         {
-            return Apply(issueId, targetTexture: null);
+            return Apply(issueId, targetTexture: null, targetProperty: null);
         }
 
+        // Two-arg overload retained for the IFixProvider surface and any caller
+        // that does not narrow to a single property (fill-all-null-slots
+        // behaviour). apply_fix routes through the three-arg overload when the
+        // caller supplies target_property.
         public FixResult Apply(string issueId, string targetTexture)
+        {
+            return Apply(issueId, targetTexture, targetProperty: null);
+        }
+
+        public FixResult Apply(string issueId, string targetTexture, string targetProperty)
         {
             if (!IssueKey.TryParse(issueId, out _, out _, out var assetPath, out _))
                 return new FixResult
@@ -148,19 +166,75 @@ namespace UnityOpenMcpVerify.Fixes
                     TouchedPaths = null
                 };
 
-            // Reassign to every TexEnv property that is currently null. A
-            // material usually has a single _MainTex, but we cover the case of
-            // several missing slots so the operator doesn't need one call per
-            // property.
-            var assigned = new List<string>();
-            var propCount = shader.GetPropertyCount();
-            for (var i = 0; i < propCount; i++)
+            // Assignment target resolution. When target_property is supplied
+            // (sourced from the issue's evidence.property by the caller), the
+            // fix narrows to that single slot. This matters because a Standard
+            // material legitimately leaves _BumpMap / _ParallaxMap /
+            // _OcclusionMap / _EmissionMap / _DetailMask / _DetailAlbedoMap /
+            // _DetailNormalMap null, and the historical fill-all-null-slots
+            // loop stuffed the chosen texture into every one of them —
+            // visibly corrupting the material. Without target_property we keep
+            // the fill-all behaviour as a convenience default.
+            var hasTargetProperty = !string.IsNullOrEmpty(targetProperty);
+
+            int targetIndex = -1;
+            if (hasTargetProperty)
             {
-                if (shader.GetPropertyType(i) != ShaderPropertyType.Texture) continue;
-                var propName = shader.GetPropertyName(i);
-                if (material.GetTexture(propName) != null) continue;
+                var propCount = shader.GetPropertyCount();
+                for (var i = 0; i < propCount; i++)
+                {
+                    if (shader.GetPropertyType(i) != ShaderPropertyType.Texture) continue;
+                    if (shader.GetPropertyName(i) != targetProperty) continue;
+                    targetIndex = i;
+                    break;
+                }
+                if (targetIndex < 0)
+                {
+                    return new FixResult
+                    {
+                        Success = false,
+                        Description = $"target_property '{targetProperty}' is not a texture property on shader '{shader.name}' for material '{assetPath}'. " +
+                                      "Omit target_property to fill all null texture slots, or pass the property name from the issue's evidence.property.",
+                        TouchedPaths = null
+                    };
+                }
+            }
+
+            var assigned = new List<string>();
+            if (hasTargetProperty)
+            {
+                // Narrowed to the single requested slot. Failing here (slot
+                // already filled) is preferable to silently no-oping or to
+                // overwriting an existing texture the operator did not name.
+                var propName = shader.GetPropertyName(targetIndex);
+                if (material.GetTexture(propName) != null)
+                {
+                    return new FixResult
+                    {
+                        Success = false,
+                        Description = $"target_property '{propName}' on material '{assetPath}' already has a texture. The issue may already be resolved; " +
+                                      "remove the existing texture first if you intend to replace it.",
+                        TouchedPaths = null
+                    };
+                }
                 material.SetTexture(propName, texture);
                 assigned.Add(propName);
+            }
+            else
+            {
+                // Fill-all fallback: every TexEnv property that is currently
+                // null. A material usually has a single _MainTex, but we cover
+                // the case of several missing slots so the operator doesn't
+                // need one call per property when no specific slot is named.
+                var propCount = shader.GetPropertyCount();
+                for (var i = 0; i < propCount; i++)
+                {
+                    if (shader.GetPropertyType(i) != ShaderPropertyType.Texture) continue;
+                    var propName = shader.GetPropertyName(i);
+                    if (material.GetTexture(propName) != null) continue;
+                    material.SetTexture(propName, texture);
+                    assigned.Add(propName);
+                }
             }
 
             if (assigned.Count == 0)
@@ -177,7 +251,10 @@ namespace UnityOpenMcpVerify.Fixes
             return new FixResult
             {
                 Success = true,
-                Description = $"Reassigned texture '{resolvedPath}' to {assigned.Count} slot(s) on '{assetPath}': {string.Join(", ", assigned)}.",
+                Description = hasTargetProperty
+                    ? $"Reassigned texture '{resolvedPath}' to slot '{assigned[0]}' on '{assetPath}'."
+                    : $"Reassigned texture '{resolvedPath}' to {assigned.Count} slot(s) on '{assetPath}': {string.Join(", ", assigned)}. " +
+                      "Pass target_property to narrow to a single slot.",
                 TouchedPaths = new[] { assetPath }
             };
         }

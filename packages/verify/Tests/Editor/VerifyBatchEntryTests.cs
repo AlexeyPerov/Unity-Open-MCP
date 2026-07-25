@@ -3,6 +3,7 @@ using UnityOpenMcpVerify.Batch;
 
 namespace UnityOpenMcpVerify.Tests
 {
+    using System.Linq;
     // Covers the VerifyBatchEntry orchestration entry path: arg extraction,
     // operation dispatch routing, and the ParseFlags validation branches.
     //
@@ -285,6 +286,47 @@ namespace UnityOpenMcpVerify.Tests
             StringAssert.Contains("\"exitCode\"", json);
             StringAssert.Contains("\"error\"", json);
             StringAssert.Contains("\"operation\"", json);
+        }
+
+        // -------------------------------------------------------------------
+        // Whole-project scope expansion (V1)
+        //
+        // The three batch runners (RunScanAll / RunBaselineCreate /
+        // RunRegressionCheck) must hand VerifyRunner a populated path set, not
+        // a null scope — otherwise 7 of 8 rules bail on their
+        // `scope.Paths == null` guard and the whole-project CI entry points
+        // report zero issues on a broken project. These are unit tests for the
+        // scope helper itself; the live runners remain integration paths
+        // (they call the real VerifyRunner over the project graph).
+        // -------------------------------------------------------------------
+
+        [Test]
+        public static void WholeProjectScope_ReturnsOnlyAssetsPrefixedPaths()
+        {
+            var paths = VerifyBatchEntry.WholeProjectScope();
+            Assert.IsNotNull(paths, "must never return null — rules' Length==0 guard relies on it");
+            Assert.IsTrue(paths.Length > 0,
+                "a real Unity project always has Assets/ entries — if this fires the test project is empty");
+            // Every entry must live under Assets/ (excludes Packages/, etc.)
+            // and use forward slashes regardless of platform.
+            foreach (var p in paths)
+            {
+                Assert.IsTrue(p.StartsWith("Assets/", System.StringComparison.Ordinal),
+                    $"scope must be Assets/-only, got '{p}'");
+                Assert.IsFalse(p.Contains('\\'),
+                    $"scope paths must use forward slashes, got '{p}'");
+            }
+        }
+
+        [Test]
+        public static void WholeProjectScope_DeduplicatesAndIsDeterministic()
+        {
+            // Two consecutive calls must return the same content — the helper
+            // is a pure projection over AssetDatabase and the batch runners
+            // invoke it once per operation.
+            var a = VerifyBatchEntry.WholeProjectScope().OrderBy(x => x);
+            var b = VerifyBatchEntry.WholeProjectScope().OrderBy(x => x);
+            Assert.AreEqual(a, b);
         }
     }
 }

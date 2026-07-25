@@ -204,6 +204,151 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
+        // target_property — V2 regression: without it the fix wrote the chosen
+        // texture into every null slot. With target_property="_MainTex" only
+        // _MainTex must change; an unrelated optional slot (_BumpMap) must
+        // remain null.
+        // -------------------------------------------------------------------
+
+        [UnityTest]
+        public System.Collections.IEnumerator Apply_WithTargetProperty_AssignsOnlyNamedSlot()
+        {
+            var matPath = FixtureRoot + "/TargetedSlot.mat";
+            var texPath = FixtureRoot + "/TargetedSlotTex.asset";
+
+            var mat = new Material(Shader.Find("Standard"));
+            AssetDatabase.CreateAsset(mat, matPath);
+
+            var tex = new Texture2D(2, 2);
+            AssetDatabase.CreateAsset(tex, texPath);
+            AssetDatabase.Refresh();
+            yield return null;
+
+            try
+            {
+                Assume.That(mat.GetTexture("_MainTex"), Is.Null,
+                    "fresh Standard material must have a null _MainTex");
+                Assume.That(mat.GetTexture("_BumpMap"), Is.Null,
+                    "fresh Standard material must have a null _BumpMap (the slot the old bug corrupted)");
+
+                var issueId = IssueKey.Build(
+                    "materials", VerifySeverity.Warning,
+                    matPath, "missing_texture");
+
+                var result = fix.Apply(issueId, texPath, "_MainTex");
+
+                Assert.IsTrue(result.Success,
+                    $"Apply should succeed. Got: {result.Description}");
+                Assert.That(result.TouchedPaths, Does.Contain(matPath));
+
+                AssetDatabase.ImportAsset(matPath, ImportAssetOptions.ForceUpdate);
+                var reloaded = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+                Assert.IsNotNull(reloaded.GetTexture("_MainTex"),
+                    "_MainTex must be assigned when target_property names it");
+                // The regression: the old fill-all loop would have written the
+                // albedo texture into _BumpMap too. With target_property it
+                // must stay null.
+                Assert.IsNull(reloaded.GetTexture("_BumpMap"),
+                    "_BumpMap must remain null — target_property narrows to the named slot only");
+            }
+            finally
+            {
+                if (AssetDatabase.LoadAssetAtPath<Material>(matPath) != null)
+                    AssetDatabase.DeleteAsset(matPath);
+                if (AssetDatabase.LoadAssetAtPath<Texture>(texPath) != null)
+                    AssetDatabase.DeleteAsset(texPath);
+                AssetDatabase.Refresh();
+            }
+        }
+
+        [Test]
+        public void Apply_WithUnknownTargetProperty_Fails()
+        {
+            // target_property that is not a texture property on the shader must
+            // produce a structured failure. The fix resolves the target texture
+            // before the property check, so use a real texture to reach the
+            // property-validation branch.
+            var matPath = FixtureRoot + "/UnknownProp.mat";
+            var texPath = FixtureRoot + "/UnknownPropTex.asset";
+
+            var mat = new Material(Shader.Find("Standard"));
+            AssetDatabase.CreateAsset(mat, matPath);
+            var tex = new Texture2D(2, 2);
+            AssetDatabase.CreateAsset(tex, texPath);
+            AssetDatabase.Refresh();
+
+            try
+            {
+                var issueId = IssueKey.Build(
+                    "materials", VerifySeverity.Warning,
+                    matPath, "missing_texture");
+                var result = fix.Apply(issueId, texPath, "_NotARealProperty");
+                Assert.IsFalse(result.Success,
+                    "an unknown target_property must fail rather than silently do nothing");
+                StringAssert.Contains("_NotARealProperty", result.Description);
+                StringAssert.Contains("not a texture property", result.Description);
+            }
+            finally
+            {
+                if (AssetDatabase.LoadAssetAtPath<Material>(matPath) != null)
+                    AssetDatabase.DeleteAsset(matPath);
+                if (AssetDatabase.LoadAssetAtPath<Texture>(texPath) != null)
+                    AssetDatabase.DeleteAsset(texPath);
+                AssetDatabase.Refresh();
+            }
+        }
+
+        [Test]
+        public void Apply_TargetPropertyAlreadyFilled_FailsWithoutOverwriting()
+        {
+            // When target_property already holds a texture, the fix must
+            // refuse rather than silently overwrite an asset the operator did
+            // not name.
+            var matPath = FixtureRoot + "/FilledSlot.mat";
+            var texAPath = FixtureRoot + "/FilledSlotTexA.asset";
+            var texBPath = FixtureRoot + "/FilledSlotTexB.asset";
+
+            var mat = new Material(Shader.Find("Standard"));
+            AssetDatabase.CreateAsset(mat, matPath);
+            var texA = new Texture2D(2, 2);
+            var texB = new Texture2D(2, 2);
+            AssetDatabase.CreateAsset(texA, texAPath);
+            AssetDatabase.CreateAsset(texB, texBPath);
+            AssetDatabase.Refresh();
+
+            try
+            {
+                mat.SetTexture("_MainTex", texA);
+                EditorUtility.SetDirty(mat);
+                AssetDatabase.SaveAssets();
+
+                var issueId = IssueKey.Build(
+                    "materials", VerifySeverity.Warning,
+                    matPath, "missing_texture");
+
+                var result = fix.Apply(issueId, texBPath, "_MainTex");
+                Assert.IsFalse(result.Success,
+                    "must refuse to overwrite an already-filled slot");
+                StringAssert.Contains("already has a texture", result.Description);
+
+                AssetDatabase.ImportAsset(matPath, ImportAssetOptions.ForceUpdate);
+                var reloaded = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+                Assert.AreSame(texA, reloaded.GetTexture("_MainTex"),
+                    "the existing texture must be untouched after the refusal");
+            }
+            finally
+            {
+                if (AssetDatabase.LoadAssetAtPath<Material>(matPath) != null)
+                    AssetDatabase.DeleteAsset(matPath);
+                if (AssetDatabase.LoadAssetAtPath<Texture>(texAPath) != null)
+                    AssetDatabase.DeleteAsset(texAPath);
+                if (AssetDatabase.LoadAssetAtPath<Texture>(texBPath) != null)
+                    AssetDatabase.DeleteAsset(texBPath);
+                AssetDatabase.Refresh();
+            }
+        }
+
+        // -------------------------------------------------------------------
         // Fixture helpers
         // -------------------------------------------------------------------
 

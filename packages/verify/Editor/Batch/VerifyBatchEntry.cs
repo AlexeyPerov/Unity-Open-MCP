@@ -93,7 +93,11 @@ namespace UnityOpenMcpVerify.Batch
             var outputPath = parsed.outputPath;
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var scope = new VerifyScope(null);
+            // Whole-project CI entry point: a null scope would make 7 of 8
+            // rules bail on their `scope.Paths == null` guard (only
+            // project_health expands null internally). Expand to the full
+            // Assets/ set here so every registered rule actually runs.
+            var scope = new VerifyScope(WholeProjectScope());
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Full);
             sw.Stop();
 
@@ -129,7 +133,9 @@ namespace UnityOpenMcpVerify.Batch
             var profile = parsed.platformProfile;
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var scope = new VerifyScope(null);
+            // Whole-project scan — see RunScanAll for why a null scope is
+            // expanded here instead of relying on per-rule null handling.
+            var scope = new VerifyScope(WholeProjectScope());
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Full);
             sw.Stop();
 
@@ -182,7 +188,9 @@ namespace UnityOpenMcpVerify.Batch
             }
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var scope = new VerifyScope(null);
+            // Whole-project scan — see RunScanAll for why a null scope is
+            // expanded here instead of relying on per-rule null handling.
+            var scope = new VerifyScope(WholeProjectScope());
             var result = VerifyRunner.RunScoped(scope, null, VerifyRunMode.Full);
             sw.Stop();
 
@@ -447,6 +455,29 @@ namespace UnityOpenMcpVerify.Batch
         #endregion
 
         #region Output helpers
+
+        // Expands a whole-project verify scope: every asset under Assets/,
+        // backslashes normalised to '/'. Mirrors the expansion
+        // ProjectHealth.Scanner.ResolveScope performs internally for the one
+        // rule that handles a null scope — centralising it here makes the
+        // other seven rules run on the same full set from the batch CLI.
+        // Returns an empty array (never null) when AssetDatabase has no paths,
+        // so the rules' `Length == 0` guard still applies cleanly.
+        internal static string[] WholeProjectScope()
+        {
+            var paths = UnityEditor.AssetDatabase.GetAllAssetPaths();
+            if (paths == null || paths.Length == 0)
+                return Array.Empty<string>();
+
+            var result = new List<string>(paths.Length);
+            foreach (var p in paths)
+            {
+                if (string.IsNullOrEmpty(p)) continue;
+                if (!p.StartsWith("Assets/", StringComparison.Ordinal)) continue;
+                result.Add(p.Replace('\\', '/'));
+            }
+            return result.ToArray();
+        }
 
         internal static string ResolveProjectPath(string relativeOrAbsolute)
         {

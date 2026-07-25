@@ -472,7 +472,8 @@ const MATERIALS_ISSUES: RuleIssueDescriptor[] = [
     fixIds: ["reassign_missing_texture"],
     rootCause: "resource_missing",
     remediation:
-      "A material texture slot is null or a builtin placeholder. Reassign a valid texture via apply_fix (reassign_missing_texture) with a target_texture asset path or GUID.",
+      "A material texture slot is null or a builtin placeholder. Reassign a valid texture via apply_fix (reassign_missing_texture) with a target_texture asset path or GUID, " +
+      "and pass target_property (from the issue's evidence.property) to narrow to the single named slot — without it the texture is written into every null slot.",
   },
   {
     code: "builtin_shader",
@@ -948,7 +949,8 @@ export const RULE_CATALOG: RuleCapability[] = [
 //     offline_integrity + project_health (orphan_meta).
 //   - fix_duplicate_guid (unsafe): regenerates a colliding GUID. Producers:
 //     offline_integrity + project_health (duplicate_guid).
-//   - reassign_missing_texture (unsafe, judgment): requires target_texture.
+//   - reassign_missing_texture (unsafe, judgment): requires target_texture;
+//     optional target_property narrows to a single slot (from evidence.property).
 //     Producer: materials (missing_texture).
 //   - reassign_missing_shader (unsafe, judgment): requires target_shader.
 //     Producer: materials (missing_shader).
@@ -988,7 +990,10 @@ const PLANNED_FIXES: FixCapability[] = [
     issueCodes: ["missing_texture"],
     // Reassigns a texture to the material's null texture slot(s). A wrong
     // texture silently changes the material's appearance; never auto-applied.
-    // Apply via apply_fix with target_texture (asset path or GUID).
+    // Apply via apply_fix with target_texture (asset path or GUID). Pass
+    // target_property (from the issue's evidence.property) to narrow to a
+    // single slot — without it the texture is written into every null slot,
+    // corrupting optional slots like _BumpMap on a Standard material.
     safe: false,
   },
   {
