@@ -46,9 +46,66 @@ namespace UnityOpenMcpBridge.Tests
     public static class OutputSerializerTests
     {
         [Test]
-        public static void Serialize_Null_ReturnsNull()
+        public static void Serialize_Null_ReturnsJsonNullLiteral()
         {
-            Assert.IsNull(OutputSerializer.Serialize(null));
+            // B3 — SerializeInternal must return the JSON token "null", not a
+            // C# null reference. Composite emitters concatenate the return
+            // value verbatim (`"key:" + val`), so a C# null produces `{"k":}`.
+            Assert.AreEqual("null", OutputSerializer.Serialize(null));
+        }
+
+        // Regression: code-review finding B3 — a null nested inside a composite
+        // (object field, dictionary value, or array element) used to emit a C#
+        // null reference, which the composite emitters concatenated verbatim,
+        // producing malformed JSON like `{"Name":}` or `[,1]`. The fix returns
+        // the literal JSON token "null" from both null branches so the composite
+        // stays valid. These cases round-trip through JsonUtility.
+        public class WithNullField
+        {
+            public string Present = "x";
+            public string Absent = null;
+        }
+
+        [Test]
+        public static void Serialize_NullField_EmitsJsonNullToken()
+        {
+            var result = OutputSerializer.Serialize(new WithNullField(),
+                new SerializeOptions { IncludeProperties = false });
+            // The null field must serialize as the JSON literal `null`, not as
+            // a missing value (`"Absent":}`) — the pre-fix malformed shape.
+            StringAssert.Contains("\"Absent\":null", result);
+            StringAssert.Contains("\"Present\":\"x\"", result);
+            // The whole object must be valid JSON (no stray `:` before `}`).
+            var parsed = JsonUtility.FromJson<WithNullField>(result);
+            Assert.AreEqual("x", parsed.Present);
+            Assert.IsNull(parsed.Absent);
+        }
+
+        [Test]
+        public static void Serialize_DictionaryWithNullValue_EmitsJsonNullToken()
+        {
+            var dict = new Dictionary<string, object>
+            {
+                { "k", null },
+                { "n", 1 },
+            };
+            var result = OutputSerializer.Serialize(dict, new SerializeOptions());
+            // The null value must render as `null`, not as `"k":` (the pre-fix
+            // malformed shape that broke the whole object).
+            StringAssert.Contains("\"k\":null", result);
+            StringAssert.Contains("\"n\":1", result);
+        }
+
+        [Test]
+        public static void Serialize_ArrayWithNullElement_EmitsJsonNullToken()
+        {
+            var list = new List<object> { null, 1 };
+            var result = OutputSerializer.Serialize(list, new SerializeOptions());
+            // `[null,1]` — the null element must render as the literal token,
+            // not as `[,1]` (the pre-fix malformed shape).
+            StringAssert.Contains("null,1", result);
+            Assert.IsFalse(result.Contains("[,"),
+                "Array with a null element must not emit a leading comma: " + result);
         }
 
         [Test]

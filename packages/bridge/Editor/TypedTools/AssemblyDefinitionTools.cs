@@ -325,8 +325,13 @@ namespace UnityOpenMcpBridge.TypedTools
             sb.Append(",\"includePlatformCount\":").Append(model.IncludePlatforms.Count);
             sb.Append(",\"excludePlatformCount\":").Append(model.ExcludePlatforms.Count);
             sb.Append(",\"defineConstraintCount\":").Append(model.DefineConstraints.Count);
-            sb.Append(",\"note\":\"ImportAsset queued; a recompile / domain reload may follow. \"")
-              .Append("Poll editor_status / compile_check to confirm.\"}");
+            // The note is ONE JSON string literal — do not split it across two
+            // Appends with a stray closing quote (code-review finding B2): the
+            // old form emitted `…may follow. "Poll …confirm."}`, which is
+            // unparseable, so every successful asmdef write returned a transport
+            // failure even though the file had already been written.
+            sb.Append(",\"note\":\"ImportAsset queued; a recompile / domain reload may follow. " +
+                      "Poll editor_status / compile_check to confirm.\"}");
             return ToolDispatchResult.Ok(sb.ToString());
         }
 

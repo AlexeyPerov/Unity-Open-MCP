@@ -291,6 +291,71 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // -------------------------------------------------------------------
+        // Regression: code-review finding B1 — BatchExecuteTool.Execute used to
+        // return ToolDispatchResult.Ok(...) unconditionally, so a partial batch
+        // (one or more failed steps) reported `mutation.success: true` to the
+        // gate envelope. That made BatchExecuteGateRunner's "one or more steps
+        // failed" guidance branch dead code and reported `gate.outcome: passed`
+        // for a run that had failed steps. The fix propagates batchSuccess to
+        // the dispatch result's Success flag with a `batch_partial_failure`
+        // error code, while the per-step output envelope is preserved so the
+        // agent can still inspect batch.results[].
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void Execute_PartialFailure_SetsBatchPartialFailureErrorCode()
+        {
+            var body = "{\"commands\":[" +
+                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"" + CleanupPrefix + "B1OK\"}}," +
+                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"\"}}" +
+                       "]}";
+
+            var result = BatchExecuteTool.Execute(body);
+            // Success flag must reflect the partial failure (B1).
+            Assert.IsFalse(result.Success, "partial batch must report Success=false");
+            Assert.AreEqual("batch_partial_failure", result.ErrorCode);
+            Assert.IsNotNull(result.ErrorMessage);
+            StringAssert.Contains("batch.results[]", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_PartialFailure_StillPreservesBatchOutputEnvelope()
+        {
+            // The per-step detail must remain available in Output even when the
+            // batch failed — the agent inspects batch.results[] to recover.
+            var body = "{\"commands\":[" +
+                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"" + CleanupPrefix + "B1Env\"}}," +
+                       "{\"tool\":\"unity_open_mcp_gameobject_create\",\"params\":{\"name\":\"\"}}" +
+                       "]}";
+
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.IsNotNull(result.Output);
+            StringAssert.Contains("\"batch\":{", result.Output);
+            StringAssert.Contains("\"success\":false", result.Output);
+            StringAssert.Contains("\"callSuccessCount\":1", result.Output);
+            StringAssert.Contains("\"callFailureCount\":1", result.Output);
+            // The whole output must be valid JSON (the error code is in the
+            // dispatch result, not duplicated into the body).
+            var parsed = JsonUtility.FromJson<BatchEnvelope>(result.Output);
+            Assert.IsFalse(parsed.batch.success);
+        }
+
+        [System.Serializable]
+        private class BatchEnvelope
+        {
+            public BatchPayload batch;
+        }
+
+        [System.Serializable]
+        private class BatchPayload
+        {
+            public bool success;
+            public int callSuccessCount;
+            public int callFailureCount;
+        }
+
+        // -------------------------------------------------------------------
         // Per-step output is present on success
         // -------------------------------------------------------------------
 

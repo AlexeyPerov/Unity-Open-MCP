@@ -45,15 +45,22 @@ namespace UnityOpenMcpBridge.MetaTools
             return SerializeInternal(value, 0, options, new HashSet<object>(ReferenceComparer.Instance));
         }
 
+        // JSON null literal. Composite emitters concatenate the return value of
+        // SerializeInternal verbatim into the output buffer
+        // (`items.Add("\"" + key + "\":" + val)`), so returning a C# null
+        // reference here produces malformed JSON like `{"Name":}`. Return the
+        // literal JSON token "null" instead — code-review finding B3.
+        private const string JsonNull = "null";
+
         private static string SerializeInternal(object value, int depth, SerializeOptions opts, HashSet<object> visited)
         {
-            if (value == null) return null;
+            if (value == null) return JsonNull;
 
             // Unity "fake null": a destroyed UnityEngine.Object is not a real null
             // reference but the overloaded == operator reports it as null. Reading
             // any property on it throws, so short-circuit to JSON null first.
             if (value is UnityEngine.Object unityObj && unityObj == null)
-                return null;
+                return JsonNull;
 
             var type = value.GetType();
 

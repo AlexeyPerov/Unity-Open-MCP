@@ -284,12 +284,25 @@ namespace UnityOpenMcpBridge.MetaTools
                 sw.Stop();
 
                 // Batch-level success = every step succeeded. A failed/skipped
-                // step makes the batch "success:false" so the gate runner +
-                // envelope reflect the partial state, but per-step detail is
-                // always present in the output.
+                // step must propagate to the ToolDispatchResult.Success flag so
+                // the gate envelope's `mutation.success` and the gate runner's
+                // partial-failure branch (BatchExecuteGateRunner) fire. The
+                // per-step detail is always present in the output regardless.
+                // Returning Ok(...) here would hardcode Success=true (see
+                // ToolDispatchResult.Ok) and make the "one or more steps failed"
+                // guidance dead code — code-review finding B1.
                 bool batchSuccess = failureCount == 0;
-                return ToolDispatchResult.Ok(BuildBatchOutput(
-                    batchSuccess, successCount, failureCount, failFast, results, sw.ElapsedMilliseconds));
+                string batchOutput = BuildBatchOutput(
+                    batchSuccess, successCount, failureCount, failFast, results, sw.ElapsedMilliseconds);
+                if (batchSuccess)
+                {
+                    return ToolDispatchResult.Ok(batchOutput);
+                }
+                return new ToolDispatchResult(
+                    false, batchOutput, "batch_partial_failure",
+                    failureCount + " batch step(s) failed; inspect batch.results[] for per-step " +
+                    "status and error detail. Successful steps before the failure are committed " +
+                    "(v1 does not roll them back) — undo with a single editor_undo if needed.");
             }
             finally
             {

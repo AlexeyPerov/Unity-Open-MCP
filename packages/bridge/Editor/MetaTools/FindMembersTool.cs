@@ -300,11 +300,21 @@ namespace UnityOpenMcpBridge.MetaTools
                 sb.Append('}');
             }
             sb.Append(']');
+            // B4 — close the previous token explicitly. The old form unconditionally
+            // emitted `"}` after this block, which is only valid when the optional
+            // `signature` string was opened just above. With includeSignatures ==
+            // false the preceding token is the unquoted `parameters` array, so the
+            // stray `"` produced `…"parameters":[…]"}` and corrupted the response.
             if (includeSignatures)
             {
-                sb.Append(",\"signature\":\"").Append(OutputSerializer.EscapeJsonString(GetMethodSignature(method)));
+                sb.Append(",\"signature\":\"")
+                  .Append(OutputSerializer.EscapeJsonString(GetMethodSignature(method)))
+                  .Append("\"}");
             }
-            sb.Append("\"}");
+            else
+            {
+                sb.Append('}');
+            }
             return sb.ToString();
         }
 
@@ -319,11 +329,21 @@ namespace UnityOpenMcpBridge.MetaTools
             sb.Append(",\"canWrite\":").Append(prop.CanWrite ? "true" : "false");
             var getter = prop.GetMethod;
             sb.Append(",\"isStatic\":").Append(getter != null && getter.IsStatic ? "true" : "false");
+            // B4 — close the previous token explicitly (see SerializeMethod for
+            // the full rationale). The trailing `"}` is only valid when the
+            // optional `signature` string was opened just above; with
+            // includeSignatures == false the preceding token is the unquoted
+            // `isStatic` boolean, so the stray `"` corrupted the response.
             if (includeSignatures)
             {
-                sb.Append(",\"signature\":\"").Append(OutputSerializer.EscapeJsonString(GetPropertySignature(prop)));
+                sb.Append(",\"signature\":\"")
+                  .Append(OutputSerializer.EscapeJsonString(GetPropertySignature(prop)))
+                  .Append("\"}");
             }
-            sb.Append("\"}");
+            else
+            {
+                sb.Append('}');
+            }
             return sb.ToString();
         }
     }

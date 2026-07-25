@@ -22,8 +22,11 @@ export const batchExecute = makeTool(
     "delta) and ONE undo group. `fail_fast: true` (the default) stops on the first step failure " +
     "and marks later entries `skipped`. With `fail_fast: false`, every step runs and per-step " +
     "errors are collected. Partial failure semantics: a successful step is NOT rolled back when a " +
-    "later step fails (same as Coplay); the `gate.delta` still reports new issues introduced by " +
-    "the partial run, and `agentNextSteps` points at fixes.\n\n" +
+    "later step fails (same as Coplay). A partial batch propagates `mutation.success: false` with " +
+    "error code `batch_partial_failure`, so the gate marks the run `outcome: failed` and skips the " +
+    "validate/delta step (the committed steps stand); `agentNextSteps` directs the caller to inspect " +
+    "`batch.results[]` for per-step status and undo with a single `editor_undo` if needed. Run " +
+    "`unity_open_mcp_validate_edit` on the touched paths to confirm health after a partial run.\n\n" +
     "v1 limits: 25 commands default / 100 hard max (`batchExecuteMaxCommands`). `parallel: true` " +
     "is accepted but ignored with a note — Unity's API is main-thread; sequential execution only. " +
     "`batch_execute` cannot be nested inside itself; `compile_check` is headless-only. Any nested " +

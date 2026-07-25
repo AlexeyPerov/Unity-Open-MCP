@@ -495,5 +495,67 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(result.Output.Contains("\"autoReferenced\":True"),
                 "autoReferenced must NOT serialize as Boolean.ToString() 'True'");
         }
+
+        // Regression: code-review finding B2 — asmdef_create / asmdef_modify built
+        // the `note` field by closing the JSON string mid-sentence across two
+        // StringBuilder.Append calls, producing `…may follow. "Poll …confirm."}`,
+        // which is unparseable. Every successful asmdef write therefore returned
+        // a transport/parse failure for an operation that had already written
+        // the file and started a domain reload. The whole response must round-trip
+        // through a JSON parser with a complete note string.
+        [Test]
+        public void AsmdefCreate_ResponseParsesAsJson_WithCompleteNote()
+        {
+            var path = TmpRoot + "/B2Note.asmdef";
+            var result = AssemblyDefinitionTools.Create(
+                "{\"asset_path\":\"" + path + "\",\"name\":\"Test.B2Note\"}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+
+            var parsed = JsonUtility.FromJson<AsmdefWritePayload>(result.Output);
+            Assert.AreEqual("ok", parsed.status);
+            Assert.IsFalse(string.IsNullOrEmpty(parsed.note),
+                "note must be present: " + result.Output);
+            // The pre-fix bug closed the note after "follow. " — the fixed note
+            // must carry the full sentence through "confirm.".
+            StringAssert.Contains("ImportAsset", parsed.note);
+            StringAssert.Contains("recompile", parsed.note);
+            StringAssert.Contains("Poll editor_status", parsed.note);
+            StringAssert.Contains("compile_check to confirm.", parsed.note);
+        }
+
+        [Test]
+        public void AsmdefModify_ResponseParsesAsJson_WithCompleteNote()
+        {
+            var path = TmpRoot + "/B2NoteModify.asmdef";
+            AssemblyDefinitionTools.Create(
+                "{\"asset_path\":\"" + path + "\",\"name\":\"Test.B2NoteModify\"}");
+
+            var result = AssemblyDefinitionTools.Modify(
+                "{\"asset_path\":\"" + path + "\",\"add_references\":[\"Test.X\"]}");
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+
+            var parsed = JsonUtility.FromJson<AsmdefWritePayload>(result.Output);
+            Assert.AreEqual("ok", parsed.status);
+            Assert.IsFalse(string.IsNullOrEmpty(parsed.note),
+                "note must be present: " + result.Output);
+            StringAssert.Contains("Poll editor_status", parsed.note);
+            StringAssert.Contains("compile_check to confirm.", parsed.note);
+        }
+
+        // Minimal payload shape for JsonUtility round-trip on the asmdef write
+        // response. Only the fields the B2 regression asserts are modelled.
+        [System.Serializable]
+        public class AsmdefWritePayload
+        {
+            public string status;
+            public string assetPath;
+            public string name;
+            public string action;
+            public int referenceCount;
+            public int includePlatformCount;
+            public int excludePlatformCount;
+            public int defineConstraintCount;
+            public string note;
+        }
     }
 }
