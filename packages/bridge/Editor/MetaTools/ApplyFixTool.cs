@@ -61,24 +61,14 @@ namespace UnityOpenMcpBridge.MetaTools
             try
             {
                 // relink_broken_guid needs a chosen target GUID to actually
-                // rewrite the reference. The materials fixes need a chosen
-                // target texture / shader (judgment calls); reassign_missing_texture
-                // also takes an optional target_property to narrow to a single
-                // slot. Other providers ignore the params.
+                // rewrite the reference. reassign_missing_shader needs a chosen
+                // target shader (a judgment call). Other providers ignore the
+                // params. (reassign_missing_texture was removed — no rule emits
+                // missing_texture.)
                 if (provider is RelinkBrokenGuidFix relink)
                 {
                     var targetGuid = JsonBody.GetString(body, "target_guid");
                     result = relink.Apply(issueId, targetGuid);
-                }
-                else if (provider is ReassignMissingTextureFix textureFix)
-                {
-                    var targetTexture = JsonBody.GetString(body, "target_texture");
-                    // target_property narrows the reassign to a single named
-                    // slot (sourced by the caller from the issue's
-                    // evidence.property). Without it the fix fills every null
-                    // texture slot, which corrupts optional slots like _BumpMap.
-                    var targetProperty = JsonBody.GetString(body, "target_property");
-                    result = textureFix.Apply(issueId, targetTexture, targetProperty);
                 }
                 else if (provider is ReassignMissingShaderFix shaderFix)
                 {

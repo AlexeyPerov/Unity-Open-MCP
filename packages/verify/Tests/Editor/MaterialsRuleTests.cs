@@ -75,9 +75,9 @@ namespace UnityOpenMcpVerify.Tests
             var scope = new VerifyScope(new[] { path });
             rule.Scan(scope, VerifyRunMode.Full, sink);
 
-            var missing = sink.Where(i => i.IssueCode == "missing_shader" || i.IssueCode == "missing_texture").ToList();
+            var missing = sink.Where(i => i.IssueCode == "missing_shader").ToList();
             Assert.AreEqual(0, missing.Count,
-                $"Healthy material must not produce missing_shader/missing_texture. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
+                $"Healthy material must not produce missing_shader. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
         }
 
         [UnityTest]

@@ -5,7 +5,15 @@ namespace UnityOpenMcpVerify.Rules.Materials
     public static class IssueMapper
     {
         public const string CodeMissingShader = "missing_shader";
-        public const string CodeMissingTexture = "missing_texture";
+        // Note: there is no `missing_texture` code here. A null texture slot is
+        // NOT reported by this rule — most optional shader texture properties
+        // (_BumpMap/_ParallaxMap/_OcclusionMap/_DetailMask/...) are
+        // legitimately null on a freshly-created material, so flagging every
+        // null slot would produce false positives. A genuinely-missing texture
+        // (a PPtr whose GUID no longer resolves) is surfaced by the
+        // missing_references rule as missing_guid. The only texture-related
+        // warning this rule emits is builtin_texture (a slot holding a
+        // unity_builtin placeholder).
         public const string CodeBuiltinShader = "builtin_shader";
         public const string CodeBuiltinTexture = "builtin_texture";
         public const string CodeRenderQueueOverride = "render_queue_override";
@@ -33,8 +41,12 @@ namespace UnityOpenMcpVerify.Rules.Materials
                 }
                 foreach (var tw in data.TextureWarnings)
                 {
-                    var severity = tw.IssueCode == CodeMissingTexture ? VerifySeverity.Warning : VerifySeverity.Warning;
-                    sink.Add(new VerifyIssue("materials", severity, data.Path, tw.IssueCode,
+                    // TextureWarnings today only carries builtin_texture
+                    // (Scanner.FindMaterialWarnings never adds anything else —
+                    // see the comment on CodeMissingShader above). Keep the
+                    // Severity explicit so a future code path does not silently
+                    // demote a real warning.
+                    sink.Add(new VerifyIssue("materials", VerifySeverity.Warning, data.Path, tw.IssueCode,
                         $"{tw.Detail}",
                         Evidence(("material", data.Name),
                             ("property", tw.PropertyName))));

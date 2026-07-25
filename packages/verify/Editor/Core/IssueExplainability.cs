@@ -201,9 +201,10 @@ namespace UnityOpenMcpVerify
             ["materials|missing_shader"] = new Entry(
                 "resource_missing",
                 "The material's shader is null or the error shader — the original shader failed to compile or is missing. Reassign a valid shader via apply_fix (reassign_missing_shader) with a target_shader name or path."),
-            ["materials|missing_texture"] = new Entry(
-                "resource_missing",
-                "A material texture slot is null or a builtin placeholder. Reassign a valid texture via apply_fix (reassign_missing_texture) with a target_texture asset path or GUID."),
+            // No materials|missing_texture entry: the materials rule never
+            // emits this code (a null texture slot is usually legitimate; a
+            // genuinely-broken texture PPtr surfaces via missing_references
+            // /missing_guid instead).
             ["materials|builtin_shader"] = new Entry(
                 "configuration_mismatch",
                 "The material uses a built-in shader. If intentional, ignore; otherwise assign the project's render-pipeline shader."),

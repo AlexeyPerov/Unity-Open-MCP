@@ -51,7 +51,12 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                     {
                         if (r.Resolves) continue;
                         if (!reported.Add(r.Reference)) continue;
-                        sink.Add(MakeIssue(asset, CodeBrokenReference,
+                        // V8: discriminator = reference name so the gate delta
+                        // sees each distinct broken reference. Without it two
+                        // unresolved references on one asmdef collapse to one
+                        // key and ComputeDelta cannot detect a second one
+                        // being added.
+                        sink.Add(MakeIssue(asset, CodeBrokenReference + ":" + r.Reference,
                             $"Assembly reference '{r.Reference}' does not resolve to a compiled assembly or known asmdef.",
                             VerifySeverity.Error,
                             Evidence(("reference", r.Reference),
@@ -90,7 +95,9 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                 if (reference.Contains("UnityEditor") || reference.Contains(".Editor"))
                 {
                     if (data.IncludePlatforms.Contains("Editor")) continue;
-                    sink.Add(MakeIssue(data, CodeEditorInRuntime,
+                    // V8: discriminator = reference so multiple editor-in-runtime
+                    // references on one asmdef do not collapse to one key.
+                    sink.Add(MakeIssue(data, CodeEditorInRuntime + ":" + reference,
                         $"Runtime assembly references editor assembly '{reference}' but is not editor-only.",
                         VerifySeverity.Warning,
                         Evidence(("reference", reference),

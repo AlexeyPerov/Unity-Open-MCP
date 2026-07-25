@@ -466,15 +466,12 @@ const MATERIALS_ISSUES: RuleIssueDescriptor[] = [
     remediation:
       "The material's shader is null or the error shader — the original shader failed to compile or is missing. Reassign a valid shader via apply_fix (reassign_missing_shader) with a target_shader name or path.",
   },
-  {
-    code: "missing_texture",
-    severity: "Warning",
-    fixIds: ["reassign_missing_texture"],
-    rootCause: "resource_missing",
-    remediation:
-      "A material texture slot is null or a builtin placeholder. Reassign a valid texture via apply_fix (reassign_missing_texture) with a target_texture asset path or GUID, " +
-      "and pass target_property (from the issue's evidence.property) to narrow to the single named slot — without it the texture is written into every null slot.",
-  },
+  // No `missing_texture` code here: the materials rule never emits it. Most
+  // optional shader texture properties (_BumpMap, _ParallaxMap, _OcclusionMap,
+  // _DetailMask, ...) are legitimately null on a freshly-created material, so
+  // flagging every null slot would produce false positives. A genuinely-missing
+  // texture (a PPtr whose GUID no longer resolves) is surfaced by the
+  // missing_references rule as missing_guid instead.
   {
     code: "builtin_shader",
     severity: "Warning",
@@ -949,11 +946,11 @@ export const RULE_CATALOG: RuleCapability[] = [
 //     offline_integrity + project_health (orphan_meta).
 //   - fix_duplicate_guid (unsafe): regenerates a colliding GUID. Producers:
 //     offline_integrity + project_health (duplicate_guid).
-//   - reassign_missing_texture (unsafe, judgment): requires target_texture;
-//     optional target_property narrows to a single slot (from evidence.property).
-//     Producer: materials (missing_texture).
 //   - reassign_missing_shader (unsafe, judgment): requires target_shader.
 //     Producer: materials (missing_shader).
+// No reassign_missing_texture provider exists: the materials rule never emits
+// missing_texture (most optional texture slots are legitimately null; a
+// genuinely-broken texture PPtr surfaces via missing_references/missing_guid).
 // M25 Plan 2 also added safe auto-fix rollback: a non-dry-run apply_fix that
 // fails or introduces new errors under enforce is restored to its pre-fix
 // state and the response carries a top-level `rollback` block.
@@ -980,20 +977,6 @@ const PLANNED_FIXES: FixCapability[] = [
     // under enforce. Apply via apply_fix with the target path picked
     // deliberately (the less-referenced asset is usually the right one to
     // re-GUID, but that judgement is the operator's).
-    safe: false,
-  },
-  {
-    id: "reassign_missing_texture",
-    implemented: true,
-    status: "implemented",
-    rules: ["materials"],
-    issueCodes: ["missing_texture"],
-    // Reassigns a texture to the material's null texture slot(s). A wrong
-    // texture silently changes the material's appearance; never auto-applied.
-    // Apply via apply_fix with target_texture (asset path or GUID). Pass
-    // target_property (from the issue's evidence.property) to narrow to a
-    // single slot — without it the texture is written into every null slot,
-    // corrupting optional slots like _BumpMap on a Standard material.
     safe: false,
   },
   {

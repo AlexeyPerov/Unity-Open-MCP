@@ -7,12 +7,12 @@ export const applyFix = makeTool(
     "Returns gate envelope when dry_run is false (dry_run short-circuits the gate entirely). " +
     "Implemented fixes: remove_missing_script (safe), relink_broken_guid (unsafe — needs target_guid), " +
     "remove_orphan_meta (safe), fix_duplicate_guid (unsafe), " +
-    "reassign_missing_texture (unsafe — needs target_texture, optional target_property narrows to one slot), reassign_missing_shader (unsafe — needs target_shader). " +
+    "reassign_missing_shader (unsafe — needs target_shader). " +
     "Safe auto-fix rollback: a non-dry-run apply that fails or introduces new errors under enforce is " +
     "restored to its pre-fix state and the response carries a top-level `rollback` block " +
     "({rolledBack, reason, restoredPaths}). Non-dry-run applies are gate-runner-mediated: a FixRollback " +
     "snapshot is active so a corrupting fix is automatically reverted on failure or new errors. " +
-    "Use gate: \"off\" ONLY when you accept that the fix commits with no rollback — the response then " +
+    "Use gate: \"off\" ONLY when you accept the fix commits with no rollback — the response then " +
     "carries `rollbackDisabled: true` to flag that no automatic restore is available.",
   {
     required: ["issue_id"],
@@ -35,20 +35,6 @@ export const applyFix = makeTool(
             description:
               "Optional. Replacement GUID for relink_broken_guid — the chosen target out of the " +
               "candidates the dry_run preview advertises. Ignored by other fixes.",
-          },
-          target_texture: {
-            type: "string",
-            description:
-              "Optional. The chosen texture for reassign_missing_texture — an asset path or 32-hex GUID " +
-              "out of the candidates the dry_run preview advertises. Ignored by other fixes.",
-          },
-          target_property: {
-            type: "string",
-            description:
-              "Optional. The shader texture-property name to narrow reassign_missing_texture to a single " +
-              "slot (e.g. '_MainTex'), sourced from the issue's evidence.property. Without it the texture " +
-              "is written into EVERY null texture slot on the material, which corrupts optional slots like " +
-              "_BumpMap/_OcclusionMap/_EmissionMap on a Standard material. Ignored by other fixes.",
           },
           target_shader: {
             type: "string",

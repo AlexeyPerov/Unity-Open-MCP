@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpVerify.Internals.RegexPatterns;
 using UnityOpenMcpVerify.Internals.Serialization;
+using UnityEngine.SceneManagement;
 
 namespace UnityOpenMcpVerify.Fixes
 {
@@ -130,7 +131,92 @@ namespace UnityOpenMcpVerify.Fixes
                     TouchedPaths = null
                 };
 
-            return RewriteGuid(assetPath, brokenGuid, targetGuid);
+            // V5: refuse to edit an asset that the Editor currently has open.
+            // Writing a scene/prefab on disk that is open in-memory means the
+            // next save silently reverts our relink AFTER apply_fix already
+            // reported success — exactly the hazard RemoveMissingScriptFix
+            // guards against with its `wasOpen` check. Scenes (open scene
+            // files) and prefab-stage assets are both covered.
+            var openAsset = CheckAssetOpen(assetPath);
+            if (openAsset != null)
+            {
+                return new FixResult
+                {
+                    Success = false,
+                    Description = openAsset,
+                    TouchedPaths = null
+                };
+            }
+
+            return RewriteGuid(assetPath, brokenGuid, targetGuid, targetPath);
+        }
+
+        // V5: detect a referencing asset that the editor currently has open.
+        // Returns a non-null message describing why we refused, or null if it
+        // is safe to edit the file on disk.
+        private static string CheckAssetOpen(string assetPath)
+        {
+            // Open scene check: any loaded scene at this path (active or
+            // additively-loaded) means an in-memory copy that would silently
+            // win the next save.
+            var ext = Path.GetExtension(assetPath ?? "").ToLowerInvariant();
+            if (ext == ".unity")
+            {
+                for (var i = 0; i < SceneManager.sceneCount; i++)
+                {
+                    if (SceneManager.GetSceneAt(i).path == assetPath)
+                    {
+                        return $"Scene '{assetPath}' is currently open in the Editor. " +
+                               "Close it (or save and close) before relinking so the in-memory copy " +
+                               "does not silently revert the relink on the next save.";
+                    }
+                }
+                return null;
+            }
+
+            // Prefab stage check: a prefab open in the Prefab Editor has an
+            // in-memory instance too. PrefabStageUtility lives in UnityEditor.
+            try
+            {
+                var stageType = System.Type.GetType(
+                    "UnityEditor.SceneManagement.PrefabStage, UnityEditor");
+                if (stageType != null)
+                {
+                    // PrefabStageUtility.GetCurrentPrefabStage() — reflection
+                    // keeps us compile-safe across Unity versions where the
+                    // API moved between namespaces.
+                    var utilType = System.Type.GetType(
+                        "UnityEditor.SceneManagement.PrefabStageUtility, UnityEditor");
+                    var getCurrent = utilType?.GetMethod(
+                        "GetCurrentPrefabStage",
+                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                    var stage = getCurrent?.Invoke(null, null);
+                    if (stage != null)
+                    {
+                        var prefabPathProp = stageType.GetProperty("prefabAssetPath");
+                        // 2022+ exposes `assetPath` (prefabAssetPath is the
+                        // older 2021/2019 name); fall back to either.
+                        var assetPathProp = stageType.GetProperty("assetPath");
+                        var stagePath = prefabPathProp?.GetValue(stage) as string
+                                        ?? assetPathProp?.GetValue(stage) as string;
+                        if (!string.IsNullOrEmpty(stagePath)
+                            && string.Equals(stagePath, assetPath, System.StringComparison.OrdinalIgnoreCase))
+                        {
+                            return $"Prefab '{assetPath}' is open in the Prefab Stage. " +
+                                   "Apply the fix with the prefab closed so the in-memory stage copy " +
+                                   "does not silently revert the relink on save.";
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Reflection against the prefab-stage API must never break
+                // Apply; if we cannot determine the stage state, fall through
+                // to the normal path (no false refusal).
+            }
+
+            return null;
         }
 
         // -------------------------------------------------------------------
@@ -224,7 +310,7 @@ namespace UnityOpenMcpVerify.Fixes
         // Apply — rewrite the broken GUID in the asset YAML and re-import
         // -------------------------------------------------------------------
 
-        private static FixResult RewriteGuid(string assetPath, string brokenGuid, string targetGuid)
+        private static FixResult RewriteGuid(string assetPath, string brokenGuid, string targetGuid, string targetPath)
         {
             if (!File.Exists(assetPath))
                 return new FixResult
@@ -249,6 +335,25 @@ namespace UnityOpenMcpVerify.Fixes
                 };
             }
 
+            // V4: rewrite the WHOLE PPtr triple (fileID + guid + type), not
+            // just the GUID token. Unity's PPtr form for an external reference
+            // is `{fileID: <local-id>, guid: <guid>, type: <type>}`. Swapping
+            // only `guid:` leaves the OLD fileID/type pointing at the OLD
+            // asset's local identifier — which is meaningless for the new
+            // target. The next scan then reports `missing_fileid` instead of
+            // `missing_guid`, and apply_fix reported Success while the
+            // reference is still dangling. The scanner's
+            // SharedRegex.ExternalFileAndGuid validates both legs, so a
+            // half-rewritten triple re-surfaces as a new issue.
+            //
+            // Resolve the target asset's main-object local fileID (the
+            // identifier the fileID field must carry). type:3 is the only
+            // value Unity emits for an external asset reference (the asset
+            // lives in its own file), so we keep whatever type the line
+            // already carried — there is no valid scenario where relinking
+            // changes it.
+            long? targetFileId = ResolveMainLocalFileId(targetPath);
+
             // Match every `guid: <brokenGuid>` occurrence on the asset — a single
             // broken GUID is typically referenced once, but the same target may
             // be wired into several PPtr fields. In .prefab/.unity/.mat YAML these
@@ -262,19 +367,63 @@ namespace UnityOpenMcpVerify.Fixes
             // (`... guid: <guid> ...`) occurrences. This mirrors the key-scope of
             // the scanner's SharedRegex.ExternalFileAndGuid, not the .meta-only
             // FixDuplicateGuidFix pattern.
-            var pattern = new Regex(
-                @"(?<![\w])guid:\s*" + Regex.Escape(brokenGuid) + @"\b",
-                RegexOptions.Compiled);
-
-            if (!pattern.IsMatch(contents))
-                return new FixResult
+            //
+            // When we can resolve the target's main fileID we match the entire
+            // PPtr flow-style triple (`{fileID: n, guid: <brokenGuid>, type: m}`)
+            // and replace it whole. The `(?<![\w])` negative-lookbehind guard is
+            // preserved when matching just `guid:` on its own (the fallback for
+            // .meta / non-PPtr contexts where we cannot resolve a fileID).
+            string newContents;
+            int replaced;
+            if (targetFileId.HasValue)
+            {
+                var triplePattern = new Regex(
+                    @"\{fileID:\s*(\d+),\s*guid:\s*" + Regex.Escape(brokenGuid) + @"\s*,\s*type:\s*(\d+)\s*\}",
+                    RegexOptions.Compiled);
+                replaced = triplePattern.Matches(contents).Count;
+                if (replaced == 0)
                 {
-                    Success = false,
-                    Description = $"Broken GUID '{brokenGuid}' not found in '{assetPath}'. The issue may have already been resolved.",
-                    TouchedPaths = null
-                };
+                    // No PPtr triple matched — fall back to the bare-guid path
+                    // below, which catches `.meta` / standalone `guid:` lines.
+                }
+                else
+                {
+                    newContents = triplePattern.Replace(
+                        contents,
+                        m => "{fileID: " + targetFileId.Value + ", guid: " + targetGuid + ", type: " + m.Groups[2].Value + "}");
+                }
+            }
+            else
+            {
+                newContents = null;
+            }
 
-            var newContents = pattern.Replace(contents, $"guid: {targetGuid}");
+            if (newContents == null)
+            {
+                // Fallback: cannot resolve a target main fileID (e.g. the
+                // target is a sub-asset only, or the file has no PPtr triples
+                // to rewrite). Restrict the edit to the bare guid: key, which
+                // is the safe .meta / standalone-key path. PPtr-fileID-bearing
+                // references are left for the next scan to re-flag with the
+                // resolved-target fileID already in hand (the common case is
+                // resolvable, so this fallback is rarely taken).
+                var guidPattern = new Regex(
+                    @"(?<![\w])guid:\s*" + Regex.Escape(brokenGuid) + @"\b",
+                    RegexOptions.Compiled);
+
+                replaced = guidPattern.Matches(contents).Count;
+                if (replaced == 0)
+                {
+                    return new FixResult
+                    {
+                        Success = false,
+                        Description = $"Broken GUID '{brokenGuid}' not found in '{assetPath}'. The issue may have already been resolved.",
+                        TouchedPaths = null
+                    };
+                }
+
+                newContents = guidPattern.Replace(contents, $"guid: {targetGuid}");
+            }
 
             try
             {
@@ -292,12 +441,36 @@ namespace UnityOpenMcpVerify.Fixes
 
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
 
+            var fileIdNote = targetFileId.HasValue
+                ? $" (fileID rewritten to {targetFileId.Value})"
+                : " (fileID not resolvable — only the guid: token was rewritten)";
+
             return new FixResult
             {
                 Success = true,
-                Description = $"Relinked broken GUID '{brokenGuid}' -> '{targetGuid}' in '{assetPath}'.",
+                Description = $"Relinked broken GUID '{brokenGuid}' -> '{targetGuid}' in '{assetPath}'{fileIdNote}.",
                 TouchedPaths = new[] { assetPath }
             };
+        }
+
+        // Resolve the main object's local file identifier for an asset path.
+        // Returns null if the asset cannot be loaded or the fileID cannot be
+        // determined — Apply then falls back to a bare-guid rewrite.
+        private static long? ResolveMainLocalFileId(string assetPath)
+        {
+            if (string.IsNullOrEmpty(assetPath)) return null;
+            try
+            {
+                var mainAsset = AssetDatabase.LoadMainAssetAtPath(assetPath);
+                if (mainAsset == null) return null;
+                if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(mainAsset, out _, out long fileId))
+                    return fileId;
+            }
+            catch
+            {
+                return null;
+            }
+            return null;
         }
 
         struct GuidCandidate

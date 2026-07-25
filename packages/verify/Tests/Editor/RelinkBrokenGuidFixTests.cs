@@ -436,6 +436,100 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
+        // V4 — Apply rewrites the WHOLE PPtr triple (fileID + guid + type),
+        // not just the guid: token. A reference with a mismatched fileID is
+        // still dangling: the scanner's SharedRegex.ExternalFileAndGuid
+        // validates both legs, so Apply must repair them together.
+        // -------------------------------------------------------------------
+
+        [UnityTest]
+        public System.Collections.IEnumerator Apply_RewritesFileIdToTargetMainLocalFileId()
+        {
+            // Build a real mesh asset and capture its main-object local
+            // fileID. Then build a prefab referencing a fake GUID with a
+            // DIFFERENT fileID. After Apply, the prefab's PPtr triple must
+            // carry BOTH the target's GUID and the target's main fileID.
+            var meshPath = FixtureRoot + "/FileIdTargetMesh.asset";
+            var prefabPath = FixtureRoot + "/FileIdPrefab.prefab";
+            yield return CreatePrefabWithMeshReference(prefabPath, meshPath);
+
+            AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                AssetDatabase.LoadAssetAtPath<Mesh>(meshPath), out var realGuid, out long realFileId);
+            Assume.That(string.IsNullOrEmpty(realGuid), Is.False);
+            Assume.That(realFileId, Is.GreaterThan(0));
+
+            // Inject a fake reference with a deliberately-wrong fileID + GUID.
+            var fakeGuid = "efefefefefefefefefefefefefefefef";
+            InjectPptrTriple(prefabPath, realGuid, fakeGuid, wrongFileId: 999);
+            AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var issueId = IssueKey.Build(
+                "missing_references", VerifySeverity.Error,
+                prefabPath, "missing_guid:" + fakeGuid);
+
+            var result = fix.Apply(issueId, realGuid);
+
+            Assert.IsTrue(result.Success,
+                $"Apply should succeed. Got: {result.Description}");
+
+            var rewritten = File.ReadAllText(prefabPath);
+
+            // The new triple must carry the target's main fileID, not the
+            // injected wrong one. fileID mismatch on the next scan would
+            // re-surface as a missing_fileid issue otherwise.
+            Assert.IsTrue(
+                rewritten.Contains($"{{fileID: {realFileId}, guid: {realGuid}, type:"),
+                "rewritten PPtr triple must carry the target's main local fileID, not the original line's fileID. " +
+                $"Expected to find `{{fileID: {realFileId}, guid: {realGuid}, type:` in the rewritten prefab.");
+            Assert.IsFalse(rewritten.Contains($"fileID: 999,"),
+                "the injected wrong fileID must be gone after Apply");
+        }
+
+        // -------------------------------------------------------------------
+        // V5 — Apply refuses to rewrite a scene that is currently open in the
+        // Editor, because the in-memory copy would silently revert the relink
+        // on the next save AFTER apply_fix already reported success.
+        // -------------------------------------------------------------------
+
+        [UnityTest]
+        public System.Collections.IEnumerator Apply_RefusesWhenReferencingSceneIsOpen()
+        {
+            // Create a tiny scene file in the fixture folder. Open it
+            // additively. Apply must refuse with a "currently open" message
+            // and NOT touch the file.
+            var scenePath = FixtureRoot + "/OpenScene.unity";
+            yield return CreateEmptySceneAt(scenePath);
+
+            var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(scenePath,
+                UnityEditor.SceneManagement.OpenSceneMode.Additive);
+            try
+            {
+                Assume.That(scene.isLoaded, Is.True);
+
+                var issueId = IssueKey.Build(
+                    "missing_references", VerifySeverity.Error,
+                    scenePath, "missing_guid:12345678123456781234567812345678");
+
+                var before = File.ReadAllText(scenePath);
+                var result = fix.Apply(issueId, "abcdefabcdefabcdefabcdefabcdefabcd");
+
+                Assert.IsFalse(result.Success,
+                    "Apply must refuse when the referencing scene is open in-memory");
+                StringAssert.Contains("currently open", result.Description);
+
+                // The file on disk must be byte-identical — no half-applied edit.
+                var after = File.ReadAllText(scenePath);
+                Assert.AreEqual(before, after,
+                    "the on-disk scene must be untouched when Apply refuses");
+            }
+            finally
+            {
+                UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
+            }
+        }
+
+        // -------------------------------------------------------------------
         // T2.3 — Bare issueCode (no GUID suffix) still works (backward compat)
         // -------------------------------------------------------------------
 
@@ -548,6 +642,41 @@ namespace UnityOpenMcpVerify.Tests
                     lines[i] = lines[i].Replace($"guid: {realGuid}", $"guid: {fakeGuid}");
             }
             File.WriteAllLines(prefabPath, lines);
+        }
+
+        // Inject (or overwrite) a PPtr-style external reference triple
+        // `{fileID: <fileId>, guid: <guid>, type: 3}` in place of any existing
+        // reference to `originalGuid`. Used to build a triple that mismatches
+        // the target's real main fileID so Apply's fileID-rewrite path can be
+        // exercised.
+        private static void InjectPptrTriple(string prefabPath, string originalGuid, string fakeGuid, long wrongFileId)
+        {
+            var lines = File.ReadAllLines(prefabPath);
+            var tripleRegex = new System.Text.RegularExpressions.Regex(
+                @"\{fileID:\s*(\d+),\s*guid:\s*" + System.Text.RegularExpressions.Regex.Escape(originalGuid) + @"\s*,\s*type:\s*(\d+)\s*\}");
+            for (int i = 0; i < lines.Length; i++)
+            {
+                var match = tripleRegex.Match(lines[i]);
+                if (match.Success)
+                {
+                    var type = match.Groups[2].Value;
+                    lines[i] = tripleRegex.Replace(
+                        lines[i],
+                        $"{{fileID: {wrongFileId}, guid: {fakeGuid}, type: {type}}}");
+                }
+            }
+            File.WriteAllLines(prefabPath, lines);
+        }
+
+        private static System.Collections.IEnumerator CreateEmptySceneAt(string scenePath)
+        {
+            EnsureDirectory(Path.GetDirectoryName(scenePath));
+            var scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+                UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
+                UnityEditor.SceneManagement.NewSceneMode.Additive);
+            UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, scenePath);
+            AssetDatabase.Refresh();
+            yield return null;
         }
 
         private static void EnsureDirectory(string path)

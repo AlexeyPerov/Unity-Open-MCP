@@ -143,7 +143,11 @@ namespace UnityOpenMcpVerify.Fixes
 
             material.shader = shader;
             EditorUtility.SetDirty(material);
-            AssetDatabase.SaveAssets();
+            // SaveAssetIfDirty persists only this material; SaveAssets would
+            // flush every dirty asset in the project, none of which the
+            // rollback snapshot can restore (ApplyFixGateRunner records only
+            // the issue's path + .meta).
+            AssetDatabase.SaveAssetIfDirty(material);
 
             return new FixResult
             {

@@ -14,7 +14,12 @@ namespace UnityOpenMcpVerify.Fixes
         {
             if (!IssueKey.TryParse(issueId, out var ruleId, out _, out _, out var issueCode))
                 return false;
-            return ruleId == "missing_references" && issueCode == "missing_script";
+            // V8: the missing_references rule emits missing_script with a
+            // per-instance discriminator suffix (missing_script:<scriptGuid>)
+            // so the gate delta can see each missing script independently.
+            // Match on the bare code, same as RelinkBrokenGuidFix.
+            var bareCode = IssueKey.BareIssueCode(issueCode);
+            return ruleId == "missing_references" && bareCode == "missing_script";
         }
 
         public FixDescription Describe(string issueId)

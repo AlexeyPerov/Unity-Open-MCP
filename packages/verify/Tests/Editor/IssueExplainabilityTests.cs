@@ -69,9 +69,9 @@ namespace UnityOpenMcpVerify.Tests
             ("asmdef_audit", "asmdef_platform_filter_broad"),
             ("asmdef_audit", "asmdef_platform_filter_contradict"),
             ("asmdef_audit", "asmdef_version_define_invalid"),
-            // materials
+            // materials (no missing_texture — the rule never emits it; a
+            // genuinely-missing texture PPtr surfaces via missing_guid)
             ("materials", "missing_shader"),
-            ("materials", "missing_texture"),
             ("materials", "builtin_shader"),
             ("materials", "builtin_texture"),
             ("materials", "render_queue_override"),

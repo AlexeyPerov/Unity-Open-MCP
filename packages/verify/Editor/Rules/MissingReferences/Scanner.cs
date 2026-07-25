@@ -143,24 +143,94 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
         private static void CountLocalUsages(string[] lines, AssetReferencesData refsData)
         {
+            // V9: previously this method was O(R × L) — for each LocalReference
+            // it built a fresh uncompiled Regex (`new Regex(...)` per registry)
+            // and ran IsMatch over every line. A real scene with R references
+            // and L lines burned R×L interpreted matches inside the
+            // VerifyRunMode.Checkpoint 2000 ms budget, so validate_edit
+            // effectively hung the Editor.
+            //
+            // Single-pass replacement: walk every line once, find every
+            // `fileID:\s*(\d+)` match, and record (per distinct fileID on the
+            // line) the line index. Then for each registry the usage count is
+            // the number of recorded lines that are NOT the registry's own
+            // declaring line — exactly the semantics of the original
+            // `if (j == registry.Line) continue; if (pattern.IsMatch(...)) usages++;`
+            // (one increment per matching line, declaring line excluded).
+            //
+            // The lookup is keyed by long (the parsed fileID), not by the IdStr
+            // token, so "123" no longer accidentally matches inside "114123456"
+            // or inside a GUID — the same correctness property the original
+            // `\b`-anchored regex had, without the per-reference cost.
+            var linesById = new Dictionary<long, List<int>>();
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+                var index = 0;
+                // Cheap pre-filter: skip lines that cannot contain a fileID ref
+                // at all. Avoids running the regex on boilerplate lines.
+                if (line.IndexOf("fileID:", StringComparison.Ordinal) < 0) continue;
+
+                var seenOnLine = new HashSet<long>();
+                while (index < line.Length)
+                {
+                    var at = line.IndexOf("fileID:", index, StringComparison.Ordinal);
+                    if (at < 0) break;
+                    // Parse the digits after `fileID:` (and any whitespace).
+                    var p = at + "fileID:".Length;
+                    while (p < line.Length && (line[p] == ' ' || line[p] == '\t')) p++;
+                    var start = p;
+                    while (p < line.Length && line[p] >= '0' && line[p] <= '9') p++;
+                    if (p > start)
+                    {
+                        // Match the original regex's `\b` boundary: the digit
+                        // run must end at a word boundary. After digits (word
+                        // chars), the next char must be a non-word char or EOL.
+                        // In valid Unity YAML `fileID:` is always followed by
+                        // `,`/`}`/whitespace, so this never rejects a real
+                        // reference; it only rejects malformed input like
+                        // `fileID: 123x` the same way the original `\b` did.
+                        var boundaryOk = p >= line.Length || !IsWordChar(line[p]);
+                        if (boundaryOk && long.TryParse(line.AsSpan(start, p - start), out var id))
+                        {
+                            if (seenOnLine.Add(id))
+                            {
+                                if (!linesById.TryGetValue(id, out var list))
+                                {
+                                    list = new List<int>();
+                                    linesById[id] = list;
+                                }
+                                list.Add(i);
+                            }
+                        }
+                    }
+                    index = p > index ? p : at + 1;
+                }
+            }
+
             foreach (var registry in refsData.LocalReferences)
             {
-                var usages = 0;
-                // Match the fileID as a YAML reference token, not a bare
-                // substring. The old `lines[j].Contains(registry.IdStr)` matched
-                // "123" inside "114123456", inside GUIDs, anywhere on the line —
-                // inflating LocalUsagesCount and causing false negatives for
-                // genuinely-missing local fileIDs. The reference form is
-                // `fileID: <id>`; anchor to the key + word boundary so only the
-                // exact ID token is counted.
-                var pattern = new Regex(@"fileID:\s*" + Regex.Escape(registry.IdStr) + @"\b");
-                for (var j = 0; j < lines.Length; j++)
+                if (!linesById.TryGetValue(registry.Id, out var list) || list.Count == 0)
                 {
-                    if (j == registry.Line) continue;
-                    if (pattern.IsMatch(lines[j])) usages++;
+                    registry.LocalUsagesCount = 0;
+                    continue;
+                }
+                var usages = 0;
+                foreach (var lineIndex in list)
+                {
+                    if (lineIndex == registry.Line) continue;
+                    usages++;
                 }
                 registry.LocalUsagesCount = usages;
             }
+        }
+
+        private static bool IsWordChar(char c)
+        {
+            return (c >= 'a' && c <= 'z')
+                || (c >= 'A' && c <= 'Z')
+                || (c >= '0' && c <= '9')
+                || c == '_';
         }
 
         private static void ResolveReferences(List<AssetData> assets, HashSet<long> scopedFileIDs,

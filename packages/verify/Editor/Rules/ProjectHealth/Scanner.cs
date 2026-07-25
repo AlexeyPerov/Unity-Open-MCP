@@ -129,6 +129,16 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
             var byGuid = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             foreach (var assetPath in AssetDatabase.GetAllAssetPaths())
             {
+                // V7: ignore Packages/ — imported package assets have GUIDs
+                // owned by upstream and are not project state the operator can
+                // re-key. Flagging them produces noisy false positives (two
+                // projects with the same installed package always "duplicate")
+                // and the FixDuplicateGuidFix would re-GUID a vendored asset
+                // the package owner controls. Assets/ (the writable tree) is
+                // the only scope where a duplicate GUID is a real defect.
+                var normAsset = assetPath.Replace('\\', '/');
+                if (!normAsset.StartsWith("Assets/", StringComparison.Ordinal)) continue;
+
                 string guid;
                 try { guid = AssetDatabase.AssetPathToGUID(assetPath); }
                 catch { continue; }
@@ -138,7 +148,7 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                     list = new List<string>();
                     byGuid[guid] = list;
                 }
-                list.Add(assetPath.Replace('\\', '/'));
+                list.Add(normAsset);
             }
 
             var scopedSet = fullScan ? null : new HashSet<string>(scopedPaths, StringComparer.Ordinal);
@@ -153,6 +163,16 @@ namespace UnityOpenMcpVerify.Rules.ProjectHealth
                     if (!anyInScope) continue;
                 }
 
+                // V7: sort the paths so the duplicate group has a canonical
+                // member order. The issue mapper picks Paths[0] as the issue
+                // key's asset path, and the previous code stored paths in
+                // AssetDatabase enumeration order — which is unstable across
+                // runs and across machines. A stable sort makes the key
+                // deterministic: the same project produces the same key on
+                // every scan, so the gate delta (key-set based) and the
+                // baseline do not flip a duplicate between "resolved" and
+                // "new" purely on enumeration order.
+                kvp.Value.Sort(StringComparer.Ordinal);
                 data.DuplicateGuids.Add(new DuplicateGuidEntry(kvp.Key, kvp.Value));
             }
         }

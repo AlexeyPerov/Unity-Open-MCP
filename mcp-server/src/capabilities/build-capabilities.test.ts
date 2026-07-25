@@ -194,19 +194,21 @@ test("project_health rule is implemented and reuses orphan_meta + duplicate_guid
   }
 });
 
-test("materials rule is implemented with missing_shader and missing_texture codes", () => {
+test("materials rule is implemented with missing_shader code (no missing_texture)", () => {
   const rule = RULE_CATALOG.find((r) => r.id === "materials");
   assert.ok(rule, "materials rule must be in the catalog");
   assert.equal(rule!.implemented, true);
   assert.equal(rule!.status, "implemented");
   const codes = rule!.issues.map((i) => i.code);
   assert.ok(codes.includes("missing_shader"));
-  assert.ok(codes.includes("missing_texture"));
-  // The planned reassign fixes link to the materials rule codes.
+  // missing_texture is intentionally NOT emitted — the materials rule never
+  // flags a null texture slot (most are legitimately empty; a genuinely
+  // broken texture PPtr surfaces via missing_references/missing_guid).
+  assert.ok(!codes.includes("missing_texture"),
+    "materials rule must not advertise missing_texture — no provider can apply it");
+  // The reassign_missing_shader fix links to the materials rule's code.
   const shaderIssue = rule!.issues.find((i) => i.code === "missing_shader")!;
   assert.ok(shaderIssue.fixIds.includes("reassign_missing_shader"));
-  const texIssue = rule!.issues.find((i) => i.code === "missing_texture")!;
-  assert.ok(texIssue.fixIds.includes("reassign_missing_texture"));
 });
 
 test("animation_analysis rule is implemented with missing_clip and empty_clip codes", () => {
@@ -355,7 +357,8 @@ test("no fix providers remain in the planned state", () => {
   // M25 Plan 2 — the last two planned fix providers (reassign_missing_texture
   // / reassign_missing_shader) shipped as real C# IFixProviders. Every catalog
   // fix is now implemented; if a planned fix is re-introduced, this guard
-  // forces the author to update it deliberately.
+  // forces the author to update it deliberately. (reassign_missing_texture
+  // was removed because no rule emits missing_texture.)
   const plannedFixes = FIX_CATALOG.filter((f) => !f.implemented);
   assert.equal(
     plannedFixes.length,
@@ -364,16 +367,13 @@ test("no fix providers remain in the planned state", () => {
   );
 });
 
-// M25 Plan 2 — the two materials fix providers shipped (registered in the
-// verify package's FixProviderRegistry, linked to the materials rule).
+// reassign_missing_texture was removed: no rule emits missing_texture, so the
+// fix could never apply. The materials rule keeps reassign_missing_shader.
 
-test("reassign_missing_texture fix is implemented and linked to materials", () => {
+test("reassign_missing_texture fix is NOT in the catalog (no producer)", () => {
   const fix = implementedFixes().find((f) => f.id === "reassign_missing_texture");
-  assert.ok(fix, "reassign_missing_texture must be in the implemented fix surface");
-  assert.equal(fix!.implemented, true);
-  assert.equal(fix!.safe, false, "a wrong texture silently changes the material's look");
-  assert.ok(fix!.rules.includes("materials"));
-  assert.ok(fix!.issueCodes.includes("missing_texture"));
+  assert.equal(fix, undefined,
+    "reassign_missing_texture must not be advertised — no rule emits missing_texture");
 });
 
 test("reassign_missing_shader fix is implemented and linked to materials", () => {

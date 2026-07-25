@@ -216,7 +216,6 @@ namespace UnityOpenMcpBridge.Tests
             FixProviderRegistry.Register(new RelinkBrokenGuidFix());
             FixProviderRegistry.Register(new RemoveOrphanMetaFix());
             FixProviderRegistry.Register(new FixDuplicateGuidFix());
-            FixProviderRegistry.Register(new ReassignMissingTextureFix());
             FixProviderRegistry.Register(new ReassignMissingShaderFix());
         }
 

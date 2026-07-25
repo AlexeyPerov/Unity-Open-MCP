@@ -35,7 +35,12 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                     }
                     else if (extRef.FileIDValid && !extRef.FileIDExistsInTargetAsset)
                     {
-                        sink.Add(MakeIssue(asset, CodeMissingFileID,
+                        // V8: discriminator = guid + fileID so the gate delta
+                        // sees every distinct broken-fileID reference. Without
+                        // it, two broken FileIDs on the same asset collapse to
+                        // one key and ComputeDelta cannot tell that a second
+                        // one was added.
+                        sink.Add(MakeIssue(asset, CodeMissingFileID + ":" + extRef.Guid + ":" + extRef.FileID,
                             $"Broken PPtr reference: FileID {extRef.FileID} not found in target asset '{extRef.GuidAssetPath}' (guid {extRef.Guid}) at line {extRef.Line}",
                             VerifySeverity.Error,
                             Evidence("guid", extRef.Guid, extRef.Line,
@@ -82,7 +87,13 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 foreach (var script in refs.MissingScripts)
                 {
-                    sink.Add(MakeIssue(asset, CodeMissingScript,
+                    // V8: discriminator = scriptGuid so two distinct missing
+                    // scripts (different deleted GUIDs) on the same prefab do
+                    // not collapse to one key. Same-GUID duplicates on one
+                    // asset are intentional (two components referencing the
+                    // same deleted script share the issue) — they would be
+                    // removed together by remove_missing_script anyway.
+                    sink.Add(MakeIssue(asset, CodeMissingScript + ":" + script.ScriptGuid,
                         $"Missing script GUID {script.ScriptGuid} at line {script.Line}",
                         VerifySeverity.Error,
                         Evidence("scriptGuid", script.ScriptGuid, script.Line)));
@@ -90,7 +101,10 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 foreach (var dup in refs.DuplicateComponents)
                 {
-                    sink.Add(MakeIssue(asset, CodeDuplicateComponent,
+                    // V8: discriminator = componentType + gameObject so the
+                    // gate delta can see a second duplicate-component type
+                    // appear on the same prefab.
+                    sink.Add(MakeIssue(asset, CodeDuplicateComponent + ":" + dup.ComponentType + ":" + dup.GameObjectName,
                         $"Duplicate component {dup.ComponentType} ({dup.Count}x) on '{dup.GameObjectName}'",
                         VerifySeverity.Warning,
                         Evidence("componentType", dup.ComponentType, null,
@@ -100,7 +114,9 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 foreach (var layer in refs.InvalidLayers)
                 {
-                    sink.Add(MakeIssue(asset, CodeInvalidLayer,
+                    // V8: discriminator = layerIndex + line so two invalid
+                    // layer lines on one asset do not collapse to one key.
+                    sink.Add(MakeIssue(asset, CodeInvalidLayer + ":" + layer.LayerIndex + ":" + layer.Line,
                         $"Invalid layer index {layer.LayerIndex} at line {layer.Line}",
                         VerifySeverity.Warning,
                         Evidence("layerIndex", layer.LayerIndex.ToString(), layer.Line)));

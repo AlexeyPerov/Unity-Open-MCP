@@ -49,7 +49,9 @@ namespace UnityOpenMcpVerify.Tests
             Assert.Greater(sink.Count, 0,
                 "MissingScriptFixture must produce at least one missing_references issue");
 
-            var hasScriptIssue = sink.Any(i => i.IssueCode == "missing_script");
+            // V8: missing_script now carries a per-instance discriminator
+            // (missing_script:<scriptGuid>). Match on the bare code.
+            var hasScriptIssue = sink.Any(i => IssueKey.BareIssueCode(i.IssueCode) == "missing_script");
             Assert.IsTrue(hasScriptIssue,
                 $"Expected 'missing_script' issue code. Got: {string.Join(", ", sink.Select(i => i.IssueCode))}");
 
