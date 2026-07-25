@@ -1044,7 +1044,10 @@ test("malformed body: compile-reload tool surfaces as error and is NOT annotated
   // that is not valid JSON (unbalanced braces — mirroring the real failure:
   // OutputSerializer truncating mid-walk). postTool must surface a structured
   // error, and because isError is true, annotateCompileVerify must NOT stamp
-  // _compileVerify onto the body.
+  // _compileVerify onto the body. (M4 additionally excludes execute_csharp
+  // from the annotation target set entirely, so this holds a fortiori; the
+  // isError guard is still the load-bearing assertion for the reliably-
+  // recompiling compile-reload tools that remain annotated.)
   const s = makeSandbox();
   try {
     const bridge = await startBridgeStub((req, res) => {
@@ -1575,12 +1578,20 @@ test("H1: POST-path 503 / transient-offline handling unchanged when the cache wa
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
-            connected: true,
+            connected: false,
             projectPath: REFRESH_PROJECT,
             unityVersion: "6000.0.0f1",
             bridgeVersion: "0.1.0",
             mode: "live",
-            compiling: false,
+            // /ping must report the bridge as STILL COMPILING until the flip
+            // below. waitForCompile polls /ping and only settles when
+            // `!compiling && connected`; if /ping reported idle from the start
+            // it would settle on its first ~poll tick and the re-POST (issued
+            // with retryOn503=false) would race ahead of the idle flip and hit
+            // the still-503 POST handler. Reporting compiling here keeps the
+            // compile-wait open until the flip, matching the test's intent
+            // ("flips the bridge to idle so the compile-wait settles").
+            compiling: true,
             isPlaying: false,
           }),
         );
@@ -1829,10 +1840,11 @@ test("M3: captureCompileSnapshot bypasses the TTL cache (compile-verify needs th
   // captureCompileSnapshot consult the cache, this test would fail because
   // the compile-reload call would not add a /tools hit beyond the warm-up.
   //
-  // Drive execute_csharp (a compile-reload tool) against a handler that
-  // counts /tools hits and returns a small-but-valid direct body for the
-  // tool POST. The compile-reload lifecycle triggers captureCompileSnapshot
-  // (before) + annotateCompileVerify (after), each fetching /tools fresh.
+  // M4 — drive script_write (a compile-reload tool that RELIABLY triggers a
+  // recompile, so it is in the annotation target set). execute_csharp is no
+  // longer annotated (its normal success compiles nothing, so the no-op
+  // detector fired a false positive on every call). The handler counts
+  // /tools hits and returns a small-but-valid direct body for the tool POST.
   const s = makeSandbox();
   const toolsHits: { count: number } = { count: 0 };
   let bridge: BridgeStub | null = null;
@@ -1865,8 +1877,8 @@ test("M3: captureCompileSnapshot bypasses the TTL cache (compile-verify needs th
         res.end(JSON.stringify({ tools: ["unity_open_mcp_ping"], groups: [] }));
         return;
       }
-      // execute_csharp POST: a valid direct body so shapeToolResult succeeds.
-      res.end(JSON.stringify({ ok: true, value: 1 }));
+      // script_write POST: a valid direct body so shapeToolResult succeeds.
+      res.end(JSON.stringify({ ok: true, path: "Assets/Foo.cs", written: true }));
     });
     plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
     const client = new LiveClient(
@@ -1881,12 +1893,203 @@ test("M3: captureCompileSnapshot bypasses the TTL cache (compile-verify needs th
     const hitsAfterWarm = toolsHits.count;
     assert.equal(hitsAfterWarm, 1);
 
-    // A compile-reload tool captures a before-snapshot via
-    // fetchBridgeToolsNow — must NOT be served from cache.
-    await client.route("unity_open_mcp_execute_csharp", { code: "return 1;" });
+    // A reliably-recompiling compile-reload tool captures a before-snapshot
+    // via fetchBridgeToolsNow — must NOT be served from cache.
+    await client.route("unity_open_mcp_script_write", {
+      path: "Assets/Foo.cs",
+      content: "public class Foo {}",
+    });
     assert.ok(
       toolsHits.count > hitsAfterWarm,
       "captureCompileSnapshot must bypass the cache (the compile-verify detector needs the real count)",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevCompileWait === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = prevCompileWait;
+    if (prevPollInterval === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = prevPollInterval;
+    disposeSandbox(s);
+  }
+});
+
+// M4 — execute_csharp / invoke_method / execute_menu are classified
+// compile-reload on the recovery axis (the invoked code CAN trigger a
+// reload), but most invocations compile nothing. The compile-verify
+// annotation must NOT run for them: the no-op detector would fire a false
+// `compile_noop` on every call (e.g. `execute_csharp {code:"return 42;"}`).
+test("M4: execute_csharp is NOT annotated with _compileVerify (no reliable recompile)", async () => {
+  const s = makeSandbox();
+  let bridge: BridgeStub | null = null;
+  const prevCompileWait = process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+  const prevPollInterval = process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+  process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = "1000";
+  process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = "50";
+  try {
+    bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      if (req.url === "/tools") {
+        res.end(JSON.stringify({ tools: ["unity_open_mcp_ping"], groups: [] }));
+        return;
+      }
+      // execute_csharp POST returns a trivial success.
+      res.end(JSON.stringify({ ok: true, value: 42 }));
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_execute_csharp", {
+      code: "return 42;",
+    });
+    assert.equal(result.isError, false);
+    const body = JSON.parse(
+      result.content[0]?.type === "text" ? (result.content[0].text as string) : "{}",
+    ) as Record<string, unknown>;
+    assert.equal(
+      body._compileVerify,
+      undefined,
+      "execute_csharp must not carry a compile_noop annotation (its normal success compiles nothing)",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevCompileWait === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = prevCompileWait;
+    if (prevPollInterval === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = prevPollInterval;
+    disposeSandbox(s);
+  }
+});
+
+test("M4: invoke_method is NOT annotated with _compileVerify (no reliable recompile)", async () => {
+  const s = makeSandbox();
+  let bridge: BridgeStub | null = null;
+  const prevCompileWait = process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+  const prevPollInterval = process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+  process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = "1000";
+  process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = "50";
+  try {
+    bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      if (req.url === "/tools") {
+        res.end(JSON.stringify({ tools: ["unity_open_mcp_ping"], groups: [] }));
+        return;
+      }
+      res.end(JSON.stringify({ ok: true, returned: null }));
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_invoke_method", {
+      type_name: "UnityEngine.Time",
+      method_name: "get_time",
+      is_static: true,
+    });
+    assert.equal(result.isError, false);
+    const body = JSON.parse(
+      result.content[0]?.type === "text" ? (result.content[0].text as string) : "{}",
+    ) as Record<string, unknown>;
+    assert.equal(
+      body._compileVerify,
+      undefined,
+      "invoke_method must not carry a compile_noop annotation (its normal success compiles nothing)",
+    );
+  } finally {
+    if (bridge) await bridge.close();
+    if (prevCompileWait === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = prevCompileWait;
+    if (prevPollInterval === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = prevPollInterval;
+    disposeSandbox(s);
+  }
+});
+
+test("M4: execute_menu is NOT annotated with _compileVerify (no reliable recompile)", async () => {
+  const s = makeSandbox();
+  let bridge: BridgeStub | null = null;
+  const prevCompileWait = process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+  const prevPollInterval = process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS;
+  process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = "1000";
+  process.env.UNITY_OPEN_MCP_COMPILE_POLL_INTERVAL_MS = "50";
+  try {
+    bridge = await startBridgeStub((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (req.url === "/ping") {
+        res.end(
+          JSON.stringify({
+            connected: true,
+            projectPath: REFRESH_PROJECT,
+            unityVersion: "6000.0.0f1",
+            bridgeVersion: "0.1.0",
+            mode: "live",
+            compiling: false,
+            isPlaying: false,
+          }),
+        );
+        return;
+      }
+      if (req.url === "/tools") {
+        res.end(JSON.stringify({ tools: ["unity_open_mcp_ping"], groups: [] }));
+        return;
+      }
+      res.end(JSON.stringify({ ok: true, executed: true }));
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_execute_menu", {
+      menu_path: "Assets/Refresh",
+    });
+    assert.equal(result.isError, false);
+    const body = JSON.parse(
+      result.content[0]?.type === "text" ? (result.content[0].text as string) : "{}",
+    ) as Record<string, unknown>;
+    assert.equal(
+      body._compileVerify,
+      undefined,
+      "execute_menu must not carry a compile_noop annotation (its normal success compiles nothing)",
     );
   } finally {
     if (bridge) await bridge.close();

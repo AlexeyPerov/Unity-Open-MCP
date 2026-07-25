@@ -3094,3 +3094,175 @@ test("L14: with the debug env UNSET, a happy-path dispatch emits no [unity-open-
   }
 });
 
+// ---------------------------------------------------------------------------
+// M3 — scene_get_data paging.
+//
+// The bridge nests the hierarchy under `body.scene` (ScenesTools.cs:393-417
+// emits `{"status":"ok","scene":{...,"roots":[...],"truncated":N}}`). The
+// previous paging code looked for `body.roots` directly, so `rootField` was
+// always undefined and paging returned an empty node list while claiming
+// completeness. Two secondary defects on the same path: the bridge's
+// `truncated` count was destructured away, and `max_nodes` was never raised
+// so paging could never walk past node 200.
+// ---------------------------------------------------------------------------
+
+/** Build a bridge-shaped scene_get_data body with N flat roots. */
+function bridgeSceneBody(rootCount: number, truncated = 0): Record<string, unknown> {
+  const roots = [];
+  for (let i = 0; i < rootCount; i++) {
+    roots.push({ name: `Root${i}`, childCount: 0, components: [] });
+  }
+  return {
+    status: "ok",
+    scene: {
+      name: "SampleScene",
+      path: "Assets/Scenes/SampleScene.unity",
+      isDirty: false,
+      isLoaded: true,
+      rootCount,
+      buildIndex: 0,
+      detail: "summary",
+      depth: 0,
+      maxNodes: 200,
+      roots,
+      moreHidden: [],
+      truncated,
+    },
+  };
+}
+
+/** Fake LiveClient that returns a canned bridge-shaped scene_get_data body. */
+function makeSceneGetDataFakeLive(opts: {
+  available?: boolean;
+  body?: Record<string, unknown>;
+  bridgeTools?: Set<string>;
+}): LiveClient & { calls: LiveCall[]; sceneCalls: number } {
+  const calls: LiveCall[] = [];
+  let sceneCalls = 0;
+  const available = opts.available ?? true;
+  const body = opts.body ?? bridgeSceneBody(5);
+  const bridgeTools = opts.bridgeTools ?? new Set<string>();
+  return {
+    calls,
+    get sceneCalls() { return sceneCalls; },
+    async isLiveAvailable() {
+      return available;
+    },
+    async route(tool: string, args: Record<string, unknown>) {
+      calls.push({ tool, args });
+      if (tool === "unity_open_mcp_scene_get_data") sceneCalls++;
+      return {
+        content: [{ type: "text", text: JSON.stringify(body) }],
+        isError: false,
+      } as CallToolResult;
+    },
+    async listBridgeTools() {
+      return { tools: bridgeTools, groups: [] };
+    },
+  } as unknown as LiveClient & { calls: LiveCall[]; sceneCalls: number };
+}
+
+test("M3: scene_get_data paging reads roots from body.scene (not body)", async () => {
+  await withTmp("router-scene-page-roots-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeSceneGetDataFakeLive({ body: bridgeSceneBody(5) });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route(
+      "unity_open_mcp_scene_get_data",
+      { page_size: 2 },
+    );
+    assert.equal(result.isError, false);
+    const body = parseBody(result);
+    const scene = body.scene as Record<string, unknown> | undefined;
+    assert.ok(scene, "page should preserve the scene envelope");
+    const nodes = scene?.nodes as unknown[];
+    assert.ok(Array.isArray(nodes), "nodes must be an array");
+    assert.equal(nodes.length, 2, "page_size=2 returns the first 2 roots");
+    const pagination = body.pagination as { next_cursor: string | null; truncated: number };
+    assert.ok(pagination.next_cursor, "more pages available → next_cursor set");
+    assert.equal(pagination.truncated, 3, "3 roots remain after the first page");
+  });
+});
+
+test("M3: scene_get_data paging walks the full hierarchy across pages", async () => {
+  await withTmp("router-scene-page-full-", async (tmp) => {
+    await setupProject(tmp);
+    // 7 roots with page_size 3 → pages of 3, 3, 1.
+    const live = makeSceneGetDataFakeLive({ body: bridgeSceneBody(7) });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+
+    const first = await router.route(
+      "unity_open_mcp_scene_get_data",
+      { page_size: 3 },
+    );
+    const firstBody = parseBody(first);
+    const firstPagination = firstBody.pagination as { next_cursor: string | null };
+    assert.equal(
+      (firstBody.scene as { nodes: unknown[] }).nodes.length,
+      3,
+      "first page = 3 nodes",
+    );
+    assert.ok(firstPagination.next_cursor, "first page has a next_cursor");
+
+    const second = await router.route(
+      "unity_open_mcp_scene_get_data",
+      { page_size: 3, cursor: firstPagination.next_cursor! },
+    );
+    const secondBody = parseBody(second);
+    const secondPagination = secondBody.pagination as { next_cursor: string | null };
+    assert.equal(
+      (secondBody.scene as { nodes: unknown[] }).nodes.length,
+      3,
+      "second page = 3 nodes",
+    );
+    assert.ok(secondPagination.next_cursor, "second page has a next_cursor");
+
+    const third = await router.route(
+      "unity_open_mcp_scene_get_data",
+      { page_size: 3, cursor: secondPagination.next_cursor! },
+    );
+    const thirdBody = parseBody(third);
+    const thirdPagination = thirdBody.pagination as { next_cursor: string | null; truncated: number };
+    assert.equal(
+      (thirdBody.scene as { nodes: unknown[] }).nodes.length,
+      1,
+      "third page = 1 node (the remainder)",
+    );
+    assert.equal(thirdPagination.next_cursor, null, "terminal page → null next_cursor");
+    assert.equal(thirdPagination.truncated, 0, "no more pages after the third");
+  });
+});
+
+test("M3: scene_get_data paging raises max_nodes so the bridge does not truncate early", async () => {
+  await withTmp("router-scene-page-maxnodes-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeSceneGetDataFakeLive({ body: bridgeSceneBody(3) });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    await router.route("unity_open_mcp_scene_get_data", { page_size: 2 });
+    const sceneCall = live.calls.find((c) => c.tool === "unity_open_mcp_scene_get_data");
+    assert.ok(sceneCall, "scene_get_data was dispatched");
+    const forwardedMaxNodes = (sceneCall!.args as { max_nodes?: number }).max_nodes;
+    assert.ok(
+      typeof forwardedMaxNodes === "number" && forwardedMaxNodes > 200,
+      "paging must override the default 200 max_nodes ceiling so the flattened stream is not truncated before paging",
+    );
+  });
+});
+
+test("M3: scene_get_data paging preserves the bridge truncated count on the scene envelope", async () => {
+  await withTmp("router-scene-page-truncated-", async (tmp) => {
+    await setupProject(tmp);
+    // Bridge reports 2 emitted roots + 5 truncated (source-side cap hit).
+    const live = makeSceneGetDataFakeLive({ body: bridgeSceneBody(2, 5) });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route(
+      "unity_open_mcp_scene_get_data",
+      { page_size: 10 },
+    );
+    const body = parseBody(result);
+    const scene = body.scene as { truncated?: number; nodes: unknown[] };
+    assert.equal(scene.truncated, 5, "bridge-side truncated count preserved on scene envelope");
+    assert.equal(scene.nodes.length, 2, "both emitted roots paged");
+  });
+});
+

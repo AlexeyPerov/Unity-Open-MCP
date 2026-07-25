@@ -84,6 +84,41 @@ const DIRECT_RESPONSE_TOOLS: ReadonlySet<string> = new Set([
   "unity_senses_spatial_query",
 ]);
 
+// M4 — compile-reload tools whose PURPOSE is to trigger or observe a domain
+// reload, so a no-op compile is a meaningful signal worth annotating. This is
+// the annotation target set; it is a strict subset of the lifecycle
+// `compile-reload` class (capabilities/lifecycle.ts). The three "invoke
+// arbitrary code" tools — execute_csharp, invoke_method, execute_menu — are
+// deliberately EXCLUDED: they are classified `compile-reload` on the recovery
+// axis (the invoked code *can* trigger a reload), but most invocations
+// compile nothing, so the no-op detector fired a false `compile_noop` on
+// every such call (e.g. `execute_csharp {code:"return 42;"}` came back
+// carrying a "force a rebuild" recommendation). scene_open is also excluded:
+// its reload concern is unsaved-scene loss, not a script compile.
+const COMPILE_RELOAD_ANNOTATION_TOOLS: ReadonlySet<string> = new Set([
+  "unity_open_mcp_asmdef_create",
+  "unity_open_mcp_asmdef_modify",
+  "unity_open_mcp_script_write",
+  "unity_open_mcp_script_delete",
+  "unity_open_mcp_build_set_target",
+  "unity_open_mcp_build_set_defines",
+  "unity_open_mcp_settings_set_player",
+  "unity_open_mcp_package_add",
+  "unity_open_mcp_package_remove",
+  "unity_open_mcp_reimport_package",
+  "unity_open_mcp_compile_check",
+]);
+
+/**
+ * M4 — should the compile-verify annotation run for this tool? Returns true
+ * only for compile-reload tools that reliably trigger (or observe) a domain
+ * reload, so the no-op detector is not handed a trivially-unchanged snapshot
+ * for tools whose normal success involves no recompile.
+ */
+function shouldAnnotateCompileVerify(toolName: string): boolean {
+  return COMPILE_RELOAD_ANNOTATION_TOOLS.has(toolName);
+}
+
 interface PingResponse {
   connected: boolean;
   projectPath: string | null;
@@ -414,12 +449,23 @@ export class LiveClient implements Router {
     // so the post-call detectCompileVerify() can flag a no-op/stale compile.
     // Non-compile-reload tools skip this entirely (no extra /tools round-trip,
     // no fs scan). The annotation is additive: it never blocks a success.
+    //
+    // M4 — gate the annotation on tools that RELIABLY trigger a domain reload,
+    // not on the lifecycle class. `execute_csharp` / `invoke_method` /
+    // `execute_menu` are classified `compile-reload` (the recovery axis: they
+    // *can* trigger a reload if the invoked code does) but most invocations
+    // compile nothing, so `countUnchanged && dllDidNotAdvance` is trivially
+    // true and every such call came back carrying a false `compile_noop`
+    // warning that told the agent to "force a rebuild" after `return 42;`.
+    // The set below is the subset of compile-reload tools whose PURPOSE is to
+    // trigger or observe a recompile; see `shouldAnnotateCompileVerify`.
     const isCompileReload = lifecycleFor(toolName).class === "compile-reload";
-    const before = isCompileReload ? await this.captureCompileSnapshot() : null;
+    const annotate = isCompileReload && shouldAnnotateCompileVerify(toolName);
+    const before = annotate ? await this.captureCompileSnapshot() : null;
 
     const result = await this.postTool(toolName, args, true);
 
-    if (isCompileReload && !result.isError && before !== null) {
+    if (annotate && !result.isError && before !== null) {
       return this.annotateCompileVerify(toolName, result, before, args);
     }
     return result;

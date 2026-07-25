@@ -483,6 +483,42 @@ test("findReferencesOffline respects max_results cap", async () => {
   }
 });
 
+// M2 — `0` is the documented "unlimited (for paging)" sentinel forwarded by
+// tool-router.ts when the caller supplies a page_size. The previous
+// `opts.maxResults ?? 100` treated 0 as a hard cap (?? does not treat 0 as
+// absent) and `displayHits.slice(0,0)` returned an empty referencedBy list,
+// so `find_references {page_size:1}` always yielded zero entries.
+test("M2: findReferencesOffline treats maxResults=0 as unlimited (paging sentinel)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-refs-zero-"));
+  try {
+    await setupReferencesProject(tmp);
+    const full = await findReferencesOffline({
+      guid: "dead000000000000000000000000beef",
+      projectRoot: tmp,
+    });
+    const zeroSentinel = await findReferencesOffline({
+      guid: "dead000000000000000000000000beef",
+      maxResults: 0,
+      projectRoot: tmp,
+    });
+    assert.ok(full.totalCount > 0, "fixture should produce references");
+    assert.equal(zeroSentinel.referencedBy.length, full.totalCount,
+      "maxResults=0 must not cap the list");
+    assert.equal(zeroSentinel.truncated, 0, "no truncation when unlimited");
+    // Negative values are also unlimited (defensive — same convention as
+    // dependenciesOffline's `maxResults > 0 && ...` guard).
+    const negative = await findReferencesOffline({
+      guid: "dead000000000000000000000000beef",
+      maxResults: -5,
+      projectRoot: tmp,
+    });
+    assert.equal(negative.referencedBy.length, full.totalCount,
+      "negative maxResults must not cap the list");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("findReferencesOffline pattern_threshold collapses large folders", async () => {
   const tmp = await mkdtemp(join(tmpdir(), "offline-refs-collapse-"));
   try {
@@ -1205,6 +1241,39 @@ test("searchAssetsOffline finds .shadergraph by guid reference", async () => {
     const sgMatch = result.matches.find((m) => m.path.endsWith("Foo.shadergraph"));
     assert.ok(sgMatch, "shadergraph found by referenced guid");
     assert.ok(sgMatch.reasons.includes("guid"));
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// M1 — `0` is the documented "unlimited (for paging)" sentinel forwarded by
+// compressible-router.ts when the caller supplies a page_size. The previous
+// `opts.maxResults ?? 50` treated 0 as a hard cap (?? does not treat 0 as
+// absent) and the loop's `if (matches.length >= maxResults) break;` exited on
+// the first file (`0 >= 0`), so `search_assets {name:"p", page_size:1}` always
+// returned `matchCount: 0, matches: []`.
+test("M1: searchAssetsOffline treats maxResults=0 as unlimited (paging sentinel)", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "offline-search-zero-"));
+  try {
+    await setupProject(tmp);
+    const full = await searchAssetsOffline({ name: "Player", projectRoot: tmp });
+    assert.ok(full.matches.length > 0, "fixture should produce matches");
+    const zeroSentinel = await searchAssetsOffline({
+      name: "Player",
+      maxResults: 0,
+      projectRoot: tmp,
+    });
+    assert.equal(zeroSentinel.matches.length, full.matches.length,
+      "maxResults=0 must not cap the match set");
+    // Negative values are also unlimited (defensive — same convention as
+    // dependenciesOffline's `maxResults > 0 && ...` guard).
+    const negative = await searchAssetsOffline({
+      name: "Player",
+      maxResults: -5,
+      projectRoot: tmp,
+    });
+    assert.equal(negative.matches.length, full.matches.length,
+      "negative maxResults must not cap the match set");
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }

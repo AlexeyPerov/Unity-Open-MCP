@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, utimesSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -516,7 +516,16 @@ test("hasRecentPendingTestRun: TTL boundary — exactly at TTL counts as recent"
     writeFileSync(path, "{}");
     const edge = new Date(now - TEST_PENDING_TTL_MS);
     utimesSync(path, edge, edge);
-    assert.equal(hasRecentPendingTestRun(now, TEST_PENDING_TTL_MS, dir), true);
+    // Read back the mtime the filesystem actually stored: some filesystems
+    // round to coarser than ms granularity, so the stored value can differ
+    // from `edge` by up to a second. Derive `now` from the stored mtime so the
+    // age is EXACTLY the TTL — this pins the `<= ttlMs` boundary deterministically
+    // regardless of filesystem timestamp precision.
+    const storedMtime = statSync(path).mtimeMs;
+    assert.equal(
+      hasRecentPendingTestRun(storedMtime + TEST_PENDING_TTL_MS, TEST_PENDING_TTL_MS, dir),
+      true,
+    );
   } finally {
     cleanupSandbox(sandbox);
   }

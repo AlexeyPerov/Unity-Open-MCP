@@ -183,7 +183,16 @@ export async function searchAssetsOffline(
   const guidQuery = (opts.guid ?? "").trim().toLowerCase();
   const typeFilter = opts.type ? parseKindSet(opts.type) : null;
   const folder = opts.folder ?? "Assets";
-  const maxResults = opts.maxResults ?? 50;
+  // M1 — `0` (and any negative) is the documented "unlimited (for paging)"
+  // sentinel forwarded by compressible-router.ts when the caller supplies a
+  // page_size; `??` does not treat 0 as absent, so the previous
+  // `opts.maxResults ?? 50` made `0` a hard cap and the loop broke on the
+  // first file (`0 >= 0`). Treat `<= 0` as unlimited, mirroring
+  // dependenciesOffline (`maxResults > 0 && totalCount > maxResults`) and
+  // renderSearchSummary (`matchLimit > 0 ? ... : all.length`).
+  const maxResults = (typeof opts.maxResults === "number" && opts.maxResults > 0)
+    ? opts.maxResults
+    : Number.POSITIVE_INFINITY;
   const searchDir = join(opts.projectRoot, folder);
 
   // M31-optimizations Plan 2 / L2 — when a component query is present, build
@@ -488,7 +497,15 @@ export async function findReferencesOffline(
   },
 ): Promise<FindReferencesOfflineResult> {
   const detail = (opts.detail ?? "normal") as "summary" | "normal" | "verbose";
-  const maxResults = opts.maxResults ?? 100;
+  // M2 — `0` (and any negative) is the documented "unlimited (for paging)"
+  // sentinel forwarded by tool-router.ts when the caller supplies a
+  // page_size; `??` does not treat 0 as absent, so the previous
+  // `opts.maxResults ?? 100` made `0` a hard cap and `displayHits.slice(0,0)`
+  // returned an empty list (page_size:1 → referencedBy:[]). Treat `<= 0` as
+  // unlimited, mirroring dependenciesOffline and searchAssetsOffline.
+  const maxResults = (typeof opts.maxResults === "number" && opts.maxResults > 0)
+    ? opts.maxResults
+    : Number.POSITIVE_INFINITY;
   const maxPerFile = opts.maxPerFile ?? 5;
   const patternThreshold = opts.patternThreshold ?? 0;
 

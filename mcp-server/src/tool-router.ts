@@ -2392,6 +2392,15 @@ export class ToolRouter implements Router {
     delete bridgeArgs.page_size;
     delete bridgeArgs.cursor;
     bridgeArgs.detail = detail;
+    // M3 — when paging, request the full hierarchy from the bridge. The bridge
+    // clamps max_nodes to >= 1 (ScenesTools.cs:387), so 0 is NOT an unlimited
+    // sentinel there; without this override the default 200 would cap the
+    // flattened stream and paging could never walk past node 200 even once the
+    // field path is fixed. Use a large explicit cap so paging can walk the
+    // whole tree; applyPaging enforces the per-page size.
+    if (wantPaging) {
+      bridgeArgs.max_nodes = SCENE_PAGING_MAX_NODES;
+    }
 
     const canBatch = this.batch.isBatchTool("unity_open_mcp_scene_get_data");
     let raw: CallToolResult;
@@ -2439,21 +2448,40 @@ function pageSceneNodes(
 
   // Preserve scene-level metadata; replace the structural root/hierarchy fields
   // with the flat paged node list + a note explaining the page shape.
-  const { roots, rootGameObjects, nodes, truncated, pagination: _existing, ...meta } = body;
+  // M3 — the bridge nests the hierarchy under `body.scene` (ScenesTools.cs:
+  // 393-417 emits `{"status":"ok","scene":{...,"roots":[...],"truncated":N}}`),
+  // so the structural fields live on `body.scene`, not `body`. The previous
+  // destructure looked at the top level and silently dropped the bridge's
+  // `truncated` count; we now pull it from `body.scene` and re-attach it on
+  // the page so callers can tell paging-truncated (resumable via next_cursor)
+  // from bridge-truncated (the source cap was hit).
+  const scene = (body.scene && typeof body.scene === "object")
+    ? body.scene as Record<string, unknown>
+    : {};
+  const { roots, rootGameObjects, nodes, truncated, moreHidden, pagination: _existing, ...sceneMeta } = scene;
   void roots;
   void rootGameObjects;
   void nodes;
   void truncated;
+  void moreHidden;
   void _existing;
 
-  return attachPagination(
-    {
-      ...meta,
+  const result: Record<string, unknown> = {
+    status: body.status ?? "ok",
+    scene: {
+      ...sceneMeta,
       nodes: page,
       pagingNote: "page_size returns a flattened node stream; re-read without page_size for the structural root/hierarchy view",
     },
-    block,
-  );
+  };
+  // Carry the bridge's source-side truncation count through to the page so an
+  // agent can distinguish "more pages" (pagination.truncated) from "the bridge
+  // capped the hierarchy" (scene.truncated). Both can be non-zero at once.
+  if (typeof truncated === "number" && truncated > 0) {
+    (result.scene as Record<string, unknown>).truncated = truncated;
+  }
+
+  return attachPagination(result, block);
 }
 
 /**
@@ -2473,11 +2501,26 @@ function flattenSceneBody(body: Record<string, unknown>): Record<string, unknown
     }
   };
 
+  // M3 — the bridge nests everything one level down under `body.scene`
+  // (`{"status":"ok","scene":{...,"roots":[...]}}`, ScenesTools.cs:393-417).
+  // The previous code read `body.roots` / `body.rootGameObjects` directly, so
+  // `rootField` was always undefined and paging returned an empty node list
+  // while claiming completeness. Read from `body.scene` first, then fall back
+  // to the top level for any caller that hands us a pre-unwrapped body.
+  const scene = (body.scene && typeof body.scene === "object")
+    ? body.scene as Record<string, unknown>
+    : body;
   // The bridge emits `roots` (summary) or `rootGameObjects` (normal/verbose);
   // accept either.
-  const rootField = Array.isArray(body.roots) ? body.roots : body.rootGameObjects;
+  const rootField = Array.isArray(scene.roots) ? scene.roots : scene.rootGameObjects;
   if (Array.isArray(rootField)) {
     for (const root of rootField) walk(root);
   }
   return out;
 }
+
+// M3 — large explicit cap forwarded to the bridge when paging so the
+// flattened stream is not truncated at the default 200 before paging even
+// starts. applyPaging enforces the per-page size; this only lifts the
+// source-side ceiling.
+const SCENE_PAGING_MAX_NODES = 100_000;
