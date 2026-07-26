@@ -21,8 +21,11 @@ export const buildStart = makeTool(
     "(EditorBuildSettings.scenes) and the active build target; pass output_path to choose the " +
     "destination (defaults to Builds/<target>/Build). development: true adds the Development " +
     "build option; allow_debugging: true adds AllowDebugging. Returns the BuildReport summary " +
-    "(result, total time, size, errors/warnings, per-step durations). `paths_hint` should scope " +
-    "to the build output folder (and/or \"ProjectSettings\" since build settings can be touched).",
+    "(result, total time, size, errors/warnings, per-step durations). On a failed build " +
+    "(result != Succeeded) the response is an error envelope (code `build_failed`) carrying the " +
+    "same report JSON — the success flag and `status` reflect the actual build outcome, not the " +
+    "HTTP call. `paths_hint` should scope to the build output folder (and/or \"ProjectSettings\" " +
+    "since build settings can be touched).",
   {
     required: ["paths_hint"],
         properties: {

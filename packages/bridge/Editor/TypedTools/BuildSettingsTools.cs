@@ -470,7 +470,23 @@ namespace UnityOpenMcpBridge.TypedTools
                 };
 
                 var report = BuildPipeline.BuildPlayer(buildOptions);
-                return ToolDispatchResult.Ok(BuildReportJson(report, outputPath, options));
+                // B17 — BuildReportJson used to hardcode status:"ok" and StartBuild
+                // wrapped it in Ok(...) regardless of report.summary.result. A
+                // failed build (totalErrors > 0 / result == Failed) therefore
+                // reported mutation.success:true and the gate reported "passed".
+                // Surface failure through the dispatch result so the gate /
+                // envelope contract is honoured, while still returning the full
+                // report JSON so the agent can inspect totalErrors + steps.
+                bool buildOk = report.summary.result == BuildResult.Succeeded;
+                string reportJson = BuildReportJson(report, outputPath, options, buildOk);
+                if (buildOk)
+                    return ToolDispatchResult.Ok(reportJson);
+                return new ToolDispatchResult(
+                    false, reportJson, "build_failed",
+                    "BuildPlayer finished with result " + report.summary.result +
+                    " (" + report.summary.totalErrors + " error(s), " +
+                    report.summary.totalWarnings + " warning(s)). Inspect totalErrors / " +
+                    "steps / outputPath in the output for detail.");
             }
             catch (Exception e)
             {
@@ -1455,10 +1471,12 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // ------------------------- JSON building --------------------------
 
-        private static string BuildReportJson(BuildReport report, string outputPath, BuildOptions options)
+        private static string BuildReportJson(BuildReport report, string outputPath, BuildOptions options, bool success)
         {
             var sb = new StringBuilder(256);
-            sb.Append("{\"status\":\"ok\",\"action\":\"build\"");
+            // B17 — status reflects the actual build outcome, derived from
+            // report.summary.result by the caller. Previously hardcoded "ok".
+            sb.Append("{\"status\":\"").Append(success ? "ok" : "error").Append("\",\"action\":\"build\"");
             sb.Append(",\"result\":").Append(Q(report.summary.result.ToString()));
             sb.Append(",\"totalTimeSeconds\":").Append(Num(report.summary.totalTime.TotalSeconds));
             sb.Append(",\"totalSize\":").Append(report.summary.totalSize);

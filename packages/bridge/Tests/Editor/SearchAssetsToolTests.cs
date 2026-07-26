@@ -54,5 +54,39 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(result.Output.Contains("\"matches\":["),
                 "envelope must carry a matches array");
         }
+
+        // B19 — `max_results: 0` is the server-internal "unlimited" sentinel
+        // (emitted by the MCP server when page_size is set so the cursor can
+        // walk the full match set). Previously the bridge treated 0 as a hard
+        // cap of zero, so every candidate was counted as truncated and zero
+        // matches were returned. Now 0 means unlimited: the empty-result case
+        // must still be a valid envelope (no truncation of nothing).
+        [Test]
+        public void Execute_MaxResultsZero_IsUnlimited_NotZeroCap()
+        {
+            var result = SearchAssetsTool.Execute(
+                "{\"guid\":\"0000000000000000000000000000dead\",\"max_results\":0}");
+            Assert.IsTrue(result.Success);
+            StringAssert.Contains("\"matchCount\":0", result.Output);
+            StringAssert.Contains("\"truncated\":0", result.Output,
+                "0 must not truncate every candidate — it means unlimited, not a cap of zero");
+        }
+
+        // B19 — once the cap is reached, only REAL matches beyond the cap count
+        // toward `truncated`. The previous form incremented `truncated` for
+        // every unexamined candidate, so `matchCount` (= matches.Count +
+        // truncated) ballooned to the total candidate count. With a query that
+        // cannot match, a tiny cap must still report truncated: 0 (no matches
+        // dropped), regardless of how many candidates AssetDatabase enumerated.
+        [Test]
+        public void Execute_SmallCap_DoesNotCountNonMatchesAsTruncated()
+        {
+            var result = SearchAssetsTool.Execute(
+                "{\"guid\":\"0000000000000000000000000000dead\",\"max_results\":1}");
+            Assert.IsTrue(result.Success);
+            // No real matches → truncated must be 0, not (candidateCount - 1).
+            StringAssert.Contains("\"truncated\":0", result.Output);
+            StringAssert.Contains("\"matchCount\":0", result.Output);
+        }
     }
 }

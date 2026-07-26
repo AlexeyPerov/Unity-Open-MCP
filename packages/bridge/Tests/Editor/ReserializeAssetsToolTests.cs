@@ -89,5 +89,81 @@ namespace UnityOpenMcpBridge.Tests
                 ForceReserializeAssetsOptions.ReserializeAssetsAndMetadata,
                 ReserializeAssetsTool.ResolveOptions(true));
         }
+
+        // B20 — paths that escape Assets/ via `..` MUST be rejected, not silently
+        // prefixed. The previous form did `p = "Assets/" + p` for any non-Assets-
+        // rooted input, so `../ProjectSettings/ProjectSettings.asset` became
+        // `Assets/../ProjectSettings/ProjectSettings.asset`, passed File.Exists,
+        // reached ForceReserializeAssets, and was reused verbatim as the gate's
+        // paths_hint. Now the containment check fails before any mutation.
+        [Test]
+        public void Execute_ParentEscape_ReturnsInvalidPaths()
+        {
+            var result = ReserializeAssetsTool.Execute(
+                "{\"paths\":[\"../ProjectSettings/ProjectSettings.asset\"]}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("invalid_paths", result.ErrorCode);
+            StringAssert.Contains("escapes Assets/", result.ErrorMessage);
+            // Must NOT reach the mutation: the original escaped string must not
+            // appear as a normalized Assets/-rooted path in the message.
+            StringAssert.DoesNotContain("Assets/../ProjectSettings", result.ErrorMessage);
+        }
+
+        // B20 — absolute paths can never be a valid Assets-relative asset path.
+        // Reject outright rather than prefixing (which would produce
+        // `Assets//etc/passwd` or similar nonsense). The sample is JSON-escaped
+        // (backslashes doubled) so the embedded Windows path stays valid JSON.
+        private static readonly string SampleAbsolutePath =
+            System.IO.Path.DirectorySeparatorChar == '/' ? "/etc/passwd" : @"C:\\Windows\\System32\\drivers\\etc\\hosts";
+
+        [Test]
+        public void Execute_AbsolutePath_ReturnsInvalidPaths()
+        {
+            var result = ReserializeAssetsTool.Execute(
+                "{\"paths\":[\"" + SampleAbsolutePath + "\"]}");
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("invalid_paths", result.ErrorCode);
+            StringAssert.Contains("absolute paths are not allowed", result.ErrorMessage);
+        }
+
+        // B20 — IsUnderAssets is the pure containment decision split out so the
+        // boundary cases are unit-testable without driving AssetDatabase. The
+        // fake root is built from the system temp path so the absolute-path
+        // arithmetic agrees with the OS's Path.GetFullPath semantics.
+        private static readonly string FakeRoot =
+            System.IO.Path.Combine(System.IO.Path.GetTempPath(), "__uomcp_reserialize_test_proj");
+        private static readonly string FakeAssets =
+            System.IO.Path.Combine(FakeRoot, "Assets");
+
+        [Test]
+        public void IsUnderAssets_AcceptsAssetUnderAssets()
+        {
+            Assert.IsTrue(ReserializeAssetsTool.IsUnderAssets(
+                "Assets/Foo.prefab", FakeRoot, FakeAssets));
+        }
+
+        [Test]
+        public void IsUnderAssets_RejectsParentEscape()
+        {
+            // `Assets/../ProjectSettings/X.asset` resolves outside Assets/.
+            Assert.IsFalse(ReserializeAssetsTool.IsUnderAssets(
+                "Assets/../ProjectSettings/ProjectSettings.asset", FakeRoot, FakeAssets));
+        }
+
+        [Test]
+        public void IsUnderAssets_RejectsSiblingEscape()
+        {
+            // A bare `../ProjectSettings/...` (before any Assets/ prefix) escapes.
+            Assert.IsFalse(ReserializeAssetsTool.IsUnderAssets(
+                "../ProjectSettings/ProjectSettings.asset", FakeRoot, FakeAssets));
+        }
+
+        [Test]
+        public void IsUnderAssets_RejectsAssetsPrefixImpostor()
+        {
+            // `AssetsFoo` must not match `Assets` (trailing-separator guard).
+            Assert.IsFalse(ReserializeAssetsTool.IsUnderAssets(
+                "AssetsFoo/Bar.prefab", FakeRoot, FakeAssets));
+        }
     }
 }

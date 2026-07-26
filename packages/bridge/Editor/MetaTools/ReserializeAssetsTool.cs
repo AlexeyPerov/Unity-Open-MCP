@@ -28,8 +28,9 @@ namespace UnityOpenMcpBridge.MetaTools
                     "'paths' is required and must be a non-empty array of asset paths to reserialize. " +
                     "Whole-project reserialize is not supported via this tool — enumerate the assets you edited.");
 
-            var normalized = NormalizePaths(paths);
-            var invalid = CollectInvalid(normalized);
+            var normalized = NormalizePaths(paths, out var containmentInvalid);
+            var invalid = containmentInvalid;
+            CollectInvalidInto(normalized, invalid);
             if (invalid.Count > 0)
                 return ToolDispatchResult.Fail("invalid_paths",
                     "One or more paths failed pre-flight checks: " + string.Join("; ", invalid));
@@ -67,34 +68,100 @@ namespace UnityOpenMcpBridge.MetaTools
         }
 
         // Normalize for AssetDatabase: forward slashes, no leading slash, rooted under Assets/.
-        // Paths outside Assets/ or with unsupported extensions are rejected before mutation.
-        private static System.Collections.Generic.List<string> NormalizePaths(string[] rawPaths)
+        //
+        // B20 — paths outside Assets/ are REJECTED, not silently prefixed. The
+        // previous form did `p = "Assets/" + p` for any non-Assets-rooted input,
+        // so `../ProjectSettings/ProjectSettings.asset` became
+        // `Assets/../ProjectSettings/ProjectSettings.asset` — File.Exists
+        // resolved the `..`, ForceReserializeAssets wrote through it, and the
+        // same escaped string was reused verbatim as the gate's paths_hint. Now
+        // we resolve each candidate against the project root and require it to
+        // land inside Assets/; anything that escapes (or is absolute / outside)
+        // is collected into `containmentInvalid` and the tool fails before any
+        // mutation. Callers that legitimately want a non-Assets path must edit
+        // it via a different mechanism — reserialize is scoped to Assets/ by
+        // design (the comment two lines above always stated this).
+        private static System.Collections.Generic.List<string> NormalizePaths(
+            string[] rawPaths, out System.Collections.Generic.List<string> containmentInvalid)
         {
             var result = new System.Collections.Generic.List<string>(rawPaths.Length);
+            containmentInvalid = new System.Collections.Generic.List<string>();
+
+            // Project root = parent of Assets (Application.dataPath). Resolve
+            // once; both the Assets folder and each candidate are resolved
+            // against it so `..` segments collapse before the containment check.
+            var projectRoot = Directory.GetParent(UnityEngine.Application.dataPath)?.FullName;
+            string assetsAbs = Path.GetFullPath(Path.Combine(projectRoot ?? "", "Assets"));
+
             foreach (var raw in rawPaths)
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
-                var p = raw.Replace('\\', '/').Trim('/');
-                if (p.StartsWith("Assets/", System.StringComparison.OrdinalIgnoreCase))
+                var p = raw.Replace('\\', '/').Trim();
+
+                // Reject absolute paths outright — they can never be a valid
+                // Assets-relative asset path and are almost always a mistake
+                // (or an attempt to reach outside the project).
+                if (Path.IsPathRooted(p))
                 {
-                    // already rooted
-                }
-                else if (p.Equals("Assets", System.StringComparison.OrdinalIgnoreCase))
-                {
+                    containmentInvalid.Add($"{raw} (absolute paths are not allowed; pass an Assets/-relative path)");
                     continue;
                 }
-                else
+
+                // Strip any leading slash left after Trim() of backslash-converted input.
+                p = p.TrimStart('/');
+
+                // If not already rooted under Assets/, root it — then verify the
+                // ROOTED form is genuinely contained (a `..` segment can still
+                // escape after prefixing).
+                if (!p.StartsWith("Assets/", System.StringComparison.OrdinalIgnoreCase)
+                    && !p.Equals("Assets", System.StringComparison.OrdinalIgnoreCase))
                 {
                     p = "Assets/" + p;
                 }
+
+                if (!IsUnderAssets(p, projectRoot, assetsAbs))
+                {
+                    containmentInvalid.Add($"{raw} (escapes Assets/ — reserialize is scoped to Assets/)");
+                    continue;
+                }
+
                 result.Add(p);
             }
             return result;
         }
 
-        private static System.Collections.Generic.List<string> CollectInvalid(System.Collections.Generic.List<string> paths)
+        // True iff the canonical absolute resolution of `assetRelativePath`
+        // (resolved against the project root) is `assetsAbs` itself or a
+        // descendant of it. Collapses `..` and `.` segments via GetFullPath so
+        // `Assets/../ProjectSettings/X.asset` resolves outside Assets/ and is
+        // rejected. Returns false when resolution fails (e.g. path is null/empty
+        // or the project root is unknown).
+        internal static bool IsUnderAssets(string assetRelativePath, string projectRoot, string assetsAbs)
         {
-            var invalid = new System.Collections.Generic.List<string>();
+            if (string.IsNullOrEmpty(assetRelativePath) || string.IsNullOrEmpty(projectRoot))
+                return false;
+            string resolved;
+            try
+            {
+                resolved = Path.GetFullPath(Path.Combine(projectRoot, assetRelativePath.Replace('\\', '/')));
+            }
+            catch
+            {
+                return false;
+            }
+            // OrdinalIgnoreCase: on Windows the drive letter casing can differ,
+            // and macOS/Linux paths are case-sensitive so an exact prefix is the
+            // strict check. We compare with a trailing separator to avoid
+            // `AssetsFoo` matching `Assets`.
+            string withSep = assetsAbs.EndsWith(System.IO.Path.DirectorySeparatorChar.ToString())
+                ? assetsAbs
+                : assetsAbs + System.IO.Path.DirectorySeparatorChar;
+            return string.Equals(resolved, assetsAbs, System.StringComparison.OrdinalIgnoreCase)
+                || resolved.StartsWith(withSep, System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void CollectInvalidInto(System.Collections.Generic.List<string> paths, System.Collections.Generic.List<string> invalid)
+        {
             foreach (var p in paths)
             {
                 var ext = Path.GetExtension(p).ToLowerInvariant();
@@ -115,7 +182,6 @@ namespace UnityOpenMcpBridge.MetaTools
                     invalid.Add($"{p} (file not found)");
                 }
             }
-            return invalid;
         }
 
         private static string BuildResult(System.Collections.Generic.List<string> paths, bool includeMeta)

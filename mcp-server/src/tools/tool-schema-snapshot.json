@@ -756,7 +756,7 @@
           "type": "boolean"
         },
         "paths": {
-          "description": "Asset paths to reserialize (e.g. [\"Assets/Prefabs/Player.prefab\"]). Must be non-empty. Supported extensions: .prefab, .unity, .asset, .mat, .controller, .anim. Whole-project reserialize is not supported — enumerate explicitly.",
+          "description": "Asset paths to reserialize (e.g. [\"Assets/Prefabs/Player.prefab\"]). Must be non-empty. Paths are scoped to Assets/ — anything that resolves outside Assets/ (absolute paths, `../` escapes, `Assets/../ProjectSettings/...`) is rejected before any mutation. Supported extensions: .prefab, .unity, .asset, .mat, .controller, .anim. Whole-project reserialize is not supported — enumerate explicitly.",
           "items": {
             "type": "string"
           },
@@ -4822,7 +4822,7 @@
     }
   },
   "unity_open_mcp_build_start": {
-    "description": "Mutating + DESTRUCTIVE: trigger a player build via BuildPipeline.BuildPlayer. BuildPlayer is on the default deny list (it is multi-minute and writes a binary player outside Assets/), so this tool REFUSES unless the request passes BOTH gate: \"off\" AND confirm_bypass: true. When bypassed, the full gate path still runs and the response carries any post-build asset-reference fallout. Uses the scenes enabled in build settings (EditorBuildSettings.scenes) and the active build target; pass output_path to choose the destination (defaults to Builds/<target>/Build). development: true adds the Development build option; allow_debugging: true adds AllowDebugging. Returns the BuildReport summary (result, total time, size, errors/warnings, per-step durations). `paths_hint` should scope to the build output folder (and/or \"ProjectSettings\" since build settings can be touched).",
+    "description": "Mutating + DESTRUCTIVE: trigger a player build via BuildPipeline.BuildPlayer. BuildPlayer is on the default deny list (it is multi-minute and writes a binary player outside Assets/), so this tool REFUSES unless the request passes BOTH gate: \"off\" AND confirm_bypass: true. When bypassed, the full gate path still runs and the response carries any post-build asset-reference fallout. Uses the scenes enabled in build settings (EditorBuildSettings.scenes) and the active build target; pass output_path to choose the destination (defaults to Builds/<target>/Build). development: true adds the Development build option; allow_debugging: true adds AllowDebugging. Returns the BuildReport summary (result, total time, size, errors/warnings, per-step durations). On a failed build (result != Succeeded) the response is an error envelope (code `build_failed`) carrying the same report JSON — the success flag and `status` reflect the actual build outcome, not the HTTP call. `paths_hint` should scope to the build output folder (and/or \"ProjectSettings\" since build settings can be touched).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

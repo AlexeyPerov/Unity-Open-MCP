@@ -178,6 +178,36 @@ namespace UnityOpenMcpBridge.Tests
             return CompileCheckState.ExtractCode(message);
         }
 
+        // B18 — the pending marker MUST be scoped per project so an idle Editor
+        // on project B cannot steal/finalize/delete project A's headless-run
+        // marker. Two distinct project paths must resolve to two distinct
+        // filenames, and the same path must be stable across calls (so the
+        // batch process and an Editor on the same project agree).
+        [Test]
+        public static void PendingFilePath_IsScopedPerProject()
+        {
+            var pathA = CompileCheckState.PendingFilePath("/projects/Alpha");
+            var pathB = CompileCheckState.PendingFilePath("/projects/Beta");
+            var pathA2 = CompileCheckState.PendingFilePath("/projects/Alpha");
+
+            StringAssert.Contains("compile-check-pending-", pathA);
+            StringAssert.Contains("compile-check-pending-", pathB);
+            Assert.AreNotEqual(pathA, pathB, "distinct projects must get distinct pending files");
+            Assert.AreEqual(pathA, pathA2, "same project must resolve to a stable filename");
+        }
+
+        // B18 — a null/empty project path must not throw (the fallback "default"
+        // key keeps the file machine-local rather than crashing the Editor).
+        [Test]
+        public static void PendingFilePath_NullOrEmptyProject_FallsBackToDefault()
+        {
+            Assert.DoesNotThrow(() => CompileCheckState.PendingFilePath(null));
+            Assert.DoesNotThrow(() => CompileCheckState.PendingFilePath(""));
+            Assert.AreEqual(
+                CompileCheckState.PendingFilePath(null),
+                CompileCheckState.PendingFilePath(""));
+        }
+
         private static CompilerMessage MakeMessage(string message, CompilerMessageType type)
         {
             return new CompilerMessage

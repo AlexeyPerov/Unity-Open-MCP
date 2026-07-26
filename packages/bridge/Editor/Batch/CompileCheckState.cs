@@ -31,7 +31,31 @@ namespace UnityOpenMcpBridge.Batch
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             BridgeConstants.SettingsDirName);
 
-        internal static string PendingFilePath => Path.Combine(StatusDir, "compile-check-pending.json");
+        // B18 — the pending marker used to be one fixed machine-global file
+        // (compile-check-pending.json) shared by every project/process. The
+        // [InitializeOnLoad] static ctor subscribes in EVERY Editor that loads
+        // this assembly, so an idle interactive Editor on project B would see
+        // project A's headless-run marker, finalize it, File.Delete it, and emit
+        // to its own discarded stdout — while the owning batch process looped
+        // forever waiting for a result it had already produced. Scope the
+        // filename by project path so only an Editor opening the SAME project
+        // acts on the marker. InstancePortResolver.ProjectHash is the canonical
+        // stable per-project key (SHA256 of the normalized path); reusing it
+        // keeps one hashing convention across the bridge.
+        internal static string PendingFilePath(string projectPath)
+        {
+            var key = string.IsNullOrEmpty(projectPath)
+                ? "default"
+                : InstancePortResolver.ProjectHash(projectPath);
+            return Path.Combine(StatusDir, "compile-check-pending-" + key + ".json");
+        }
+
+        // The project path for THIS Editor/process: parent of Assets
+        // (Application.dataPath). Available in both batch mode and the
+        // interactive Editor, and stable across the domain reload the
+        // compile-check itself triggers.
+        private static string ResolveProjectPath() =>
+            Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
 
         // Bound the payload for catastrophically broken projects. The first N
         // errors are enough for an agent to diagnose; beyond that, fix forward
@@ -96,9 +120,10 @@ namespace UnityOpenMcpBridge.Batch
 
         private static void OnAssemblyCompiled(string assembly, CompilerMessage[] messages)
         {
-            if (!File.Exists(PendingFilePath)) return;
+            var pendingPath = PendingFilePath(ResolveProjectPath());
+            if (!File.Exists(pendingPath)) return;
 
-            var pending = ReadPending();
+            var pending = ReadPending(pendingPath);
             if (pending == null) return;
 
             CollectErrors(pending, assembly, messages);
@@ -136,9 +161,10 @@ namespace UnityOpenMcpBridge.Batch
 
         private static void Update()
         {
-            if (!File.Exists(PendingFilePath)) return;
+            var pendingPath = PendingFilePath(ResolveProjectPath());
+            if (!File.Exists(pendingPath)) return;
 
-            var pending = ReadPending();
+            var pending = ReadPending(pendingPath);
             if (pending == null) return;
 
             bool timedOut = NowMs() - pending.startedAtMs > pending.timeoutMs;
@@ -147,17 +173,17 @@ namespace UnityOpenMcpBridge.Batch
             // capture every assembly's messages.
             if (EditorApplication.isCompiling && !timedOut) return;
 
-            Finalize(pending, timedOut);
+            Finalize(pending, timedOut, pendingPath);
         }
 
-        private static void Finalize(PendingState pending, bool timedOut)
+        private static void Finalize(PendingState pending, bool timedOut, string pendingPath)
         {
             EditorApplication.update -= Update;
             CompilationPipeline.assemblyCompilationFinished -= OnAssemblyCompiled;
 
             var resultJson = BuildResultJson(pending, timedOut);
 
-            try { File.Delete(PendingFilePath); }
+            try { File.Delete(pendingPath); }
             catch { /* best-effort cleanup */ }
 
             int exit = pending.errors.Count > 0
@@ -234,7 +260,7 @@ namespace UnityOpenMcpBridge.Batch
             try
             {
                 Directory.CreateDirectory(StatusDir);
-                File.WriteAllText(PendingFilePath, SerializePending(pending));
+                File.WriteAllText(PendingFilePath(ResolveProjectPath()), SerializePending(pending));
             }
             catch (Exception e)
             {
@@ -242,12 +268,12 @@ namespace UnityOpenMcpBridge.Batch
             }
         }
 
-        private static PendingState ReadPending()
+        private static PendingState ReadPending(string pendingPath)
         {
             try
             {
-                if (!File.Exists(PendingFilePath)) return null;
-                return ParsePending(File.ReadAllText(PendingFilePath));
+                if (!File.Exists(pendingPath)) return null;
+                return ParsePending(File.ReadAllText(pendingPath));
             }
             catch (Exception e)
             {

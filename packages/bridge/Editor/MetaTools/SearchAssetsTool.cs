@@ -42,15 +42,35 @@ namespace UnityOpenMcpBridge.MetaTools
             var matches = new List<MatchRecord>();
             int truncated = 0;
 
+            // B19 — `max_results <= 0` means "unlimited" (the server-internal
+            // sentinel the MCP server emits when page_size is set, so the cursor
+            // can walk the full match set). Mirrors the offline path
+            // (offline/api.ts searchAssetsOffline) and the schema doc on
+            // `max_results`. Without this, passing 0 made the loop bail on the
+            // first candidate and report every remaining GUID as truncated.
+            bool unlimited = maxResults <= 0;
+
             foreach (var foundGuid in guids)
             {
-                if (matches.Count + truncated >= maxResults) { truncated++; continue; }
-
                 var assetPath = AssetDatabase.GUIDToAssetPath(foundGuid);
                 if (string.IsNullOrEmpty(assetPath)) continue;
 
                 var record = BuildMatch(assetPath, foundGuid, name, component, guid, objectLimit);
                 if (record == null) continue; // no reason matched
+
+                // B19 — only count REAL matches toward the cap. The previous
+                // form (`if (matches.Count + truncated >= maxResults) { truncated++;
+                // continue; }` at the TOP of the loop) incremented `truncated`
+                // for every unexamined candidate once the cap was reached, so
+                // `matchCount = matches.Count + truncated` grew to the total
+                // candidate count (e.g. 10000) regardless of how many actually
+                // matched. Now `truncated` is the count of matches dropped, and
+                // `matchCount` reflects the true match set size.
+                if (!unlimited && matches.Count >= maxResults)
+                {
+                    truncated++;
+                    continue;
+                }
 
                 matches.Add(record);
             }

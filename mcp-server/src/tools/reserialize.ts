@@ -15,7 +15,7 @@ export const reserialize = makeTool(
             type: "array",
             items: { type: "string" },
             description:
-              "Asset paths to reserialize (e.g. [\"Assets/Prefabs/Player.prefab\"]). Must be non-empty. Supported extensions: .prefab, .unity, .asset, .mat, .controller, .anim. Whole-project reserialize is not supported — enumerate explicitly.",
+              "Asset paths to reserialize (e.g. [\"Assets/Prefabs/Player.prefab\"]). Must be non-empty. Paths are scoped to Assets/ — anything that resolves outside Assets/ (absolute paths, `../` escapes, `Assets/../ProjectSettings/...`) is rejected before any mutation. Supported extensions: .prefab, .unity, .asset, .mat, .controller, .anim. Whole-project reserialize is not supported — enumerate explicitly.",
           },
           include_meta: {
             type: "boolean",
