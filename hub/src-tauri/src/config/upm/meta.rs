@@ -27,12 +27,19 @@ pub fn meta_content_for_path(asset_path: &Path) -> String {
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    let is_folder = asset_path.is_dir() || ext.is_empty();
+    // H32: `is_folder` must be driven by `is_dir()` alone. The previous
+    // `|| ext.is_empty()` arm treated extension-less *files* (`LICENSE`,
+    // `AUTHORS`, `NOTICE`) as folders, so they were written with
+    // `folderAsset: yes` — Unity then refused to import them as assets
+    // and the package shipped with broken importer state. Extension-less
+    // files now fall through to the default `TextScriptImporter`, which
+    // is exactly what Unity writes for `LICENSE` / `AUTHORS` / `NOTICE`.
+    let is_folder = asset_path.is_dir();
 
     let (importer, extra) = if is_folder {
         (
             "DefaultImporter",
-            "  userData: \n  assetBundleName: \n  assetBundleVariant: \n",
+            "  externalObjects: {}\n  userData: \n  assetBundleName: \n  assetBundleVariant: \n",
         )
     } else {
         match ext.as_str() {
@@ -63,11 +70,21 @@ pub fn meta_content_for_path(asset_path: &Path) -> String {
         }
     };
 
-    let folder_line = if is_folder {
-        "  isImporter: 0\n  folderAsset: yes\n"
-    } else {
-        ""
-    };
+    // H32: `folderAsset: yes` is a top-level scalar Unity writes at
+    // column 0 (immediately under `guid:`), NOT an indented importer
+    // field. The previous body emitted it indented two spaces right
+    // after the `guid:` scalar with a fabricated `isImporter: 0` line,
+    // which YAML cannot parse against a bare scalar context — Unity
+    // failed to read every folder meta this wrote and re-GUIDed the
+    // folder on first import. The real Unity shape (verified against
+    // package-cache folder metas) is:
+    //   fileFormatVersion: 2
+    //   guid: <hex>
+    //   folderAsset: yes
+    //   DefaultImporter:
+    //     externalObjects: {}
+    //     ...
+    let folder_line = if is_folder { "folderAsset: yes\n" } else { "" };
 
     format!(
         "fileFormatVersion: 2\n\
@@ -383,6 +400,63 @@ mod tests {
         let content = meta_content_for_path(dir.path());
         assert!(content.contains("folderAsset: yes"));
         assert!(content.contains("DefaultImporter"));
+    }
+
+    // H32: a folder meta must match Unity's real on-disk shape exactly —
+    // `folderAsset: yes` at column 0 (a top-level scalar under `guid:`),
+    // no fabricated `isImporter: 0` line, and the `DefaultImporter` block
+    // at column 0. The previous body indented `folderAsset` two spaces
+    // and emitted `isImporter: 0`, which YAML could not parse, so Unity
+    // re-GUIDed every folder this wrote.
+    #[test]
+    fn meta_for_folder_matches_unity_shape() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = meta_content_for_path(dir.path());
+        // No fabricated isImporter line.
+        assert!(!content.contains("isImporter"));
+        // folderAsset: yes appears at column 0 (start of a line).
+        assert!(
+            content.contains("\nfolderAsset: yes\n"),
+            "folderAsset: yes must be a top-level (column 0) scalar, got:\n{}",
+            content
+        );
+        // DefaultImporter: at column 0.
+        assert!(
+            content.contains("\nDefaultImporter:\n"),
+            "DefaultImporter: must be at column 0, got:\n{}",
+            content
+        );
+        // guid: precedes folderAsset:.
+        let guid_idx = content.find("guid:").unwrap();
+        let folder_idx = content.find("folderAsset: yes").unwrap();
+        assert!(guid_idx < folder_idx);
+    }
+
+    // H32: extension-less FILES (LICENSE, AUTHORS, NOTICE) must NOT be
+    // treated as folders. Previously `is_folder = is_dir() || ext.is_empty()`
+    // gave them `folderAsset: yes` + DefaultImporter, so Unity refused to
+    // import them. They are files and get the default TextScriptImporter.
+    #[test]
+    fn meta_for_extensionless_file_is_not_a_folder() {
+        for name in ["LICENSE", "AUTHORS", "NOTICE", "CHANGELOG"] {
+            // A path that does not exist on disk and has no extension —
+            // `is_dir()` returns false, which is the file case.
+            let f = Path::new(name);
+            assert!(!f.is_dir(), "fixture must be a file, not a dir");
+            let content = meta_content_for_path(f);
+            assert!(
+                !content.contains("folderAsset"),
+                "{} should not be a folder meta, got:\n{}",
+                name,
+                content
+            );
+            assert!(
+                content.contains("TextScriptImporter"),
+                "{} should use TextScriptImporter, got:\n{}",
+                name,
+                content
+            );
+        }
     }
 
     #[test]

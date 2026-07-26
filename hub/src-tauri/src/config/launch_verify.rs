@@ -242,6 +242,14 @@ pub enum LaunchForVerifyError {
         pid: u32,
         project_path: String,
     },
+    /// H36: persisting the post-launch `projects.json` failed. Mirrors
+    /// `LaunchError::PersistFailed` in `launch.rs`. Unity is already
+    /// running by this point, but the bookkeeping (`lastLaunchPid`,
+    /// `lastLaunchAt`, frecency) was NOT recorded to disk — surfaced as
+    /// an error instead of silently swallowed so the wizard learns the
+    /// config volume is unwritable.
+    #[serde(rename_all = "camelCase")]
+    PersistFailed { project_id: String, message: String },
 }
 
 impl std::fmt::Display for LaunchForVerifyError {
@@ -263,6 +271,9 @@ impl std::fmt::Display for LaunchForVerifyError {
             }
             LaunchForVerifyError::AlreadyRunning { pid, .. } => {
                 write!(f, "Unity is already running for this project (pid {})", pid)
+            }
+            LaunchForVerifyError::PersistFailed { message, .. } => {
+                write!(f, "Failed to persist launch data: {}", message)
             }
         }
     }
@@ -478,7 +489,12 @@ fn launch_for_verify_inner(
             });
         }
     };
-    let pid = child.id();
+    // H39: hand the Child to a reaper thread instead of dropping it
+    // here. `Child::drop` does not `waitpid`, so dropping would leave a
+    // zombie when Unity exits — `kill -0` then reports the dead editor
+    // as alive (the wizard's Step-5 poll and the running-Unity chip),
+    // and one process-table entry leaks per launch.
+    let pid = crate::config::process::reap_child(child);
     let mut projects = projects;
     if let Some(p) = projects.projects.iter_mut().find(|p| p.id == params.project_id) {
         p.last_launch_pid = Some(pid);
@@ -488,8 +504,31 @@ fn launch_for_verify_inner(
             p.unity_version = refreshed_version.clone();
         }
     }
+    // H36: surface the persist failure instead of swallowing it. Unity is
+    // already running (spawn above succeeded), so we still publish the
+    // in-memory state — but returning `Err` tells the wizard the launch
+    // bookkeeping did NOT reach disk, so the user learns the config
+    // volume is unwritable instead of seeing a silent success.
     if let Err(e) = persistence::save_projects(&projects) {
         log::error!("Failed to persist launch data: {}", e);
+        {
+            let mut guard = state.projects.lock().unwrap();
+            *guard = projects;
+        }
+        return Err(InnerLaunchForVerifyError {
+            typed: LaunchForVerifyError::PersistFailed {
+                project_id: params.project_id.clone(),
+                message: e.to_string(),
+            },
+            project_name,
+            project_path: project_path_str,
+            unity_version: Some(version),
+            install_path: Some(install_path),
+            launch_args: args,
+            build_target,
+            code: "persistFailed".to_string(),
+            message: format!("Failed to persist launch data: {}", e),
+        });
     }
     {
         let mut guard = state.projects.lock().unwrap();

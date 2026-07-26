@@ -24,6 +24,11 @@ import { S } from "$lib/state.svelte";
  */
 class WalkUpScanStore {
   scanning = $state(false);
+  // H38: synchronous latch set while the backend `start_walk_up_scan`
+  // invoke is in flight, so a second click in that window is rejected
+  // before it reaches the backend (avoids a spurious
+  // `anotherScanInProgress` from the authoritative server-side guard).
+  starting = $state(false);
   scanId = $state<string | null>(null);
   currentRoot = $state<string | null>(null);
   currentDepth = $state<number | null>(null);
@@ -80,10 +85,21 @@ class WalkUpScanStore {
    * the inline message.
    */
   async begin(params: WalkUpStartParams): Promise<WalkUpStart | null> {
-    if (this.scanning) {
+    // H38: guard against a double-invoke in the window between the user
+    // clicking Start and the backend `start_walk_up_scan` invoke
+    // resolving. The previous check read `this.scanning`, but
+    // `this.scanning` was only set to true AFTER the await, so two
+    // rapid clicks both passed the guard and both invoked — the second
+    // then surfaced a confusing `anotherScanInProgress` even though the
+    // user only intended one scan. `starting` is set synchronously
+    // before the await so the second click is rejected up front. (The
+    // backend `try_register` is the authoritative guard; this is the
+    // client-side mirror that avoids the spurious error entirely.)
+    if (this.scanning || this.starting) {
       this.startError = "a walk-up scan is already running";
       return null;
     }
+    this.starting = true;
     this.startError = null;
     this.lastResult = null;
     try {
@@ -101,6 +117,8 @@ class WalkUpScanStore {
       this.startError = msg;
       S.appendErrorLog(`walk-up scan failed to start: ${msg}`);
       return null;
+    } finally {
+      this.starting = false;
     }
   }
 
@@ -172,6 +190,8 @@ function formatStartError(e: unknown): string {
         return "no walk-up roots are configured — add at least one in Settings";
       case "invalidRoot":
         return `invalid walk-up root: ${err.reason} (${err.path})`;
+      case "spawnFailed":
+        return `failed to start scan worker: ${err.message}`;
     }
   }
   return e instanceof Error ? e.message : String(e);

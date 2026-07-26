@@ -34,6 +34,14 @@ pub struct RefreshOutcome {
     pub projects: ProjectsFile,
     pub updated: Vec<String>,
     pub skipped: Vec<String>,
+    /// H36: set when persisting the refreshed `projects.json` failed
+    /// (read-only or full config volume). The refresh itself ran and
+    /// `projects` reflects the in-memory state, but the on-disk file is
+    /// stale — surfaced so the UI can warn the user instead of
+    /// returning a silent success whose results vanish on the next
+    /// boot. `None` when the persist succeeded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persist_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -280,9 +288,20 @@ pub fn refresh_all_projects(state: State<AppState>) -> RefreshOutcome {
         }
     }
 
-    if let Err(e) = persistence::save_projects(&projects) {
-        log::error!("Failed to persist refreshed projects: {}", e);
-    }
+    // H36: capture the persist failure instead of swallowing it. The
+    // refresh ran and `projects` reflects the refreshed in-memory state,
+    // but on a read-only / full config volume the on-disk file stays
+    // stale. We still publish the in-memory state (the session should
+    // show the refreshed data), but surface the error via `persist_error`
+    // so the UI can warn the user instead of returning a silent success
+    // whose results vanish on the next boot.
+    let persist_error = match persistence::save_projects(&projects) {
+        Ok(()) => None,
+        Err(e) => {
+            log::error!("Failed to persist refreshed projects: {}", e);
+            Some(e.to_string())
+        }
+    };
 
     {
         let mut guard = state.projects.lock().unwrap();
@@ -300,6 +319,7 @@ pub fn refresh_all_projects(state: State<AppState>) -> RefreshOutcome {
         projects,
         updated,
         skipped,
+        persist_error,
     }
 }
 

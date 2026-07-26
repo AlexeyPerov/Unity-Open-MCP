@@ -1449,6 +1449,12 @@
       S.appendDrawerLog(
         `refreshed projects (${updatedCount} updated${skippedCount ? `, ${skippedCount} skipped` : ""})`
       );
+      // H36: surface a persist failure so the user learns the config
+      // volume is unwritable instead of seeing a silent success whose
+      // results vanish on the next boot.
+      if (result.persistError) {
+        S.appendErrorLog(`refresh saved in memory but NOT to disk: ${result.persistError}`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       S.appendErrorLog(`refresh failed: ${msg}`);

@@ -961,6 +961,117 @@
                 </Button>
               </div>
             </div>
+            <!--
+              H37: walk-up scan configuration. These handlers
+              (handleAddWalkUpRoot / handleRemoveWalkUpRoot /
+              setWalkUpMaxDepth / setWalkUpFollowSymlinks /
+              setWalkUpKeepPartial) were defined but previously wired to
+              nothing in the template, so the only place the user could
+              see these values was the read-only <dd> list inside
+              WalkUpScanModal.svelte — which presented them as if they
+              were configurable. The settings now live here, in the
+              Discovery group, alongside the other discovery inputs.
+            -->
+            <div class="walkup-section">
+              <h4 class="walkup-heading">Walk-up scan roots</h4>
+              <p class="walkup-hint">
+                Folders the <strong>Walk-up scan</strong> modal (Projects tab)
+                descends into looking for Unity projects. Each root is
+                walked up to <code>Max depth</code>; discovered projects are
+                appended to the project list. Paths persist in
+                <code>settings.json</code> and survive restart.
+              </p>
+              <ul class="folder-list" aria-label="Walk-up scan roots">
+                {#each settings.unityDiscovery.walkUpRoots as root, i (root + ":w:" + i)}
+                  <li class="folder-item">
+                    <span class="folder-path" title={root}>{root}</span>
+                    <button
+                      type="button"
+                      class="folder-remove"
+                      onclick={() => handleRemoveWalkUpRoot(i)}
+                      aria-label={`Remove walk-up root ${root}`}
+                      title={`Remove ${root}`}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                {:else}
+                  <li class="folder-empty">
+                    No walk-up roots. Use <strong>Add Folder</strong> below
+                    to pick a folder to scan for Unity projects.
+                  </li>
+                {/each}
+              </ul>
+              <div class="folder-actions">
+                <Button
+                  variant="secondary"
+                  onclick={handleAddWalkUpRoot}
+                  disabled={addingWalkUpRoot}
+                >
+                  {addingWalkUpRoot ? "Adding…" : "Add Folder"}
+                </Button>
+              </div>
+              <div class="scan-interval-row">
+                <label class="check-row scan-interval-label" for="walkup-max-depth">
+                  <span class="widget-text">
+                    <span class="check-label">Max depth</span>
+                    <span class="check-desc">
+                      How deep the walk-up scan descends into each root.
+                      Default 4; clamped to 1–8. Higher values find projects
+                      nested deeper in the tree at the cost of a longer scan.
+                    </span>
+                  </span>
+                </label>
+                <div class="scan-interval-input">
+                  <input
+                    id="walkup-max-depth"
+                    type="number"
+                    min="1"
+                    max="8"
+                    step="1"
+                    value={settings.unityDiscovery.walkUpMaxDepth ?? 4}
+                    onchange={(e) => {
+                      const raw = Number((e.currentTarget as HTMLInputElement).value);
+                      if (Number.isFinite(raw) && raw > 0) {
+                        void setWalkUpMaxDepth(raw);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+              <label class="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.unityDiscovery.walkUpFollowSymlinks}
+                  onchange={(e) =>
+                    setWalkUpFollowSymlinks((e.currentTarget as HTMLInputElement).checked)}
+                />
+                <span class="widget-text">
+                  <span class="check-label">Follow symlinks during walk-up scan</span>
+                  <span class="check-desc">
+                    When on, the scan traverses symlinked directories. Off
+                    (default) is safer — it avoids loops and cross-device
+                    surprises. The Walk-up scan modal reflects this setting.
+                  </span>
+                </span>
+              </label>
+              <label class="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.unityDiscovery.walkUpKeepPartial}
+                  onchange={(e) =>
+                    setWalkUpKeepPartial((e.currentTarget as HTMLInputElement).checked)}
+                />
+                <span class="widget-text">
+                  <span class="check-label">Keep partial results on cancel</span>
+                  <span class="check-desc">
+                    When on, cancelling a walk-up scan still appends the
+                    projects found so far. Off (default) discards partial
+                    results on cancel.
+                  </span>
+                </span>
+              </label>
+            </div>
           </div>
         {/if}
       </section>

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { getNow, useNow } from "../state/clock.svelte";
+
   let {
     iso,
     fallback = "—",
@@ -6,6 +8,14 @@
     iso?: string;
     fallback?: string;
   } = $props();
+
+  // H33: subscribe to the shared wall-clock so `display` re-derives on
+  // every tick. `Date.now()` read inside `formatRelative` is not itself
+  // reactive — without this subscription a row rendered "just now"
+  // would keep that text for the whole session. The cleanup returned by
+  // `useNow` decrements the shared clock's consumer count and disarms
+  // its single `setInterval` when the last consumer unmounts.
+  $effect(() => useNow());
 
   function parseIso(value?: string): Date | null {
     if (!value) return null;
@@ -17,7 +27,9 @@
   function formatRelative(value?: string): string {
     const d = parseIso(value);
     if (!d) return fallback;
-    const now = Date.now();
+    // Read the shared reactive clock so a `$derived` re-runs on each
+    // tick. `Date.now()` would return a snapshot that never changes.
+    const now = getNow();
     const diffMs = now - d.getTime();
     const future = diffMs < 0;
     const abs = Math.abs(diffMs);

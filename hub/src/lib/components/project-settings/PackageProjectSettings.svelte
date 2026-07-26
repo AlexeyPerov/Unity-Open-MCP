@@ -189,6 +189,13 @@
   let skippedDuplicateEntries = $derived(
     migrateResult?.entries.filter((e) => e.action === "skipped-duplicate") ?? []
   );
+  // H35: copies whose `fs::copy` failed. The destination is already
+  // truncated to 0 bytes by the time the error is returned, so these
+  // MUST be shown distinctly from `replaced` — otherwise a data-loss
+  // event looks like a clean run.
+  let failedEntries = $derived(
+    migrateResult?.entries.filter((e) => e.action === "failed") ?? []
+  );
 
   async function pickSource() {
     const selected = await openDialog({
@@ -229,7 +236,11 @@
         `migrated ${migrateResult.replaced} files for ${project.name} ` +
           `(${migrateResult.replaced} replaced, ${migrateResult.skippedNew} new in source, ` +
           `${migrateResult.skippedMeta} .meta skipped, ${migrateResult.skippedDuplicate} duplicate, ` +
-          `${migrateResult.untouched} untouched)`
+          `${migrateResult.untouched} untouched` +
+          (migrateResult.failed > 0
+            ? `, ${migrateResult.failed} FAILED — destination truncated, see list`
+            : "") +
+          `)`
       );
       // Reflect the persisted source folder + mtime back into the store.
       const updated: ProjectEntry = { ...project, migrateSourceFolder: migrateResult.savedSourceFolder };
@@ -414,7 +425,7 @@
       </div>
       {#if migrateError}<p class="error-text">{migrateError}</p>{/if}
       {#if migrateResult}
-        <p class="ok-text">
+        <p class={migrateResult.failed > 0 ? "error-text" : "ok-text"}>
           Replaced {migrateResult.replaced}
           {#if migrateResult.skippedMeta}
             , .meta skipped {migrateResult.skippedMeta}{/if}
@@ -423,7 +434,9 @@
           {#if migrateResult.skippedNew}
             , new in source {migrateResult.skippedNew}{/if}
           {#if migrateResult.untouched}
-            , untouched {migrateResult.untouched}{/if}.
+            , untouched {migrateResult.untouched}{/if}
+          {#if migrateResult.failed}
+            , <strong>FAILED {migrateResult.failed}</strong> (destination truncated to 0 bytes){/if}.
         </p>
         {#if replacedEntries.length}
           <p class="migrate-group-title">Replaced ({replacedEntries.length})</p>
@@ -482,6 +495,22 @@
               <li>
                 <span class="migrate-action migrate-untouched">untouched</span>
                 <span class="migrate-path">{entry.relPath}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if failedEntries.length}
+          <!-- H35: a failed `fs::copy` truncates the destination to 0 bytes
+            before erroring, so this is data loss — render it as an error
+            list, not a benign skip. -->
+          <p class="migrate-group-title error-text">
+            FAILED — copy error, destination truncated ({failedEntries.length})
+          </p>
+          <ul class="notes-list migrate-log">
+            {#each migrateResult?.errors ?? [] as errMsg}
+              <li>
+                <span class="migrate-action migrate-skipped-duplicate">failed</span>
+                <span class="migrate-path">{errMsg}</span>
               </li>
             {/each}
           </ul>

@@ -1174,6 +1174,13 @@
   line-height: 1.5;
 }
 
+.walkup-config-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: var(--hub-muted-fg);
+  line-height: 1.5;
+}
+
 .walkup-kinds {
   display: flex;
   flex-direction: column;

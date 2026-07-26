@@ -38,6 +38,15 @@ pub enum LaunchError {
         pid: u32,
         project_path: String,
     },
+    /// H36: persisting the post-launch / refreshed `projects.json` failed
+    /// (read-only or full config volume). The launch / refresh itself
+    /// may have succeeded (Unity may already be running), but the
+    /// bookkeeping — `lastLaunchPid`, `lastLaunchAt`, frecency, refreshed
+    /// version — was NOT recorded to disk, so the next boot loses it.
+    /// Surfaced as an error instead of silently swallowed so the user
+    /// learns the config volume is unwritable.
+    #[serde(rename_all = "camelCase")]
+    PersistFailed { project_id: String, message: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -501,7 +510,11 @@ fn launch_project_inner(
         }
     };
 
-    let pid = child.id();
+    // H39: hand the Child to a reaper thread instead of dropping it
+    // here. `Child::drop` does not `waitpid`, so dropping would leave a
+    // zombie when Unity exits — `kill -0` then reports the dead editor
+    // as alive, and one process-table entry leaks per launch.
+    let pid = crate::config::process::reap_child(child);
 
     let mut projects = projects;
     if let Some(p) = projects.projects.iter_mut().find(|p| p.id == project_id) {
@@ -525,8 +538,36 @@ fn launch_project_inner(
         .find(|p| p.id == project_id)
         .cloned();
 
+    // H36: surface the persist failure instead of swallowing it. Unity is
+    // already running by this point (the spawn above succeeded), so we
+    // still publish the in-memory state — but returning `Err` tells the
+    // frontend the launch bookkeeping (`lastLaunchPid`, `lastLaunchAt`,
+    // frecency) did NOT reach disk, so the user learns the config volume
+    // is unwritable instead of seeing a silent success that vanishes on
+    // the next boot.
     if let Err(e) = persistence::save_projects(&projects) {
         log::error!("Failed to persist launch data: {}", e);
+        // Still update in-memory state so the current session reflects
+        // the launch even though the on-disk file is stale.
+        {
+            let mut guard = state.projects.lock().unwrap();
+            *guard = projects;
+        }
+        return Err(InnerLaunchError {
+            typed: LaunchError::PersistFailed {
+                project_id: project_id.to_string(),
+                message: e.to_string(),
+            },
+            project_id: project_id.to_string(),
+            project_name,
+            project_path: project_path_str,
+            unity_version: Some(version),
+            install_path: Some(install_path),
+            launch_args: args,
+            build_target,
+            code: "persistFailed".to_string(),
+            message: format!("Failed to persist launch data: {}", e),
+        });
     }
 
     {
@@ -585,8 +626,17 @@ pub fn refresh_project_version(
         p.git_branch = git_branch.clone();
     }
 
+    // H36: surface the persist failure instead of swallowing it. A
+    // read-only or full config volume would otherwise silently lose the
+    // refreshed version/mtime/branch — the in-memory state advances but
+    // the on-disk file never does, so the next boot shows the stale
+    // version again with no indication anything went wrong.
     if let Err(e) = persistence::save_projects(&projects) {
         log::error!("Failed to persist version refresh: {}", e);
+        return Err(LaunchError::PersistFailed {
+            project_id,
+            message: e.to_string(),
+        });
     }
 
     {
@@ -646,7 +696,10 @@ pub fn run_unity_install(
             message: format!("Failed to spawn Unity: {}", e),
         })?;
 
-    let pid = child.id();
+    // H39: reap the spawned Unity via a background `wait()` thread so it
+    // does not become a zombie when the user quits it (mirrors
+    // `launch_project_inner` / `launch_for_verify`).
+    let pid = crate::config::process::reap_child(child);
 
     Ok(RunUnityResult {
         version: version.clone(),

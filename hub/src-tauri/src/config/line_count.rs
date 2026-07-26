@@ -747,6 +747,10 @@ pub fn count_lines(
     // wrote the stale snapshot back — clobbering any concurrent
     // add/remove/launch mutation that landed during the scan.
     let stats_for_closure = stats.clone();
+    // H36: surface the persist failure instead of swallowing it. The
+    // scan ran, but if the config volume is read-only / full the cached
+    // stats never reach disk and the next boot shows a stale "scanned
+    // at" timestamp with no indication anything went wrong.
     if let Err(e) = crate::config::commands::with_projects(&state.projects, |projects| {
         for p in projects.projects.iter_mut() {
             if p.id == project_id {
@@ -756,6 +760,7 @@ pub fn count_lines(
         }
     }) {
         log::error!("Failed to persist line-count stats: {}", e);
+        return Err(format!("Failed to persist line-count stats: {}", e));
     }
 
     Ok(CountLinesResult { scan, report, stats })
@@ -811,6 +816,7 @@ pub fn count_lines_cached(
     // fresh stats into the live state instead of writing a stale snapshot
     // back over concurrent mutations.
     let stats_for_closure = stats.clone();
+    // H36: surface the persist failure (mirrors `count_lines`).
     if let Err(e) = crate::config::commands::with_projects(&state.projects, |projects| {
         for p in projects.projects.iter_mut() {
             if p.id == project_id {
@@ -820,6 +826,7 @@ pub fn count_lines_cached(
         }
     }) {
         log::error!("Failed to persist line-count stats: {}", e);
+        return Err(format!("Failed to persist line-count stats: {}", e));
     }
 
     Ok(Some(stats))

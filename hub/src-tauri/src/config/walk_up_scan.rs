@@ -138,6 +138,13 @@ pub enum WalkUpError {
     NoRoots,
     #[serde(rename_all = "camelCase")]
     InvalidRoot { path: String, reason: String },
+    /// H38: the OS refused to spawn the scan worker thread (typically
+    /// resource exhaustion). The registration was rolled back so a
+    /// retry is possible; surfaced as a typed error instead of panicking
+    /// (the previous `.expect(...)` panicked after registering,
+    /// permanently wedging all future scans behind a leaked entry).
+    #[serde(rename_all = "camelCase")]
+    SpawnFailed { message: String },
 }
 
 /// Pure: true if `path` is a Unity project root. Mirrors
@@ -290,6 +297,29 @@ impl WalkUpRegistry {
         let cancel = Arc::new(AtomicBool::new(false));
         self.inner.lock().unwrap().insert(scan_id.clone(), cancel.clone());
         (scan_id, cancel)
+    }
+
+    /// H38: atomically check that NO scan is in progress and register a
+    /// new one. Returns `Err(current_scan_id)` when a scan is already
+    /// running — the previous shape released the lock between the
+    /// `current()` check and `register()`, so two overlapping invokes
+    /// both passed the check and both registered, racing the same
+    /// whole-file `projects.json` write. Bundling the check + register
+    /// under one lock acquisition closes the TOCTOU window.
+    pub fn try_register(&self) -> Result<(String, Arc<AtomicBool>), String> {
+        let mut id_guard = self.next_id.lock().unwrap();
+        // Hold the inner lock across the check + insert so a concurrent
+        // caller cannot slip a registration in between.
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(existing) = inner.keys().next() {
+            return Err(existing.to_string());
+        }
+        *id_guard += 1;
+        let scan_id = format!("walk-up-{}", *id_guard);
+        drop(id_guard);
+        let cancel = Arc::new(AtomicBool::new(false));
+        inner.insert(scan_id.clone(), cancel.clone());
+        Ok((scan_id, cancel))
     }
 
     pub fn cancel(&self, scan_id: &str) -> bool {
@@ -535,12 +565,11 @@ pub fn start_walk_up_scan(
     state: State<'_, AppState>,
     params: WalkUpStartParams,
 ) -> Result<WalkUpStart, WalkUpError> {
-    if let Some(current) = state.walk_up_registry.lock().unwrap().current() {
-        return Err(WalkUpError::AnotherScanInProgress {
-            current_scan_id: current,
-        });
-    }
-
+    // H38: validate the roots BEFORE taking the registry lock so two
+    // concurrent invokes do not serialize behind the lock only to both
+    // fail root validation. The atomic check-and-register happens below
+    // (`try_register`), closing the TOCTOU window the previous shape
+    // had between the standalone `current()` check and `register()`.
     let mut valid_roots: Vec<String> = Vec::new();
     let mut errors: Vec<(String, String)> = Vec::new();
     for root in &params.roots {
@@ -561,7 +590,19 @@ pub fn start_walk_up_scan(
     let keep_partial = params.keep_partial;
     let kinds = params.kinds;
 
-    let (scan_id, cancel) = state.walk_up_registry.lock().unwrap().register();
+    // H38: atomic check-and-register. The previous shape checked
+    // `current()` under one lock acquisition, released the lock, did
+    // other work, then called `register()` under a SECOND acquisition —
+    // so two overlapping invokes both saw "no scan in progress" and
+    // both registered, spawning two scan threads that raced the same
+    // whole-file `projects.json` write. `try_register` holds the lock
+    // across the check + insert.
+    let (scan_id, cancel) = match state.walk_up_registry.lock().unwrap().try_register() {
+        Ok(reg) => reg,
+        Err(current_scan_id) => {
+            return Err(WalkUpError::AnotherScanInProgress { current_scan_id });
+        }
+    };
 
     let app_for_thread = app.clone();
     let start = WalkUpStart {
@@ -573,7 +614,17 @@ pub fn start_walk_up_scan(
         kinds,
     };
 
-    std::thread::Builder::new()
+    // H38: spawn AFTER registering, and roll back the registration if
+    // the spawn fails. The previous `.expect("failed to spawn walk-up
+    // scan thread")` panicked AFTER registering, leaving the registry
+    // entry in place forever — every future scan would hit
+    // `AnotherScanInProgress` and the Hub would need a restart. Now a
+    // spawn failure removes the entry and returns a typed error so the
+    // caller (and the next scan) are not wedged. `scan_id_for_rollback`
+    // is cloned before the closure takes ownership of `scan_id`, so the
+    // rollback path can still name the entry to remove.
+    let scan_id_for_rollback = scan_id.clone();
+    let thread_handle = std::thread::Builder::new()
         .name("hub-walk-up-scan".to_string())
         .spawn(move || {
             let started = Instant::now();
@@ -678,8 +729,26 @@ pub fn start_walk_up_scan(
             // Drop the in-flight entry so a subsequent scan can start.
             let app_state = app_for_thread.state::<AppState>();
             app_state.walk_up_registry.lock().unwrap().finish(&scan_id);
-        })
-        .expect("failed to spawn walk-up scan thread");
+        });
+
+    // H38: a spawn failure (e.g. the OS refusing to create a thread)
+    // must roll back the registration we just made — otherwise the
+    // registry entry stays forever and every future scan returns
+    // `AnotherScanInProgress`, wedging the feature until the Hub is
+    // restarted. The previous `.expect(...)` panicked here, which on a
+    // resource-starved machine took the whole command down AND left the
+    // entry leaked (panic unwinding does not run the worker-thread
+    // `finish`).
+    if let Err(e) = thread_handle {
+        state
+            .walk_up_registry
+            .lock()
+            .unwrap()
+            .finish(&scan_id_for_rollback);
+        return Err(WalkUpError::SpawnFailed {
+            message: format!("failed to spawn walk-up scan thread: {}", e),
+        });
+    }
 
     Ok(start)
 }
@@ -802,6 +871,53 @@ mod tests {
         assert!(!c2.load(Ordering::SeqCst));
         reg.finish(&id1);
         reg.finish(&id2);
+    }
+
+    // H38: try_register must atomically refuse a second registration
+    // while one is in flight. The previous shape checked `current()`
+    // and `register()` under separate lock acquisitions, so two
+    // concurrent invokes both passed the check.
+    #[test]
+    fn try_register_rejects_second_concurrent_registration() {
+        let reg = WalkUpRegistry::default();
+        let (id1, _c1) = reg.try_register().expect("first register succeeds");
+        // While id1 is in flight, a second try_register must fail and
+        // name the in-flight scan as the blocker.
+        let err = reg.try_register().expect_err("second register rejected");
+        assert_eq!(err, id1);
+        // After the first finishes, a new registration succeeds again.
+        reg.finish(&id1);
+        let (id2, _c2) = reg.try_register().expect("register succeeds after finish");
+        assert_ne!(id1, id2);
+        reg.finish(&id2);
+    }
+
+    // H38: try_register under contention from multiple threads must
+    // allow exactly ONE successful registration; the rest get the
+    // in-flight id. This is the regression that would have caught the
+    // TOCTOU (separate check + register under two locks).
+    #[test]
+    fn try_register_allows_exactly_one_under_thread_contention() {
+        let reg = std::sync::Arc::new(WalkUpRegistry::default());
+        let mut handles = Vec::new();
+        let success_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        for _ in 0..8 {
+            let reg_clone = std::sync::Arc::clone(&reg);
+            let sc = std::sync::Arc::clone(&success_count);
+            handles.push(std::thread::spawn(move || {
+                if reg_clone.try_register().is_ok() {
+                    sc.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(
+            success_count.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "exactly one thread should have registered"
+        );
     }
 
     #[test]

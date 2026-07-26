@@ -123,6 +123,16 @@
           {:else}
             <p class="walkup-empty">No folder selected</p>
           {/if}
+          <!--
+            H37: these values are configurable in Settings → Discovery
+            (Walk-up scan roots block). Point the user there instead of
+            presenting them as inert read-only rows that imply they are
+            fixed.
+          -->
+          <p class="walkup-config-hint">
+            Configure roots, depth, symlink-follow and keep-partial in
+            <strong>Settings → Discovery → Walk-up scan roots</strong>.
+          </p>
           <dl class="walkup-config-list">
             <div>
               <dt>Max depth</dt>

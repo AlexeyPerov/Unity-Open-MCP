@@ -51,6 +51,18 @@ pub struct MigrateResult {
     /// Occurrences of basenames that appeared 2+ times on either side —
     /// ambiguous, so skipped (each occurrence counts once).
     pub skipped_duplicate: u32,
+    /// H35: 1:1 basename matches whose `fs::copy` FAILED. `fs::copy`
+    /// opens the destination `O_WRONLY|O_CREAT|O_TRUNC` before reading
+    /// the source, so a failed copy has already truncated the package
+    /// file to 0 bytes — counting these separately (and listing them in
+    /// `errors`) is the only way the UI can show that data was lost
+    /// rather than presenting a clean "migrated N files".
+    pub failed: u32,
+    /// H35: human-readable per-file copy failures, mirroring the
+    /// `errors` vec collected during classification. Surfaced so the
+    /// frontend can render them in the migration report instead of
+    /// burying them in the server log.
+    pub errors: Vec<String>,
     /// The saved source folder, persisted on the project entry so the
     /// next Migrate open pre-fills the field.
     pub saved_source_folder: String,
@@ -174,7 +186,10 @@ fn collect_files_by_name(root: &Path) -> BTreeMap<String, Vec<(String, PathBuf)>
 ///   - 1:1 match → `replaced`, or `skipped-meta` when the basename ends
 ///     with `.meta` and `skip_meta` is on;
 ///   - source-only → `skipped-new` (not copied);
-///   - package-only → `untouched`.
+///   - package-only → `untouched`;
+///   - 1:1 match whose `fs::copy` failed → `failed` (the destination is
+///     already truncated to 0 bytes by `fs::copy`'s open order, so this
+///     is surfaced distinctly from `replaced` — see H35).
 fn migrate_replace_only(
     src_by_name: &BTreeMap<String, Vec<(String, PathBuf)>>,
     dst_by_name: &BTreeMap<String, Vec<(String, PathBuf)>>,
@@ -186,6 +201,7 @@ fn migrate_replace_only(
     skipped_new: &mut u32,
     untouched: &mut u32,
     skipped_duplicate: &mut u32,
+    failed: &mut u32,
 ) {
     // Union of all basenames, iterated in sorted order for deterministic
     // output (BTreeSet of BTreeMap keys).
@@ -252,6 +268,16 @@ fn migrate_replace_only(
                         dst_abs.display(),
                     ));
                 } else if let Err(e) = fs::copy(src_abs, dst_abs) {
+                    // H35: `fs::copy` opens dst O_TRUNC before reading
+                    // src, so a failure here has already zeroed the
+                    // package file. Count it as `failed` and surface a
+                    // `failed` entry + error string so the UI can show
+                    // the loss instead of a clean "migrated N files".
+                    *failed += 1;
+                    entries.push(MigrateEntry {
+                        rel_path: dst_rel.clone(),
+                        action: "failed".into(),
+                    });
                     errors.push(format!(
                         "copy {} → {}: {}",
                         src_abs.display(),
@@ -345,6 +371,7 @@ pub fn migrate_package_files(
     let mut skipped_new: u32 = 0;
     let mut untouched: u32 = 0;
     let mut skipped_duplicate: u32 = 0;
+    let mut failed: u32 = 0;
     migrate_replace_only(
         &src_by_name,
         &dst_by_name,
@@ -356,6 +383,7 @@ pub fn migrate_package_files(
         &mut skipped_new,
         &mut untouched,
         &mut skipped_duplicate,
+        &mut failed,
     );
 
     // Persist the source folder on the entry + bump mtime.
@@ -380,9 +408,10 @@ pub fn migrate_package_files(
     }
 
     if !errors.is_empty() {
-        // Log the per-file errors but do not fail the whole migration
-        // — a partial copy is still useful and the log shows what was
-        // missed.
+        // H35: still log the per-file errors for server-side triage, but
+        // they are now ALSO surfaced to the UI via `MigrateResult.errors`
+        // + the `failed` counter so a truncated-destination loss is
+        // visible in the report rather than presented as a clean run.
         for e in &errors {
             log::warn!("migrate error: {}", e);
         }
@@ -395,6 +424,8 @@ pub fn migrate_package_files(
         skipped_new,
         untouched,
         skipped_duplicate,
+        failed,
+        errors,
         saved_source_folder: source_folder,
         skip_meta,
     })
@@ -410,7 +441,7 @@ mod tests {
     /// command (which needs an `AppState`). Mirrors what the command
     /// does for the small fixture built by each test. Returns
     /// `(entries, replaced, skipped_meta, skipped_new, untouched,
-    /// skipped_duplicate)`.
+    /// skipped_duplicate, failed, errors)`.
     fn run(
         src: &Path,
         dst: &Path,
@@ -422,6 +453,8 @@ mod tests {
         u32,
         u32,
         u32,
+        u32,
+        Vec<String>,
     ) {
         let src_by_name = collect_files_by_name(src);
         let dst_by_name = collect_files_by_name(dst);
@@ -432,6 +465,7 @@ mod tests {
         let mut skipped_new = 0;
         let mut untouched = 0;
         let mut skipped_duplicate = 0;
+        let mut failed = 0;
         migrate_replace_only(
             &src_by_name,
             &dst_by_name,
@@ -443,9 +477,9 @@ mod tests {
             &mut skipped_new,
             &mut untouched,
             &mut skipped_duplicate,
+            &mut failed,
         );
-        assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
-        (entries, replaced, skipped_meta, skipped_new, untouched, skipped_duplicate)
+        (entries, replaced, skipped_meta, skipped_new, untouched, skipped_duplicate, failed, errors)
     }
 
     #[test]
@@ -484,7 +518,7 @@ mod tests {
         // source-only — must NOT be copied
         fs::write(src.join("brand-new.txt"), "src only").unwrap();
 
-        let (entries, replaced, skipped_meta, skipped_new, untouched, skipped_dup) =
+        let (entries, replaced, skipped_meta, skipped_new, untouched, skipped_dup, failed, errors) =
             run(&src, &dst, false);
 
         assert_eq!(replaced, 1);
@@ -492,6 +526,8 @@ mod tests {
         assert_eq!(skipped_new, 1);
         assert_eq!(untouched, 1);
         assert_eq!(skipped_dup, 0);
+        assert_eq!(failed, 0);
+        assert!(errors.is_empty());
         assert_eq!(fs::read_to_string(dst.join("existing.txt")).unwrap(), "new");
         assert_eq!(fs::read_to_string(dst.join("keep-me.txt")).unwrap(), "untouched");
         assert!(!dst.join("brand-new.txt").exists());
@@ -519,7 +555,7 @@ mod tests {
         // Different basename in the same source folder — source-only.
         fs::write(src.join("Editor/Bar.cs"), "src only").unwrap();
 
-        let (entries, replaced, _, skipped_new, untouched, _) = run(&src, &dst, false);
+        let (entries, replaced, _, skipped_new, untouched, _, _, _) = run(&src, &dst, false);
 
         assert_eq!(replaced, 1);
         assert_eq!(skipped_new, 1);
@@ -552,7 +588,7 @@ mod tests {
         fs::write(src.join("Unique.cs"), "u").unwrap();
         fs::write(dst.join("Unique.cs"), "old").unwrap();
 
-        let (entries, replaced, _, _, _, skipped_dup) = run(&src, &dst, false);
+        let (entries, replaced, _, _, _, skipped_dup, _, _) = run(&src, &dst, false);
 
         // Unique.cs still migrates; Foo.cs is reported as duplicate.
         assert_eq!(replaced, 1);
@@ -585,7 +621,7 @@ mod tests {
         fs::write(dst.join("X/Foo.cs"), "pkg X").unwrap();
         fs::write(dst.join("Y/Foo.cs"), "pkg Y").unwrap();
 
-        let (_, replaced, _, _, _, skipped_dup) = run(&src, &dst, false);
+        let (_, replaced, _, _, _, skipped_dup, _, _) = run(&src, &dst, false);
 
         assert_eq!(replaced, 0);
         assert_eq!(skipped_dup, 3); // 1 source + 2 package
@@ -607,7 +643,7 @@ mod tests {
         fs::write(src.join("Foo.cs.meta"), "new meta").unwrap();
 
         // skip_meta on: the .cs is replaced, the .meta matches but is left alone.
-        let (entries, replaced, skipped_meta, _, _, _) = run(&src, &dst, true);
+        let (entries, replaced, skipped_meta, _, _, _, _, _) = run(&src, &dst, true);
         assert_eq!(replaced, 1);
         assert_eq!(skipped_meta, 1);
         assert_eq!(fs::read_to_string(dst.join("Foo.cs")).unwrap(), "new cs");
@@ -632,7 +668,7 @@ mod tests {
         fs::write(dst.join("Foo.cs.meta"), "old").unwrap();
         fs::write(src.join("Foo.cs.meta"), "new").unwrap();
 
-        let (_, replaced, skipped_meta, _, _, _) = run(&src, &dst, false);
+        let (_, replaced, skipped_meta, _, _, _, _, _) = run(&src, &dst, false);
         assert_eq!(replaced, 1);
         assert_eq!(skipped_meta, 0);
         assert_eq!(fs::read_to_string(dst.join("Foo.cs.meta")).unwrap(), "new");
@@ -652,12 +688,57 @@ mod tests {
         fs::write(src.join("Top.cs"), "new").unwrap();
         fs::write(dst.join("Top.cs"), "old").unwrap();
 
-        let (entries, replaced, _, skipped_new, untouched, skipped_dup) =
+        let (entries, replaced, _, skipped_new, untouched, skipped_dup, _, _) =
             run(&src, &dst, false);
         assert_eq!(replaced, 1); // only Top.cs
         assert_eq!(skipped_new, 0);
         assert_eq!(untouched, 0);
         assert_eq!(skipped_dup, 0);
         assert!(entries.iter().all(|e| !e.rel_path.contains("Samples~")));
+    }
+
+    // H35: a failed `fs::copy` must be counted as `failed` and listed in
+    // `errors` + entries, not silently dropped. The previous shape pushed
+    // the error onto a local vec that was only `log::warn!`-ed, so the
+    // truncated-to-0 destination appeared in NO counter and the UI showed
+    // a clean "migrated N files" while data was lost. We make the dst
+    // unwritable so `fs::copy`'s `O_WRONLY|O_CREAT|O_TRUNC` open fails;
+    // this is reliable on Unix (chmod 0444 → EACCES on the open).
+    #[cfg(unix)]
+    #[test]
+    fn failed_copy_is_counted_and_surfaced() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let dst = tmp.path().join("pkg");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(src.join("Shared.txt"), "new contents").unwrap();
+        fs::write(dst.join("Shared.txt"), "old contents").unwrap();
+        // Make the destination read-only so `fs::copy` cannot open it for
+        // writing. The source remains readable.
+        let mut perms = fs::metadata(dst.join("Shared.txt")).unwrap().permissions();
+        perms.set_mode(0o444);
+        fs::set_permissions(dst.join("Shared.txt"), perms).unwrap();
+
+        let (entries, replaced, _, _, _, _, failed, errors) = run(&src, &dst, false);
+
+        // The copy failed: nothing was replaced, but it IS counted.
+        assert_eq!(replaced, 0);
+        assert_eq!(failed, 1);
+        // The error string is surfaced (not just logged).
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("Shared.txt"));
+        // A `failed` entry is recorded so the UI can list it.
+        let failed_entry = entries
+            .iter()
+            .find(|e| e.action == "failed")
+            .expect("a failed entry should be recorded");
+        assert_eq!(failed_entry.rel_path, "Shared.txt");
+
+        // Restore perms so tempdir cleanup can remove the file.
+        let mut perms = fs::metadata(dst.join("Shared.txt")).unwrap().permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(dst.join("Shared.txt"), perms).unwrap();
     }
 }

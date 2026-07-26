@@ -247,6 +247,45 @@ pub fn is_pid_alive(pid: u32) -> bool {
     }
 }
 
+/// Takes ownership of a spawned `Child`, returns its PID, and spawns a
+/// detached reaper thread that calls `wait()` so the OS can reap the
+/// process when it exits.
+///
+/// H39: `std::process::Child::drop` does NOT `waitpid` — it only closes
+/// the stdio handles. So every Unity the Hub launches (`launch_project`,
+/// `launch_for_verify`, `run_unity_install`) became a zombie once the
+/// user quit it: the kernel kept the PID entry in the Hub's process
+/// table until the Hub itself exited, and `kill -0` (used by
+/// `is_pid_alive`) reports a zombie as alive — so the running-Unity chip
+/// and the `kill_unity` stale-PID check both treated a dead editor as
+/// running. Each launch also leaked one process-table entry. Holding the
+/// `Child` handle and `wait()`-ing on a background thread lets the kernel
+/// reap the exit status as soon as Unity terminates, closing the leak.
+///
+/// The reaper thread is best-effort: if spawning it fails we log and
+/// continue (the child is still running; only the zombie-reaping is
+/// lost), so a transient resource-exhaustion error does not fail an
+/// otherwise-successful launch.
+pub fn reap_child(mut child: std::process::Child) -> u32 {
+    let pid = child.id();
+    if let Err(e) = std::thread::Builder::new()
+        .name(format!("hub-child-reaper-{}", pid))
+        .spawn(move || {
+            // Block until the child exits, then drop the handle. `wait`
+            // reaps the zombie on Unix and closes the process handle on
+            // Windows. Errors are logged but otherwise ignored — the
+            // child may already have been reaped elsewhere (ESRCH) or
+            // the PID reused; neither is actionable from a reaper.
+            if let Err(e) = child.wait() {
+                log::debug!("child reaper for pid {} ended: {}", pid, e);
+            }
+        })
+    {
+        log::warn!("failed to spawn reaper thread for pid {}: {}", pid, e);
+    }
+    pid
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,5 +420,53 @@ mod tests {
         // the process; the kill must come first.
         let _ = kill_unity(pid);
         let _ = child.wait();
+    }
+
+    /// H39: `reap_child` must spawn a background `wait()` so the child is
+    /// reaped (not left as a zombie) when it exits. We spawn a process
+    /// that exits immediately, hand it to `reap_child`, and poll until
+    /// the reaper thread has drained it — at which point `is_pid_alive`
+    /// reports false (no zombie). Without the reaper, `Child::drop`
+    /// leaves a zombie and `is_pid_alive` would keep returning true.
+    #[test]
+    fn reap_child_does_not_leave_a_zombie() {
+        // Spawn a process that exits on its own (no long sleep). `true`
+        // is a POSIX builtin that exits 0; on Windows `cmd /C exit 0`
+        // does the same.
+        let child = if cfg!(windows) {
+            Command::new("cmd")
+                .arg("/C")
+                .arg("exit")
+                .arg("0")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn cmd")
+        } else {
+            Command::new("true")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn true")
+        };
+        let pid = reap_child(child);
+        assert!(pid > 0);
+
+        // Poll up to ~2 s for the reaper thread's `wait()` to drain the
+        // exited child. Once reaped, the PID is no longer alive — and
+        // crucially NOT a zombie (which `kill -0` would still see as
+        // alive on Unix). If `reap_child` had just dropped the handle,
+        // the process would remain a zombie for the lifetime of the
+        // test process and this loop would time out.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut reaped = false;
+        while std::time::Instant::now() < deadline {
+            if !is_pid_alive(pid) {
+                reaped = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(reaped, "reaped child pid {} should not be alive (or a zombie) after the reaper thread drains it", pid);
     }
 }

@@ -389,7 +389,11 @@ export type LaunchError =
       projectId: string;
       pid: number;
       projectPath: string;
-    };
+    }
+  /** H36: post-launch persist of projects.json failed (read-only / full
+   *  config volume). The launch itself may have succeeded (Unity may be
+   *  running), but the bookkeeping was not recorded to disk. */
+  | { type: "persistFailed"; projectId: string; message: string };
 
 export type RunUnityError =
   | { type: "versionMissing" }
@@ -471,6 +475,10 @@ export interface RefreshAllResult {
   projects: ProjectsFile;
   updated: string[];
   skipped: string[];
+  /** H36: set when persisting the refreshed projects.json failed. The
+   *  refresh itself ran and `projects` reflects the in-memory state, but
+   *  the on-disk file is stale. `undefined` when the persist succeeded. */
+  persistError?: string;
 }
 
 export type RemoveProjectError =
@@ -859,6 +867,14 @@ export interface MigrateResult {
   /** Occurrences of basenames that appeared 2+ times on either side —
    *  ambiguous, so skipped (each occurrence counts once). */
   skippedDuplicate: number;
+  /** H35: 1:1 basename matches whose `fs::copy` FAILED. `fs::copy` opens
+   *  the destination `O_WRONLY|O_CREAT|O_TRUNC` before reading the
+   *  source, so a failed copy has already truncated the package file to
+   *  0 bytes — counted separately so the UI can show data loss rather
+   *  than a clean "migrated N files". */
+  failed: number;
+  /** H35: human-readable per-file copy failures, surfaced to the UI. */
+  errors: string[];
   savedSourceFolder: string;
   /** Echo of the flag the migration ran with. */
   skipMeta: boolean;
@@ -1204,7 +1220,10 @@ export interface WalkUpDone {
 export type WalkUpError =
   | { type: "anotherScanInProgress"; currentScanId: string }
   | { type: "noRoots" }
-  | { type: "invalidRoot"; path: string; reason: string };
+  | { type: "invalidRoot"; path: string; reason: string }
+  /** H38: the OS refused to spawn the scan worker thread; the
+   *  registration was rolled back so a retry is possible. */
+  | { type: "spawnFailed"; message: string };
 
 export async function startWalkUpScan(
   params: WalkUpStartParams
@@ -1988,7 +2007,17 @@ export type LaunchForVerifyError =
   | { kind: "versionMissing"; projectId: string }
   | { kind: "installNotFound"; projectId: string; version: string }
   | { kind: "launchFailed"; projectId: string; message: string }
-  | { kind: "portInvalid"; port: number };
+  | { kind: "portInvalid"; port: number }
+  | {
+      kind: "alreadyRunning";
+      projectId: string;
+      pid: number;
+      projectPath: string;
+    }
+  /** H36: post-launch persist of projects.json failed (read-only / full
+   *  config volume). Unity may already be running, but the bookkeeping
+   *  was not recorded to disk. */
+  | { kind: "persistFailed"; projectId: string; message: string };
 
 export interface BridgePingResult {
   port: number;
