@@ -162,7 +162,12 @@ namespace UnityOpenMcpBridge.Screenshot
             cam.orthographicSize = size * 0.6f;
             cam.nearClipPlane = 0.01f;
             cam.farClipPlane = dist * 4f;
-            cam.cullingMask = 1 << target.layer;
+            // B33 — ComputeBounds encapsulates EVERY child renderer (including
+            // children on other layers), so culling to only the root's layer
+            // frames the full bounds but renders just a slice of the hierarchy.
+            // Mirror the bounds walk and union every child renderer's layer so
+            // the framed bounds and the rendered pixels agree.
+            cam.cullingMask = ComputeLayerMask(target);
 
             // Directions: Front, Right, Back, Top
             var dirs = new[]
@@ -333,6 +338,20 @@ namespace UnityOpenMcpBridge.Screenshot
             for (int i = 1; i < renderers.Length; i++)
                 b.Encapsulate(renderers[i].bounds);
             return b;
+        }
+
+        // Union of every child renderer's layer. Mirrors ComputeBounds so the
+        // culling mask and the framed bounds agree: a hierarchy with children
+        // on multiple layers is rendered in full, not just the root's slice.
+        private static int ComputeLayerMask(GameObject go)
+        {
+            var renderers = go.GetComponentsInChildren<Renderer>();
+            if (renderers == null || renderers.Length == 0)
+                return 1 << go.layer;
+            int mask = 0;
+            for (int i = 0; i < renderers.Length; i++)
+                mask |= 1 << renderers[i].gameObject.layer;
+            return mask;
         }
 
         private static CameraClearFlags ParseClearFlags(string background)

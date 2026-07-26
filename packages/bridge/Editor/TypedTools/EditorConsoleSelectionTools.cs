@@ -144,7 +144,10 @@ namespace UnityOpenMcpBridge.TypedTools
             bool force = JsonBody.GetBool(body, "force", false);
             bool ignoreDirty = JsonBody.GetBool(body, "ignore_scene_dirty", false);
 
-            // Idempotent guards (unless force).
+            // Idempotent guards (unless force). Pause is also idempotent: a
+            // retry after a timeout must not RESUME the game while the response
+            // still reports "pause". `force` is the explicit opt-out for callers
+            // that want to toggle/unpause (B36).
             switch (state)
             {
                 case EditorStateTarget.Play:
@@ -156,6 +159,9 @@ namespace UnityOpenMcpBridge.TypedTools
                     if (!EditorApplication.isPlaying)
                         return ToolDispatchResult.Ok(BuildStateEnvelope("pause_noop",
                             "Not in play mode; nothing to pause."));
+                    if (!force && EditorApplication.isPaused)
+                        return ToolDispatchResult.Ok(BuildStateEnvelope("pause_noop",
+                            "Already paused. Pass force: true to toggle."));
                     break;
                 case EditorStateTarget.Stop:
                     if (!EditorApplication.isPlaying)
@@ -182,7 +188,11 @@ namespace UnityOpenMcpBridge.TypedTools
                         EditorApplication.isPlaying = true;
                         break;
                     case EditorStateTarget.Pause:
-                        EditorApplication.isPaused = !EditorApplication.isPaused;
+                        // Idempotent pause: set true directly. `force` toggles so
+                        // an explicit unpause is still reachable.
+                        EditorApplication.isPaused = force
+                            ? !EditorApplication.isPaused
+                            : true;
                         break;
                     case EditorStateTarget.Stop:
                         EditorApplication.isPlaying = false;

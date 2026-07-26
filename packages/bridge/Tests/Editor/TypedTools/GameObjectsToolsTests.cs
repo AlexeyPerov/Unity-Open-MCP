@@ -526,6 +526,105 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // ---- B37 — explicit detach to scene root ----
+
+        // The old code's error message told the caller to "pass an empty
+        // parent_path with parent_instance_id=0 to detach to scene root", but
+        // no path actually did it — that exact request failed with
+        // missing_parameter. Now an explicitly-present (empty) parent_path with
+        // parent_instance_id=0 detaches via Undo.SetTransformParent(..., null).
+        [Test]
+        public void SetParent_EmptyParentPathExplicit_DetachesToSceneRoot()
+        {
+            var root = new GameObject("__MCPTest_GO_DetachRoot");
+            var child = new GameObject("__MCPTest_GO_DetachChild");
+            child.transform.SetParent(root.transform, false);
+            try
+            {
+                Assert.AreEqual(root.transform, child.transform.parent);
+
+                var result = GameObjectsTools.SetParent(
+                    "{\"instance_id\":" + InstanceId.Of(child) +
+                    ",\"parent_path\":\"\"}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsNull(child.transform.parent, "child should be detached to scene root");
+                StringAssert.Contains("\"action\":\"detached\"", result.Output);
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+                Object.DestroyImmediate(child);
+            }
+        }
+
+        [Test]
+        public void SetParent_ExplicitZeroInstanceId_DetachesToSceneRoot()
+        {
+            var root = new GameObject("__MCPTest_GO_DetachRoot2");
+            var child = new GameObject("__MCPTest_GO_DetachChild2");
+            child.transform.SetParent(root.transform, false);
+            try
+            {
+                Assert.AreEqual(root.transform, child.transform.parent);
+
+                // Explicit parent_instance_id=0 together with an (empty)
+                // parent_path is the documented detach form.
+                var result = GameObjectsTools.SetParent(
+                    "{\"instance_id\":" + InstanceId.Of(child) +
+                    ",\"parent_path\":\"\",\"parent_instance_id\":0}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsNull(child.transform.parent, "child should be detached to scene root");
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+                Object.DestroyImmediate(child);
+            }
+        }
+
+        // The "both keys absent" case must STILL be missing_parameter — the
+        // detach contract requires the caller to opt in with an explicit empty
+        // parent_path, so a body that says nothing about the parent is an error.
+        [Test]
+        public void SetParent_NoParentArg_StillReturnsMissingParameter()
+        {
+            var go = new GameObject("__MCPTest_GO_Orphan2");
+            try
+            {
+                var result = GameObjectsTools.SetParent(
+                    "{\"instance_id\":" + InstanceId.Of(go) + "}");
+                Assert.IsFalse(result.Success);
+                Assert.AreEqual("missing_parameter", result.ErrorCode);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        // Detach must be undo-recorded so a human Ctrl+Z reattaches the child.
+        [Test]
+        public void SetParent_Detach_IsUndoRecorded()
+        {
+            var root = new GameObject("__MCPTest_GO_DetachUndoRoot");
+            var child = new GameObject("__MCPTest_GO_DetachUndoChild");
+            child.transform.SetParent(root.transform, false);
+            try
+            {
+                GameObjectsTools.SetParent(
+                    "{\"instance_id\":" + InstanceId.Of(child) +
+                    ",\"parent_path\":\"\"}");
+                Assert.IsNull(child.transform.parent);
+
+                Undo.PerformUndo();
+
+                Assert.AreEqual(root.transform, child.transform.parent,
+                    "undo must reattach the detached child to its prior parent");
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+                Object.DestroyImmediate(child);
+            }
+        }
+
         // ---- T1.3 — duplicate preserves prefab-ness + sibling index --------
 
         [Test]

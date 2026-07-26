@@ -17,7 +17,8 @@ export const editorSetState = makeTool(
   "unity_open_mcp_editor_set_state",
   "Set the Unity Editor play / pause / stop state. Complements " +
     "unity_open_mcp_editor_status (the read side). play = enter play mode " +
-    "(EditorApplication.EnterPlaymode); pause = toggle pause while playing; " +
+    "(EditorApplication.EnterPlaymode); pause = pause the current play session " +
+    "(idempotent — a retry after a timeout no longer resumes the game); " +
     "stop = exit play mode. Entering play mode is disruptive — when a loaded " +
     "scene has unsaved changes, Unity's native save modal can interrupt the " +
     "flow, so the bridge preflights and refuses with code `scene_dirty`; pass " +
@@ -34,17 +35,19 @@ export const editorSetState = makeTool(
             enum: ["play", "pause", "stop"],
             description:
               "Target state. 'play' → enter play mode (refuses if already playing " +
-              "unless force: true); 'pause' → toggle pause on the current play " +
-              "session (no-op when not playing); 'stop' → exit play mode (refuses " +
-              "when not playing).",
+              "unless force: true); 'pause' → pause the current play session " +
+              "(idempotent — refuses with pause_noop when already paused unless " +
+              "force: true, which toggles pause so an explicit unpause is " +
+              "reachable; no-op when not playing); 'stop' → exit play mode " +
+              "(refuses when not playing).",
           },
           force: {
             type: "boolean",
             default: false,
             description:
               "When true, skip the idempotent 'already in target state' check. " +
-              "Useful for re-entering play mode after a code change without first " +
-              "stopping. Default false.",
+              "For 'pause' this is also the toggle path: force: true unpauses " +
+              "when already paused. Default false.",
           },
           ignore_scene_dirty: { ...IGNORE_SCENE_DIRTY_BASE, description: "Opt out of the active-scene dirty guard. When false (default), the " + "call is refused with code `scene_dirty` if any loaded scene has " + "unsaved changes — entering play mode would otherwise trigger " + "Unity's native save modal. Set true to proceed and accept the risk." },
         },

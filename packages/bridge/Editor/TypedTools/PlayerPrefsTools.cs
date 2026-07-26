@@ -362,7 +362,13 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Value coercion helpers (mirror BuildSettingsTools — same raw-JSON
         // value shape: strings arrive quoted, numbers/bools bare).
-        private static string AsString(string valueRaw)
+        private static string AsString(string valueRaw) => StripJsonQuotes(valueRaw);
+
+        // B35 — GetRawValue hands the value over WITH its JSON quotes attached,
+        // so a quoted number like `"42"` parsed by the old AsInt/AsFloat failed
+        // int.TryParse/float.TryParse and yielded 0. Strip the quotes (and the
+        // JSON null token) exactly like AsString before parsing.
+        private static string StripJsonQuotes(string valueRaw)
         {
             if (string.IsNullOrEmpty(valueRaw)) return "";
             var v = valueRaw.Trim();
@@ -374,18 +380,20 @@ namespace UnityOpenMcpBridge.TypedTools
 
         private static int AsInt(string valueRaw)
         {
-            if (string.IsNullOrEmpty(valueRaw)) return 0;
-            if (int.TryParse(valueRaw.Trim(), NumberStyles.Integer,
+            var s = StripJsonQuotes(valueRaw);
+            if (string.IsNullOrEmpty(s)) return 0;
+            if (int.TryParse(s, NumberStyles.Integer,
                 CultureInfo.InvariantCulture, out var v)) return v;
-            if (float.TryParse(valueRaw.Trim(), NumberStyles.Float,
+            if (float.TryParse(s, NumberStyles.Float,
                 CultureInfo.InvariantCulture, out var f)) return (int)f;
             return 0;
         }
 
         private static float AsFloat(string valueRaw)
         {
-            if (string.IsNullOrEmpty(valueRaw)) return 0f;
-            if (float.TryParse(valueRaw.Trim(), NumberStyles.Float,
+            var s = StripJsonQuotes(valueRaw);
+            if (string.IsNullOrEmpty(s)) return 0f;
+            if (float.TryParse(s, NumberStyles.Float,
                 CultureInfo.InvariantCulture, out var v)) return v;
             return 0f;
         }

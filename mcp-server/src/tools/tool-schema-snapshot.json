@@ -2827,7 +2827,7 @@
     }
   },
   "unity_open_mcp_gameobject_set_parent": {
-    "description": "Reparent a GameObject under another GameObject in the active scene. Undo-recorded. Cycle-safe (refuses to parent a GameObject under one of its own descendants). Mutating: runs the full gate path; `paths_hint` is the scene path that contains the target. Address the child by instance_id > path > name. Identify the new parent by parent_instance_id or parent_path. world_position_stays (default true) preserves world transform across the reparent.",
+    "description": "Reparent a GameObject under another GameObject in the active scene, or detach it to the scene root. Undo-recorded. Cycle-safe (refuses to parent a GameObject under one of its own descendants). Mutating: runs the full gate path; `paths_hint` is the scene path that contains the target. Address the child by instance_id > path > name. Identify the new parent by parent_instance_id or parent_path; pass an explicit empty parent_path with parent_instance_id=0 to detach the child to the scene root. world_position_stays (default true) preserves world transform across the reparent.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -2853,14 +2853,14 @@
         },
         "parent_instance_id": {
           "default": 0,
-          "description": "New parent GameObject instance ID. Takes precedence over parent_path when both are set.",
+          "description": "New parent GameObject instance ID. Takes precedence over parent_path when both are set. Omit (or set 0) together with an explicit empty parent_path to detach to scene root.",
           "type": [
             "string",
             "integer"
           ]
         },
         "parent_path": {
-          "description": "New parent hierarchy path \"Root/Parent\".",
+          "description": "New parent hierarchy path \"Root/Parent\". Pass an explicit empty string (\"\") with parent_instance_id=0 to detach the child to the scene root.",
           "type": "string"
         },
         "path": {
@@ -3875,13 +3875,13 @@
     }
   },
   "unity_open_mcp_editor_set_state": {
-    "description": "Set the Unity Editor play / pause / stop state. Complements unity_open_mcp_editor_status (the read side). play = enter play mode (EditorApplication.EnterPlaymode); pause = toggle pause while playing; stop = exit play mode. Entering play mode is disruptive — when a loaded scene has unsaved changes, Unity's native save modal can interrupt the flow, so the bridge preflights and refuses with code `scene_dirty`; pass ignore_scene_dirty: true to accept the risk. Writes no assets, so the call is gate-free and returns the post-transition state directly. Prefer this over raw execute_csharp EditorApplication.isPlaying = true — schema-validated, undo-safe, and the dirty-scene refusal is surfaced as a structured error instead of a hanging save dialog.",
+    "description": "Set the Unity Editor play / pause / stop state. Complements unity_open_mcp_editor_status (the read side). play = enter play mode (EditorApplication.EnterPlaymode); pause = pause the current play session (idempotent — a retry after a timeout no longer resumes the game); stop = exit play mode. Entering play mode is disruptive — when a loaded scene has unsaved changes, Unity's native save modal can interrupt the flow, so the bridge preflights and refuses with code `scene_dirty`; pass ignore_scene_dirty: true to accept the risk. Writes no assets, so the call is gate-free and returns the post-transition state directly. Prefer this over raw execute_csharp EditorApplication.isPlaying = true — schema-validated, undo-safe, and the dirty-scene refusal is surfaced as a structured error instead of a hanging save dialog.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "force": {
           "default": false,
-          "description": "When true, skip the idempotent 'already in target state' check. Useful for re-entering play mode after a code change without first stopping. Default false.",
+          "description": "When true, skip the idempotent 'already in target state' check. For 'pause' this is also the toggle path: force: true unpauses when already paused. Default false.",
           "type": "boolean"
         },
         "ignore_scene_dirty": {
@@ -3890,7 +3890,7 @@
           "type": "boolean"
         },
         "state": {
-          "description": "Target state. 'play' → enter play mode (refuses if already playing unless force: true); 'pause' → toggle pause on the current play session (no-op when not playing); 'stop' → exit play mode (refuses when not playing).",
+          "description": "Target state. 'play' → enter play mode (refuses if already playing unless force: true); 'pause' → pause the current play session (idempotent — refuses with pause_noop when already paused unless force: true, which toggles pause so an explicit unpause is reachable; no-op when not playing); 'stop' → exit play mode (refuses when not playing).",
           "enum": [
             "play",
             "pause",

@@ -184,6 +184,53 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual("invalid_type", result.ErrorCode);
         }
 
+        // B35 — GetRawValue returns the value WITH its JSON quotes attached, so
+        // a quoted number ("42") failed int.TryParse/float.TryParse and stored
+        // 0. The quotes are stripped before parsing now (mirrors AsString).
+        [Test]
+        public void PlayerPrefsSet_QuotedNumber_RoundTripsInt()
+        {
+            var setResult = PlayerPrefsTools.PlayerPrefsSet(
+                $"{{\"key\":\"{PlayerKey}\",\"value\":\"42\",\"type\":\"int\"}}");
+            Assert.IsTrue(setResult.Success, setResult.ErrorMessage);
+            StringAssert.Contains("\"value\":42", setResult.Output);
+
+            var getResult = PlayerPrefsTools.PlayerPrefsGet(
+                $"{{\"key\":\"{PlayerKey}\"}}");
+            Assert.IsTrue(getResult.Success, getResult.ErrorMessage);
+            StringAssert.Contains("\"type\":\"int\"", getResult.Output);
+            StringAssert.Contains("\"value\":42", getResult.Output);
+        }
+
+        [Test]
+        public void PlayerPrefsSet_QuotedNumber_RoundTripsFloat()
+        {
+            var setResult = PlayerPrefsTools.PlayerPrefsSet(
+                $"{{\"key\":\"{PlayerKey}\",\"value\":\"3.14\",\"type\":\"float\"}}");
+            Assert.IsTrue(setResult.Success, setResult.ErrorMessage);
+            StringAssert.Contains("\"value\":3.14", setResult.Output);
+
+            var getResult = PlayerPrefsTools.PlayerPrefsGet(
+                $"{{\"key\":\"{PlayerKey}\"}}");
+            Assert.IsTrue(getResult.Success, getResult.ErrorMessage);
+            StringAssert.Contains("\"type\":\"float\"", getResult.Output);
+            StringAssert.Contains("\"value\":3.14", getResult.Output);
+        }
+
+        [Test]
+        public void EditorPrefsSet_QuotedNumber_RoundTripsInt()
+        {
+            var setResult = PlayerPrefsTools.EditorPrefsSet(
+                $"{{\"key\":\"{EditorKey}\",\"value\":\"-7\",\"type\":\"int\"}}");
+            Assert.IsTrue(setResult.Success, setResult.ErrorMessage);
+            StringAssert.Contains("\"value\":-7", setResult.Output);
+
+            var getResult = PlayerPrefsTools.EditorPrefsGet(
+                $"{{\"key\":\"{EditorKey}\"}}");
+            Assert.IsTrue(getResult.Success, getResult.ErrorMessage);
+            StringAssert.Contains("\"value\":-7", getResult.Output);
+        }
+
         // ----------------------- Dispatch wiring --------------------------
         //
         // KnownTools / DirectResponseTools membership is the contract that lets

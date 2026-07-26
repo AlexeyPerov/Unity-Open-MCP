@@ -111,6 +111,22 @@ namespace UnityOpenMcpBridge
         {
             lock (_agentQueues)
             {
+                // B34 — every dropped PendingRequest carries a TaskCompletionSource
+                // the enqueueing worker thread is awaiting. Clearing the queues
+                // without signalling leaves each worker blocked until its own
+                // timeoutMs elapses, so a bridge stop stalls every in-flight HTTP
+                // handler. Fail every pending completion before the state is wiped
+                // (TrySetException on an already-completed TCS is a no-op).
+                foreach (var agent in _agentOrder)
+                {
+                    if (!_agentQueues.TryGetValue(agent, out var queue)) continue;
+                    while (queue.Count > 0)
+                    {
+                        var req = queue.Dequeue();
+                        req.Completion.TrySetException(
+                            new System.OperationCanceledException("Bridge request queue was reset."));
+                    }
+                }
                 _agentQueues.Clear();
                 _agentOrder.Clear();
                 _rrCursor = 0;

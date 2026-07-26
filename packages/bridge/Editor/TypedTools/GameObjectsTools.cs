@@ -642,14 +642,40 @@ namespace UnityOpenMcpBridge.TypedTools
             var parentInstanceId = JsonBody.GetLongFlexible(body, "parent_instance_id", 0);
             var worldPositionStays = JsonBody.GetBool(body, "world_position_stays", true);
 
+            // B37 — distinguish "no parent argument at all" (missing_parameter)
+            // from an explicit detach request. The contract documented by the
+            // old error message was "empty parent_path with parent_instance_id=0
+            // detaches to scene root", but no code path actually did it. We treat
+            // an explicitly-present parent_path (even if empty/null) together
+            // with parent_instance_id=0 as a detach; both keys absent is still
+            // missing_parameter so the existing test still holds.
+            bool parentPathKeyPresent = JsonBody.HasKey(body, "parent_path");
+
+            // Resolve the new parent. detachToRoot is set when the caller
+            // explicitly asked for the scene root (empty/null parent_path with
+            // no instance id).
             GameObject parentGo = null;
+            bool detachToRoot = false;
             if (parentInstanceId != 0)
             {
                 parentGo = TypedTargets.FindByInstanceId(parentInstanceId);
+                if (parentGo == null)
+                    return ToolDispatchResult.Fail("parent_not_found",
+                        $"Parent GameObject not found (parent_instance_id={parentInstanceId}).");
             }
             else if (!string.IsNullOrEmpty(parentPath))
             {
                 parentGo = TypedTargets.FindByPath(parentPath);
+                if (parentGo == null)
+                    return ToolDispatchResult.Fail("parent_not_found",
+                        $"Parent GameObject not found (parent_path='{parentPath}').");
+            }
+            else if (parentPathKeyPresent)
+            {
+                // Explicit empty/null parent_path with parent_instance_id=0 →
+                // detach to scene root (the contract the old error message
+                // documented but never implemented).
+                detachToRoot = true;
             }
             else
             {
@@ -658,22 +684,21 @@ namespace UnityOpenMcpBridge.TypedTools
                     "Pass an empty parent_path with parent_instance_id=0 to detach to scene root.");
             }
 
-            if (parentGo == null)
-                return ToolDispatchResult.Fail("parent_not_found",
-                    $"Parent GameObject not found (parent_instance_id={parentInstanceId}, parent_path='{parentPath}').");
-
-            if (parentGo == go)
-                return ToolDispatchResult.Fail("invalid_parameter",
-                    "Cannot parent a GameObject under itself.");
-
-            // Detect cycles: walking up from the new parent must not hit `go`.
-            var walker = parentGo.transform.parent;
-            while (walker != null)
+            if (parentGo != null)
             {
-                if (walker == go.transform)
+                if (parentGo == go)
                     return ToolDispatchResult.Fail("invalid_parameter",
-                        $"Cannot parent '{go.name}' under '{parentGo.name}': '{parentGo.name}' is a descendant of '{go.name}'.");
-                walker = walker.parent;
+                        "Cannot parent a GameObject under itself.");
+
+                // Detect cycles: walking up from the new parent must not hit `go`.
+                var walker = parentGo.transform.parent;
+                while (walker != null)
+                {
+                    if (walker == go.transform)
+                        return ToolDispatchResult.Fail("invalid_parameter",
+                            $"Cannot parent '{go.name}' under '{parentGo.name}': '{parentGo.name}' is a descendant of '{go.name}'.");
+                    walker = walker.parent;
+                }
             }
 
             // Reparent exactly once, honoring the caller's worldPositionStays.
@@ -687,15 +712,19 @@ namespace UnityOpenMcpBridge.TypedTools
             // B23 — capture the owning scene before the reparent: when the new
             // parent lives in a different (additively-loaded) scene the root
             // GameObject follows it, so both the old and new scenes change.
+            // B37 — a null new parent detaches to scene root; SetTransformParent
+            // accepts a null target for exactly this case.
             var previousScene = go.scene;
-            Undo.SetTransformParent(go.transform, parentGo.transform, worldPositionStays, "MCP Set Parent");
+            Undo.SetTransformParent(go.transform, parentGo != null ? parentGo.transform : null,
+                worldPositionStays, "MCP Set Parent");
 
             EditorUtility.SetDirty(go);
             if (previousScene.IsValid() && previousScene != go.scene)
                 EditorSceneManager.MarkSceneDirty(previousScene);
             MarkObjectSceneDirty(go);
 
-            return ToolDispatchResult.Ok(BuildGameObjectResult(go, "reparented"));
+            return ToolDispatchResult.Ok(BuildGameObjectResult(go,
+                detachToRoot ? "detached" : "reparented"));
         }
 
         // ----------------------------- helpers -----------------------------

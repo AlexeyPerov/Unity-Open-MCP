@@ -273,5 +273,40 @@ namespace UnityOpenMcpBridge.Tests
             // Both queues are now empty → both agents removed from the order.
             Assert.AreEqual(0, order.Count);
         }
+
+        // -------------------------------------------------------------------
+        // B34 — Reset() must signal every pending TaskCompletionSource so the
+        // enqueueing worker threads do not block until their own timeout. The
+        // scheduler tests above cover the pure decision; this covers the
+        // runtime queue's reset contract.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public static void Reset_SignalsPendingCompletionsWithCancel()
+        {
+            // Reset() drains shared static state — make sure no other test
+            // leaves an in-flight request behind.
+            BridgeRequestQueue.Reset();
+            try
+            {
+                var t1 = BridgeRequestQueue.Enqueue("A", "r1", false, () => { });
+                var t2 = BridgeRequestQueue.Enqueue("B", "w1", true, () => { });
+                Assert.IsFalse(t1.IsCompleted);
+                Assert.IsFalse(t2.IsCompleted);
+
+                BridgeRequestQueue.Reset();
+
+                // Both workers unblock immediately with an OperationCanceledException.
+                Assert.IsTrue(t1.IsFaulted);
+                Assert.IsTrue(t2.IsFaulted);
+                Assert.IsInstanceOf<System.OperationCanceledException>(t1.Exception.InnerException);
+                Assert.IsInstanceOf<System.OperationCanceledException>(t2.Exception.InnerException);
+                Assert.AreEqual(0, BridgeRequestQueue.ActiveAgentCount);
+            }
+            finally
+            {
+                BridgeRequestQueue.Reset();
+            }
+        }
     }
 }
