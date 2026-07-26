@@ -41,6 +41,11 @@ namespace UnityOpenMcpVerify.Fixes
             };
         }
 
+        // Safe is a static verdict (a detached .meta loses no asset data) —
+        // return it directly so CandidatesForIssue / TryGetFixInfo do not have
+        // to build the FixDescription just to learn the safety flag.
+        public bool IsSafe(string issueId) => true;
+
         public FixResult Apply(string issueId)
         {
             if (!IssueKey.TryParse(issueId, out _, out _, out var metaPath, out _))

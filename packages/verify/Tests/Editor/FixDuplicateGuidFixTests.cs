@@ -219,6 +219,81 @@ namespace UnityOpenMcpVerify.Tests
             }
         }
 
+        // V10 regression — the guid-line regex used to end in `\s*$`, and in
+        // .NET `\s` matches `\r` while multiline `$` matches before `\n`, so the
+        // trailing `\s*` consumed the CR of a CRLF .meta and the replacement
+        // dropped it — leaving one LF-terminated line in an otherwise CRLF file
+        // (mixed line endings + gratuitous git diffs). The fix anchors on
+        // `[ \t]*(?=\r?$)` so any trailing CR is preserved.
+        [UnityTest]
+        public System.Collections.IEnumerator Apply_PreservesCrlfLineEndings()
+        {
+            var matPath = FixtureRoot + "/Crlf.mat";
+            AssetDatabase.CreateAsset(new Material(Shader.Find("Standard")), matPath);
+            AssetDatabase.Refresh();
+            yield return null;
+
+            try
+            {
+                var oldGuid = AssetDatabase.AssetPathToGUID(matPath);
+                Assume.That(string.IsNullOrEmpty(oldGuid), Is.False, "material must have a GUID");
+
+                // Rewrite the .meta with CRLF line endings and a trailing
+                // horizontal-whitespace pad after the guid (the original bug
+                // also stripped trailing spaces/tabs).
+                var metaPath = matPath + ".meta";
+                var lines = File.ReadAllLines(metaPath);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (lines[i].StartsWith("guid:"))
+                        lines[i] = "guid: " + oldGuid + "   ";
+                }
+                // Join with CRLF and add a terminating CRLF so every line ends
+                // with `\r\n` (File.ReadAllLines strips the last terminator).
+                var crlf = string.Join("\r\n", lines) + "\r\n";
+                File.WriteAllText(metaPath, crlf);
+                AssetDatabase.ImportAsset(metaPath, ImportAssetOptions.ForceUpdate);
+                yield return null;
+
+                Assume.That(File.ReadAllText(metaPath).Contains("\r\n"),
+                    "fixture .meta must be CRLF before apply");
+
+                var issueId = IssueKey.Build(
+                    "project_health", VerifySeverity.Error,
+                    matPath, "duplicate_guid");
+                var newGuid = "fedcba9876543210fedcba9876543210";
+                var result = fix.Apply(issueId, newGuid);
+
+                Assert.IsTrue(result.Success,
+                    $"Apply should succeed. Got: {result.Description}");
+
+                var after = File.ReadAllText(metaPath);
+                // Every original CRLF line must still be CRLF — no LF-only line
+                // should appear (the regression signature).
+                Assert.That(after.Contains("\n"), Is.True, "meta must still have newlines");
+                Assert.That(after.IndexOf("\r\n"), Is.GreaterThanOrEqualTo(0),
+                    "meta must still contain CRLF sequences");
+                Assert.That(after.Contains("\r\r\n"), Is.False,
+                    "meta must not contain doubled CR (over-correction)");
+                // Count LF not preceded by CR — must be zero for a pure CRLF file.
+                int loneLf = 0;
+                for (int i = 0; i < after.Length; i++)
+                {
+                    if (after[i] == '\n' && (i == 0 || after[i - 1] != '\r')) loneLf++;
+                }
+                Assert.AreEqual(0, loneLf,
+                    "meta must not contain any LF not part of a CRLF pair (mixed endings)");
+                Assert.AreEqual(newGuid, ReadMetaGuid(matPath),
+                    "guid must be regenerated");
+            }
+            finally
+            {
+                if (AssetDatabase.LoadAssetAtPath<Material>(matPath) != null)
+                    AssetDatabase.DeleteAsset(matPath);
+                AssetDatabase.Refresh();
+            }
+        }
+
         // -------------------------------------------------------------------
         // Fixture helpers
         // -------------------------------------------------------------------

@@ -25,8 +25,7 @@ namespace UnityOpenMcpVerify.Fixes
         public FixDescription Describe(string issueId)
         {
             IssueKey.TryParse(issueId, out _, out _, out var assetPath, out _);
-            var ext = Path.GetExtension(assetPath ?? "").ToLowerInvariant();
-            var isPrefab = ext == ".prefab";
+            var isPrefab = IsPrefabAsset(assetPath);
 
             return new FixDescription
             {
@@ -39,6 +38,20 @@ namespace UnityOpenMcpVerify.Fixes
                 Safe = isPrefab
             };
         }
+
+        // Safe mirrors Describe() (prefab-only is safe; scenes need a load
+        // cycle) without building the FixDescription. Cheap by design — the
+        // verdict is a Path.GetExtension check, no asset I/O.
+        public bool IsSafe(string issueId)
+        {
+            IssueKey.TryParse(issueId, out _, out _, out var assetPath, out _);
+            return IsPrefabAsset(assetPath);
+        }
+
+        // Prefab edits are isolated (load → edit → save); scene edits can
+        // collide with an open scene, so only prefabs are Safe under enforce.
+        private static bool IsPrefabAsset(string assetPath)
+            => Path.GetExtension(assetPath ?? "").ToLowerInvariant() == ".prefab";
 
         public FixResult Apply(string issueId)
         {

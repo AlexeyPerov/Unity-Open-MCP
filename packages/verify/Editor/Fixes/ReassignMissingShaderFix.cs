@@ -48,6 +48,14 @@ namespace UnityOpenMcpVerify.Fixes
             };
         }
 
+        // Safe is a static verdict (a wrong shader always changes rendering) —
+        // return it directly so CandidatesForIssue / TryGetFixInfo do not have
+        // to run Describe()'s FindAssets("t:Shader") sweep just to learn the
+        // safety flag. That sweep was the V11 hot path: on a URP project with
+        // a few hundred materials issues it fired hundreds of full
+        // search-index queries per scan.
+        public bool IsSafe(string issueId) => false;
+
         public FixResult Apply(string issueId)
         {
             return Apply(issueId, targetShader: null);

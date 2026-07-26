@@ -251,6 +251,8 @@ namespace UnityOpenMcpBridge.Tests
                 };
             }
 
+            public bool IsSafe(string issueId) => false;
+
             public FixResult Apply(string issueId)
             {
                 if (Mode == CorruptorMode.FailAndCorrupt && TargetMetaPath != null && File.Exists(TargetMetaPath))

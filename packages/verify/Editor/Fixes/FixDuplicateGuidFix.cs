@@ -60,6 +60,12 @@ namespace UnityOpenMcpVerify.Fixes
             };
         }
 
+        // Safe is a static verdict (re-GUIDing always rewires the asset graph)
+        // — return it directly so CandidatesForIssue / TryGetFixInfo do not
+        // have to run Describe()'s GetAllAssetPaths sibling sweep just to learn
+        // the safety flag.
+        public bool IsSafe(string issueId) => false;
+
         public FixResult Apply(string issueId)
         {
             return Apply(issueId, regenerateGuid: null);
@@ -185,8 +191,16 @@ namespace UnityOpenMcpVerify.Fixes
             // Match the `guid: <32hex>` line. Unity writes it as
             // `guid: abcd...` (single space). Anchor to start-of-line so we
             // don't touch any incidental `guid:` substring elsewhere.
+            //
+            // Trailing whitespace: match horizontal whitespace only
+            // (`[ \t]*`), NOT `\s*`. In .NET `\s` matches `\r` and the
+            // multiline `$` matches before `\n`, so `\s*$` on a CRLF file
+            // consumes the `\r` and the replacement drops it — leaving one
+            // LF-terminated line in an otherwise CRLF file (mixed line
+            // endings + gratuitous git diffs). `[ \t]*(?=\r?$)` keeps any
+            // trailing CR intact.
             var pattern = new Regex(
-                @"(?m)^guid:\s*" + Regex.Escape(oldGuid) + @"\s*$",
+                @"(?m)^guid:\s*" + Regex.Escape(oldGuid) + @"[ \t]*(?=\r?$)",
                 RegexOptions.Compiled);
 
             if (!pattern.IsMatch(contents))

@@ -59,6 +59,12 @@ namespace UnityOpenMcpVerify.Fixes
             };
         }
 
+        // Safe is a static verdict (a wrong relink always rewires the asset
+        // graph) — return it directly so CandidatesForIssue / TryGetFixInfo do
+        // not have to run Describe()'s FindCandidateAssets sweep just to learn
+        // the safety flag.
+        public bool IsSafe(string issueId) => false;
+
         public FixResult Apply(string issueId)
         {
             // Apply without a chosen target is a no-op for this provider —

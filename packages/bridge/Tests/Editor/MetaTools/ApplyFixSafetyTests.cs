@@ -332,6 +332,8 @@ namespace UnityOpenMcpBridge.Tests
                 };
             }
 
+            public bool IsSafe(string issueId) => false;
+
             public FixResult Apply(string issueId)
             {
                 return new FixResult
