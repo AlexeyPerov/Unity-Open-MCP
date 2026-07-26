@@ -73,6 +73,37 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // -------------------------------------------------------------------
+        // B25 — unknown fix_id must report mutation.success: false
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void ApplyFix_UnknownFixId_ReportsFailureWithStructuredOutput()
+        {
+            // An unknown fix_id is a client error, not a success. The previous
+            // implementation returned Ok(BuildUnknownFixError(...)), so the gate
+            // envelope reported mutation.success:true and the gate runner's
+            // gate:off branch skipped its rollbackDisabled warning. The fix keeps
+            // the structured availableFixIds / applicableFixIdsForIssue output
+            // (so the agent can pick a valid fix) while reporting the failure.
+            var issueId = IssueKey.Build(
+                "missing_references", VerifySeverity.Error,
+                "Assets/__DoesNotExist__.prefab", "missing_guid");
+
+            var body = "{\"fix_id\":\"__no_such_fix__\",\"issue_id\":\"" + issueId
+                + "\",\"dry_run\":false}";
+
+            var result = ApplyFixTool.Execute(body);
+
+            Assert.IsFalse(result.Success,
+                "unknown fix_id must report failure, not success");
+            Assert.AreEqual("unknown_fix", result.ErrorCode);
+            Assert.IsNotNull(result.Output,
+                "structured output (availableFixIds / applicableFixIdsForIssue) must be preserved");
+            StringAssert.Contains("\"availableFixIds\"", result.Output);
+            StringAssert.Contains("\"applicableFixIdsForIssue\"", result.Output);
+        }
+
+        // -------------------------------------------------------------------
         // T5.1 — gate:"off" marks RollbackDisabled on a successful apply
         // -------------------------------------------------------------------
 

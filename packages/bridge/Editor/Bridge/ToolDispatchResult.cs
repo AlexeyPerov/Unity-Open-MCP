@@ -24,5 +24,17 @@ namespace UnityOpenMcpBridge
         {
             return new ToolDispatchResult(false, null, code, message);
         }
+
+        // B25 — a failed mutation may still carry a structured output body the
+        // caller needs (e.g. apply_fix's unknown_fix error lists available and
+        // applicable fix ids). The plain Fail(code, message) factory drops the
+        // output, losing that guidance; this variant keeps it so the gate
+        // envelope reports `mutation.success: false` (so gate runners and
+        // activity recording treat it as a real failure) while still surfacing
+        // the structured JSON at `mutation.output`.
+        public static ToolDispatchResult FailWithOutput(string code, string message, string output)
+        {
+            return new ToolDispatchResult(false, output, code, message);
+        }
     }
 }

@@ -79,12 +79,27 @@ namespace UnityOpenMcpBridge.TestRunner
         {
             var results = new List<TestResultInfo>();
             TestRunnerApi api = null;
+            TestCallbacks callbacks = null;
 
-            var callbacks = new TestCallbacks(
+            callbacks = new TestCallbacks(
                 onResult: r => TestRunnerService.CollectResult(r, results),
                 onFinished: _ =>
                 {
-                    if (api != null) Object.DestroyImmediate(api);
+                    // B26 — unregister the callbacks BEFORE destroying the api.
+                    // RegisterCallbacks stores the ICallbacks in the framework's
+                    // domain-level holder, so DestroyImmediate(api) does NOT
+                    // detach it: the closure (which captures this run's `results`
+                    // list and `runId`) stays subscribed for the rest of the
+                    // session. On the next run, run 1's TestFinished fires again
+                    // and appends run 2's results to run 1's list, then rewrites
+                    // test-results-<runId1>.json with merged, wrong counts.
+                    // UnregisterCallbacks is the documented counterpart and
+                    // removes the instance from that holder.
+                    if (api != null && callbacks != null)
+                    {
+                        try { api.UnregisterCallbacks(callbacks); } catch { }
+                        Object.DestroyImmediate(api);
+                    }
                     // Unconditional for all modes — see MarkPending note above.
                     TestRunnerState.ClearPending(runId);
                     TestRunnerService.WriteResultsFile(runId, mode, results, includePasses);
@@ -108,6 +123,11 @@ namespace UnityOpenMcpBridge.TestRunner
                     // surface a results file so the polling agent sees a
                     // terminal state instead of waiting on a never-written file.
                     TestRunnerService.WriteErrorFile(runId, mode, "test_run_failed", e.Message);
+                    // B26 — same UnregisterCallbacks defense as onFinished: the
+                    // callbacks were already registered above, so a rejected
+                    // Execute still leaves them subscribed in the domain-level
+                    // holder. Unregister before destroying the api.
+                    try { api.UnregisterCallbacks(callbacks); } catch { }
                     Object.DestroyImmediate(api);
                     // B9 — clear the pending marker so it does not linger. The
                     // onFinished callback (the only other ClearPending site)

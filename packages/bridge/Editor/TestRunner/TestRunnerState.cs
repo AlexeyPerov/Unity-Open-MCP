@@ -160,12 +160,23 @@ namespace UnityOpenMcpBridge.TestRunner
             var mode = playMode ? "PlayMode" : "EditMode";
             var results = new List<TestResultInfo>();
             TestRunnerApi api = null;
+            TestCallbacks callbacks = null;
 
-            var callbacks = new TestCallbacks(
+            callbacks = new TestCallbacks(
                 onResult: r => TestRunnerService.CollectResult(r, results),
                 onFinished: _ =>
                 {
-                    if (api != null) Object.DestroyImmediate(api);
+                    // B26 — unregister before destroying, same as the
+                    // RunTestsTool path. Reattach subscribes a fresh callbacks
+                    // instance on every domain reload; without Unregister the
+                    // previous instance's closure (capturing this `results`
+                    // list and `runId`) stays subscribed and pollutes the next
+                    // run with merged counts.
+                    if (api != null && callbacks != null)
+                    {
+                        try { api.UnregisterCallbacks(callbacks); } catch { }
+                        Object.DestroyImmediate(api);
+                    }
                     ClearPending(runId);
                     TestRunnerService.WriteResultsFile(runId, mode, results, includePasses);
                 });

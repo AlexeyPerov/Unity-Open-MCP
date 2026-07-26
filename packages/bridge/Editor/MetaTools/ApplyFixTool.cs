@@ -31,7 +31,19 @@ namespace UnityOpenMcpBridge.MetaTools
 
             var provider = FixProviderRegistry.Find(fixId);
             if (provider == null)
-                return ToolDispatchResult.Ok(BuildUnknownFixError(fixId, issueId));
+                // B25 — unknown fix_id is a client error, not a success. The
+                // previous `Ok(...)` made mutation.success:true even though no
+                // fix ran, which defeated the gate/envelope contract (the
+                // envelope is the single signal for "did this mutation land");
+                // under gate=off the gate runner also skipped its
+                // rollbackDisabled warning because it keys off Mutation.Success.
+                // FailWithOutput keeps the structured availableFixIds /
+                // applicableFixIdsForIssue lists the agent still needs to pick
+                // a valid fix, while reporting the genuine failure.
+                return ToolDispatchResult.FailWithOutput(
+                    "unknown_fix",
+                    $"Unknown fix id '{fixId}'.",
+                    BuildUnknownFixError(fixId, issueId));
 
             if (!provider.CanFix(issueId))
                 return ToolDispatchResult.Fail("fix_not_applicable",
