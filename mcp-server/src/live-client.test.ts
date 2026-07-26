@@ -797,6 +797,75 @@ test("shouldRetryPostAfterFailure: unit cases for the connection-vs-timeout retr
   assert.equal(shouldRetryPostAfterFailure(otherErr, true), true);
 });
 
+test("M10: postTool retry recursion is bounded when POSTs keep failing but /ping answers", async () => {
+  // Regression for the unbounded postTool → handlePostFailure → postTool loop.
+  // shouldRetryPostAfterFailure returns true for every TypeError (a connection
+  // failure is always safe to retry), so a bridge whose /ping answers during
+  // recovery but whose /tools/* POSTs always socket-reset previously re-POSTed
+  // the mutation forever. The fix threads an attempt counter through postTool
+  // and caps the recursion at 1 + transientRetryAttempts (4 by default).
+  //
+  // The stub: /ping answers idle 200 (so handleTransientOffline returns null
+  // — "recovered" — fast, exercising the outer re-POST path), and EVERY /tools/*
+  // POST hard-resets the socket (req.socket.destroy → undici throws TypeError).
+  // We count the POSTs and assert the client stops at the budget and surfaces
+  // bridge_offline instead of looping indefinitely.
+  const s = makeSandbox();
+  const toolHits: { count: number } = { count: 0 };
+  try {
+    const bridge = await startBridgeStub((req, res) => {
+      if (req.url?.startsWith("/tools/")) {
+        toolHits.count++;
+        // Every POST resets the socket before any bytes flush → TypeError on
+        // the client → connection-class failure → retried while budget remains.
+        req.socket.destroy();
+        return;
+      }
+      // /ping answers idle 200 so recovery returns null ("recovered") fast and
+      // the outer postTool retry path runs (the path M10 bounds).
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          connected: true,
+          projectPath: REFRESH_PROJECT,
+          unityVersion: "6000.0.0f1",
+          bridgeVersion: "0.1.0",
+          mode: "live",
+          compiling: false,
+          isPlaying: false,
+        }),
+      );
+    });
+    plantLock(s, REFRESH_PROJECT, process.pid, 0, "idle", bridge.port);
+    const client = new LiveClient(
+      bridge.port,
+      new PingCache(),
+      "deadbeef",
+      REFRESH_PROJECT,
+    );
+
+    const result = await client.route("unity_open_mcp_validate_edit", {
+      paths: ["Assets"],
+    });
+
+    // Budget is 1 initial attempt + transientRetryAttempts (default 3) = 4.
+    // The POST count must equal the budget exactly — more means the loop is
+    // unbounded (the bug); fewer means the bound short-circuits recovery.
+    assert.equal(
+      toolHits.count,
+      4,
+      `expected exactly 4 tool POSTs (1 initial + 3 retries), got ${toolHits.count}`,
+    );
+    // The terminal result is the bridge_offline surface (NOT a hang).
+    assert.equal(result.isError, true, "exhausted retries must surface an error");
+    const body = JSON.parse((result.content[0] as { text: string }).text);
+    assert.equal(body.error.code, "bridge_offline");
+    await bridge.close();
+  } finally {
+    disposeSandbox(s);
+  }
+});
+
 test("refresh: env-port override disables lock refresh", async () => {
   // When UNITY_OPEN_MCP_BRIDGE_PORT (passed as envPort) pins the endpoint,
   // refreshEndpointFromLock must be a no-op even if the lock points elsewhere.

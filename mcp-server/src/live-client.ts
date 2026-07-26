@@ -522,33 +522,78 @@ export class LiveClient implements Router {
       `test-results-${runId}.json`,
     );
 
+    // M9 (round-2 review) — read the results file atomically. The bridge writes
+    // it with a plain `File.WriteAllText` (TestRunnerService.cs:104), which is
+    // NOT atomic: a poll landing mid-write observes a partial/truncated body.
+    // The previous implementation did `existsSync` → `readFileSync` →
+    // `unlinkSync` in one shot, so a mid-write read produced unparseable JSON
+    // that was reported as a bogus failure AND deleted (the only copy of the
+    // results). To avoid that, require the file's size + mtime to be STABLE
+    // across two probes before consuming it, and NEVER unlink a body that
+    // failed to parse — leave it for the next poll (it may still be growing).
+    // `mtimeMs` granularity is platform-dependent (ms on most FSes, 100ns on
+    // NTFS), so size is the primary signal and mtime is the tiebreaker; two
+    // equal `{size, mtimeMs}` snapshots mean no writes landed between them.
+    let prevSnapshot: { size: number; mtimeMs: number } | null = null;
+
     let intervalMs = minIntervalMs;
     while (Date.now() < deadline) {
+      let snapshot: { size: number; mtimeMs: number } | null = null;
       try {
-        if (existsSync(resultsPath)) {
-          const content = readFileSync(resultsPath, "utf-8");
-          try {
-            unlinkSync(resultsPath);
-          } catch {
-            // best-effort cleanup
-          }
-
-          let isError = false;
-          try {
-            const parsed = JSON.parse(content);
-            isError = parsed.status === "error";
-          } catch {
-            // unparseable → treat as error
-            isError = true;
-          }
-
-          return {
-            content: [{ type: "text", text: content }],
-            isError,
-          };
-        }
+        const st = statSync(resultsPath);
+        snapshot = { size: st.size, mtimeMs: st.mtimeMs };
       } catch {
-        // continue polling
+        // File does not exist yet (or vanished between stat and read) — reset
+        // the stability tracker so a brand-new file gets a fresh two-probe
+        // window rather than inheriting a stale snapshot.
+        snapshot = null;
+        prevSnapshot = null;
+      }
+
+      if (snapshot !== null) {
+        const stable =
+          prevSnapshot !== null &&
+          prevSnapshot.size === snapshot.size &&
+          prevSnapshot.mtimeMs === snapshot.mtimeMs;
+        if (stable) {
+          // Two consecutive identical probes → the bridge has finished writing.
+          // Read, then unlink ONLY on a successful parse so a truncated body is
+          // retried on the next iteration instead of being destroyed.
+          try {
+            const content = readFileSync(resultsPath, "utf-8");
+            let isError = false;
+            try {
+              const parsed = JSON.parse(content);
+              isError = parsed.status === "error";
+            } catch {
+              // Unparseable → the read raced a writer despite the stability
+              // check (rare, e.g. a size match on a still-flushing FS). Do NOT
+              // delete: the next poll re-reads once the writer is done.
+              prevSnapshot = null;
+              await sleep(intervalMs);
+              intervalMs = Math.min(intervalMs * 2, maxIntervalMs);
+              continue;
+            }
+            try {
+              unlinkSync(resultsPath);
+            } catch {
+              // best-effort cleanup — the result is already in hand
+            }
+            prevSnapshot = null;
+            return {
+              content: [{ type: "text", text: content }],
+              isError,
+            };
+          } catch {
+            // readFileSync threw (e.g. file deleted between stat and read) —
+            // reset and keep polling; the next stat re-establishes a baseline.
+            prevSnapshot = null;
+          }
+        } else {
+          // First sighting of this file (or it grew since the last probe) —
+          // remember the snapshot and wait one interval before re-checking.
+          prevSnapshot = snapshot;
+        }
       }
 
       await sleep(intervalMs);
@@ -583,22 +628,34 @@ export class LiveClient implements Router {
    *      recovers (re-syncing the endpoint, waiting out a reload, or surfacing
    *      the structured offline/dead-bridge error) and re-POSTs only when safe.
    *
-   * The retry/compile contract is unchanged from the former monolithic body.
+   * The retry/compile contract is unchanged from the former monolithic body
+   * EXCEPT for the recursion bound added in M10 (round-2 review): `attempt`
+   * counts the POST tries so the postTool → handlePostFailure → postTool loop
+   * cannot run forever. `shouldRetryPostAfterFailure` returns true for every
+   * `TypeError`, so if POSTs keep failing at the socket level while `/ping`
+   * answers during recovery, the previous code re-POSTed the mutation each pass
+   * with no depth limit. The bound is `this.retry.transientRetryAttempts + 1`
+   * (1 initial attempt + N retries), matching the documented RETRY_CONFIG
+   * semantics; once exhausted the offline error is surfaced instead of recursing.
    */
   private async postTool(
     toolName: string,
     args: Record<string, unknown>,
     retryOn503: boolean,
+    attempt = 1,
   ): Promise<CallToolResult> {
     try {
       const res = await this.postToolFetch(toolName, args, retryOn503);
-      // 503 + compile settled cleanly → re-POST once without 503 retry.
+      // 503 + compile settled cleanly → re-POST once without 503 retry. This is
+      // a deliberate single re-dispatch (retryOn503 flips to false, so a second
+      // 503 surfaces the error), but it still counts as a POST attempt for the
+      // recursion bound.
       if (isCompileRepostSentinel(res)) {
-        return this.postTool(toolName, args, false);
+        return this.postTool(toolName, args, false, attempt + 1);
       }
       return res;
     } catch (err) {
-      return this.handlePostFailure(toolName, args, err, retryOn503);
+      return this.handlePostFailure(toolName, args, err, retryOn503, attempt);
     }
   }
 
@@ -866,20 +923,45 @@ export class LiveClient implements Router {
    * when the endpoint is unchanged the same live bridge is still processing —
    * or has queued — the original POST's Work; re-POSTing would run the mutation
    * a second time. In that case surface the timeout instead of retrying.
+   *
+   * M10 (round-2 review) — `attempt` is the 1-based POST attempt counter. When
+   * it exceeds the configured retry budget (`this.retry.transientRetryAttempts`
+   * retries beyond the initial attempt) the offline error is surfaced instead
+   * of recursing. Without this bound `shouldRetryPostAfterFailure` returning
+   * true for every `TypeError` made the loop unbounded: POSTs failing at the
+   * socket level while `/ping` answers during recovery re-POSTed the mutation
+   * each pass forever. The recovery probe inside `handleTransientOffline` is
+   * itself bounded (`transientRetryAttempts` iterations of `/ping`); this outer
+   * bound caps how many times we re-enter that recovery + re-POST cycle.
    */
   private async handlePostFailure(
     toolName: string,
     args: Record<string, unknown>,
     err: unknown,
     retryOn503: boolean,
+    attempt: number,
   ): Promise<CallToolResult> {
     const endpointBefore = this.baseUrl;
     const recovered = await this.handleTransientOffline("post");
     if (recovered !== null) return recovered;
     const endpointChanged = this.baseUrl !== endpointBefore;
-    if (shouldRetryPostAfterFailure(err, endpointChanged)) {
-      return this.postTool(toolName, args, retryOn503);
+    // M10 — bound the postTool → handlePostFailure → postTool recursion. The
+    // budget is the initial attempt plus the configured transient retry count.
+    const maxAttempts = 1 + this.retry.transientRetryAttempts;
+    const attemptsExhausted = attempt >= maxAttempts;
+    if (
+      !attemptsExhausted &&
+      shouldRetryPostAfterFailure(err, endpointChanged)
+    ) {
+      return this.postTool(toolName, args, retryOn503, attempt + 1);
     }
+    const exhaustedNote = attemptsExhausted
+      ? ` The POST retry budget (${maxAttempts} attempt${
+          maxAttempts === 1 ? "" : "s"
+        }) was exhausted after ${attempt} attempt${
+          attempt === 1 ? "" : "s"
+        }; the bridge is reachable by /ping but POSTs keep failing.`
+      : "";
     return makeErrorResult({
       code: "bridge_offline",
       message:
@@ -889,7 +971,7 @@ export class LiveClient implements Router {
         `the request was NOT retried — re-POSTing would risk running the ` +
         `mutation twice on the same bridge. If the editor was briefly slow ` +
         `(unfocused, GC, a long main-thread op), the original call may still ` +
-        `complete there; verify the effect before retrying. Endpoint: ${this.baseUrl}.`,
+        `complete there; verify the effect before retrying. Endpoint: ${this.baseUrl}.${exhaustedNote}`,
       detail: {
         error: {
           code: "bridge_offline",
