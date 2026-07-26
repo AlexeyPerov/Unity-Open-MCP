@@ -229,7 +229,8 @@ namespace UnityOpenMcpBridge.MetaTools
         // + [SerializeField] privates), skipping properties — which is exactly the
         // contract the compression module expects. Values are stringified with a
         // depth/count cap to keep the payload bounded.
-        private static List<KeyValuePair<string, string>> SerializeFields(Object asset, int fieldLimit)
+        // internal for the same test-access reason as ReadPropertyValue (B38).
+        internal static List<KeyValuePair<string, string>> SerializeFields(Object asset, int fieldLimit)
         {
             var result = new List<KeyValuePair<string, string>>();
             try
@@ -250,7 +251,16 @@ namespace UnityOpenMcpBridge.MetaTools
                         if (prop.depth != 0) continue;
                         var fieldName = prop.name;
                         if (fieldName == "m_Script") continue;
-                        var value = ReadPropertyValue(prop);
+                        // B38 — a per-field throw (e.g. an out-of-range enum on a
+                        // [Flags] field) must not abort the whole iteration and
+                        // drop every field after it. ReadPropertyValue guards the
+                        // known throw sites; this try/catch is defense-in-depth
+                        // for any other SerializedProperty accessor that throws
+                        // on an exotic field, so one bad field is skipped, not
+                        // the rest of the asset.
+                        string value;
+                        try { value = ReadPropertyValue(prop); }
+                        catch { continue; }
                         if (value == null) continue;
                         result.Add(new KeyValuePair<string, string>(fieldName, value));
                         emitted++;
@@ -265,7 +275,10 @@ namespace UnityOpenMcpBridge.MetaTools
             return result;
         }
 
-        private static string ReadPropertyValue(SerializedProperty prop)
+        // internal so the test assembly (InternalsVisibleTo via OutputSerializer's
+        // assembly attribute) can exercise the B38 enum-index guard directly
+        // without round-tripping through an on-disk asset.
+        internal static string ReadPropertyValue(SerializedProperty prop)
         {
             switch (prop.propertyType)
             {
@@ -280,9 +293,17 @@ namespace UnityOpenMcpBridge.MetaTools
                 case SerializedPropertyType.Vector3: return prop.vector3Value.ToString();
                 case SerializedPropertyType.Vector4: return prop.vector4Value.ToString();
                 case SerializedPropertyType.Quaternion: return prop.quaternionValue.ToString();
-                case SerializedPropertyType.Enum: return prop.enumDisplayNames.Length > prop.enumValueIndex
-                    ? prop.enumDisplayNames[prop.enumValueIndex]
-                    : prop.enumValueIndex.ToString();
+                // B38 — combined [Flags] bits make Unity report enumValueIndex = -1
+                // (no single named entry matches). The upper-bound check alone is
+                // not enough: -1 fails `Length > -1` (true), then indexes out of
+                // range, throwing — and the outer catch in SerializeFields aborts
+                // the WHOLE field iteration, dropping this field and every one
+                // after it. Guard both bounds and fall back to the numeric value
+                // (the combined flag bits) when no display name applies.
+                case SerializedPropertyType.Enum:
+                    if (prop.enumValueIndex >= 0 && prop.enumValueIndex < prop.enumDisplayNames.Length)
+                        return prop.enumDisplayNames[prop.enumValueIndex];
+                    return prop.enumValueIndex.ToString();
                 case SerializedPropertyType.ObjectReference:
                     return prop.objectReferenceValue != null ? prop.objectReferenceValue.name : "null";
                 case SerializedPropertyType.LayerMask: return prop.intValue.ToString();

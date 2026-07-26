@@ -27,6 +27,27 @@ namespace UnityOpenMcpBridge.MetaTools
             if (string.IsNullOrEmpty(failOnSeverity))
                 failOnSeverity = VerifyProjectSettings.SeverityThreshold;
 
+            // B42 — fail closed on an unrecognized fail_on_severity. The local
+            // ShouldFail switch had a `_ => false` arm that mapped ANY unknown
+            // token (typos like "warning", "critical", "errors") to "never
+            // fail", so the response reported passed:true while still listing
+            // the errors. batch_execute re-enters DispatchTool with agent-
+            // authored bodies that bypass the MCP schema, and the canonical
+            // SeverityThreshold.Parse *throws* on unknown values — so an
+            // unrecognized value here is a real contract violation. Validate
+            // against the canonical parser and reject before scanning so the
+            // caller sees a structured error instead of a false pass. (The
+            // project default from VerifyProjectSettings is already normalized
+            // and never trips this path.)
+            try
+            {
+                SeverityThreshold.Parse(failOnSeverity);
+            }
+            catch (System.Exception ex)
+            {
+                return ToolDispatchResult.Fail("invalid_argument", ex.Message);
+            }
+
             FilteredVerifyResult filtered;
             try
             {
@@ -48,12 +69,16 @@ namespace UnityOpenMcpBridge.MetaTools
 
         private static bool ShouldFail(VerifySeverity severity, string failOnSeverity)
         {
+            // failOnSeverity is validated against SeverityThreshold.Parse at the
+            // top of Execute, so only the five canonical tokens reach here.
+            // `never` (and any defense-in-depth fallback) must NOT fail.
             return failOnSeverity switch
             {
                 "error" => severity == VerifySeverity.Error,
                 "warn" => severity == VerifySeverity.Error || severity == VerifySeverity.Warning,
                 "info" => true,
                 "verbose" => true,
+                "never" => false,
                 _ => false
             };
         }

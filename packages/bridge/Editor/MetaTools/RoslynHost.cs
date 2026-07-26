@@ -14,6 +14,17 @@ namespace UnityOpenMcpBridge.MetaTools
         private static Assembly _cacs;
         private static bool _initAttempted;
 
+        // B40 — MetadataReference construction is the expensive part of every
+        // compile: BuildMetadataReferences walks every loaded assembly and calls
+        // CreateFromAssembly / CreateFromFile (which opens and parses each PE).
+        // The set of referenced assemblies is effectively stable for the session
+        // (Unity loads its assemblies once at startup; execute_csharp does not
+        // load new production assemblies), so cache the built references keyed by
+        // the assembly count. A domain reload clears the static field; a genuine
+        // new assembly bumps the count and triggers one rebuild.
+        private static List<object> _cachedReferences;
+        private static int _cachedReferenceAssemblyCount = -1;
+
         public static bool IsAvailable { get; private set; }
         public static string LastInitError { get; private set; }
 
@@ -153,40 +164,47 @@ namespace UnityOpenMcpBridge.MetaTools
             if (withOptions != null)
                 compilation = withOptions.Invoke(compilation, new object[] { options });
 
-            var peStream = new MemoryStream();
-            var emitMethod = FindInstanceMethod(compType, "Emit", p => typeof(Stream).IsAssignableFrom(p.ParameterType));
-            if (emitMethod == null)
-                return (null, "Could not find compilation Emit method");
-
-            var emitResult = InvokeWithOptionalDefaults(emitMethod, compilation, peStream);
-
-            var emitResultType = _ca.GetType("Microsoft.CodeAnalysis.Emit.EmitResult");
-            var successProp = emitResultType.GetProperty("Success");
-            var success = (bool)successProp.GetValue(emitResult);
-
-            if (!success)
+            // B40 — peStream is IDisposable; scope it with `using` so every
+            // return path (emit failure diagnostics, success, or a throw from
+            // Emit) disposes the underlying managed buffer holder. MemoryStream
+            // holds no unmanaged resource, but disposing is the documented
+            // contract and keeps the buffer eligible for immediate GC.
+            using (var peStream = new MemoryStream())
             {
-                var diagsProp = emitResultType.GetProperty("Diagnostics");
-                var diags = (System.Collections.IEnumerable)diagsProp.GetValue(emitResult);
-                var errorMessages = new List<string>();
-                var diagnosticType = _ca.GetType("Microsoft.CodeAnalysis.Diagnostic");
-                var severityProp = diagnosticType.GetProperty("Severity");
+                var emitMethod = FindInstanceMethod(compType, "Emit", p => typeof(Stream).IsAssignableFrom(p.ParameterType));
+                if (emitMethod == null)
+                    return (null, "Could not find compilation Emit method");
 
-                var getMessage = diagnosticType.GetMethod("GetMessage", Type.EmptyTypes);
-                foreach (var d in diags)
+                var emitResult = InvokeWithOptionalDefaults(emitMethod, compilation, peStream);
+
+                var emitResultType = _ca.GetType("Microsoft.CodeAnalysis.Emit.EmitResult");
+                var successProp = emitResultType.GetProperty("Success");
+                var success = (bool)successProp.GetValue(emitResult);
+
+                if (!success)
                 {
-                    var severity = severityProp.GetValue(d);
-                    if (severity.ToString() == "Error")
+                    var diagsProp = emitResultType.GetProperty("Diagnostics");
+                    var diags = (System.Collections.IEnumerable)diagsProp.GetValue(emitResult);
+                    var errorMessages = new List<string>();
+                    var diagnosticType = _ca.GetType("Microsoft.CodeAnalysis.Diagnostic");
+                    var severityProp = diagnosticType.GetProperty("Severity");
+
+                    var getMessage = diagnosticType.GetMethod("GetMessage", Type.EmptyTypes);
+                    foreach (var d in diags)
                     {
-                        var msg = getMessage?.Invoke(d, null)?.ToString() ?? d?.ToString();
-                        errorMessages.Add(string.IsNullOrEmpty(msg) ? "Unknown error" : msg);
+                        var severity = severityProp.GetValue(d);
+                        if (severity.ToString() == "Error")
+                        {
+                            var msg = getMessage?.Invoke(d, null)?.ToString() ?? d?.ToString();
+                            errorMessages.Add(string.IsNullOrEmpty(msg) ? "Unknown error" : msg);
+                        }
                     }
+
+                    return (null, string.Join("\n", errorMessages));
                 }
 
-                return (null, string.Join("\n", errorMessages));
+                return (peStream.ToArray(), null);
             }
-
-            return (peStream.ToArray(), null);
         }
 
         private static (object syntaxTree, string error) ParseSyntaxTree(string source, Type syntaxTreeType)
@@ -220,8 +238,23 @@ namespace UnityOpenMcpBridge.MetaTools
             if (createFromAssembly == null && createFromFile == null)
                 return null;
 
+            // B40 — MetadataReference construction (CreateFromAssembly /
+            // CreateFromFile) opens and parses every loaded PE and is the
+            // expensive part of every compile. The referenced assembly set is
+            // effectively stable for the session: Unity loads its assemblies at
+            // startup and execute_csharp does not load new production assemblies.
+            // Cache the built references keyed by the loaded-assembly count so a
+            // genuine new assembly (e.g. a freshly compiled snippet, or a
+            // domain-bound package) triggers exactly one rebuild, while the
+            // common repeated-call case reuses the cached list. A domain reload
+            // clears the static fields, so the cache never outlives its
+            // AppDomain.
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            if (_cachedReferences != null && _cachedReferenceAssemblyCount == assemblies.Length)
+                return _cachedReferences;
+
             var references = new List<object>();
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            foreach (var asm in assemblies)
             {
                 if (asm.IsDynamic) continue;
 
@@ -242,6 +275,8 @@ namespace UnityOpenMcpBridge.MetaTools
                     references.Add(reference);
             }
 
+            _cachedReferences = references;
+            _cachedReferenceAssemblyCount = assemblies.Length;
             return references;
         }
 

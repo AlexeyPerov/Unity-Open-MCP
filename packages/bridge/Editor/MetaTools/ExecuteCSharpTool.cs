@@ -145,12 +145,16 @@ namespace UnityOpenMcpBridge.MetaTools
                     return ToolDispatchResult.Fail("execution_error", "Compiled snippet entry point not found");
 
                 // Inject resolved object references so the snippet can access live objects.
-                if (resolvedRefs != null)
-                {
-                    var refsField = type.GetField("Refs", BindingFlags.Public | BindingFlags.Static);
-                    if (refsField != null)
-                        refsField.SetValue(null, resolvedRefs);
-                }
+                // B39 — always resolve the Refs field, even when this call has no
+                // object_ids. The compiled snippet assembly is REUSED when the PE is
+                // byte-identical (LoadSnippetAssembly), so a previous call that DID
+                // pass object_ids leaves its Refs array on the static field. Re-running
+                // the same snippet without object_ids would then hand it the previous
+                // call's (possibly destroyed) objects. Explicitly null the field when no
+                // refs were resolved this call so the reuse path is clean.
+                var refsField = type.GetField("Refs", BindingFlags.Public | BindingFlags.Static);
+                if (refsField != null)
+                    refsField.SetValue(null, resolvedRefs);
 
                 var result = method.Invoke(null, null);
                 var output = OutputSerializer.Serialize(result, BuildSerializeOptions(body));
@@ -216,7 +220,14 @@ namespace UnityOpenMcpBridge.MetaTools
         // call sites.
         private static Assembly LoadSnippetAssembly(byte[] pe)
         {
-            var hash = System.Security.Cryptography.SHA256.Create().ComputeHash(pe);
+            // B40 — SHA256.Create() returns an IDisposable hash algorithm (a
+            // native crypto provider handle). Wrap in `using` so a throw from
+            // ComputeHash (or the lock body) cannot leak it across calls.
+            byte[] hash;
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                hash = sha.ComputeHash(pe);
+            }
             lock (s_snippetLock)
             {
                 if (s_snippetAssembly != null && s_snippetPeHash != null && BytesEqual(s_snippetPeHash, hash))
@@ -238,7 +249,9 @@ namespace UnityOpenMcpBridge.MetaTools
             return true;
         }
 
-        private static string BuildSource(string code, string[] usings)
+        // internal so the EditMode suite can pin the B39 source-level contract
+        // (Refs declared as a public static field) without a live Roslyn install.
+        internal static string BuildSource(string code, string[] usings)
         {
             var sb = new StringBuilder(code.Length + usings.Length * 30 + 280);
             foreach (var u in usings)

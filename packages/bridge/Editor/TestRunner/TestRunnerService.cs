@@ -41,6 +41,41 @@ namespace UnityOpenMcpBridge.TestRunner
         internal static string PendingFilePath(string runId) =>
             Path.Combine(StatusDir, $"test-pending-{runId}.json");
 
+        // B41 — run_id is caller-supplied (via the bridge body, bypassing the
+        // MCP schema under batch_execute) and interpolated straight into a
+        // filesystem path under StatusDir (~/.unity-open-mcp). Without
+        // validation, values like "../../.." or "a/b" escape the directory or
+        // invent subpaths. Restrict to the documented-safe set
+        // [A-Za-z0-9._-] (1..128 chars), which the auto-generated
+        // "<pid>-<unixMs>" form always satisfies. Returns true for a safe id;
+        // the caller (RunTestsTool.RunTests) throws on false BEFORE any file op.
+        private static readonly char[] SafeRunIdChars =
+        {
+            'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
+            'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z',
+            '0','1','2','3','4','5','6','7','8','9',
+            '.', '_', '-'
+        };
+
+        internal const int MaxRunIdLength = 128;
+
+        internal static bool IsValidRunId(string runId)
+        {
+            if (string.IsNullOrEmpty(runId) || runId.Length > MaxRunIdLength)
+                return false;
+            // Explicit char whitelist beats a regex here: no path separators,
+            // no whitespace, no casing surprises, and no dependency on
+            // System.Text.RegularExpressions (which Unity's stripped runtime
+            // gates behind a define in some configurations).
+            for (int i = 0; i < runId.Length; i++)
+            {
+                var c = runId[i];
+                if (Array.IndexOf(SafeRunIdChars, c) < 0)
+                    return false;
+            }
+            return true;
+        }
+
         internal static Filter BuildFilter(
             bool playMode,
             string assemblyName,

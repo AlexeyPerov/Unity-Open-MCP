@@ -30,6 +30,22 @@ namespace UnityOpenMcpBridge.TestRunner
                 run_id = System.Diagnostics.Process.GetCurrentProcess().Id + "-"
                         + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
 
+            // B41 — run_id is caller-supplied (via the bridge body, bypassing
+            // the MCP schema under batch_execute) and reaches File.Delete /
+            // File.WriteAllText inside ResultsFilePath / PendingFilePath /
+            // MarkPending. Validate BEFORE any filesystem op: a value like
+            // "../../.." would escape ~/.unity-open-mcp, and "a/b" would invent
+            // subpaths. The auto-generated "<pid>-<unixMs>" form always passes.
+            // Registry tools cannot emit a custom error code (TryDispatch maps a
+            // throw to execution_error), so throw with a precise message.
+            if (!TestRunnerService.IsValidRunId(run_id))
+            {
+                throw new ArgumentException(
+                    "Invalid 'run_id': must be 1.." + TestRunnerService.MaxRunIdLength +
+                    " characters of [A-Za-z0-9._-] only (no path separators, whitespace, or '..'). " +
+                    "Omit run_id to let the tool generate a safe one.");
+            }
+
             var mode = play_mode ? "PlayMode" : "EditMode";
             var filter = TestRunnerService.BuildFilter(play_mode, assembly_name, test_namespace, test_class, test_method);
 
