@@ -379,7 +379,12 @@ pub fn discover_unity_installations(settings: &Settings) -> DiscoveryResult {
     }
 
     let mut installations: Vec<UnityInstallation> = seen.into_values().collect();
-    installations.sort_by(|a, b| b.version.cmp(&a.version));
+    // H14: sort by the parsed numeric tuple so patch numbers >= 10 order
+    // correctly (`6000.0.10f1` > `6000.0.9f1`); the previous lexicographic
+    // sort mis-ordered them.
+    installations.sort_by(|a, b| {
+        crate::config::unity_version::compare_versions(&b.version, &a.version)
+    });
 
     DiscoveryResult {
         installations,

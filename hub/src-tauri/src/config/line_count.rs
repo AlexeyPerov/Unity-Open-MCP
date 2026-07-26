@@ -688,7 +688,6 @@ fn is_gitignored(stack: &[GitignoreMatcher], rel_path: &str, is_dir: bool) -> bo
 use tauri::State;
 
 use crate::config::commands::AppState;
-use crate::config::persistence;
 use crate::config::schemas::LineCountStats;
 
 /// Result of the manual "Run line count" button. Carries the full
@@ -716,16 +715,14 @@ pub fn count_lines(
 ) -> Result<CountLinesResult, String> {
     // Clone-out + locate the entry under the lock; release before the
     // potentially long scan so the lock is not held during file I/O.
-    let (entry, projects) = {
+    let entry = {
         let guard = state.projects.lock().unwrap();
-        let projects = guard.clone();
-        let entry = projects
+        guard
             .projects
             .iter()
             .find(|p| p.id == project_id)
             .cloned()
-            .ok_or_else(|| format!("project not found: {}", project_id))?;
-        (entry, projects)
+            .ok_or_else(|| format!("project not found: {}", project_id))?
     };
 
     let root = std::path::PathBuf::from(&entry.path);
@@ -743,20 +740,22 @@ pub fn count_lines(
         details: report.clone(),
     };
 
-    // Persist the cached stats back onto the entry.
-    let mut updated_projects = projects;
-    for p in updated_projects.projects.iter_mut() {
-        if p.id == project_id {
-            p.line_count_stats = Some(stats.clone());
-            break;
+    // H12: persist via the locked mutate-and-persist helper so we merge
+    // the fresh stats into the CURRENT live state, not the stale snapshot
+    // cloned before the (potentially multi-minute) scan. The previous
+    // shape cloned the whole ProjectsFile, ran the scan lock-free, then
+    // wrote the stale snapshot back — clobbering any concurrent
+    // add/remove/launch mutation that landed during the scan.
+    let stats_for_closure = stats.clone();
+    if let Err(e) = crate::config::commands::with_projects(&state.projects, |projects| {
+        for p in projects.projects.iter_mut() {
+            if p.id == project_id {
+                p.line_count_stats = Some(stats_for_closure.clone());
+                break;
+            }
         }
-    }
-    if let Err(e) = persistence::save_projects(&updated_projects) {
+    }) {
         log::error!("Failed to persist line-count stats: {}", e);
-    }
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = updated_projects.clone();
     }
 
     Ok(CountLinesResult { scan, report, stats })
@@ -773,16 +772,14 @@ pub fn count_lines_cached(
     state: State<AppState>,
     project_id: String,
 ) -> Result<Option<LineCountStats>, String> {
-    let (entry, projects) = {
+    let entry = {
         let guard = state.projects.lock().unwrap();
-        let projects = guard.clone();
-        let entry = projects
+        guard
             .projects
             .iter()
             .find(|p| p.id == project_id)
             .cloned()
-            .ok_or_else(|| format!("project not found: {}", project_id))?;
-        (entry, projects)
+            .ok_or_else(|| format!("project not found: {}", project_id))?
     };
 
     // If we already have a cached result, return it immediately — the
@@ -810,19 +807,19 @@ pub fn count_lines_cached(
         details: scan.render_report(),
     };
 
-    let mut updated_projects = projects;
-    for p in updated_projects.projects.iter_mut() {
-        if p.id == project_id {
-            p.line_count_stats = Some(stats.clone());
-            break;
+    // H12: same locked mutate-and-persist fix as `count_lines` — merge the
+    // fresh stats into the live state instead of writing a stale snapshot
+    // back over concurrent mutations.
+    let stats_for_closure = stats.clone();
+    if let Err(e) = crate::config::commands::with_projects(&state.projects, |projects| {
+        for p in projects.projects.iter_mut() {
+            if p.id == project_id {
+                p.line_count_stats = Some(stats_for_closure.clone());
+                break;
+            }
         }
-    }
-    if let Err(e) = persistence::save_projects(&updated_projects) {
+    }) {
         log::error!("Failed to persist line-count stats: {}", e);
-    }
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = updated_projects.clone();
     }
 
     Ok(Some(stats))

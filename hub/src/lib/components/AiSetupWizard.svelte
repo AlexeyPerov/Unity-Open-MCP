@@ -186,6 +186,14 @@
   let toolkitValidation = $state<ToolkitValidation | null>(null);
   let toolkitValidating = $state(false);
   let toolkitError = $state<string | null>(null);
+  // H20: latch recording the toolkit-root value we last attempted to
+  // auto-validate. The Step 1 auto-validation effect re-reads
+  // `toolkitValidation`/`toolkitValidating`, and `runToolkitValidation`
+  // resets both to null/false on rejection — without this latch the guard
+  // re-satisfied itself and the effect retried forever (one error log per
+  // iteration). The latch resets when the user edits the path so a manual
+  // re-validation is still offered.
+  let toolkitValidationAttemptedFor = $state<string | null>(null);
   let nodeProbe = $state<NodeProbe | null>(null);
   let nodeProbing = $state(false);
   let pickToolkitInFlight = $state(false);
@@ -618,6 +626,12 @@
       clearTimeout(draftPersistTimer);
       draftPersistTimer = null;
     }
+    // H21: stop the Step 5 bridge polling loop so it does not keep firing
+    // `poll_bridge_ping` every 2 s into a destroyed component for the rest
+    // of the 120 s budget after the wizard closes. `stopStep5Polling`
+    // collapses the deadline to now, so the loop's `while (Date.now() <
+    // step5DeadlineAt)` guard exits on its next iteration.
+    stopStep5Polling();
     void persistAiSetupWizardDraft();
     onClose();
   }
@@ -732,6 +746,8 @@
   function onToolkitRootInput(value: string) {
     toolkitRoot = value;
     toolkitRootDirty = true;
+    // H20: a new root value is eligible for auto-validation again.
+    toolkitValidationAttemptedFor = null;
   }
 
   async function runToolkitValidation() {
@@ -780,7 +796,20 @@
   $effect(() => {
     if (currentStep === "step1") {
       if (nodeProbe === null) void runNodeProbe();
-      if (toolkitRoot.trim() && toolkitValidation === null && !toolkitValidating) {
+      // H20: only auto-validate once per toolkit-root value. The previous
+      // guard (`toolkitValidation === null && !toolkitValidating`)
+      // re-satisfied itself when `runToolkitValidation` reset both to
+      // null/false on rejection, looping forever. The latch records the
+      // root we last attempted; editing the path resets it so a manual
+      // re-validation is still offered.
+      const root = toolkitRoot.trim();
+      if (
+        root &&
+        root !== toolkitValidationAttemptedFor &&
+        toolkitValidation === null &&
+        !toolkitValidating
+      ) {
+        toolkitValidationAttemptedFor = root;
         void runToolkitValidation();
       }
     }
@@ -1379,6 +1408,12 @@
 
   async function pollBridgeUntilReady(port: number) {
     while (Date.now() < (step5DeadlineAt ?? Date.now())) {
+      // H21: bail immediately if the wizard was closed while we were
+      // suspended in the inter-poll `setTimeout`. `closeWizard` also
+      // collapses the deadline, but the loop can be mid-await when that
+      // happens; this guard prevents the resumed iteration from writing
+      // into a destroyed component.
+      if (wizardClosed) return;
       step5LastTick = Date.now();
       try {
         const result = await pollBridgePing(port, STEP5_PING_TIMEOUT_MS);

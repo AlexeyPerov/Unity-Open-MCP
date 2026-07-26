@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const ALWAYS_EXCLUDED: &[&str] = &["Library", "Temp", "Logs", "UserSettings"];
 
@@ -41,7 +42,18 @@ fn is_ignored_by_gitignore(entry_name: &str, patterns: &[String]) -> bool {
     false
 }
 
-fn compute_size(dir: &Path, patterns: &[String]) -> u64 {
+fn compute_size(dir: &Path, patterns: &[String], visited: &mut HashSet<PathBuf>) -> u64 {
+    // H26: defense-in-depth loop guard. The symlink check below already
+    // prevents the common Unity `Assets/Shared -> ../..` cycle from being
+    // descended into, but a `visited` set of canonicalized paths also
+    // catches a real directory that appears twice via bind mounts or a
+    // non-symlink cycle, so the walk terminates instead of recursing to
+    // PATH_MAX. Canonicalize best-effort: a path that cannot be
+    // canonicalized is still walked once (the set just won't dedupe it).
+    let canon = fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    if !visited.insert(canon) {
+        return 0;
+    }
     let mut total: u64 = 0;
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -54,8 +66,23 @@ fn compute_size(dir: &Path, patterns: &[String]) -> u64 {
                 continue;
             }
             let path = entry.path();
+            // H26: probe with `symlink_metadata` so symlinks are detected
+            // (not followed). The previous `path.is_dir()` call followed
+            // the link, so a symlinked directory inside the project
+            // (`Assets/Shared -> ../..`, common in Unity setups) was
+            // re-descended per level until PATH_MAX, inflating the reported
+            // size by orders of magnitude and pegging a core for minutes.
+            // A symlink is now counted by the size of the link entry
+            // itself (typically 0 on Unix) and never traversed.
+            let is_symlink = match fs::symlink_metadata(&path) {
+                Ok(md) => md.file_type().is_symlink(),
+                Err(_) => continue,
+            };
+            if is_symlink {
+                continue;
+            }
             if path.is_dir() {
-                total += compute_size(&path, patterns);
+                total += compute_size(&path, patterns, visited);
             } else {
                 total += entry.metadata().map(|m| m.len()).unwrap_or(0);
             }
@@ -76,7 +103,8 @@ fn compute_project_sizes(paths: &[String]) -> HashMap<String, u64> {
             continue;
         }
         let patterns = parse_ignore_patterns(p);
-        let size = compute_size(p, &patterns);
+        let mut visited: HashSet<PathBuf> = HashSet::new();
+        let size = compute_size(p, &patterns, &mut visited);
         result.insert(path.clone(), size);
     }
     result
@@ -167,5 +195,37 @@ mod tests {
         let gitignore_size = fs::metadata(&gitignore).unwrap().len();
         let asset_size = fs::metadata(&asset_file).unwrap().len();
         assert_eq!(result.get(&path), Some(&(gitignore_size + asset_size)));
+    }
+
+    // H26: a symlinked directory inside the project (common in Unity:
+    // `Assets/Shared -> ../..`) must not be traversed. The previous
+    // `path.is_dir()` followed the link, so the walker re-descended the
+    // whole tree per level until PATH_MAX. The fix uses symlink_metadata
+    // so symlinks are skipped outright, and a visited-set guards against
+    // any residual cycle.
+    #[cfg(unix)]
+    #[test]
+    fn does_not_recurse_through_symlinked_directory() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        // A real file we can size.
+        let asset = dir.path().join("Assets").join("a.cs");
+        fs::create_dir_all(asset.parent().unwrap()).unwrap();
+        let mut f = fs::File::create(&asset).unwrap();
+        f.write_all(b"1234").unwrap();
+        let asset_size = fs::metadata(&asset).unwrap().len();
+        // A symlinked directory pointing back at the project root — the
+        // classic Unity `Assets/Shared -> ../..` cycle.
+        symlink(dir.path(), dir.path().join("Assets").join("Shared")).unwrap();
+        let path = dir.path().to_string_lossy().to_string();
+        let result = compute_project_sizes(&[path.clone()]);
+        // The size must be bounded by the real file, not inflated by the
+        // self-referential symlink. Without the fix this either blew the
+        // stack or reported a size multiplied by the recursion depth.
+        let reported = *result.get(&path).unwrap();
+        assert!(
+            reported < asset_size * 4,
+            "symlink cycle inflated reported size to {reported}"
+        );
     }
 }

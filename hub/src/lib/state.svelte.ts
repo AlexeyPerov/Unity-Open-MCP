@@ -174,9 +174,19 @@ class AppState {
   // a "terminate & relaunch" without importing the ProjectsTab module
   // (the drawer is mounted at the app root and outlives tab switches).
   // Signature: (projectId: string) => Promise<void> | void.
+  //
+  // H23: this is `$state` so the StatusDrawer can reactively hide the
+  // "Terminate & relaunch" button when no handler is registered (e.g. the
+  // user switched away from the Projects tab, which clears the handler on
+  // unmount). Previously the button stayed visible and silently no-op'd via
+  // the `if (!this.terminateAndRelaunchHandler) return;` guard below.
   terminateAndRelaunchHandler:
     | ((projectId: string) => Promise<void> | void)
-    | null = null;
+    | null = $state(null);
+
+  get terminateAndRelaunchAvailable(): boolean {
+    return this.terminateAndRelaunchHandler !== null;
+  }
 
   setTerminateAndRelaunchHandler(
     handler: ((projectId: string) => Promise<void> | void) | null,

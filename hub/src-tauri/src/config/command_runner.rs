@@ -186,13 +186,41 @@ fn pick_highest_version_dir(dir: &Path) -> Option<String> {
 
 /// Builds a `Command` for `program` (e.g. `"npm"` / `"node"`) with the Node
 /// bin directory prepended to `PATH` so GUI-app launches can still find it.
-/// On Windows the shell is required to resolve `npm.cmd`/`node.exe` the same
-/// way the original code did, so this only enriches PATH on Unix.
+///
+/// H19: on Windows the previous shape used `cmd /C <program> <args…>`, which
+/// hands the entire command line to `cmd.exe` for a second round of
+/// metacharacter parsing. Rust's Windows quoting only escapes spaces and
+/// quotes and does NOT escape `cmd.exe` metacharacters (`&`, `|`, `<`, `>`,
+/// `^`, `(`, `)`), so a space-free frontend arg like `build&whoami` runs as a
+/// second command — a command-injection vector reachable from the maintainer
+/// panel's free-text "custom args" field. We now resolve the actual
+/// executable (`npm.cmd` / `node.exe`) off PATH and spawn it directly, so
+/// the OS — not `cmd.exe` — tokenizes the arguments. `npm.cmd` is a batch
+/// wrapper; spawning it directly still runs it, but its arguments are no
+/// longer re-parsed by an interactive shell.
 fn command_with_node_path(program: &str, use_shell: bool) -> Command {
+    // Enrich PATH with the resolved Node bin dir FIRST so the Windows
+    // resolver below can find `npm.cmd` / `node.exe` in it. Use the
+    // platform-correct separator (`;` on Windows, `:` on Unix); the
+    // previous unconditional `:` produced a malformed PATH on Windows.
+    let path_separator = if cfg!(target_os = "windows") { ';' } else { ':' };
+    let bin_dir = resolve_node_bin_dir();
+    let enriched_path = bin_dir.as_ref().and_then(|bin| {
+        let bin_str = bin.to_string_lossy();
+        match std::env::var("PATH") {
+            Ok(existing) => Some(format!("{}{}{}", bin_str, path_separator, existing)),
+            Err(_) => Some(bin_str.into_owned()),
+        }
+    });
+
     let mut cmd = if cfg!(target_os = "windows") {
-        let mut c = Command::new("cmd");
-        c.arg("/C").arg(program);
-        c
+        // Resolve the real executable so we spawn it directly instead of
+        // routing through `cmd /C` (which re-parses metacharacters). Fall
+        // back to the bare program name if resolution fails — the spawn
+        // will then surface a clear ENOENT rather than a silent injection.
+        let resolved = resolve_windows_executable(program, bin_dir.as_deref())
+            .unwrap_or_else(|| program.to_string());
+        Command::new(resolved)
     } else if use_shell {
         let mut c = Command::new("sh");
         c.arg("-c").arg(program);
@@ -200,14 +228,47 @@ fn command_with_node_path(program: &str, use_shell: bool) -> Command {
     } else {
         Command::new(program)
     };
-    if let Some(bin) = resolve_node_bin_dir() {
-        if let (Ok(existing), bin_str) = (std::env::var("PATH"), bin.to_string_lossy()) {
-            cmd.env("PATH", format!("{}:{}", bin_str, existing));
-        } else {
-            cmd.env("PATH", bin.to_string_lossy().into_owned());
-        }
+    if let Some(path) = enriched_path {
+        cmd.env("PATH", path);
     }
     cmd
+}
+
+/// On Windows, resolve a bare program name (`"npm"`, `"node"`) to an actual
+/// executable path by searching `bin_dir` (the resolved Node bin directory)
+/// and then the current `PATH`. Returns the first matching
+/// `<dir>/<program>.exe` or `<dir>/<program>.cmd`. Returns `None` on non-
+/// Windows targets so the caller can fall back to the bare name.
+#[cfg(target_os = "windows")]
+fn resolve_windows_executable(program: &str, bin_dir: Option<&std::path::Path>) -> Option<String> {
+    let candidates = [".exe", ".cmd", ".bat"];
+    // Search the Node bin dir first (it was prepended to PATH), then each
+    // PATH entry, mirroring how the shell would resolve the name.
+    let mut search_dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(b) = bin_dir {
+        search_dirs.push(b.to_path_buf());
+    }
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in path.split(';') {
+            if !dir.is_empty() {
+                search_dirs.push(std::path::PathBuf::from(dir));
+            }
+        }
+    }
+    for dir in search_dirs {
+        for ext in &candidates {
+            let full = dir.join(format!("{}{}", program, ext));
+            if full.is_file() {
+                return Some(full.to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_windows_executable(_program: &str, _bin_dir: Option<&std::path::Path>) -> Option<String> {
+    None
 }
 
 /// Cross-platform npm wrapper: `npm` on Unix, `cmd /C npm` on Windows
@@ -298,10 +359,18 @@ pub fn read_mcp_package_info(
 /// Strips ANSI CSI color sequences so the log pane renders cleanly.
 /// Ports vibe-launcher's `strip_ansi_escapes`. Only handles the `m`
 /// (SGR) final byte; cursor/erase sequences are rare in npm output.
+///
+/// H34: the previous byte-at-a-time loop cast each byte to `char` with
+/// `bytes[i] as char`, which is a Latin-1 decoding — every byte of a
+/// multi-byte UTF-8 sequence became its own (wrong) character, so npm's
+/// `✓`/`✗`/`→` glyphs and non-ASCII paths rendered as mojibake in the log
+/// pane. We now iterate by `char_indices`, which advances over whole
+/// codepoints, and copy the original byte slice for each kept char so the
+/// UTF-8 sequence is preserved verbatim.
 fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
     let bytes = s.as_bytes();
-    let mut i = 0;
+    let mut out: Vec<u8> = Vec::with_capacity(s.len());
+    let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
             // Skip until the final byte (0x40..=0x7e).
@@ -310,12 +379,27 @@ fn strip_ansi(s: &str) -> String {
                 i += 1;
             }
             i += 1; // skip the final byte itself
-        } else {
-            out.push(bytes[i] as char);
+        } else if bytes[i] == 0x1b {
+            // A stray ESC that is not the start of a CSI sequence: drop it
+            // rather than emitting the raw control byte.
             i += 1;
+        } else {
+            // Advance over one whole UTF-8 codepoint so multi-byte
+            // sequences are copied intact. `char_indices` gives us the
+            // byte length of the char starting at `i`.
+            let len = std::str::from_utf8(&bytes[i..])
+                .ok()
+                .and_then(|slice| slice.char_indices().next())
+                .map(|(delta, _)| delta)
+                .unwrap_or(1);
+            let take = len.max(1).min(bytes.len() - i);
+            out.extend_from_slice(&bytes[i..i + take]);
+            i += take;
         }
     }
-    out
+    // The input was a valid &str; the only edits were dropping ANSI / ESC
+    // bytes, which cannot split a UTF-8 sequence, so this is always valid.
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
 /// Emits a single log line to the frontend. The payload matches the
@@ -807,6 +891,17 @@ pub fn stop_project_command(
     if let Some(p) = procs.get_mut(&k) {
         p.running = false;
         p.pid = None;
+        // H18: bump the generation so an in-flight spawn (whose
+        // reservation captured the old generation but has not yet stamped
+        // its PID — the frontend calls `markRunning` before awaiting the
+        // spawn) cannot revive this entry. Without the bump the spawn's
+        // later PID stamp sees `p.generation == generation` still match,
+        // stamps the real PID into an entry the UI already shows as idle,
+        // and the child can never be stopped again. Bumping makes the
+        // stamp's generation check (see `spawn_tracked`) refuse the
+        // stamp, and the next `run_project_*` reserve the next
+        // generation.
+        p.generation = p.generation.wrapping_add(1);
     }
     Ok(())
 }
@@ -1010,6 +1105,25 @@ mod tests {
         assert_eq!(strip_ansi("hello world"), "hello world");
     }
 
+    // H34: the byte-at-a-time loop used to cast each byte to a char
+    // (Latin-1 decoding), so multi-byte UTF-8 glyphs like npm's `✓`/`✗`
+    // rendered as mojibake. Verify the whole codepoints survive.
+    #[test]
+    fn strip_ansi_preserves_multibyte_utf8() {
+        let input = "\x1b[32m✓ passed\x1b[0m → next";
+        assert_eq!(strip_ansi(input), "✓ passed → next");
+        // A multi-byte sequence straddling the ANSI boundary is preserved.
+        let input2 = "✓\x1b[31m✗\x1b[0m→";
+        assert_eq!(strip_ansi(input2), "✓✗→");
+    }
+
+    #[test]
+    fn strip_ansi_drops_stray_escape_byte() {
+        // A lone ESC (not followed by `[`) is a control byte; drop it
+        // instead of emitting the raw 0x1b.
+        assert_eq!(strip_ansi("a\x1bb"), "ab");
+    }
+
     #[test]
     fn key_format_is_project_pipe_panel() {
         assert_eq!(key("abc", "build"), "abc|build");
@@ -1088,6 +1202,74 @@ mod tests {
             final_state.pid,
             Some(222),
             "B's PID was dropped by A's stale thread"
+        );
+        assert_eq!(final_state.generation, 2);
+    }
+
+    // H18: stop landing in the window between a spawn's reservation (which
+    // sets running: true + generation: N + pid: None) and the spawn's later
+    // PID stamp must NOT let the stamp revive the entry. Previously stop
+    // cleared running/pid but left generation untouched, so the in-flight
+    // spawn's `p.generation == generation` check still matched and stamped
+    // the real PID into an entry the UI already showed as idle — an
+    // unkillable child. The fix bumps generation on stop, so the stamp's
+    // generation check refuses. This test models the post-fix contract:
+    // stop bumps the generation, the late stamp sees a mismatch, and the
+    // entry stays cleared.
+    #[test]
+    fn stop_during_in_flight_spawn_prevents_late_pid_stamp() {
+        let procs = Arc::new(Mutex::new(HashMap::<String, TrackedProc>::new()));
+        let k = key("proj", "publish");
+
+        // 1. Spawn path reserves the entry (running: true, pid: None, gen: 1).
+        let spawn_generation = {
+            let mut g = procs.lock().unwrap();
+            let prev = g.get(&k).map(|p| p.generation).unwrap_or(0);
+            let next = prev.wrapping_add(1);
+            g.insert(
+                k.clone(),
+                TrackedProc {
+                    pid: None,
+                    running: true,
+                    generation: next,
+                },
+            );
+            next
+        };
+
+        // 2. Stop arrives before spawn stamps its PID. With the H18 fix,
+        //    stop bumps the generation (1 -> 2) so the late stamp sees a
+        //    mismatch. (kill_process_tree is a no-op because pid is None.)
+        {
+            let mut g = procs.lock().unwrap();
+            if let Some(p) = g.get_mut(&k) {
+                p.running = false;
+                p.pid = None;
+                p.generation = p.generation.wrapping_add(1);
+            }
+        }
+
+        // 3. Spawn completes and tries to stamp the real PID. The
+        //    generation check must now refuse.
+        let real_pid = 42_42u32;
+        {
+            let mut g = procs.lock().unwrap();
+            if let Some(p) = g.get_mut(&k) {
+                if p.generation == spawn_generation {
+                    p.pid = Some(real_pid);
+                }
+            }
+        }
+
+        let final_state = procs.lock().unwrap().get(&k).cloned().unwrap();
+        assert!(
+            !final_state.running,
+            "entry must stay idle after stop won the race"
+        );
+        assert_eq!(
+            final_state.pid,
+            None,
+            "the late PID stamp must be refused so the child is not orphaned"
         );
         assert_eq!(final_state.generation, 2);
     }

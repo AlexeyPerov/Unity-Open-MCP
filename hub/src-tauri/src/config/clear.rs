@@ -448,21 +448,8 @@ fn clear_json_target(
         return;
     }
     prune_empty_along(&mut value, &key_path);
-    let backed_up = match backup(&target.path) {
-        Ok(b) => {
-            let p = b.to_string_lossy().into_owned();
-            match write_json_atomic(&target.path, &value) {
-                Ok(()) => true,
-                Err(e) => {
-                    result.errors.push(format!(
-                        "{label}: failed to write {}: {e}",
-                        target.path.display()
-                    ));
-                    let _ = &p;
-                    false
-                }
-            }
-        }
+    let backup_path = match backup(&target.path) {
+        Ok(b) => b.to_string_lossy().into_owned(),
         Err(e) => {
             result.errors.push(format!(
                 "{label}: cannot create backup at {}: {e}",
@@ -471,11 +458,24 @@ fn clear_json_target(
             return;
         }
     };
+    // H16: the previous shape pushed `removed: true` even when the write
+    // failed, so the wizard's "Removed N MCP config entries" summary
+    // counted entries that are still on disk. Mirror the backup-error arm
+    // and return early on write failure — no misleading `removed: true`
+    // is recorded.
+    if let Err(e) = write_json_atomic(&target.path, &value) {
+        result.errors.push(format!(
+            "{label}: failed to write {}: {e}",
+            target.path.display()
+        ));
+        let _ = &backup_path;
+        return;
+    }
     result.client_configs_cleared.push(ClearedClientConfig {
         label: label.to_string(),
         path: target.path.to_string_lossy().into_owned(),
         removed: true,
-        backed_up,
+        backed_up: true,
     });
 }
 
@@ -516,23 +516,8 @@ fn clear_toml_target(
             root.remove("mcp_servers");
         }
     }
-    let backed_up = match backup(&target.path) {
-        Ok(b) => {
-            let p = b.to_string_lossy().into_owned();
-            let body = toml::to_string_pretty(&toml::Value::Table(root.clone()))
-                .unwrap_or_default();
-            match write_text_atomic(&target.path, &body) {
-                Ok(()) => true,
-                Err(e) => {
-                    result.errors.push(format!(
-                        "{label}: failed to write {}: {e}",
-                        target.path.display()
-                    ));
-                    let _ = &p;
-                    false
-                }
-            }
-        }
+    let backup_path = match backup(&target.path) {
+        Ok(b) => b.to_string_lossy().into_owned(),
         Err(e) => {
             result.errors.push(format!(
                 "{label}: cannot create backup at {}: {e}",
@@ -541,11 +526,23 @@ fn clear_toml_target(
             return;
         }
     };
+    // H16 (TOML path): same fix as the JSON path — return early on write
+    // failure so `removed: true` is not recorded for an entry still on disk.
+    let body = toml::to_string_pretty(&toml::Value::Table(root.clone()))
+        .unwrap_or_default();
+    if let Err(e) = write_text_atomic(&target.path, &body) {
+        result.errors.push(format!(
+            "{label}: failed to write {}: {e}",
+            target.path.display()
+        ));
+        let _ = &backup_path;
+        return;
+    }
     result.client_configs_cleared.push(ClearedClientConfig {
         label: label.to_string(),
         path: target.path.to_string_lossy().into_owned(),
         removed: true,
-        backed_up,
+        backed_up: true,
     });
 }
 

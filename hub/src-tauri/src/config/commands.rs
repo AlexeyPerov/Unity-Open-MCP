@@ -15,6 +15,39 @@ pub struct AppState {
     pub walk_up_registry: Mutex<WalkUpRegistry>,
 }
 
+/// Locked mutate-and-persist helper for `projects.json`. Acquires the
+/// `projects` Mutex, clones the CURRENT live state, runs `mutate` to
+/// produce the next state, persists it, and swaps it back into the Mutex
+/// — all under the same lock acquisition so no concurrent writer can land
+/// a change between the read and the write.
+///
+/// H12: this closes the "lost update" / stale-snapshot race that
+/// `line_count::count_lines` (and the other long-running scans) had. The
+/// previous pattern cloned the state under a short lock, ran a
+/// multi-minute scan with the lock released, then took the lock again
+/// and assigned the STALE snapshot back — clobbering any concurrent
+/// add/remove/launch/flag mutation that landed during the scan. Callers
+/// that need to do long work should do it BEFORE calling this helper
+/// (producing a patch, not a full snapshot), then pass a `mutate` that
+/// applies the patch to the fresh live state.
+///
+/// Returns the persisted next state on success, or the IO error on
+/// failure (the live Mutex is left untouched on failure).
+pub fn with_projects<F>(
+    projects: &Mutex<ProjectsFile>,
+    mutate: F,
+) -> Result<ProjectsFile, std::io::Error>
+where
+    F: FnOnce(&mut ProjectsFile),
+{
+    let mut guard = projects.lock().unwrap();
+    let mut next: ProjectsFile = guard.clone();
+    mutate(&mut next);
+    persistence::save_projects(&next)?;
+    *guard = next.clone();
+    Ok(next)
+}
+
 #[tauri::command]
 pub async fn load_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     // The `persistence::load_settings` disk read (which can create the

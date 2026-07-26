@@ -805,7 +805,22 @@ pub(crate) fn write_manifest_merge_at(
             .join("manifest.json.bak");
         // Overwrite any prior backup — the wizard owns this file
         // and the previous backup has already served its purpose.
-        let _ = fs::copy(&manifest_path, &candidate);
+        // H17: the previous shape swallowed the copy error (`let _ = …`)
+        // and then populated `backup_path` regardless, so on a read-only
+        // `Packages/` or a full disk the destructive rewrite at the bottom
+        // proceeded while the wizard reported "Backup saved to …" for a
+        // file that does not exist. Propagate the failure instead — both
+        // sibling writers (`mcp_config.rs`, `clear.rs`) do the same.
+        fs::copy(&manifest_path, &candidate).map_err(|e| {
+            ManifestError::new(
+                "backupFailed",
+                format!(
+                    "cannot create manifest backup at {}: {}",
+                    candidate.display(),
+                    e
+                ),
+            )
+        })?;
         backup_path = candidate.to_string_lossy().into_owned();
     }
 

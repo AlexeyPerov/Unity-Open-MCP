@@ -1501,7 +1501,15 @@ fn copy_skill_files_at(
             skipped.push(target);
             continue;
         }
-        if target.exists {
+        // H15: only back up the existing target when it actually differs
+        // from the source template. When the target is already up to date
+        // (run 2+ after a successful copy, or the user previously
+        // installed the same template), copying is a no-op and backing up
+        // the target would overwrite the `.bak` from run 1 — which holds
+        // the user's real customizations — with the template, destroying
+        // those notes permanently. The planner already computed
+        // `up_to_date` via a byte-for-byte `matches_opt` check.
+        if target.exists && !target.up_to_date {
             let backup = target_path.with_extension("md.bak");
             if let Err(e) = fs::copy(&target_path, &backup) {
                 return Err(SkillCopyError::new(
@@ -1510,7 +1518,7 @@ fn copy_skill_files_at(
                         "cannot create backup at {}: {}",
                         backup.display(),
                         e
-                    ),
+                    )
                 ));
             }
         }
@@ -1646,11 +1654,23 @@ fn build_generate_skill_args_json(client_keys: &[String]) -> String {
 
 /// Truncate a skill preview for the JSON envelope, cutting on a line
 /// boundary so the tail note lands cleanly.
+///
+/// H22: the byte cap (`MAX_INVENTORY_PREVIEW_CHARS`) must land on a UTF-8
+/// char boundary. The shipped SKILL.md template contains non-ASCII (em-dash,
+/// `≠`) and the generator prepends a variable-length inventory, so a naive
+/// `&skill[..cap]` slice can split a multi-byte codepoint and panic — caught
+/// by `spawn_blocking` and surfaced as the misleading `spawnFailed`. We walk
+/// back from the cap to the nearest char boundary, then to the preceding
+/// newline, so the slice is always valid UTF-8.
 fn truncate_inventory_preview(skill: &str) -> String {
     if skill.len() <= MAX_INVENTORY_PREVIEW_CHARS {
         return skill.to_string();
     }
-    let cut = &skill[..MAX_INVENTORY_PREVIEW_CHARS];
+    // Floor the byte cap to a char boundary so the slice cannot split a
+    // multi-byte codepoint. `floor_char_boundary` is stable since 1.82;
+    // fall back to a manual scan on older toolchains.
+    let cap = floor_char_boundary(skill, MAX_INVENTORY_PREVIEW_CHARS);
+    let cut = &skill[..cap];
     let head = match cut.rfind('\n') {
         Some(i) if i > 0 => &skill[..i],
         _ => cut,
@@ -1660,6 +1680,22 @@ fn truncate_inventory_preview(skill: &str) -> String {
         head,
         skill.len() - head.len()
     )
+}
+
+/// Return the largest byte index <= `idx` that is a UTF-8 char boundary.
+/// Mirrors the std `str::floor_char_boundary` API (stable since Rust 1.82)
+/// so this module compiles on older toolchains too. `idx` is clamped to the
+/// string's byte length.
+fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
+    if idx >= s.len() {
+        return s.len();
+    }
+    // Walk back at most 3 bytes (the longest UTF-8 continuation sequence
+    // minus one) to find a char boundary — mirrors the std implementation.
+    while !s.is_char_boundary(idx) && idx > 0 {
+        idx -= 1;
+    }
+    idx
 }
 
 /// Tauri command: generate a project-specific skill file by invoking
@@ -2617,6 +2653,64 @@ mod tests {
         assert_eq!(result.kind, "sourceMissing");
     }
 
+    // H15: a second "Copy again" run must not destroy the `.bak` produced
+    // by the first run. After run 1 the target already matches the source
+    // template byte-for-byte, so the backup step is a no-op target whose
+    // only effect would be to overwrite the real (user-customized) `.bak`
+    // with the template. The writer must skip the backup when the target
+    // is already up to date.
+    #[test]
+    fn copy_skill_files_preserves_bak_when_target_already_up_to_date() {
+        let project_dir = tempdir().unwrap();
+        let project = project_dir.path();
+        let root = tempdir().unwrap();
+        make_fake_skill_manifest(root.path());
+        let skill = root.path().join("skills").join("unity-open-mcp").join("SKILL.md");
+        write_text(&skill, "# unity-open-mcp\n\nToolkit content.\n");
+
+        let claude_target = project.join(".claude/skills/unity-open-mcp/SKILL.md");
+        let backup = project.join(".claude/skills/unity-open-mcp/SKILL.md.bak");
+
+        // Run 1: the user had custom notes; the copy backs them up and
+        // overwrites the target with the template.
+        write_text(&claude_target, "# user's custom notes\n");
+        let r1 = copy_skill_files_at(
+            &make_skill_params(project, root.path(), McpClientId::ClaudeDesktop),
+            true,
+        )
+        .unwrap();
+        assert_eq!(r1.overwritten.len(), 1);
+        assert!(backup.exists());
+        assert_eq!(fs::read_to_string(&backup).unwrap(), "# user's custom notes\n");
+        assert_eq!(
+            fs::read_to_string(&claude_target).unwrap(),
+            "# unity-open-mcp\n\nToolkit content.\n"
+        );
+
+        // Run 2 ("Copy again"): the target now matches the source, so the
+        // backup must NOT be taken — the existing `.bak` still holds the
+        // user's custom notes and must survive. (`overwritten` still
+        // records that the target pre-existed; the H15 contract is that
+        // the `.bak` is not regenerated, not that `overwritten` is empty.)
+        let r2 = copy_skill_files_at(
+            &make_skill_params(project, root.path(), McpClientId::ClaudeDesktop),
+            true,
+        )
+        .unwrap();
+        assert_eq!(r2.copied.len(), 1);
+        assert!(backup.exists());
+        assert_eq!(
+            fs::read_to_string(&backup).unwrap(),
+            "# user's custom notes\n",
+            "the run-1 .bak must be preserved, not overwritten with the template"
+        );
+        // The target still holds the template (the copy is idempotent).
+        assert_eq!(
+            fs::read_to_string(&claude_target).unwrap(),
+            "# unity-open-mcp\n\nToolkit content.\n"
+        );
+    }
+
     #[test]
     fn mcp_path_check_uses_existing_heuristic() {
         // Sanity check: a real on-disk config file with a
@@ -2831,6 +2925,25 @@ mod tests {
         assert!(out.contains("more chars; full content written to disk"));
         // The cut lands on a newline (the head ends with a newline, then
         // the appended blank-line + note).
+        assert!(out.ends_with("disk)"));
+    }
+
+    // H22: the byte cap must not split a multi-byte UTF-8 codepoint. The
+    // shipped SKILL.md contains em-dashes and the `≠` glyph; a naive
+    // `&skill[..6000]` panics when 6000 lands mid-codepoint. This test
+    // builds a body whose 6000th byte is inside a multi-byte sequence and
+    // asserts the truncation does not panic and yields valid UTF-8.
+    #[test]
+    fn truncate_inventory_preview_does_not_split_multibyte_chars() {
+        // Repeat a 3-byte em-dash so the byte cap lands mid-codepoint for
+        // most cap values. Each line is "—\n" = 4 bytes.
+        let chunk = "—\n".repeat(4000);
+        assert!(chunk.len() > MAX_INVENTORY_PREVIEW_CHARS);
+        // Must not panic.
+        let out = truncate_inventory_preview(&chunk);
+        // Output is valid UTF-8 by construction (String), and the tail
+        // note is present.
+        assert!(out.contains("more chars; full content written to disk"));
         assert!(out.ends_with("disk)"));
     }
 

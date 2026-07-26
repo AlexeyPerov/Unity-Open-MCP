@@ -4,6 +4,7 @@ pub mod schemas;
 pub mod persistence;
 pub mod commands;
 pub mod seed;
+pub mod unity_version;
 pub mod discovery;
 pub mod launch;
 pub mod launch_log;

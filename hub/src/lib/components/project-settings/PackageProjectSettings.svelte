@@ -27,6 +27,15 @@
   type Tab = "manifest" | "meta" | "migrate" | "lineCounter";
   let activeTab = $state<Tab>("manifest");
 
+  // H28: request-generation guard for `loadManifest`. The load effect
+  // fires on `project.id` changes, but the `project` prop also gets a new
+  // identity whenever `saveSource()` / `saveManifest()` round-trip through
+  // the projects store (`replaceAll` + `onMutated`). Without this guard a
+  // stale in-flight load (from before the identity change, or from a
+  // previous project) can resolve after a newer load and clobber the
+  // user's in-progress edits.
+  let manifestLoadGeneration = $state(0);
+
   // --- Manifest tab ---
   let manifest = $state<PackageManifest | null>(null);
   let manifestLoading = $state(true);
@@ -41,10 +50,15 @@
   let depRows = $state<{ key: string; value: string }[]>([]);
 
   async function loadManifest() {
+    // H28: capture the generation so a stale in-flight load (from a
+    // previous project, or from before an identity-changing saveSource /
+    // saveManifest round-trip) cannot overwrite a newer result.
+    const generation = ++manifestLoadGeneration;
     manifestLoading = true;
     manifestError = null;
     try {
       const m = await readPackageManifest(project.id);
+      if (generation !== manifestLoadGeneration) return;
       // H5: `author` is `Option<ManifestAuthor>` and a minimal manifest
       // deserializes with `author: undefined`. The two `bind:value`
       // inputs below dereference `manifest.author!.name` / `.url`, and
@@ -61,10 +75,13 @@
       keywordsText = (m.keywords ?? []).join(", ");
       depRows = Object.entries(m.dependencies ?? {}).map(([key, value]) => ({ key, value }));
     } catch (e) {
+      if (generation !== manifestLoadGeneration) return;
       manifestError = e instanceof Error ? e.message : String(e);
       S.appendErrorLog(`read package.json failed: ${manifestError}`);
     } finally {
-      manifestLoading = false;
+      if (generation === manifestLoadGeneration) {
+        manifestLoading = false;
+      }
     }
   }
 
@@ -225,10 +242,17 @@
     }
   }
 
-  // Load manifest on mount.
+  // Load manifest on mount and when the project id actually changes.
+  // H28: snapshot the id into a local so the effect tracks the id VALUE,
+  // not the `project` prop identity. The parent re-derives the `project`
+  // prop on every projects-store mutation (saveSource / saveManifest call
+  // `replaceAll` + `onMutated`), so reading `project.id` directly inside
+  // the effect re-ran it on every identity change and clobbered in-progress
+  // edits. Reading the snapshot decouples the reload from same-id identity
+  // bumps.
   $effect(() => {
-    // Re-run when the project id changes (popup reopened on a different package).
-    if (project.id) loadManifest();
+    const id = project.id;
+    if (id) loadManifest();
   });
 </script>
 

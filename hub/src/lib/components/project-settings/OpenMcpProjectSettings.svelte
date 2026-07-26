@@ -149,8 +149,12 @@
       packageInfo = await readMcpPackageInfo(project.path, project.kind ?? "openMcp");
       packageInfoError = null;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      packageInfoError = msg;
+      // H30: use describeInvokeError so a Tauri serde-tagged rejection
+      // (e.g. `{ type: "parseFailed", message: "…" }`) surfaces its real
+      // message instead of "[object Object]". This is the primary failure
+      // path of both tabs (a walk-up-scanned npm package whose `author`
+      // is a string fails ParseFailed).
+      packageInfoError = describeInvokeError(e);
       packageInfo = null;
     }
   }
@@ -160,7 +164,8 @@
     try {
       registry = await queryNpmRegistry(project.path, project.kind ?? "openMcp");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      // H30: same fix as refreshPackageInfo.
+      const msg = describeInvokeError(e);
       registry = { viewError: msg, whoamiError: msg };
     } finally {
       registryLoading = false;
@@ -236,9 +241,21 @@
   });
 
   // Load the info header + registry snapshot on first mount.
+  // H29: the comment said both load on mount, but the previous shape only
+  // called `refreshPackageInfo()`. Until the user clicked the Registry
+  // "Refresh" link, `registry` stayed `null` → the `{:else}` "not queried"
+  // branch rendered, but the publish dialog's `{#if registry?.whoami}`
+  // fell through to "not logged in — run `npm login` first" immediately
+  // before an irreversible publish, even when the user IS logged in. Load
+  // the registry snapshot on mount too so the auth status is real.
+  let registryLoaded = $state(false);
   $effect(() => {
     if (packageInfo === null && packageInfoError === null) {
       void refreshPackageInfo();
+    }
+    if (!registryLoaded && registry === null) {
+      registryLoaded = true;
+      void refreshRegistry();
     }
   });
 

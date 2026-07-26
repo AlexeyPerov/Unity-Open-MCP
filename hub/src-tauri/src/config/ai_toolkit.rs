@@ -335,9 +335,15 @@ pub fn probe_node() -> NodeProbe {
                 None
             } else {
                 Some(match (version.as_deref(), major) {
-                    (Some(v), Some(m)) => format!(
+                    // H31: `m` is the DETECTED major (e.g. 16 on Node 16),
+                    // not the requirement. This arm only runs when
+                    // `m < MIN_NODE_MAJOR`, so printing `m` as the
+                    // requirement produced a self-contradictory message
+                    // ("Node v16.20.0 found; requires Node 16+"). Print
+                    // `MIN_NODE_MAJOR` (18) instead.
+                    (Some(v), Some(_m)) => format!(
                         "Node {} found; Unity Hub Pro requires Node {}+",
-                        v, m
+                        v, MIN_NODE_MAJOR
                     ),
                     _ => format!("Could not parse Node version from '{}'", raw),
                 })

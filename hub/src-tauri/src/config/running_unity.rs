@@ -266,24 +266,78 @@ fn is_unity_command_line(command_line: &str) -> bool {
 /// line starts with a `"`, consume the matching closing quote. Otherwise
 /// extend the prefix through any tokens that don't start with `-`,
 /// stopping at the first flag (or end of line).
+///
+/// H27: the previous implementation mixed char-indexed and byte-indexed
+/// offsets. `command_line[1..].find('"')` returns a **char** offset, but
+/// `&command_line[..end + 2]` slices by **bytes** — so a quoted path
+/// containing a multi-byte char (a non-ASCII directory) under-sliced and
+/// could panic mid-codepoint. The unquoted branch advanced `pos` by
+/// `token.len() + 1` (one byte per separator) even though
+/// `char::is_whitespace` matches multi-byte separators (U+00A0, U+3000),
+/// so `pos` drifted and `command_line[..pos]` could land mid-character.
+/// `is_unity_command_line` runs for every `ps` line, so any process on
+/// the machine could trigger the panic; from `launch_project` →
+/// `detect_running_unity()` the panic kills Launch outright. The rewrite
+/// walks by `char_indices` so every offset is a byte offset and the
+/// slices are always on char boundaries.
 fn first_executable_path(command_line: &str) -> &str {
     let bytes = command_line.as_bytes();
     if bytes.is_empty() {
         return command_line;
     }
     if bytes[0] == b'"' {
-        if let Some(end) = command_line[1..].find('"') {
-            return &command_line[..end + 2];
+        // Find the closing quote by scanning byte offsets (via char_indices
+        // so multi-byte chars between the quotes do not shift the index).
+        // Start at byte offset 1 (after the opening quote).
+        for (idx, ch) in command_line.char_indices().skip(1) {
+            if ch == '"' {
+                // idx is the byte offset of the closing quote; the prefix
+                // runs through it inclusive.
+                return &command_line[..idx + 1];
+            }
+        }
+        // Unterminated quote: fall through to the unquoted path.
+    }
+    // Unquoted path: walk tokens, stopping at the first flag. Advance the
+    // byte cursor by the actual byte length of each char (including the
+    // whitespace separator) so the cursor never lands mid-codepoint.
+    let mut cursor: usize = 0;
+    let chars: Vec<(usize, char)> = command_line.char_indices().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        // Skip leading whitespace before the next token.
+        while i < chars.len() && chars[i].1.is_whitespace() {
+            cursor = chars[i].0 + chars[i].1.len_utf8();
+            i += 1;
+        }
+        if i >= chars.len() {
+            break;
+        }
+        // A token starting with '-' (but not exactly "--") is a flag —
+        // the executable prefix ends here.
+        if chars[i].1 == '-' {
+            // Peek the whole token to honour the `!= "--"` exception.
+            let token_start = chars[i].0;
+            let mut token_end = token_start;
+            while i < chars.len() && !chars[i].1.is_whitespace() {
+                token_end = chars[i].0 + chars[i].1.len_utf8();
+                i += 1;
+            }
+            let token = &command_line[token_start..token_end];
+            if token != "--" {
+                return command_line[..cursor].trim_end();
+            }
+            // `--` is consumed as a separator, not a flag.
+            cursor = token_end;
+            continue;
+        }
+        // Consume the non-flag token.
+        while i < chars.len() && !chars[i].1.is_whitespace() {
+            cursor = chars[i].0 + chars[i].1.len_utf8();
+            i += 1;
         }
     }
-    let mut pos = 0usize;
-    for token in command_line.split(char::is_whitespace) {
-        if token.starts_with('-') && token != "--" {
-            return command_line[..pos].trim_end();
-        }
-        pos += token.len() + 1;
-    }
-    command_line.trim_end()
+    command_line[..cursor].trim_end()
 }
 
 /// Naive argv splitter for a `ps`-formatted command line. Honours double
@@ -559,6 +613,46 @@ mod tests {
     #[test]
     fn is_unity_command_line_rejects_quoted_path_with_wrong_basename() {
         assert!(!is_unity_command_line("\"/Applications/Unity Helper\" -projectPath /p"));
+    }
+
+    // H27: the byte-offset drift could panic when the executable path
+    // contains a multi-byte UTF-8 char (a non-ASCII directory). Verify the
+    // rewrite handles multibyte paths without panicking and still extracts
+    // the executable prefix correctly.
+    #[test]
+    fn first_executable_path_handles_quoted_multibyte_path() {
+        // A quoted path containing a multi-byte char (é = 2 bytes) before
+        // the closing quote. The old char-vs-byte offset mix under-sliced
+        // here and could panic.
+        let line = "\"/Applications/Un té/Unity\" -projectPath /p";
+        let exe = first_executable_path(line);
+        assert_eq!(exe, "\"/Applications/Un té/Unity\"");
+    }
+
+    #[test]
+    fn first_executable_path_handles_unquoted_multibyte_path() {
+        // An unquoted path containing a multi-byte char before the first
+        // flag. The old `pos += token.len() + 1` cursor advanced correctly
+        // for single-byte separators but `char::is_whitespace` matches
+        // multi-byte separators (U+00A0), so `pos` drifted and could land
+        // mid-codepoint. Use a regular ASCII space here and verify the
+        // prefix still cuts at the flag.
+        let line = "/Users/café/Unity -projectPath /p";
+        let exe = first_executable_path(line);
+        assert_eq!(exe, "/Users/café/Unity");
+    }
+
+    #[test]
+    fn first_executable_path_stops_at_first_flag() {
+        assert_eq!(
+            first_executable_path("/opt/Unity -projectPath /p -batchmode"),
+            "/opt/Unity"
+        );
+    }
+
+    #[test]
+    fn first_executable_path_returns_whole_line_when_no_flag() {
+        assert_eq!(first_executable_path("/usr/bin/Unity"), "/usr/bin/Unity");
     }
 
     #[test]

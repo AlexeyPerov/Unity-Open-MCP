@@ -410,8 +410,17 @@ fn walk_dir(
                 let is_dir = if ctx.follow_symlinks {
                     path.is_dir()
                 } else {
+                    // H13: when the user opted out of symlink following,
+                    // reject symlinked entries outright. The previous
+                    // `is_dir() || is_symlink()` form was the inverse of
+                    // the comment above and of `has_subdirectory` (which
+                    // uses `is_dir() && !is_symlink()`): it followed every
+                    // symlink, so a symlink to a file reached `walk_dir`
+                    // → `detect_kind` returned `Custom` → a plain file was
+                    // appended to `projects.json` as a project, and symlink
+                    // loops were re-traversed to `max_depth`.
                     match std::fs::symlink_metadata(&path) {
-                        Ok(md) => md.file_type().is_dir() || md.file_type().is_symlink(),
+                        Ok(md) => md.file_type().is_dir() && !md.file_type().is_symlink(),
                         Err(_) => false,
                     }
                 };
@@ -980,5 +989,45 @@ mod tests {
         assert!(!d.matches(ProjectKind::Package));
         assert!(d.matches(ProjectKind::OpenMcp));
         assert!(!d.matches(ProjectKind::Custom));
+    }
+
+    // H13: when the user opted out of symlink following, a symlinked
+    // directory must NOT count as a subdirectory (so a Custom folder
+    // containing only a symlinked child is still treated as a leaf),
+    // and a symlink to a file must not be reported as a dir. The
+    // previous `is_dir() || is_symlink()` form followed every link.
+    #[cfg(unix)]
+    #[test]
+    fn has_subdirectory_ignores_symlinks_when_follow_is_off() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempdir().unwrap();
+        // A real leaf directory...
+        let leaf = tmp.path().join("leaf");
+        fs::create_dir_all(&leaf).unwrap();
+        // ...with a symlinked subdirectory inside it.
+        let target = tmp.path().join("real-dir");
+        fs::create_dir_all(&target).unwrap();
+        symlink(&target, leaf.join("linked-dir")).unwrap();
+        // follow_symlinks=false: the symlink does not count → leaf.
+        assert!(!has_subdirectory(&leaf, false));
+        // follow_symlinks=true: the symlink resolves to a dir → not leaf.
+        assert!(has_subdirectory(&leaf, true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn has_subdirectory_ignores_symlinked_files_when_follow_is_off() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("dir");
+        fs::create_dir_all(&dir).unwrap();
+        // A symlink that points at a plain file (the H13 report's
+        // "symlink to a file" case).
+        let file_target = tmp.path().join("file.txt");
+        fs::write(&file_target, b"x").unwrap();
+        symlink(&file_target, dir.join("linked-file")).unwrap();
+        // Neither setting should treat a file symlink as a subdir.
+        assert!(!has_subdirectory(&dir, false));
+        assert!(!has_subdirectory(&dir, true));
     }
 }

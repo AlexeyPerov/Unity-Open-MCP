@@ -34,9 +34,10 @@ use tauri::State;
 use crate::config::commands::AppState;
 use crate::config::constants::PORT_ENV_VAR;
 use crate::config::env_vars;
-use crate::config::launch::{read_project_version, resolve_install_for_version};
+use crate::config::launch::{is_already_running, read_project_version, resolve_install_for_version};
 use crate::config::launch_log::{self, LaunchOutcome};
 use crate::config::persistence;
+use crate::config::running_unity::detect_running_unity;
 
 /// Default `/ping` request timeout. The spec gives the wizard
 /// a 120 s window for the bridge to come up; we keep the
@@ -230,6 +231,17 @@ pub enum LaunchForVerifyError {
     LaunchFailed { project_id: String, message: String },
     #[serde(rename_all = "camelCase")]
     PortInvalid { port: u16 },
+    /// A Unity process is already running for this project. Surfaced before
+    /// spawn so the wizard does not fork a second Unity that would hit the
+    /// `Library/EditorInstance.json` lock and raise a system-modal dialog
+    /// the Hub cannot dismiss. Mirrors `LaunchError::AlreadyRunning` in
+    /// `launch.rs`. See H25 in the round-2 review.
+    #[serde(rename_all = "camelCase")]
+    AlreadyRunning {
+        project_id: String,
+        pid: u32,
+        project_path: String,
+    },
 }
 
 impl std::fmt::Display for LaunchForVerifyError {
@@ -248,6 +260,9 @@ impl std::fmt::Display for LaunchForVerifyError {
             }
             LaunchForVerifyError::PortInvalid { port } => {
                 write!(f, "bridge port {} is not a valid TCP port", port)
+            }
+            LaunchForVerifyError::AlreadyRunning { pid, .. } => {
+                write!(f, "Unity is already running for this project (pid {})", pid)
             }
         }
     }
@@ -378,6 +393,42 @@ fn launch_for_verify_inner(
     };
     let mut args: Vec<String> = Vec::new();
     let mut build_target: Option<String> = None;
+    // H25: double-launch guard. Mirrors `launch_project_inner` in
+    // `launch.rs` — refuse to spawn a second Unity that would collide with
+    // one already running for this project (the second editor hits the
+    // `Library/EditorInstance.json` lock and raises a system-modal dialog
+    // the Hub cannot dismiss). The wizard's Step 5 launch goes through
+    // this path, so without the guard a re-run after a failed Step 5 (or
+    // an already-open editor) forks a duplicate. A scan failure is
+    // non-fatal: fall through to the spawn rather than blocking the wizard
+    // on a transient `ps` / PowerShell error.
+    let project_path_canon = match std::fs::canonicalize(project_path) {
+        Ok(p) => p.to_string_lossy().to_string(),
+        Err(_) => project_path_str.clone(),
+    };
+    let scan = detect_running_unity();
+    if let Some((conflict_pid, conflict_path)) =
+        is_already_running(&scan, &project_path_canon, project.last_launch_pid)
+    {
+        return Err(InnerLaunchForVerifyError {
+            typed: LaunchForVerifyError::AlreadyRunning {
+                project_id: params.project_id.clone(),
+                pid: conflict_pid,
+                project_path: conflict_path,
+            },
+            project_name,
+            project_path: project_path_str,
+            unity_version: Some(version.clone()),
+            install_path: Some(install_path),
+            launch_args: Vec::new(),
+            build_target: None,
+            code: "alreadyRunning".to_string(),
+            message: format!(
+                "Unity is already running for this project (pid {})",
+                conflict_pid
+            ),
+        });
+    }
     // Always pass -projectPath so the Hub launcher flow opens the
     // right project even when the wizard is the one driving the
     // launch (the regular launch_project flow layers this same

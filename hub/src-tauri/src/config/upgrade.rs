@@ -713,15 +713,16 @@ pub fn upgrade_candidates(state: State<AppState>, project_id: String) -> Vec<Str
             })
             .unwrap_or_default()
     };
-    installed.sort_by(|a, b| b.cmp(a));
+    installed.sort_by(|a, b| crate::config::unity_version::compare_versions(b, a));
     installed
 }
 
-/// True when `candidate` is strictly higher than `current` using the same
-/// lexicographic comparison as the discovery service (which sorts version
-/// strings as `6000.0.2f1 > 6000.0.1f1 > 2022.3.48f1`).
+/// True when `candidate` is strictly higher than `current`. Delegates to
+/// [`crate::config::unity_version::version_is_higher`] which parses the
+/// numeric `(major, minor, patch)` tuple so patch numbers >= 10 order
+/// correctly (`6000.0.10f1` > `6000.0.9f1`); see H14 in the round-2 review.
 fn version_is_higher(candidate: &str, current: &str) -> bool {
-    candidate != current && candidate > current
+    crate::config::unity_version::version_is_higher(candidate, current)
 }
 
 #[cfg(test)]
@@ -1045,15 +1046,18 @@ mod tests {
     }
 
     #[test]
-    fn version_is_higher_uses_lexicographic_order() {
-        // The discovery service sorts versions lexicographically and the
-        // upgrade flow uses the same comparator. These assertions pin the
-        // contract so a future refactor (e.g. to a semver-aware parser)
-        // does not silently change which versions are offered.
+    fn version_is_higher_uses_numeric_order() {
+        // H14: versions are compared by their parsed numeric tuple, not
+        // lexicographically, so patch numbers >= 10 order correctly.
         assert!(version_is_higher("6000.0.1f1", "2022.3.48f1"));
         assert!(!version_is_higher("2022.3.48f1", "6000.0.1f1"));
         assert!(!version_is_higher("6000.0.1f1", "6000.0.1f1"));
         assert!(version_is_higher("6000.0.2f1", "6000.0.1f1"));
         assert!(!version_is_higher("6000.0.0f1", "6000.0.1f1"));
+        // The case the lexicographic comparator got wrong: patch >= 10.
+        assert!(version_is_higher("6000.0.10f1", "6000.0.9f1"));
+        assert!(!version_is_higher("6000.0.9f1", "6000.0.10f1"));
+        assert!(version_is_higher("2022.3.48f1", "2022.3.9f1"));
+        assert!(!version_is_higher("2022.3.9f1", "2022.3.48f1"));
     }
 }

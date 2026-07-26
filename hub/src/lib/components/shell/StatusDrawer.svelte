@@ -100,14 +100,16 @@
           <p class="notice-body">{S.launchInfoNotice.message}</p>
           <div class="notice-actions">
             {#if S.launchInfoNotice.conflictPid !== null}
-              <button
-                type="button"
-                class="drawer-action drawer-action-accent"
-                onclick={handleTerminateAndRelaunch}
-                title={`Terminate pid ${S.launchInfoNotice.conflictPid} and re-launch ${S.launchInfoNotice.projectName}`}
-              >
-                Terminate &amp; relaunch
-              </button>
+              {#if S.terminateAndRelaunchAvailable}
+                <button
+                  type="button"
+                  class="drawer-action drawer-action-accent"
+                  onclick={handleTerminateAndRelaunch}
+                  title={`Terminate pid ${S.launchInfoNotice.conflictPid} and re-launch ${S.launchInfoNotice.projectName}`}
+                >
+                  Terminate &amp; relaunch
+                </button>
+              {/if}
               <span class="notice-hint">
                 conflict pid {S.launchInfoNotice.conflictPid}
               </span>
@@ -147,14 +149,16 @@
               </button>
             {/if}
             {#if S.lastLaunchFailure.conflictPid !== null}
-              <button
-                type="button"
-                class="drawer-action drawer-action-accent"
-                onclick={handleTerminateAndRelaunch}
-                title={`Terminate pid ${S.lastLaunchFailure.conflictPid} and re-launch ${S.lastLaunchFailure.projectName}`}
-              >
-                Terminate &amp; relaunch
-              </button>
+              {#if S.terminateAndRelaunchAvailable}
+                <button
+                  type="button"
+                  class="drawer-action drawer-action-accent"
+                  onclick={handleTerminateAndRelaunch}
+                  title={`Terminate pid ${S.lastLaunchFailure.conflictPid} and re-launch ${S.lastLaunchFailure.projectName}`}
+                >
+                  Terminate &amp; relaunch
+                </button>
+              {/if}
               <span class="failure-hint">
                 conflict pid {S.lastLaunchFailure.conflictPid}
               </span>

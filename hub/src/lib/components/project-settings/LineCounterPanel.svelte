@@ -13,11 +13,17 @@
   // count" button can update them without re-deriving from the prop.
   let lastTotal = $state<number | null>(null);
   let lastScannedAt = $state<string | null>(null);
-  // Sync from the prop when it changes (e.g. when the popup opens on a
-  // different project, or the cached stats are refreshed upstream).
+  // Sync from the prop when the project changes. H28: snapshot the id
+  // AND the stats so a same-project identity bump (another tab's save
+  // round-tripping the projects store) does not reset a freshly-computed
+  // local count. The previous shape re-read `project.lineCountStats` on
+  // every `project` prop identity change, clobbering a `runCount()` result
+  // if the store mutated in the same tick.
   $effect(() => {
-    lastTotal = project.lineCountStats?.totalLines ?? null;
-    lastScannedAt = project.lineCountStats?.scannedAt ?? null;
+    const _id = project.id;
+    const stats = project.lineCountStats;
+    lastTotal = stats?.totalLines ?? null;
+    lastScannedAt = stats?.scannedAt ?? null;
   });
 
   async function runCount() {

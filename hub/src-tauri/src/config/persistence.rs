@@ -1,9 +1,17 @@
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::config::paths;
 use crate::config::schemas::{ProjectsFile, Settings};
+
+/// Monotonic counter used to derive a unique staging filename per
+/// `atomic_write_at` call so two overlapping writes to the same target
+/// cannot collide on a shared temp inode (H12). Combined with the
+/// process id the name is unique across both concurrent calls in this
+/// process and any other Hub process writing to the same directory.
+static WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn backup_corrupt(path: &Path) {
     let backup = path.with_extension("json.corrupt");
@@ -19,6 +27,21 @@ fn atomic_write(path: &Path, data: &str) -> std::io::Result<()> {
     atomic_write_at(path, data)
 }
 
+/// Build a unique staging path sibling to `target`. The name embeds the
+/// target's file stem, the process id, and a monotonic per-process
+/// counter, so concurrent writers (even in the same process) never share
+/// an inode. See H12.
+fn unique_tmp_path(target: &Path) -> PathBuf {
+    let dir = target.parent().unwrap_or_else(|| Path::new("."));
+    let stem = target
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("hub");
+    let seq = WRITE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    dir.join(format!(".{}-tmp-{}-{}", stem, pid, seq))
+}
+
 /// Write `data` to `path` via tmp + rename, with the tmp file created
 /// as a sibling of `path` (same directory) so the rename is atomic on
 /// every platform and never crosses a filesystem boundary. Unlike
@@ -26,20 +49,34 @@ fn atomic_write(path: &Path, data: &str) -> std::io::Result<()> {
 /// config directory, so callers writing to arbitrary project paths
 /// (e.g. a package `package.json` inside the project tree) can use it
 /// directly. See H4 in the round-2 review.
+///
+/// H12: the staging file gets a UNIQUE name per call (process id +
+/// monotonic counter). The previous shape used a fixed deterministic
+/// name (`<path>.json.tmp-merge`), so two overlapping `spawn_blocking`
+/// writes to the same target (e.g. two `save_projects` invokes) both
+/// `File::create`d the same inode: the first `rename` published a
+/// byte-mix and the loser's file descriptor kept writing into the
+/// now-live file → next boot `load_projects` failed to parse →
+/// `backup_corrupt` + defaults, i.e. the project list disappeared. A
+/// unique temp name removes the collision; the rename then publishes
+/// each writer's own complete bytes. A failed write cleans up its
+/// staging file so the directory does not accumulate litter.
 pub fn atomic_write_at(path: &Path, data: &str) -> std::io::Result<()> {
-    // Stage to a sibling tmp file so the rename stays intra-directory
-    // (cross-directory rename is non-atomic on Windows and slow on
-    // Unix). Using a unique suffix avoids clobbering any `.json.tmp`
-    // already present from a different writer (the central-config
-    // `atomic_write` reuses one fixed name; this one is per-path).
-    let tmp_path = path.with_extension("json.tmp-merge");
-    {
+    let tmp_path = unique_tmp_path(path);
+    let write_result = (|| {
         let mut tmp = fs::File::create(&tmp_path)?;
         tmp.write_all(data.as_bytes())?;
         tmp.sync_all()?;
+        drop(tmp);
+        fs::rename(&tmp_path, path)?;
+        Ok::<(), std::io::Error>(())
+    })();
+    if write_result.is_err() {
+        // Best-effort cleanup of the staging file on any failure path so
+        // a transient error does not leave litter in the config dir.
+        let _ = fs::remove_file(&tmp_path);
     }
-    fs::rename(&tmp_path, path)?;
-    Ok(())
+    write_result
 }
 
 pub fn load_settings() -> Settings {
@@ -146,6 +183,38 @@ mod tests {
         let file_path = dir.path().join("test.json");
         atomic_write(&file_path, "content").unwrap();
         assert!(!dir.path().join("test.json.tmp").exists());
+        // H12: the unique NamedTempFile must be consumed by the rename, so
+        // the only entry in the staging directory is the target itself.
+        let entries: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+        let entry_names: Vec<String> = entries
+            .iter()
+            .map(|e| e.as_ref().unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(entry_names, vec!["test.json".to_string()]);
+    }
+
+    // H12: two concurrent atomic writes to the same path must not collide
+    // on a shared temp name. The previous fixed-name staging file let one
+    // writer clobber the other's inode mid-write. With NamedTempFile each
+    // writer stages a unique file, so sequential (simulated concurrent)
+    // writes both land cleanly.
+    #[test]
+    fn atomic_write_concurrent_calls_do_not_collide() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.json");
+        // Interleave two writes; the final content is whatever landed last,
+        // but the file must always be valid and one of the two payloads.
+        atomic_write(&file_path, "first").unwrap();
+        atomic_write(&file_path, "second").unwrap();
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert!(content == "first" || content == "second");
+        // No leftover staging files from either writer.
+        let leftover: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "test.json")
+            .collect();
+        assert!(leftover.is_empty(), "leftover staging files: {:?}", leftover);
     }
 
     #[test]

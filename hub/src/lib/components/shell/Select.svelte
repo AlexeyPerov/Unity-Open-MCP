@@ -91,8 +91,7 @@
 <svelte:window onclick={handleClickOutside} />
 
 <div
-  class="select-wrap"
-  class:select-wrap-class={className}
+  class={`select-wrap${className ? ` ${className}` : ""}`}
   bind:this={container}
 >
   <button
