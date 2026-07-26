@@ -148,6 +148,47 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(json.Contains("\"timedOut\":true"));
         }
 
+        // B31 — a timed-out check is inconclusive: compilation never settled.
+        // The status must surface that (compile_timeout) and take precedence
+        // over the error-count-derived status, so a timeout with zero collected
+        // errors no longer masquerades as compile_passed. CI scripts reading
+        // `status` (and Finalize's exit code, covered by the exit-code branch)
+        // must be able to tell a real pass from an abandoned wait.
+        [Test]
+        public static void BuildResultJson_TimeoutSurfacesCompileTimeoutStatus()
+        {
+            var pending = new PendingState { assembliesSeen = new List<string> { "A.dll" } };
+            var json = CompileCheckState.BuildResultJson(pending, timedOut: true);
+
+            Assert.IsTrue(json.Contains("\"status\":\"compile_timeout\""),
+                "a timed-out check must report compile_timeout, not compile_passed");
+            Assert.IsTrue(json.Contains("\"timedOut\":true"),
+                "the timedOut flag must still be emitted for direct readers");
+            // And it must NOT claim a clean pass.
+            Assert.IsFalse(json.Contains("\"status\":\"compile_passed\""));
+        }
+
+        // B31 — timeout precedence: even when errors were already collected,
+        // timeout wins as the status (the error list is necessarily partial
+        // because compilation did not finish).
+        [Test]
+        public static void BuildResultJson_TimeoutTakesPrecedenceOverErrors()
+        {
+            var pending = new PendingState();
+            CompileCheckState.CollectErrors(
+                pending,
+                "A.dll",
+                new[] { MakeMessage("error CS0246: type not found", CompilerMessageType.Error) });
+
+            var json = CompileCheckState.BuildResultJson(pending, timedOut: true);
+
+            Assert.IsTrue(json.Contains("\"status\":\"compile_timeout\""),
+                "timeout must take precedence over compile_failed");
+            // The partial error must still be surfaced for the agent.
+            Assert.IsTrue(json.Contains("\"errorCount\":1"));
+            Assert.IsTrue(json.Contains("CS0246"));
+        }
+
         [Test]
         public static void BuildResultJson_EscapesQuotesInMessages()
         {

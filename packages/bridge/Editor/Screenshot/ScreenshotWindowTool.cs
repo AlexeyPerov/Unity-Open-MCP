@@ -232,21 +232,24 @@ namespace UnityOpenMcpBridge.Screenshot
                     $"Window '{window.titleContent.text}' has no visible rect to capture.");
 
             var prevActive = RenderTexture.active;
+            Texture2D tex = null;
             try
             {
-                var tex = new Texture2D(captureW, captureH, TextureFormat.RGBA32, false);
+                tex = new Texture2D(captureW, captureH, TextureFormat.RGBA32, false);
                 // Screen origin is bottom-left; GUI rect origin is top-left.
                 // ReadPixels takes a Rect in screen space (origin bottom-left).
                 tex.ReadPixels(
                     new Rect(rect.x, Screen.height - rect.y - captureH, captureW, captureH),
                     0, 0);
                 tex.Apply();
-                var png = ImageConversion.EncodeToPNG(tex);
-                Object.DestroyImmediate(tex);
-                return png;
+                return ImageConversion.EncodeToPNG(tex);
             }
             finally
             {
+                // B28 — DestroyImmediate must run on every path. The tool stays
+                // callable, so a throw from ReadPixels/Apply/EncodeToPNG would
+                // otherwise leak a new Texture2D on each retry.
+                if (tex != null) Object.DestroyImmediate(tex);
                 RenderTexture.active = prevActive;
             }
         }

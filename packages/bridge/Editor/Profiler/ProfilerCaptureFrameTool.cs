@@ -45,9 +45,10 @@ namespace UnityOpenMcpBridge.ProfilerExt
             "inspect a specific frame's call tree (e.g. a spike). The cost grows " +
             "with frame_count, max_depth, and max_items — defaults (frame_count " +
             "= 1, max_depth = 8, max_items = 200) bound the token budget. If the " +
-            "Profiler is disabled, the tool enables it for one frame and reports " +
-            "profilerWasEnabled in the response so the agent knows Editor state " +
-            "may have changed. Requires a live Unity Editor connection.")]
+            "Profiler is disabled, the tool enables it for the capture, then " +
+            "restores it to disabled; profilerWasEnabled in the response reports " +
+            "the PRIOR state so the agent knows whether Editor state was touched. " +
+            "Requires a live Unity Editor connection.")]
         public string ProfilerCaptureFrame(
             int frame_count = 1,
             string modules = null,
@@ -69,15 +70,22 @@ namespace UnityOpenMcpBridge.ProfilerExt
                 // the tool walks the whole hierarchy.
                 var moduleFilter = ParseModuleFilter(modules);
 
-                // Ensure the profiler is on so at least one frame exists. If we
-                // had to flip it on, wait a beat for a frame to land. The
-                // response reports profilerWasEnabled so the agent knows it left
-                // editor state changed.
-                bool profilerWasEnabled = false;
-                if (!ProfilerDriver.enabled)
+                // Ensure the profiler is on so at least one frame exists. The
+                // response reports profilerWasEnabled (the PRIOR state) so the
+                // agent knows whether this call changed Editor state.
+                //
+                // B30 — the local used to be inverted (set true when the
+                // profiler was OFF), reported verbatim, and the profiler was
+                // never turned back off — so a read-only call left it recording
+                // indefinitely. Now: capture the prior state, and if WE enabled
+                // it, restore `enabled = false` in the finally below once the
+                // capture is done (covers the success, profiler_empty, and
+                // exception paths uniformly).
+                bool profilerWasEnabled = ProfilerDriver.enabled;
+                bool weEnabledProfiler = !profilerWasEnabled;
+                if (weEnabledProfiler)
                 {
                     ProfilerDriver.enabled = true;
-                    profilerWasEnabled = true;
                     // Allow the profiler to capture at least one frame before we
                     // read. ProfilerDriver.lastFrameIndex becomes valid after the
                     // first recorded frame; we poll briefly so a cold capture
@@ -85,33 +93,44 @@ namespace UnityOpenMcpBridge.ProfilerExt
                     WaitForFirstFrame();
                 }
 
-                int lastFrame = ProfilerDriver.lastFrameIndex;
-                int firstFrame = ProfilerDriver.firstFrameIndex;
-                if (lastFrame < 0 || firstFrame < 0)
-                    return ErrorJson("profiler_empty",
-                        "Profiler captured no frames yet. Enable the Profiler in " +
-                        "Unity (Window > Analysis > Profiler > Record) and let it " +
-                        "capture at least one frame before retrying.");
-
-                // Clamp the requested range to what the profiler actually has.
-                int fromFrame = Math.Max(firstFrame, lastFrame - frame_count + 1);
-                int toFrame = lastFrame;
-                int resolvedFrameCount = toFrame - fromFrame + 1;
-
-                var frames = new List<string>(resolvedFrameCount);
-                int totalTruncated = 0;
-                for (int fi = fromFrame; fi <= toFrame; fi++)
+                try
                 {
-                    var (frameJson, truncated) = BuildFrameTree(
-                        fi, thread_index, moduleFilter, max_depth, max_items);
-                    frames.Add(frameJson);
-                    totalTruncated += truncated;
-                }
+                    int lastFrame = ProfilerDriver.lastFrameIndex;
+                    int firstFrame = ProfilerDriver.firstFrameIndex;
+                    if (lastFrame < 0 || firstFrame < 0)
+                        return ErrorJson("profiler_empty",
+                            "Profiler captured no frames yet. Enable the Profiler in " +
+                            "Unity (Window > Analysis > Profiler > Record) and let it " +
+                            "capture at least one frame before retrying.");
 
-                return BuildSuccessJson(
-                    fromFrame, toFrame, resolvedFrameCount, thread_index,
-                    modules, max_depth, max_items, frames, totalTruncated,
-                    profilerWasEnabled);
+                    // Clamp the requested range to what the profiler actually has.
+                    int fromFrame = Math.Max(firstFrame, lastFrame - frame_count + 1);
+                    int toFrame = lastFrame;
+                    int resolvedFrameCount = toFrame - fromFrame + 1;
+
+                    var frames = new List<string>(resolvedFrameCount);
+                    int totalTruncated = 0;
+                    for (int fi = fromFrame; fi <= toFrame; fi++)
+                    {
+                        var (frameJson, truncated) = BuildFrameTree(
+                            fi, thread_index, moduleFilter, max_depth, max_items);
+                        frames.Add(frameJson);
+                        totalTruncated += truncated;
+                    }
+
+                    return BuildSuccessJson(
+                        fromFrame, toFrame, resolvedFrameCount, thread_index,
+                        modules, max_depth, max_items, frames, totalTruncated,
+                        profilerWasEnabled);
+                }
+                finally
+                {
+                    // B30 — never leave the profiler recording after a read-only
+                    // call. Only restore when WE turned it on; if the user had it
+                    // on, leave it on.
+                    if (weEnabledProfiler)
+                        ProfilerDriver.enabled = false;
+                }
             }
             catch (Exception e)
             {

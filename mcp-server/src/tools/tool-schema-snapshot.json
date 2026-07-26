@@ -1431,7 +1431,7 @@
     }
   },
   "unity_senses_profiler_capture_frame": {
-    "description": "Capture a single frame's deep profiler sample tree for the requested modules. Deeper than profiler_get_script_stats / profiler_get_status (those report aggregate / rolling stats); this returns the full sample hierarchy for one frame so an agent can inspect a specific frame's call tree (e.g. a spike). The output size grows with frame_count, max_depth, and max_items — defaults (frame_count = 1, max_depth = 8, max_items = 200) bound the token budget. If the Profiler is disabled, the tool enables it for one frame and reports profilerWasEnabled in the response so the agent knows Editor state may have changed. Requires a live Unity Editor connection.",
+    "description": "Capture a single frame's deep profiler sample tree for the requested modules. Deeper than profiler_get_script_stats / profiler_get_status (those report aggregate / rolling stats); this returns the full sample hierarchy for one frame so an agent can inspect a specific frame's call tree (e.g. a spike). The output size grows with frame_count, max_depth, and max_items — defaults (frame_count = 1, max_depth = 8, max_items = 200) bound the token budget. If the Profiler is disabled, the tool enables it for the capture, then restores it to disabled; profilerWasEnabled in the response reports the PRIOR state so the agent knows whether Editor state was touched. Requires a live Unity Editor connection.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

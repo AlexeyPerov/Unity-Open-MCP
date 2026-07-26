@@ -53,7 +53,13 @@ namespace UnityOpenMcpBridge.ProfilerExt
         {
             try
             {
-                if (!ProfilerDriver.enabled && ProfilerDriver.lastFrameIndex < 0)
+                // B32 — the guard used `&&`, so when the profiler was enabled
+                // but no frame had landed yet (e.g. Record just pressed) the
+                // check passed and execution reached GetHierarchyFrameDataView,
+                // yielding the opaque `no_frame_data` instead of the actionable
+                // `profiler_empty`. Either condition (profiler off OR no frame)
+                // means there is nothing to capture.
+                if (!ProfilerDriver.enabled || ProfilerDriver.lastFrameIndex < 0)
                     return ErrorJson("profiler_empty",
                         "Profiler has no captured data. Enable the Profiler in Unity " +
                         "first (Window > Analysis > Profiler > Record).");

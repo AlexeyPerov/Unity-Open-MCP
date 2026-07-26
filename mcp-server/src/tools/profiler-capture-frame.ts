@@ -10,9 +10,9 @@ import { makeTool } from "./schema-fragments.js";
 // The cost grows with frame_count, max_depth, and max_items — defaults (1, 8,
 // 200) bound the token budget.
 //
-// If the Profiler is disabled the bridge enables it for one frame and reports
-// profilerWasEnabled so the agent knows Editor state may have changed.
-// Read-only (gate off).
+// If the Profiler is disabled the bridge enables it for the capture, then
+// restores it to disabled; profilerWasEnabled reports the PRIOR state so the
+// agent knows whether Editor state was touched. Read-only (gate off).
 export const profilerCaptureFrame = makeTool(
   "unity_senses_profiler_capture_frame",
   "Capture a single frame's deep profiler sample tree for the requested " +
@@ -22,9 +22,10 @@ export const profilerCaptureFrame = makeTool(
     "tree (e.g. a spike). The output size grows with frame_count, max_depth, " +
     "and max_items — defaults (frame_count = 1, max_depth = 8, max_items = " +
     "200) bound the token budget. If the Profiler is disabled, the tool " +
-    "enables it for one frame and reports profilerWasEnabled in the response " +
-    "so the agent knows Editor state may have changed. Requires a live Unity " +
-    "Editor connection.",
+    "enables it for the capture, then restores it to disabled; " +
+    "profilerWasEnabled in the response reports the PRIOR state so the agent " +
+    "knows whether Editor state was touched. Requires a live Unity Editor " +
+    "connection.",
   {
     properties: {
           frame_count: {

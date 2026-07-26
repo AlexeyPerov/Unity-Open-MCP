@@ -186,7 +186,13 @@ namespace UnityOpenMcpBridge.Batch
             try { File.Delete(pendingPath); }
             catch { /* best-effort cleanup */ }
 
-            int exit = pending.errors.Count > 0
+            // B31 — both the status string and the exit code used to key only
+            // off errors.Count, so a timed-out check with zero errors reported
+            // compile_passed and exited 0 — a CI script checking $? would miss
+            // that compilation never settled. A timeout is an inconclusive
+            // result: fail (non-zero) so CI catches it, and let BuildResultJson
+            // surface compile_timeout as the status.
+            int exit = (timedOut || pending.errors.Count > 0)
                 ? BridgeBatchEntry.ExitFail
                 : BridgeBatchEntry.ExitPass;
 
@@ -198,12 +204,23 @@ namespace UnityOpenMcpBridge.Batch
         /// Pure (testable). The caller wraps this in the mutation success
         /// envelope — a completed check is a successful tool call regardless of
         /// whether compilation passed, so agents read <c>status</c>.
+        ///
+        /// <para><b>Status precedence (B31):</b> a timeout is inconclusive — the
+        /// compiler never settled — so <c>compile_timeout</c> takes precedence
+        /// over the error-count-derived status. Otherwise <c>compile_failed</c>
+        /// when errors were collected, else <c>compile_passed</c>. The
+        /// <c>timedOut</c> flag stays emitted for callers that read it directly.
+        /// </para>
         /// </summary>
         internal static string BuildResultJson(PendingState pending, bool timedOut)
         {
+            string status = timedOut
+                ? "compile_timeout"
+                : (pending.errors.Count > 0 ? "compile_failed" : "compile_passed");
+
             var sb = new StringBuilder(512);
             sb.Append('{');
-            sb.Append("\"status\":").Append(JsonString(pending.errors.Count > 0 ? "compile_failed" : "compile_passed")).Append(',');
+            sb.Append("\"status\":").Append(JsonString(status)).Append(',');
             sb.Append("\"errorCount\":").Append(pending.errors.Count.ToString(CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"assembliesChecked\":").Append((pending.assembliesSeen?.Count ?? 0).ToString(CultureInfo.InvariantCulture)).Append(',');
             if (timedOut)

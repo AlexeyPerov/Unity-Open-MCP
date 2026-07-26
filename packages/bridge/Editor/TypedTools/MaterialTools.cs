@@ -65,7 +65,7 @@ namespace UnityOpenMcpBridge.TypedTools
                 EnsureFolderRecursive(dir);
             }
 
-            Material material;
+            Material material = null;
             try
             {
                 material = new Material(shader);
@@ -76,6 +76,10 @@ namespace UnityOpenMcpBridge.TypedTools
             }
             catch (System.Exception e)
             {
+                // B29 — a Material is a UnityEngine.Object; if CreateAsset /
+                // SaveAssets threw, the instance never became an asset and would
+                // leak (the tool stays callable, so a retry leaks another).
+                if (material != null) UnityEngine.Object.DestroyImmediate(material);
                 return ToolDispatchResult.Fail("create_error",
                     $"Failed to create material at '{normalized}': {e.Message}");
             }

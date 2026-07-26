@@ -1305,26 +1305,30 @@ namespace UnityOpenMcpBridge.TypedTools
 
         // Read an int field off the PlayerSettings serialized object. Some
         // PlayerSettings knobs (e.g. activeInputHandler) are not exposed as
-        // public properties and have to go through SerializedObject.
+        // public properties and have to go through SerializedObject. The
+        // SerializedObject owns a native SerializedFile handle — dispose it via
+        // `using` so a throw from FindProperty/ApplyModifiedProperties cannot
+        // leak it (B27). SettingsGetTime (746) already follows this pattern.
         private static int ReadSerializedPlayerInt(string propertyName)
         {
-            var so = new SerializedObject(GetPlayerSettingsAsset());
-            var prop = so.FindProperty(propertyName);
-            var value = prop != null ? prop.intValue : 0;
-            so.Dispose();
-            return value;
+            using (var so = new SerializedObject(GetPlayerSettingsAsset()))
+            {
+                var prop = so.FindProperty(propertyName);
+                return prop != null ? prop.intValue : 0;
+            }
         }
 
         private static void WriteSerializedPlayerInt(string propertyName, int value)
         {
-            var so = new SerializedObject(GetPlayerSettingsAsset());
-            var prop = so.FindProperty(propertyName);
-            if (prop != null)
+            using (var so = new SerializedObject(GetPlayerSettingsAsset()))
             {
-                prop.intValue = value;
-                so.ApplyModifiedPropertiesWithoutUndo();
+                var prop = so.FindProperty(propertyName);
+                if (prop != null)
+                {
+                    prop.intValue = value;
+                    so.ApplyModifiedPropertiesWithoutUndo();
+                }
             }
-            so.Dispose();
         }
 
         private static UnityEngine.Object GetPlayerSettingsAsset()
