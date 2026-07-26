@@ -1,7 +1,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import type { MutationEnvelope } from "./gate-error.js";
-import type { PingCache } from "./ping-cache.js";
+import type { PingCache, PingSnapshot } from "./ping-cache.js";
 import type { BridgeToolsInventory } from "./bridge-tools-cache.js";
 import { BridgeToolsCache } from "./bridge-tools-cache.js";
 import { deriveIsError } from "./gate-error.js";
@@ -343,9 +343,9 @@ export class LiveClient implements Router {
     }
   }
 
-  async isLiveAvailable(): Promise<boolean> {
+  async isLiveAvailable(fetchTimeoutMs?: number): Promise<boolean> {
     try {
-      const res = await this.fetchWithTimeout("/ping", { method: "GET" });
+      const res = await this.fetchWithTimeout("/ping", { method: "GET" }, fetchTimeoutMs);
       if (res.status === 503) return true;
       if (!res.ok) return false;
       const body = (await res.json()) as PingResponse;
@@ -355,6 +355,16 @@ export class LiveClient implements Router {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * M14 — return the most recent cached /ping snapshot (any age), or null when
+   * no successful probe has populated the cache. Used by the CLI ping poller
+   * so a single {@link isLiveAvailable} probe answers BOTH "is it up?" and
+   * "what's its state?" without a second `/ping` round-trip per poll.
+   */
+  getCachedPing(): PingSnapshot | null {
+    return this.pingCache.get();
   }
 
   async route(
@@ -1658,6 +1668,27 @@ export class LiveClient implements Router {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+    // M11 — the abort timer must cover the BODY read, not just the headers.
+    // Previously `.finally(() => clearTimeout(timer))` cleared the timer as
+    // soon as `fetch()` resolved (headers arrived), so every later
+    // `res.text()`/`res.json()` ran with no deadline: an Editor that flushed
+    // the headers then froze stalled until undici's 300s body timeout.
+    //
+    // The timer is now cleared only once the body is consumed. Rather than
+    // tee/observe the stream (which can deadlock when a caller never drains
+    // the body), we wrap the Response's `text`/`json`/`arrayBuffer` accessors
+    // so the timer is cleared as part of the body-read promise the caller
+    // already awaits. If the caller never reads the body, the timer still
+    // fires on its own (aborting an already-consumed response is a no-op) —
+    // matching the prior header-only timeout contract as a backstop. `disposed`
+    // guards against double-clear (timer fires + body then settles).
+    let disposed = false;
+    const dispose = (): void => {
+      if (disposed) return;
+      disposed = true;
+      clearTimeout(timer);
+    };
+
     // M14 — attach the bearer token to every request when one was discovered
     // from the instance lock. Merge with any caller-supplied headers so we
     // never clobber a per-request value.
@@ -1676,6 +1707,25 @@ export class LiveClient implements Router {
       ...init,
       headers,
       signal: controller.signal,
-    }).finally(() => clearTimeout(timer));
+    }).then(
+      (res) => {
+        // Wrap the body-reading accessors so the abort timer is cleared when
+        // the body is consumed (the common path) or errors. The wrappers
+        // delegate to the original methods; they only add the dispose() side
+        // effect. Non-body responses (no body) clear the timer immediately.
+        const origText = res.text.bind(res);
+        const origJson = res.json.bind(res);
+        const origArrayBuffer = res.arrayBuffer.bind(res);
+        res.text = () => origText().finally(dispose);
+        res.json = () => origJson().finally(dispose);
+        res.arrayBuffer = () => origArrayBuffer().finally(dispose);
+        if (!res.body) dispose();
+        return res;
+      },
+      (err) => {
+        dispose();
+        throw err;
+      },
+    );
   }
 }

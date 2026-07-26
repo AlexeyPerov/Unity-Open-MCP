@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { stat } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
@@ -77,6 +78,69 @@ function extractJson(stdout: string): string | null {
   if (endIdx === -1) return null;
   return stdout.slice(jsonStart, endIdx).trim();
 }
+
+// M13 — bounded, UTF-8-correct stdout/stderr accumulator for the batch spawn.
+//
+// Two defects this fixes:
+//   1. `stdout += chunk.toString()` decoded each chunk independently, so a
+//      multi-byte UTF-8 sequence straddling a chunk boundary became U+FFFD
+//      replacement characters inside the VERIFY_JSON_BEGIN/END block, breaking
+//      JSON.parse for any payload with non-ASCII (asset names, localized
+//      compiler messages). `StringDecoder` buffers incomplete trailing bytes
+//      across chunks and only emits whole characters.
+//   2. `stdout`/`stderr` grew unbounded over a 10-minute run (Unity can emit
+//      megabytes of compile/import log lines). `MAX_OUTPUT_BYTES` caps the
+//      retained tail; the verify JSON is emitted near the end (after the
+//      operation completes), so keeping the last `MAX_OUTPUT_BYTES` preserves
+//      the markers + body for any realistic verify output while bounding
+//      memory. `partial` tracks whether the head was dropped so diagnostics
+//      can flag a truncated log.
+const MAX_OUTPUT_BYTES = 16 * 1024 * 1024; // 16 MiB per stream — covers verify JSON + tail.
+
+export class BoundedTextAccumulator {
+  private decoder = new StringDecoder("utf8");
+  private bytes: Buffer[] = [];
+  private byteLen = 0;
+  private droppedHead = 0;
+
+  /** Append a chunk; bytes that don't yet form a complete character are
+   *  buffered in the decoder and emitted on the next push / flush. */
+  push(chunk: Buffer): void {
+    const decoded = this.decoder.write(chunk);
+    if (decoded) this.appendDecoded(decoded);
+  }
+
+  /** Flush any trailing incomplete bytes (called once on stream end). */
+  flush(): void {
+    const tail = this.decoder.end();
+    if (tail) this.appendDecoded(tail);
+  }
+
+  private appendDecoded(text: string): void {
+    // Encode to UTF-8 bytes so the cap is a byte budget (not a UTF-16 code-unit
+    // budget), matching how the data arrives from the child.
+    const buf = Buffer.from(text, "utf8");
+    this.bytes.push(buf);
+    this.byteLen += buf.length;
+    // Drop whole leading buffers while over budget. Never splits a buffer
+    // (keeps the StringDecoder contract intact) and keeps the JSON markers,
+    // which arrive at the tail.
+    while (this.byteLen > MAX_OUTPUT_BYTES && this.bytes.length > 1) {
+      const head = this.bytes.shift()!;
+      this.byteLen -= head.length;
+      this.droppedHead += head.length;
+    }
+  }
+
+  get wasTruncated(): boolean {
+    return this.droppedHead > 0;
+  }
+
+  toString(): string {
+    return Buffer.concat(this.bytes, this.byteLen).toString("utf8");
+  }
+}
+
 
 // extractCompilerErrors is shared with the offline read_compile_errors tool —
 // see compiler-errors.ts. Imported for the local call site below and
@@ -497,30 +561,54 @@ export class BatchSpawn implements Router {
       );
 
       const startTime = Date.now();
-      let stdout = "";
-      let stderr = "";
+      // M13 — bounded, UTF-8-correct accumulators (see BoundedTextAccumulator).
+      const stdoutAcc = new BoundedTextAccumulator();
+      const stderrAcc = new BoundedTextAccumulator();
 
       const child = spawn(this.unityPath, unityArgs, {
         stdio: ["ignore", "pipe", "pipe"],
       });
 
-      const timer = setTimeout(() => {
+      // M13 — escalate SIGTERM → SIGKILL after a grace window so a wedged
+      // Unity actually dies instead of lingering until the parent is killed.
+      // The grace is short relative to the overall timeout but long enough for
+      // Unity to flush its log on a cooperative shutdown.
+      let sigtermSent = false;
+      let sigkillTimer: NodeJS.Timeout | null = null;
+      const SIGKILL_GRACE_MS = 5_000;
+      const armKillEscalation = (): void => {
+        if (sigkillTimer) return;
+        sigtermSent = true;
         child.kill("SIGTERM");
+        sigkillTimer = setTimeout(() => {
+          // SIGKILL is unblockable; ignore the return — the close handler
+          // resolves/rejects the promise.
+          try { child.kill("SIGKILL"); } catch { /* already dead */ }
+        }, SIGKILL_GRACE_MS);
+      };
+
+      const timer = setTimeout(() => {
+        armKillEscalation();
         reject(new Error(
           `Batch Unity process timed out after ${this.timeoutMs / 1000}s.`,
         ));
       }, this.timeoutMs);
 
+      const clearTimers = (): void => {
+        clearTimeout(timer);
+        if (sigkillTimer) clearTimeout(sigkillTimer);
+      };
+
       child.stdout?.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString();
+        stdoutAcc.push(chunk);
       });
 
       child.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
+        stderrAcc.push(chunk);
       });
 
       child.on("error", (err) => {
-        clearTimeout(timer);
+        clearTimers();
         reject(new BatchClassificationError(
           "unity_spawn_refused",
           `Failed to spawn Unity at '${this.unityPath}': ${err.message}`,
@@ -529,12 +617,18 @@ export class BatchSpawn implements Router {
       });
 
       child.on("close", (code) => {
-        clearTimeout(timer);
+        clearTimers();
         const elapsedMs = Date.now() - startTime;
         const exitCode = code ?? 1;
+        // M13 — flush any trailing incomplete UTF-8 bytes before reading.
+        stdoutAcc.flush();
+        stderrAcc.flush();
+        const stdout = stdoutAcc.toString();
+        const stderr = stderrAcc.toString();
 
         console.error(
-          `[unity-open-mcp] Batch completed: exit=${exitCode} elapsed=${elapsedMs}ms`,
+          `[unity-open-mcp] Batch completed: exit=${exitCode} elapsed=${elapsedMs}ms` +
+            (sigtermSent ? " (killed after timeout)" : ""),
         );
 
         const jsonStr = extractJson(stdout);

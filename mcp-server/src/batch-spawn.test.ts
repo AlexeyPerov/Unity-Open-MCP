@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
-import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, BatchClassificationError, encodeSpaces, buildUnityBatchArgs } from "./batch-spawn.js";
+import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator } from "./batch-spawn.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 function parseBody(result: CallToolResult): Record<string, unknown> {
@@ -616,3 +616,53 @@ test("compile_check with exit 127 surfaces unity_spawn_refused, not batch_spawn_
     else process.env.UNITY_PATH = savedPath;
   }
 });
+
+// ---------------------------------------------------------------------------
+// M13 — BoundedTextAccumulator: UTF-8 correctness + bounded retention
+// ---------------------------------------------------------------------------
+
+test("M13: BoundedTextAccumulator reassembles a multi-byte UTF-8 char split across chunks", () => {
+  // "café" — 'é' is U+00E9, two bytes in UTF-8 (0xC3 0xA9). Split the bytes so
+  // 0xC3 lands at the end of one chunk and 0xA9 at the start of the next. The
+  // naive `chunk.toString()` approach would emit U+FFFD for each half.
+  const full = Buffer.from("café", "utf8");
+  const splitAt = full.indexOf(0xc3);
+  const acc = new BoundedTextAccumulator();
+  acc.push(full.subarray(0, splitAt + 1)); // "caf" + lead byte 0xC3
+  acc.push(full.subarray(splitAt + 1));    // trail byte 0xA9
+  acc.flush();
+  assert.equal(acc.toString(), "café", "split multi-byte char must reassemble");
+});
+
+test("M13: BoundedTextAccumulator preserves non-ASCII inside a JSON payload", () => {
+  // A verify JSON payload whose asset path contains non-ASCII. Decode the
+  // whole payload, then feed it byte-by-byte (worst case for naive decoders).
+  const payload = `VERIFY_JSON_BEGIN{"asset":"Assets/Tëst.mat"}VERIFY_JSON_END`;
+  const bytes = Buffer.from(payload, "utf8");
+  const acc = new BoundedTextAccumulator();
+  for (let i = 0; i < bytes.length; i++) acc.push(bytes.subarray(i, i + 1));
+  acc.flush();
+  assert.equal(acc.toString(), payload, "byte-by-byte feed must reconstruct the exact payload");
+});
+
+test("M13: BoundedTextAccumulator caps retained bytes (drops the head, keeps the tail)", () => {
+  // Feed well over the 16 MiB cap of head bytes then a known tail marker, and
+  // assert the retained buffer is bounded near the cap while the tail marker
+  // survives. The cap keeps the verify JSON markers (emitted at the tail)
+  // while bounding memory on a 10-minute run that spams compile/import logs.
+  const acc = new BoundedTextAccumulator();
+  const tailMarker = "__TAIL_MARKER__";
+  const headSize = 40 * 1024 * 1024; // 40 MiB of head — well past the 16 MiB cap
+  const chunkSize = 1024 * 1024;
+  const headChunk = Buffer.alloc(chunkSize, 0x61); // 'a'
+  for (let i = 0; i < headSize; i += chunkSize) acc.push(headChunk);
+  acc.push(Buffer.from(tailMarker, "utf8"));
+  acc.flush();
+  const out = acc.toString();
+  assert.ok(out.endsWith(tailMarker), "tail marker must survive the cap");
+  // Retained buffer is bounded near the 16 MiB cap (one chunk of slack from
+  // the whole-buffer drop policy), nowhere near the 40 MiB fed in.
+  assert.ok(out.length <= 17 * 1024 * 1024, `retained buffer must be bounded near the cap (got ${out.length})`);
+  assert.ok(out.length < headSize, "retained buffer must be smaller than the head fed in (cap applied)");
+});
+

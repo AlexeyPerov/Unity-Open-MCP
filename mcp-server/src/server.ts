@@ -26,7 +26,8 @@ import { BatchSpawn } from "./batch-spawn.js";
 import { ToolRouter } from "./tool-router.js";
 import { PingCache } from "./ping-cache.js";
 import { ResourceRouter } from "./resource-router.js";
-import { withSchemaDefaults } from "./schema-defaults.js";
+import { withSchemaDefaults, missingRequiredArgs } from "./schema-defaults.js";
+import { makeErrorResult } from "./results.js";
 import { resolvePort, resolveAuthToken } from "./instance-discovery.js";
 import {
   PORT_ENV_VAR,
@@ -192,6 +193,28 @@ export function createServer(
       const routedArgs = tool
         ? withSchemaDefaults(tool, routing.strippedArgs)
         : routing.strippedArgs;
+      // M15 — the MCP SDK does not validate `inputSchema.required`, so a missing
+      // required argument (e.g. regression_check without baseline_path) would
+      // flow downstream as the literal `undefined` (Unity spawned with
+      // `--baseline-path undefined`). Reject it up front with a stable code.
+      if (tool) {
+        const missing = missingRequiredArgs(tool, routedArgs);
+        if (missing.length > 0) {
+          return makeErrorResult({
+            code: "missing_required_argument",
+            message:
+              `Missing required argument(s): ${missing.join(", ")}. ` +
+              `Provide each as a non-null value and retry.`,
+            detail: {
+              error: {
+                code: "missing_required_argument",
+                message: `Missing required argument(s): ${missing.join(", ")}.`,
+              },
+              missing,
+            },
+          });
+        }
+      }
       // No port override → default router (the common single-bridge case).
       if (routing.portOverride === undefined) {
         return router.route(name, routedArgs);

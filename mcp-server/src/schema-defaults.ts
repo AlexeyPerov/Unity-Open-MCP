@@ -1,4 +1,4 @@
-// Schema-default injection.
+// Schema-default injection + required-argument validation.
 //
 // MCP JSON-Schema documents advertise per-property `default` values (e.g.
 // `run_tests` documents `timeout_ms` default 60000). Those defaults are advisory:
@@ -13,6 +13,13 @@
 // any missing top-level argument whose property declares a scalar `default`
 // before dispatching. This keeps client-supplied values authoritative and only
 // ever adds missing fields.
+//
+// M15 — the MCP SDK does NOT validate `inputSchema.required`: an agent can call
+// `regression_check` without `baseline_path` (declared required) and the value
+// reaches the bridge / batch spawn as the literal `undefined`, e.g. Unity is
+// spawned with `--baseline-path undefined`. validateRequiredArgs closes that
+// gap by checking the schema's `required` array up front and returning a stable
+// `missing_required_argument` error listing every missing field.
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
@@ -57,3 +64,29 @@ export function withSchemaDefaults(
   }
   return out;
 }
+
+/**
+ * M15 — validate that every field in the tool's `inputSchema.required` array is
+ * present (and not `undefined`/`null`) in `args`. The MCP SDK does not enforce
+ * `required`, so without this a missing required argument flows downstream as
+ * the literal `undefined` (e.g. `regression_check` without `baseline_path`
+ * spawns Unity with `--baseline-path undefined`).
+ *
+ * @returns the list of missing required field names (empty when all present).
+ *          The caller decides how to surface the error.
+ */
+export function missingRequiredArgs(
+  tool: Tool,
+  args: Record<string, unknown>,
+): string[] {
+  const required = tool.inputSchema?.required;
+  if (!Array.isArray(required) || required.length === 0) return [];
+  const missing: string[] = [];
+  for (const field of required) {
+    if (typeof field !== "string") continue;
+    const v = args[field];
+    if (v === undefined || v === null) missing.push(field);
+  }
+  return missing;
+}
+

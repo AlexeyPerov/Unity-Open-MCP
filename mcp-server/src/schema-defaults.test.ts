@@ -6,8 +6,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import { withSchemaDefaults } from "./schema-defaults.js";
+import { withSchemaDefaults, missingRequiredArgs } from "./schema-defaults.js";
 import { runTests } from "./tools/run-tests.js";
+import { regressionCheck } from "./tools/regression-check.js";
 
 function toolWith(properties: Record<string, Record<string, unknown>>): Tool {
   return {
@@ -102,3 +103,61 @@ test("withSchemaDefaults: run_tests schema default is 60000", () => {
     "run_tests must default to 60s — the documented value that previously never reached the bridge",
   );
 });
+
+// ---------------------------------------------------------------------------
+// M15 — missingRequiredArgs: the SDK does not validate `required`; this does.
+// ---------------------------------------------------------------------------
+
+function toolRequired(required: string[], properties: Record<string, Record<string, unknown>>): Tool {
+  return {
+    name: "test_tool",
+    description: "d",
+    inputSchema: { type: "object", properties, required },
+  };
+}
+
+test("missingRequiredArgs: returns [] when there is no `required` array", () => {
+  const tool = toolWith({ timeout_ms: { type: "integer", default: 60000 } });
+  assert.deepEqual(missingRequiredArgs(tool, {}), []);
+});
+
+test("missingRequiredArgs: lists every missing required field", () => {
+  const tool = toolRequired(["baseline_path", "threshold", "label"], {
+    baseline_path: { type: "string" },
+    threshold: { type: "integer" },
+    label: { type: "string" },
+  });
+  assert.deepEqual(
+    missingRequiredArgs(tool, {}),
+    ["baseline_path", "threshold", "label"],
+  );
+});
+
+test("missingRequiredArgs: treats null and undefined as missing, keeps present values", () => {
+  const tool = toolRequired(["a", "b", "c"], {
+    a: { type: "string" },
+    b: { type: "integer" },
+    c: { type: "string" },
+  });
+  assert.deepEqual(
+    missingRequiredArgs(tool, { a: "x", b: null }),
+    ["b", "c"],
+  );
+  assert.deepEqual(
+    missingRequiredArgs(tool, { a: "x", b: 0, c: "" }),
+    [],
+    "falsy-but-present values (0, empty string) are NOT missing",
+  );
+});
+
+test("M15: regression_check without baseline_path is flagged (was spawned as --baseline-path undefined)", () => {
+  // The exact defect from the finding: regression_check declares baseline_path
+  // as required; without validation the literal `undefined` reached the Unity
+  // spawn line. missingRequiredArgs must catch it before dispatch.
+  assert.deepEqual(missingRequiredArgs(regressionCheck, {}), ["baseline_path"]);
+  assert.deepEqual(
+    missingRequiredArgs(regressionCheck, { baseline_path: "CI/baseline.json" }),
+    [],
+  );
+});
+

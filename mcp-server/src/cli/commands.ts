@@ -18,7 +18,7 @@ import {
   PROJECT_PATH_ENV_VAR,
   bridgeBaseUrl,
 } from "../constants.js";
-import { withSchemaDefaults } from "../schema-defaults.js";
+import { withSchemaDefaults, missingRequiredArgs } from "../schema-defaults.js";
 import {
   readInstanceLock,
   classifyInstance,
@@ -314,6 +314,27 @@ export async function runRunToolCommand(
   // does (index.ts). Without this, a CLI caller omitting timeout_ms would get
   // a different default than an MCP client — parity requires it.
   const routedArgs = withSchemaDefaults(tool, opts.toolArgs);
+
+  // M15 — parity with the MCP CallTool handler: validate required arguments.
+  // The SDK does not enforce `inputSchema.required`, and `run-tool` accepts
+  // arbitrary args, so a missing required field would otherwise reach the
+  // bridge / batch spawn as the literal `undefined`.
+  const missing = missingRequiredArgs(tool, routedArgs);
+  if (missing.length > 0) {
+    const message =
+      `Missing required argument(s): ${missing.join(", ")}. ` +
+      `Provide each as a non-null value and retry.`;
+    return {
+      exitCode: 2,
+      json: {
+        command: "run-tool",
+        tool: opts.toolName,
+        error: { code: "missing_required_argument", message, missing },
+      },
+      human: message,
+      errorLabel: "missing_required_argument",
+    };
+  }
 
   const result: CallToolResult = await stack.router.route(
     opts.toolName,

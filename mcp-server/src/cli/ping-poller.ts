@@ -190,31 +190,32 @@ export interface SinglePollResult {
  * Single /ping attempt translated into a poll status. Centralizes the
  * "connected AND not compiling" readiness rule so every command agrees on it.
  *
- * Implementation note: this calls `live.isLiveAvailable()` first to get the
- * ping-cache population side effect + 503/compiling handling, then falls back
- * to a direct route of `unity_open_mcp_ping`. The LiveClient's ping handler
- * already returns the full body; we re-read it from the ping cache so a single
- * network round-trip answers both "is it up?" and "what's its state?".
+ * Implementation note: calls `live.isLiveAvailable(fetchTimeoutMs)` ONCE — it
+ * performs the `/ping` round-trip, classifies 503/HTTP errors, populates the
+ * ping cache, AND returns the connected flag — then reads the body back from
+ * {@link LiveClient.getCachedPing} so a single network round-trip answers both
+ * "is it up?" and "what's its state?". M14 — `fetchTimeoutMs` is now honored
+ * (previously the parameter was declared but never read, so `ping
+ * --timeout-ms` was silently ignored and both fetches used the hardcoded 5s).
  */
 export async function singlePing(
   live: LiveClient,
   fetchTimeoutMs: number = PING_FETCH_TIMEOUT_MS,
 ): Promise<SinglePollResult> {
-  // `isLiveAvailable` populates the ping cache and returns the connected flag.
-  // A 503 (compile in progress) returns true from isLiveAvailable but is NOT
-  // readiness — we still need the body to check `compiling`.
+  // `isLiveAvailable` performs the single /ping probe, populates the cache,
+  // and returns the connected flag. A 503 (compile in progress) returns true
+  // from isLiveAvailable but is NOT readiness — we still need the body to
+  // check `compiling`.
   try {
-    const available = await live.isLiveAvailable();
+    const available = await live.isLiveAvailable(fetchTimeoutMs);
     if (!available) {
       return { status: "offline", body: null };
     }
-    // Reuse the populated ping cache rather than a second round-trip. The
-    // cache was just written by isLiveAvailable.
-    const pingResult = await live.route("unity_open_mcp_ping", {});
-    const body = extractPingBody(pingResult);
+    // Reuse the snapshot the probe just wrote to the cache — no second
+    // round-trip. When the probe hit a 503 (isLiveAvailable returns true but
+    // records no body), there is no cached snapshot: treat as compiling.
+    const body = live.getCachedPing();
     if (!body) {
-      // isLiveAvailable said true but the explicit ping didn't yield a body —
-      // treat as compiling/unknown and keep polling.
       return { status: "compiling", body: null };
     }
     if (body.compiling === true) {

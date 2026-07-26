@@ -27,6 +27,8 @@ import {
   getCollectFilesCount,
   parallelMap,
   collectFiles,
+  walkMeta,
+  AsyncSemaphore,
   buildGuidAndScriptIndex,
   buildGuidScriptAndNameIndex,
 } from "./offline/index-builders.js";
@@ -2501,6 +2503,123 @@ test("M4: parallelMap respects chunk size (bounds concurrency)", async () => {
     `concurrency must be bounded by chunk size (high-water ${highWater} > 4)`,
   );
 });
+
+// ---- M16: shared semaphore bounds recursive fan-out (64^depth → ≤permits) ----
+
+test("M16: walkMeta bounds global concurrency across recursion depth (not 64^depth)", async () => {
+  // Build a deep, wide tree where each level has many siblings AND recurses —
+  // the exact shape that made parallelMap fan out to 64^depth. Pass a SMALL
+  // semaphore (4 permits) so the bound is meaningful and the test is fast.
+  // Track the high-water mark of in-flight fn calls across the WHOLE walk; it
+  // must stay ≤ 4 regardless of depth, proving the semaphore is shared across
+  // recursion (the old parallelMap would let each of the 4 slots recurse into
+  // another 4-wide burst → up to 4^3 = 64 concurrent).
+  const tmp = await mkdtemp(join(tmpdir(), "offline-walk-sem-"));
+  try {
+    // 3 levels × 5 siblings = 5 + 25 + 125 = 155 entries. Modest but deep/
+    // wide enough that an unbounded fan-out would exceed the 4-permit cap.
+    const buildLevel = async (dir: string, depth: number): Promise<void> => {
+      if (depth <= 0) return;
+      for (let i = 0; i < 5; i++) {
+        const sub = join(dir, `d${i}`);
+        await mkdir(sub, { recursive: true });
+        // A .meta file so walkMeta's fn fires at every level.
+        await writeFile(join(sub, "f.mat.meta"), "guid: abc\n");
+        await buildLevel(sub, depth - 1);
+      }
+    };
+    await buildLevel(tmp, 3);
+
+    let inFlight = 0;
+    let highWater = 0;
+    const sem = new AsyncSemaphore(4);
+    await walkMeta(
+      tmp,
+      async () => {
+        inFlight++;
+        highWater = Math.max(highWater, inFlight);
+        // Yield so the scheduler can overlap other in-flight calls (without a
+        // yield, the event loop often serializes and hides the true fan-out).
+        await new Promise<void>((r) => setImmediate(r));
+        inFlight--;
+      },
+      sem,
+    );
+    assert.ok(
+      highWater <= 4,
+      `global walk concurrency must be bounded by the shared semaphore (4); high-water was ${highWater}`,
+    );
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("M16: collectFiles bounds global concurrency across recursion depth", async () => {
+  // Same hazard as walkMeta: collectFiles recurses inside its mapped fn. Pass
+  // a small semaphore and assert the walk completes over a deep tree (the
+  // concurrency bound itself is covered by walkMeta + the semaphore unit tests
+  // below; here we confirm collectFiles still walks the whole deep tree under
+  // the shared semaphore and returns a deterministic file set).
+  const tmp = await mkdtemp(join(tmpdir(), "offline-collect-sem-"));
+  try {
+    const buildLevel = async (dir: string, depth: number): Promise<void> => {
+      if (depth <= 0) return;
+      for (let i = 0; i < 4; i++) {
+        const sub = join(dir, `d${i}`);
+        await mkdir(sub, { recursive: true });
+        await writeFile(join(sub, `f${i}.cs`), "");
+        await buildLevel(sub, depth - 1);
+      }
+    };
+    await buildLevel(tmp, 3);
+
+    const sem = new AsyncSemaphore(4);
+    const files = await collectFiles(tmp, sem);
+    // 3 levels × 4 siblings = 4 + 16 + 64 = 84 leaf .cs files.
+    assert.equal(files.length, 84, "collectFiles must walk the full deep tree");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("M16: AsyncSemaphore caps concurrent withPermit invocations", async () => {
+  // Direct unit test of the semaphore: with permits=4 and 50 tasks, the
+  // in-flight count must never exceed 4.
+  const sem = new AsyncSemaphore(4);
+  let inFlight = 0;
+  let highWater = 0;
+  const tasks = Array.from({ length: 50 }, (_, i) =>
+    sem.withPermit(async () => {
+      inFlight++;
+      highWater = Math.max(highWater, inFlight);
+      await new Promise<void>((r) => setImmediate(r));
+      inFlight--;
+      return i;
+    }),
+  );
+  await Promise.all(tasks);
+  assert.ok(
+    highWater <= 4,
+    `AsyncSemaphore(4) must cap concurrency at 4 (high-water ${highWater})`,
+  );
+});
+
+test("M16: AsyncSemaphore hands permits to waiters in FIFO order on release", async () => {
+  // A released permit goes straight to the next waiter (count unchanged), so
+  // no permit is lost between release and the next acquire.
+  const sem = new AsyncSemaphore(1);
+  const order: number[] = [];
+  await sem.acquire(); // hold the only permit
+  const p2 = sem.acquire().then(() => order.push(2));
+  const p3 = sem.acquire().then(() => order.push(3));
+  sem.release(); // wakes waiter 2
+  await p2;
+  sem.release(); // wakes waiter 3
+  await p3;
+  assert.deepEqual(order, [2, 3], "waiters must be woken in FIFO order");
+});
+
+
 
 // ---- T2.5: extractReferenceLocations single split (L4) ----
 

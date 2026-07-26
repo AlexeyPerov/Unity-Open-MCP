@@ -26,6 +26,14 @@ import { readMetaGUID } from "./primitives.js";
 // (its Promise.all burst typically stays well under the per-process soft fd
 // limit on macOS/Linux, ~256). Tuned to leave headroom for the rest of the
 // process while still overlapping the bulk of the stat latency.
+//
+// M16 — parallelMap caps concurrency PER CALL, but walkMeta/collectFiles
+// recurse INSIDE the mapped fn, so each of the 64 concurrent slots could
+// spawn another 64-wide parallelMap → worst-case 64^depth concurrent syscalls.
+// The recursive walkers now share a single AsyncSemaphore (see below) across
+// the whole tree, so the global in-flight count stays bounded by
+// WALK_CONCURRENCY regardless of depth. parallelMap itself is unchanged (still
+// used by non-recursive callers + exported for direct unit tests).
 // ===========================================================================
 
 const PARALLEL_CHUNK_SIZE = 64;
@@ -45,6 +53,72 @@ export async function parallelMap<T, R>(
   }
   return out;
 }
+
+// ===========================================================================
+// M16 — AsyncSemaphore: bounds the TOTAL concurrent async operations across a
+// whole recursive walk, not just per recursion level. `parallelMap` alone
+// gives 64^depth worst-case fan-out because each level's mapped fn recurses
+// into another 64-wide parallelMap. Sharing one semaphore across the tree
+// caps the global in-flight count at WALK_CONCURRENCY.
+//
+// acquire() resolves once a slot is free (FIFO via a queue of deferred
+// resolvers); release() frees a slot and wakes the next waiter. The walkers
+// acquire BEFORE each stat/readdir/fn call and release in a finally so a
+// throw never leaks a slot.
+// ===========================================================================
+
+export const WALK_CONCURRENCY = 64;
+
+export class AsyncSemaphore {
+  private available: number;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(private readonly permits: number = WALK_CONCURRENCY) {
+    if (permits < 1) throw new Error("AsyncSemaphore requires permits >= 1");
+    this.available = permits;
+  }
+
+  async acquire(): Promise<void> {
+    if (this.available > 0) {
+      this.available--;
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+
+  release(): void {
+    const next = this.waiters.shift();
+    if (next) {
+      // Hand the slot directly to the next waiter (count stays constant).
+      next();
+      return;
+    }
+    this.available++;
+  }
+
+  /** Run `fn` while holding one permit. Always releases (even on throw). */
+  async withPermit<T>(fn: () => Promise<T>): Promise<T> {
+    await this.acquire();
+    try {
+      return await fn();
+    } finally {
+      this.release();
+    }
+  }
+}
+
+/**
+ * M16 note: the recursive walkers (walkMeta, collectFiles) fan out siblings
+ * with `Promise.all` and acquire a permit around each individual async
+ * filesystem op (stat / readdir / fn), NOT around the recursive call. This
+ * bounds the GLOBAL in-flight op count at `semaphore.permits` regardless of
+ * tree depth, without deadlocking (a permit held across recursion would
+ * wedge once the tree is wider than `permits`). Output order is preserved by
+ * placing each sibling's result in an input-order-indexed slot.
+ */
+
 
 // ===========================================================================
 // Parsed-asset GUID extraction — scopes the index builders to only the GUIDs
@@ -331,23 +405,39 @@ export function getCollectFilesCount(): number {
 export async function walkMeta(
   dir: string,
   fn: (metaPath: string) => Promise<void>,
+  semaphore?: AsyncSemaphore,
 ): Promise<void> {
   walkMetaCount++;
+  // M16 — create one shared semaphore at the top-level entry and thread it
+  // through every recursion so the GLOBAL count of in-flight filesystem
+  // operations is bounded across the whole tree (not 64^depth). The permit is
+  // acquired around each individual async op (stat, fn), NOT around the
+  // recursive walkMeta call — otherwise a directory entry would hold its
+  // permit across the entire subtree walk, deadlocking once the tree is wider
+  // than `permits`. Recursion fans out freely; only the leaf ops are gated.
+  const sem = semaphore ?? new AsyncSemaphore();
   let entries: string[];
   try { entries = await readdir(dir); } catch { return; }
-  // M31-optimizations Plan 2 / M4 — bounded-parallel fan-out (was an unbounded
-  // Promise.all burst; the parallelMap helper caps concurrency at
-  // PARALLEL_CHUNK_SIZE so a project with thousands of sibling files does not
-  // exhaust the process fd table). Iteration order is preserved.
-  await parallelMap(entries, async (name) => {
+  // Fan out all siblings at once; the semaphore is the ONLY concurrency bound.
+  // Each entry acquires a permit just for its stat (+ the fn call for .meta
+  // files), then releases before recursing so the subtree's ops compete for
+  // permits on equal footing with this level's other siblings.
+  await Promise.all(entries.map(async (name) => {
     if (shouldSkipDir(name)) return;
     const fullPath = join(dir, name);
+    let isDir = false;
     try {
-      const s = await stat(fullPath);
-      if (s.isDirectory()) await walkMeta(fullPath, fn);
-      else if (name.endsWith(".meta")) await fn(fullPath);
+      const s = await sem.withPermit(() => stat(fullPath));
+      isDir = s.isDirectory();
     } catch { /* skip */ }
-  });
+    if (isDir) {
+      // Recurse WITHOUT holding a permit — the child walk's own stat/fn ops
+      // acquire permits, so the global in-flight count stays bounded.
+      await walkMeta(fullPath, fn, sem);
+    } else if (name.endsWith(".meta")) {
+      await sem.withPermit(() => fn(fullPath));
+    }
+  }));
 }
 
 // ===========================================================================
@@ -413,24 +503,38 @@ export async function collectMetaTriples(projectRoot: string): Promise<MetaTripl
  * subdir's descendants always land in `results` at the position the subdir
  * occupied, regardless of which sibling's stat settled first.
  */
-export async function collectFiles(dir: string): Promise<string[]> {
+export async function collectFiles(
+  dir: string,
+  semaphore?: AsyncSemaphore,
+): Promise<string[]> {
   collectFilesCount++;
+  // M16 — shared semaphore threaded through recursion (see walkMeta). The
+  // permit gates only the stat syscall, not the recursive collectFiles call.
+  const sem = semaphore ?? new AsyncSemaphore();
   let entries: string[];
   try { entries = await readdir(dir); } catch { return []; }
   // Each entry contributes a list of paths (a file → [fullPath]; a subdir →
-  // its own collectFiles result; an error/skip → []). parallelMap returns
-  // those lists in input order; flattening once at the end keeps the result
-  // deterministic without an accumulator race between concurrent subdirs.
-  const perEntry = await parallelMap(entries, async (name) => {
-    if (shouldSkipDir(name)) return [];
+  // its own collectFiles result; an error/skip → []). Fan out siblings at
+  // once; the semaphore bounds global in-flight stat ops. Results land in
+  // input-order slots (each entry's list is placed at its index) so the
+  // flattened output is deterministic regardless of resolution order.
+  const perEntry: string[][] = new Array(entries.length);
+  await Promise.all(entries.map(async (name, i) => {
+    if (shouldSkipDir(name)) { perEntry[i] = []; return; }
     const fullPath = join(dir, name);
     try {
-      const s = await stat(fullPath);
-      if (s.isDirectory()) return collectFiles(fullPath);
-      if (!name.endsWith(".meta")) return [fullPath];
-    } catch { /* skip */ }
-    return [];
-  });
+      const s = await sem.withPermit(() => stat(fullPath));
+      if (s.isDirectory()) {
+        // Recurse WITHOUT holding a permit.
+        perEntry[i] = await collectFiles(fullPath, sem);
+        return;
+      }
+      perEntry[i] = name.endsWith(".meta") ? [] : [fullPath];
+      return;
+    } catch {
+      perEntry[i] = [];
+    }
+  }));
   const results: string[] = [];
   for (const list of perEntry) for (const p of list) results.push(p);
   return results;

@@ -121,6 +121,16 @@ export interface DismissProbeOptions {
    * the modal is blocked (audit line, no click) unless this is set.
    */
   allowUnsavedSceneDismiss: boolean;
+  /**
+   * M12 — optional abort signal. When fired while a probe is in flight, the
+   * underlying `execFile`/`execFileSync` child is killed so the loop can exit
+   * promptly instead of paying up to one full shell-probe window
+   * (`DISMISS_SHELL_TIMEOUT_MS`, ~5s) after the compile already settled.
+   * Callers that already hold an authoritative readiness signal (e.g.
+   * waitForCompile's compile-settled abort) pass it through; absent it, the
+   * probe runs to its own timeout as before.
+   */
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -367,11 +377,15 @@ async function tryDismissWindows(
     genericTokens: table.genericTokens,
   });
   return new Promise<DismissOutcome>((resolve) => {
+    let settled = false;
     const child = execFile(
       "powershell",
       ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_DISMISS_PS_SCRIPT],
       { timeout: DISMISS_SHELL_TIMEOUT_MS, windowsHide: true },
       (err, stdout) => {
+        if (settled) return;
+        settled = true;
+        detachAbort();
         if (err) {
           resolve({ kind: "error", message: err.message });
           return;
@@ -379,6 +393,9 @@ async function tryDismissWindows(
         resolve(parseDismissOutput(stdout));
       },
     );
+    // M12 — kill the in-flight PowerShell probe when the loop's abort signal
+    // fires so waitForCompile's compile-settled abort unblocks promptly.
+    const detachAbort = attachAbortToChild(child, opts.abortSignal);
     // Pipe the token table via stdin.
     if (child.stdin) {
       child.stdin.end(payload);
@@ -587,11 +604,15 @@ async function tryDismissMacOS(
   opts: DismissProbeOptions,
 ): Promise<DismissOutcome> {
   return new Promise<DismissOutcome>((resolve) => {
-    execFile(
+    let settled = false;
+    const child = execFile(
       "osascript",
       ["-e", macosDismissAppleScript(opts)],
       { timeout: DISMISS_SHELL_TIMEOUT_MS },
       (err, stdout) => {
+        if (settled) return;
+        settled = true;
+        detachAbort();
         if (err) {
           resolve({ kind: "error", message: err.message });
           return;
@@ -599,6 +620,9 @@ async function tryDismissMacOS(
         resolve(parseDismissOutput(stdout));
       },
     );
+    // M12 — kill the in-flight osascript probe when the loop's abort signal
+    // fires so waitForCompile's compile-settled abort unblocks promptly.
+    const detachAbort = attachAbortToChild(child, opts.abortSignal);
   });
 }
 
@@ -703,9 +727,32 @@ async function tryDismissLinuxX11(
   void kinds;
   return new Promise<DismissOutcome>((resolve) => {
     let idx = 0;
+    let settled = false;
+    // M12 — kill the in-flight xdotool probe when the loop's abort signal
+    // fires so waitForCompile's compile-settled abort unblocks promptly. The
+    // active search child is tracked here; each fragment attempt re-attaches.
+    let activeChild: { kill: (signal?: NodeJS.Signals) => boolean } | null = null;
+    let detachAbort: () => void = () => undefined;
+    const finish = (outcome: DismissOutcome): void => {
+      if (settled) return;
+      settled = true;
+      detachAbort();
+      resolve(outcome);
+    };
+    if (opts.abortSignal) {
+      const onAbort = (): void => {
+        activeChild?.kill("SIGTERM");
+        finish({ kind: "error", message: "aborted" });
+      };
+      opts.abortSignal.addEventListener("abort", onAbort, { once: true });
+      detachAbort = (): void => {
+        opts.abortSignal?.removeEventListener("abort", onAbort);
+      };
+    }
     const tryNextKind = (): void => {
+      if (settled) return;
       if (idx >= order.length) {
-        resolve({ kind: "not-found" });
+        finish({ kind: "not-found" });
         return;
       }
       const kind = order[idx++];
@@ -719,16 +766,19 @@ async function tryDismissLinuxX11(
       // Probe this kind's fragments one at a time.
       let fIdx = 0;
       const tryNextFragment = (): void => {
+        if (settled) return;
         if (fIdx >= fragments.length) {
           tryNextKind();
           return;
         }
         const fragment = fragments[fIdx++];
-        execFile(
+        const child = execFile(
           "xdotool",
           ["search", "--name", regexEscapeForXdotool(fragment)],
           { timeout: XDOTOOL_PROBE_TIMEOUT_MS },
           (err, stdout) => {
+            activeChild = null;
+            if (settled) return;
             if (err || !stdout.trim()) {
               tryNextFragment();
               return;
@@ -745,7 +795,7 @@ async function tryDismissLinuxX11(
                 // token decline (manual / safe-mode on a kind with no safe
                 // button) is reported as not-found so the loop keeps ticking.
                 if (blocked.has(kind)) {
-                  resolve({
+                  finish({
                     kind: "blocked",
                     dialog: kind,
                     message: `Policy '${opts.policy}' declines to dismiss ${kind} dialog`,
@@ -755,7 +805,7 @@ async function tryDismissLinuxX11(
                 tryNextKind();
                 return;
               }
-              execFile(
+              const activateChild = execFile(
                 "xdotool",
                 [
                   "windowactivate",
@@ -767,19 +817,25 @@ async function tryDismissLinuxX11(
                 ],
                 { timeout: XDOTOOL_PROBE_TIMEOUT_MS },
                 (activateErr) => {
+                  activeChild = null;
+                  if (settled) return;
                   if (activateErr) {
-                    resolve({
+                    finish({
                       kind: "error",
                       message: `xdotool failed to dismiss window ${winId}: ${activateErr.message}`,
                     });
                     return;
                   }
-                  resolve({ kind: "dismissed", button: "Focus", dialog: kind });
+                  finish({ kind: "dismissed", button: "Focus", dialog: kind });
                 },
               );
+              // M12 — the activate/key probe is also abort-cancellable.
+              activeChild = activateChild;
             });
           },
         );
+        // M12 — track the in-flight search child so the abort handler kills it.
+        activeChild = child;
       };
       tryNextFragment();
     };
@@ -1074,6 +1130,11 @@ export async function pollAndDismissDialogs(
         policy: opts.policy,
         allowProjectUpgrade: opts.allowProjectUpgrade,
         allowUnsavedSceneDismiss: opts.allowUnsavedSceneDismiss,
+        // M12 — thread the loop's abort signal into the probe so an in-flight
+        // osascript/PowerShell child is killed the moment the readiness abort
+        // fires, instead of running out its own ~5s timeout after the compile
+        // already settled.
+        abortSignal: opts.abortSignal ?? undefined,
       });
       // Re-check exit conditions BEFORE applying the outcome: if abort fired
       // (or the deadline lapsed) while `probe` was in flight, the in-flight
@@ -1118,13 +1179,58 @@ export async function pollAndDismissDialogs(
       }
       const remaining = deadline - Date.now();
       if (remaining <= 0 || aborted) break;
-      await sleepMs(Math.min(interval, remaining));
+      // M12 — sleepMs is abort-responsive: resolve immediately when the abort
+      // signal fires so `dismissAbort?.abort(); await dismissDone;` in
+      // waitForCompile actually unblocks the loop here, instead of waiting out
+      // the full poll interval after the compile already settled.
+      await sleepMs(Math.min(interval, remaining), opts.abortSignal);
     }
   } finally {
     opts.abortSignal?.removeEventListener("abort", onAbort);
   }
 }
 
-function sleepMs(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleepMs(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (abortSignal?.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      abortSignal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * M12 — wire an AbortSignal to a spawned `execFile` child. When the signal
+ * fires, the child is killed (`SIGTERM`) so the probe's promise resolves
+ * promptly instead of running out the shell's own timeout. The callback is
+ * unaffected: Node still invokes it with an error after `kill()`, so the
+ * caller's resolve/reject path runs normally. No-op when `abortSignal` is
+ * absent or already aborted-and-handled. Returns a detach fn to remove the
+ * listener once the child settles (avoids leaking the abort listener).
+ */
+function attachAbortToChild(
+  child: { kill: (signal?: NodeJS.Signals) => boolean },
+  abortSignal: AbortSignal | undefined,
+): () => void {
+  if (!abortSignal) return () => undefined;
+  if (abortSignal.aborted) {
+    child.kill("SIGTERM");
+    return () => undefined;
+  }
+  const onAbort = (): void => {
+    child.kill("SIGTERM");
+  };
+  abortSignal.addEventListener("abort", onAbort, { once: true });
+  return () => {
+    abortSignal.removeEventListener("abort", onAbort);
+  };
 }

@@ -52,23 +52,33 @@ function makeFakeLive(opts: FakeLiveOpts = {}): LiveClient {
     bridgeVersion: "0.1.0",
     mode: "live",
   };
+  // M14 — singlePing now reads the cached body from getCachedPing() instead of
+  // issuing a second /ping via route(). The fake mirrors that: isLiveAvailable
+  // "writes" the snapshot, getCachedPing returns it.
+  const offlineBody = {
+    connected: false,
+    projectPath: null,
+    unityVersion: null,
+    bridgeVersion: "unknown",
+    mode: "offline",
+    compiling: false,
+    isPlaying: false,
+  };
+  const cached = available ? pingBody : offlineBody;
   return {
     async isLiveAvailable() {
       return available;
     },
+    getCachedPing() {
+      // Mirrors the real client: returns the snapshot recorded by the last
+      // successful /ping probe (null when none, e.g. a pure-503 compile state).
+      return available
+        ? { ...cached, asOf: new Date().toISOString() }
+        : null;
+    },
     async route(tool: string) {
       if (tool === "unity_open_mcp_ping") {
-        const body = available
-          ? pingBody
-          : {
-              connected: false,
-              projectPath: null,
-              unityVersion: null,
-              bridgeVersion: "unknown",
-              mode: "offline",
-              compiling: false,
-              isPlaying: false,
-            };
+        const body = available ? pingBody : offlineBody;
         return {
           content: [{ type: "text" as const, text: JSON.stringify(body) }],
           isError: false,
