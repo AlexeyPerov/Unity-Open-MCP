@@ -423,7 +423,6 @@ namespace UnityOpenMcpBridge.TypedTools
 
             var deleted = new List<string>();
             var errors = new List<string>();
-            var refreshPaths = new List<string>();
 
             foreach (var rawPath in filePaths)
             {
@@ -439,23 +438,37 @@ namespace UnityOpenMcpBridge.TypedTools
                     errors.Add($"No file at '{rawPath}'.");
                     continue;
                 }
+
+                // B21 — go through AssetDatabase.DeleteAsset so the stale
+                // MonoScript entry, the .meta and the GUID are removed in one
+                // atomic operation. Raw File.Delete leaves the asset DB and
+                // GUID alive until an unrelated global refresh, and the
+                // follow-up ImportAsset on the now-missing path was a no-op.
+                // DeleteAsset takes a project-relative Assets/... path; compute
+                // it from the resolved absolute path. Fall back to
+                // MoveAssetToTrash (same pattern as AssetsTools.Delete) when
+                // DeleteAsset refuses a protected asset.
+                var assetPath = ToAssetPath(resolved);
+                if (assetPath == null)
+                {
+                    errors.Add($"Delete '{rawPath}' failed: resolved path is not under Assets/.");
+                    continue;
+                }
                 try
                 {
-                    File.Delete(resolved);
-                    var meta = resolved + ".meta";
-                    if (File.Exists(meta)) File.Delete(meta);
+                    bool ok = AssetDatabase.DeleteAsset(assetPath);
+                    if (!ok) ok = AssetDatabase.MoveAssetToTrash(assetPath);
+                    if (!ok)
+                    {
+                        errors.Add($"Delete '{rawPath}' failed: AssetDatabase.DeleteAsset and MoveAssetToTrash both refused.");
+                        continue;
+                    }
                     deleted.Add(rawPath);
-                    refreshPaths.Add(rawPath);
                 }
                 catch (Exception e)
                 {
                     errors.Add($"Delete '{rawPath}' failed: {e.Message}");
                 }
-            }
-
-            if (refreshPaths.Count > 0)
-            {
-                foreach (var p in refreshPaths) AssetDatabase.ImportAsset(p, ImportAssetOptions.ForceUpdate);
             }
 
             return ToolDispatchResult.Ok(BuildOpResult(deleted, errors, "deleted", null));
@@ -831,6 +844,28 @@ namespace UnityOpenMcpBridge.TypedTools
                 return null;
             }
             return absolute;
+        }
+
+        // Convert an absolute project-rooted path to the Assets/... form
+        // AssetDatabase.DeleteAsset expects. Returns null when the path does
+        // not live under the project's Assets/ folder (DeleteAsset cannot
+        // address it). Reuses the same project-root resolution as
+        // ResolveScriptPath so the two stay consistent.
+        private static string ToAssetPath(string absolutePath)
+        {
+            if (string.IsNullOrEmpty(absolutePath)) return null;
+            var dataPath = Application.dataPath;
+            if (string.IsNullOrEmpty(dataPath)) return null;
+
+            var assetsRoot = Path.GetFullPath(dataPath);
+            var full = Path.GetFullPath(absolutePath);
+            if (!full.StartsWith(assetsRoot, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            // dataPath already ends in "Assets"; the relative portion is the
+            // suffix after the root, with the OS separator normalized to '/'.
+            var rel = full.Substring(assetsRoot.Length).TrimStart('/', Path.DirectorySeparatorChar);
+            return string.IsNullOrEmpty(rel) ? null : ("Assets/" + rel.Replace('\\', '/'));
         }
 
         // Roslyn-validate a script source. Returns (true, null) on success,

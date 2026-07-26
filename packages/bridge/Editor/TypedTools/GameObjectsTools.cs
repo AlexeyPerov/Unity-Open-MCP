@@ -76,7 +76,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
             Undo.RegisterCreatedObjectUndo(go, "MCP Create GameObject");
             EditorUtility.SetDirty(go);
-            MarkActiveSceneDirty();
+            MarkObjectSceneDirty(go);
 
             return ToolDispatchResult.Ok(BuildGameObjectResult(go, "created"));
         }
@@ -87,6 +87,12 @@ namespace UnityOpenMcpBridge.TypedTools
             if (!resolved.Ok) return resolved.Result;
             var go = resolved.GameObject;
 
+            // B23 — capture the owning scene BEFORE the destroy: reading
+            // go.scene after Undo.DestroyObjectImmediate is unreliable, so the
+            // scene the object lived in (not necessarily the active scene) must
+            // be resolved up front and marked dirty after the removal.
+            var owningScene = go != null ? go.scene : default;
+
             try
             {
                 Undo.DestroyObjectImmediate(go);
@@ -96,7 +102,10 @@ namespace UnityOpenMcpBridge.TypedTools
                 return ToolDispatchResult.Fail("destroy_failed", e.Message);
             }
 
-            MarkActiveSceneDirty();
+            if (owningScene.IsValid())
+                EditorSceneManager.MarkSceneDirty(owningScene);
+            else
+                MarkActiveSceneDirty();
 
             var sb = new StringBuilder(64);
             sb.Append("{\"status\":\"ok\",\"destroyed\":true,\"name\":\"")
@@ -153,7 +162,7 @@ namespace UnityOpenMcpBridge.TypedTools
 
             Undo.RegisterCreatedObjectUndo(clone, "MCP Duplicate GameObject");
             EditorUtility.SetDirty(clone);
-            MarkActiveSceneDirty();
+            MarkObjectSceneDirty(clone);
 
             return ToolDispatchResult.Ok(BuildGameObjectResult(clone, "duplicated"));
         }
@@ -340,7 +349,7 @@ namespace UnityOpenMcpBridge.TypedTools
             }
 
             EditorUtility.SetDirty(go);
-            MarkActiveSceneDirty();
+            MarkObjectSceneDirty(go);
 
             // ---- response shape ----
             // Legacy (root-only) call → original compact shape so existing
@@ -362,8 +371,16 @@ namespace UnityOpenMcpBridge.TypedTools
             bool hasLayer, string layerStr, bool hasActive, string activeStr,
             bool hasTransform, string positionStr, string rotationStr, string scaleStr, bool localSpace)
         {
+            // The Transform carries position/rotation/scale, so it is always a
+            // candidate for change. The GameObject carries name/tag/layer and
+            // the active flag (m_IsActive is serialized on the GameObject), so
+            // it must be recorded whenever ANY of those surfaces is touched —
+            // not only on rename. Previously a tag/layer/active-only edit was
+            // not registered on the Undo stack, so Ctrl+Z could not revert it
+            // and the batch_execute single-undo-step contract was broken.
             Undo.RecordObject(go.transform, "MCP Modify GameObject");
-            if (hasName) Undo.RecordObject(go, "MCP Modify GameObject");
+            if (hasName || hasTag || hasLayer || hasActive)
+                Undo.RecordObject(go, "MCP Modify GameObject");
 
             if (hasTag)
             {
@@ -667,10 +684,16 @@ namespace UnityOpenMcpBridge.TypedTools
             // with worldPositionStays=false the undo snapshot captured the
             // wrong pose (the true/intermediate one) but the live state used
             // false — Ctrl+Z then restored a pose the object never had.
+            // B23 — capture the owning scene before the reparent: when the new
+            // parent lives in a different (additively-loaded) scene the root
+            // GameObject follows it, so both the old and new scenes change.
+            var previousScene = go.scene;
             Undo.SetTransformParent(go.transform, parentGo.transform, worldPositionStays, "MCP Set Parent");
 
             EditorUtility.SetDirty(go);
-            MarkActiveSceneDirty();
+            if (previousScene.IsValid() && previousScene != go.scene)
+                EditorSceneManager.MarkSceneDirty(previousScene);
+            MarkObjectSceneDirty(go);
 
             return ToolDispatchResult.Ok(BuildGameObjectResult(go, "reparented"));
         }
@@ -852,6 +875,24 @@ namespace UnityOpenMcpBridge.TypedTools
         {
             var scene = EditorSceneManager.GetActiveScene();
             if (scene.IsValid()) EditorSceneManager.MarkSceneDirty(scene);
+        }
+
+        // B23 — mark the scene that actually OWNS the object dirty, not the
+        // active scene. Targets are resolved across every loaded scene, so
+        // flagging the active scene for an edit on an additively-loaded scene
+        // trips SceneDirtyGuard and Unity's save prompt on a scene with no
+        // changes. Falls back to the active scene when the object is not in a
+        // valid loaded scene (e.g. a freshly-created GameObject whose scene
+        // assignment is pending, or a prefab-stage object) so we never silently
+        // skip the dirty flag.
+        private static void MarkObjectSceneDirty(GameObject go)
+        {
+            if (go != null && go.scene.IsValid())
+            {
+                EditorSceneManager.MarkSceneDirty(go.scene);
+                return;
+            }
+            MarkActiveSceneDirty();
         }
     }
 }

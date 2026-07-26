@@ -370,7 +370,22 @@ namespace UnityOpenMcpBridge
                 EditorGUILayout.LabelField("Captured", entry.Timestamp ?? "(no timestamp)", EditorStyles.miniLabel);
                 if (entry.Paths != null && entry.Paths.Length > 0)
                 {
-                    EditorGUILayout.LabelField("Paths", string.Join(", ", entry.Paths), EditorStyles.wordWrappedMiniLabel);
+                    // B24 — a whole-project checkpoint_create stores the full
+                    // Assets/ set (potentially thousands of paths) so DeltaTool
+                    // re-validates the same scope. Render a compact summary
+                    // instead of joining every path into one giant string.
+                    string pathsLabel;
+                    const int displayCap = 8;
+                    if (entry.Paths.Length > displayCap)
+                    {
+                        pathsLabel = string.Join(", ", entry.Paths, 0, displayCap)
+                            + $", … (+{entry.Paths.Length - displayCap} more)";
+                    }
+                    else
+                    {
+                        pathsLabel = string.Join(", ", entry.Paths);
+                    }
+                    EditorGUILayout.LabelField("Paths", pathsLabel, EditorStyles.wordWrappedMiniLabel);
                 }
                 if (entry.Categories != null && entry.Categories.Length > 0)
                 {

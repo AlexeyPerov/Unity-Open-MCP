@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Text;
 using UnityOpenMcpVerify;
+using UnityOpenMcpVerify.Batch;
 
 namespace UnityOpenMcpBridge.MetaTools
 {
@@ -12,14 +13,29 @@ namespace UnityOpenMcpBridge.MetaTools
             var paths = JsonBody.GetStringArray(body, "paths");
             var label = JsonBody.GetString(body, "label");
 
+            // B24 — an empty/null `paths` is documented as "whole project
+            // summary" (mcp-server/src/tools/checkpoint-create.ts), but
+            // seven of eight rules bail on a `scope.Paths.Length == 0`
+            // guard (only project_health expands it internally), so a
+            // literal empty array records an all-zero fingerprint and
+            // every later delta then reports `passed:true` regardless of
+            // project state. Expand to the full Assets/ set (the same
+            // helper the batch CLI uses) so every registered rule runs and
+            // the fingerprint reflects reality. SelectRuleIds(paths) is
+            // skipped in the whole-project case so all rules run. The
+            // expanded scope is stored on the entry so DeltaTool re-validates
+            // the SAME scope (otherwise the delta would re-bail and always
+            // pass).
+            var isWholeProject = paths == null || paths.Length == 0;
+            var effectivePaths = isWholeProject
+                ? VerifyBatchEntry.WholeProjectScope()
+                : paths;
+            var ruleIds = isWholeProject ? null : VerifyGateAdapter.SelectRuleIds(paths);
+
             CheckpointFingerprint checkpoint;
             try
             {
-                var ruleIds = paths != null && paths.Length > 0
-                    ? VerifyGateAdapter.SelectRuleIds(paths)
-                    : null;
-                checkpoint = VerifyGateAdapter.CreateCheckpoint(
-                    paths ?? Array.Empty<string>(), ruleIds);
+                checkpoint = VerifyGateAdapter.CreateCheckpoint(effectivePaths, ruleIds);
             }
             catch (System.Exception e)
             {
@@ -31,7 +47,7 @@ namespace UnityOpenMcpBridge.MetaTools
                 CheckpointId = checkpoint.CheckpointId,
                 Timestamp = DateTime.UtcNow.ToString("o"),
                 Label = label,
-                Paths = paths,
+                Paths = effectivePaths,
                 Categories = checkpoint.Fingerprints?.Keys.ToArray() ?? Array.Empty<string>(),
                 Fingerprint = checkpoint
             };

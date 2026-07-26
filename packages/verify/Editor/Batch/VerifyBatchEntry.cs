@@ -463,7 +463,12 @@ namespace UnityOpenMcpVerify.Batch
         // other seven rules run on the same full set from the batch CLI.
         // Returns an empty array (never null) when AssetDatabase has no paths,
         // so the rules' `Length == 0` guard still applies cleanly.
-        internal static string[] WholeProjectScope()
+        //
+        // Public so the bridge's checkpoint_create (and any other live-Editor
+        // whole-project entry point) can reuse the same expansion — without it
+        // an empty/null `paths` flows straight into the rules' Length==0 guard
+        // and the checkpoint records an all-zero fingerprint (B24).
+        public static string[] WholeProjectScope()
         {
             var paths = UnityEditor.AssetDatabase.GetAllAssetPaths();
             if (paths == null || paths.Length == 0)
