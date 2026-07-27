@@ -88,33 +88,64 @@ namespace UnityOpenMcpBridge
         // Pure decision over a scene setup snapshot. Split out from Check() so
         // the dirty-path collection is unit-testable without synthesizing live
         // scenes: a synthetic SceneSetup[] fed through here resolves each entry
-        // via EditorSceneManager.GetSceneByPath, which returns an invalid Scene
-        // when no real scene matches (the case in a fresh EditMode test), so
-        // the dirty list comes back empty.
+        // via the scene-resolver provider, which returns an invalid Scene when
+        // no real scene matches (the case in a fresh EditMode test), so the
+        // dirty list comes back empty.
         //
         // SceneSetup has only isActive/isLoaded/path — no isDirty. The dirty
         // flag lives on UnityEngine.SceneManagement.Scene; we resolve each
-        // setup entry to its Scene by path, then read Scene.isDirty. An entry
-        // we can't resolve (unsaved scene with empty path, or a setup whose
-        // scene isn't currently loaded) is skipped — refusing on a scene we
-        // can't introspect would block every disruptive op in such setups.
+        // setup entry to its Scene by path, then read Scene.isDirty.
+        //
+        // A3 — a brand-new untitled scene has path == "", so GetSceneByPath("")
+        // returns an invalid Scene. Previously such an entry was skipped, so a
+        // user who built a hierarchy in a fresh unsaved scene lost it to a
+        // single scene_create in Single mode (the guard never refused). Now an
+        // empty-path entry is resolved by index via GetSceneAt(i) instead —
+        // SceneSetup entries are in load order, which matches SceneManager's
+        // loaded-scene order — and its isDirty is honored. An entry we still
+        // can't resolve (e.g. a setup whose scene isn't currently loaded) is
+        // skipped; refusing on a scene we can't introspect would block every
+        // disruptive op in such setups.
         public static GuardResult Check(SceneSetup[] setup)
         {
-            if (setup == null || setup.Length == 0) return GuardResult.Allow();
+            return Check(setup, ResolveSceneDefault);
+        }
 
-            var dirty = CollectDirtyPaths(setup);
+        // Overload that accepts a scene resolver so the index-based unsaved-
+        // scene fallback is unit-testable without a live SceneManager. The
+        // resolver takes (path, indexInSetup) and returns the matching Scene.
+        public static GuardResult Check(
+            SceneSetup[] setup, System.Func<string, int, Scene> resolveScene)
+        {
+            if (setup == null || setup.Length == 0) return GuardResult.Allow();
+            if (resolveScene == null) resolveScene = ResolveSceneDefault;
+
+            var dirty = CollectDirtyPaths(setup, resolveScene);
             if (dirty.Count == 0) return GuardResult.Allow();
             return GuardResult.Refuse(dirty.ToArray(), BuildMessage(dirty));
         }
 
-        private static List<string> CollectDirtyPaths(SceneSetup[] setup)
+        // Production resolver: path-based lookup, with an index-based fallback
+        // for unsaved scenes whose path is empty. Must run on the main thread.
+        private static Scene ResolveSceneDefault(string path, int indexInSetup)
+        {
+            if (!string.IsNullOrEmpty(path))
+                return SceneManager.GetSceneByPath(path);
+            if (indexInSetup >= 0 && indexInSetup < SceneManager.sceneCount)
+                return SceneManager.GetSceneAt(indexInSetup);
+            return default;
+        }
+
+        private static List<string> CollectDirtyPaths(
+            SceneSetup[] setup, System.Func<string, int, Scene> resolveScene)
         {
             var dirty = new List<string>();
-            foreach (var entry in setup)
+            for (int i = 0; i < setup.Length; i++)
             {
+                var entry = setup[i];
                 if (entry == null) continue;
 
-                var scene = SceneManager.GetSceneByPath(entry.path);
+                var scene = resolveScene(entry.path, i);
                 if (!scene.IsValid()) continue;
 
                 if (scene.isDirty)

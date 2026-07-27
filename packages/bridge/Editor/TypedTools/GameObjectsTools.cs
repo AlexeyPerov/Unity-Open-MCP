@@ -401,7 +401,11 @@ namespace UnityOpenMcpBridge.TypedTools
 
             if (hasActive)
             {
-                var active = activeStr != null && activeStr.Trim() == "true";
+                // A4 — activeStr arrives from JsonBody.GetRawValue, so a wire
+                // bool lands as the quoted literal "true"/"false". Strip the
+                // surrounding quotes first; otherwise "true" (quoted) != "true"
+                // and a request to activate writes false.
+                var active = activeStr != null && StripQuotes(activeStr) == "true";
                 go.SetActive(active);
             }
 
@@ -531,7 +535,9 @@ namespace UnityOpenMcpBridge.TypedTools
                 }
                 if (activeStr != null)
                 {
-                    childGo.SetActive(activeStr.Trim() == "true");
+                    // A4 — activeStr is a raw JSON token (may be quoted);
+                    // strip quotes before comparing (see ApplyFields above).
+                    childGo.SetActive(StripQuotes(activeStr) == "true");
                 }
                 if (!string.IsNullOrEmpty(childName)) childGo.name = childName;
 

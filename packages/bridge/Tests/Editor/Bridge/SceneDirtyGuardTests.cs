@@ -119,6 +119,67 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(SceneDirtyGuard.Check(new SceneSetup[0]).Allowed);
         }
 
+        // ----- A3: unsaved ("untitled") scene must not be skipped -----
+        //
+        // A never-saved scene has path == "", so GetSceneByPath("") is invalid
+        // and the old code skipped the entry — a user who built a hierarchy in
+        // a fresh untitled scene lost it to a single scene_create in Single
+        // mode. The fix resolves an empty-path entry by index via GetSceneAt(i)
+        // instead. The Check(setup, resolveScene) overload lets the test inject
+        // a synthetic resolver so the index-based fallback is covered without a
+        // live SceneManager.
+        //
+        // Scene is a struct with no public setter for isDirty, so a test cannot
+        // construct a "dirty valid Scene" to observe a Refuse. Instead we prove
+        // the fix by asserting the resolver is *called* for an empty-path entry
+        // (the old code skipped it before any lookup): a stub that records the
+        // invocation proves the index branch was reached.
+
+        [Test]
+        public static void Check_UnsavedScene_EmptyPath_ResolvedByIndex()
+        {
+            // The empty-path entry must reach the resolver (by index), not be
+            // skipped. The stub records the call; if the guard skipped empty-
+            // path entries (the A3 bug), the assertion below would fail.
+            int calls = 0;
+            int seenIndex = -2;
+            string seenPath = "untouched";
+            var setup = new[]
+            {
+                new SceneSetup { path = "", isLoaded = true },
+            };
+            var result = SceneDirtyGuard.Check(setup, (p, i) =>
+            {
+                calls++;
+                seenPath = p;
+                seenIndex = i;
+                return default; // invalid Scene ⇒ skipped ⇒ Allow (no live scene)
+            });
+            Assert.AreEqual(1, calls, "Empty-path entry must be resolved, not skipped.");
+            Assert.AreEqual("", seenPath, "Empty path must be passed to the resolver.");
+            Assert.AreEqual(0, seenIndex, "Unsaved scene must be resolved by its setup index.");
+            Assert.IsTrue(result.Allowed, "Invalid resolved Scene ⇒ skipped ⇒ Allow.");
+        }
+
+        [Test]
+        public static void Check_NamedDirtyScene_ResolvedByPath()
+        {
+            // Sanity: a non-empty path is resolved by path (the resolver
+            // receives the path verbatim). Here it returns an invalid Scene so
+            // the entry is skipped and the guard Allows.
+            var setup = new[]
+            {
+                new SceneSetup { path = "Assets/Scenes/Main.unity", isLoaded = true },
+            };
+            var result = SceneDirtyGuard.Check(setup, (p, i) =>
+            {
+                Assert.AreEqual("Assets/Scenes/Main.unity", p,
+                    "Non-empty path must be passed to the resolver verbatim.");
+                return default;
+            });
+            Assert.IsTrue(result.Allowed);
+        }
+
         // ----- Check(Func): fail-open + observability -----
         //
         // Fail-open policy is intentional (refusing on an API failure would

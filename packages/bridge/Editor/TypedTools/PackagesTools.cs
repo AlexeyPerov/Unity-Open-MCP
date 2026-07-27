@@ -688,22 +688,37 @@ namespace UnityOpenMcpBridge.TypedTools
         // completed within the timeout, false on timeout. Package-manager
         // worker progress advances independently of the polling thread.
         //
-        // Tool dispatch runs synchronously on EditorApplication.update
-        // (BridgeRequestQueue.ProcessQueue), so a plain Thread.Sleep on this
-        // thread freezes the editor loop (heartbeat, queue, settle-wait) for
-        // the whole 90 s budget per request — three sequential waits in
-        // Search would wedge the bridge for minutes. We pump the player loop
-        // each iteration so update delegates (including the bridge's own
-        // RefreshVolatileState / heartbeat ticks) keep firing while the UPM
-        // worker thread advances IsCompleted.
+        // A2 — the previous body called EditorApplication.QueuePlayerLoopUpdate()
+        // between sleeps, claiming it kept the bridge's update delegates
+        // (heartbeat, queue, settle-wait) firing while the UPM worker advanced
+        // IsCompleted. That is impossible: tool dispatch runs synchronously ON
+        // EditorApplication.update (BridgeRequestQueue.ProcessQueue → Work()),
+        // so Thread.Sleep blocks the very thread that would service the queued
+        // update — QueuePlayerLoopUpdate only *requests* the next tick, it
+        // executes nothing synchronously. The pump was a no-op that burned the
+        // whole 90 s budget per request (three sequential waits in Search →
+        // minutes of a wedged bridge) while pretending otherwise. It is removed
+        // here so the code stops lying about the behaviour.
+        //
+        // Residual limitation: because the dispatcher is one-shot synchronous
+        // (Work() must return a complete ToolDispatchResult within the tick),
+        // the wait still blocks the main thread for up to RequestTimeoutMs —
+        // freezing the heartbeat and stalling other queued tools for the
+        // duration. The IsCompleted flag is set by a package-manager worker
+        // thread and PackageInfo reads are thread-safe, so a true fix is to
+        // move UPM tools to the async file-handoff pattern (start on the main
+        // thread, poll IsCompleted on a worker, hand results off via a scratch
+        // file the MCP server polls) like unity_senses_run_tests. That is a
+        // cross-package change (bridge results-file convention + MCP poller) and
+        // is out of scope for this fix; tracked as a follow-up. The bounded
+        // block below is the maximum correct behaviour achievable within the
+        // synchronous dispatch model.
         private static bool WaitForRequest<T>(T request) where T : Request
         {
             var deadline = System.DateTime.UtcNow.AddMilliseconds(RequestTimeoutMs);
             while (!request.IsCompleted)
             {
                 if (System.DateTime.UtcNow > deadline) return false;
-                try { UnityEditor.EditorApplication.QueuePlayerLoopUpdate(); }
-                catch { /* best-effort pump; ignore pump failures */ }
                 System.Threading.Thread.Sleep(PollIntervalMs);
             }
             return true;

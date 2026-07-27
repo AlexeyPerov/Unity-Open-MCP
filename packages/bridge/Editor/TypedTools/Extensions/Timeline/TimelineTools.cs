@@ -667,7 +667,10 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
                         System.Globalization.CultureInfo.InvariantCulture);
                     break;
                 case SerializedPropertyType.Boolean:
-                    prop.boolValue = raw.Trim() == "true";
+                    // A4 — raw is a raw JSON token (from ExtractRawValue), so a
+                    // wire bool lands quoted. Strip surrounding quotes before
+                    // comparing; otherwise "true" (quoted) writes false.
+                    prop.boolValue = raw.Trim('"') == "true";
                     break;
                 case SerializedPropertyType.String:
                     var s = raw;

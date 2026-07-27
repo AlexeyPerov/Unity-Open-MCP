@@ -327,6 +327,46 @@ namespace UnityOpenMcpBridge.Tests
             }
         }
 
+        // A4 regression: a wire bool may arrive as a JSON-quoted string
+        // ("active": "true"). JsonBody.GetRawValue returns the quoted token, so
+        // a naive `token == "true"` writes false. The coercion must strip the
+        // surrounding quotes first. batch_execute step bodies bypass the MCP
+        // schema and can produce this quoted form, so the guard is reachable.
+        [Test]
+        public void Modify_RootDiff_QuotedActiveTrue_Activates()
+        {
+            var go = new GameObject("__MCPTest_GO_QActive") { active = false };
+            try
+            {
+                // gameObjectDiffs carries the quoted-string form of the bool.
+                var result = GameObjectsTools.Modify(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"gameObjectDiffs\":{\"active\":\"true\"}}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsTrue(go.activeSelf,
+                    "Quoted \"true\" must activate the GameObject (A4).");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Modify_PathPatch_QuotedActiveFalse_Deactivates()
+        {
+            var go = new GameObject("__MCPTest_GO_QActiveRoot");
+            var child = new GameObject("__MCPTest_GO_QActiveChild") { active = true };
+            child.transform.SetParent(go.transform, false);
+            try
+            {
+                var result = GameObjectsTools.Modify(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"pathPatchesPerGameObject\":{\"__MCPTest_GO_QActiveChild\":{\"active\":\"false\"}}}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsFalse(child.activeSelf,
+                    "Quoted \"false\" must deactivate the child (A4).");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         [Test]
         public void Modify_ThreeSurface_AppliesInOrder()
         {

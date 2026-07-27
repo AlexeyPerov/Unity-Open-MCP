@@ -912,7 +912,11 @@ namespace UnityOpenMcpBridge.TypedTools
                     sp.intValue = ParseInt(valueRaw);
                     break;
                 case SerializedPropertyType.Boolean:
-                    sp.boolValue = valueRaw == "true";
+                    // A4 — valueRaw arrives from JsonBody.GetRawValue, so a wire
+                    // bool lands as the quoted literal "true"/"false". Strip the
+                    // surrounding quotes first; otherwise "true" (quoted) is
+                    // treated as false. (The string branch below already strips.)
+                    sp.boolValue = StripQuotes(valueRaw) == "true";
                     break;
                 case SerializedPropertyType.Float:
                     sp.floatValue = ParseFloat(valueRaw);

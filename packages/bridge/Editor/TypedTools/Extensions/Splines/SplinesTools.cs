@@ -753,7 +753,9 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             }
             if (targetType == typeof(int)) return int.Parse(raw);
             if (targetType == typeof(float)) return float.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
-            if (targetType == typeof(bool)) return raw == "true";
+            // A4 — raw is a raw JSON token (from ExtractRawValue), so a wire
+            // bool lands quoted. Strip surrounding quotes before comparing.
+            if (targetType == typeof(bool)) return raw.Trim('"') == "true";
             if (targetType == typeof(Vector3)) return ParseVector3(raw, Vector3.zero);
             if (targetType.IsEnum)
             {

@@ -981,7 +981,10 @@ namespace UnityOpenMcpBridge.Extensions.UIExt
             }
             if (targetType == typeof(int)) return int.Parse(raw);
             if (targetType == typeof(float)) return float.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
-            if (targetType == typeof(bool)) return raw == "true";
+            // A4 — raw is a raw JSON token (from ExtractRawValue), so a wire
+            // bool lands quoted ("true"/"false"). Strip surrounding quotes
+            // before comparing; otherwise "true" (quoted) coerces to false.
+            if (targetType == typeof(bool)) return raw.Trim('"') == "true";
             if (targetType == typeof(Color))
             {
                 if (!TryParseColor(raw.Trim('"'), out var c))

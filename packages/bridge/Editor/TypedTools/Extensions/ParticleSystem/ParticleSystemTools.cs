@@ -957,8 +957,14 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
         private static bool TryBool(string token, out bool value)
         {
             value = false;
-            if (token == "true") { value = true; return true; }
-            if (token == "false") { value = false; return true; }
+            // A4 — token arrives from ParseFieldsObject, which preserves the
+            // surrounding JSON quotes on string values, so a wire bool lands as
+            // "true"/"false". Unquote first (matching TryFloat/TryInt); without
+            // it, "true" (quoted) matches neither branch and the field is
+            // silently left unapplied.
+            var raw = Unquote(token);
+            if (raw == "true") { value = true; return true; }
+            if (raw == "false") { value = false; return true; }
             return false;
         }
 

@@ -747,7 +747,9 @@ namespace UnityOpenMcpBridge.Extensions.LightingExt
             }
             if (targetType == typeof(int)) return int.Parse(raw, CultureInfo.InvariantCulture);
             if (targetType == typeof(float)) return float.Parse(raw, CultureInfo.InvariantCulture);
-            if (targetType == typeof(bool)) return raw == "true";
+            // A4 — raw is a raw JSON token (from ExtractRawValue), so a wire
+            // bool lands quoted. Strip surrounding quotes before comparing.
+            if (targetType == typeof(bool)) return raw.Trim('"') == "true";
             if (targetType == typeof(Vector3)) return ParseVector3(raw, Vector3.zero);
             if (targetType == typeof(Vector4)) return ParseVector4(raw, Vector4.zero);
             if (targetType == typeof(Color)) return ParseColor(raw, Color.white);

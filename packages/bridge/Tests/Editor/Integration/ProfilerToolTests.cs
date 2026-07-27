@@ -143,7 +143,10 @@ namespace UnityOpenMcpBridge.Tests
             // The tool flips the Profiler on if it is off (recording profilerWasEnabled),
             // captures the latest frame(s), and returns the sample tree. In a headless
             // EditMode run the Profiler may capture nothing; either way the dispatch must
-            // succeed and return a JSON envelope (error payload or status:ok).
+            // succeed and return a JSON envelope (error payload, warming_up, or status:ok).
+            // A1 — a cold capture (profiler just enabled, no frame yet) returns
+            // warming_up instead of blocking the editor loop, and leaves the
+            // profiler enabled so the agent's retry succeeds.
             var result = BridgeToolRegistry.TryDispatch(
                 "unity_senses_profiler_capture_frame",
                 "{\"frame_count\":1,\"max_depth\":3,\"max_items\":16}");
@@ -154,8 +157,8 @@ namespace UnityOpenMcpBridge.Tests
 
             var output = result.Output;
             Assert.IsTrue(
-                output.Contains("\"error\"") || output.Contains("\"status\":\"ok\""),
-                "profiler_capture_frame output should be an error or status:ok envelope: " + output);
+                output.Contains("\"error\"") || output.Contains("\"status\":\"ok\"") || output.Contains("\"status\":\"warming_up\""),
+                "profiler_capture_frame output should be an error, warming_up, or status:ok envelope: " + output);
         }
     }
 }
