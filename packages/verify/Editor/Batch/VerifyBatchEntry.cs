@@ -464,10 +464,13 @@ namespace UnityOpenMcpVerify.Batch
         // Returns an empty array (never null) when AssetDatabase has no paths,
         // so the rules' `Length == 0` guard still applies cleanly.
         //
-        // Public so the bridge's checkpoint_create (and any other live-Editor
-        // whole-project entry point) can reuse the same expansion — without it
-        // an empty/null `paths` flows straight into the rules' Length==0 guard
-        // and the checkpoint records an all-zero fingerprint (B24).
+        // Used by the batch CLI's scan_all / baseline_create / regression_check
+        // (headless, where loading every asset is acceptable). The live bridge
+        // checkpoint_create does NOT use this — expanding to every asset and
+        // running the full rule set from the live Editor was pathological
+        // (MissingReferences loads every asset, ScenePrefabHealth opens every
+        // scene — see B-N4); the live whole-project case is restricted to the
+        // cheap project_health rule with an empty scope instead.
         public static string[] WholeProjectScope()
         {
             var paths = UnityEditor.AssetDatabase.GetAllAssetPaths();

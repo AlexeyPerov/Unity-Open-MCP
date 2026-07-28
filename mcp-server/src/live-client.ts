@@ -1678,16 +1678,43 @@ export class LiveClient implements Router {
     // tee/observe the stream (which can deadlock when a caller never drains
     // the body), we wrap the Response's `text`/`json`/`arrayBuffer` accessors
     // so the timer is cleared as part of the body-read promise the caller
-    // already awaits. If the caller never reads the body, the timer still
-    // fires on its own (aborting an already-consumed response is a no-op) —
-    // matching the prior header-only timeout contract as a backstop. `disposed`
-    // guards against double-clear (timer fires + body then settles).
+    // already awaits. `disposed` guards against double-clear.
+    //
+    // B-N1 — a pending `setTimeout` is a live libuv handle that keeps Node's
+    // event loop alive. Every status-only return path (the caller inspects the
+    // response and returns without reading the body) left the abort timer
+    // armed for the full `timeoutMs` (40 s minimum on the POST path), so
+    // `npm test` printed all subtests as `ok` then never reached the `# tests`
+    // summary — CI hung. The accessor wrappers alone cannot fix this because a
+    // caller that never touches the body never triggers them. Arm a short
+    // fallback `claimTimer` (unref'd so it never pins the loop on its own):
+    // if the body is read within the grace window, `bodyClaimed` flips and the
+    // fallback becomes a no-op (the abort timer stays armed to protect the
+    // in-progress read); if the body is never claimed, the fallback fires and
+    // disposes, releasing the abort timer's loop handle. The abort timer
+    // itself is NOT unref'd — it must still fire to abort a genuinely stalled
+    // body read while the process is alive (the in-progress socket keeps the
+    // loop alive in that case, so the abort lands).
     let disposed = false;
+    let bodyClaimed = false;
     const dispose = (): void => {
       if (disposed) return;
       disposed = true;
       clearTimeout(timer);
+      clearTimeout(claimTimer);
     };
+    const markBodyClaimed = (): void => {
+      bodyClaimed = true;
+    };
+    // Short grace window for the caller to claim the body. Long enough that a
+    // synchronous `await res.text()` after an `await fetchWithTimeout(...)`
+    // always wins; short enough that a process with no body read pending
+    // releases its handles promptly. If the body WAS claimed, this is a no-op
+    // — the abort timer remains armed to protect the read.
+    const claimTimer = setTimeout(() => {
+      if (!bodyClaimed) dispose();
+    }, 100);
+    claimTimer.unref();
 
     // M14 — attach the bearer token to every request when one was discovered
     // from the instance lock. Merge with any caller-supplied headers so we
@@ -1716,9 +1743,9 @@ export class LiveClient implements Router {
         const origText = res.text.bind(res);
         const origJson = res.json.bind(res);
         const origArrayBuffer = res.arrayBuffer.bind(res);
-        res.text = () => origText().finally(dispose);
-        res.json = () => origJson().finally(dispose);
-        res.arrayBuffer = () => origArrayBuffer().finally(dispose);
+        res.text = () => { markBodyClaimed(); return origText().finally(dispose); };
+        res.json = () => { markBodyClaimed(); return origJson().finally(dispose); };
+        res.arrayBuffer = () => { markBodyClaimed(); return origArrayBuffer().finally(dispose); };
         if (!res.body) dispose();
         return res;
       },

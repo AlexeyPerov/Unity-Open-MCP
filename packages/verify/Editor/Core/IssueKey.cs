@@ -94,6 +94,29 @@ namespace UnityOpenMcpVerify
             return issueCode.Substring(colon + 1);
         }
 
+        // B-N7 — sanitize a string before it is concatenated into an
+        // issueCode discriminator. The issue key format is
+        // `{ruleId}|{severity}|{assetPath}|{issueCode}`, and
+        // ValidateComponents forbids '|' in every component (it would break
+        // the 4-way Split('|') on parse). GUID/fileID discriminators are
+        // already '|'-free, but user-controlled strings — a GameObject name
+        // (`UI|Header`, `Wall|Left` are ordinary), a component type, an
+        // asmdef reference name — can contain '|'. Concatenating such a
+        // value verbatim made IssueKey.Build throw ArgumentException, which
+        // is NOT caught by the gate's FormatException handler — so it
+        // aborted baseline_create (unhandled_exception, no baseline written)
+        // and threw AFTER a mutation had already committed in the gate path.
+        // Replace '|' with a safe stand-in ('_') so the discriminator still
+        // uniquely identifies the instance within an asset (two names that
+        // differ only by '|' vs '_' are vanishingly unlikely) and the key
+        // stays parseable. The original value is preserved verbatim in the
+        // issue's `evidence`/`description` for human inspection.
+        public static string SanitizeComponent(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            return value.IndexOf('|') < 0 ? value : value.Replace('|', '_');
+        }
+
         private static void ValidateComponents(string ruleId, VerifySeverity severity, string assetPath, string issueCode)
         {
             if (string.IsNullOrEmpty(ruleId))

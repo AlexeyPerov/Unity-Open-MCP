@@ -41,6 +41,10 @@ namespace UnityOpenMcpBridge.MetaTools
             var guids = FindAssets(folder, typeFilter);
             var matches = new List<MatchRecord>();
             int truncated = 0;
+            // B-N3 — true when scanning stopped early at the cap, so
+            // `truncated`/`matchCount` are lower bounds (more matches may exist
+            // beyond the scanned prefix) rather than exact counts.
+            bool truncatedIsLowerBound = false;
 
             // B19 — `max_results <= 0` means "unlimited" (the server-internal
             // sentinel the MCP server emits when page_size is set, so the cursor
@@ -66,16 +70,30 @@ namespace UnityOpenMcpBridge.MetaTools
                 // candidate count (e.g. 10000) regardless of how many actually
                 // matched. Now `truncated` is the count of matches dropped, and
                 // `matchCount` reflects the true match set size.
+                //
+                // B-N3 — STOP scanning once the cap is hit. `BuildMatch` calls
+                // `AssetDatabase.LoadMainAssetAtPath` for every prefab/scene
+                // and recursively walks its hierarchy, plus `File.ReadAllText`
+                // per text asset for guid queries. With `continue` the loop
+                // loaded EVERY candidate synchronously on the Unity main
+                // thread even after the cap was reached, freezing the Editor
+                // and blowing the 30 s dispatch timeout on a project with a
+                // few thousand prefabs. `break` bounds the work to the first
+                // `max_results` matches; `truncated`/`matchCount` then carry
+                // a lower bound (flagged via `truncatedIsLowerBound`) so the
+                // envelope is honest that more matches may exist beyond the
+                // scanned prefix.
                 if (!unlimited && matches.Count >= maxResults)
                 {
                     truncated++;
-                    continue;
+                    truncatedIsLowerBound = true;
+                    break;
                 }
 
                 matches.Add(record);
             }
 
-            return ToolDispatchResult.Ok(BuildResult(matches, truncated, name, component, guid, typeFilter));
+            return ToolDispatchResult.Ok(BuildResult(matches, truncated, truncatedIsLowerBound, name, component, guid, typeFilter));
         }
 
         class MatchRecord
@@ -279,7 +297,7 @@ namespace UnityOpenMcpBridge.MetaTools
             }
         }
 
-        private static string BuildResult(List<MatchRecord> matches, int truncated, string name, string component, string guid, string typeFilter)
+        private static string BuildResult(List<MatchRecord> matches, int truncated, bool truncatedIsLowerBound, string name, string component, string guid, string typeFilter)
         {
             var sb = new StringBuilder(2048);
             sb.Append('{');
@@ -291,7 +309,13 @@ namespace UnityOpenMcpBridge.MetaTools
             if (!string.IsNullOrEmpty(typeFilter)) { if (!first) sb.Append(','); sb.Append("\"type\":\"").Append(Esc(typeFilter)).Append('"'); first = false; }
             sb.Append('}');
 
+            // B-N3 — when scanning stopped early at the cap, matchCount and
+            // truncated are LOWER BOUNDS (the true match set may be larger;
+            // only a prefix was examined). Surface `truncatedIsLowerBound` so a
+            // caller paging the result knows to treat the counts as "at least".
             sb.Append(",\"matchCount\":").Append(matches.Count + truncated);
+            if (truncatedIsLowerBound)
+                sb.Append(",\"matchCountIsLowerBound\":true");
             sb.Append(",\"matches\":[");
             for (int i = 0; i < matches.Count; i++)
             {

@@ -246,6 +246,20 @@ namespace UnityOpenMcpBridge.MetaTools
                     if (p.GetIndexParameters().Length > 0) continue;
                     var getter = p.GetMethod;
                     if (getter == null || !getter.IsPublic) continue;
+                    // B-N6 — skip known instantiating properties on Components.
+                    // See IsInstantiatingProperty for the rationale; in short,
+                    // reading `Renderer.material` / `MeshFilter.mesh` in edit
+                    // mode clones the shared asset into a non-persisted
+                    // instance ("Instantiating material due to calling
+                    // renderer.material during edit mode. This will leak
+                    // materials into the scene."), silently corrupting scene
+                    // state from a tool documented read-only and gate-free.
+                    // The `shared*` variants are safe and still serialized.
+                    if (IsInstantiatingProperty(type, p))
+                    {
+                        members.Add("\"" + EscapeJsonString(p.Name) + "\":\"<skipped: instantiates in edit mode>\"");
+                        continue;
+                    }
                     string valJson;
                     try { valJson = SerializeInternal(p.GetValue(value, null), depth + 1, opts, visited); }
                     catch (Exception ex) { valJson = ErrorMarker(ex); }
@@ -254,6 +268,40 @@ namespace UnityOpenMcpBridge.MetaTools
             }
 
             return "{" + string.Join(",", members) + "}";
+        }
+
+        // B-N6 — properties whose getter CLONES the shared asset into a
+        // non-persisted instance when read in edit mode. object_get_data
+        // (SerializeReflectiveRoot) resolves any UnityEngine.Object including a
+        // Component, so without this guard `object_get_data {instance_id:<Renderer>}`
+        // would read `Renderer.material`/`.materials` and `<MeshFilter>` would
+        // read `MeshFilter.mesh`, each instantiating and replacing the shared
+        // reference with a leak ("Instantiating material due to calling
+        // renderer.material during edit mode. This will leak materials into the
+        // scene."). The tool is classified non-mutating and gate-free
+        // (BridgeToolClassification), so this silent corruption has no
+        // checkpoint or rollback. The `shared*` variants are the correct
+        // read-only accessors and are NOT skipped.
+        //
+        // Keyed on the runtime type's assignability to Renderer/MeshFilter so a
+        // user-defined `material` property on an unrelated type is unaffected.
+        // The set is small and stable (Unity's instantiating accessors are
+        // long-standing API); add to it if a new instance-leaking property is
+        // identified.
+        private static readonly HashSet<string> InstantiatingPropertyNames
+            = new HashSet<string> { "material", "materials", "mesh" };
+
+        private static bool IsInstantiatingProperty(Type runtimeType, PropertyInfo property)
+        {
+            if (property == null || runtimeType == null) return false;
+            if (!InstantiatingPropertyNames.Contains(property.Name)) return false;
+            // Renderer declares material/materials; MeshFilter declares mesh.
+            // IsAssignableFrom covers subclasses (MeshRenderer,
+            // SkinnedMeshRenderer, ParticleSystemRenderer, …) without naming
+            // each one. A user-defined `material` property on an unrelated
+            // Component type is unaffected.
+            return typeof(UnityEngine.Renderer).IsAssignableFrom(runtimeType)
+                || typeof(UnityEngine.MeshFilter).IsAssignableFrom(runtimeType);
         }
 
         private static string ErrorMarker(Exception ex)

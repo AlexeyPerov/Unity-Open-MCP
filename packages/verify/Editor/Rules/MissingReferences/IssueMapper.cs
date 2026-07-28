@@ -104,7 +104,19 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                     // V8: discriminator = componentType + gameObject so the
                     // gate delta can see a second duplicate-component type
                     // appear on the same prefab.
-                    sink.Add(MakeIssue(asset, CodeDuplicateComponent + ":" + dup.ComponentType + ":" + dup.GameObjectName,
+                    //
+                    // B-N7 — sanitize the user-controlled strings (component
+                    // type, GameObject name) before concatenation: Unity
+                    // permits '|' in names (`UI|Header`, `Wall|Left`), and a
+                    // raw '|' in the discriminator makes IssueKey.Build throw
+                    // ArgumentException (uncaught by the gate's
+                    // FormatException handler) — aborting baseline_create and
+                    // throwing post-mutation in the gate path. The original
+                    // values stay in `evidence`/`description`.
+                    sink.Add(MakeIssue(asset,
+                        CodeDuplicateComponent + ":"
+                            + IssueKey.SanitizeComponent(dup.ComponentType) + ":"
+                            + IssueKey.SanitizeComponent(dup.GameObjectName),
                         $"Duplicate component {dup.ComponentType} ({dup.Count}x) on '{dup.GameObjectName}'",
                         VerifySeverity.Warning,
                         Evidence("componentType", dup.ComponentType, null,

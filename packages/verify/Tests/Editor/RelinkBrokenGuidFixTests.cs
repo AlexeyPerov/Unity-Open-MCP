@@ -564,7 +564,11 @@ namespace UnityOpenMcpVerify.Tests
                     scenePath, "missing_guid:12345678123456781234567812345678");
 
                 var before = File.ReadAllText(scenePath);
-                var result = fix.Apply(issueId, "abcdefabcdefabcdefabcdefabcdefabcd");
+                // A16 — the target_guid must be a valid 32-hex GUID so Apply
+                // advances past the Guid32Hex check and actually exercises
+                // CheckAssetOpen. The previous value was 34 chars and returned
+                // at validation, leaving the guard with no passing coverage.
+                var result = fix.Apply(issueId, "abcdefabcdefabcdefabcdefabcdefab");
 
                 Assert.IsFalse(result.Success,
                     "Apply must refuse when the referencing scene is open in-memory");

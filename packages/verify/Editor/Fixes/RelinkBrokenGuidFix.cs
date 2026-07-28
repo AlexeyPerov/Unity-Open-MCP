@@ -165,12 +165,18 @@ namespace UnityOpenMcpVerify.Fixes
             // Open scene check: any loaded scene at this path (active or
             // additively-loaded) means an in-memory copy that would silently
             // win the next save.
+            //
+            // A16 — compare with OrdinalIgnoreCase so a path that differs only
+            // in case (macOS/Windows default to case-insensitive filesystems)
+            // is still recognized as open. The previous ordinal `==` let such a
+            // path slip past the scene check on those platforms.
             var ext = Path.GetExtension(assetPath ?? "").ToLowerInvariant();
             if (ext == ".unity")
             {
                 for (var i = 0; i < SceneManager.sceneCount; i++)
                 {
-                    if (SceneManager.GetSceneAt(i).path == assetPath)
+                    if (string.Equals(SceneManager.GetSceneAt(i).path, assetPath,
+                        System.StringComparison.OrdinalIgnoreCase))
                     {
                         return $"Scene '{assetPath}' is currently open in the Editor. " +
                                "Close it (or save and close) before relinking so the in-memory copy " +
@@ -181,36 +187,63 @@ namespace UnityOpenMcpVerify.Fixes
             }
 
             // Prefab stage check: a prefab open in the Prefab Editor has an
-            // in-memory instance too. PrefabStageUtility lives in UnityEditor.
+            // in-memory instance too.
+            //
+            // A16 — inspect the WHOLE stage stack, not just the focused stage.
+            // PrefabStageUtility.GetCurrentPrefabStage() returns only the top
+            // of the stack, but Unity keeps a stack of open stages (open
+            // Prefab A, double-click nested Prefab B → two stages). With B
+            // focused, a relink targeting A's `.prefab` would pass the
+            // focused-only guard, File.WriteAllText would land, and A's
+            // in-memory stage copy would revert it on the next save. The
+            // StageUtility.GetStages() API (UnityEditor.SceneManagement, since
+            // 2020.1) returns every open stage including the main scene stage;
+            // filter to prefab stages and compare each one's asset path.
+            // Reflection keeps us compile-safe across Unity versions where the
+            // API moved between namespaces.
             try
             {
                 var stageType = System.Type.GetType(
                     "UnityEditor.SceneManagement.PrefabStage, UnityEditor");
-                if (stageType != null)
+                var stageUtilType = System.Type.GetType(
+                    "UnityEditor.SceneManagement.StageUtility, UnityEditor");
+                if (stageType != null && stageUtilType != null)
                 {
-                    // PrefabStageUtility.GetCurrentPrefabStage() — reflection
-                    // keeps us compile-safe across Unity versions where the
-                    // API moved between namespaces.
-                    var utilType = System.Type.GetType(
-                        "UnityEditor.SceneManagement.PrefabStageUtility, UnityEditor");
-                    var getCurrent = utilType?.GetMethod(
-                        "GetCurrentPrefabStage",
+                    var getStages = stageUtilType.GetMethod(
+                        "GetStages",
                         System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                    var stage = getCurrent?.Invoke(null, null);
-                    if (stage != null)
+                    if (getStages != null)
                     {
-                        var prefabPathProp = stageType.GetProperty("prefabAssetPath");
-                        // 2022+ exposes `assetPath` (prefabAssetPath is the
-                        // older 2021/2019 name); fall back to either.
-                        var assetPathProp = stageType.GetProperty("assetPath");
-                        var stagePath = prefabPathProp?.GetValue(stage) as string
-                                        ?? assetPathProp?.GetValue(stage) as string;
-                        if (!string.IsNullOrEmpty(stagePath)
-                            && string.Equals(stagePath, assetPath, System.StringComparison.OrdinalIgnoreCase))
+                        var stages = getStages.Invoke(null, null) as System.Collections.IEnumerable;
+                        if (stages != null)
                         {
-                            return $"Prefab '{assetPath}' is open in the Prefab Stage. " +
-                                   "Apply the fix with the prefab closed so the in-memory stage copy " +
-                                   "does not silently revert the relink on save.";
+                            var prefabPathProp = stageType.GetProperty("prefabAssetPath");
+                            // 2022+ exposes `assetPath` (prefabAssetPath is the
+                            // older 2021/2019 name); fall back to either.
+                            var assetPathProp = stageType.GetProperty("assetPath");
+                            foreach (var stage in stages)
+                            {
+                                if (stage == null) continue;
+                                // GetStages returns the main scene stage too
+                                // (a SceneStage, not a PrefabStage). Invoking
+                                // a PrefabStage-declared property on a non-
+                                // PrefabStage instance throws TargetException,
+                                // so skip any stage that is not assignable to
+                                // PrefabStage. Only prefab stages carry an
+                                // asset path; the main scene stage returns
+                                // null/empty for it.
+                                if (!stageType.IsInstanceOfType(stage)) continue;
+                                var stagePath = prefabPathProp?.GetValue(stage) as string
+                                                ?? assetPathProp?.GetValue(stage) as string;
+                                if (!string.IsNullOrEmpty(stagePath)
+                                    && string.Equals(stagePath, assetPath,
+                                        System.StringComparison.OrdinalIgnoreCase))
+                                {
+                                    return $"Prefab '{assetPath}' is open in the Prefab Stage. " +
+                                           "Apply the fix with the prefab closed so the in-memory stage copy " +
+                                           "does not silently revert the relink on save.";
+                                }
+                            }
                         }
                     }
                 }

@@ -56,7 +56,16 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                         // unresolved references on one asmdef collapse to one
                         // key and ComputeDelta cannot detect a second one
                         // being added.
-                        sink.Add(MakeIssue(asset, CodeBrokenReference + ":" + r.Reference,
+                        //
+                        // B-N7 — sanitize the reference name (asmdef references
+                        // are assembly names or `GUID:...` strings and are
+                        // unlikely to contain '|', but a malformed/manual
+                        // asmdef could) before concatenation so a '|' cannot
+                        // make IssueKey.Build throw ArgumentException (uncaught
+                        // by the gate's FormatException handler). The original
+                        // value stays in `evidence`/`description`.
+                        sink.Add(MakeIssue(asset,
+                            CodeBrokenReference + ":" + IssueKey.SanitizeComponent(r.Reference),
                             $"Assembly reference '{r.Reference}' does not resolve to a compiled assembly or known asmdef.",
                             VerifySeverity.Error,
                             Evidence(("reference", r.Reference),
@@ -97,7 +106,10 @@ namespace UnityOpenMcpVerify.Rules.AsmdefAudit
                     if (data.IncludePlatforms.Contains("Editor")) continue;
                     // V8: discriminator = reference so multiple editor-in-runtime
                     // references on one asmdef do not collapse to one key.
-                    sink.Add(MakeIssue(data, CodeEditorInRuntime + ":" + reference,
+                    // B-N7 — sanitize the reference name before concatenation
+                    // (see CodeBrokenReference above).
+                    sink.Add(MakeIssue(data,
+                        CodeEditorInRuntime + ":" + IssueKey.SanitizeComponent(reference),
                         $"Runtime assembly references editor assembly '{reference}' but is not editor-only.",
                         VerifySeverity.Warning,
                         Evidence(("reference", reference),

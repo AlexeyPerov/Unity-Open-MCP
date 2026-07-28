@@ -226,5 +226,45 @@ namespace UnityOpenMcpVerify.Tests
             Assert.AreEqual("Assets/Scenes/Game.unity", path);
             Assert.AreEqual("override_explosion", code);
         }
+
+        // B-N7 — a user-controlled discriminator (GameObject name like
+        // "UI|Header") must not break IssueKey.Build. SanitizeComponent replaces
+        // '|' with '_' so the concatenated issueCode stays parseable; the bare
+        // code (before the first ':') is unaffected, and the original value is
+        // preserved in evidence/description (not tested here — the contract is
+        // "no '|' leaks into the key").
+        [Test]
+        public void SanitizeComponent_ReplacesPipe()
+        {
+            Assert.AreEqual("UI_Header", IssueKey.SanitizeComponent("UI|Header"));
+            Assert.AreEqual("Wall_Left_Extra", IssueKey.SanitizeComponent("Wall|Left|Extra"));
+            // No '|' → returned verbatim (the common, fast path).
+            Assert.AreEqual("Player", IssueKey.SanitizeComponent("Player"));
+        }
+
+        [Test]
+        public void SanitizeComponent_NullOrEmpty_Passthrough()
+        {
+            Assert.IsNull(IssueKey.SanitizeComponent(null));
+            Assert.AreEqual("", IssueKey.SanitizeComponent(""));
+        }
+
+        [Test]
+        public void SanitizeComponent_SanitizedValueBuildsAndParses()
+        {
+            // A GameObject name with '|' that a duplicate-component mapper would
+            // concatenate. Sanitized, it must round-trip through Build/TryParse.
+            var sanitized = IssueKey.SanitizeComponent("UI|Header");
+            var code = "duplicate_component:Canvas:" + sanitized;
+            var key = IssueKey.Build("missing_references", VerifySeverity.Warning,
+                "Assets/HUD.prefab", code);
+
+            Assert.IsTrue(IssueKey.TryParse(key, out var ruleId, out _, out var path, out var parsedCode));
+            Assert.AreEqual("missing_references", ruleId);
+            Assert.AreEqual("Assets/HUD.prefab", path);
+            Assert.AreEqual(code, parsedCode);
+            // The bare code (issue explainability key) is unaffected.
+            Assert.AreEqual("duplicate_component", IssueKey.BareIssueCode(parsedCode));
+        }
     }
 }

@@ -180,8 +180,14 @@ namespace UnityOpenMcpBridge
                     // ignored — checkpoint history capture is non-essential
                 }
             }
-            catch (FormatException e)
+            catch (Exception e)
             {
+                // B-N7 — IssueKey.Build/ValidateKey throw ArgumentException
+                // (not FormatException) when an issueCode contains '|'. The
+                // producer-side sanitization (IssueKey.SanitizeComponent) covers
+                // the known user-controlled strings, but catch broadly here so
+                // any future leak from a new mapper cannot abort the
+                // pre-mutation checkpoint path with an unhandled exception.
                 UnityEngine.Debug.LogError($"[GatePolicy] Checkpoint key validation failed: {e.Message}");
                 return new GateDispatchResult
                 {
@@ -254,8 +260,16 @@ namespace UnityOpenMcpBridge
             {
                 delta = VerifyGateAdapter.ComputeDelta(checkpoint, validation);
             }
-            catch (FormatException e)
+            catch (Exception e)
             {
+                // B-N7 — ComputeDelta calls IssueKey.Build, which throws
+                // ArgumentException (not just FormatException) for a
+                // '|'bearing issueCode. This runs AFTER the mutation committed,
+                // so a broad catch is essential: an uncaught exception here
+                // would propagate out of the gate with the mutation already in
+                // place and no delta/health report. The producer-side
+                // sanitization (IssueKey.SanitizeComponent) covers known
+                // sources; this is defense-in-depth for any future leak.
                 gateSw.Stop();
                 UnityEngine.Debug.LogError($"[GatePolicy] Delta key validation failed: {e.Message}");
                 return new GateDispatchResult

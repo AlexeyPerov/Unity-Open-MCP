@@ -9,7 +9,12 @@ export const checkpointCreate = makeTool(
           paths: {
             type: "array",
             items: { type: "string" },
-            description: "Scope; empty = whole project summary (expensive)",
+            description:
+              "Scope; empty = whole-project summary restricted to the cheap " +
+              "project_health rule (orphan .meta, duplicate_guid, invalid_layer). " +
+              "Pass explicit folders/files to fingerprint the per-asset rules " +
+              "(missing_references, scene_prefab_health, …); a literal empty " +
+              "scope does not load or open every asset.",
           },
           label: { type: "string" },
         },

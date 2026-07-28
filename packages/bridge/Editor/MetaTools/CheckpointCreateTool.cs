@@ -19,32 +19,48 @@ namespace UnityOpenMcpBridge.MetaTools
             // guard (only project_health expands it internally), so a
             // literal empty array records an all-zero fingerprint and
             // every later delta then reports `passed:true` regardless of
-            // project state. Expand to the full Assets/ set (the same
-            // helper the batch CLI uses) so every registered rule runs and
-            // the fingerprint reflects reality.
+            // project state.
             //
-            // A5 — passing ruleIds = null DOES NOT mean "run all rules":
-            // VerifyGateAdapter.CreateCheckpoint rewrites null to
-            // SelectRuleIds(paths), which derives rules from file extensions
-            // and has no arm for project_health (orphan .meta, duplicate_guid,
-            // invalid_layer — concerns not bound to an extension). The
-            // whole-project fingerprint therefore missed project_health and a
-            // later delta could never surface those errors. Pass the explicit
-            // full registered rule set instead, sourced from the live registry
-            // so newly added rules are picked up automatically. (Note:
-            // project_health is gated to VerifyRunMode.Full, so it still
-            // contributes nothing in checkpoint mode — but every rule that CAN
-            // run in a checkpoint now does, and the intent is unambiguous.)
-            // The expanded scope is stored on the entry so DeltaTool
-            // re-validates the SAME scope (otherwise the delta would re-bail
-            // and always pass).
+            // B-N4 — the previous fix expanded the whole-project case to
+            // EVERY asset path under Assets/ and ran the FULL rule set from
+            // the live Editor. Two rules make that pathological there:
+            // MissingReferences loads every asset via AssetDatabase with no
+            // extension filter, and ScenePrefabHealth additively opens and
+            // closes every .unity in the project — synchronously on the
+            // Unity main thread, freezing the Editor and blowing the 30 s
+            // dispatch timeout. The expanded scope is stored on the entry,
+            // so every subsequent delta repeats it.
+            //
+            // The honest contract for a live whole-project checkpoint is
+            // the cheap whole-project rule only: project_health (orphan
+            // .meta, duplicate_guid, invalid_layer — concerns not bound to a
+            // file extension, scanned from the file tree without loading
+            // assets). Pass an EMPTY scope and the project_health rule id
+            // explicitly; project_health is gated to VerifyRunMode.Full so
+            // it contributes nothing in checkpoint mode either, but the
+            // intent is unambiguous and the fingerprint stays cheap. The
+            // per-asset rules (missing_references, scene_prefab_health, …)
+            // require an explicit `paths` set — an agent that wants them in
+            // a checkpoint must scope to the relevant folders/files.
+            //
+            // A5 note (preserved): passing ruleIds = null DOES NOT mean "run
+            // all rules" — VerifyGateAdapter.CreateCheckpoint rewrites null
+            // to SelectRuleIds(paths), which derives rules from extensions
+            // and has no arm for project_health. The explicit rule set here
+            // avoids that.
             var isWholeProject = paths == null || paths.Length == 0;
-            var effectivePaths = isWholeProject
-                ? VerifyBatchEntry.WholeProjectScope()
-                : paths;
-            var ruleIds = isWholeProject
-                ? VerifyGateAdapter.AllRegisteredRuleIds()
-                : VerifyGateAdapter.SelectRuleIds(paths);
+            string[] effectivePaths;
+            string[] ruleIds;
+            if (isWholeProject)
+            {
+                effectivePaths = System.Array.Empty<string>();
+                ruleIds = new[] { "project_health" };
+            }
+            else
+            {
+                effectivePaths = paths;
+                ruleIds = VerifyGateAdapter.SelectRuleIds(paths);
+            }
 
             CheckpointFingerprint checkpoint;
             try

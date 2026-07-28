@@ -846,26 +846,72 @@ namespace UnityOpenMcpBridge.TypedTools
             return absolute;
         }
 
-        // Convert an absolute project-rooted path to the Assets/... form
-        // AssetDatabase.DeleteAsset expects. Returns null when the path does
-        // not live under the project's Assets/ folder (DeleteAsset cannot
-        // address it). Reuses the same project-root resolution as
-        // ResolveScriptPath so the two stay consistent.
+        // Convert an absolute project-rooted path to the project-relative
+        // Assets/... (or Packages/...) form AssetDatabase.DeleteAsset expects.
+        // Returns null when the path does not live under one of those roots.
+        // Reuses the same project-root resolution as ResolveScriptPath so the
+        // two stay consistent.
+        //
+        // B-N5 — the previous implementation tested `full.StartsWith(assetsRoot)`
+        // with NO separator boundary, so a sibling directory whose name shares
+        // the `Assets` prefix — `<root>/AssetsBackup/Old.cs` — mapped to
+        // `Assets/Backup/Old.cs`. If that file existed, DeleteAsset removed it
+        // while the INTENDED file survived, and the tool reported the original
+        // path as deleted. (ResolveScriptPath accepts the path because it only
+        // enforces project-root containment.) The same defect was already fixed
+        // in ApplyFixGateRunner.NormalizeRestoredPaths; this reapplies the
+        // boundary check here. Separately, force-prefixing `Assets/` meant any
+        // script under `Packages/` — which `script_write` writes to and
+        // `DeleteAsset` accepts — was refused as "not under Assets/". Both
+        // roots are now supported via the per-root boundary check.
         private static string ToAssetPath(string absolutePath)
         {
             if (string.IsNullOrEmpty(absolutePath)) return null;
-            var dataPath = Application.dataPath;
-            if (string.IsNullOrEmpty(dataPath)) return null;
-
-            var assetsRoot = Path.GetFullPath(dataPath);
             var full = Path.GetFullPath(absolutePath);
-            if (!full.StartsWith(assetsRoot, StringComparison.OrdinalIgnoreCase))
+            var rel = ProjectRelativeAssetPath(full, Application.dataPath, "Assets");
+            if (rel != null) return rel;
+            // Packages/ scripts are deletable too (script_write writes there
+            // and AssetDatabase.DeleteAsset accepts Packages/... paths).
+            var packagesRoot = Application.dataPath != null
+                ? Path.GetFullPath(Path.Combine(
+                    Directory.GetParent(Application.dataPath)?.FullName ?? "",
+                    "Packages"))
+                : null;
+            if (!string.IsNullOrEmpty(packagesRoot))
+                rel = ProjectRelativeAssetPath(full, packagesRoot, "Packages");
+            return rel;
+        }
+
+        // Map an absolute path that lives under `rootDir` to the
+        // `<rootName>/<relative>` form AssetDatabase expects. Returns null when
+        // the path is not under `rootDir` (with a separator boundary so a
+        // sibling dir like `AssetsBackup` cannot match `Assets`). The exact
+        // match (the root dir itself) returns null — there is no asset to
+        // delete at the root.
+        private static string ProjectRelativeAssetPath(string fullPath, string rootDir, string rootName)
+        {
+            if (string.IsNullOrEmpty(rootDir)) return null;
+            var root = Path.GetFullPath(rootDir);
+            // Ensure `root` ends with a separator so the StartsWith check
+            // enforces a path-segment boundary: `<root>/AssetsBackup` must NOT
+            // match `<root>/Assets`. On Windows the root may already end in `\`
+            // (e.g. `C:\proj\Assets`); on Unix it does not. Normalize by
+            // appending the platform separator only when absent.
+            var sep = Path.DirectorySeparatorChar.ToString();
+            if (!root.EndsWith(sep, StringComparison.Ordinal))
+                root += sep;
+
+            // Exact match against the root (no trailing content) — nothing to
+            // delete. Compare the unsep'd forms so `Assets` matches `Assets`.
+            if (string.Equals(Path.GetFullPath(rootDir), fullPath, StringComparison.OrdinalIgnoreCase))
                 return null;
 
-            // dataPath already ends in "Assets"; the relative portion is the
-            // suffix after the root, with the OS separator normalized to '/'.
-            var rel = full.Substring(assetsRoot.Length).TrimStart('/', Path.DirectorySeparatorChar);
-            return string.IsNullOrEmpty(rel) ? null : ("Assets/" + rel.Replace('\\', '/'));
+            if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            var rel = fullPath.Substring(root.Length).TrimStart('/', Path.DirectorySeparatorChar);
+            if (string.IsNullOrEmpty(rel)) return null;
+            return rootName + "/" + rel.Replace('\\', '/');
         }
 
         // Roslyn-validate a script source. Returns (true, null) on success,
