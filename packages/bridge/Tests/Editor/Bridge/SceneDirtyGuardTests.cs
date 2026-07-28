@@ -70,6 +70,58 @@ namespace UnityOpenMcpBridge.Tests
                 SceneDirtyGuard.AppliesTo("unity_open_mcp_execute_csharp", "{}"));
         }
 
+        // ----- B-N8: additive scene_create / scene_open bypass the guard -----
+        //
+        // Additive mode keeps currently-open scenes open, so a dirty scene can
+        // neither be lost nor trigger the native save modal. The guard would
+        // only add friction on the most common (interactive) path. Only the
+        // default Single mode — which closes every open scene without saving —
+        // is preflighted. This matches the shipped schema's promise that the
+        // dirty guard has "No effect for 'additive' mode".
+
+        [TestCase("unity_open_mcp_scene_create", ExpectedResult = false)]
+        [TestCase("unity_open_mcp_scene_open", ExpectedResult = false)]
+        public static bool AppliesTo_AdditiveSceneOp_SkipsGuard(string tool)
+        {
+            return SceneDirtyGuard.AppliesTo(tool, "{\"mode\":\"additive\"}");
+        }
+
+        [TestCase("unity_open_mcp_scene_create", ExpectedResult = true)]
+        [TestCase("unity_open_mcp_scene_open", ExpectedResult = true)]
+        public static bool AppliesTo_SingleSceneOp_Guarded(string tool)
+        {
+            // The default Single mode closes open scenes — must stay guarded.
+            return SceneDirtyGuard.AppliesTo(tool, "{\"mode\":\"single\"}");
+        }
+
+        [TestCase("unity_open_mcp_scene_create", ExpectedResult = true)]
+        [TestCase("unity_open_mcp_scene_open", ExpectedResult = true)]
+        public static bool AppliesTo_SceneOp_DefaultMode_Guarded(string tool)
+        {
+            // Missing mode ⇒ Unity's default (Single) ⇒ guarded.
+            return SceneDirtyGuard.AppliesTo(tool, "{}");
+        }
+
+        [Test]
+        public static void AppliesTo_AdditiveSceneOp_CaseInsensitive()
+        {
+            // A case variant must still bypass (mirrors the bool-quoting fix
+            // class — agent-authored bodies are not always lower-case).
+            Assert.IsFalse(
+                SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_create",
+                    "{\"mode\":\"Additive\"}"));
+        }
+
+        [Test]
+        public static void AppliesTo_AdditiveSceneOp_IgnoreStillRespected()
+        {
+            // Additive bypasses regardless; the assertion documents that the
+            // two opt-outs are independent and additive already implies no risk.
+            Assert.IsFalse(
+                SceneDirtyGuard.AppliesTo("unity_open_mcp_scene_create",
+                    "{\"mode\":\"additive\",\"ignore_scene_dirty\":false}"));
+        }
+
         // ----- Check: null/empty scene setup => Allow -----
 
         [Test]

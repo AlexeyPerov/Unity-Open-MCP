@@ -126,9 +126,20 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 foreach (var layer in refs.InvalidLayers)
                 {
-                    // V8: discriminator = layerIndex + line so two invalid
-                    // layer lines on one asset do not collapse to one key.
-                    sink.Add(MakeIssue(asset, CodeInvalidLayer + ":" + layer.LayerIndex + ":" + layer.Line,
+                    // V8: discriminator = layerIndex so two invalid layer indices
+                    // on one asset do not collapse to one key.
+                    //
+                    // B-N13 — the discriminator previously ALSO carried
+                    // `layer.Line` (a line index into the asset YAML). That made
+                    // the key deterministic only for identical bytes: any edit
+                    // ABOVE the line (adding a component, a Unity reserialize, a
+                    // .meta reformat) shifted it, so a pre-existing invalid_layer
+                    // surfaced in the gate delta as one resolvedWarnings PLUS one
+                    // newWarnings purely from an unrelated change. The line is
+                    // still in `evidence` for human inspection; the key now
+                    // depends only on the stable layerIndex, matching the
+                    // missing_fileid discriminator's stable guid+fileID choice.
+                    sink.Add(MakeIssue(asset, CodeInvalidLayer + ":" + layer.LayerIndex,
                         $"Invalid layer index {layer.LayerIndex} at line {layer.Line}",
                         VerifySeverity.Warning,
                         Evidence("layerIndex", layer.LayerIndex.ToString(), layer.Line)));

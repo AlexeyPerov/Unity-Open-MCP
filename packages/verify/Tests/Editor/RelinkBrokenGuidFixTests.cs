@@ -586,6 +586,71 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
+        // B-N12 — when the same broken GUID appears BOTH as a PPtr triple AND
+        // as a non-triple occurrence (a standalone `guid:` key, an Addressables-
+        // style m_AssetGUID, etc.), the triple-only rewrite left the non-triple
+        // occurrence dangling and reported Success. The fix runs the bare-guid
+        // pass over the triple-rewritten text so every occurrence is updated.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void RewriteGuid_TripleAndBareOccurrence_BothRewritten()
+        {
+            // A .mat-style fixture carrying the SAME broken GUID in two shapes:
+            //   1. an inline PPtr triple (m_Texture)
+            //   2. a standalone `guid:` key (e.g. a hand-written Addressables
+            //      reference or a .meta-style field in the same file)
+            // The pre-fix code matched the triple, reported Success, and left
+            // the standalone `guid:` line pointing at the dead GUID — the next
+            // scan re-flagged the asset. After the fix both are rewritten.
+            var tempDir = System.IO.Path.GetTempPath();
+            var fixturePath = tempDir + "unity_open_mcp_relink_mixed_occurrences.mat";
+            var brokenGuid = "12121212121212121212121212121212";
+            var targetGuid = "34343434343434343434343434343434";
+
+            try
+            {
+                var yaml = "%YAML 1.1\n"
+                    + "%TAG !u! tag:unity3d.com,2011:\n"
+                    + "--- !u!21 &2100000\n"
+                    + "Material:\n"
+                    + "  m_Name: MixedOccurrences\n"
+                    + "  m_Texture: {fileID: 2800000, guid: " + brokenGuid + ", type: 3}\n"
+                    + "  m_StandaloneRef:\n"
+                    + "    guid: " + brokenGuid + "\n";
+
+                System.IO.File.WriteAllText(fixturePath, yaml);
+
+                var issueId = IssueKey.Build(
+                    "missing_references", VerifySeverity.Error,
+                    fixturePath, "missing_guid:" + brokenGuid);
+
+                var result = fix.Apply(issueId, targetGuid);
+
+                Assert.IsTrue(result.Success,
+                    $"Apply should succeed. Got: {result.Description}");
+
+                var rewritten = System.IO.File.ReadAllText(fixturePath);
+
+                // The triple was rewritten to the target.
+                Assert.IsTrue(
+                    rewritten.Contains($"{{fileID: 2800000, guid: {targetGuid}, type: 3}}"),
+                    "the PPtr triple must be rewritten to the target GUID. Rewritten: " + rewritten);
+                // The standalone bare-guid occurrence was ALSO rewritten.
+                Assert.IsTrue(rewritten.Contains($"guid: {targetGuid}"),
+                    "the bare standalone guid: occurrence must also be rewritten. Rewritten: " + rewritten);
+                // No occurrence of the broken GUID may remain anywhere.
+                Assert.IsFalse(rewritten.Contains(brokenGuid),
+                    "the broken GUID must be entirely gone after Apply. Rewritten: " + rewritten);
+            }
+            finally
+            {
+                if (System.IO.File.Exists(fixturePath))
+                    System.IO.File.Delete(fixturePath);
+            }
+        }
+
+        // -------------------------------------------------------------------
         // T2.3 — Bare issueCode (no GUID suffix) still works (backward compat)
         // -------------------------------------------------------------------
 

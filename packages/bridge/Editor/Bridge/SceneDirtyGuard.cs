@@ -43,9 +43,31 @@ namespace UnityOpenMcpBridge
         public static bool AppliesTo(string toolName, string body)
         {
             if (!ToolLifecycle.RequiresDirtyGuard(toolName)) return false;
+            // Additive scene_create / scene_open do not close any open scene,
+            // so a dirty scene cannot be lost and the native save modal cannot
+            // fire — the guard would only add friction. The shipped schema tells
+            // the agent exactly this ("No effect for 'additive' mode"). Only the
+            // default Single mode (which closes every open scene without saving)
+            // is preflighted. (B-N8.)
+            if (IsAdditiveSceneOp(toolName, body)) return false;
             // Explicit opt-out: the agent takes responsibility for the dirty
             // state (the lightweight --force equivalent — no auto-save).
             return !JsonBody.GetBool(body, "ignore_scene_dirty");
+        }
+
+        // scene_create and scene_open accept a `mode` parameter whose "additive"
+        // value keeps currently-open scenes open. The body's mode string is
+        // matched case-insensitively against "additive"; any other value
+        // (including the default "single" and a missing key) is treated as a
+        // scene-closing op that the guard must preflight.
+        private static bool IsAdditiveSceneOp(string toolName, string body)
+        {
+            if (toolName != "unity_open_mcp_scene_create"
+                && toolName != "unity_open_mcp_scene_open") return false;
+            var mode = JsonBody.GetString(body, "mode");
+            if (string.IsNullOrEmpty(mode)) return false;
+            return mode == "additive" ||
+                   System.String.Equals(mode, "additive", System.StringComparison.OrdinalIgnoreCase);
         }
 
         // Must be called on the main thread. Returns Allow when there is no

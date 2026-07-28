@@ -103,7 +103,16 @@ namespace UnityOpenMcpBridge.MetaTools
                 sb.Append("\"ruleId\":\"").Append(Esc(issue.RuleId)).Append("\",");
                 sb.Append("\"categoryId\":\"").Append(Esc(issue.RuleId)).Append("\",");
                 sb.Append("\"severity\":\"").Append(SeverityStr(issue.Severity)).Append("\",");
-                sb.Append("\"code\":\"").Append(Esc(issue.IssueCode)).Append("\",");
+                // B-N14 — `code` is the BARE catalog code (e.g. "missing_script")
+                // that an agent matches against the rule-catalog / SKILL.md
+                // (both advertise the bare tokens). `issueCode` carries the full
+                // key-discriminator form ("missing_script:<guid>",
+                // "invalid_layer:7", …) that IssueKey.Build uses for delta
+                // tracking and apply_fix uses to target the exact instance. The
+                // two were previously identical, so `code === "missing_script"`
+                // never matched because the value was `missing_script:<guid>`.
+                var bareCode = IssueKey.BareIssueCode(issue.IssueCode);
+                sb.Append("\"code\":\"").Append(Esc(bareCode)).Append("\",");
                 sb.Append("\"issueCode\":\"").Append(Esc(issue.IssueCode)).Append("\",");
                 sb.Append("\"assetPath\":\"").Append(Esc(issue.AssetPath)).Append("\",");
                 sb.Append("\"description\":\"").Append(Esc(issue.Description)).Append("\"");
@@ -115,12 +124,9 @@ namespace UnityOpenMcpBridge.MetaTools
                 // superseding the single fixId/fixSafe pair below (kept for
                 // backwards compatibility).
                 //
-                // Some issueCodes carry a GUID suffix (e.g. "missing_guid:<guid>")
-                // so the fix provider can identify the exact broken reference.
-                // The explainability table is keyed by the bare code, so strip
-                // the suffix before lookup. FixProviderRegistry uses CanFix
-                // which handles both forms.
-                var bareCode = IssueKey.BareIssueCode(issue.IssueCode);
+                // The explainability table is keyed by the bare code (computed
+                // above for the `code` wire field). FixProviderRegistry uses
+                // CanFix which handles both forms.
                 if (IssueExplainability.TryGet(issue.RuleId, bareCode, out var explain))
                 {
                     sb.Append(",\"rootCause\":\"").Append(Esc(explain.RootCause)).Append("\"");

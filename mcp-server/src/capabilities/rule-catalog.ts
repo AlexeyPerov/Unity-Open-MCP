@@ -14,7 +14,15 @@
 export type CapabilityStatus = "implemented" | "planned";
 
 export interface RuleIssueDescriptor {
-  /** Issue code emitted by the rule (e.g. `missing_script`). */
+  /**
+   * Bare issue code emitted by the rule (e.g. `missing_script`). In a
+   * scan_paths / validate_edit response this is the value of the per-issue
+   * `code` field — match it with `code === "<bare>"`. The companion
+   * `issueCode` field carries the full key-discriminator form
+   * (`missing_script:<guid>`, `invalid_layer:7`, …) used for gate-delta
+   * tracking and apply_fix targeting; branch on `code`, target with
+   * `issueCode`.
+   */
   code: string;
   /** Default severity (`Error` | `Warning`). */
   severity: "Error" | `Warning`;

@@ -20,11 +20,14 @@ namespace UnityOpenMcpBridge.MetaTools
     //
     // v1 does NOT roll back successful steps when a later step fails (same
     // partial-failure semantics as Coplay, documented in the tool contract).
-    // A partial batch propagates `Mutation.Success = false` (code-review fix B1),
-    // so GatePolicy.Execute short-circuits the validate/delta step — the same
-    // "mutation failed → no delta" treatment ApplyFixGateRunner applies. The
-    // partial-failure branch below adds the recovery guidance (inspect
-    // batch.results[], undo with editor_undo). Rollback-on-failure is v2.
+    // A partial batch propagates `Mutation.Success = false` (code-review fix B1)
+    // AND stamps `PartialCommit = true` when at least one step committed (B-N10),
+    // so GatePolicy.Execute STILL runs the post-mutation validate/delta on the
+    // committed work (the committed steps must be health-checked) while marking
+    // the run Failed so the agent reads batch.results[]. The partial-failure
+    // branch below adds the recovery guidance (inspect batch.results[], undo
+    // with editor_undo). A total failure (no step committed) short-circuits the
+    // validate/delta step as before. Rollback-on-failure is v2.
     public static class BatchExecuteGateRunner
     {
         public static GateDispatchResult Execute(

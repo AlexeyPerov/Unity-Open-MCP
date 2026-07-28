@@ -128,6 +128,15 @@ export function formatLaunchError(err: LaunchError, project: ProjectEntry): stri
       return `launch failed: ${err.message}`;
     case "alreadyRunning":
       return `launch refused: Unity is already running for "${project.name}" (pid ${err.pid}). Terminate it first, or click "Terminate & relaunch" in the status drawer.`;
+    case "persistFailed":
+      // B-N16 — on the launch path Unity already spawned (pid present), so
+      // this is a SUCCESS-WITH-WARNING, not a hard failure: the running
+      // Editor is fine, only the on-disk bookkeeping failed. The caller
+      // (ProjectsTab) checks err.pid to decide whether to merge the entry
+      // and skip the failure drawer.
+      return err.pid != null
+        ? `launched ${project.name} (pid ${err.pid}) with a warning: could not save launch state to disk (${err.message}). The config volume may be read-only or full — the running Editor is unaffected, but launch history will not persist.`
+        : `could not save project state to disk (${err.message}). The config volume may be read-only or full.`;
     default:
       return `launch failed: ${JSON.stringify(err)}`;
   }

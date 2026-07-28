@@ -125,6 +125,15 @@ export function describeLaunchForVerifyError(e: unknown): string {
         return `Failed to launch Unity: ${err.message}. Open the launch log from the Status drawer.`;
       case "portInvalid":
         return `Bridge port ${err.port} is not a valid TCP port. Pick a port in 1..65535.`;
+      case "alreadyRunning":
+        // B-N16 — a Unity process is already running for this project.
+        // Informational, not a hard failure: terminate it first or reuse it.
+        return `Unity is already running for this project (pid ${err.pid}). Terminate it first, or reuse the running Editor.`;
+      case "persistFailed":
+        // B-N16 — the launch itself succeeded but the config-volume write
+        // failed (read-only / full). Unity is running; only the bookkeeping
+        // (lastLaunchPid / frecency on disk) was lost.
+        return `Unity launched, but the Hub could not save its state to disk (${err.message}). The config volume may be read-only or full — the running Editor is unaffected, but launch history will not persist.`;
       default:
         return `${(e as { kind?: string }).kind ?? "unknown"}: ${
           (e as { message?: string }).message ?? "unknown error"

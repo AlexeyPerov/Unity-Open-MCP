@@ -236,7 +236,10 @@ Authoritative via `capabilities` (call for the live list). Implemented:
 
 ### Issue explainability
 
-Every issue in a `scan_paths` / `validate_edit` response carries optional explainability fields (beyond `ruleId` / `severity` / `code` / `assetPath` / `description`):
+Every issue in a `scan_paths` / `validate_edit` response carries optional explainability fields (beyond `ruleId` / `severity` / `code` / `assetPath` / `description`). Two code-shaped fields carry different things — match the right one:
+
+- **`code`** — the BARE catalog code (`missing_script`, `invalid_layer`, …). This is what `capabilities` / `list_rules` / the table above advertise. Branch on `code === "<bare>"`.
+- **`issueCode`** — the full key-discriminator form (`missing_script:<guid>`, `invalid_layer:7`, `duplicate_component:<type>:<gameObject>`). Used internally for gate-delta tracking (so two broken GUIDs on one asset do not collapse to one key) and by `apply_fix` to target the exact instance. Pass `issueCode` (or the whole `issue_id`) back to `apply_fix`, but branch recovery logic on the bare `code` / `rootCause`.
 
 - **`rootCause`** — a stable machine-readable code identifying *why* the issue class happens. Branch recovery on this, not on free-text. Values: `missing_guid_reference`, `missing_fileid_reference`, `missing_script_class`, `missing_dependency`, `orphaned_meta`, `duplicate_guid`, `structural_complexity`, `configuration_mismatch`, `resource_missing`, `build_blocker`. The same code is declared on the issue descriptor in `capabilities` / `list_rules` (`issues[].rootCause`).
 - **`evidence`** — the per-instance payload that fired *this* issue (the broken reference's GUID / fileID / line, the duplicate group's paths, the count vs threshold, etc.). Keys are issue-class-specific, always string-valued. Absent when the rule has no per-instance detail.

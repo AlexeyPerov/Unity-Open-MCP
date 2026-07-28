@@ -56,6 +56,16 @@ namespace UnityOpenMcpBridge.MetaTools
         // the top-level object only — nested UnityEngine.Object references
         // still collapse to handles (cyclic GameObject↔Component graphs,
         // throwing property access), so payload size stays bounded.
+        //
+        // B-N11 — a UnityEngine.Object root is routed STRAIGHT to ReflectObject,
+        // bypassing SerializeComposite's IDictionary → IEnumerable → ReflectObject
+        // dispatch. Several UnityEngine types implement IEnumerable in a way that
+        // hides the reflective walk the caller asked for: Transform enumerates
+        // its children, so object_get_data on a Transform/RectTransform emitted
+        // "data":[{child-handle}, …] and dropped position/rotation/scale/parent.
+        // ReflectObject is the documented behaviour for the reflective root, so a
+        // UnityEngine.Object root goes there directly. (Non-Unity roots keep the
+        // composite dispatch — a List<T> root should still serialize as an array.)
         public static string SerializeReflectiveRoot(object value, SerializeOptions options)
         {
             if (options == null) options = new SerializeOptions();
@@ -65,6 +75,11 @@ namespace UnityOpenMcpBridge.MetaTools
             // via the overloaded == operator; mirror SerializeInternal's guard.
             if (value is UnityEngine.Object fakeNull && fakeNull == null) return JsonNull;
             if (!value.GetType().IsValueType) visited.Add(value);
+            // A UnityEngine.Object root wants the reflective walk (fields +
+            // properties), not the IEnumerable dispatch that would otherwise
+            // fire for Transform (child enumeration) and similar types.
+            if (value is UnityEngine.Object)
+                return ReflectObject(value, value.GetType(), 0, options, visited);
             return SerializeComposite(value, value.GetType(), 0, options, visited);
         }
 

@@ -933,8 +933,16 @@ namespace UnityOpenMcpBridge
                 // mutation actually succeeded and the policy requires it; a
                 // failed mutation (e.g. scene_dirty refusal) should return
                 // immediately with no settle wait.
+                //
+                // B-N10 — a partial-batch failure (mutation.Success == false but
+                // PartialCommit == true) still wrote assets via the committed
+                // steps, so the settle wait must run here too — otherwise the
+                // response returns while the Editor is still importing what the
+                // successful steps wrote. A total failure (Success == false,
+                // PartialCommit == false) committed nothing and skips the wait.
                 var lifecycle = ToolLifecycle.Resolve(toolName);
-                if (result.Mutation != null && result.Mutation.Success
+                if (result.Mutation != null
+                    && (result.Mutation.Success || result.Mutation.PartialCommit)
                     && ToolLifecycle.RequiresSettleWait(lifecycle))
                 {
                     result.SettleMs = EditorSettleWait.Wait(lifecycle);

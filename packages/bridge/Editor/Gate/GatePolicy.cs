@@ -201,7 +201,7 @@ namespace UnityOpenMcpBridge
 
             var mutationResult = mutation();
 
-            if (!mutationResult.Success)
+            if (!mutationResult.Success && !mutationResult.PartialCommit)
             {
                 gateSw.Stop();
                 return new GateDispatchResult
@@ -297,6 +297,20 @@ namespace UnityOpenMcpBridge
             }
 
             var (outcome, gateFailed) = ResolveOutcome(mode, delta);
+
+            // B-N10 — a partial-commit run (e.g. batch_partial_failure with some
+            // steps committed) reached here so the validate/delta health-checks
+            // the committed work. The mutation itself still failed, so override
+            // a delta-driven Passed/Warned to Failed: the agent must see the run
+            // as failed (mutation.success is false) and read batch.results[] for
+            // the per-step breakdown. The delta is still attached so the caller
+            // can see whether the committed steps introduced new issues.
+            if (mutationResult.PartialCommit && !mutationResult.Success)
+            {
+                outcome = GateOutcome.Failed;
+                gateFailed = true;
+            }
+
             var nextSteps = GenerateAgentNextSteps(delta, outcome);
 
             return new GateDispatchResult

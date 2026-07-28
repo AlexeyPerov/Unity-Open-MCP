@@ -80,10 +80,11 @@ namespace UnityOpenMcpBridge
             // RestartThenSettle: both default to Single mode, which closes all
             // open scenes without prompting or saving — the active-scene dirty
             // guard must preflight them so a user's unsaved scene work is not
-            // silently discarded (see SceneDirtyGuard.AppliesTo). scene_create
-            // with mode:"additive" still routes through the guard, but the guard
-            // returns Allow when no scene is dirty, so additive use stays
-            // frictionless; the explicit opt-out is ignore_scene_dirty:true.
+            // silently discarded (see SceneDirtyGuard.AppliesTo). scene_create /
+            // scene_open with mode:"additive" keep open scenes, so
+            // SceneDirtyGuard.AppliesTo short-circuits them before the preflight
+            // — only the Single (scene-closing) path is guarded. The explicit
+            // opt-out for the Single path is ignore_scene_dirty:true.
             // (BatchExecuteTool additionally refuses a nested scene_create
             // unless mode:"additive" — the single-dispatch path is the one the
             // dirty guard protects.)

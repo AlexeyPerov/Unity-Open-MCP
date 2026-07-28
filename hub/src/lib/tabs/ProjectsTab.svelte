@@ -815,6 +815,26 @@
           conflictPid: err.pid,
           timestamp: new Date().toISOString(),
         });
+      } else if (err.type === "persistFailed" && err.pid != null) {
+        // B-N16 — Unity DID spawn (the backend carries the pid + post-launch
+        // entry), but the config-volume write failed. Treat as a SUCCESS-
+        // WITH-WARNING: merge the authoritative entry so `lastLaunchPid` is
+        // recorded (otherwise "Terminate Unity" / "Terminate & relaunch" have
+        // nothing to act on), then surface a calm notice — do NOT route
+        // through `handleLaunchFailure`, which would auto-open the drawer and
+        // dump the launch-log tail as if the spawn itself had failed.
+        if (err.project) {
+          await projectsStore.update(err.project);
+        }
+        const notice = formatLaunchError(err, project);
+        S.appendDrawerLog(notice);
+        S.setLaunchInfoNotice({
+          projectId: project.id,
+          projectName: project.name,
+          message: notice,
+          conflictPid: err.pid,
+          timestamp: new Date().toISOString(),
+        });
       } else {
         const message = formatLaunchError(err, project);
         const autoOpen =

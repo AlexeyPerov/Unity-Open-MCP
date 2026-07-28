@@ -58,16 +58,21 @@ namespace UnityOpenMcpBridge.MetaTools
                 sb.Append("\"ruleId\":\"").Append(Esc(issue.RuleId)).Append("\",");
                 sb.Append("\"categoryId\":\"").Append(Esc(issue.RuleId)).Append("\",");
                 sb.Append("\"severity\":\"").Append(SeverityStr(issue.Severity)).Append("\",");
-                sb.Append("\"code\":\"").Append(Esc(issue.IssueCode)).Append("\",");
+                // B-N14 — `code` is the BARE catalog code an agent matches
+                // against the rule-catalog / SKILL.md; `issueCode` carries the
+                // full key-discriminator form IssueKey.Build uses for delta
+                // tracking and apply_fix targeting. See ScanPathsTool for the
+                // full rationale.
+                var bareCode = IssueKey.BareIssueCode(issue.IssueCode);
+                sb.Append("\"code\":\"").Append(Esc(bareCode)).Append("\",");
                 sb.Append("\"issueCode\":\"").Append(Esc(issue.IssueCode)).Append("\",");
                 sb.Append("\"assetPath\":\"").Append(Esc(issue.AssetPath)).Append("\",");
                 sb.Append("\"description\":\"").Append(Esc(issue.Description)).Append("\"");
 
                 // M25 Plan 3 — explainability (see ScanPathsTool for details).
-                // Strip any GUID suffix from the issueCode before the
-                // explainability / registry lookups (those key on the bare
-                // code). CanFix handles both forms.
-                var bareCode = IssueKey.BareIssueCode(issue.IssueCode);
+                // The explainability / registry lookups key on the bare code
+                // (computed above for the `code` wire field). CanFix handles
+                // both forms.
                 if (IssueExplainability.TryGet(issue.RuleId, bareCode, out var explain))
                 {
                     sb.Append(",\"rootCause\":\"").Append(Esc(explain.RootCause)).Append("\"");

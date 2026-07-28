@@ -428,24 +428,42 @@ namespace UnityOpenMcpVerify.Fixes
             // and replace it whole. The `(?<![\w])` negative-lookbehind guard is
             // preserved when matching just `guid:` on its own (the fallback for
             // .meta / non-PPtr contexts where we cannot resolve a fileID).
-            string newContents;
-            int replaced;
+            // B-N12 — a single broken GUID can appear in MORE than one syntactic
+            // shape on the same asset:
+            //   1. A flow-style PPtr triple `{fileID: n, guid: <g>, type: m}`
+            //      (the common inline reference in .prefab/.unity/.mat YAML).
+            //   2. A non-triple occurrence the triple regex does not cover:
+            //      a negative/omitted local id, a `guid:` key on its own line
+            //      (a .meta Guid field, an Addressables-style `m_AssetGUID:`),
+            //      or any other shape the scanner's ExternalFileAndGuid flags.
+            // The previous code, when at least one TRIPLE matched, replaced only
+            // triples and never fell back, so the non-triple occurrences were
+            // left dangling while Success=true was reported — the next scan re-
+            // flagged the same asset and a scan→apply_fix agent looped. The
+            // rewrite now ALWAYS runs the bare-guid pass over the triple-rewritten
+            // text (or the original when no triple matched / fileID was
+            // unresolvable), so every `guid: <brokenGuid>` occurrence is updated.
+            var triplePattern = new Regex(
+                @"\{fileID:\s*(\d+),\s*guid:\s*" + Regex.Escape(brokenGuid) + @"\s*,\s*type:\s*(\d+)\s*\}",
+                RegexOptions.Compiled);
+            // Bare-guid key pattern — matches any `guid: <brokenGuid>` NOT
+            // preceded by a word char (excludes `m_guid:` / `second_guid:`
+            // substrings while matching both line-start and inline occurrences).
+            // Used for the .meta / standalone-key path AND for the residual
+            // non-triple occurrences after a triple rewrite.
+            var guidPattern = new Regex(
+                @"(?<![\w])guid:\s*" + Regex.Escape(brokenGuid) + @"\b",
+                RegexOptions.Compiled);
+
+            int tripleReplaced = 0;
+            string working = contents;
             if (targetFileId.HasValue)
             {
-                var triplePattern = new Regex(
-                    @"\{fileID:\s*(\d+),\s*guid:\s*" + Regex.Escape(brokenGuid) + @"\s*,\s*type:\s*(\d+)\s*\}",
-                    RegexOptions.Compiled);
-                replaced = triplePattern.Matches(contents).Count;
-                if (replaced == 0)
+                tripleReplaced = triplePattern.Matches(working).Count;
+                if (tripleReplaced > 0)
                 {
-                    // No PPtr triple matched — fall back to the bare-guid path
-                    // below, which catches `.meta` / standalone `guid:` lines.
-                    newContents = null;
-                }
-                else
-                {
-                    newContents = triplePattern.Replace(
-                        contents,
+                    working = triplePattern.Replace(
+                        working,
                         m =>
                         {
                             // A15: preserve the existing fileID when it is
@@ -462,37 +480,28 @@ namespace UnityOpenMcpVerify.Fixes
                         });
                 }
             }
-            else
-            {
-                newContents = null;
-            }
 
-            if (newContents == null)
+            // B-N12 — always run the bare-guid pass on the (possibly triple-
+            // rewritten) text. A triple already rewrote its inline `guid:`
+            // token to the target, so guidPattern naturally re-matches zero of
+            // those; it ONLY catches the residual non-triple occurrences the
+            // triple pass left in place. Counting is done AFTER the triple
+            // rewrite so already-rewritten triples are not double-counted.
+            int guidReplaced = guidPattern.Matches(working).Count;
+            int replaced = tripleReplaced + guidReplaced;
+            if (replaced == 0)
             {
-                // Fallback: cannot resolve a target main fileID (e.g. the
-                // target is a sub-asset only, or the file has no PPtr triples
-                // to rewrite). Restrict the edit to the bare guid: key, which
-                // is the safe .meta / standalone-key path. PPtr-fileID-bearing
-                // references are left for the next scan to re-flag with the
-                // resolved-target fileID already in hand (the common case is
-                // resolvable, so this fallback is rarely taken).
-                var guidPattern = new Regex(
-                    @"(?<![\w])guid:\s*" + Regex.Escape(brokenGuid) + @"\b",
-                    RegexOptions.Compiled);
-
-                replaced = guidPattern.Matches(contents).Count;
-                if (replaced == 0)
+                return new FixResult
                 {
-                    return new FixResult
-                    {
-                        Success = false,
-                        Description = $"Broken GUID '{brokenGuid}' not found in '{assetPath}'. The issue may have already been resolved.",
-                        TouchedPaths = null
-                    };
-                }
-
-                newContents = guidPattern.Replace(contents, $"guid: {targetGuid}");
+                    Success = false,
+                    Description = $"Broken GUID '{brokenGuid}' not found in '{assetPath}'. The issue may have already been resolved.",
+                    TouchedPaths = null
+                };
             }
+
+            string newContents = guidReplaced > 0
+                ? guidPattern.Replace(working, $"guid: {targetGuid}")
+                : working;
 
             try
             {
@@ -510,19 +519,28 @@ namespace UnityOpenMcpVerify.Fixes
 
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
 
-            // A15: the fileID note describes the rewrite behaviour honestly.
-            // When the target's fileID set resolved, valid existing fileIDs
-            // (sub-object references) are preserved and only invalid ones are
-            // rewritten to the main object id; otherwise only the guid: token
-            // was touched.
-            var fileIdNote = targetFileId.HasValue
+            // A15/B-N12: the description reports how many occurrences were
+            // rewritten and in which pass, so an agent can tell a triple-only
+            // relink (fileID-aware) from one that also touched bare-guid keys
+            // (.meta / Addressables / standalone guid: lines). When the target's
+            // fileID set resolved, valid existing fileIDs (sub-object references)
+            // are preserved and only invalid ones are rewritten to the main id.
+            var fileIdNote = targetFileId.HasValue && tripleReplaced > 0
                 ? $" (fileID rewritten to main object where the existing id was invalid for the target; valid sub-object ids preserved)"
-                : " (fileID not resolvable — only the guid: token was rewritten)";
+                : (targetFileId.HasValue
+                    ? " (no PPtr triples matched — only bare guid: keys were rewritten)"
+                    : " (fileID not resolvable — only the guid: token was rewritten)");
+            var countNote = replaced == 1
+                ? " (1 occurrence"
+                : $" ({replaced} occurrences";
+            countNote += tripleReplaced > 0 && guidReplaced > 0
+                ? $": {tripleReplaced} triple + {guidReplaced} bare-guid)"
+                : (tripleReplaced > 0 ? " triple)" : " bare-guid)");
 
             return new FixResult
             {
                 Success = true,
-                Description = $"Relinked broken GUID '{brokenGuid}' -> '{targetGuid}' in '{assetPath}'{fileIdNote}.",
+                Description = $"Relinked broken GUID '{brokenGuid}' -> '{targetGuid}' in '{assetPath}'{countNote}{fileIdNote}.",
                 TouchedPaths = new[] { assetPath }
             };
         }

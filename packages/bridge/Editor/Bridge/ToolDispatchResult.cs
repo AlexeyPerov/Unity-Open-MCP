@@ -7,6 +7,17 @@ namespace UnityOpenMcpBridge
         public string ErrorCode { get; }
         public string ErrorMessage { get; }
 
+        // B-N10 — true when a FAILED result still committed side effects the gate
+        // must health-check. The motivating case is a partial batch_execute
+        // (some steps succeeded before a later step failed): Success is false so
+        // the gate marks the run failed, but the committed steps wrote assets and
+        // the post-mutation validate/delta + settle wait must still run, or those
+        // writes ship without a health check and the response can return while
+        // the Editor is still importing them. Default false preserves the
+        // existing "a failed mutation committed nothing" contract for every
+        // other tool. Set via the partial-batch factory below.
+        public bool PartialCommit { get; private set; }
+
         public ToolDispatchResult(bool success, string output, string errorCode, string errorMessage)
         {
             Success = success;
@@ -35,6 +46,16 @@ namespace UnityOpenMcpBridge
         public static ToolDispatchResult FailWithOutput(string code, string message, string output)
         {
             return new ToolDispatchResult(false, output, code, message);
+        }
+
+        // B-N10 — a partial-batch failure: Success is false (one or more steps
+        // failed) but PartialCommit is true (at least one step committed), so the
+        // gate must still run the post-mutation validate/delta and the settle
+        // wait on the committed work. Mirrors FailWithOutput's shape (keeps the
+        // per-step JSON) and stamps PartialCommit = true.
+        public static ToolDispatchResult PartialFailure(string code, string message, string output)
+        {
+            return new ToolDispatchResult(false, output, code, message) { PartialCommit = true };
         }
     }
 }

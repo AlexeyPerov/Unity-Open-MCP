@@ -45,8 +45,32 @@ pub enum LaunchError {
     /// version — was NOT recorded to disk, so the next boot loses it.
     /// Surfaced as an error instead of silently swallowed so the user
     /// learns the config volume is unwritable.
+    ///
+    /// B-N16 — when this fires on the LAUNCH path Unity has ALREADY spawned,
+    /// so the spawned PID and the post-launch `ProjectEntry` (with the
+    /// in-memory `lastLaunchPid` / `lastLaunchAt` / frecency bump the backend
+    /// still applied) are carried alongside the error. The frontend treats a
+    /// `persistFailed` carrying a `pid` as a SUCCESS-WITH-WARNING: it merges
+    /// `pid` / `project` so "Terminate Unity" / "Terminate & relaunch" still
+    /// work, and surfaces the warning instead of routing through the launch-
+    /// failure drawer. On the version-REFRESH path no Unity was spawned, so
+    /// `pid` / `project` are `None` and the frontend treats it as a plain
+    /// warning (the version card shows the stale value).
     #[serde(rename_all = "camelCase")]
-    PersistFailed { project_id: String, message: String },
+    PersistFailed {
+        project_id: String,
+        message: String,
+        /// The PID of the Unity process that DID spawn on the launch path
+        /// (so the frontend can record `lastLaunchPid` despite the persist
+        /// failure). `None` on the version-refresh path (no spawn).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pid: Option<u32>,
+        /// The post-launch ProjectEntry the backend applied in memory (the
+        /// on-disk file is stale, but the live session reflects the launch).
+        /// `None` on the version-refresh path.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        project: Option<crate::config::schemas::ProjectEntry>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -557,6 +581,16 @@ fn launch_project_inner(
             typed: LaunchError::PersistFailed {
                 project_id: project_id.to_string(),
                 message: e.to_string(),
+                // B-N16 — Unity already spawned; carry the PID and the
+                // post-launch entry so the frontend can record
+                // `lastLaunchPid` despite the persist failure (otherwise
+                // "Terminate Unity" has nothing to act on).
+                pid: Some(pid),
+                project: Some(
+                    updated_project
+                        .clone()
+                        .expect("entry exists — it was just mutated"),
+                ),
             },
             project_id: project_id.to_string(),
             project_name,
@@ -633,9 +667,14 @@ pub fn refresh_project_version(
     // version again with no indication anything went wrong.
     if let Err(e) = persistence::save_projects(&projects) {
         log::error!("Failed to persist version refresh: {}", e);
+        // B-N16 — version refresh does NOT spawn Unity, so pid / project are
+        // None (the frontend treats a pid-less persistFailed as a plain
+        // warning, not a success-with-warning).
         return Err(LaunchError::PersistFailed {
             project_id,
             message: e.to_string(),
+            pid: None,
+            project: None,
         });
     }
 

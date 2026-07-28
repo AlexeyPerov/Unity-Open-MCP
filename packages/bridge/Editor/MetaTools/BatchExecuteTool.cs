@@ -62,21 +62,33 @@ namespace UnityOpenMcpBridge.MetaTools
         // lifecycle taxonomy catches the whole class as new RestartThenSettle
         // tools are added, instead of hardcoding each tool name. Returns the
         // resolved lifecycle so the caller can build a precise error message.
+        //
+        // scene_create is RestartThenSettle too, but its unsafety is MODE-
+        // DEPENDENT: Single mode replaces the scene stack (unsafe mid-batch),
+        // while additive mode preserves it (safe). It is therefore carved out
+        // here and handled by the param-aware IsNestedSceneStackUnsafe check,
+        // which runs FIRST (see the call site). scene_open has no additive-safe
+        // case in the batch context and stays caught here. (B-N9.)
         private static bool IsNestedReloadUnsafe(string toolName, out LifecyclePolicy policy)
         {
             policy = ToolLifecycle.Resolve(toolName);
-            return policy == LifecyclePolicy.RestartThenSettle;
+            if (policy != LifecyclePolicy.RestartThenSettle) return false;
+            // scene_create's safety depends on its `mode` param; the param-aware
+            // IsNestedSceneStackUnsafe check (run before this one at the call
+            // site) decides, so additive scene_create is not lumped into the
+            // unconditional reload-unsafe refusal here.
+            if (toolName == "unity_open_mcp_scene_create") return false;
+            return true;
         }
 
-        // M30-polish review follow-up — scene_create is classified EditorSettle
-        // (it does not force a domain reload), so IsNestedReloadUnsafe above does
-        // NOT catch it. But scene_create defaults to NewSceneMode.Single, which
-        // replaces the active scene stack — a mid-batch Single create/open
-        // silently discards unsaved changes in the currently-open scenes, the
-        // same disruption class T5.2 targets. scene_open IS RestartThenSettle and
-        // is already caught by the lifecycle check, but scene_create is not, so
-        // it gets a dedicated param-aware guard here. Additive mode preserves the
-        // scene stack and is allowed.
+        // scene_create defaults to NewSceneMode.Single, which replaces the active
+        // scene stack — a mid-batch Single create silently discards unsaved
+        // changes in the currently-open scenes, the same disruption class T5.2
+        // targets. scene_open IS ReloadUnsafe and is already caught by the
+        // lifecycle check above; scene_create is carved out of that check so its
+        // mode can be inspected here. Additive mode preserves the scene stack and
+        // is allowed. (B-N9 — this check MUST run before IsNestedReloadUnsafe so
+        // an additive scene_create is accepted instead of refused wholesale.)
         private const string SingleModeReason =
             "defaults to Single mode (or has mode:\"single\"), which replaces the " +
             "active scene stack and can discard unsaved changes in open scenes";
@@ -157,10 +169,28 @@ namespace UnityOpenMcpBridge.MetaTools
                         "single top-level call instead.");
                 }
 
+                // B-N9 — scene_create's safety depends on its `mode` param
+                // (additive preserves the scene stack; Single replaces it). Run
+                // this param-aware check BEFORE the lifecycle-derived reload
+                // check: scene_create is RestartThenSettle, so the reload check
+                // would otherwise refuse it wholesale even with mode:"additive",
+                // contradicting the schema and making this branch dead code.
+                // The reload check below carves scene_create out accordingly.
+                if (IsNestedSceneStackUnsafe(tool, paramsBody, out var sceneReason))
+                {
+                    return ToolDispatchResult.Fail(
+                        "batch_nested_reload_unsafe",
+                        $"commands[{i}] tool '{tool}' is not invokable inside a batch: " +
+                        $"it {sceneReason}. Pass mode:\"additive\" or use it as a " +
+                        "single top-level call instead.");
+                }
+
                 // T5.2 — deny RestartThenSettle nested steps. A domain reload
                 // or scene switch mid-batch silently aborts every later step
                 // (the settle wait can't bridge a reload). Refuse up-front with
-                // a clear error naming the offending step and why.
+                // a clear error naming the offending step and why. scene_create
+                // is handled by the param-aware check above and carved out of
+                // IsNestedReloadUnsafe so an additive scene_create is accepted.
                 if (IsNestedReloadUnsafe(tool, out var unsafePolicy))
                 {
                     return ToolDispatchResult.Fail(
@@ -169,20 +199,6 @@ namespace UnityOpenMcpBridge.MetaTools
                         $"{unsafePolicy.ToWireString()} and is not invokable inside a batch: " +
                         "it may trigger a domain reload or scene switch that silently aborts " +
                         "the remaining steps. Use it as a single top-level call instead.");
-                }
-
-                // Review follow-up — scene_create is EditorSettle (no domain
-                // reload) but its default Single mode replaces the scene stack.
-                // Block the Single/default case; allow additive. Same error code
-                // as the lifecycle deny so the contract stays consistent, with a
-                // message explaining the scene-stack reason.
-                if (IsNestedSceneStackUnsafe(tool, paramsBody, out var sceneReason))
-                {
-                    return ToolDispatchResult.Fail(
-                        "batch_nested_reload_unsafe",
-                        $"commands[{i}] tool '{tool}' is not invokable inside a batch: " +
-                        $"it {sceneReason}. Pass mode:\"additive\" or use it as a " +
-                        "single top-level call instead.");
                 }
 
                 steps.Add(new BatchStep { Tool = tool, ParamsBody = paramsBody });
@@ -291,12 +307,30 @@ namespace UnityOpenMcpBridge.MetaTools
                 // Returning Ok(...) here would hardcode Success=true (see
                 // ToolDispatchResult.Ok) and make the "one or more steps failed"
                 // guidance dead code — code-review finding B1.
+                //
+                // B-N10 — when at least one step committed (successCount > 0)
+                // the failure is PARTIAL: stamp PartialCommit = true via the
+                // PartialFailure factory so GatePolicy still runs the post-
+                // mutation validate/delta on the committed work (instead of
+                // returning right after the mutation) and BridgeHttpServer still
+                // waits for the asset/compile settle. A total failure
+                // (successCount == 0) keeps the old shape — nothing committed,
+                // so there is nothing to health-check.
                 bool batchSuccess = failureCount == 0;
                 string batchOutput = BuildBatchOutput(
                     batchSuccess, successCount, failureCount, failFast, results, sw.ElapsedMilliseconds);
                 if (batchSuccess)
                 {
                     return ToolDispatchResult.Ok(batchOutput);
+                }
+                if (successCount > 0)
+                {
+                    return ToolDispatchResult.PartialFailure(
+                        "batch_partial_failure",
+                        failureCount + " batch step(s) failed; inspect batch.results[] for per-step " +
+                        "status and error detail. Successful steps before the failure are committed " +
+                        "(v1 does not roll them back) — undo with a single editor_undo if needed.",
+                        batchOutput);
                 }
                 return new ToolDispatchResult(
                     false, batchOutput, "batch_partial_failure",

@@ -365,5 +365,51 @@ namespace UnityOpenMcpBridge.Tests
                 Object.DestroyImmediate(mat);
             }
         }
+
+        // -------------------------------------------------------------------
+        // Regression: B-N11 — object_get_data on a Transform emitted an array
+        // of child handles instead of the documented reflective walk. Transform
+        // implements IEnumerable (it enumerates children), so
+        // SerializeComposite's IEnumerable dispatch fired before ReflectObject
+        // and the position/rotation/scale/parent properties were all dropped.
+        // The fix routes a UnityEngine.Object root straight to ReflectObject.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public static void SerializeReflectiveRoot_Transform_ReflectsPropertiesNotChildren()
+        {
+            var go = new GameObject("__MCPTest_TransformRoot");
+            try
+            {
+                // Give it a child so the pre-fix IEnumerable path would have
+                // emitted a non-empty child array.
+                var child = new GameObject("__MCPTest_TransformChild");
+                child.transform.SetParent(go.transform, false);
+
+                var t = go.transform;
+                t.position = new Vector3(1, 2, 3);
+                var opts = new SerializeOptions { MaxDepth = 2, MaxListItems = 5 };
+                var result = OutputSerializer.SerializeReflectiveRoot(t, opts);
+
+                // The root must be a reflective object ($type), NOT a JSON array
+                // of child handles (the pre-fix shape: "data":[{handle}, …]).
+                StringAssert.Contains("\"$type\":\"Transform\"", result);
+                Assert.IsFalse(result.StartsWith("["),
+                    "Transform root must not serialize as a JSON array of children: " + result);
+
+                // The reflective walk must surface Transform's core properties
+                // (position/rotation/scale/parent) — all dropped by the pre-fix
+                // IEnumerable dispatch. position is a Vector3 nested value; its
+                // components must appear somewhere in the payload.
+                StringAssert.Contains("\"position\"", result);
+                StringAssert.Contains("\"rotation\"", result);
+                StringAssert.Contains("\"scale\"", result);
+                StringAssert.Contains("\"parent\"", result);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
     }
 }

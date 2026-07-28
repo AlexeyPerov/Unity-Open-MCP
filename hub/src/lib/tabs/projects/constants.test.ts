@@ -174,6 +174,29 @@ test("formatLaunchError formats each error type", () => {
   );
 });
 
+// B-N16 — persistFailed is a success-with-warning on the launch path (pid
+// present: Unity spawned) and a plain warning on the refresh path (no pid).
+test("formatLaunchError persistFailed with pid reports success-with-warning", () => {
+  const msg = formatLaunchError(
+    { type: "persistFailed", projectId: "x", message: "read-only volume", pid: 4321 } as never,
+    makeProject(),
+  );
+  assert.match(msg, /launched TestProject/);
+  assert.match(msg, /pid 4321/);
+  assert.match(msg, /read-only volume/);
+});
+
+test("formatLaunchError persistFailed without pid reports plain warning", () => {
+  const msg = formatLaunchError(
+    { type: "persistFailed", projectId: "x", message: "read-only volume" } as never,
+    makeProject(),
+  );
+  assert.match(msg, /could not save project state/);
+  assert.match(msg, /read-only volume/);
+  // Must NOT claim a launch happened (no pid on the refresh path).
+  assert.doesNotMatch(msg, /launched/);
+});
+
 test("formatAddProjectError formats each error type", () => {
   assert.match(formatAddProjectError({ type: "notADirectory", path: "/x" } as never), /not a directory/);
   assert.match(formatAddProjectError({ type: "duplicate", path: "/x" } as never), /already in list/);

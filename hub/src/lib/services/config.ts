@@ -392,8 +392,22 @@ export type LaunchError =
     }
   /** H36: post-launch persist of projects.json failed (read-only / full
    *  config volume). The launch itself may have succeeded (Unity may be
-   *  running), but the bookkeeping was not recorded to disk. */
-  | { type: "persistFailed"; projectId: string; message: string };
+   *  running), but the bookkeeping was not recorded to disk.
+   *
+   *  B-N16 — on the LAUNCH path Unity has already spawned, so `pid` and
+   *  `project` (the post-launch entry with the in-memory `lastLaunchPid` /
+   *  frecency bump) are present; treat it as a SUCCESS-WITH-WARNING (merge
+   *  `pid` / `project`, surface the warning). On the version-REFRESH path
+   *  no Unity was spawned, so both are absent — treat as a plain warning. */
+  | {
+      type: "persistFailed";
+      projectId: string;
+      message: string;
+      /** Present on the launch path (Unity spawned); absent on refresh. */
+      pid?: number;
+      /** Post-launch entry; present on the launch path, absent on refresh. */
+      project?: ProjectEntry;
+    };
 
 export type RunUnityError =
   | { type: "versionMissing" }
