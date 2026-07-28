@@ -81,6 +81,21 @@ namespace UnityOpenMcpBridge.MetaTools
         // mutation. Callers that legitimately want a non-Assets path must edit
         // it via a different mechanism — reserialize is scoped to Assets/ by
         // design (the comment two lines above always stated this).
+        //
+        // A7 — the gate scope (paths_hint) is built from the RAW request array
+        // before Execute runs, so NormalizeForHint exposes the validated subset
+        // (the same containment check, skipping the file-existence + extension
+        // gates that would force a disk probe) for the checkpoint builder. This
+        // keeps an unresolvable `..`/absolute path out of VerifyGateAdapter.
+        // CreateCheckpoint without duplicating the containment logic at the call
+        // site.
+        public static string[] NormalizeForHint(string[] rawPaths)
+        {
+            if (rawPaths == null || rawPaths.Length == 0) return null;
+            var normalized = NormalizePaths(rawPaths, out _);
+            return normalized.Count == 0 ? null : normalized.ToArray();
+        }
+
         private static System.Collections.Generic.List<string> NormalizePaths(
             string[] rawPaths, out System.Collections.Generic.List<string> containmentInvalid)
         {

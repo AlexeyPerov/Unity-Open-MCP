@@ -205,17 +205,20 @@ pub fn write_package_manifest(
     bump_changelog: Option<bool>,
     changelog_label: Option<String>,
 ) -> Result<PackageManifest, ManifestError> {
-    let (entry, projects) = {
+    // A10 — only the entry is needed up-front; the projects snapshot cloned
+    // here went stale during write_manifest_at + the optional changelog bump
+    // and clobbered concurrent changes on write-back. The persist now goes
+    // through with_projects against the fresh live state (see below).
+    let entry = {
         let guard = state.projects.lock().unwrap();
-        let entry = guard
+        guard
             .projects
             .iter()
             .find(|p| p.id == project_id)
             .cloned()
             .ok_or_else(|| ManifestError::ProjectNotFound {
                 project_id: project_id.clone(),
-            })?;
-        (entry, guard.clone())
+            })?
     };
     let path = manifest_path_for(&entry)?;
     write_manifest_at(&path, &manifest)?;
@@ -244,23 +247,28 @@ pub fn write_package_manifest(
     // No project-entry mutation needed (the manifest lives on disk,
     // not on ProjectEntry), but we re-save to bump lastModifiedAt so
     // the list's m-time column reflects the edit.
-    let mut updated = projects;
+    // A10 — apply the mtime bump to the FRESH live state via with_projects
+    // instead of cloning a snapshot before write_manifest_at and writing it
+    // back afterwards. The snapshot went stale if any concurrent change (a
+    // launch, a hide, an env-var save) landed during the manifest write + the
+    // optional changelog prepend, and assigning the stale clone back into the
+    // Mutex discarded those changes.
     let now = chrono::Utc::now().to_rfc3339();
-    for p in updated.projects.iter_mut() {
-        if p.id == project_id {
-            p.last_modified_at = Some(now);
-            break;
-        }
-    }
-    if let Err(e) = persistence::save_projects(&updated) {
+    if let Err(e) = crate::config::commands::with_projects(
+        &state.projects,
+        |p| {
+            for entry in p.projects.iter_mut() {
+                if entry.id == project_id {
+                    entry.last_modified_at = Some(now.clone());
+                    break;
+                }
+            }
+        },
+    ) {
         log::error!("Failed to persist project mtime after manifest write: {}", e);
         return Err(ManifestError::PersistFailed {
             message: e.to_string(),
         });
-    }
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = updated;
     }
 
     Ok(manifest)

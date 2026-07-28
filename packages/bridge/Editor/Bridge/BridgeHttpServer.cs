@@ -794,8 +794,19 @@ namespace UnityOpenMcpBridge
                     }
                     else if (toolName == "unity_open_mcp_reserialize")
                     {
-                        // reserialize's `paths` array IS the mutation scope — reuse it as the gate hint.
-                        pathsHint = JsonBody.GetStringArray(body, "paths");
+                        // A7 — reserialize's `paths` array IS the mutation scope,
+                        // but the raw array can contain escapes (`..`, absolute
+                        // paths) the tool will reject. Building the checkpoint
+                        // scope from the RAW array hands those unresolvable paths
+                        // to the verify rules before the tool refuses. Reuse the
+                        // tool's own normalization (the same containment check
+                        // Execute runs) so the hint contains only validated
+                        // Assets/-relative paths — matching exactly what the
+                        // mutation will touch (or nothing, if every path is
+                        // invalid, in which case the gate is a cheap no-op and
+                        // the tool's structured `invalid_paths` error follows).
+                        var reserializeRaw = JsonBody.GetStringArray(body, "paths");
+                        pathsHint = ReserializeAssetsTool.NormalizeForHint(reserializeRaw);
                     }
                     else if (toolName == "unity_open_mcp_assets_refresh")
                     {

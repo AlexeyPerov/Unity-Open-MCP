@@ -417,7 +417,14 @@ export async function walkMeta(
   // than `permits`. Recursion fans out freely; only the leaf ops are gated.
   const sem = semaphore ?? new AsyncSemaphore();
   let entries: string[];
-  try { entries = await readdir(dir); } catch { return; }
+  // A9 — gate readdir under the SAME permit as stat/fn. readdir is the op that
+  // actually opens a directory handle, so leaving it ungated let the in-flight
+  // directory-handle count grow with the number of directories in the tree
+  // (each child walk issued its readdir ungated the moment its parent's stat
+  // resolved), contradicting the "global in-flight count is bounded by
+  // WALK_CONCURRENCY" invariant the M16 comment claims. On error (missing /
+  // unreadable dir) there is nothing to walk — return early.
+  try { entries = await sem.withPermit(() => readdir(dir)); } catch { return; }
   // Fan out all siblings at once; the semaphore is the ONLY concurrency bound.
   // Each entry acquires a permit just for its stat (+ the fn call for .meta
   // files), then releases before recursing so the subtree's ops compete for
@@ -512,7 +519,10 @@ export async function collectFiles(
   // permit gates only the stat syscall, not the recursive collectFiles call.
   const sem = semaphore ?? new AsyncSemaphore();
   let entries: string[];
-  try { entries = await readdir(dir); } catch { return []; }
+  // A9 — gate readdir under the shared permit (see walkMeta): readdir opens a
+  // directory handle, so leaving it ungated broke the "global in-flight op
+  // count is bounded by WALK_CONCURRENCY" invariant. On error return [].
+  try { entries = await sem.withPermit(() => readdir(dir)); } catch { return []; }
   // Each entry contributes a list of paths (a file → [fullPath]; a subdir →
   // its own collectFiles result; an error/skip → []). Fan out siblings at
   // once; the semaphore bounds global in-flight stat ops. Results land in

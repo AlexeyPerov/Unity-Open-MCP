@@ -21,16 +21,30 @@ namespace UnityOpenMcpBridge.MetaTools
             // every later delta then reports `passed:true` regardless of
             // project state. Expand to the full Assets/ set (the same
             // helper the batch CLI uses) so every registered rule runs and
-            // the fingerprint reflects reality. SelectRuleIds(paths) is
-            // skipped in the whole-project case so all rules run. The
-            // expanded scope is stored on the entry so DeltaTool re-validates
-            // the SAME scope (otherwise the delta would re-bail and always
-            // pass).
+            // the fingerprint reflects reality.
+            //
+            // A5 — passing ruleIds = null DOES NOT mean "run all rules":
+            // VerifyGateAdapter.CreateCheckpoint rewrites null to
+            // SelectRuleIds(paths), which derives rules from file extensions
+            // and has no arm for project_health (orphan .meta, duplicate_guid,
+            // invalid_layer — concerns not bound to an extension). The
+            // whole-project fingerprint therefore missed project_health and a
+            // later delta could never surface those errors. Pass the explicit
+            // full registered rule set instead, sourced from the live registry
+            // so newly added rules are picked up automatically. (Note:
+            // project_health is gated to VerifyRunMode.Full, so it still
+            // contributes nothing in checkpoint mode — but every rule that CAN
+            // run in a checkpoint now does, and the intent is unambiguous.)
+            // The expanded scope is stored on the entry so DeltaTool
+            // re-validates the SAME scope (otherwise the delta would re-bail
+            // and always pass).
             var isWholeProject = paths == null || paths.Length == 0;
             var effectivePaths = isWholeProject
                 ? VerifyBatchEntry.WholeProjectScope()
                 : paths;
-            var ruleIds = isWholeProject ? null : VerifyGateAdapter.SelectRuleIds(paths);
+            var ruleIds = isWholeProject
+                ? VerifyGateAdapter.AllRegisteredRuleIds()
+                : VerifyGateAdapter.SelectRuleIds(paths);
 
             CheckpointFingerprint checkpoint;
             try

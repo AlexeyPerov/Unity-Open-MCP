@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::config::commands::AppState;
-use crate::config::persistence;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -321,17 +320,20 @@ pub fn migrate_package_files(
     source_folder: String,
     skip_meta: bool,
 ) -> Result<MigrateResult, MigrateError> {
-    let (entry, projects) = {
+    // A10 — only the entry is needed up-front; the projects snapshot that was
+    // cloned here previously went stale during the multi-second copy loop and
+    // clobbered concurrent changes on write-back. The persist now goes through
+    // with_projects against the fresh live state (see below).
+    let entry = {
         let guard = state.projects.lock().unwrap();
-        let entry = guard
+        guard
             .projects
             .iter()
             .find(|p| p.id == project_id)
             .cloned()
             .ok_or_else(|| MigrateError::ProjectNotFound {
                 project_id: project_id.clone(),
-            })?;
-        (entry, guard.clone())
+            })?
     };
 
     let src = PathBuf::from(&source_folder);
@@ -387,24 +389,32 @@ pub fn migrate_package_files(
     );
 
     // Persist the source folder on the entry + bump mtime.
-    let mut updated = projects;
+    // A10 — apply the patch to the FRESH live state via with_projects instead
+    // of cloning a snapshot before the multi-second copy loop and writing it
+    // back afterwards. The snapshot was stale: any concurrent change (a launch,
+    // a hide, an env-var save) made during the copy was discarded when the
+    // stale clone was assigned back into the Mutex. with_projects clones the
+    // current state, applies the patch, persists, and swaps back — all under a
+    // single lock acquisition, so no concurrent writer can land a change
+    // between the read and the write.
     let now = chrono::Utc::now().to_rfc3339();
-    for p in updated.projects.iter_mut() {
-        if p.id == project_id {
-            p.migrate_source_folder = Some(source_folder.clone());
-            p.last_modified_at = Some(now);
-            break;
-        }
-    }
-    if let Err(e) = persistence::save_projects(&updated) {
+    let source_folder_for_patch = source_folder.clone();
+    if let Err(e) = crate::config::commands::with_projects(
+        &state.projects,
+        |p| {
+            for entry in p.projects.iter_mut() {
+                if entry.id == project_id {
+                    entry.migrate_source_folder = Some(source_folder_for_patch.clone());
+                    entry.last_modified_at = Some(now.clone());
+                    break;
+                }
+            }
+        },
+    ) {
         log::error!("Failed to persist migrate source folder: {}", e);
         return Err(MigrateError::PersistFailed {
             message: e.to_string(),
         });
-    }
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = updated;
     }
 
     if !errors.is_empty() {

@@ -114,6 +114,9 @@ namespace UnityOpenMcpBridge.TestRunner
                     if (api != null && callbacks != null)
                     {
                         try { api.UnregisterCallbacks(callbacks); } catch { }
+                        // A6 — also drop the pair from the active registry so a
+                        // later DrainActiveCallbacks sweep does not touch it.
+                        TestRunnerState.UnregisterActive(api, callbacks);
                         Object.DestroyImmediate(api);
                     }
                     // Unconditional for all modes — see MarkPending note above.
@@ -123,12 +126,22 @@ namespace UnityOpenMcpBridge.TestRunner
 
             EditorApplication.delayCall += () =>
             {
+                // A6 — sweep any leaked (api, callbacks) pair from a previous
+                // run whose onFinished never fired (Stop during PlayMode, a
+                // reload that aborted an EditMode run) before subscribing a
+                // fresh one. Without this the leaked instance stays in the
+                // framework's domain-level holder, collects THIS run's results
+                // into the old run's captured list, and its onFinished rewrites
+                // test-results-<oldRunId>.json with the wrong counts.
+                TestRunnerState.DrainActiveCallbacks();
+
                 // Re-resolve api inside the deferred call: TestRunnerApi is a
                 // ScriptableObject and must be created on the main thread (which
                 // delayCall guarantees), and the callbacks close over it so the
                 // onFinished callback can destroy it.
                 api = ScriptableObject.CreateInstance<TestRunnerApi>();
                 api.RegisterCallbacks(callbacks);
+                TestRunnerState.RegisterActive(api, callbacks, runId);
                 try
                 {
                     api.Execute(new ExecutionSettings(filter));
@@ -144,6 +157,7 @@ namespace UnityOpenMcpBridge.TestRunner
                     // Execute still leaves them subscribed in the domain-level
                     // holder. Unregister before destroying the api.
                     try { api.UnregisterCallbacks(callbacks); } catch { }
+                    TestRunnerState.UnregisterActive(api, callbacks);
                     Object.DestroyImmediate(api);
                     // B9 — clear the pending marker so it does not linger. The
                     // onFinished callback (the only other ClearPending site)

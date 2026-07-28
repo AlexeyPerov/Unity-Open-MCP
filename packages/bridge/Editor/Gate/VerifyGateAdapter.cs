@@ -12,6 +12,19 @@ namespace UnityOpenMcpBridge
     {
         private static readonly string[] FallbackRuleIds = { "missing_references", "dependencies" };
 
+        // Every rule currently registered with VerifyRunner. Used by the
+        // whole-project checkpoint/scan entry points so the fingerprint reflects
+        // the FULL rule set, not the subset SelectRuleIds happens to derive from
+        // the extensions present in `paths`. SelectRuleIds has no arm for the
+        // rules whose concerns are not extension-bound (project_health — orphan
+        // .meta, duplicate GUID, invalid_layer), so routing the whole-project
+        // case through it silently dropped them and a later delta could never
+        // surface a duplicate_guid / invalid_layer / orphan-meta error.
+        // Sourced from VerifyRunner.Rules (the live registry) so newly
+        // registered rules are picked up automatically.
+        public static string[] AllRegisteredRuleIds()
+            => VerifyRunner.Rules.Select(r => r.Id).ToArray();
+
         public static string[] SelectRuleIds(string[] paths)
         {
             if (paths == null || paths.Length == 0)

@@ -54,7 +54,6 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::config::commands::AppState;
-use crate::config::persistence;
 use crate::config::project_kind;
 use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile, WalkUpKinds};
 
@@ -669,37 +668,63 @@ pub fn start_walk_up_scan(
             let keep = !(status == WalkUpStatus::Cancelled && !keep_partial);
             let to_add: Vec<ProjectEntry> = if keep { ctx.found.clone() } else { Vec::new() };
 
+            // A10 — append discovered entries to the FRESH live state via
+            // with_projects instead of cloning a snapshot, appending to the
+            // clone, and writing the clone back. The snapshot was taken before
+            // the (potentially long) dedup+append loop, so any concurrent
+            // change (a launch, a hide, an env-var save, an Add Project) made
+            // during the scan was discarded when the stale clone was assigned
+            // back into the Mutex. with_projects clones the CURRENT state under
+            // the lock, applies the dedup+append patch, persists, and swaps
+            // back — all under one lock acquisition.
+            //
+            // The dedup set is rebuilt from the fresh state inside the closure
+            // (the original code already refreshed it against "whatever the
+            // current projects file contains"), so a project added via Add
+            // Project during the scan is still correctly deduped.
             let app_state = app_for_thread.state::<AppState>();
-            let mut projects = app_state.projects.lock().unwrap().clone();
-            // Refresh dedup set with whatever the *current* projects
-            // file contains (could have changed since the scan
-            // started if the user added a project via Add Project).
-            let mut current_paths: HashSet<String> = projects
-                .projects
-                .iter()
-                .map(|p| canonicalize_for_compare(&p.path))
-                .collect();
             let mut final_added: Vec<ProjectEntry> = Vec::new();
-            for entry in to_add {
-                let key = canonicalize_for_compare(&entry.path);
-                if current_paths.contains(&key) {
-                    ctx.skipped_existing.push(key);
-                    continue;
-                }
-                current_paths.insert(key);
-                projects.projects.push(entry.clone());
-                final_added.push(entry);
-            }
-
             let mut persist_error: Option<String> = None;
-            if !final_added.is_empty() {
-                if let Err(e) = persistence::save_projects(&projects) {
-                    persist_error = Some(e.to_string());
-                } else {
-                    let mut guard = app_state.projects.lock().unwrap();
-                    *guard = projects.clone();
+            // The post-persist projects snapshot for the WalkUpDone event. When
+            // the scan added nothing (or to_add was empty) we still emit a done
+            // event carrying the current state, so always resolve a fresh view.
+            let persisted_projects: ProjectsFile = if to_add.is_empty() {
+                app_state.projects.lock().unwrap().clone()
+            } else {
+                // Capture the skipped-existing keys + added entries out of the
+                // closure so they feed the WalkUpDone report. The closure is
+                // FnOnce and runs synchronously inside with_projects.
+                let skipped = &mut ctx.skipped_existing;
+                let added = &mut final_added;
+                match crate::config::commands::with_projects(
+                    &app_state.projects,
+                    |p| {
+                        let mut current_paths: HashSet<String> = p
+                            .projects
+                            .iter()
+                            .map(|e| canonicalize_for_compare(&e.path))
+                            .collect();
+                        for entry in &to_add {
+                            let key = canonicalize_for_compare(&entry.path);
+                            if current_paths.contains(&key) {
+                                skipped.push(key);
+                                continue;
+                            }
+                            current_paths.insert(key);
+                            p.projects.push(entry.clone());
+                            added.push(entry.clone());
+                        }
+                    },
+                ) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        persist_error = Some(e.to_string());
+                        // Persist failed — the live Mutex was left untouched by
+                        // with_projects, so report the current (unchanged) state.
+                        app_state.projects.lock().unwrap().clone()
+                    }
                 }
-            }
+            };
 
             let done = WalkUpDone {
                 scan_id: scan_id.clone(),
@@ -712,7 +737,7 @@ pub fn start_walk_up_scan(
                 skipped_existing: ctx.skipped_existing,
                 skipped_unmatched: ctx.skipped_unmatched,
                 skipped_invalid_root: Vec::new(),
-                projects,
+                projects: persisted_projects,
                 error: persist_error,
             };
 

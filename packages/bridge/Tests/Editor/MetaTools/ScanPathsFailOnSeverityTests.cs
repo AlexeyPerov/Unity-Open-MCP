@@ -65,6 +65,32 @@ namespace UnityOpenMcpBridge.Tests
                 $"canonical threshold '{threshold}' must be accepted by the validator");
         }
 
+        // A8 — case-variant thresholds ("Error", "WARN", "Never", …) must be
+        // ACCEPTED (Parse normalizes via ToLowerInvariant) AND must NOT fall
+        // through a raw-string switch's default arm to reported passed:true.
+        // Pre-fix the local ShouldFail switched on the raw string, so "Error"
+        // passed validation but then mapped to "never fail" — the response
+        // listed the errors yet still reported passed:true. Now the decision
+        // runs against the parsed FailSeverity enum, so a case variant behaves
+        // identically to its canonical lower-case form.
+        [TestCase("Error")]
+        [TestCase("ERROR")]
+        [TestCase("Warn")]
+        [TestCase("WARN")]
+        [TestCase("Info")]
+        [TestCase("Verbose")]
+        [TestCase("Never")]
+        [TestCase("NEVER")]
+        public void Execute_CaseVariantFailOnSeverity_IsAcceptedAndNormalized(string threshold)
+        {
+            var body = Body + ",\"fail_on_severity\":\"" + threshold + "\"}";
+            var result = ScanPathsTool.Execute(body);
+            // A8: a case variant must pass validation (Parse lower-cases) —
+            // it must NOT be rejected as invalid_argument.
+            Assert.AreNotEqual("invalid_argument", result.ErrorCode,
+                $"case variant '{threshold}' must be accepted (Parse normalizes case)");
+        }
+
         // B42 — the "never" threshold is a real canonical value (fail on
         // nothing). Pre-fix it was handled by the `_ => false` arm coincidentally;
         // now it has an explicit case. Assert the resolved threshold is echoed.
