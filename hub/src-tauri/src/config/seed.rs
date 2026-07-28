@@ -181,6 +181,13 @@ pub fn seed_from_unity_hub(state: State<AppState>) -> SeedResult {
         projects: entries,
     };
 
+    // B-R6 note: this write deliberately bypasses `commands::with_projects`.
+    // `seed_from_unity_hub` only runs on first launch, when the projects list
+    // is provably empty (the early-out above guarantees it), so there is no
+    // concurrent writer whose update a stale snapshot could clobber — the race
+    // `with_projects` exists to close cannot occur here. The wholesale
+    // replacement (whole `ProjectsFile`, not a per-entry patch) is also a poor
+    // fit for `with_projects`'s "cheap patch on the live entry" contract.
     if let Err(e) = persistence::save_projects(&projects_file) {
         log::error!("Failed to save seeded projects: {}", e);
         return SeedResult {

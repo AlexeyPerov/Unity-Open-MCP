@@ -307,15 +307,22 @@ namespace UnityOpenMcpVerify.Fixes
                     return $"EditorSceneManager.OpenScene did not reload '{assetPath}'.";
                 }
 
-                if (wasActive && !SceneManager.SetActiveScene(reopened))
-                    return $"reloaded '{assetPath}' but could not restore it as the active scene.";
-
                 if (createdPlaceholder && placeholder.IsValid())
                 {
                     // The target is loaded again, so closing the placeholder
                     // is legal. If Unity still refuses, the leftover is an
                     // empty Untitled scene — cosmetic, not a reload failure.
                     EditorSceneManager.CloseScene(placeholder, true);
+                }
+
+                if (wasActive && !SceneManager.SetActiveScene(reopened))
+                {
+                    // The reload itself succeeded — the relink is safe. Only
+                    // the active-scene status did not round-trip. Closing the
+                    // placeholder above (rather than early-returning before it,
+                    // as a prior version did) avoids leaving a stray empty
+                    // Untitled scene lingering in the hierarchy on this path.
+                    return $"reloaded '{assetPath}' but could not restore it as the active scene.";
                 }
 
                 return null;
