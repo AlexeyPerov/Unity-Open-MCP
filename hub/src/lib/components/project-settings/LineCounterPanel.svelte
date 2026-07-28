@@ -3,6 +3,7 @@
   import { countLines } from "$lib/services/config";
   import { S } from "$lib/state.svelte";
   import Button from "$lib/components/shell/Button.svelte";
+  import { describeInvokeError } from "$lib/components/project-settings/invoke-errors.ts";
 
   let { project }: { project: ProjectEntry } = $props();
 
@@ -13,17 +14,23 @@
   // count" button can update them without re-deriving from the prop.
   let lastTotal = $state<number | null>(null);
   let lastScannedAt = $state<string | null>(null);
-  // Sync from the prop when the project changes. H28: snapshot the id
-  // AND the stats so a same-project identity bump (another tab's save
-  // round-tripping the projects store) does not reset a freshly-computed
-  // local count. The previous shape re-read `project.lineCountStats` on
-  // every `project` prop identity change, clobbering a `runCount()` result
-  // if the store mutated in the same tick.
+  // A13: the last `project.id` we synced the cached stats from. The sync
+  // effect must re-seed from `project.lineCountStats` when the user switches
+  // to a different project, but NOT on a same-project identity bump (another
+  // tab's `saveSource` / `saveManifest` / `runMigrate` round-trips the
+  // projects store with a fresh `{ ...project }` object). Snapshotting the
+  // id into a local did not reliably decouple from the prop-identity bump,
+  // so a freshly-computed `runCount()` result could be stomped by the stale
+  // cached stats in the same tick. Comparing the id VALUE fixes it.
+  let lastSyncedProjectId = $state<string | null>(null);
   $effect(() => {
-    const _id = project.id;
-    const stats = project.lineCountStats;
-    lastTotal = stats?.totalLines ?? null;
-    lastScannedAt = stats?.scannedAt ?? null;
+    const id = project.id;
+    if (id && id !== lastSyncedProjectId) {
+      lastSyncedProjectId = id;
+      const stats = project.lineCountStats;
+      lastTotal = stats?.totalLines ?? null;
+      lastScannedAt = stats?.scannedAt ?? null;
+    }
   });
 
   async function runCount() {
@@ -42,7 +49,7 @@
         S.appendDrawerLog(line);
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      error = describeInvokeError(e);
       S.appendErrorLog(`line count failed for ${project.name}: ${error}`);
     } finally {
       running = false;

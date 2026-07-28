@@ -344,21 +344,37 @@ namespace UnityOpenMcpVerify.Fixes
             // V4: rewrite the WHOLE PPtr triple (fileID + guid + type), not
             // just the GUID token. Unity's PPtr form for an external reference
             // is `{fileID: <local-id>, guid: <guid>, type: <type>}`. Swapping
-            // only `guid:` leaves the OLD fileID/type pointing at the OLD
-            // asset's local identifier — which is meaningless for the new
-            // target. The next scan then reports `missing_fileid` instead of
+            // only `guid:` leaves the OLD fileID pointing at the OLD asset's
+            // local identifier — which is meaningless for the new target. The
+            // next scan then reports `missing_fileid` instead of
             // `missing_guid`, and apply_fix reported Success while the
             // reference is still dangling. The scanner's
             // SharedRegex.ExternalFileAndGuid validates both legs, so a
             // half-rewritten triple re-surfaces as a new issue.
             //
-            // Resolve the target asset's main-object local fileID (the
-            // identifier the fileID field must carry). type:3 is the only
-            // value Unity emits for an external asset reference (the asset
-            // lives in its own file), so we keep whatever type the line
-            // already carried — there is no valid scenario where relinking
-            // changes it.
-            long? targetFileId = ResolveMainLocalFileId(targetPath);
+            // A15: resolve the target asset's full set of valid local
+            // fileIDs (main object + every sub-asset, via
+            // `LoadAllAssetsAtPath` — the same approach the scanner's
+            // `GetFileIdsForPath` uses). For each matched triple:
+            //   - If the EXISTING fileID is already valid for the target
+            //     (e.g. the broken GUID pointed at a specific sub-object of
+            //     an .fbx and the target .fbx exposes a fileID with the same
+            //     number), KEEP it — rewriting it to the main object's id
+            //     would silently re-point the reference at the root.
+            //   - Otherwise rewrite fileID to the target's MAIN object id
+            //     (the previous behaviour, correct for a reference whose old
+            //     fileID does not exist in the target at all).
+            // The `type:` field is preserved as-is: it encodes the target's
+            // storage kind (0/2/3), and there is no reliable Unity API to
+            // compute the correct digit from the target asset. The scanner
+            // validates fileID+guid but not type, so an invalid type is
+            // re-flagged by the next scan rather than silently "fixed" away.
+            // (The earlier comment's claim that "type:3 is the only value
+            // Unity emits for an external reference" was false — this repo's
+            // own demo/Assets carries type:0, type:2 and type:3 external
+            // PPtrs — so the type is no longer assumed.)
+            var validFileIds = ResolveValidFileIds(targetPath, out long? mainFileId);
+            long? targetFileId = mainFileId;
 
             // Match every `guid: <brokenGuid>` occurrence on the asset — a single
             // broken GUID is typically referenced once, but the same target may
@@ -397,7 +413,20 @@ namespace UnityOpenMcpVerify.Fixes
                 {
                     newContents = triplePattern.Replace(
                         contents,
-                        m => "{fileID: " + targetFileId.Value + ", guid: " + targetGuid + ", type: " + m.Groups[2].Value + "}");
+                        m =>
+                        {
+                            // A15: preserve the existing fileID when it is
+                            // already valid for the target (a sub-object
+                            // reference that survives the relink). Only fall
+                            // back to the target's main object id when the old
+                            // fileID does not exist in the target at all.
+                            long existingId;
+                            long.TryParse(m.Groups[1].Value, out existingId);
+                            long fileId = validFileIds != null && validFileIds.Contains(existingId)
+                                ? existingId
+                                : targetFileId.Value;
+                            return "{fileID: " + fileId + ", guid: " + targetGuid + ", type: " + m.Groups[2].Value + "}";
+                        });
                 }
             }
             else
@@ -448,8 +477,13 @@ namespace UnityOpenMcpVerify.Fixes
 
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
 
+            // A15: the fileID note describes the rewrite behaviour honestly.
+            // When the target's fileID set resolved, valid existing fileIDs
+            // (sub-object references) are preserved and only invalid ones are
+            // rewritten to the main object id; otherwise only the guid: token
+            // was touched.
             var fileIdNote = targetFileId.HasValue
-                ? $" (fileID rewritten to {targetFileId.Value})"
+                ? $" (fileID rewritten to main object where the existing id was invalid for the target; valid sub-object ids preserved)"
                 : " (fileID not resolvable — only the guid: token was rewritten)";
 
             return new FixResult
@@ -460,24 +494,58 @@ namespace UnityOpenMcpVerify.Fixes
             };
         }
 
-        // Resolve the main object's local file identifier for an asset path.
-        // Returns null if the asset cannot be loaded or the fileID cannot be
-        // determined — Apply then falls back to a bare-guid rewrite.
-        private static long? ResolveMainLocalFileId(string assetPath)
+        // Resolve every local file identifier the target asset exposes — the
+        // main object's id PLUS every sub-asset's id (an .fbx model carries
+        // one fileID per imported mesh/material/animation). This mirrors the
+        // scanner's `MissingReferences.Scanner.GetFileIdsForPath`, which uses
+        // `LoadAllAssetsAtPath` for the same reason: a reference that points
+        // at a specific sub-object is valid iff its fileID appears in this set.
+        // `mainFileId` (out) is the main object's id, used as the rewrite
+        // fallback when an existing fileID is NOT in the set.
+        //
+        // A15: the previous `ResolveMainLocalFileId` returned only the main
+        // object's id, so N triples that referenced N distinct sub-objects of
+        // one target all collapsed onto the main id — silently re-pointing
+        // every sub-object reference at the root.
+        //
+        // Returns null (and mainFileId null) when the asset cannot be loaded;
+        // Apply then falls back to a bare-guid rewrite.
+        private static HashSet<long> ResolveValidFileIds(string assetPath, out long? mainFileId)
         {
+            mainFileId = null;
             if (string.IsNullOrEmpty(assetPath)) return null;
             try
             {
                 var mainAsset = AssetDatabase.LoadMainAssetAtPath(assetPath);
                 if (mainAsset == null) return null;
-                if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(mainAsset, out _, out long fileId))
-                    return fileId;
+                if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(mainAsset, out _, out long mainId))
+                    mainFileId = mainId;
+
+                // LoadAllAssetsAtPath returns the main object plus every
+                // imported sub-asset; collect each one's local fileID.
+                var allAssets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+                if (allAssets == null || allAssets.Length == 0)
+                {
+                    return mainFileId.HasValue ? new HashSet<long> { mainFileId.Value } : null;
+                }
+                var fileIds = new HashSet<long>();
+                foreach (var subAsset in allAssets)
+                {
+                    if (subAsset == null) continue;
+                    if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(subAsset, out _, out long subFileId))
+                        fileIds.Add(subFileId);
+                }
+                // Defensive: ensure the main id is present even if
+                // LoadAllAssetsAtPath did not surface it as the first entry
+                // (it always does in practice, but the contract does not
+                // guarantee ordering).
+                if (mainFileId.HasValue) fileIds.Add(mainFileId.Value);
+                return fileIds.Count > 0 ? fileIds : null;
             }
             catch
             {
                 return null;
             }
-            return null;
         }
 
         struct GuidCandidate

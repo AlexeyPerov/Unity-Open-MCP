@@ -22,6 +22,7 @@
   import Button from "$lib/components/shell/Button.svelte";
   import Console from "$lib/components/project-settings/Console.svelte";
   import LineCounterPanel from "$lib/components/project-settings/LineCounterPanel.svelte";
+  import { describeInvokeError } from "$lib/components/project-settings/invoke-errors.ts";
 
   let {
     project,
@@ -127,22 +128,9 @@
     return exitCode === 0 ? "passed" : `failed (${exitCode})`;
   }
 
-  // Tauri `invoke` rejections arrive as the backend's serialized error enum
-  // (e.g. `{ type: "spawnFailed", message: "No such file or directory …" }`),
-  // but the value can also be a plain `Error` or a string depending on where
-  // the rejection originated. Extract a readable message so failures surface
-  // the actual reason instead of "[object Object]".
-  function describeInvokeError(e: unknown): string {
-    if (typeof e === "string") return e;
-    if (e instanceof Error) return e.message;
-    if (e && typeof e === "object") {
-      const any = e as Record<string, unknown>;
-      if (typeof any.message === "string" && any.message.length > 0) return any.message;
-      // Serde-flattened enum variants sometimes only carry a `type` tag.
-      if (typeof any.type === "string") return any.type;
-    }
-    return String(e);
-  }
+  // `describeInvokeError` is imported from `./invoke-errors.ts` (A14) so the
+  // serde-tagged Tauri rejection shape is handled consistently across every
+  // project-settings tab.
 
   async function refreshPackageInfo() {
     try {

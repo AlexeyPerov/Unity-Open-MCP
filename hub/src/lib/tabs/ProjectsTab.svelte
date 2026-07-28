@@ -118,6 +118,7 @@
   } from "./projects/constants.ts";
   import {
     formatSize as formatSizeImported,
+    unityVersionIsHigher,
   } from "./projects/helpers.ts";
   import type { ProjectsHandlers, ProjectsState } from "./projects/state.ts";
 
@@ -1379,8 +1380,10 @@
       return hasUpgradeAvailable(project);
     }
     const current = project.unityVersion ?? "";
+    // A11: compare by parsed numeric tuple, not lexicographically, so a
+    // patch >= 10 (`6000.0.10f1` vs `6000.0.9f1`) still surfaces the entry.
     return discoveryStore.installations.some(
-      (i) => i.version !== current && i.version > current,
+      (i) => unityVersionIsHigher(i.version, current),
     );
   }
 

@@ -487,6 +487,58 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
+        // A15 — when the existing fileID is ALREADY valid for the target asset
+        // (e.g. a sub-object reference whose fileID the target exposes), Apply
+        // must PRESERVE it and only swap the guid: token. The previous impl
+        // collapsed every triple onto the target's main-object fileID, silently
+        // re-pointing sub-object references at the root.
+        // -------------------------------------------------------------------
+
+        [UnityTest]
+        public System.Collections.IEnumerator Apply_PreservesExistingFileIdWhenValidForTarget()
+        {
+            // Build a real mesh asset and capture its main-object local fileID.
+            // Inject a broken-GUID triple whose fileID is the REAL fileID
+            // (i.e. a reference that would be valid if only the GUID were
+            // correct — the common sub-object-aliasing shape). After Apply the
+            // fileID must be UNCHANGED; only the guid: token is swapped.
+            var meshPath = FixtureRoot + "/PreserveFileIdTargetMesh.asset";
+            var prefabPath = FixtureRoot + "/PreserveFileIdPrefab.prefab";
+            yield return CreatePrefabWithMeshReference(prefabPath, meshPath);
+
+            AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                AssetDatabase.LoadAssetAtPath<Mesh>(meshPath), out var realGuid, out long realFileId);
+            Assume.That(string.IsNullOrEmpty(realGuid), Is.False);
+            Assume.That(realFileId, Is.GreaterThan(0));
+
+            // Inject a broken-GUID triple whose fileID IS the real fileID.
+            var fakeGuid = "dededededededededededededededed";
+            InjectPptrTriple(prefabPath, realGuid, fakeGuid, wrongFileId: realFileId);
+            AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var issueId = IssueKey.Build(
+                "missing_references", VerifySeverity.Error,
+                prefabPath, "missing_guid:" + fakeGuid);
+
+            var result = fix.Apply(issueId, realGuid);
+
+            Assert.IsTrue(result.Success,
+                $"Apply should succeed. Got: {result.Description}");
+
+            var rewritten = File.ReadAllText(prefabPath);
+
+            // The fileID must be PRESERVED (it was valid for the target).
+            Assert.IsTrue(
+                rewritten.Contains($"{{fileID: {realFileId}, guid: {realGuid}, type:"),
+                "a fileID that is valid for the target must be preserved, not rewritten. " +
+                $"Expected to find `{{fileID: {realFileId}, guid: {realGuid}, type:` unchanged in the rewritten prefab.");
+            // The broken GUID must be gone.
+            Assert.IsFalse(rewritten.Contains(fakeGuid),
+                "the broken GUID must be replaced after Apply");
+        }
+
+        // -------------------------------------------------------------------
         // V5 — Apply refuses to rewrite a scene that is currently open in the
         // Editor, because the in-memory copy would silently revert the relink
         // on the next save AFTER apply_fix already reported success.

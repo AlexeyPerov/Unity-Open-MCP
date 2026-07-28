@@ -16,6 +16,7 @@ import type {
   SetProjectFlagError,
   UpgradeUnityError,
 } from "$lib/services/config";
+import { unityVersionIsHigher } from "./helpers.ts";
 
 export const LAUNCH_LOG_TAIL_LINES = 200;
 
@@ -73,9 +74,13 @@ export function upgradeCandidatesFor(
   installedCandidates: string[],
 ): string[] {
   if (!project.unityVersion) return [];
-  return installedCandidates.filter(
-    (v) => v !== project.unityVersion && v > (project.unityVersion ?? ""),
-  );
+  // A11: compare by the parsed numeric tuple, not lexicographically. The
+  // Rust side already sorts the candidates descending via the same
+  // comparator, so a plain string `>` here would re-filter with the wrong
+  // order (e.g. drop `6000.0.10f1` against a `6000.0.9f1` current, and
+  // offer `2022.3.9f1` as an "upgrade" from `2022.3.48f1`). See H14.
+  const current = project.unityVersion;
+  return installedCandidates.filter((v) => unityVersionIsHigher(v, current));
 }
 
 export type NewTemplateKind = "empty" | "hub-default" | "custom";

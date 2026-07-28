@@ -9,6 +9,9 @@ import {
   previewBundleFor,
   validateArgs,
   isValidEnvVarDraft,
+  parseUnityVersion,
+  compareUnityVersions,
+  unityVersionIsHigher,
   type EnvVarDraft,
 } from "./helpers.ts";
 import type { BundleStrategy, ProjectEntry, ProjectKind } from "$lib/services/config.ts";
@@ -231,4 +234,97 @@ test("isValidEnvVarDraft rejects duplicate keys", () => {
   const result = isValidEnvVarDraft([draft("1", "FOO"), draft("2", "FOO")]);
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.error, /duplicate/);
+});
+
+// ---- parseUnityVersion / compareUnityVersions / unityVersionIsHigher ----
+// A11: these cases mirror the Rust `unity_version` unit tests so the TS and
+// Rust sides stay in lockstep.
+
+test("parseUnityVersion parses modern Unity versions", () => {
+  assert.deepEqual(parseUnityVersion("6000.0.1f1"), {
+    major: 6000,
+    minor: 0,
+    patch: 1,
+    kind: "f",
+    build: 1,
+  });
+  assert.deepEqual(parseUnityVersion("2022.3.48f1"), {
+    major: 2022,
+    minor: 3,
+    patch: 48,
+    kind: "f",
+    build: 1,
+  });
+  assert.deepEqual(parseUnityVersion("6000.0.10b2"), {
+    major: 6000,
+    minor: 0,
+    patch: 10,
+    kind: "b",
+    build: 2,
+  });
+});
+
+test("parseUnityVersion tolerates a local-build suffix", () => {
+  const v = parseUnityVersion("6000.0.1f1exrLocal");
+  assert.equal(v?.major, 6000);
+  assert.equal(v?.patch, 1);
+  assert.equal(v?.kind, "f");
+  assert.equal(v?.build, 1);
+});
+
+test("parseUnityVersion returns null for empty / non-numeric / too-short input", () => {
+  assert.equal(parseUnityVersion(""), null);
+  assert.equal(parseUnityVersion("not-a-version"), null);
+  assert.equal(parseUnityVersion("6000"), null);
+  assert.equal(parseUnityVersion("6000.0"), null);
+});
+
+test("compareUnityVersions sorts patch numbers above 9 numerically (A11)", () => {
+  assert.ok(compareUnityVersions("6000.0.10f1", "6000.0.9f1") > 0);
+  assert.ok(compareUnityVersions("6000.0.9f1", "6000.0.10f1") < 0);
+  assert.ok(compareUnityVersions("2022.3.48f1", "2022.3.9f1") > 0);
+  assert.ok(compareUnityVersions("2022.3.9f1", "2022.3.48f1") < 0);
+});
+
+test("compareUnityVersions orders across majors correctly", () => {
+  assert.ok(compareUnityVersions("6000.0.1f1", "2022.3.48f1") > 0);
+  assert.ok(compareUnityVersions("2022.3.48f1", "6000.0.1f1") < 0);
+});
+
+test("compareUnityVersions returns 0 for equal versions", () => {
+  assert.equal(compareUnityVersions("6000.0.1f1", "6000.0.1f1"), 0);
+});
+
+test("compareUnityVersions orders higher patch within same minor", () => {
+  assert.ok(compareUnityVersions("6000.0.2f1", "6000.0.1f1") > 0);
+  assert.ok(compareUnityVersions("6000.0.0f1", "6000.0.1f1") < 0);
+});
+
+test("compareUnityVersions falls back to lexicographic compare on malformed input", () => {
+  assert.equal(compareUnityVersions("garbage", "6000.0.1f1"), "garbage" < "6000.0.1f1" ? -1 : 1);
+});
+
+test("compareUnityVersions orders a descending sort like the Rust discovery feed", () => {
+  const versions = [
+    "2022.3.48f1",
+    "6000.0.1f1",
+    "6000.0.10f1",
+    "6000.0.9f1",
+    "6000.0.2f1",
+  ];
+  const sorted = [...versions].sort((a, b) => compareUnityVersions(b, a));
+  assert.deepEqual(sorted, [
+    "6000.0.10f1",
+    "6000.0.9f1",
+    "6000.0.2f1",
+    "6000.0.1f1",
+    "2022.3.48f1",
+  ]);
+});
+
+test("unityVersionIsHigher is true only for a strictly-higher candidate", () => {
+  assert.equal(unityVersionIsHigher("6000.0.10f1", "6000.0.9f1"), true);
+  assert.equal(unityVersionIsHigher("6000.0.9f1", "6000.0.10f1"), false);
+  assert.equal(unityVersionIsHigher("6000.0.1f1", "6000.0.1f1"), false);
+  assert.equal(unityVersionIsHigher("2022.3.9f1", "2022.3.48f1"), false);
 });

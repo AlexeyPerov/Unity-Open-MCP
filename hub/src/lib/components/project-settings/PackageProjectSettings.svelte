@@ -15,6 +15,7 @@
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import Button from "$lib/components/shell/Button.svelte";
   import LineCounterPanel from "$lib/components/project-settings/LineCounterPanel.svelte";
+  import { describeInvokeError } from "$lib/components/project-settings/invoke-errors.ts";
 
   let {
     project,
@@ -35,6 +36,15 @@
   // previous project) can resolve after a newer load and clobber the
   // user's in-progress edits.
   let manifestLoadGeneration = $state(0);
+
+  // A13: the last `project.id` we loaded the manifest for. The load effect
+  // must NOT re-fire on a same-project identity bump — `saveSource()` and
+  // `runMigrate()` both call `onMutated(updated)` with a fresh `{ ...project }`
+  // object, which re-runs any `$effect` that read the `project` prop even
+  // though `id` is unchanged. Snapshotting `project.id` into a local inside
+  // the effect body does not reliably decouple (the prop proxy re-tracks on
+  // the new identity); comparing against the last-seen id VALUE does.
+  let lastLoadedProjectId = $state<string | null>(null);
 
   // --- Manifest tab ---
   let manifest = $state<PackageManifest | null>(null);
@@ -76,7 +86,7 @@
       depRows = Object.entries(m.dependencies ?? {}).map(([key, value]) => ({ key, value }));
     } catch (e) {
       if (generation !== manifestLoadGeneration) return;
-      manifestError = e instanceof Error ? e.message : String(e);
+      manifestError = describeInvokeError(e);
       S.appendErrorLog(`read package.json failed: ${manifestError}`);
     } finally {
       if (generation === manifestLoadGeneration) {
@@ -113,7 +123,7 @@
       manifestSaved = `saved${bumpChangelog && originalVersion !== result.version ? " (+ changelog)" : ""}`;
       S.appendDrawerLog(`package.json updated for ${project.name}`);
     } catch (e) {
-      manifestError = e instanceof Error ? e.message : String(e);
+      manifestError = describeInvokeError(e);
       S.appendErrorLog(`write package.json failed: ${manifestError}`);
     } finally {
       manifestSaving = false;
@@ -139,7 +149,7 @@
       S.appendDrawerLog(`regenerated ${metaResult.regenerated} GUIDs for ${project.name}`);
       for (const note of metaResult.notes) S.appendDrawerLog(note);
     } catch (e) {
-      S.appendErrorLog(`regenerate GUIDs failed: ${e}`);
+      S.appendErrorLog(`regenerate GUIDs failed: ${describeInvokeError(e)}`);
     } finally {
       metaBusy = false;
     }
@@ -153,7 +163,7 @@
       S.appendDrawerLog(`added ${metaResult.added} .meta files for ${project.name}`);
       for (const note of metaResult.notes) S.appendDrawerLog(note);
     } catch (e) {
-      S.appendErrorLog(`add missing .meta failed: ${e}`);
+      S.appendErrorLog(`add missing .meta failed: ${describeInvokeError(e)}`);
     } finally {
       metaBusy = false;
     }
@@ -217,7 +227,7 @@
       onMutated(updated);
       S.appendDrawerLog(`saved migration source for ${project.name}: ${migrateSource}`);
     } catch (e) {
-      S.appendErrorLog(`save migration source failed: ${e}`);
+      S.appendErrorLog(`save migration source failed: ${describeInvokeError(e)}`);
     }
   }
 
@@ -246,7 +256,7 @@
       const updated: ProjectEntry = { ...project, migrateSourceFolder: migrateResult.savedSourceFolder };
       onMutated(updated);
     } catch (e) {
-      migrateError = e instanceof Error ? e.message : String(e);
+      migrateError = describeInvokeError(e);
       S.appendErrorLog(`migrate failed: ${migrateError}`);
     } finally {
       migrateBusy = false;
@@ -254,16 +264,22 @@
   }
 
   // Load manifest on mount and when the project id actually changes.
-  // H28: snapshot the id into a local so the effect tracks the id VALUE,
-  // not the `project` prop identity. The parent re-derives the `project`
-  // prop on every projects-store mutation (saveSource / saveManifest call
-  // `replaceAll` + `onMutated`), so reading `project.id` directly inside
-  // the effect re-ran it on every identity change and clobbered in-progress
-  // edits. Reading the snapshot decouples the reload from same-id identity
-  // bumps.
+  // A13: only reload when the id VALUE differs from the last one we loaded.
+  // The parent re-derives the `project` prop on every projects-store mutation
+  // (`saveSource` / `saveManifest` / `runMigrate` all call `onMutated` with a
+  // fresh `{ ...project }` object), which re-runs this effect even though
+  // `id` is unchanged. The previous "snapshot the id into a local" shape did
+  // not reliably decouple from the prop-identity bump (the proxy re-tracks
+  // on the new object), so the reload fired mid-edit and clobbered the
+  // user's in-progress manifest changes. Comparing against `lastLoadedProjectId`
+  // makes the effect a no-op for same-id identity bumps while still
+  // reloading when the user switches to a different project.
   $effect(() => {
     const id = project.id;
-    if (id) loadManifest();
+    if (id && id !== lastLoadedProjectId) {
+      lastLoadedProjectId = id;
+      void loadManifest();
+    }
   });
 </script>
 

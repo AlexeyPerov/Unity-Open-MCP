@@ -240,6 +240,101 @@ export function statusFor(input: StatusForInput): RowStatus {
   };
 }
 
+/**
+ * Parse a Unity editor version string into its numeric tuple. Unity writes
+ * versions as `<major>.<minor>.<patch>[<kind>[<build>]]` where `<kind>` is a
+ * single letter (`a` alpha, `b` beta, `f` final, `c` China, `p` patch) and
+ * `<build>` is an integer. The patch segment ships well above 9
+ * (`2022.3.48f1`, `6000.0.10f1`), so a lexicographic comparison mis-sorts
+ * them. Returns `null` for a string that does not match the documented shape.
+ *
+ * This is a TS port of the Rust `unity_version::UnityVersion::parse`
+ * (`hub/src-tauri/src/config/unity_version.rs`) — both sides must agree so
+ * the frontend filter and the Rust sort order the same set of installed
+ * versions identically. See H14 in the round-2 review.
+ */
+export interface ParsedUnityVersion {
+  major: number;
+  minor: number;
+  patch: number;
+  /** Release-stream letter (`a`, `b`, `f`, `c`, `p`) when present. */
+  kind: string | null;
+  /** Trailing build number (`1` in `6000.0.1f1`). */
+  build: number | null;
+}
+
+// `[kind][build]` tail attached to the patch segment (`48f1`, `10b2`, `0`,
+// `48f1exrLocal`). Stops at the first non-digit after the kind letter so a
+// local-build suffix does not break the parse (mirrors the Rust parser).
+const PATCH_TAIL = /^([a-zA-Z]?)(\d*)/;
+
+export function parseUnityVersion(input: string): ParsedUnityVersion | null {
+  const trimmed = (input ?? "").trim();
+  if (!trimmed) return null;
+  const parts = trimmed.split(".");
+  if (parts.length < 3) return null;
+  const major = Number(parts[0]);
+  const minor = Number(parts[1]);
+  // The third segment may carry the kind letter + build number attached to
+  // the patch (`48f1`) or be a bare number (`48`).
+  const third = parts[2];
+  const digitRun = third.match(/^\d*/)?.[0] ?? "";
+  if (digitRun.length === 0) return null;
+  const patch = Number(digitRun);
+  if (!Number.isInteger(major) || !Number.isInteger(minor) || !Number.isInteger(patch)) {
+    return null;
+  }
+  const tail = third.slice(digitRun.length);
+  const tailMatch = tail.match(PATCH_TAIL);
+  const kind = tailMatch && tailMatch[1] ? tailMatch[1] : null;
+  const buildRaw = tailMatch && tailMatch[2] ? tailMatch[2] : "";
+  const build = buildRaw.length > 0 ? Number(buildRaw) : null;
+  if (build !== null && !Number.isInteger(build)) return null;
+  return { major, minor, patch, kind, build };
+}
+
+/**
+ * Compare two Unity version strings by their parsed numeric tuples. Order:
+ * higher major wins; ties break on minor, then patch, then the kind letter's
+ * ASCII codepoint (so `f` > `c` > `b` > `a`, matching Unity's release-stream
+ * ordering and the Rust `Ord` impl which uses `kind as u32`), then the build
+ * number. Returns >0 if `a` is newer, <0 if `b` is newer, 0 on tie. Falls
+ * back to a plain lexicographic compare when either side fails to parse, so
+ * malformed values still order deterministically rather than being dropped.
+ *
+ * Ported from `unity_version::compare_versions` — keep the two in sync.
+ */
+export function compareUnityVersions(a: string, b: string): number {
+  const pa = parseUnityVersion(a);
+  const pb = parseUnityVersion(b);
+  if (!pa || !pb) {
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+  // Major first, then minor, then patch.
+  if (pa.major !== pb.major) return pa.major - pb.major;
+  if (pa.minor !== pb.minor) return pa.minor - pb.minor;
+  if (pa.patch !== pb.patch) return pa.patch - pb.patch;
+  // Kind letter by ASCII codepoint; an absent kind ranks below any present
+  // letter (a bare patch like `0` is an unfinished parse on the other side,
+  // so the well-formed side is treated as greater), matching the Rust impl.
+  const ka = pa.kind ? pa.kind.charCodeAt(0) : 0;
+  const kb = pb.kind ? pb.kind.charCodeAt(0) : 0;
+  if (ka !== kb) return ka - kb;
+  const ba = pa.build ?? 0;
+  const bb = pb.build ?? 0;
+  return ba - bb;
+}
+
+/**
+ * True when `candidate` is strictly higher than `current` using the parsed
+ * numeric tuple comparison. Replaces the lexicographic `candidate > current`
+ * comparisons that mis-sorted patch numbers >= 10 (H14). Ported from
+ * `unity_version::version_is_higher`.
+ */
+export function unityVersionIsHigher(candidate: string, current: string): boolean {
+  return candidate !== current && compareUnityVersions(candidate, current) > 0;
+}
+
 /** Bytes → human-readable size string (B / KB / MB / GB). */
 export function formatSize(bytes: number): string {
   if (bytes === 0) return "—";

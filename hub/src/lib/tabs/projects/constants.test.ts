@@ -84,6 +84,24 @@ test("upgradeCandidatesFor returns empty when the project has no version", () =>
   assert.deepEqual(upgradeCandidatesFor(project, ["2022.3.48f1"]), []);
 });
 
+// A11: a patch number >= 10 must sort ABOVE a patch number < 10 of the same
+// line. The old lexicographic `>` dropped `6000.0.10f1` against a
+// `6000.0.9f1` current (because `"1" < "9"` at the patch position).
+test("upgradeCandidatesFor treats patch >= 10 as higher than patch < 10 (A11)", () => {
+  const project = makeProject({ unityVersion: "6000.0.9f1" });
+  const installed = ["6000.0.10f1", "6000.0.9f1"];
+  assert.deepEqual(upgradeCandidatesFor(project, installed), ["6000.0.10f1"]);
+});
+
+// A11: the symmetric case — `2022.3.9f1` must NOT be offered as an upgrade
+// from `2022.3.48f1` (lexicographically `"2022.3.9f1" > "2022.3.48f1"` is
+// true, so the old code surfaced a downgrade in the upgrade list).
+test("upgradeCandidatesFor excludes downgrades whose patch sorts lexicographically higher (A11)", () => {
+  const project = makeProject({ unityVersion: "2022.3.48f1" });
+  const installed = ["2022.3.9f1", "2022.3.48f1", "2022.3.50f1"];
+  assert.deepEqual(upgradeCandidatesFor(project, installed), ["2022.3.50f1"]);
+});
+
 // ---- isNewProjectFormValid ----
 
 test("isNewProjectFormValid requires parent, name, and version", () => {

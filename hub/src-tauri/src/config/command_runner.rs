@@ -559,13 +559,31 @@ fn spawn_tracked(
     // Stamp the reserved entry with the real PID. The generation was already
     // assigned at reservation time; a late wait thread from a *previous*
     // command on this key detects the mismatch and must not clear this entry.
+    //
+    // A12: when `stop_project_command` won the race and bumped the generation
+    // between our reservation and this stamp, the entry we reserved is gone
+    // and we will never track this child — `stop_project_command` already
+    // read `pid: None` (our stamp had not run yet) and could not kill it. The
+    // user already asked to stop, so honor that intent and tear down the
+    // just-spawned tree we can no longer reach. Without this the orphan keeps
+    // running and a second Start spawns another one.
+    let mut stamp_orphaned = false;
     {
         let mut procs = state.procs.lock().unwrap();
         if let Some(p) = procs.get_mut(&k) {
             if p.generation == generation {
                 p.pid = Some(pid);
+            } else {
+                stamp_orphaned = true;
             }
+        } else {
+            // The entry was removed entirely (e.g. a stop that also cleared
+            // the map). Same outcome: the child is untracked.
+            stamp_orphaned = true;
         }
+    }
+    if stamp_orphaned {
+        kill_process_tree(pid);
     }
 
     let app_clone = app.clone();
@@ -1272,6 +1290,12 @@ mod tests {
             "the late PID stamp must be refused so the child is not orphaned"
         );
         assert_eq!(final_state.generation, 2);
+        // A12: in the real `spawn_tracked` path this mismatch also triggers
+        // `kill_process_tree(real_pid)` — the user already pressed Stop, so
+        // the just-spawned tree we will never track is torn down. This
+        // map-level model cannot assert that (it does not spawn a real
+        // process); the kill is covered by code review of `spawn_tracked`'s
+        // `stamp_orphaned` branch.
     }
 
     #[test]

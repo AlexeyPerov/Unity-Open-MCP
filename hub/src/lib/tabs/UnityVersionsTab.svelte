@@ -17,6 +17,7 @@
   import Button from "$lib/components/shell/Button.svelte";
   import StatusChip from "$lib/components/StatusChip.svelte";
   import VirtualList from "$lib/components/VirtualList.svelte";
+  import { compareUnityVersions } from "./projects/helpers.ts";
 
   const ROW_HEIGHT = 38;
 
@@ -128,35 +129,10 @@
     return a >= 6000 ? `${m[1]}.${m[2]}` : m[1];
   }
 
-  /// Compare two Unity version strings for "which is newer". Parses the
-  /// `major.minor.patch` numeric segments plus the suffix letter+number
-  /// (`f1`, `b2`, `a7`). Order: higher major wins; ties break on minor,
-  /// then patch, then the suffix letter (`f` final > `b` beta > `a`
-  /// alpha), then the suffix number. Returns >0 if `a` is newer, <0 if
-  /// `b` is newer, 0 on tie. Falls back to a plain string compare for
-  /// versions that do not parse, so they still order deterministically.
-  ///
-  /// Comparing the full major.minor (not just the patch, as the old
-  /// implementation did) is required so versions from different lines
-  /// order correctly — e.g. `6000.5.0f1` is newer than `6000.0.77f1`
-  /// even though the latter has a higher patch number.
-  function compareUnityVersions(a: string, b: string): number {
-    const pa = /^(\d+)\.(\d+)\.(\d+)([a-z])(\d+)$/.exec(a);
-    const pb = /^(\d+)\.(\d+)\.(\d+)([a-z])(\d+)$/.exec(b);
-    if (!pa || !pb) return a < b ? -1 : a > b ? 1 : 0;
-    // Major first, then minor, then patch.
-    for (let i = 1; i <= 3; i++) {
-      const delta = Number(pa[i]) - Number(pb[i]);
-      if (delta !== 0) return delta;
-    }
-    // Suffix letter: f > b > a. Compare ranks so any unknown letter
-    // sorts below the known set.
-    const rank = (c: string): number =>
-      c === "f" ? 3 : c === "b" ? 2 : c === "a" ? 1 : 0;
-    const letterDelta = rank(pa[4]) - rank(pb[4]);
-    if (letterDelta !== 0) return letterDelta;
-    return Number(pa[5]) - Number(pb[5]);
-  }
+  // `compareUnityVersions` is imported from `./projects/helpers.ts` so the
+  // frontend sort matches the Rust `unity_version::compare_versions` order
+  // exactly (A11): the old local rank-based impl diverged on the `c`/`p`
+  // release-stream letters.
 
   /// Collapse an LTS list to the newest patch of each major line. Unity
   /// ships multiple LTS lines (`6000.0`, `6000.3`, `2022`, …); for the
