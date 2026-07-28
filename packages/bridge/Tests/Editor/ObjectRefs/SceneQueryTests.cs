@@ -26,13 +26,15 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         [Test]
-        public void FindRootTransforms_ReturnsNonNullArray()
+        public void FindActiveTransforms_ReturnsNonNullArray()
         {
-            // FindRootTransforms is the most common call shape in the codebase
-            // (every screenshot + extension-domain hierarchy walk). It must
-            // return a non-null array on any scene with at least one root.
-            var roots = SceneQuery.FindRootTransforms();
-            Assert.IsNotNull(roots, "FindRootTransforms must never return null");
+            // B-N22 — FindActiveTransforms (renamed from FindRootTransforms)
+            // is the most common call shape in the codebase (every screenshot
+            // + extension-domain hierarchy walk). It returns every ACTIVE
+            // Transform, not only roots; the rename makes that honest. It must
+            // return a non-null array on any scene with at least one Transform.
+            var transforms = SceneQuery.FindActiveTransforms();
+            Assert.IsNotNull(transforms, "FindActiveTransforms must never return null");
         }
 
         [Test]

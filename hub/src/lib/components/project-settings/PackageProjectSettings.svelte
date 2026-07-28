@@ -530,6 +530,28 @@
               </li>
             {/each}
           </ul>
+        {:else if (migrateResult?.errors ?? []).length}
+          <!-- B-N28: the H3 `same_file` branch (a hardlink/symlink alias
+            between the source and package trees) increments
+            `skipped_duplicate`, NOT `failed`, but still pushes an
+            explanatory string onto `errors`. The previous template rendered
+            `errors` only inside `{#if failedEntries.length}`, so when a
+            same-file alias was the only problem nothing was shown and the
+            file appeared in the generic Duplicates list above with no
+            reason. Surface those diagnostics here under their own heading so
+            the user sees WHY the file was skipped instead of a bare
+            "duplicate". -->
+          <p class="migrate-group-title">
+            Skipped — source and destination resolve to the same file ({(migrateResult?.errors ?? []).length})
+          </p>
+          <ul class="notes-list migrate-log">
+            {#each migrateResult?.errors ?? [] as errMsg}
+              <li>
+                <span class="migrate-action migrate-skipped-duplicate">same-file</span>
+                <span class="migrate-path">{errMsg}</span>
+              </li>
+            {/each}
+          </ul>
         {/if}
       {/if}
     </section>

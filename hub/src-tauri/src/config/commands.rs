@@ -33,6 +33,21 @@ pub struct AppState {
 ///
 /// Returns the persisted next state on success, or the IO error on
 /// failure (the live Mutex is left untouched on failure).
+///
+/// B-N27 — the lock is deliberately held across the disk write: releasing
+/// it would re-open the lost-update race this helper exists to close (a
+/// concurrent writer could land between our read and our swap, and we'd
+/// clobber it). The trade-off is that a slow config volume serializes
+/// every projects-touching Tauri command behind one `fsync` while the
+/// mutex is held. The mitigation is contractual: callers MUST do all long
+/// work (scans, copies, network) BEFORE calling this helper and pass a
+/// `mutate` that only applies the resulting patch to the fresh live state
+/// — so the only cost under the lock is the atomic write itself, which is
+/// unavoidable for the read/swap atomicity guarantee. The two current
+/// callers (`count_lines`, `count_lines_cached`) already follow this
+/// pattern. If a future caller needs to persist after a genuinely long
+/// synchronous operation, make that command `async` and offload the whole
+/// `with_projects` call to `spawn_blocking`, mirroring `save_settings`.
 pub fn with_projects<F>(
     projects: &Mutex<ProjectsFile>,
     mutate: F,

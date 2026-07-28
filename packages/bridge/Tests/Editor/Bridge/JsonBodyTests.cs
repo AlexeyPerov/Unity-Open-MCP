@@ -154,6 +154,37 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsFalse(JsonBody.HasKey(null, "code"));
         }
 
+        // ----- HasKeyAndNotNull (B-N23) -----
+        //
+        // The "field provided with a real value" predicate: false for both a
+        // missing key and an explicit null, true only when a non-null value is
+        // present. Used by gameobject_set_parent so `"parent_path": null` (the
+        // common LLM shape for "not specified") does not trigger a detach.
+
+        [Test]
+        public static void HasKeyAndNotNull_PresentValue_ReturnsTrue()
+        {
+            Assert.IsTrue(JsonBody.HasKeyAndNotNull("{\"code\":\"x\"}", "code"));
+            // An empty string IS a real value (the explicit-detach form for
+            // parent_path), so it must report true.
+            Assert.IsTrue(JsonBody.HasKeyAndNotNull("{\"parent_path\":\"\"}", "parent_path"));
+        }
+
+        [Test]
+        public static void HasKeyAndNotNull_ExplicitNull_ReturnsFalse()
+        {
+            Assert.IsFalse(JsonBody.HasKeyAndNotNull("{\"parent_path\":null}", "parent_path"));
+        }
+
+        [Test]
+        public static void HasKeyAndNotNull_MissingKey_ReturnsFalse()
+        {
+            Assert.IsFalse(JsonBody.HasKeyAndNotNull("{\"code\":\"x\"}", "parent_path"));
+            Assert.IsFalse(JsonBody.HasKeyAndNotNull("{}", "parent_path"));
+            Assert.IsFalse(JsonBody.HasKeyAndNotNull("", "parent_path"));
+            Assert.IsFalse(JsonBody.HasKeyAndNotNull(null, "parent_path"));
+        }
+
         [Test]
         public static void TryGetString_PresentString_ReturnsValueAndPresentTrue()
         {

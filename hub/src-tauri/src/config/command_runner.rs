@@ -385,12 +385,20 @@ fn strip_ansi(s: &str) -> String {
             i += 1;
         } else {
             // Advance over one whole UTF-8 codepoint so multi-byte
-            // sequences are copied intact. `char_indices` gives us the
-            // byte length of the char starting at `i`.
+            // sequences are copied intact. B-N26 — `char_indices` yields
+            // (byte_offset, char); the byte offset of the FIRST char of a
+            // slice is always 0, so the previous `.map(|(delta, _)| delta)`
+            // made `len` always 0 and `take` always 1. Output was nonetheless
+            // correct (copying a UTF-8 sequence byte-by-byte reproduces it,
+            // and ESC cannot appear inside one), but `from_utf8` re-validated
+            // the whole remaining slice on every byte, making the loop
+            // quadratic on long npm/vitest lines. Use `ch.len_utf8()` (the
+            // codepoint's actual byte length) so multi-byte sequences advance
+            // in one step.
             let len = std::str::from_utf8(&bytes[i..])
                 .ok()
-                .and_then(|slice| slice.char_indices().next())
-                .map(|(delta, _)| delta)
+                .and_then(|slice| slice.chars().next())
+                .map(|ch| ch.len_utf8())
                 .unwrap_or(1);
             let take = len.max(1).min(bytes.len() - i);
             out.extend_from_slice(&bytes[i..i + take]);

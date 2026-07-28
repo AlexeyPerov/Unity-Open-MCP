@@ -484,7 +484,7 @@ namespace UnityOpenMcpBridge.Extensions.AnimationExt
         {
             sb.Append('{');
             sb.Append("\"name\":").Append(AnimationJson.Esc(layer.name)).Append(',');
-            sb.Append("\"defaultWeight\":").Append(layer.defaultWeight).Append(',');
+            sb.Append("\"defaultWeight\":").Append(layer.defaultWeight.ToString("R", CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"blendingMode\":").Append(AnimationJson.Esc(layer.blendingMode.ToString())).Append(',');
             sb.Append("\"iKPass\":").Append(layer.iKPass ? "true" : "false").Append(',');
 

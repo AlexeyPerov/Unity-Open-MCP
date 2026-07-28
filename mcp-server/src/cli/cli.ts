@@ -238,7 +238,17 @@ export async function runCli(opts: CliRunOptions): Promise<CliRunOutcome> {
   // and forgotten, so eventCount is 0). Skip the final emitResult so we do not
   // append a bogus summary line after the live stream. Non-follow still emits
   // its single summary through emitResult as before.
+  //
+  // B-N24 — BUT if the follow branch never streamed anything because the
+  // bridge was unreachable, it returns a non-success exit code (EXIT.TIMEOUT)
+  // with an `errorLabel: "bridge_unavailable"` verdict and a human message.
+  // Skipping emitResult there left CI with exit 3 and an EMPTY log — no clue
+  // why the job failed. Emit the diagnostic on the failure path only; the
+  // successful follow path keeps skipping the bogus zero-event summary.
   if (parsed.command === "stream-events" && parsed.follow) {
+    if (result.exitCode !== 0 && (result.human || result.errorLabel)) {
+      await emitResult(result, parsed.json);
+    }
     return { handled: true, exitCode: result.exitCode };
   }
 

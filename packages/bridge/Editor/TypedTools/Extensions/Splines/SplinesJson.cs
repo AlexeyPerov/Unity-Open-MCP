@@ -96,7 +96,7 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
 
             if (!string.IsNullOrEmpty(name))
             {
-                var roots = SceneQuery.FindRootTransforms();
+                var roots = SceneQuery.FindActiveTransforms();
                 foreach (var root in roots)
                 {
                     if (root.gameObject.name == name) return root.gameObject;
@@ -109,7 +109,7 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
         public static GameObject FindByPath(string path)
         {
             var parts = path.Split('/');
-            var roots = SceneQuery.FindRootTransforms();
+            var roots = SceneQuery.FindActiveTransforms();
             foreach (var root in roots)
             {
                 if (root.gameObject.name == parts[0])

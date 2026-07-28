@@ -365,7 +365,7 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(link)).Append(',');
             sb.Append("\"startPosition\":").Append(Vec3(link.startPoint)).Append(',');
             sb.Append("\"endPosition\":").Append(Vec3(link.endPoint)).Append(',');
-            sb.Append("\"width\":").Append(link.width).Append(',');
+            sb.Append("\"width\":").Append(link.width.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"bidirectional\":").Append(link.bidirectional ? "true" : "false").Append(',');
             sb.Append("\"autoUpdate\":").Append(link.autoUpdate ? "true" : "false");
             sb.Append('}');
@@ -428,10 +428,10 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
             sb.Append("\"agent\":{");
             sb.Append("\"added\":").Append(added ? "true" : "false").Append(',');
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(agent)).Append(',');
-            sb.Append("\"radius\":").Append(agent.radius).Append(',');
-            sb.Append("\"height\":").Append(agent.height).Append(',');
-            sb.Append("\"speed\":").Append(agent.speed).Append(',');
-            sb.Append("\"angularSpeed\":").Append(agent.angularSpeed);
+            sb.Append("\"radius\":").Append(agent.radius.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
+            sb.Append("\"height\":").Append(agent.height.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
+            sb.Append("\"speed\":").Append(agent.speed.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
+            sb.Append("\"angularSpeed\":").Append(agent.angularSpeed.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             sb.Append('}');
             return NavigationJson.Ok(sb.ToString());
         }
@@ -592,12 +592,12 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
                 first = AppendComma(sb, first);
                 sb.Append("{\"type\":\"NavMeshAgent\",")
                   .Append("\"instanceId\":").Append(InstanceId.ToJson(agent)).Append(',')
-                  .Append("\"radius\":").Append(agent.radius).Append(',')
-                  .Append("\"height\":").Append(agent.height).Append(',')
-                  .Append("\"speed\":").Append(agent.speed).Append(',')
-                  .Append("\"angularSpeed\":").Append(agent.angularSpeed).Append(',')
-                  .Append("\"acceleration\":").Append(agent.acceleration).Append(',')
-                  .Append("\"stoppingDistance\":").Append(agent.stoppingDistance).Append(',')
+                  .Append("\"radius\":").Append(agent.radius.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
+                  .Append("\"height\":").Append(agent.height.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
+                  .Append("\"speed\":").Append(agent.speed.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
+                  .Append("\"angularSpeed\":").Append(agent.angularSpeed.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
+                  .Append("\"acceleration\":").Append(agent.acceleration.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
+                  .Append("\"stoppingDistance\":").Append(agent.stoppingDistance.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
                   .Append("\"isOnNavMesh\":").Append(agent.isOnNavMesh ? "true" : "false").Append(',')
                   .Append("\"pathStatus\":").Append(NavigationJson.Esc(agent.pathStatus.ToString()))
                   .Append('}');
@@ -611,10 +611,10 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
                   .Append("\"instanceId\":").Append(InstanceId.ToJson(link)).Append(',')
                   .Append("\"startPosition\":").Append(Vec3(link.startPoint)).Append(',')
                   .Append("\"endPosition\":").Append(Vec3(link.endPoint)).Append(',')
-                  .Append("\"width\":").Append(link.width).Append(',')
+                  .Append("\"width\":").Append(link.width.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',')
                   .Append("\"bidirectional\":").Append(link.bidirectional ? "true" : "false").Append(',')
                   .Append("\"autoUpdate\":").Append(link.autoUpdate ? "true" : "false").Append(',')
-                  .Append("\"costModifier\":").Append(link.costModifier)
+                  .Append("\"costModifier\":").Append(link.costModifier.ToString("R", System.Globalization.CultureInfo.InvariantCulture))
                   .Append('}');
             }
 

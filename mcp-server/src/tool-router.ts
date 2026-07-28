@@ -2455,6 +2455,15 @@ function pageSceneNodes(
   // `truncated` count; we now pull it from `body.scene` and re-attach it on
   // the page so callers can tell paging-truncated (resumable via next_cursor)
   // from bridge-truncated (the source cap was hit).
+  //
+  // B-N20 — the previous rewrite built a fresh `{status, scene: {...}}` object,
+  // silently discarding every OTHER top-level field. The most important of
+  // those is `_route` (stamped at :2409/2414/2417 to signal live vs batch
+  // fallback), which docs/api/routing-lifecycle.md documents as the agent's
+  // data-origin signal: a paging agent would lose the live-vs-batch-fallback
+  // indication whenever `page_size` is supplied, while the unpaged response
+  // still carries it. Spread the rest of `body` (everything except `scene`)
+  // so the page matches the unpaged response's top-level shape.
   const scene = (body.scene && typeof body.scene === "object")
     ? body.scene as Record<string, unknown>
     : {};
@@ -2466,7 +2475,12 @@ function pageSceneNodes(
   void moreHidden;
   void _existing;
 
+  // Pull the top-level meta (everything except `scene`, which we rebuild).
+  const { scene: _s, ...topMeta } = body;
+  void _s;
+
   const result: Record<string, unknown> = {
+    ...topMeta,
     status: body.status ?? "ok",
     scene: {
       ...sceneMeta,

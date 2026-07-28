@@ -546,6 +546,68 @@ export class LiveClient implements Router {
     // equal `{size, mtimeMs}` snapshots mean no writes landed between them.
     let prevSnapshot: { size: number; mtimeMs: number } | null = null;
 
+    // B-N25 — extract the "read + parse + unlink" consume step so it can run
+    // BOTH inside the stability-gated loop AND once more after the loop. The
+    // stability gate requires two identical probes, so the file is consumed
+    // one poll interval (250 ms – 1 s) AFTER it is first observed. If the
+    // results land inside that last interval before `deadline`, the loop
+    // exits and used to return `test_results_timeout` even though a complete
+    // parseable result was on disk (and since the consume is the only thing
+    // that unlinks, the file was left for the next run to trip over). The
+    // post-loop attempt is a last-chance read with NO stability requirement —
+    // the deadline has passed, so a final single-shot parse is strictly
+    // better than declaring a timeout with a result on disk. Returns the
+    // CallToolResult on a successful parse, or null to keep polling / fall
+    // through to the timeout. `requireStable` gates whether the two-probe
+    // stability check must pass first.
+    const consumeIfReady = (
+      snapshot: { size: number; mtimeMs: number } | null,
+      requireStable: boolean,
+    ): { content: { type: "text"; text: string }[]; isError: boolean } | null => {
+      if (snapshot === null) return null;
+      if (requireStable) {
+        const stable =
+          prevSnapshot !== null &&
+          prevSnapshot.size === snapshot.size &&
+          prevSnapshot.mtimeMs === snapshot.mtimeMs;
+        if (!stable) return null;
+      }
+      // Two consecutive identical probes (or the post-loop last chance) → the
+      // bridge has finished writing. Read, then unlink ONLY on a successful
+      // parse so a truncated body is retried on the next iteration instead of
+      // being destroyed.
+      let content: string;
+      try {
+        content = readFileSync(resultsPath, "utf-8");
+      } catch {
+        // readFileSync threw (e.g. file deleted between stat and read) —
+        // reset the baseline so the next poll re-establishes it.
+        prevSnapshot = null;
+        return null;
+      }
+      let isError = false;
+      try {
+        const parsed = JSON.parse(content);
+        isError = parsed.status === "error";
+      } catch {
+        // Unparseable → the read raced a writer despite the stability check
+        // (rare, e.g. a size match on a still-flushing FS). Do NOT delete:
+        // the next poll re-reads once the writer is done.
+        prevSnapshot = null;
+        return null;
+      }
+      try {
+        unlinkSync(resultsPath);
+      } catch {
+        // best-effort cleanup — the result is already in hand
+      }
+      prevSnapshot = null;
+      return {
+        content: [{ type: "text", text: content }],
+        isError,
+      };
+    };
+
     let intervalMs = minIntervalMs;
     while (Date.now() < deadline) {
       let snapshot: { size: number; mtimeMs: number } | null = null;
@@ -561,53 +623,33 @@ export class LiveClient implements Router {
       }
 
       if (snapshot !== null) {
-        const stable =
-          prevSnapshot !== null &&
-          prevSnapshot.size === snapshot.size &&
-          prevSnapshot.mtimeMs === snapshot.mtimeMs;
-        if (stable) {
-          // Two consecutive identical probes → the bridge has finished writing.
-          // Read, then unlink ONLY on a successful parse so a truncated body is
-          // retried on the next iteration instead of being destroyed.
-          try {
-            const content = readFileSync(resultsPath, "utf-8");
-            let isError = false;
-            try {
-              const parsed = JSON.parse(content);
-              isError = parsed.status === "error";
-            } catch {
-              // Unparseable → the read raced a writer despite the stability
-              // check (rare, e.g. a size match on a still-flushing FS). Do NOT
-              // delete: the next poll re-reads once the writer is done.
-              prevSnapshot = null;
-              await sleep(intervalMs);
-              intervalMs = Math.min(intervalMs * 2, maxIntervalMs);
-              continue;
-            }
-            try {
-              unlinkSync(resultsPath);
-            } catch {
-              // best-effort cleanup — the result is already in hand
-            }
-            prevSnapshot = null;
-            return {
-              content: [{ type: "text", text: content }],
-              isError,
-            };
-          } catch {
-            // readFileSync threw (e.g. file deleted between stat and read) —
-            // reset and keep polling; the next stat re-establishes a baseline.
-            prevSnapshot = null;
-          }
-        } else {
-          // First sighting of this file (or it grew since the last probe) —
-          // remember the snapshot and wait one interval before re-checking.
-          prevSnapshot = snapshot;
-        }
+        const consumed = consumeIfReady(snapshot, true);
+        if (consumed) return consumed;
+        // Not yet stable → first sighting of this file (or it grew since the
+        // last probe). Remember the snapshot and wait one interval before
+        // re-checking.
+        if (prevSnapshot === null) prevSnapshot = snapshot;
       }
 
       await sleep(intervalMs);
       intervalMs = Math.min(intervalMs * 2, maxIntervalMs);
+    }
+
+    // B-N25 — one final last-chance read after the loop. The stability gate
+    // consumes the file one interval after it first appears, so a result that
+    // lands in the final interval used to time out with a parseable file on
+    // disk (and left there for the next run). The deadline has already
+    // passed, so a single-shot parse with no stability requirement is
+    // strictly better than the timeout below: a complete result is returned,
+    // and only a genuinely missing/incomplete file falls through to the
+    // timeout error.
+    try {
+      const st = statSync(resultsPath);
+      const finalSnapshot = { size: st.size, mtimeMs: st.mtimeMs };
+      const consumed = consumeIfReady(finalSnapshot, false);
+      if (consumed) return consumed;
+    } catch {
+      // File is genuinely absent — fall through to the timeout.
     }
 
     return makeErrorResult({

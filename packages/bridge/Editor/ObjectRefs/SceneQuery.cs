@@ -10,7 +10,7 @@
 // available there. On UNITY_2023_1_OR_NEWER the helper uses the new API; on
 // older Unity it falls back to FindObjectsOfType<T>(), which returns active
 // objects only — so FindObjectsInactive.Include degrades to active-only on
-// pre-2023.1 (graceful, never a compile failure), and a one-time warning
+// pre-2023.1 (graceful, never a compile failure), and a ONE-TIME warning
 // makes the semantic loss observable.
 //
 // Resources.FindObjectsOfTypeAll (used by the toolbar / window enumerators)
@@ -40,6 +40,13 @@ namespace UnityOpenMcpBridge.ObjectRefs
             Include,
         }
 
+        // B-N22 — the pre-2023.1 Inactive.Include degradation warning used to
+        // fire on EVERY call, so on the declared 2022.3 floor the console
+        // spammed from audio_listener_get, EnsureEventSystem and the
+        // Cinemachine camera list. Latch it to a process-lifetime flag so the
+        // semantic loss is logged exactly once per Editor session.
+        private static bool _warnedIncludeUnavailable;
+
         /// <summary>
         /// Find every live object of type <typeparamref name="T"/> in open
         /// scenes, active objects only. Equivalent to the codebase's most
@@ -63,26 +70,42 @@ namespace UnityOpenMcpBridge.ObjectRefs
 #else
             // Pre-2023.1 has no FindObjectsInactive enum and FindObjectsOfType<T>()
             // is the only option — it returns active objects only. Include
-            // degrades to active-only (graceful, never a crash). Warn once per
-            // call so the semantic loss is observable in the Editor log rather
-            // than silently changing the result set.
-            if (inactive == Inactive.Include)
+            // degrades to active-only (graceful, never a crash). B-N22 — warn
+            // ONCE per process (not per call) so the semantic loss is
+            // observable in the Editor log without spamming it from every
+            // Inactive.Include caller.
+            if (inactive == Inactive.Include && !_warnedIncludeUnavailable)
             {
+                _warnedIncludeUnavailable = true;
                 Debug.LogWarning(
                     "[unity-open-mcp] SceneQuery.Inactive.Include is not available " +
-                    "on Unity < 2023.1; degrading to active-only (Exclude).");
+                    "on Unity < 2023.1; degrading to active-only (Exclude). This " +
+                    "warning is logged once per Editor session.");
             }
             return Object.FindObjectsOfType<T>();
 #endif
         }
 
         /// <summary>
-        /// The most common call shape in this codebase: every active root
-        /// Transform across open scenes. Centralized so every screenshot and
-        /// extension-domain hierarchy walk emits the same set. Equivalent to
-        /// <c>FindObjectsByType&lt;Transform&gt;(FindObjectsInactive.Exclude)</c>.
+        /// The most common call shape in this codebase: every ACTIVE Transform
+        /// across open scenes (NOT only root transforms — every Transform in
+        /// the hierarchy, including children). Centralized so every screenshot
+        /// and extension-domain hierarchy walk emits the same set. Equivalent
+        /// to <c>FindObjectsByType&lt;Transform&gt;(FindObjectsInactive.Exclude)</c>.
+        ///
+        /// <para><b>B-N22 — naming honesty.</b> The previous name
+        /// <c>FindRootTransforms</c> and its XML doc claimed "every active
+        /// ROOT Transform", but the implementation returns every active
+        /// Transform (children included), because <c>Transform</c> is queried
+        /// as a type and every child is one. Behaviour matched the pre-fix
+        /// call sites (they all match on the first path segment by name), but
+        /// the name invited a real bug the first time someone trusted
+        /// "roots". The name now says what it does; callers that genuinely
+        /// need only root Transforms should filter on
+        /// <c>t.parent == null</c> or use the scene's
+        /// <c>GetRootGameObjects()</c>.</para>
         /// </summary>
-        public static Transform[] FindRootTransforms()
+        public static Transform[] FindActiveTransforms()
             => FindAllOfType<Transform>(Inactive.Exclude);
     }
 }

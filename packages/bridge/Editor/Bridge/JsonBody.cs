@@ -43,6 +43,43 @@ namespace UnityOpenMcpBridge
         }
 
         /// <summary>
+        /// Reports whether <paramref name="json"/> carries a top-level entry
+        /// for <paramref name="key"/> whose value is NOT an explicit JSON
+        /// <c>null</c>. This is the "the caller actually supplied a value"
+        /// predicate: it returns false for both a missing key and
+        /// <c>"key": null</c>, and true only when a key is present with a
+        /// non-null value (a string, number, object, array, bool).
+        ///
+        /// <para><b>B-N23.</b> LLM tool callers commonly include optional
+        /// string fields as <c>null</c> to mean "not specified". A bare
+        /// <see cref="HasKey"/> treats <c>"parent_path": null</c> as present,
+        /// which made <c>gameobject_set_parent</c> detach to scene root
+        /// instead of returning <c>missing_parameter</c>. Callers that want
+        /// "the field was provided with a real value" should use this helper,
+        /// not <see cref="HasKey"/>.</para>
+        /// </summary>
+        public static bool HasKeyAndNotNull(string json, string key)
+        {
+            if (!HasKey(json, key)) return false;
+            // Re-locate the value start the same way GetString does and check
+            // whether the literal token at that position is `null`.
+            var pattern = "\"" + key + "\"";
+            var idx = json.IndexOf(pattern, StringComparison.Ordinal);
+            var colonIdx = json.IndexOf(':', idx + pattern.Length);
+            if (colonIdx < 0) return false;
+            var start = colonIdx + 1;
+            while (start < json.Length && char.IsWhiteSpace(json[start])) start++;
+            if (start + 3 < json.Length
+                && json[start] == 'n' && json[start + 1] == 'u'
+                && json[start + 2] == 'l' && json[start + 3] == 'l')
+            {
+                return false;
+            }
+            // Also treat an explicit absent-after-colon tail as not-provided.
+            return start < json.Length;
+        }
+
+        /// <summary>
         /// Resolve a string field that distinguishes "missing key" from an
         /// explicit <c>null</c>. <paramref name="present"/> is set to true when
         /// the key exists (even if its value is null); false when it is absent.

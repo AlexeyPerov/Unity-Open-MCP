@@ -3266,3 +3266,22 @@ test("M3: scene_get_data paging preserves the bridge truncated count on the scen
   });
 });
 
+test("B-N20: scene_get_data paging preserves _route (and other top-level fields)", async () => {
+  await withTmp("router-scene-page-route-", async (tmp) => {
+    await setupProject(tmp);
+    const live = makeSceneGetDataFakeLive({ body: bridgeSceneBody(4) });
+    const router = makeRouter(live, makeFakeBatch(), tmp, makeFakeEventStream());
+    const result = await router.route(
+      "unity_open_mcp_scene_get_data",
+      { page_size: 2 },
+    );
+    const body = parseBody(result);
+    // _route is stamped by the router wrapper (injectRouteMeta) on the live
+    // path; a paging response must carry it through just like the unpaged one
+    // so an agent can tell live vs batch-fallback apart.
+    const route = body._route as { route?: string } | undefined;
+    assert.ok(route, "_route must survive paging");
+    assert.equal(route?.route, "live", "_route.route preserved on a paged response");
+  });
+});
+

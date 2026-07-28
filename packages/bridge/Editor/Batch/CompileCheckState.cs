@@ -54,8 +54,21 @@ namespace UnityOpenMcpBridge.Batch
         // (Application.dataPath). Available in both batch mode and the
         // interactive Editor, and stable across the domain reload the
         // compile-check itself triggers.
-        private static string ResolveProjectPath() =>
+        //
+        // B-N18 — compute ONCE into a `static readonly`. `Update()` is
+        // subscribed by the [InitializeOnLoad] ctor in every Editor that
+        // loads this assembly and runs at Editor tick rates (~100 Hz), so
+        // resolving the path on every tick used to call `ProjectHash(...)`
+        // (a SHA256 + 64-char hex StringBuilder) + a `File.Exists` syscall
+        // on every frame, forever, for a feature inert outside a batch run.
+        // The project path cannot change within a domain (it is the parent
+        // of `Application.dataPath`, fixed when Unity launches), so the
+        // cached value is valid for the whole domain lifetime and the
+        // pending-path string right alongside it.
+        private static readonly string ProjectPath =
             Directory.GetParent(Application.dataPath)?.FullName ?? Application.dataPath;
+
+        private static readonly string ResolvedPendingPath = PendingFilePath(ProjectPath);
 
         // Bound the payload for catastrophically broken projects. The first N
         // errors are enough for an agent to diagnose; beyond that, fix forward
@@ -120,10 +133,11 @@ namespace UnityOpenMcpBridge.Batch
 
         private static void OnAssemblyCompiled(string assembly, CompilerMessage[] messages)
         {
-            var pendingPath = PendingFilePath(ResolveProjectPath());
-            if (!File.Exists(pendingPath)) return;
+            // B-N18 — read the cached pending path instead of recomputing
+            // ProjectHash + File.Exists on every assembly compile.
+            if (!File.Exists(ResolvedPendingPath)) return;
 
-            var pending = ReadPending(pendingPath);
+            var pending = ReadPending(ResolvedPendingPath);
             if (pending == null) return;
 
             CollectErrors(pending, assembly, messages);
@@ -161,10 +175,13 @@ namespace UnityOpenMcpBridge.Batch
 
         private static void Update()
         {
-            var pendingPath = PendingFilePath(ResolveProjectPath());
-            if (!File.Exists(pendingPath)) return;
+            // B-N18 — `Update` runs at Editor tick rates (~100 Hz) in every
+            // Editor that loads this assembly. The cached `ResolvedPendingPath`
+            // avoids a SHA256 + hex StringBuilder + `File.Exists` syscall per
+            // tick for a feature that is inert outside a batch run.
+            if (!File.Exists(ResolvedPendingPath)) return;
 
-            var pending = ReadPending(pendingPath);
+            var pending = ReadPending(ResolvedPendingPath);
             if (pending == null) return;
 
             bool timedOut = NowMs() - pending.startedAtMs > pending.timeoutMs;
@@ -173,7 +190,7 @@ namespace UnityOpenMcpBridge.Batch
             // capture every assembly's messages.
             if (EditorApplication.isCompiling && !timedOut) return;
 
-            Finalize(pending, timedOut, pendingPath);
+            Finalize(pending, timedOut, ResolvedPendingPath);
         }
 
         private static void Finalize(PendingState pending, bool timedOut, string pendingPath)
@@ -277,7 +294,7 @@ namespace UnityOpenMcpBridge.Batch
             try
             {
                 Directory.CreateDirectory(StatusDir);
-                File.WriteAllText(PendingFilePath(ResolveProjectPath()), SerializePending(pending));
+                File.WriteAllText(ResolvedPendingPath, SerializePending(pending));
             }
             catch (Exception e)
             {

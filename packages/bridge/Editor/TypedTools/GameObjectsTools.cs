@@ -652,10 +652,20 @@ namespace UnityOpenMcpBridge.TypedTools
             // from an explicit detach request. The contract documented by the
             // old error message was "empty parent_path with parent_instance_id=0
             // detaches to scene root", but no code path actually did it. We treat
-            // an explicitly-present parent_path (even if empty/null) together
+            // an explicitly-present parent_path (even if empty) together
             // with parent_instance_id=0 as a detach; both keys absent is still
             // missing_parameter so the existing test still holds.
-            bool parentPathKeyPresent = JsonBody.HasKey(body, "parent_path");
+            //
+            // B-N23 — `HasKey` treats `"parent_path": null` as present (its
+            // documented purpose is to distinguish missing from explicit
+            // null). LLM callers commonly emit optional string fields as null
+            // to mean "not specified", so a literal null used to trigger a
+            // real reparent to scene root instead of missing_parameter. Use
+            // HasKeyAndNotNull so only an actual value (an explicit empty
+            // STRING for detach, or a real path) counts as "provided"; an
+            // explicit null falls through to missing_parameter, matching the
+            // "not specified" intent.
+            bool parentPathKeyPresent = JsonBody.HasKeyAndNotNull(body, "parent_path");
 
             // Resolve the new parent. detachToRoot is set when the caller
             // explicitly asked for the scene root (empty/null parent_path with

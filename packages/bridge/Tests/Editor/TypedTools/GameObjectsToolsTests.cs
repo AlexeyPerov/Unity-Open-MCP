@@ -639,6 +639,37 @@ namespace UnityOpenMcpBridge.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        // B-N23 — an explicit `"parent_path": null` is the common LLM shape for
+        // "not specified". The old HasKey-based check treated null as present,
+        // so this body detached the child to scene root instead of erroring.
+        // HasKeyAndNotNull treats explicit null the same as absent, so the
+        // request now returns missing_parameter (no real reparent happens).
+        [Test]
+        public void SetParent_ExplicitNullParentPath_StillReturnsMissingParameter()
+        {
+            var root = new GameObject("__MCPTest_GO_NullParentRoot");
+            var child = new GameObject("__MCPTest_GO_NullParentChild");
+            child.transform.SetParent(root.transform, false);
+            try
+            {
+                Assert.AreEqual(root.transform, child.transform.parent);
+
+                var result = GameObjectsTools.SetParent(
+                    "{\"instance_id\":" + InstanceId.Of(child) +
+                    ",\"parent_path\":null}");
+                Assert.IsFalse(result.Success, "explicit null parent_path must not detach");
+                Assert.AreEqual("missing_parameter", result.ErrorCode);
+                // Crucially, the child must STILL be parented — no reparent ran.
+                Assert.AreEqual(root.transform, child.transform.parent,
+                    "explicit null parent_path must not move the child");
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+                Object.DestroyImmediate(child);
+            }
+        }
+
         // Detach must be undo-recorded so a human Ctrl+Z reattaches the child.
         [Test]
         public void SetParent_Detach_IsUndoRecorded()

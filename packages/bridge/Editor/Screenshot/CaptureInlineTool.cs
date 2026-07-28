@@ -80,7 +80,7 @@ namespace UnityOpenMcpBridge.Screenshot
             var parts = path.Split('/');
             // SceneQuery centralizes the FindObjectsByType (2023.1+) /
             // FindObjectsOfType (pre-2023.1) version dance — see SceneQuery.cs.
-            var roots = SceneQuery.FindRootTransforms();
+            var roots = SceneQuery.FindActiveTransforms();
 
             foreach (var root in roots)
             {

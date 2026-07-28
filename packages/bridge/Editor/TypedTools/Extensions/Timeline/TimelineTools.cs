@@ -97,7 +97,7 @@ namespace UnityOpenMcpBridge.Extensions.TimelineExt
             sb.Append("\"timeline\":{");
             sb.Append("\"assetPath\":").Append(TimelineJson.Esc(asset_path)).Append(',');
             sb.Append("\"instanceId\":").Append(InstanceId.ToJson(asset)).Append(',');
-            sb.Append("\"frameRate\":").Append(asset.editorSettings.frameRate).Append(',');
+            sb.Append("\"frameRate\":").Append(asset.editorSettings.frameRate.ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"trackCount\":0");
             sb.Append('}');
             return TimelineJson.Ok(sb.ToString());

@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityOpenMcpVerify.Internals.RegexPatterns;
 using UnityOpenMcpVerify.Internals.Serialization;
@@ -137,70 +138,112 @@ namespace UnityOpenMcpVerify.Fixes
                     TouchedPaths = null
                 };
 
-            // V5: refuse to edit an asset that the Editor currently has open.
-            // Writing a scene/prefab on disk that is open in-memory means the
-            // next save silently reverts our relink AFTER apply_fix already
-            // reported success — exactly the hazard RemoveMissingScriptFix
-            // guards against with its `wasOpen` check. Scenes (open scene
-            // files) and prefab-stage assets are both covered.
-            var openAsset = CheckAssetOpen(assetPath);
-            if (openAsset != null)
+            // V5 / B-N21: refuse to edit a PREFAB the Editor currently has
+            // open in a Prefab Stage, but EDIT-AND-RELOAD an open scene. The
+            // previous guard hard-refused any open asset, so the documented
+            // scan→apply_fix loop dead-ended on the most common interactive
+            // case — the user almost always has the referencing scene open.
+            // For an open scene we now rewrite the file on disk and reload the
+            // open scene from disk (the `wasOpen` model RemoveMissingScriptFix
+            // uses) so the in-memory copy picks up the relink instead of
+            // reverting it on the next save. Prefab stages still refuse: a
+            // text rewrite cannot safely update a prefab stage's in-memory
+            // instance, so the user must close the prefab first.
+            var openPrefab = CheckPrefabStageOpen(assetPath);
+            if (openPrefab != null)
             {
                 return new FixResult
                 {
                     Success = false,
-                    Description = openAsset,
+                    Description = openPrefab,
                     TouchedPaths = null
                 };
             }
 
-            return RewriteGuid(assetPath, brokenGuid, targetGuid, targetPath);
+            bool sceneOpen = IsSceneOpen(assetPath);
+            var rewrite = RewriteGuid(assetPath, brokenGuid, targetGuid, targetPath);
+            if (!rewrite.Success || !sceneOpen) return rewrite;
+
+            // B-N21 — the referencing scene is open in-memory. Reload it from
+            // disk so the rewrite we just wrote wins instead of being silently
+            // reverted when the user next saves. `OpenScene` with
+            // `OpenSceneMode.Additive` would load a second copy; we need to
+            // reload the EXISTING loaded scene, so look it up by path and
+            // re-open that specific scene via the editor API. This mirrors
+            // RemoveMissingScriptFix's stance that a fix touching an open
+            // scene saves through Unity rather than expecting the in-memory
+            // copy to be discarded.
+            ReloadOpenScene(assetPath);
+            return rewrite;
         }
 
-        // V5: detect a referencing asset that the editor currently has open.
-        // Returns a non-null message describing why we refused, or null if it
-        // is safe to edit the file on disk.
-        private static string CheckAssetOpen(string assetPath)
+        // B-N21 — true when the referencing scene at assetPath is loaded
+        // (active or additively). Compared OrdinalIgnoreCase so a path that
+        // differs only in case (macOS/Windows default to case-insensitive
+        // filesystems) is still recognized as open.
+        private static bool IsSceneOpen(string assetPath)
         {
-            // Open scene check: any loaded scene at this path (active or
-            // additively-loaded) means an in-memory copy that would silently
-            // win the next save.
-            //
-            // A16 — compare with OrdinalIgnoreCase so a path that differs only
-            // in case (macOS/Windows default to case-insensitive filesystems)
-            // is still recognized as open. The previous ordinal `==` let such a
-            // path slip past the scene check on those platforms.
-            var ext = Path.GetExtension(assetPath ?? "").ToLowerInvariant();
-            if (ext == ".unity")
+            if (Path.GetExtension(assetPath ?? "").ToLowerInvariant() != ".unity") return false;
+            for (var i = 0; i < SceneManager.sceneCount; i++)
             {
-                for (var i = 0; i < SceneManager.sceneCount; i++)
+                if (string.Equals(SceneManager.GetSceneAt(i).path, assetPath,
+                    System.StringComparison.OrdinalIgnoreCase))
                 {
-                    if (string.Equals(SceneManager.GetSceneAt(i).path, assetPath,
-                        System.StringComparison.OrdinalIgnoreCase))
-                    {
-                        return $"Scene '{assetPath}' is currently open in the Editor. " +
-                               "Close it (or save and close) before relinking so the in-memory copy " +
-                               "does not silently revert the relink on the next save.";
-                    }
+                    return true;
                 }
-                return null;
             }
+            return false;
+        }
 
-            // Prefab stage check: a prefab open in the Prefab Editor has an
-            // in-memory instance too.
-            //
-            // A16 — inspect the WHOLE stage stack, not just the focused stage.
-            // PrefabStageUtility.GetCurrentPrefabStage() returns only the top
-            // of the stack, but Unity keeps a stack of open stages (open
-            // Prefab A, double-click nested Prefab B → two stages). With B
-            // focused, a relink targeting A's `.prefab` would pass the
-            // focused-only guard, File.WriteAllText would land, and A's
-            // in-memory stage copy would revert it on the next save. The
-            // StageUtility.GetStages() API (UnityEditor.SceneManagement, since
-            // 2020.1) returns every open stage including the main scene stage;
-            // filter to prefab stages and compare each one's asset path.
-            // Reflection keeps us compile-safe across Unity versions where the
-            // API moved between namespaces.
+        // B-N21 — reload an already-loaded scene from disk so an on-disk edit
+        // (the GUID relink we just wrote) is reflected in the in-memory copy
+        // instead of being reverted on the next save. We close the open scene
+        // and reopen it additively: `OpenScene(path, Additive)` on an already-
+        // loaded path is version-dependent (some Unity versions load a second
+        // copy rather than refreshing in place), so the close-then-reopen pair
+        // is the reliable way to make Unity re-read the file. Best-effort: if
+        // Unity refuses (unsaved changes the user keeps, or the API throws),
+        // the on-disk relink still landed and will win the next time the scene
+        // is opened fresh — a reload failure is NOT a relink failure.
+        private static void ReloadOpenScene(string assetPath)
+        {
+            try
+            {
+                var scene = SceneManager.GetSceneByPath(assetPath);
+                if (!scene.IsValid() || !scene.isLoaded) return;
+                // Close-then-reopen forces Unity to re-read the rewritten file.
+                // `CloseScene(removeScene: true)` drops the in-memory copy;
+                // `OpenScene(Additive)` re-loads it from disk. Unity prompts
+                // before discarding unsaved changes in the closed scene,
+                // matching the editor's normal reload UX.
+                EditorSceneManager.CloseScene(scene, true);
+                EditorSceneManager.OpenScene(assetPath, OpenSceneMode.Additive);
+            }
+            catch
+            {
+                // Best-effort: the on-disk rewrite is the source of truth.
+            }
+        }
+
+        // V5 / B-N21: detect a prefab the Editor currently has open in a
+        // Prefab Stage. Returns a non-null message describing why we refused,
+        // or null if it is safe to edit the file on disk. (Open SCENES are no
+        // longer refused — see IsSceneOpen / ReloadOpenScene for the
+        // edit-and-reload path that handles them.)
+        //
+        // A16 — inspect the WHOLE stage stack, not just the focused stage.
+        // PrefabStageUtility.GetCurrentPrefabStage() returns only the top of
+        // the stack, but Unity keeps a stack of open stages (open Prefab A,
+        // double-click nested Prefab B → two stages). With B focused, a relink
+        // targeting A's `.prefab` would pass the focused-only guard,
+        // File.WriteAllText would land, and A's in-memory stage copy would
+        // revert it on the next save. The StageUtility.GetStages() API
+        // (UnityEditor.SceneManagement, since 2020.1) returns every open stage
+        // including the main scene stage; filter to prefab stages and compare
+        // each one's asset path. Reflection keeps us compile-safe across Unity
+        // versions where the API moved between namespaces.
+        private static string CheckPrefabStageOpen(string assetPath)
+        {
             try
             {
                 var stageType = System.Type.GetType(
