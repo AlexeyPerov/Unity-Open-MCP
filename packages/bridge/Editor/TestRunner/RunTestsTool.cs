@@ -133,6 +133,15 @@ namespace UnityOpenMcpBridge.TestRunner
                 // framework's domain-level holder, collects THIS run's results
                 // into the old run's captured list, and its onFinished rewrites
                 // test-results-<oldRunId>.json with the wrong counts.
+                //
+                // B-R3 note: if another run is genuinely still in flight, this
+                // sweep unsubscribes it and its results file is never written —
+                // that run's results are discarded BY DESIGN (single-run model;
+                // the old alternative was cross-talk that corrupted both runs'
+                // counts). Unlike TestRunnerState.ReattachCallbacks (which no
+                // longer drains — its caller drains once before the marker
+                // loop), starting a NEW run is exactly the point where sweeping
+                // leftovers is legitimate.
                 TestRunnerState.DrainActiveCallbacks();
 
                 // Re-resolve api inside the deferred call: TestRunnerApi is a

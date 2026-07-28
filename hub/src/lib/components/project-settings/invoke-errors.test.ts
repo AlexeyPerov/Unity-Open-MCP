@@ -40,6 +40,30 @@ test("describeInvokeError ignores an empty .message and falls back to .type", ()
   assert.equal(describeInvokeError(err), "persistFailed");
 });
 
+test("describeInvokeError formats sourceOverlapsPackage with both paths", () => {
+  // MigrateError::SourceOverlapsPackage carries no `message`; the wire shape
+  // (serde tag = "type", variant rename_all = camelCase) is
+  // `{ type: "sourceOverlapsPackage", source, packagePath }`.
+  const err = {
+    type: "sourceOverlapsPackage",
+    source: "/pkg/sub",
+    packagePath: "/pkg",
+  };
+  const text = describeInvokeError(err);
+  assert.match(text, /\/pkg\/sub/);
+  assert.match(text, /\/pkg/);
+  assert.match(text, /overlap/i);
+  // Must not fall through to the bare tag.
+  assert.notEqual(text, "sourceOverlapsPackage");
+});
+
+test("describeInvokeError handles sourceOverlapsPackage with malformed fields", () => {
+  const err = { type: "sourceOverlapsPackage", source: 5 };
+  const text = describeInvokeError(err);
+  assert.match(text, /\(unknown\)/);
+  assert.match(text, /overlap/i);
+});
+
 test("describeInvokeError falls back to String(e) for an unrecognized object", () => {
   const err = { code: 500, detail: "internal" };
   assert.equal(describeInvokeError(err), String(err));

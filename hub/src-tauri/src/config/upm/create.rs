@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::config::commands::AppState;
-use crate::config::persistence;
 use crate::config::project_kind;
 use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile};
 use crate::config::upm::manifest::{write_manifest_at, ManifestError, PackageManifest};
@@ -299,15 +298,16 @@ pub fn create_package(
         }
     }
 
-    let mut projects = state.projects.lock().unwrap().clone();
-    projects.projects.push(entry.clone());
-    persistence::save_projects(&projects).map_err(|e| CreatePackageError::PersistFailed {
+    // B-R6 (same class as the named launch/new-project sites): the
+    // scaffold above ran without the lock, so append the new entry to the
+    // FRESH live state via `with_projects` instead of writing back a
+    // pre-scaffold snapshot that would clobber concurrent mutations.
+    let projects = crate::config::commands::with_projects(&state.projects, |file| {
+        file.projects.push(entry.clone());
+    })
+    .map_err(|e| CreatePackageError::PersistFailed {
         message: e.to_string(),
     })?;
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects.clone();
-    }
 
     Ok(CreatePackageResult {
         project: entry,

@@ -290,23 +290,31 @@ namespace UnityOpenMcpBridge.TypedTools
                     $"GameObject not found (instance_id={instanceId}, path='{path}', name_target='{nameTarget}').");
 
             // ---- surface detection (T22.1.4) ----
-            var pathPatchesRaw = JsonBody.GetRawValue(body, "pathPatchesPerGameObject");
-            var jsonPatchesRaw = JsonBody.GetRawValue(body, "jsonPatchesPerGameObject");
+            // B-R4 — every GetRawValue read here routes through NullAsAbsent:
+            // an explicit `"key": null` (the common LLM "not specified" shape,
+            // see B-N23) must read as not-present, not as the token "null".
+            var pathPatchesRaw = NullAsAbsent(JsonBody.GetRawValue(body, "pathPatchesPerGameObject"));
+            var jsonPatchesRaw = NullAsAbsent(JsonBody.GetRawValue(body, "jsonPatchesPerGameObject"));
             bool hasPathPatches = !string.IsNullOrEmpty(pathPatchesRaw) && pathPatchesRaw.Trim() != "{}";
             bool hasJsonPatches = !string.IsNullOrEmpty(jsonPatchesRaw) && jsonPatchesRaw.Trim() != "{}";
 
             // Root diff source: gameObjectDiffs wins when present, else the
             // legacy flat fields on the body. Read fields once from whichever
             // source applies.
-            var diffsSource = JsonBody.GetRawValue(body, "gameObjectDiffs");
+            var diffsSource = NullAsAbsent(JsonBody.GetRawValue(body, "gameObjectDiffs"));
             bool hasGameObjectDiffs = !string.IsNullOrEmpty(diffsSource) && diffsSource.Trim() != "{}";
             string rootSource = hasGameObjectDiffs ? diffsSource : body;
 
             // ---- surface 3: root diffs / legacy flat fields (fail-fast) ----
+            // (name/tag use GetString, which already collapses an explicit
+            // null to C# null; layer/active need the raw token, so B-R4's
+            // NullAsAbsent filter applies — previously `"active": null`
+            // yielded the token "null" and SetActive(false) mutated state,
+            // and `"layer": null` failed with a spurious invalid_layer.)
             var name = JsonBody.GetString(rootSource, "name");
             var tag = JsonBody.GetString(rootSource, "tag");
-            var layerStr = JsonBody.GetRawValue(rootSource, "layer");
-            var activeStr = JsonBody.GetRawValue(rootSource, "active");
+            var layerStr = NullAsAbsent(JsonBody.GetRawValue(rootSource, "layer"));
+            var activeStr = NullAsAbsent(JsonBody.GetRawValue(rootSource, "active"));
             var positionStr = JsonBody.GetString(rootSource, "position");
             var rotationStr = JsonBody.GetString(rootSource, "rotation");
             var scaleStr = JsonBody.GetString(rootSource, "scale");
@@ -502,7 +510,9 @@ namespace UnityOpenMcpBridge.TypedTools
                     continue;
                 }
                 var childGo = child.gameObject;
-                var diffsRaw = JsonBody.GetRawValue(patchesRaw, childPath);
+                // B-R4 — `{"Child": null}` must surface as an empty diff, not
+                // count as a successfully applied no-op.
+                var diffsRaw = NullAsAbsent(JsonBody.GetRawValue(patchesRaw, childPath));
                 if (string.IsNullOrEmpty(diffsRaw) || diffsRaw.Trim() == "{}")
                 {
                     failed.Add($"{childPath}: empty diff.");
@@ -510,15 +520,27 @@ namespace UnityOpenMcpBridge.TypedTools
                 }
 
                 var tag = JsonBody.GetString(diffsRaw, "tag");
-                var layerStr = JsonBody.GetRawValue(diffsRaw, "layer");
-                var activeStr = JsonBody.GetRawValue(diffsRaw, "active");
+                // B-R4 — same null-token filter as the root surface: an
+                // explicit `"active": null` / `"layer": null` means "not
+                // specified", not "deactivate" / invalid layer.
+                var layerStr = NullAsAbsent(JsonBody.GetRawValue(diffsRaw, "layer"));
+                var activeStr = NullAsAbsent(JsonBody.GetRawValue(diffsRaw, "active"));
                 var positionStr = JsonBody.GetString(diffsRaw, "position");
                 var rotationStr = JsonBody.GetString(diffsRaw, "rotation");
                 var scaleStr = JsonBody.GetString(diffsRaw, "scale");
                 var localSpace = JsonBody.GetBool(diffsRaw, "local_space", false);
                 var childName = JsonBody.GetString(diffsRaw, "name");
 
+                // B-R5 — mirror the root-surface undo model (see ApplyRootDiff):
+                // the Transform carries position/rotation/scale, but tag/layer/
+                // active/name live on the GameObject, so the GameObject must be
+                // recorded too — recording only the Transform left those edits
+                // un-undoable and broke the batch_execute single-undo-step
+                // contract for path patches.
                 Undo.RecordObject(child, "MCP Modify GameObject (path patch)");
+                if (!string.IsNullOrEmpty(tag) || layerStr != null || activeStr != null ||
+                    !string.IsNullOrEmpty(childName))
+                    Undo.RecordObject(childGo, "MCP Modify GameObject (path patch)");
 
                 if (!string.IsNullOrEmpty(tag))
                 {
@@ -834,6 +856,15 @@ namespace UnityOpenMcpBridge.TypedTools
             foreach (var t in tags) if (t == tag) return true;
             return false;
         }
+
+        // B-R4 — JsonBody.GetRawValue returns the literal token "null" for an
+        // explicit JSON null. LLM callers commonly send optional fields as
+        // null to mean "not specified" (the B-N23 pattern HasKeyAndNotNull
+        // exists for), so a bare null token must read as "absent". A QUOTED
+        // "null" string survives: GetRawValue keeps the surrounding quotes,
+        // so its trimmed token is "\"null\"", not "null".
+        private static string NullAsAbsent(string raw)
+            => raw != null && raw.Trim() == "null" ? null : raw;
 
         private static string StripQuotes(string s)
         {

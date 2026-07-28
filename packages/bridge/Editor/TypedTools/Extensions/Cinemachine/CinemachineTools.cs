@@ -270,28 +270,30 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
             if (field_of_view > 0f)
             {
                 SetNestedFloat(camera, "Lens", "FieldOfView", field_of_view);
-                sb.Append("\"fieldOfView\":").Append(field_of_view);
+                // A-R4 — StringBuilder.Append(float) uses the current culture;
+                // route floats through CinemachineJson.Num (invariant culture).
+                sb.Append("\"fieldOfView\":").Append(CinemachineJson.Num(field_of_view));
                 any = true;
             }
             if (near_clip > 0f)
             {
                 SetNestedFloat(camera, "Lens", "NearClipPlane", near_clip);
                 if (any) sb.Append(',');
-                sb.Append("\"nearClip\":").Append(near_clip);
+                sb.Append("\"nearClip\":").Append(CinemachineJson.Num(near_clip));
                 any = true;
             }
             if (far_clip > 0f)
             {
                 SetNestedFloat(camera, "Lens", "FarClipPlane", far_clip);
                 if (any) sb.Append(',');
-                sb.Append("\"farClip\":").Append(far_clip);
+                sb.Append("\"farClip\":").Append(CinemachineJson.Num(far_clip));
                 any = true;
             }
             if (dutch > -1000f)
             {
                 SetTopLevelFloat(camera, "Dutch", dutch);
                 if (any) sb.Append(',');
-                sb.Append("\"dutch\":").Append(dutch);
+                sb.Append("\"dutch\":").Append(CinemachineJson.Num(dutch));
                 any = true;
             }
 

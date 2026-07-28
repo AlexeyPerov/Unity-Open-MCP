@@ -32,7 +32,6 @@
 //! editing the manifest, not Rust or TypeScript constants.
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use std::process::Stdio;
@@ -616,29 +615,24 @@ fn write_mcp_config_at(
                 }
             }
         }
-        // Atomic write: tmp + rename. A failure mid-write
-        // leaves the original file untouched. The serialized body
-        // is already in `proposed_str` (JSON pretty or Codex TOML).
+        // Atomic write via `persistence::atomic_write_at` (unique staging
+        // name + fsync + rename). A failure mid-write leaves the original
+        // file untouched. C1 — the previous shape staged through a FIXED
+        // `<target>.<ext>.tmp` filename, so two overlapping writers to the
+        // same config file shared a temp inode and could publish a
+        // byte-mix (the H12 hazard `unique_tmp_path` closes). The
+        // serialized body is already in `proposed_str` (JSON pretty or
+        // Codex TOML).
         let pretty = match client_format(params.client) {
             // TOML body already carries its own trailing newline.
             ClientFormat::Toml => proposed_str.clone(),
             _ => proposed_str.clone() + "\n",
         };
-        let tmp_path = match target.extension().and_then(|e| e.to_str()) {
-            Some(ext) => target.with_extension(format!("{}.tmp", ext)),
-            None => target.with_extension("tmp"),
-        };
-        {
-            let mut tmp = fs::File::create(&tmp_path).map_err(|e| {
-                McpConfigError::new("writeFailed", format!("cannot create tmp file: {}", e))
-            })?;
-            tmp.write_all(pretty.as_bytes()).map_err(|e| {
-                McpConfigError::new("writeFailed", format!("cannot write tmp file: {}", e))
-            })?;
-            tmp.sync_all().ok();
-        }
-        fs::rename(&tmp_path, &target).map_err(|e| {
-            McpConfigError::new("writeFailed", format!("cannot rename tmp to target: {}", e))
+        crate::config::persistence::atomic_write_at(&target, &pretty).map_err(|e| {
+            McpConfigError::new(
+                "writeFailed",
+                format!("cannot write {} atomically: {}", target.display(), e),
+            )
         })?;
     }
     Ok(McpConfigWriteResult {

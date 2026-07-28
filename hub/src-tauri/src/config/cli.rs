@@ -266,6 +266,17 @@ pub fn run_cli_mode(decision: CliDecision) -> ExitCode {
 /// next GUI refresh; CLI mode intentionally does not bump `frecency` to
 /// avoid skewing the sort when the user is just opening a project
 /// repeatedly from a terminal script.
+///
+/// B-R6 note: this deliberately KEEPS the load → mutate → save shape
+/// instead of `commands::with_projects`. CLI mode is a one-shot process
+/// with no Tauri `AppState` (no `projects` Mutex exists here — the GUI
+/// event loop never starts), so there is no in-process shared state to
+/// race with; `with_projects` cannot even be called without a
+/// `Mutex<ProjectsFile>`. The remaining race is CROSS-process (a CLI
+/// launch while a GUI Hub instance is running), which an in-process
+/// mutex cannot close either — that would need file locking, out of
+/// scope here. Worst case is the pre-existing one: the GUI's next write
+/// overwrites this launch stamp.
 fn record_cli_launch(path: &str, version: &str, pid: u32) {
     let mut projects: ProjectsFile = persistence::load_projects();
     let now = chrono::Utc::now().to_rfc3339();

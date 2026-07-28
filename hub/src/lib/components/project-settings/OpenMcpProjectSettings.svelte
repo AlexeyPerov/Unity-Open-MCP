@@ -236,7 +236,15 @@
   // fell through to "not logged in — run `npm login` first" immediately
   // before an irreversible publish, even when the user IS logged in. Load
   // the registry snapshot on mount too so the auth status is real.
-  let registryLoaded = $state(false);
+  // C4: `registryLoaded` is a one-shot latch, deliberately NOT `$state`.
+  // As reactive state the mount effect below both read and wrote it, so
+  // flipping the latch immediately re-scheduled the same effect (a
+  // read-your-own-write cycle: one wasted re-run per mount, and a
+  // fragile shape if the effect ever grows). A plain variable is
+  // invisible to the reactive graph — the effect still re-runs on the
+  // `packageInfo` / `packageInfoError` / `registry` reads it tracks, and
+  // the latch keeps the registry fetch one-shot exactly as before.
+  let registryLoaded = false;
   $effect(() => {
     if (packageInfo === null && packageInfoError === null) {
       void refreshPackageInfo();

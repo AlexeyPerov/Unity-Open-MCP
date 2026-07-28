@@ -97,6 +97,22 @@ class ProjectsStore {
   }
 
   /**
+   * Merge an entry into the in-memory list WITHOUT persisting to disk.
+   *
+   * Exists for the `persistFailed` launch path (A-R5/B-N16): the backend
+   * already failed to write `projects.json`, so calling `update()` (which
+   * re-persists) would write to the very volume whose write just failed —
+   * and its rejection would escape the caller's catch block, killing the
+   * success-with-warning notice. The backend's in-memory state already
+   * holds the merged entry; this keeps the frontend consistent with it.
+   */
+  mergeInMemory(updated: ProjectEntry): void {
+    this.projects = this.projects.map((p) =>
+      p.id === updated.id ? updated : p
+    );
+  }
+
+  /**
    * Update only the `aiSetupWizard` draft field on a single project,
    * without replacing the `projects` array identity.
    *

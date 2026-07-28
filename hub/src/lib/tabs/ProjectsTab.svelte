@@ -823,8 +823,14 @@
         // nothing to act on), then surface a calm notice — do NOT route
         // through `handleLaunchFailure`, which would auto-open the drawer and
         // dump the launch-log tail as if the spawn itself had failed.
+        // A-R5: merge in memory only — `projectsStore.update()` would
+        // re-persist `projects.json` to the very volume whose write just
+        // failed, and on a persistently read-only/full volume that await
+        // rejects INSIDE this catch block, so the notice below never runs.
+        // The backend already holds the merged entry in its state; the
+        // next successful persist (any later mutation) writes it through.
         if (err.project) {
-          await projectsStore.update(err.project);
+          projectsStore.mergeInMemory(err.project);
         }
         const notice = formatLaunchError(err, project);
         S.appendDrawerLog(notice);

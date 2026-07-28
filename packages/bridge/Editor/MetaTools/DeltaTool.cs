@@ -54,8 +54,13 @@ namespace UnityOpenMcpBridge.MetaTools
             {
                 delta = VerifyGateAdapter.ComputeDelta(stored.Fingerprint, currentResult);
             }
-            catch (System.FormatException e)
+            catch (System.Exception e)
             {
+                // B-N7 / B-R9 — ComputeDelta calls IssueKey.Build, which throws
+                // ArgumentException (not just FormatException) for a '|'-bearing
+                // issueCode. Catch broadly, matching GatePolicy's ComputeDelta
+                // catch, so any such leak surfaces as the structured
+                // `delta_error` envelope instead of a generic execution_error.
                 return ToolDispatchResult.Fail("delta_error",
                     $"Delta computation failed: {e.Message}");
             }

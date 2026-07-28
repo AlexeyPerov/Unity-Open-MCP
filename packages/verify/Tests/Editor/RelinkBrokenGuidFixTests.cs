@@ -539,23 +539,112 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
-        // V5 — Apply refuses to rewrite a scene that is currently open in the
-        // Editor, because the in-memory copy would silently revert the relink
-        // on the next save AFTER apply_fix already reported success.
+        // V5 / B-N21 / A-R3 — open-scene handling: a CLEAN open scene is
+        // rewritten on disk and reloaded; a DIRTY open scene is refused
+        // (reload would discard unsaved edits without prompting); a prefab
+        // open in a Prefab Stage is always refused.
         // -------------------------------------------------------------------
 
         [UnityTest]
         public System.Collections.IEnumerator Apply_RewritesAndReloadsWhenReferencingSceneIsOpen()
         {
-            // B-N21 — an open referencing scene is no longer hard-refused. Apply
-            // now rewrites the file on disk AND reloads the open scene so the
-            // in-memory copy picks up the relink (the wasOpen model
-            // RemoveMissingScriptFix uses), instead of dead-ending the
-            // scan→apply_fix loop on the most common interactive case. The
-            // previous behavior refused any open scene; this test was named
-            // Apply_RefusesWhenReferencingSceneIsOpen and asserted the refusal.
+            // B-N21 / A-R3 — an open, CLEAN referencing scene is no longer
+            // hard-refused: Apply rewrites the file on disk AND reloads the
+            // open scene so the in-memory copy picks up the relink instead of
+            // reverting it on the next save.
+            //
+            // A-R3 fixed this fixture: the previous version scanned an EMPTY
+            // scene that never contained the broken GUID, so RewriteGuid
+            // returned "not found" and the Success assertion could not pass in
+            // a real Unity run. The scene now carries a real mesh reference
+            // that we corrupt on disk, exactly like the prefab fixtures above.
+            //
+            // Harness limitation (stated honestly): the scene is opened
+            // ADDITIVELY next to the test runner's scene, so the reload
+            // exercises the multi-scene branch of ReloadOpenScene. The
+            // single-loaded-scene placeholder branch cannot run here — the
+            // harness scene cannot be closed — and is pinned by ReloadOpenScene
+            // checking CloseScene's return value rather than by this test.
             var scenePath = FixtureRoot + "/OpenScene.unity";
-            yield return CreateEmptySceneAt(scenePath);
+            var meshPath = FixtureRoot + "/OpenSceneMesh.asset";
+            yield return CreateSceneWithMeshReference(scenePath, meshPath);
+
+            Assume.That(File.Exists(scenePath), Is.True, "scene must exist");
+            AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                AssetDatabase.LoadAssetAtPath<Mesh>(meshPath), out var realGuid, out _);
+            Assume.That(string.IsNullOrEmpty(realGuid), Is.False,
+                "mesh must produce a real GUID to relink onto");
+
+            // Corrupt the scene's mesh reference on disk BEFORE opening it, so
+            // the opened scene genuinely references the broken GUID.
+            var fakeGuid = "12345678123456781234567812345678";
+            InjectBrokenGuid(scenePath, realGuid, fakeGuid);
+            AssetDatabase.ImportAsset(scenePath, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(scenePath,
+                UnityEditor.SceneManagement.OpenSceneMode.Additive);
+            try
+            {
+                Assume.That(scene.isLoaded, Is.True);
+                Assume.That(scene.isDirty, Is.False,
+                    "a freshly opened scene must be clean so Apply takes the edit-and-reload path");
+
+                var issueId = IssueKey.Build(
+                    "missing_references", VerifySeverity.Error,
+                    scenePath, "missing_guid:" + fakeGuid);
+
+                var result = fix.Apply(issueId, realGuid);
+
+                Assert.IsTrue(result.Success,
+                    $"Apply must succeed for a clean open scene (edit + reload). Got: {result.Description}");
+                Assert.That(result.TouchedPaths, Does.Contain(scenePath));
+
+                // The on-disk scene must carry the relink.
+                var rewritten = File.ReadAllText(scenePath);
+                Assert.IsTrue(rewritten.Contains($"guid: {realGuid}"),
+                    "the rewritten scene must reference the real mesh GUID");
+                Assert.IsFalse(rewritten.Contains(fakeGuid),
+                    "the broken GUID must be gone from the scene file");
+
+                // The reload actually happened: the scene is loaded again and
+                // CLEAN (re-read from the rewritten file), so the next save
+                // cannot revert the relink.
+                var reloaded = UnityEngine.SceneManagement.SceneManager.GetSceneByPath(scenePath);
+                Assert.IsTrue(reloaded.IsValid() && reloaded.isLoaded,
+                    "the scene must be loaded again after the close-and-reopen reload");
+                Assert.IsFalse(reloaded.isDirty,
+                    "the reloaded scene must be clean — its content came from the rewritten file");
+            }
+            finally
+            {
+                // Re-fetch by path: the pre-Apply `scene` handle went stale
+                // when ReloadOpenScene closed and reopened the scene.
+                var open = UnityEngine.SceneManagement.SceneManager.GetSceneByPath(scenePath);
+                if (open.IsValid() && open.isLoaded)
+                    UnityEditor.SceneManagement.EditorSceneManager.CloseScene(open, true);
+            }
+        }
+
+        [UnityTest]
+        public System.Collections.IEnumerator Apply_RefusesWhenOpenSceneHasUnsavedChanges()
+        {
+            // A-R3 — a DIRTY open scene must be refused before any disk write:
+            // ReloadOpenScene closes the scene via EditorSceneManager.CloseScene,
+            // which does NOT prompt about unsaved changes, so proceeding would
+            // silently destroy the user's edits.
+            var scenePath = FixtureRoot + "/DirtyScene.unity";
+            var meshPath = FixtureRoot + "/DirtySceneMesh.asset";
+            yield return CreateSceneWithMeshReference(scenePath, meshPath);
+
+            AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                AssetDatabase.LoadAssetAtPath<Mesh>(meshPath), out var realGuid, out _);
+            Assume.That(string.IsNullOrEmpty(realGuid), Is.False);
+
+            var fakeGuid = "56785678567856785678567856785678";
+            InjectBrokenGuid(scenePath, realGuid, fakeGuid);
+            AssetDatabase.ImportAsset(scenePath, ImportAssetOptions.ForceUpdate);
+            yield return null;
 
             var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene(scenePath,
                 UnityEditor.SceneManagement.OpenSceneMode.Additive);
@@ -563,29 +652,31 @@ namespace UnityOpenMcpVerify.Tests
             {
                 Assume.That(scene.isLoaded, Is.True);
 
+                // Dirty the scene with an in-memory edit the user has not saved.
+                var marker = new GameObject("UnsavedEditMarker");
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(marker, scene);
+                UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
+                Assume.That(scene.isDirty, Is.True, "scene must be dirty for this test");
+
                 var issueId = IssueKey.Build(
                     "missing_references", VerifySeverity.Error,
-                    scenePath, "missing_guid:12345678123456781234567812345678");
+                    scenePath, "missing_guid:" + fakeGuid);
 
-                // A16 — the target_guid must be a valid 32-hex GUID so Apply
-                // advances past the Guid32Hex check and actually reaches the
-                // open-scene path. The previous value was 34 chars and returned
-                // at validation, leaving the guard with no passing coverage.
-                var result = fix.Apply(issueId, "abcdefabcdefabcdefabcdefabcdefab");
+                var result = fix.Apply(issueId, realGuid);
 
-                Assert.IsTrue(result.Success,
-                    "Apply must succeed for an open scene (edit + reload), not refuse");
-                // The on-disk scene must carry the relink (the broken GUID is
-                // gone). The scene YAML may not contain the GUID token at all
-                // (an empty scene has no external references), so a Success
-                // result without a thrown exception is the contract we pin
-                // here — the guard no longer short-circuits the rewrite.
-                Assert.IsFalse(result.Description.Contains("currently open"),
-                    "the open-scene refusal message must not appear under the new edit-and-reload path");
+                Assert.IsFalse(result.Success,
+                    "a dirty open scene must be refused, never silently reloaded");
+                StringAssert.Contains("unsaved changes", result.Description);
+                // The refusal happened BEFORE the rewrite — file untouched.
+                var content = File.ReadAllText(scenePath);
+                Assert.IsTrue(content.Contains(fakeGuid),
+                    "the scene file must not be rewritten when the fix refuses");
             }
             finally
             {
-                UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
+                var open = UnityEngine.SceneManagement.SceneManager.GetSceneByPath(scenePath);
+                if (open.IsValid() && open.isLoaded)
+                    UnityEditor.SceneManagement.EditorSceneManager.CloseScene(open, true);
             }
         }
 
@@ -597,15 +688,20 @@ namespace UnityOpenMcpVerify.Tests
             // remaining refusal: a prefab open in the Prefab Stage is not
             // edited and Apply returns the open-prefab message.
             //
+            // A-R2 guard structure: CheckPrefabStageOpen refuses via a
+            // GUARANTEED baseline — the public
+            // PrefabStageUtility.GetCurrentPrefabStage() (the focused stage) —
+            // plus a BEST-EFFORT reflection sweep over the internal
+            // StageNavigationManager.instance.stageHistory for non-focused
+            // stages in the stack. A reflection failure degrades coverage to
+            // the focused stage only; it never disables the baseline.
+            //
             // We cannot deterministically open a Prefab Stage from a unit test
-            // without a real prefab asset and the Prefab Stage API (which is
-            // version-gated and editor-modal), so this is a structural pin:
-            // CheckPrefabStageOpen is the refusal surface, and it only fires
-            // when StageUtility.GetStages() reports a matching prefab. The
-            // open-SCENE path is covered by the test above; the open-PREFAB
-            // refusal message is verified by reading CheckPrefabStageOpen's
-            // contract via a prefab-path that is not in any stage (null → no
-            // refusal, the safe fall-through).
+            // (editor-modal), so this is a structural pin of the safe
+            // fall-through: for a prefab that is NOT open in any stage, both
+            // layers find no match, CheckPrefabStageOpen returns null, and
+            // Apply proceeds to the normal rewrite path (no false refusal).
+            // The open-SCENE path is covered by the tests above.
             var prefabPath = FixtureRoot + "/NotInAnyStage.prefab";
             var issueId = IssueKey.Build(
                 "missing_references", VerifySeverity.Error,
@@ -828,13 +924,38 @@ namespace UnityOpenMcpVerify.Tests
             File.WriteAllLines(prefabPath, lines);
         }
 
-        private static System.Collections.IEnumerator CreateEmptySceneAt(string scenePath)
+        // A-R3 — build a scene that actually CONTAINS an external mesh
+        // reference (a MeshFilter PPtr triple), then save and close it. The
+        // caller corrupts the on-disk GUID afterwards so Apply's open-scene
+        // path has a real broken reference to rewrite — the old empty-scene
+        // fixture never contained the GUID, so RewriteGuid could not succeed.
+        private static System.Collections.IEnumerator CreateSceneWithMeshReference(
+            string scenePath, string meshPath)
         {
             EnsureDirectory(Path.GetDirectoryName(scenePath));
+
+            var mesh = new Mesh();
+            mesh.vertices = new[] {
+                new Vector3(0, 0, 0),
+                new Vector3(1, 0, 0),
+                new Vector3(0, 1, 0),
+            };
+            mesh.triangles = new[] { 0, 1, 2 };
+            AssetDatabase.CreateAsset(mesh, meshPath);
+
             var scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
                 UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
                 UnityEditor.SceneManagement.NewSceneMode.Additive);
+
+            // `new GameObject` lands in the ACTIVE scene, which is the test
+            // runner's scene — move it into the fixture scene before saving.
+            var go = new GameObject("SceneRelinkFixture");
+            var mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+            UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(go, scene);
+
             UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, scenePath);
+            UnityEditor.SceneManagement.EditorSceneManager.CloseScene(scene, true);
             AssetDatabase.Refresh();
             yield return null;
         }

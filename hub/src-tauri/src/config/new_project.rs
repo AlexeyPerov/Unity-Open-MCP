@@ -65,7 +65,6 @@ use tauri::State;
 
 use crate::config::commands::AppState;
 use crate::config::paths;
-use crate::config::persistence;
 use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -665,27 +664,34 @@ pub fn create_new_project(
         ai_setup_wizard: None,
     };
 
-    let mut projects = state.projects.lock().unwrap().clone();
-    // De-duplicate by canonical path: a stale entry with the same
-    // path would silently double-count the frecency score.
+    // B-R6: the long work (scaffold copy + atomic rename) all happened
+    // above with no lock held. Apply the register step to the FRESH live
+    // state via `with_projects` so a concurrent mutation that landed
+    // during the scaffold window is not clobbered by writing back a
+    // stale pre-scaffold snapshot. The per-entry `canonicalize_for_compare`
+    // inside the closure is a stat-level syscall per tracked project
+    // (same cost `add_project`'s duplicate check already pays under its
+    // lock), not "long work" in the with_projects-contract sense.
     let canonical = canonicalize_for_compare(&entry.path);
-    projects.projects.retain(|p| {
-        canonicalize_for_compare(&p.path) != canonical
+    let persist_result = crate::config::commands::with_projects(&state.projects, |file| {
+        // De-duplicate by canonical path: a stale entry with the same
+        // path would silently double-count the frecency score.
+        file.projects
+            .retain(|p| canonicalize_for_compare(&p.path) != canonical);
+        file.projects.push(entry.clone());
     });
-    projects.projects.push(entry.clone());
 
-    if let Err(e) = persistence::save_projects(&projects) {
-        // Persistence failed. Best-effort: remove the on-disk project
-        // we just published so the user is not left with a folder
-        // that no longer appears in the list.
-        remove_dir_all_best_effort(&target);
-        return Err(NewProjectError::PersistFailed { message: e.to_string() });
-    }
-
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects.clone();
-    }
+    let projects = match persist_result {
+        Ok(next) => next,
+        Err(e) => {
+            // Persistence failed. Best-effort: remove the on-disk project
+            // we just published so the user is not left with a folder
+            // that no longer appears in the list. (`with_projects` leaves
+            // the live Mutex untouched on failure.)
+            remove_dir_all_best_effort(&target);
+            return Err(NewProjectError::PersistFailed { message: e.to_string() });
+        }
+    };
 
     Ok(NewProjectResult {
         project: entry,

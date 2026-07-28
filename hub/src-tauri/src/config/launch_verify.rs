@@ -36,7 +36,6 @@ use crate::config::constants::PORT_ENV_VAR;
 use crate::config::env_vars;
 use crate::config::launch::{is_already_running, read_project_version, resolve_install_for_version};
 use crate::config::launch_log::{self, LaunchOutcome};
-use crate::config::persistence;
 use crate::config::running_unity::detect_running_unity;
 
 /// Default `/ping` request timeout. The spec gives the wizard
@@ -495,25 +494,41 @@ fn launch_for_verify_inner(
     // as alive (the wizard's Step-5 poll and the running-Unity chip),
     // and one process-table entry leaks per launch.
     let pid = crate::config::process::reap_child(child);
-    let mut projects = projects;
-    if let Some(p) = projects.projects.iter_mut().find(|p| p.id == params.project_id) {
+    // B-R6: the long work (process-table scan, Unity spawn) happened above
+    // with no lock held; apply the cheap bookkeeping stamp to the FRESH
+    // live state via `with_projects` (entry looked up again inside the
+    // closure) so a concurrent mutation landed during the spawn window is
+    // not clobbered by writing back the stale pre-launch snapshot.
+    let stamp = |p: &mut crate::config::schemas::ProjectEntry| {
         p.last_launch_pid = Some(pid);
         p.last_launch_at = Some(chrono::Utc::now().to_rfc3339());
         p.frecency = p.frecency.saturating_add(1);
         if refreshed_version.is_some() {
             p.unity_version = refreshed_version.clone();
         }
-    }
+    };
+    let persist_result =
+        crate::config::commands::with_projects(&state.projects, |file| {
+            if let Some(p) = file.projects.iter_mut().find(|p| p.id == params.project_id) {
+                stamp(p);
+            }
+        });
     // H36: surface the persist failure instead of swallowing it. Unity is
     // already running (spawn above succeeded), so we still publish the
     // in-memory state — but returning `Err` tells the wizard the launch
     // bookkeeping did NOT reach disk, so the user learns the config
     // volume is unwritable instead of seeing a silent success.
-    if let Err(e) = persistence::save_projects(&projects) {
+    if let Err(e) = persist_result {
         log::error!("Failed to persist launch data: {}", e);
+        // `with_projects` leaves the live Mutex untouched on failure, so
+        // apply the same stamp to the fresh live state here (memory only)
+        // — the current session must reflect the launch even though the
+        // on-disk file is stale.
         {
             let mut guard = state.projects.lock().unwrap();
-            *guard = projects;
+            if let Some(p) = guard.projects.iter_mut().find(|p| p.id == params.project_id) {
+                stamp(p);
+            }
         }
         return Err(InnerLaunchForVerifyError {
             typed: LaunchForVerifyError::PersistFailed {
@@ -529,10 +544,6 @@ fn launch_for_verify_inner(
             code: "persistFailed".to_string(),
             message: format!("Failed to persist launch data: {}", e),
         });
-    }
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects;
     }
     Ok(InnerLaunchForVerify {
         project_id: params.project_id.clone(),

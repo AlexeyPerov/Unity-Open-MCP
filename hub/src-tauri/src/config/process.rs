@@ -209,6 +209,72 @@ pub fn terminate_process(pid: u32) -> KillUnityResult {
     }
 }
 
+/// C5: identity cross-check before signalling. A persisted
+/// `lastLaunchPid` can outlive the Unity process it recorded (reboot,
+/// crash, plain exit while the Hub was closed), and the OS recycles
+/// PIDs — so a stale record can point at an unrelated process. Probe
+/// the pid's command line (macOS/Linux: `ps -p <pid> -o command=`, the
+/// same source `detect_running_unity` scans; Windows: the `tasklist`
+/// CSV image name, the same filter `check_windows` uses) and classify:
+///
+/// - `Some(true)`  — the pid is a Unity editor; safe to signal.
+/// - `Some(false)` — the pid is ALIVE but NOT Unity; refuse to signal.
+/// - `None`        — the probe could not determine (process already
+///   gone, or the probe tool itself failed). Proceed: a dead pid is
+///   classified as `NotFound` by `terminate_process`'s own alive-check,
+///   and a transient probe failure must not block a legitimate
+///   terminate (mirrors the scan-failure-is-non-fatal philosophy in
+///   the double-launch guard).
+#[cfg(unix)]
+fn probe_is_unity(pid: u32) -> Option<bool> {
+    let output = Command::new("ps")
+        .arg("-p")
+        .arg(pid.to_string())
+        .arg("-o")
+        .arg("command=")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        // `ps -p` exits non-zero when the pid does not exist — let the
+        // alive-check downstream report NotFound.
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.trim();
+    if line.is_empty() {
+        return None;
+    }
+    Some(crate::config::running_unity::is_unity_command_line(line))
+}
+
+#[cfg(windows)]
+fn probe_is_unity(pid: u32) -> Option<bool> {
+    // Reuse the `tasklist` CSV probe shape from `check_windows`; the
+    // first CSV field of the matching row is the image name.
+    let output = Command::new("tasklist")
+        .arg("/FI")
+        .arg(format!("PID eq {}", pid))
+        .arg("/FO")
+        .arg("CSV")
+        .arg("/NH")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let needle = format!(",\"{}\",", pid);
+    let row = stdout.lines().find(|l| l.contains(&needle))?;
+    // Row shape: "Image Name","PID","Session Name","Session#","Mem Usage"
+    let name = row
+        .trim_start()
+        .trim_start_matches('"')
+        .split('"')
+        .next()
+        .unwrap_or("");
+    Some(name.eq_ignore_ascii_case("Unity.exe"))
+}
+
 #[tauri::command]
 pub fn kill_unity(pid: u32) -> KillUnityResult {
     if pid == 0 {
@@ -219,6 +285,29 @@ pub fn kill_unity(pid: u32) -> KillUnityResult {
             pid,
             status: KillUnityStatus::NotFound,
             message: "pid 0 is not a valid Unity launch record".to_string(),
+        };
+    }
+    // C5: refuse to signal a live process that is not a Unity editor —
+    // the recorded pid was recycled by the OS onto something unrelated.
+    // Reported as NotFound because that is the truth about the Unity
+    // this record referred to: it is gone (the frontend already treats
+    // NotFound as "stale launch record").
+    //
+    // Note: the other C5 half (clearing the persisted `lastLaunchPid`
+    // when the reaper observes the child's exit) is NOT implemented:
+    // `reap_child` is a plain fn without access to `AppState` or an
+    // `AppHandle` (its reaper thread is `'static`), so it cannot reach
+    // the projects Mutex or `projects.json`. The stale pid therefore
+    // still exists on disk — this guard is what makes it harmless.
+    if let Some(false) = probe_is_unity(pid) {
+        return KillUnityResult {
+            pid,
+            status: KillUnityStatus::NotFound,
+            message: format!(
+                "pid {} is alive but is not a Unity editor (the recorded \
+                 launch pid was recycled by the OS); refusing to signal it",
+                pid
+            ),
         };
     }
     terminate_process(pid)
@@ -417,8 +506,30 @@ mod tests {
         // The test child runs `sleep 99999` (or `ping 99999` on Windows)
         // — terminate it before waiting, otherwise the test waits the
         // full 99999 seconds. `child.wait()` blocks until the OS reaps
-        // the process; the kill must come first.
-        let _ = kill_unity(pid);
+        // the process; the kill must come first. C5: use the raw
+        // `terminate_process` — `kill_unity` now (correctly) refuses to
+        // signal a live non-Unity process like this dummy.
+        let _ = terminate_process(pid);
+        let _ = child.wait();
+    }
+
+    /// C5: `kill_unity` must refuse to signal a live process that is not
+    /// a Unity editor (a stale `lastLaunchPid` recycled by the OS). The
+    /// dummy child (`sleep` / `ping`) stands in for the innocent process:
+    /// the command must report NotFound and leave it running.
+    #[test]
+    fn kill_unity_refuses_live_non_unity_pid() {
+        let (mut child, pid) = spawn_dummy_child_with_handle();
+        let result = kill_unity(pid);
+        assert_eq!(result.status, KillUnityStatus::NotFound);
+        assert!(
+            result.message.contains("not a Unity editor"),
+            "message should explain the identity refusal, got: {}",
+            result.message
+        );
+        // The innocent process must NOT have been signalled.
+        assert!(is_pid_alive(pid), "dummy child must still be alive");
+        let _ = child.kill();
         let _ = child.wait();
     }
 

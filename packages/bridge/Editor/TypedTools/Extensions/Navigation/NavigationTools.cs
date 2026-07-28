@@ -1002,7 +1002,13 @@ namespace UnityOpenMcpBridge.Extensions.NavigationExt
         }
 
         private static string Vec3(Vector3 v)
-            => $"[{v.x},{v.y},{v.z}]";
+            => "[" + Num(v.x) + "," + Num(v.y) + "," + Num(v.z) + "]";
+
+        // A-R4 — render floats with invariant culture. Bare interpolation
+        // ($"{v.x}") uses the OS culture, so de/fr/ru locales emit "1,5" and
+        // the vector array parses as valid JSON with the wrong element count.
+        private static string Num(float v)
+            => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
 
         private static string BuildPath(GameObject go)
         {

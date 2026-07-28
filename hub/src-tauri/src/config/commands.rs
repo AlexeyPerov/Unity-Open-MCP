@@ -43,9 +43,10 @@ pub struct AppState {
 /// work (scans, copies, network) BEFORE calling this helper and pass a
 /// `mutate` that only applies the resulting patch to the fresh live state
 /// — so the only cost under the lock is the atomic write itself, which is
-/// unavoidable for the read/swap atomicity guarantee. The two current
-/// callers (`count_lines`, `count_lines_cached`) already follow this
-/// pattern. If a future caller needs to persist after a genuinely long
+/// unavoidable for the read/swap atomicity guarantee. All callers (the
+/// line-count scans, the launch/upgrade/refresh bookkeeping stamps, and
+/// the add/remove/relink/flag mutations — see B-R6) follow this pattern.
+/// If a future caller needs to persist after a genuinely long
 /// synchronous operation, make that command `async` and offload the whole
 /// `with_projects` call to `spawn_blocking`, mirroring `save_settings`.
 pub fn with_projects<F>(

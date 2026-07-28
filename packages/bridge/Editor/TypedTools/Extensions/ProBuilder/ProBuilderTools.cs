@@ -268,7 +268,9 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             sb.Append("\"extrudedFaceCount\":").Append(facesToExtrude.Length).Append(',');
             sb.Append("\"selectionMethod\":").Append(ProBuilderJson.Esc(selectionMethod)).Append(',');
             sb.Append("\"extrudeMethod\":").Append(ProBuilderJson.Esc(method.ToString())).Append(',');
-            sb.Append("\"distance\":").Append(distance).Append(',');
+            // A-R4 — StringBuilder.Append(float) uses the current culture;
+            // route floats through ProBuilderJson.Num (invariant culture).
+            sb.Append("\"distance\":").Append(ProBuilderJson.Num(distance)).Append(',');
             sb.Append("\"newFacesCreated\":").Append(newFaces.Length).Append(',');
             sb.Append("\"totalFaceCount\":").Append(mesh.faceCount).Append(',');
             sb.Append("\"totalVertexCount\":").Append(mesh.vertexCount);

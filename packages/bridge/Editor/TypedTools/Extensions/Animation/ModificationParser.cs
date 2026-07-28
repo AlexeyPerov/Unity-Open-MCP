@@ -391,6 +391,7 @@ namespace UnityOpenMcpBridge.Extensions.AnimationExt
         private static bool? Bool(Dictionary<string, string> d, string key)
         {
             if (!d.TryGetValue(key, out var v)) return null;
+            v = Unquote(v);
             if (v == "true") return true;
             if (v == "false") return false;
             return null;
@@ -399,13 +400,27 @@ namespace UnityOpenMcpBridge.Extensions.AnimationExt
         private static int? Int(Dictionary<string, string> d, string key)
         {
             if (!d.TryGetValue(key, out var v)) return null;
-            return int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : (int?)null;
+            return int.TryParse(Unquote(v), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : (int?)null;
         }
 
         private static float? Float(Dictionary<string, string> d, string key)
         {
             if (!d.TryGetValue(key, out var v)) return null;
-            return float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var n) ? n : (float?)null;
+            return float.TryParse(Unquote(v), NumberStyles.Float, CultureInfo.InvariantCulture, out var n) ? n : (float?)null;
+        }
+
+        // B-R10 — ParseInlineObject stores string values WITH their quotes
+        // (see :364), so JSON-quoted scalars ("true", "12", "1.5" — a common
+        // LLM shape) must be unquoted before comparing/parsing, exactly as
+        // Str does. Bool/Int/Float previously compared/parsed the still-quoted
+        // token and silently returned null, so quoted legacy/hasExitTime/
+        // defaultBool/numeric fields were dropped without an error. Bool/int/
+        // float tokens contain no escapes, so a plain quote-strip suffices.
+        private static string Unquote(string v)
+        {
+            if (v != null && v.Length >= 2 && v[0] == '"' && v[v.Length - 1] == '"')
+                return v.Substring(1, v.Length - 2);
+            return v;
         }
 
         private static T? Enum<T>(Dictionary<string, string> d, string key) where T : struct

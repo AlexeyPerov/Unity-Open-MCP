@@ -385,22 +385,25 @@ fn strip_ansi(s: &str) -> String {
             i += 1;
         } else {
             // Advance over one whole UTF-8 codepoint so multi-byte
-            // sequences are copied intact. B-N26 — `char_indices` yields
-            // (byte_offset, char); the byte offset of the FIRST char of a
-            // slice is always 0, so the previous `.map(|(delta, _)| delta)`
-            // made `len` always 0 and `take` always 1. Output was nonetheless
-            // correct (copying a UTF-8 sequence byte-by-byte reproduces it,
-            // and ESC cannot appear inside one), but `from_utf8` re-validated
-            // the whole remaining slice on every byte, making the loop
-            // quadratic on long npm/vitest lines. Use `ch.len_utf8()` (the
-            // codepoint's actual byte length) so multi-byte sequences advance
-            // in one step.
-            let len = std::str::from_utf8(&bytes[i..])
-                .ok()
-                .and_then(|slice| slice.chars().next())
-                .map(|ch| ch.len_utf8())
-                .unwrap_or(1);
-            let take = len.max(1).min(bytes.len() - i);
+            // sequences are copied intact. A-R6/B-N26 — the previous code
+            // called `std::str::from_utf8(&bytes[i..])` per codepoint,
+            // which re-validates the entire remaining slice each iteration
+            // (quadratic on long npm/vitest lines). Derive the codepoint's
+            // byte length from the UTF-8 leading byte instead — O(1) per
+            // step. The input is a valid `&str`, so the leading-byte class
+            // is authoritative; and since output bytes are copied verbatim,
+            // correctness is preserved even for a hypothetically malformed
+            // sequence (the `unreachable` else arm advances by 1, which for
+            // valid input never fires — continuation bytes 0x80..=0xBF
+            // cannot start a codepoint in a valid &str).
+            let len = match bytes[i] {
+                0x00..=0x7F => 1,
+                0xC0..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                0xF0..=0xF7 => 4,
+                _ => 1,
+            };
+            let take = len.min(bytes.len() - i);
             out.extend_from_slice(&bytes[i..i + take]);
             i += take;
         }
@@ -458,11 +461,24 @@ fn pipe_lines<R: std::io::Read + Send + 'static>(
 fn kill_process_tree(pid: u32) {
     #[cfg(unix)]
     {
+        // Send SIGTERM synchronously so the caller's contract ("the tree
+        // has been asked to stop") holds on return, but offload the
+        // 900 ms grace sleep + SIGKILL escalation to a background thread.
+        // Both call sites (`stop_project_command`, the A12 orphan kill in
+        // `spawn_tracked`) run on the sync Tauri command thread and
+        // nothing after them depends on the kill having *completed* —
+        // liveness is tracked by the wait thread observing the child's
+        // exit, not by this function returning. Inlining the sleep
+        // stalled IPC ~0.9 s per stop.
         unsafe {
             libc::kill(-(pid as i32), libc::SIGTERM);
-            thread::sleep(Duration::from_millis(900));
-            libc::kill(-(pid as i32), libc::SIGKILL);
         }
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(900));
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+        });
     }
     #[cfg(windows)]
     {
@@ -906,28 +922,36 @@ pub fn stop_project_command(
     panel: String,
 ) -> Result<(), CommandRunnerError> {
     let k = key(&project_id, &panel);
+    // Read the pid, clear the entry, and bump the generation under ONE
+    // lock acquisition. The previous two-acquisition shape had a TOCTOU:
+    // a PID stamp landing between the read and the clear was neither
+    // orphan-killed (generation still matched, so the stamp succeeded)
+    // nor kept (this stop then cleared it). The actual kill happens
+    // after the lock is released so signal delivery never blocks other
+    // lock holders.
     let pid = {
-        let procs = state.procs.lock().unwrap();
-        procs.get(&k).and_then(|p| p.pid)
+        let mut procs = state.procs.lock().unwrap();
+        if let Some(p) = procs.get_mut(&k) {
+            let pid = p.pid.take();
+            p.running = false;
+            // H18: bump the generation so an in-flight spawn (whose
+            // reservation captured the old generation but has not yet stamped
+            // its PID — the frontend calls `markRunning` before awaiting the
+            // spawn) cannot revive this entry. Without the bump the spawn's
+            // later PID stamp sees `p.generation == generation` still match,
+            // stamps the real PID into an entry the UI already shows as idle,
+            // and the child can never be stopped again. Bumping makes the
+            // stamp's generation check (see `spawn_tracked`) refuse the
+            // stamp, and the next `run_project_*` reserve the next
+            // generation.
+            p.generation = p.generation.wrapping_add(1);
+            pid
+        } else {
+            None
+        }
     };
     if let Some(pid) = pid {
         kill_process_tree(pid);
-    }
-    let mut procs = state.procs.lock().unwrap();
-    if let Some(p) = procs.get_mut(&k) {
-        p.running = false;
-        p.pid = None;
-        // H18: bump the generation so an in-flight spawn (whose
-        // reservation captured the old generation but has not yet stamped
-        // its PID — the frontend calls `markRunning` before awaiting the
-        // spawn) cannot revive this entry. Without the bump the spawn's
-        // later PID stamp sees `p.generation == generation` still match,
-        // stamps the real PID into an entry the UI already shows as idle,
-        // and the child can never be stopped again. Bumping makes the
-        // stamp's generation check (see `spawn_tracked`) refuse the
-        // stamp, and the next `run_project_*` reserve the next
-        // generation.
-        p.generation = p.generation.wrapping_add(1);
     }
     Ok(())
 }

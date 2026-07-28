@@ -16,7 +16,6 @@
 //! could be removed.
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -337,23 +336,18 @@ fn prune_empty_at_depth(root: &mut Value, key_path: &[&str], depth: usize) {
     }
 }
 
-/// Atomic write mirroring `mcp_config.rs`: tmp + rename. Writes
-/// pretty JSON with a trailing newline to match the writer's output.
+/// Atomic write via `persistence::atomic_write_at` (unique staging name +
+/// fsync + rename). C1 — the previous shape staged through a FIXED
+/// `<target>.<ext>.tmp` filename, so two overlapping writers to the same
+/// target shared a temp inode and could publish a byte-mix (the same H12
+/// hazard `unique_tmp_path` exists to close). Writes pretty JSON with a
+/// trailing newline to match the writer's output.
 fn write_json_atomic(target: &Path, value: &Value) -> std::io::Result<()> {
-    let tmp_path = match target.extension().and_then(|e| e.to_str()) {
-        Some(ext) => target.with_extension(format!("{ext}.tmp")),
-        None => target.with_extension("tmp"),
-    };
     let pretty = match serde_json::to_string_pretty(value) {
         Ok(s) => s + "\n",
         Err(e) => return Err(std::io::Error::other(e)),
     };
-    {
-        let mut tmp = fs::File::create(&tmp_path)?;
-        tmp.write_all(pretty.as_bytes())?;
-        tmp.sync_all().ok();
-    }
-    fs::rename(&tmp_path, target)
+    crate::config::persistence::atomic_write_at(target, &pretty)
 }
 
 /// Back up `target` to `<target>.bak` (extension-aware, matching
@@ -581,18 +575,11 @@ fn remove_toml_entry(root: &mut toml::value::Table, project_path: &str, guard: b
     }
 }
 
-/// Atomic text write (tmp + rename), mirroring `write_json_atomic`.
+/// Atomic text write, mirroring `write_json_atomic` (C1: same unique-
+/// staging-name conversion — the fixed `.tmp` name had the H12 collision
+/// hazard).
 fn write_text_atomic(target: &Path, body: &str) -> std::io::Result<()> {
-    let tmp_path = match target.extension().and_then(|e| e.to_str()) {
-        Some(ext) => target.with_extension(format!("{ext}.tmp")),
-        None => target.with_extension("tmp"),
-    };
-    {
-        let mut tmp = fs::File::create(&tmp_path)?;
-        tmp.write_all(body.as_bytes())?;
-        tmp.sync_all().ok();
-    }
-    fs::rename(&tmp_path, target)
+    crate::config::persistence::atomic_write_at(target, body)
 }
 
 /// Strip bridge + verify from `Packages/manifest.json`. Preserves all

@@ -231,15 +231,23 @@ namespace UnityOpenMcpBridge
             var resolvedKeys = new HashSet<string>(beforeKeys);
             resolvedKeys.ExceptWith(afterKeys);
 
+            // C2 quirk — count NEW issues per-KEY, exactly like the resolved
+            // counters below and NewIssueKeys itself. The previous loop
+            // counted per-INSTANCE (iterating after.Issues), so when several
+            // issue instances collapse onto one key (e.g. discriminator-less
+            // codes), NewWarnings disagreed with NewIssueKeys.Length while
+            // ResolvedWarnings stayed per-key. Both sides now speak the same
+            // per-key unit. Keys in newKeys come from IssueKey.Build, which
+            // always emits the upper-case "ERROR"/"WARN" severity token.
             var newErrors = 0;
             var newWarnings = 0;
-            foreach (var issue in after.Issues)
+            foreach (var key in newKeys)
             {
-                var key = IssueKey.Build(issue);
-                if (newKeys.Contains(key))
+                var parts = key.Split('|');
+                if (parts.Length >= 2)
                 {
-                    if (issue.Severity == VerifySeverity.Error) newErrors++;
-                    else newWarnings++;
+                    if (parts[1] == "ERROR") newErrors++;
+                    else if (parts[1] == "WARN") newWarnings++;
                 }
             }
 

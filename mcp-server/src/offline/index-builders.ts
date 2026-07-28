@@ -497,17 +497,21 @@ export async function collectMetaTriples(projectRoot: string): Promise<MetaTripl
 /**
  * Recursively collect non-`.meta` file paths under `dir`.
  *
- * M31-optimizations Plan 2 / M4 + L5 — fans out via `parallelMap` (bounded
- * `Promise.all` chunks) instead of sequentially awaiting each sibling's
- * stat/readdir, and uses an order-stable merge (each entry's results land in
- * a fixed input-order slot) instead of the previous `results.push(...await
- * collectFiles(fullPath))` spread (which was O(depth × N) element copies).
+ * M31-optimizations Plan 2 / M4 + L5, reworked by M16/A9 — fans out all
+ * siblings at once via a single `Promise.all`, with a shared
+ * {@link AsyncSemaphore} (threaded through the recursion) bounding the
+ * global number of in-flight readdir/stat syscalls to WALK_CONCURRENCY
+ * regardless of tree depth. This replaced both the original sequential
+ * per-sibling await and the intermediate per-call `parallelMap` chunking
+ * (which multiplied across recursion levels). The order-stable merge
+ * remains: each entry's results land in a fixed input-order slot instead of
+ * the previous `results.push(...await collectFiles(fullPath))` spread
+ * (which was O(depth × N) element copies).
  *
- * Output ordering matches the previous implementation: entries appear in
- * `readdir` order, with each directory's descendants inlined where the
- * directory sat in its parent's listing. parallelMap preserves input order
- * across chunks, and the slot-based merge preserves it within a chunk — so a
- * subdir's descendants always land in `results` at the position the subdir
+ * Output ordering matches the original sequential implementation: entries
+ * appear in `readdir` order, with each directory's descendants inlined where
+ * the directory sat in its parent's listing. The slot-based merge guarantees
+ * a subdir's descendants always land in `results` at the position the subdir
  * occupied, regardless of which sibling's stat settled first.
  */
 export async function collectFiles(

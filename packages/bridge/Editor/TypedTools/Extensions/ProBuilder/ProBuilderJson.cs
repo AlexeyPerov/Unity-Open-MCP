@@ -58,7 +58,14 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             return sb.ToString();
         }
 
-        public static string Vec3(Vector3 v) => $"[{v.x},{v.y},{v.z}]";
+        // A-R4 — render floats with invariant culture. Bare interpolation
+        // ($"{v.x}") uses the OS culture, so de/fr/ru locales emit "1,5" and
+        // the vector array parses as valid JSON with the wrong element count.
+        public static string Vec3(Vector3 v)
+            => "[" + Num(v.x) + "," + Num(v.y) + "," + Num(v.z) + "]";
+
+        public static string Num(float v)
+            => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     // Target resolver for ProBuilder tools. Mirrors the bridge's GameObject
@@ -98,6 +105,8 @@ namespace UnityOpenMcpBridge.Extensions.ProBuilderExt
             var roots = SceneQuery.FindActiveTransforms();
             foreach (var root in roots)
             {
+                // Anchor multi-segment paths to scene roots (FindActiveTransforms returns every active transform), so "A/B" cannot resolve against a nested "A"; single-segment lookups keep matching anywhere.
+                if (parts.Length > 1 && root.parent != null) continue;
                 if (root.gameObject.name == parts[0])
                 {
                     var current = root.gameObject;

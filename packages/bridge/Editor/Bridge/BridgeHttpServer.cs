@@ -782,6 +782,12 @@ namespace UnityOpenMcpBridge
             }
 
             string[] pathsHint = null;
+            // B-R7 — set when reserialize's raw `paths` array was non-empty but
+            // every entry failed the containment check: dispatch must proceed
+            // (gate skipped, same as other no-hint tools) so the tool itself
+            // emits the structured `invalid_paths` error naming each rejected
+            // path, instead of a misleading `paths_hint_required` envelope.
+            bool reserializeAllPathsInvalid = false;
             if (isMutating)
             {
                 pathsHint = JsonBody.GetStringArray(body, "paths_hint");
@@ -802,11 +808,20 @@ namespace UnityOpenMcpBridge
                         // tool's own normalization (the same containment check
                         // Execute runs) so the hint contains only validated
                         // Assets/-relative paths — matching exactly what the
-                        // mutation will touch (or nothing, if every path is
-                        // invalid, in which case the gate is a cheap no-op and
-                        // the tool's structured `invalid_paths` error follows).
+                        // mutation will touch.
+                        //
+                        // B-R7 — when every entry fails containment the hint is
+                        // empty, but dispatch must still happen so the tool
+                        // emits its structured `invalid_paths` error naming the
+                        // rejected paths (the mutation is refused before any
+                        // write, so the skipped gate loses nothing). Only a raw
+                        // array that is missing/empty falls through to the
+                        // generic `paths_hint_required` return below.
                         var reserializeRaw = JsonBody.GetStringArray(body, "paths");
                         pathsHint = ReserializeAssetsTool.NormalizeForHint(reserializeRaw);
+                        reserializeAllPathsInvalid =
+                            reserializeRaw != null && reserializeRaw.Length > 0
+                            && (pathsHint == null || pathsHint.Length == 0);
                     }
                     else if (toolName == "unity_open_mcp_assets_refresh")
                     {
@@ -838,8 +853,14 @@ namespace UnityOpenMcpBridge
 
                     if (pathsHint == null || pathsHint.Length == 0)
                     {
-                        bool skipPathsHint = toolName == "unity_open_mcp_execute_menu"
-                            && ExecuteMenuTool.IsReadOnlyMenu(JsonBody.GetString(body, "menu_path"));
+                        // B-R7 — reserializeAllPathsInvalid: the caller DID
+                        // provide paths, they were just all invalid; dispatch so
+                        // the tool's `invalid_paths` diagnostic (which names each
+                        // rejected path) reaches the caller instead of a generic
+                        // paths_hint_required.
+                        bool skipPathsHint = reserializeAllPathsInvalid
+                            || (toolName == "unity_open_mcp_execute_menu"
+                                && ExecuteMenuTool.IsReadOnlyMenu(JsonBody.GetString(body, "menu_path")));
 
                         if (!skipPathsHint)
                         {

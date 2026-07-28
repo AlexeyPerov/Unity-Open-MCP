@@ -144,6 +144,43 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual(1, delta.ResolvedWarnings);
         }
 
+        // C2 quirk regression — NEW issues are counted per-KEY, matching
+        // ResolvedErrors/ResolvedWarnings and NewIssueKeys. Two issue
+        // instances that collapse onto one key (same rule/path/code —
+        // e.g. a discriminator-less code) must count once, so
+        // NewWarnings always agrees with NewIssueKeys.Length.
+        [Test]
+        public static void ComputeDelta_DuplicateInstancesOfOneKey_CountedPerKey()
+        {
+            var before = new CheckpointFingerprint("cp_test6", new Dictionary<string, RuleFingerprint>
+            {
+                {
+                    "missing_references", new RuleFingerprint(0, 0,
+                        new HashSet<string>())
+                }
+            });
+
+            var after = new VerifyResult(
+                new List<VerifyIssue>
+                {
+                    new VerifyIssue("missing_references", VerifySeverity.Warning,
+                        "Assets/Test.prefab", "empty_local_ref",
+                        "Empty local fileID reference at line 5"),
+                    new VerifyIssue("missing_references", VerifySeverity.Warning,
+                        "Assets/Test.prefab", "empty_local_ref",
+                        "Empty local fileID reference at line 99")
+                },
+                new[] { "missing_references" },
+                10);
+
+            var delta = VerifyGateAdapter.ComputeDelta(before, after);
+            Assert.AreEqual(1, delta.NewIssueKeys.Length,
+                "two instances of one key must yield one new key");
+            Assert.AreEqual(1, delta.NewWarnings,
+                "NewWarnings must count per-key, matching NewIssueKeys.Length");
+            Assert.AreEqual(0, delta.NewErrors);
+        }
+
         // -------------------------------------------------------------------
         // SelectRuleIds — extension → rule-set routing
         // -------------------------------------------------------------------

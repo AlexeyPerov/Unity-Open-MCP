@@ -91,9 +91,11 @@ namespace UnityOpenMcpBridge.ProfilerExt
                 // return a profiler_warming_up status immediately, and LEAVE it
                 // enabled so the next editor frame is recorded before the
                 // agent's retry. The retry then sees lastFrameIndex >= 0 and
-                // returns real data. We only restore enabled=false when WE
-                // enabled the profiler AND the capture produced data — never on
-                // the warming-up path (which would undo the warm-up).
+                // returns real data. When WE enabled the profiler we restore
+                // enabled=false on every exit EXCEPT the warming-up return
+                // (which would undo the warm-up) — including the exception
+                // path, so a throw inside the capture cannot leave a profiler
+                // we enabled recording forever (B-R8).
                 //
                 // Residual: a successful capture on the retry sees
                 // weEnabledProfiler == false (the profiler is already on), so
@@ -106,10 +108,13 @@ namespace UnityOpenMcpBridge.ProfilerExt
                 if (weEnabledProfiler)
                     ProfilerDriver.enabled = true;
 
-                // Whether the finally may turn the profiler back off. True only
-                // when we enabled it AND the capture produced data. Stays false
-                // on the warming-up path so the profiler stays warm for retry.
-                bool capturedData = false;
+                // B-R8 — whether the finally must SKIP restoring the profiler.
+                // True only on the warming-up return, so the profiler stays
+                // warm for the agent's retry. Every other exit — success OR an
+                // exception thrown mid-capture — restores enabled=false when we
+                // turned it on (the old `capturedData` flag skipped the restore
+                // on the exception path, leaving the profiler recording forever).
+                bool leaveEnabledForWarmup = false;
                 try
                 {
                     int lastFrame = ProfilerDriver.lastFrameIndex;
@@ -124,6 +129,7 @@ namespace UnityOpenMcpBridge.ProfilerExt
                         // tick has fired), the same retry guidance applies.
                         if (weEnabledProfiler)
                         {
+                            leaveEnabledForWarmup = true;
                             return WarmingUpJson(profilerWasEnabled);
                         }
                         return ErrorJson("profiler_empty",
@@ -147,7 +153,6 @@ namespace UnityOpenMcpBridge.ProfilerExt
                         totalTruncated += truncated;
                     }
 
-                    capturedData = true;
                     return BuildSuccessJson(
                         fromFrame, toFrame, resolvedFrameCount, thread_index,
                         modules, max_depth, max_items, frames, totalTruncated,
@@ -155,13 +160,13 @@ namespace UnityOpenMcpBridge.ProfilerExt
                 }
                 finally
                 {
-                    // B30 / B-N2 — never leave the profiler recording after a
-                    // read-only call that produced data. Only restore when WE
-                    // turned it on AND the capture succeeded; on the warming-up
-                    // path (capturedData == false) we deliberately leave it
-                    // enabled so the agent's retry sees a recorded frame. If the
-                    // user had it on, leave it on regardless.
-                    if (weEnabledProfiler && capturedData)
+                    // B30 / B-N2 / B-R8 — never leave a profiler WE enabled
+                    // recording, whether the capture succeeded or threw. The
+                    // only exception is the warming-up return, which
+                    // deliberately leaves it enabled so the agent's retry sees
+                    // a recorded frame. If the user had it on, leave it on
+                    // regardless.
+                    if (weEnabledProfiler && !leaveEnabledForWarmup)
                         ProfilerDriver.enabled = false;
                 }
             }

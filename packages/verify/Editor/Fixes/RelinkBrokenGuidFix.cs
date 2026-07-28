@@ -161,19 +161,50 @@ namespace UnityOpenMcpVerify.Fixes
             }
 
             bool sceneOpen = IsSceneOpen(assetPath);
+            if (sceneOpen)
+            {
+                // A-R3 — refuse when the open scene has UNSAVED changes. The
+                // reload below closes the scene WITHOUT prompting
+                // (EditorSceneManager.CloseScene does not ask to save — the
+                // prompting API is SaveCurrentModifiedScenesIfUserWantsTo), so
+                // proceeding would silently destroy the user's edits. This
+                // restores the safe pre-B-N21 refusal for the dirty case only;
+                // a clean open scene still takes the edit-and-reload path.
+                var openScene = SceneManager.GetSceneByPath(assetPath);
+                if (openScene.IsValid() && openScene.isDirty)
+                {
+                    return new FixResult
+                    {
+                        Success = false,
+                        Description = $"Scene '{assetPath}' is open in the Editor with unsaved changes. "
+                            + "Relinking rewrites the scene file on disk and reloads it, which would discard "
+                            + "those edits without prompting. Save (or discard) the scene's changes, then re-run apply_fix.",
+                        TouchedPaths = null
+                    };
+                }
+            }
+
             var rewrite = RewriteGuid(assetPath, brokenGuid, targetGuid, targetPath);
             if (!rewrite.Success || !sceneOpen) return rewrite;
 
-            // B-N21 — the referencing scene is open in-memory. Reload it from
-            // disk so the rewrite we just wrote wins instead of being silently
-            // reverted when the user next saves. `OpenScene` with
-            // `OpenSceneMode.Additive` would load a second copy; we need to
-            // reload the EXISTING loaded scene, so look it up by path and
-            // re-open that specific scene via the editor API. This mirrors
-            // RemoveMissingScriptFix's stance that a fix touching an open
-            // scene saves through Unity rather than expecting the in-memory
-            // copy to be discarded.
-            ReloadOpenScene(assetPath);
+            // B-N21 / A-R3 — the referencing scene is open in-memory. Reload
+            // it from disk so the rewrite we just wrote wins instead of being
+            // silently reverted when the user next saves. A reload failure is
+            // surfaced as a FAILED fix result: the disk rewrite landed, but
+            // the stale in-memory copy would revert it on the next save —
+            // reporting Success here would hide exactly that hazard.
+            var reloadError = ReloadOpenScene(assetPath);
+            if (reloadError != null)
+            {
+                return new FixResult
+                {
+                    Success = false,
+                    Description = $"The GUID relink was written to '{assetPath}' on disk, but reloading the "
+                        + $"open scene failed: {reloadError} The stale in-memory copy may revert the relink "
+                        + "on the next save — close and reopen the scene to pick up the change.",
+                    TouchedPaths = new[] { assetPath }
+                };
+            }
             return rewrite;
         }
 
@@ -195,33 +226,103 @@ namespace UnityOpenMcpVerify.Fixes
             return false;
         }
 
-        // B-N21 — reload an already-loaded scene from disk so an on-disk edit
-        // (the GUID relink we just wrote) is reflected in the in-memory copy
-        // instead of being reverted on the next save. We close the open scene
-        // and reopen it additively: `OpenScene(path, Additive)` on an already-
-        // loaded path is version-dependent (some Unity versions load a second
-        // copy rather than refreshing in place), so the close-then-reopen pair
-        // is the reliable way to make Unity re-read the file. Best-effort: if
-        // Unity refuses (unsaved changes the user keeps, or the API throws),
-        // the on-disk relink still landed and will win the next time the scene
-        // is opened fresh — a reload failure is NOT a relink failure.
-        private static void ReloadOpenScene(string assetPath)
+        // B-N21 / A-R3 — reload an already-loaded scene from disk so an
+        // on-disk edit (the GUID relink we just wrote) is reflected in the
+        // in-memory copy instead of being reverted on the next save. We close
+        // the open scene and reopen it additively: `OpenScene(path, Additive)`
+        // on an already-loaded path is version-dependent (some Unity versions
+        // load a second copy rather than refreshing in place), so the
+        // close-then-reopen pair is the reliable way to make Unity re-read
+        // the file.
+        //
+        // A-R3 corrections over the first B-N21 attempt:
+        //   * `CloseScene` CANNOT remove the LAST loaded scene — it returns
+        //     false and the stale copy survives. When the target is the only
+        //     loaded scene (the most common interactive state) we first
+        //     create a temporary empty placeholder scene
+        //     (`NewScene(EmptyScene, Additive)`) so the close is legal, and
+        //     close the placeholder once the target is reloaded.
+        //   * `CloseScene` does NOT prompt about unsaved changes (the
+        //     prompting API is SaveCurrentModifiedScenesIfUserWantsTo). The
+        //     dirty-scene case is therefore refused by Apply BEFORE the
+        //     rewrite, so no user edits can be silently discarded here.
+        //   * Active-scene status is restored when the target was the active
+        //     scene, so lighting/occlusion/nav context does not silently move
+        //     to another scene.
+        //
+        // Returns null on success, or an error description on failure. Apply
+        // surfaces a non-null return as Success=false: after a failed reload
+        // the stale in-memory copy can still revert the on-disk relink on the
+        // next save, which is exactly the hazard B-N21 set out to close — so
+        // it must never hide behind a success result.
+        private static string ReloadOpenScene(string assetPath)
         {
             try
             {
                 var scene = SceneManager.GetSceneByPath(assetPath);
-                if (!scene.IsValid() || !scene.isLoaded) return;
-                // Close-then-reopen forces Unity to re-read the rewritten file.
-                // `CloseScene(removeScene: true)` drops the in-memory copy;
-                // `OpenScene(Additive)` re-loads it from disk. Unity prompts
-                // before discarding unsaved changes in the closed scene,
-                // matching the editor's normal reload UX.
-                EditorSceneManager.CloseScene(scene, true);
-                EditorSceneManager.OpenScene(assetPath, OpenSceneMode.Additive);
+                if (!scene.IsValid() || !scene.isLoaded)
+                    return null; // not actually loaded — nothing to reload
+
+                bool wasActive = SceneManager.GetActiveScene() == scene;
+
+                // Count LOADED scenes (sceneCount includes unloaded entries
+                // still present in the hierarchy). CloseScene refuses to
+                // remove the last loaded scene, so park a placeholder first
+                // when the target is the only one.
+                int loadedCount = 0;
+                for (var i = 0; i < SceneManager.sceneCount; i++)
+                {
+                    if (SceneManager.GetSceneAt(i).isLoaded) loadedCount++;
+                }
+
+                Scene placeholder = default(Scene);
+                bool createdPlaceholder = false;
+                if (loadedCount <= 1)
+                {
+                    placeholder = EditorSceneManager.NewScene(
+                        NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+                    createdPlaceholder = true;
+                    if (!placeholder.IsValid())
+                        return "could not create a placeholder scene, so the last loaded scene cannot be closed for reload.";
+                }
+
+                // CHECK the close result — an unchecked false here was the
+                // original A-R3 defect (single-scene close silently no-oped
+                // and the stale copy reverted the relink on the next save).
+                if (!EditorSceneManager.CloseScene(scene, true))
+                {
+                    // Best-effort tidy-up of the placeholder we just created;
+                    // a leftover empty Untitled scene is harmless next to the
+                    // real failure being reported.
+                    if (createdPlaceholder && placeholder.IsValid())
+                        EditorSceneManager.CloseScene(placeholder, true);
+                    return $"EditorSceneManager.CloseScene refused to close '{assetPath}'.";
+                }
+
+                var reopened = EditorSceneManager.OpenScene(assetPath, OpenSceneMode.Additive);
+                if (!reopened.IsValid() || !reopened.isLoaded)
+                {
+                    // Keep the placeholder in this branch: with the target
+                    // closed it may now be the only loaded scene.
+                    return $"EditorSceneManager.OpenScene did not reload '{assetPath}'.";
+                }
+
+                if (wasActive && !SceneManager.SetActiveScene(reopened))
+                    return $"reloaded '{assetPath}' but could not restore it as the active scene.";
+
+                if (createdPlaceholder && placeholder.IsValid())
+                {
+                    // The target is loaded again, so closing the placeholder
+                    // is legal. If Unity still refuses, the leftover is an
+                    // empty Untitled scene — cosmetic, not a reload failure.
+                    EditorSceneManager.CloseScene(placeholder, true);
+                }
+
+                return null;
             }
-            catch
+            catch (System.Exception e)
             {
-                // Best-effort: the on-disk rewrite is the source of truth.
+                return $"scene reload threw {e.GetType().Name}: {e.Message}.";
             }
         }
 
@@ -231,74 +332,105 @@ namespace UnityOpenMcpVerify.Fixes
         // longer refused — see IsSceneOpen / ReloadOpenScene for the
         // edit-and-reload path that handles them.)
         //
-        // A16 — inspect the WHOLE stage stack, not just the focused stage.
-        // PrefabStageUtility.GetCurrentPrefabStage() returns only the top of
-        // the stack, but Unity keeps a stack of open stages (open Prefab A,
-        // double-click nested Prefab B → two stages). With B focused, a relink
-        // targeting A's `.prefab` would pass the focused-only guard,
-        // File.WriteAllText would land, and A's in-memory stage copy would
-        // revert it on the next save. The StageUtility.GetStages() API
-        // (UnityEditor.SceneManagement, since 2020.1) returns every open stage
-        // including the main scene stage; filter to prefab stages and compare
-        // each one's asset path. Reflection keeps us compile-safe across Unity
-        // versions where the API moved between namespaces.
+        // A16 / A-R2 — two layers:
+        //
+        //   1. GUARANTEED baseline (public API, no reflection):
+        //      PrefabStageUtility.GetCurrentPrefabStage() refuses when the
+        //      FOCUSED stage is this prefab. This always works, so a relink
+        //      targeting the prefab the user is looking at can never slip
+        //      through, regardless of what the best-effort layer below does.
+        //
+        //   2. BEST-EFFORT stack sweep: Unity keeps a stack of open stages
+        //      (open Prefab A, double-click nested Prefab B → two stages),
+        //      and with B focused a relink targeting A's `.prefab` would pass
+        //      the focused-only check while A's in-memory stage copy reverts
+        //      the rewrite on the next stage save. There is NO public API for
+        //      the stack (the earlier claim that `StageUtility.GetStages()`
+        //      exists was wrong — the public surface is GetCurrentStage/
+        //      GetMainStage/GetStage/...); the stack lives on the INTERNAL
+        //      `StageNavigationManager.instance.stageHistory`. We reach it
+        //      via reflection with a null-guard on every step and fall back
+        //      to the baseline verdict when anything is missing, has an
+        //      unexpected shape, or throws. An internal rename in a future
+        //      Unity version therefore degrades this guard to
+        //      focused-stage-only — it can never disable the baseline.
         private static string CheckPrefabStageOpen(string assetPath)
         {
+            // Layer 1 — guaranteed: the focused prefab stage via public API.
+            var focused = PrefabStageUtility.GetCurrentPrefabStage();
+            if (focused != null
+                && !string.IsNullOrEmpty(focused.assetPath)
+                && string.Equals(focused.assetPath, assetPath,
+                    System.StringComparison.OrdinalIgnoreCase))
+            {
+                return PrefabStageRefusal(assetPath);
+            }
+
+            // Layer 2 — best-effort: the full stage stack via the internal
+            // StageNavigationManager. Every step is null-guarded; any miss or
+            // throw falls back to the focused-stage verdict above (which
+            // already returned if it matched).
             try
             {
-                var stageType = System.Type.GetType(
-                    "UnityEditor.SceneManagement.PrefabStage, UnityEditor");
-                var stageUtilType = System.Type.GetType(
-                    "UnityEditor.SceneManagement.StageUtility, UnityEditor");
-                if (stageType != null && stageUtilType != null)
+                var navManagerType = System.Type.GetType(
+                    "UnityEditor.SceneManagement.StageNavigationManager, UnityEditor");
+                if (navManagerType == null) return null;
+
+                // `instance` is declared on the ScriptableSingleton<T> base,
+                // so FlattenHierarchy is required to see the inherited static.
+                var instanceProp = navManagerType.GetProperty(
+                    "instance",
+                    System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Static
+                    | System.Reflection.BindingFlags.FlattenHierarchy);
+                var instance = instanceProp != null ? instanceProp.GetValue(null, null) : null;
+                if (instance == null) return null;
+
+                var historyProp = navManagerType.GetProperty(
+                    "stageHistory",
+                    System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Instance);
+                var history = historyProp != null
+                    ? historyProp.GetValue(instance, null) as System.Collections.IEnumerable
+                    : null;
+                if (history == null) return null;
+
+                foreach (var stage in history)
                 {
-                    var getStages = stageUtilType.GetMethod(
-                        "GetStages",
-                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                    if (getStages != null)
+                    // The history holds the main scene stage too; only
+                    // PrefabStage entries carry a prefab asset path. The cast
+                    // uses the PUBLIC PrefabStage type, so no reflection is
+                    // needed to read `assetPath` once the instance matches.
+                    var prefabStage = stage as PrefabStage;
+                    if (prefabStage == null) continue;
+                    var stagePath = prefabStage.assetPath;
+                    if (!string.IsNullOrEmpty(stagePath)
+                        && string.Equals(stagePath, assetPath,
+                            System.StringComparison.OrdinalIgnoreCase))
                     {
-                        var stages = getStages.Invoke(null, null) as System.Collections.IEnumerable;
-                        if (stages != null)
-                        {
-                            var prefabPathProp = stageType.GetProperty("prefabAssetPath");
-                            // 2022+ exposes `assetPath` (prefabAssetPath is the
-                            // older 2021/2019 name); fall back to either.
-                            var assetPathProp = stageType.GetProperty("assetPath");
-                            foreach (var stage in stages)
-                            {
-                                if (stage == null) continue;
-                                // GetStages returns the main scene stage too
-                                // (a SceneStage, not a PrefabStage). Invoking
-                                // a PrefabStage-declared property on a non-
-                                // PrefabStage instance throws TargetException,
-                                // so skip any stage that is not assignable to
-                                // PrefabStage. Only prefab stages carry an
-                                // asset path; the main scene stage returns
-                                // null/empty for it.
-                                if (!stageType.IsInstanceOfType(stage)) continue;
-                                var stagePath = prefabPathProp?.GetValue(stage) as string
-                                                ?? assetPathProp?.GetValue(stage) as string;
-                                if (!string.IsNullOrEmpty(stagePath)
-                                    && string.Equals(stagePath, assetPath,
-                                        System.StringComparison.OrdinalIgnoreCase))
-                                {
-                                    return $"Prefab '{assetPath}' is open in the Prefab Stage. " +
-                                           "Apply the fix with the prefab closed so the in-memory stage copy " +
-                                           "does not silently revert the relink on save.";
-                                }
-                            }
-                        }
+                        return PrefabStageRefusal(assetPath);
                     }
                 }
             }
             catch
             {
-                // Reflection against the prefab-stage API must never break
-                // Apply; if we cannot determine the stage state, fall through
-                // to the normal path (no false refusal).
+                // Reflection against the INTERNAL stage stack must never break
+                // Apply. Falling through here leaves the guaranteed focused-
+                // stage refusal (layer 1) as the effective guard — a reflection
+                // failure narrows coverage to the focused stage, it never
+                // produces a false refusal or a crash.
             }
 
             return null;
+        }
+
+        private static string PrefabStageRefusal(string assetPath)
+        {
+            return $"Prefab '{assetPath}' is open in the Prefab Stage. " +
+                   "Apply the fix with the prefab closed so the in-memory stage copy " +
+                   "does not silently revert the relink on save.";
         }
 
         // -------------------------------------------------------------------

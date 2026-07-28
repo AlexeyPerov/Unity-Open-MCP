@@ -34,12 +34,16 @@ namespace UnityOpenMcpBridge.TestRunner
         // too, appending the new run's results to the leaked list and rewriting
         // test-results-<oldRunId>.json with the wrong counts.
         //
-        // Guard: before registering a fresh pair (StartRunDeferred and
-        // ReattachCallbacks), DrainActiveCallbacks() unregisters and destroys
-        // every pair still in this registry whose onFinished never ran. A pair
-        // whose onFinished DID fire has already removed itself, so only genuine
-        // leaks are swept. The registry is also drained on beforeAssemblyReload
-        // as a belt-and-suspenders cleanup before the domain ends.
+        // Guard: before registering fresh pairs, DrainActiveCallbacks()
+        // unregisters and destroys every pair still in this registry whose
+        // onFinished never ran. A pair whose onFinished DID fire has already
+        // removed itself, so only genuine leaks are swept. The drain runs in
+        // RunTestsTool.StartRunDeferred (a new run sweeps leftovers) and ONCE
+        // in OnAfterAssemblyReload before the pending-marker loop — NOT inside
+        // ReattachCallbacks, which may run several times per reload and would
+        // otherwise destroy the pair the previous loop iteration registered
+        // (B-R3). The registry is also drained on beforeAssemblyReload as a
+        // belt-and-suspenders cleanup before the domain ends.
         private static readonly List<ActiveCallbacks> ActiveRegistry = new List<ActiveCallbacks>();
 
         private struct ActiveCallbacks
@@ -163,6 +167,15 @@ namespace UnityOpenMcpBridge.TestRunner
             try
             {
                 Directory.CreateDirectory(TestRunnerService.StatusDir);
+
+                // A6/B-R3 — sweep leaked (api, callbacks) pairs ONCE, before
+                // the marker loop. Draining inside ReattachCallbacks destroyed
+                // the pair the previous loop iteration had just registered
+                // whenever multiple pending markers exist (e.g. a stale-but-
+                // within-TTL marker plus a genuinely in-flight PlayMode run),
+                // leaving only the last-enumerated marker with live callbacks.
+                DrainActiveCallbacks();
+
                 var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 foreach (var file in Directory.GetFiles(TestRunnerService.StatusDir, "test-pending-*.json"))
                 {
@@ -239,18 +252,21 @@ namespace UnityOpenMcpBridge.TestRunner
         // the results file was already written by the original onFinished and
         // these re-registered callbacks simply never fire — harmless, PROVIDED
         // any leaked callbacks from a previous abandoned run were already
-        // drained. A6 adds that drain at the top of this method: a reattached
-        // pair whose onFinished never fires (reload aborted the run, the user
-        // pressed Stop) would otherwise stay subscribed for the session and
-        // collect the NEXT run's results into the old runId's results file.
+        // drained. A6 requires that drain; B-R3 moved it out of this method:
+        // a reattached pair whose onFinished never fires (reload aborted the
+        // run, the user pressed Stop) would otherwise stay subscribed for the
+        // session and collect the NEXT run's results into the old runId's
+        // results file.
+        //
+        // CALLER-DRAINS CONTRACT (B-R3): this method does NOT drain the active
+        // registry. The caller must call DrainActiveCallbacks() exactly once
+        // before its first ReattachCallbacks call — OnAfterAssemblyReload does
+        // so before its marker loop. Draining here destroyed the pair a
+        // previous loop iteration had just registered when multiple pending
+        // markers exist, so only the last-enumerated marker kept live
+        // callbacks and the other runs' results files were never written.
         private static void ReattachCallbacks(string runId, bool playMode, bool includePasses)
         {
-            // A6 — sweep any leaked (api, callbacks) pair from a previous run
-            // whose onFinished never fired before subscribing a fresh one.
-            // Without this, the leaked instance collects THIS run's results and
-            // rewrites test-results-<oldRunId>.json with them.
-            DrainActiveCallbacks();
-
             var mode = playMode ? "PlayMode" : "EditMode";
             var results = new List<TestResultInfo>();
             TestRunnerApi api = null;

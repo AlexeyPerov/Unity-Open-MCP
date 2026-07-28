@@ -176,10 +176,22 @@
   let migrateError = $state<string | null>(null);
   // Skip .meta files even when they match by name. Off by default.
   let migrateSkipMeta = $state(false);
+  // B-R11: the last `project.id` we synced the Migrate source input for.
+  // Same guard as the A13 manifest load below — the `project` prop gets a
+  // fresh object identity on every store-wide mutation (a walk-up scan
+  // finishing while the popup is open calls `projectsStore.replaceAll` with
+  // all-new entry objects), and an unguarded effect reset a typed-but-
+  // unsaved Browse… path back to the last saved value. Reset only when the
+  // id VALUE changes (popup opened on a different project).
+  let lastSyncedSourceProjectId = $state<string | null>(null);
   // Sync the saved source folder from the project entry (pre-fills
   // when the popup opens on a package with a saved source).
   $effect(() => {
-    migrateSource = project.migrateSourceFolder ?? "";
+    const id = project.id;
+    if (id !== lastSyncedSourceProjectId) {
+      lastSyncedSourceProjectId = id;
+      migrateSource = project.migrateSourceFolder ?? "";
+    }
   });
 
   // Grouped buckets of the last result, derived so the template can

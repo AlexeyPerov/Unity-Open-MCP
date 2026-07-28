@@ -537,11 +537,21 @@ test("T-fix-2: transient refusal during a reloading lock window enters the wait 
   const s = makeSandbox();
   const projectPath = "/test/ReloadRecoveryGame";
   plantLock(s, projectPath, process.pid, 0, "reloading");
+  // Pin the compile-wait small (tunables are read at LiveClient construction,
+  // so set the env BEFORE `new LiveClient`). The route() promise below is
+  // abandoned when the 3s guard wins the race; with the default 120s cap its
+  // ref'd sleep timers kept `node --test` alive ~2 minutes after every
+  // subtest had passed. 3s means the abandoned waitForCompile winds down
+  // right around the guard cutoff instead.
+  const prevCompileWait = process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+  process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = "3000";
   try {
     const client = new LiveClient(1, new PingCache(), undefined, projectPath);
 
-    // Race the call against a 3s guard. waitForCompile caps at 120s; if the
-    // recovery path was entered we expect to still be waiting at 3s.
+    // Race the call against a 3s guard. waitForCompile caps at the pinned 3s;
+    // if the recovery path was entered we are either still waiting at the
+    // guard cutoff or have just timed out with compile_timeout — both prove
+    // the wait path ran.
     type Outcome =
       | { kind: "result"; result: CallToolResult }
       | { kind: "still-waiting" };
@@ -568,6 +578,8 @@ test("T-fix-2: transient refusal during a reloading lock window enters the wait 
       `Expected compile_timeout/bridge_compile_failed (recovery path entered), got ${body.error.code}`,
     );
   } finally {
+    if (prevCompileWait === undefined) delete process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS;
+    else process.env.UNITY_OPEN_MCP_COMPILE_WAIT_MS = prevCompileWait;
     disposeSandbox(s);
   }
 });

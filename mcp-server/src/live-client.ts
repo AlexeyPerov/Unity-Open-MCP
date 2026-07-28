@@ -5,7 +5,7 @@ import type { PingCache, PingSnapshot } from "./ping-cache.js";
 import type { BridgeToolsInventory } from "./bridge-tools-cache.js";
 import { BridgeToolsCache } from "./bridge-tools-cache.js";
 import { deriveIsError } from "./gate-error.js";
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -625,10 +625,13 @@ export class LiveClient implements Router {
       if (snapshot !== null) {
         const consumed = consumeIfReady(snapshot, true);
         if (consumed) return consumed;
-        // Not yet stable → first sighting of this file (or it grew since the
-        // last probe). Remember the snapshot and wait one interval before
-        // re-checking.
-        if (prevSnapshot === null) prevSnapshot = snapshot;
+        // Not yet stable → first sighting of this file, or it changed since
+        // the last probe. B-R2 — refresh the baseline to THIS probe
+        // unconditionally: stability means two CONSECUTIVE identical probes.
+        // Pinning the first-ever snapshot (a `=== null` guard here) meant one
+        // mid-write probe poisoned the baseline forever and the poll burned
+        // the full timeout, rescued only by the post-loop unstable read.
+        prevSnapshot = snapshot;
       }
 
       await sleep(intervalMs);
@@ -1735,28 +1738,31 @@ export class LiveClient implements Router {
     // in-progress read); if the body is never claimed, the fallback fires and
     // disposes, releasing the abort timer's loop handle. The abort timer
     // itself is NOT unref'd — it must still fire to abort a genuinely stalled
-    // body read while the process is alive (the in-progress socket keeps the
+    // request while the process is alive (the in-progress socket keeps the
     // loop alive in that case, so the abort lands).
+    //
+    // A-R1 — the claim timer is armed inside the fetch *fulfilled* handler
+    // (below, next to the accessor wrappers), NOT here at request creation.
+    // `bodyClaimed` can only flip once the Response exists, so an
+    // arm-at-creation timer fired before the headers arrived on any request
+    // slower than 100 ms and disposed the abort timer — disabling every fetch
+    // timeout exactly in the hung-Editor cases it exists for. Arming after
+    // the headers arrive means the grace window starts when the caller can
+    // first claim the body; until then the abort timer alone bounds the
+    // headers phase. On fetch rejection no claim timer was ever armed and the
+    // rejection handler disposes the abort timer directly.
     let disposed = false;
     let bodyClaimed = false;
+    let claimTimer: NodeJS.Timeout | undefined;
     const dispose = (): void => {
       if (disposed) return;
       disposed = true;
       clearTimeout(timer);
-      clearTimeout(claimTimer);
+      if (claimTimer !== undefined) clearTimeout(claimTimer);
     };
     const markBodyClaimed = (): void => {
       bodyClaimed = true;
     };
-    // Short grace window for the caller to claim the body. Long enough that a
-    // synchronous `await res.text()` after an `await fetchWithTimeout(...)`
-    // always wins; short enough that a process with no body read pending
-    // releases its handles promptly. If the body WAS claimed, this is a no-op
-    // — the abort timer remains armed to protect the read.
-    const claimTimer = setTimeout(() => {
-      if (!bodyClaimed) dispose();
-    }, 100);
-    claimTimer.unref();
 
     // M14 — attach the bearer token to every request when one was discovered
     // from the instance lock. Merge with any caller-supplied headers so we
@@ -1788,7 +1794,21 @@ export class LiveClient implements Router {
         res.text = () => { markBodyClaimed(); return origText().finally(dispose); };
         res.json = () => { markBodyClaimed(); return origJson().finally(dispose); };
         res.arrayBuffer = () => { markBodyClaimed(); return origArrayBuffer().finally(dispose); };
-        if (!res.body) dispose();
+        if (!res.body) {
+          dispose();
+        } else {
+          // A-R1 — short grace window for the caller to claim the body,
+          // armed only now that the Response (and thus the accessors) exist.
+          // Long enough that a synchronous `await res.text()` after an
+          // `await fetchWithTimeout(...)` always wins; short enough that a
+          // status-only caller releases its handles promptly (B-N1). If the
+          // body WAS claimed, the fallback is a no-op — the abort timer
+          // remains armed to protect the in-progress read.
+          claimTimer = setTimeout(() => {
+            if (!bodyClaimed) dispose();
+          }, 100);
+          claimTimer.unref();
+        }
         return res;
       },
       (err) => {

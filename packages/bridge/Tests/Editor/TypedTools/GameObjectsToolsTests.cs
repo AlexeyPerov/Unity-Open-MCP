@@ -367,6 +367,50 @@ namespace UnityOpenMcpBridge.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        // B-R4 regression: LLM callers commonly send optional fields as an
+        // explicit JSON null to mean "not specified". JsonBody.GetRawValue
+        // returns the literal token "null" for that shape, and StripQuotes
+        // ("null") != "true" — so `"active": null` used to SetActive(false).
+        // A null token must read as absent: no mutation, no spurious error.
+        [Test]
+        public void Modify_RootDiff_NullActive_DoesNotMutate()
+        {
+            var go = new GameObject("__MCPTest_GO_NullActive") { active = true };
+            try
+            {
+                var result = GameObjectsTools.Modify(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"gameObjectDiffs\":{\"active\":null,\"name\":\"__MCPTest_GO_NullActiveDone\"}}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsTrue(go.activeSelf,
+                    "\"active\": null means not-specified and must not deactivate the GameObject (B-R4).");
+                Assert.AreEqual("__MCPTest_GO_NullActiveDone", go.name,
+                    "The non-null sibling field must still apply.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        [Test]
+        public void Modify_PathPatch_NullActive_DoesNotMutate()
+        {
+            var go = new GameObject("__MCPTest_GO_NullActiveRoot");
+            var child = new GameObject("__MCPTest_GO_NullActiveChild") { active = true };
+            child.transform.SetParent(go.transform, false);
+            try
+            {
+                var result = GameObjectsTools.Modify(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"pathPatchesPerGameObject\":{\"__MCPTest_GO_NullActiveChild\":" +
+                    "{\"active\":null,\"name\":\"__MCPTest_GO_NullActiveChildDone\"}}}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.IsTrue(child.activeSelf,
+                    "\"active\": null means not-specified and must not deactivate the child (B-R4).");
+                Assert.AreEqual("__MCPTest_GO_NullActiveChildDone", child.name,
+                    "The non-null sibling field must still apply.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         [Test]
         public void Modify_ThreeSurface_AppliesInOrder()
         {

@@ -41,7 +41,6 @@ use tauri::State;
 
 use crate::config::commands::AppState;
 use crate::config::launch_log::{self, LaunchOutcome, LaunchRecord};
-use crate::config::persistence;
 use crate::config::schemas::ProjectEntry;
 
 /// Bundle-version bump strategy. The default is `Patch` per the task spec;
@@ -583,17 +582,24 @@ pub fn upgrade_unity(
     // Refresh the project entry in `projects.json` and bump
     // `lastModifiedAt` to "now" so the row surfaces at the top of a
     // last-modified view.
+    //
+    // B-R6: the long work (the on-disk `apply_upgrade` edits above) ran
+    // without the lock. Apply the two-field patch to the FRESH live state
+    // via `with_projects` — entry looked up again inside the closure — so
+    // a concurrent mutation that landed during the upgrade window is not
+    // clobbered by writing back the stale pre-upgrade snapshot.
     let now_iso = chrono::Utc::now().to_rfc3339();
-    let mut projects = projects;
-    let target = projects
-        .projects
-        .iter_mut()
-        .find(|p| p.id == params.project_id)
-        .expect("project present after earlier lookup");
-    target.unity_version = Some(target_version.clone());
-    target.last_modified_at = Some(now_iso.clone());
+    let mut updated_project: Option<crate::config::schemas::ProjectEntry> = None;
+    let persist_result =
+        crate::config::commands::with_projects(&state.projects, |file| {
+            if let Some(p) = file.projects.iter_mut().find(|p| p.id == params.project_id) {
+                p.unity_version = Some(target_version.clone());
+                p.last_modified_at = Some(now_iso.clone());
+                updated_project = Some(p.clone());
+            }
+        });
 
-    if let Err(e) = persistence::save_projects(&projects) {
+    if let Err(e) = persist_result {
         // Best-effort rollback of the on-disk file changes. The user has
         // not yet seen the success state, so undoing the file edits
         // keeps the project in a known-good shape.
@@ -616,17 +622,16 @@ pub fn upgrade_unity(
         });
     }
 
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects.clone();
-    }
-
-    let updated_project = projects
-        .projects
-        .iter()
-        .find(|p| p.id == params.project_id)
-        .cloned()
-        .expect("project present after persistence");
+    // If the entry vanished mid-upgrade (a concurrent remove landed
+    // during the on-disk edit window), the file edits still succeeded:
+    // report success against the pre-upgrade clone with the same patch
+    // applied, without resurrecting the removed entry on disk.
+    let updated_project = updated_project.unwrap_or_else(|| {
+        let mut p = project.clone();
+        p.unity_version = Some(target_version.clone());
+        p.last_modified_at = Some(now_iso.clone());
+        p
+    });
 
     // Fire-and-forget log entry. Even on a log failure the upgrade
     // itself succeeded; the user-facing error path is already past.

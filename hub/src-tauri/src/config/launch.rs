@@ -9,7 +9,6 @@ use crate::config::commands::AppState;
 use crate::config::discovery;
 use crate::config::env_vars;
 use crate::config::launch_log::{self, LaunchOutcome, LaunchRecord};
-use crate::config::persistence;
 use crate::config::projects::read_dir_mtime_iso;
 use crate::config::running_unity::{detect_running_unity, RunningUnity};
 
@@ -540,8 +539,17 @@ fn launch_project_inner(
     // as alive, and one process-table entry leaks per launch.
     let pid = crate::config::process::reap_child(child);
 
-    let mut projects = projects;
-    if let Some(p) = projects.projects.iter_mut().find(|p| p.id == project_id) {
+    // B-R6: the long work (process-table scan, Unity spawn) all happened
+    // above with no lock held. Apply the cheap bookkeeping patch to the
+    // FRESH live state via `with_projects` — looking the entry up again
+    // inside the closure — so a concurrent mutation that landed during
+    // the multi-second window (a hide, an env-var save, another project's
+    // launch stamping *its* `lastLaunchPid`) is not clobbered by writing
+    // back the stale pre-launch snapshot.
+    //
+    // The stamp is shared with the persist-failure fallback below, which
+    // must apply the identical patch to the live state in memory.
+    let stamp = |p: &mut crate::config::schemas::ProjectEntry| {
         p.last_launch_pid = Some(pid);
         p.last_launch_at = Some(chrono::Utc::now().to_rfc3339());
         // Increment frecency on every successful launch. The frontend
@@ -552,15 +560,28 @@ fn launch_project_inner(
         if refreshed_version.is_some() {
             p.unity_version = refreshed_version.clone();
         }
-    }
+    };
     // H2: capture the post-launch entry so the success path can return it
     // to the frontend. Round-tripping a pre-launch snapshot would silently
     // revert the frecency bump and delete `lastLaunchAt`.
-    let updated_project = projects
-        .projects
-        .iter()
-        .find(|p| p.id == project_id)
-        .cloned();
+    let mut updated_project: Option<crate::config::schemas::ProjectEntry> = None;
+    let persist_result =
+        crate::config::commands::with_projects(&state.projects, |file| {
+            if let Some(p) = file.projects.iter_mut().find(|p| p.id == project_id) {
+                stamp(p);
+                updated_project = Some(p.clone());
+            }
+        });
+
+    // If the entry vanished mid-launch (a concurrent remove landed during
+    // the spawn window), Unity is running regardless: return the
+    // pre-launch clone with the stamp applied so the frontend still gets
+    // the pid/frecency, without resurrecting the removed entry on disk.
+    let fallback_entry = || {
+        let mut p = project.clone();
+        stamp(&mut p);
+        p
+    };
 
     // H36: surface the persist failure instead of swallowing it. Unity is
     // already running by this point (the spawn above succeeded), so we
@@ -569,14 +590,22 @@ fn launch_project_inner(
     // frecency) did NOT reach disk, so the user learns the config volume
     // is unwritable instead of seeing a silent success that vanishes on
     // the next boot.
-    if let Err(e) = persistence::save_projects(&projects) {
+    if let Err(e) = persist_result {
         log::error!("Failed to persist launch data: {}", e);
         // Still update in-memory state so the current session reflects
         // the launch even though the on-disk file is stale.
+        // `with_projects` leaves the live Mutex untouched on failure, so
+        // apply the same stamp to the fresh live state here (memory only,
+        // no second write attempt).
+        let mut failed_entry: Option<crate::config::schemas::ProjectEntry> = None;
         {
             let mut guard = state.projects.lock().unwrap();
-            *guard = projects;
+            if let Some(p) = guard.projects.iter_mut().find(|p| p.id == project_id) {
+                stamp(p);
+                failed_entry = Some(p.clone());
+            }
         }
+        let failed_entry = failed_entry.unwrap_or_else(fallback_entry);
         return Err(InnerLaunchError {
             typed: LaunchError::PersistFailed {
                 project_id: project_id.to_string(),
@@ -586,11 +615,7 @@ fn launch_project_inner(
                 // `lastLaunchPid` despite the persist failure (otherwise
                 // "Terminate Unity" has nothing to act on).
                 pid: Some(pid),
-                project: Some(
-                    updated_project
-                        .clone()
-                        .expect("entry exists — it was just mutated"),
-                ),
+                project: Some(failed_entry),
             },
             project_id: project_id.to_string(),
             project_name,
@@ -604,10 +629,7 @@ fn launch_project_inner(
         });
     }
 
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects;
-    }
+    let updated_project = updated_project.unwrap_or_else(fallback_entry);
 
     Ok(InnerLaunchResult {
         project_id: project_id.to_string(),
@@ -618,7 +640,7 @@ fn launch_project_inner(
         executable_path: executable.to_string_lossy().to_string(),
         launch_args: args,
         build_target,
-        project: updated_project.expect("entry exists — it was just mutated"),
+        project: updated_project,
     })
 }
 
@@ -653,19 +675,27 @@ pub fn refresh_project_version(
     let last_modified_at = read_dir_mtime_iso(project_path);
     let git_branch = crate::config::git_branch::read_git_branch(project_path);
 
-    let mut projects = projects;
-    if let Some(p) = projects.projects.iter_mut().find(|p| p.id == project_id) {
-        p.unity_version = unity_version.clone();
-        p.last_modified_at = last_modified_at.clone();
-        p.git_branch = git_branch.clone();
-    }
-
+    // B-R6: the disk/git reads above ran without the lock; apply the
+    // patch to the FRESH live state via `with_projects` (entry looked up
+    // again inside the closure) so a concurrent mutation landed during
+    // the reads is not clobbered by writing back the stale snapshot.
+    //
     // H36: surface the persist failure instead of swallowing it. A
     // read-only or full config volume would otherwise silently lose the
     // refreshed version/mtime/branch — the in-memory state advances but
     // the on-disk file never does, so the next boot shows the stale
     // version again with no indication anything went wrong.
-    if let Err(e) = persistence::save_projects(&projects) {
+    // (`with_projects` leaves the live Mutex untouched on failure, which
+    // matches the previous behavior here: no in-memory advance either.)
+    let persist_result =
+        crate::config::commands::with_projects(&state.projects, |file| {
+            if let Some(p) = file.projects.iter_mut().find(|p| p.id == project_id) {
+                p.unity_version = unity_version.clone();
+                p.last_modified_at = last_modified_at.clone();
+                p.git_branch = git_branch.clone();
+            }
+        });
+    if let Err(e) = persist_result {
         log::error!("Failed to persist version refresh: {}", e);
         // B-N16 — version refresh does NOT spawn Unity, so pid / project are
         // None (the frontend treats a pid-less persistFailed as a plain
@@ -676,11 +706,6 @@ pub fn refresh_project_version(
             pid: None,
             project: None,
         });
-    }
-
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects;
     }
 
     Ok(VersionRefreshResult {

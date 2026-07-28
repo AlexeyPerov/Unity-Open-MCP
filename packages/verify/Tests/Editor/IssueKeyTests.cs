@@ -65,22 +65,59 @@ namespace UnityOpenMcpVerify.Tests
         [Test]
         public void Build_RuleIdContainsPipe_Throws()
         {
+            // ruleId is a code-controlled constant — a '|' there is a
+            // producer bug and must keep throwing (C8 sanitizes only the
+            // user-controlled path/issueCode components).
             Assert.Throws<ArgumentException>(() =>
                 IssueKey.Build("bad|rule", VerifySeverity.Error, "Assets/A.prefab", "code"));
         }
 
+        // C8 regression — '|' is legal in macOS/Linux filenames, so an asset
+        // path containing '|' must BUILD (with the pipe sanitized to '_'),
+        // not throw: the old ArgumentException aborted baseline_create
+        // wholesale and blocked every gated mutation sweeping the file.
         [Test]
-        public void Build_AssetPathContainsPipe_Throws()
+        public void Build_AssetPathContainsPipe_SanitizesInsteadOfThrowing()
         {
-            Assert.Throws<ArgumentException>(() =>
-                IssueKey.Build("rule", VerifySeverity.Error, "bad|path", "code"));
+            var key = IssueKey.Build("rule", VerifySeverity.Error,
+                "Assets/Weird|Name.prefab", "code");
+
+            Assert.AreEqual("rule|ERROR|Assets/Weird_Name.prefab|code", key);
+            // The sanitized key must round-trip through the 4-way split.
+            Assert.IsTrue(IssueKey.TryParse(key, out var ruleId, out var sev, out var path, out var code));
+            Assert.AreEqual("rule", ruleId);
+            Assert.AreEqual(VerifySeverity.Error, sev);
+            Assert.AreEqual("Assets/Weird_Name.prefab", path);
+            Assert.AreEqual("code", code);
         }
 
         [Test]
-        public void Build_IssueCodeContainsPipe_Throws()
+        public void Build_IssueCodeContainsPipe_SanitizesInsteadOfThrowing()
         {
-            Assert.Throws<ArgumentException>(() =>
-                IssueKey.Build("rule", VerifySeverity.Error, "Assets/A.prefab", "bad|code"));
+            // C8 — a mapper that forgets to pre-sanitize a user-controlled
+            // discriminator must no longer be able to make Build throw.
+            var key = IssueKey.Build("rule", VerifySeverity.Error,
+                "Assets/A.prefab", "dup:UI|Header");
+
+            Assert.AreEqual("rule|ERROR|Assets/A.prefab|dup:UI_Header", key);
+            Assert.IsTrue(IssueKey.TryParse(key, out _, out _, out _, out var code));
+            Assert.AreEqual("dup:UI_Header", code);
+            Assert.AreEqual("dup", IssueKey.BareIssueCode(code));
+        }
+
+        [Test]
+        public void Build_FromIssueWithPipePath_DoesNotThrow()
+        {
+            // The end-to-end C8 shape: a VerifyIssue whose AssetPath carries
+            // the raw '|' (evidence/description keep the raw value) still
+            // produces a parseable key.
+            var issue = new VerifyIssue("missing_references", VerifySeverity.Warning,
+                "Assets/Props/Door|Left.prefab", "missing_guid", "desc");
+
+            string key = null;
+            Assert.DoesNotThrow(() => key = IssueKey.Build(issue));
+            Assert.AreEqual(
+                "missing_references|WARN|Assets/Props/Door_Left.prefab|missing_guid", key);
         }
 
         [Test]

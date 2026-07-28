@@ -121,6 +121,113 @@ namespace UnityOpenMcpVerify.Tests
             Assert.AreEqual("missing_guid", IssueKey.BareIssueCode(issue.IssueCode));
         }
 
+        // -------------------------------------------------------------------
+        // C2 — the four previously discriminator-less codes now carry stable
+        // sanitized discriminators, so two distinct instances on one asset no
+        // longer collapse to a single issue key (which hid the second one from
+        // the gate delta). The wire `code` field stays bare via BareIssueCode.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void MissingMethod_Discriminator_IsClassAndMethod_Sanitized()
+        {
+            var data = new AssetReferencesData();
+            data.MissingMethods.Add(new MissingMethodEntry("Game.Ui.MenuController", "OnClick", 12));
+            // A second, DIFFERENT missing binding on the same asset — must not
+            // collapse onto the first one's key.
+            data.MissingMethods.Add(new MissingMethodEntry("Game.Ui.MenuController", "OnClose", 30));
+            // User-controlled names can carry '|' (read from asset YAML) —
+            // must be sanitized, not throw at IssueKey.Build time.
+            data.MissingMethods.Add(new MissingMethodEntry("Weird|Class", "Do|Thing", 44));
+            var asset = new AssetData("Assets/A.prefab", typeof(object), "Prefab", "guid", data);
+
+            var sink = new List<VerifyIssue>();
+            Assert.DoesNotThrow(() => IssueMapper.MapToIssues(new List<AssetData> { asset }, sink));
+
+            var codes = sink.Where(i => IssueKey.BareIssueCode(i.IssueCode) == "missing_method")
+                            .Select(i => i.IssueCode).ToList();
+            CollectionAssert.AreEquivalent(
+                new[]
+                {
+                    "missing_method:Game.Ui.MenuController:OnClick",
+                    "missing_method:Game.Ui.MenuController:OnClose",
+                    "missing_method:Weird_Class:Do_Thing",
+                },
+                codes);
+            // Raw (unsanitized) names stay in evidence for inspection.
+            var weird = sink.Single(i => i.IssueCode == "missing_method:Weird_Class:Do_Thing");
+            Assert.AreEqual("Weird|Class", weird.Evidence["className"]);
+            Assert.AreEqual("Do|Thing", weird.Evidence["methodName"]);
+        }
+
+        [Test]
+        public void TypeMismatch_Discriminator_IsTypeName_Sanitized()
+        {
+            var data = new AssetReferencesData();
+            data.TypeMismatches.Add(new TypeMismatchEntry("Game.MissingArgType", 9));
+            data.TypeMismatches.Add(new TypeMismatchEntry("Other.MissingArgType", 21));
+            var asset = new AssetData("Assets/A.prefab", typeof(object), "Prefab", "guid", data);
+
+            var sink = new List<VerifyIssue>();
+            IssueMapper.MapToIssues(new List<AssetData> { asset }, sink);
+
+            var codes = sink.Where(i => IssueKey.BareIssueCode(i.IssueCode) == "type_mismatch")
+                            .Select(i => i.IssueCode).ToList();
+            CollectionAssert.AreEquivalent(
+                new[]
+                {
+                    "type_mismatch:Game.MissingArgType",
+                    "type_mismatch:Other.MissingArgType",
+                },
+                codes);
+        }
+
+        [Test]
+        public void MissingLocalFileID_Discriminator_IsFileId_NotLine()
+        {
+            var data = new AssetReferencesData();
+            // IdValid requires Id > 0; LocalUsagesCount == 0 and
+            // !ExistsInAssets are the defaults, which is the issue shape.
+            data.LocalReferences.Add(new LocalReferenceRegistry(4100001, 17));
+            data.LocalReferences.Add(new LocalReferenceRegistry(4100002, 90));
+            var asset = new AssetData("Assets/A.prefab", typeof(object), "Prefab", "guid", data);
+
+            var sink = new List<VerifyIssue>();
+            IssueMapper.MapToIssues(new List<AssetData> { asset }, sink);
+
+            var codes = sink.Where(i => IssueKey.BareIssueCode(i.IssueCode) == "missing_local_fileid")
+                            .Select(i => i.IssueCode).ToList();
+            CollectionAssert.AreEquivalent(
+                new[] { "missing_local_fileid:4100001", "missing_local_fileid:4100002" },
+                codes);
+            // The (unstable) line is evidence-only, never part of the key.
+            Assert.IsFalse(codes.Any(c => c.Contains(":17") || c.Contains(":90")),
+                "line numbers must not leak into the discriminator");
+        }
+
+        [Test]
+        public void EmptyLocalRef_Discriminator_IsOrdinal_CountVisibleToDelta()
+        {
+            // The scanner record carries only the line (a {fileID: 0} has no
+            // identifying payload), so the key uses the ordinal among the
+            // asset's empty refs: two instances → two distinct keys, and a
+            // third appearing surfaces as exactly one NEW key (:2) in the
+            // gate delta instead of collapsing into the existing one.
+            var data = new AssetReferencesData();
+            data.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(5));
+            data.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(99));
+            var asset = new AssetData("Assets/A.prefab", typeof(object), "Prefab", "guid", data);
+
+            var sink = new List<VerifyIssue>();
+            IssueMapper.MapToIssues(new List<AssetData> { asset }, sink);
+
+            var codes = sink.Where(i => IssueKey.BareIssueCode(i.IssueCode) == "empty_local_ref")
+                            .Select(i => i.IssueCode).ToList();
+            CollectionAssert.AreEquivalent(
+                new[] { "empty_local_ref:0", "empty_local_ref:1" },
+                codes);
+        }
+
         // ---- helpers ----
 
         private static VerifyIssue AssertSingle(List<VerifyIssue> sink, string bareCode)

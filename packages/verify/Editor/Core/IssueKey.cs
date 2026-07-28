@@ -6,9 +6,24 @@ namespace UnityOpenMcpVerify
     {
         public static string Build(string ruleId, VerifySeverity severity, string assetPath, string issueCode)
         {
-            ValidateComponents(ruleId, severity, assetPath, issueCode);
+            // C8 — '|' is legal in macOS/Linux filenames, so a project can
+            // contain an asset whose PATH carries '|'. Rule mappers pass that
+            // path straight into Build for every issue on the asset, and B-N7
+            // only sanitized issue-code DISCRIMINATORS at the mapper call
+            // sites — a '|' path still made Build throw ArgumentException,
+            // aborting baseline_create/regression_check wholesale and turning
+            // every gated mutation whose scope swept the file into a
+            // checkpoint_validation failure. Sanitize the path and issueCode
+            // HERE, inside Build, so no caller can throw on user-controlled
+            // data; the raw path still flows into the issue's
+            // AssetPath/evidence untouched (only the KEY is sanitized).
+            // ruleId stays strict: it is a code-controlled constant, so a '|'
+            // there is a producer bug that must keep throwing.
+            var keyPath = SanitizeComponent(assetPath);
+            var keyCode = SanitizeComponent(issueCode);
+            ValidateComponents(ruleId, severity, keyPath, keyCode);
             var sev = severity == VerifySeverity.Error ? "ERROR" : "WARN";
-            return $"{ruleId}|{sev}|{assetPath}|{issueCode}";
+            return $"{ruleId}|{sev}|{keyPath}|{keyCode}";
         }
 
         public static string Build(VerifyIssue issue)
@@ -127,6 +142,9 @@ namespace UnityOpenMcpVerify
                 throw new ArgumentException("Issue key issueCode must not be empty.", nameof(issueCode));
             if (ruleId.Contains('|'))
                 throw new ArgumentException($"Issue key ruleId must not contain '|': '{ruleId}'", nameof(ruleId));
+            // C8 — Build sanitizes assetPath/issueCode before validation, so
+            // the two checks below are unreachable from Build; they stay as a
+            // defensive contract for any future caller that skips sanitizing.
             if (assetPath.Contains('|'))
                 throw new ArgumentException($"Issue key assetPath must not contain '|': '{assetPath}'", nameof(assetPath));
             if (issueCode.Contains('|'))

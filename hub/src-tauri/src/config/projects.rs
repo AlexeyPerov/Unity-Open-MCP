@@ -7,7 +7,6 @@ use tauri::State;
 use crate::config::commands::AppState;
 use crate::config::discovery;
 use crate::config::git_branch;
-use crate::config::persistence;
 use crate::config::schemas::{ProjectEntry, ProjectKind, ProjectsFile};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,17 +227,19 @@ pub fn add_project(
         ai_setup_wizard: None,
     };
 
-    let mut projects = state.projects.lock().unwrap().clone();
-    projects.projects.push(entry.clone());
-
-    persistence::save_projects(&projects).map_err(|e| AddProjectError::PersistFailed {
+    // B-R6: the enrichment reads above (mtime, version, render pipeline,
+    // build target) ran without the lock. Append the new entry to the
+    // FRESH live state via `with_projects` so a concurrent mutation that
+    // landed during those reads is not clobbered by writing back the
+    // stale snapshot. The duplicate pre-check above keeps its own small
+    // pre-existing window; re-running it here would put N canonicalize
+    // calls under the lock for no change in the common case.
+    let projects = crate::config::commands::with_projects(&state.projects, |file| {
+        file.projects.push(entry.clone());
+    })
+    .map_err(|e| AddProjectError::PersistFailed {
         message: e.to_string(),
     })?;
-
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects.clone();
-    }
 
     Ok(AddProjectResult {
         project: entry,
@@ -246,13 +247,31 @@ pub fn add_project(
     })
 }
 
+/// Per-project patch computed by the (long, lock-free) disk scan in
+/// `refresh_all_projects`, applied by id to the fresh live state under
+/// the `with_projects` lock (B-R6).
+struct RefreshPatch {
+    unity_version: Option<String>,
+    last_modified_at: Option<String>,
+    git_branch: Option<String>,
+    render_pipeline: Option<String>,
+    default_build_target: Option<String>,
+}
+
 #[tauri::command]
 pub fn refresh_all_projects(state: State<AppState>) -> RefreshOutcome {
-    let mut projects = state.projects.lock().unwrap().clone();
+    // B-R6: scan a SNAPSHOT without holding the lock (the per-project
+    // disk reads below can take seconds across many projects), collect
+    // patches keyed by project id, then apply them to the fresh live
+    // state inside `with_projects` — so a concurrent mutation that
+    // landed during the scan is not clobbered by writing back the stale
+    // snapshot.
+    let snapshot = state.projects.lock().unwrap().clone();
     let mut updated: Vec<String> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
+    let mut patches: Vec<(String, RefreshPatch)> = Vec::new();
 
-    for project in projects.projects.iter_mut() {
+    for project in snapshot.projects.iter() {
         let project_path = PathBuf::from(&project.path);
         if !project_path.is_dir() {
             skipped.push(project.id.clone());
@@ -279,34 +298,55 @@ pub fn refresh_all_projects(state: State<AppState>) -> RefreshOutcome {
             || new_render_pipeline != project.render_pipeline
             || new_default_build_target != project.default_build_target
         {
-            project.unity_version = new_version;
-            project.last_modified_at = new_mtime;
-            project.git_branch = new_branch;
-            project.render_pipeline = new_render_pipeline;
-            project.default_build_target = new_default_build_target;
             updated.push(project.id.clone());
+            patches.push((
+                project.id.clone(),
+                RefreshPatch {
+                    unity_version: new_version,
+                    last_modified_at: new_mtime,
+                    git_branch: new_branch,
+                    render_pipeline: new_render_pipeline,
+                    default_build_target: new_default_build_target,
+                },
+            ));
         }
     }
 
-    // H36: capture the persist failure instead of swallowing it. The
-    // refresh ran and `projects` reflects the refreshed in-memory state,
-    // but on a read-only / full config volume the on-disk file stays
-    // stale. We still publish the in-memory state (the session should
-    // show the refreshed data), but surface the error via `persist_error`
-    // so the UI can warn the user instead of returning a silent success
-    // whose results vanish on the next boot.
-    let persist_error = match persistence::save_projects(&projects) {
-        Ok(()) => None,
-        Err(e) => {
-            log::error!("Failed to persist refreshed projects: {}", e);
-            Some(e.to_string())
+    // Shared between the `with_projects` closure and the persist-failure
+    // fallback below, which must apply the identical patches in memory.
+    let apply = |file: &mut ProjectsFile| {
+        for (id, patch) in &patches {
+            if let Some(p) = file.projects.iter_mut().find(|p| p.id == *id) {
+                p.unity_version = patch.unity_version.clone();
+                p.last_modified_at = patch.last_modified_at.clone();
+                p.git_branch = patch.git_branch.clone();
+                p.render_pipeline = patch.render_pipeline.clone();
+                p.default_build_target = patch.default_build_target.clone();
+            }
         }
     };
 
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects.clone();
-    }
+    // H36: capture the persist failure instead of swallowing it. The
+    // refresh ran, but on a read-only / full config volume the on-disk
+    // file stays stale. We still publish the in-memory state (the
+    // session should show the refreshed data — `with_projects` leaves
+    // the Mutex untouched on failure, so apply the patches to the live
+    // state by hand), and surface the error via `persist_error` so the
+    // UI can warn the user instead of returning a silent success whose
+    // results vanish on the next boot.
+    let (projects, persist_error) =
+        match crate::config::commands::with_projects(&state.projects, |file| apply(file)) {
+            Ok(next) => (next, None),
+            Err(e) => {
+                log::error!("Failed to persist refreshed projects: {}", e);
+                let published = {
+                    let mut guard = state.projects.lock().unwrap();
+                    apply(&mut *guard);
+                    guard.clone()
+                };
+                (published, Some(e.to_string()))
+            }
+        };
 
     let settings = state.settings.lock().unwrap().clone();
     let discovery_result = discovery::discover_unity_installations(&settings);
@@ -328,16 +368,33 @@ pub fn remove_project(
     state: State<AppState>,
     project_id: String,
 ) -> Result<RemoveProjectResult, RemoveProjectError> {
-    let mut projects = state.projects.lock().unwrap().clone();
+    // Fast-path NotFound without touching the disk (matches the previous
+    // behavior: an unknown id never wrote `projects.json`).
+    {
+        let guard = state.projects.lock().unwrap();
+        if !guard.projects.iter().any(|p| p.id == project_id) {
+            return Err(RemoveProjectError::ProjectNotFound {
+                project_id: project_id.clone(),
+            });
+        }
+    }
 
-    let removed = projects
-        .projects
-        .iter()
-        .find(|p| p.id == project_id)
-        .cloned();
+    // B-R6: remove the entry from the FRESH live state via `with_projects`
+    // (looked up again inside the closure) instead of the old
+    // clone → retain → save → swap shape, which could clobber a concurrent
+    // mutation with the stale snapshot.
+    let mut removed: Option<ProjectEntry> = None;
+    let persist_result = crate::config::commands::with_projects(&state.projects, |file| {
+        if let Some(pos) = file.projects.iter().position(|p| p.id == project_id) {
+            removed = Some(file.projects.remove(pos));
+        }
+    });
 
+    // The entry can vanish between the pre-check and the closure (a
+    // concurrent remove won the race) — same NotFound the loser would
+    // have seen under the old shape.
     let removed = match removed {
-        Some(p) => p,
+        Some(r) => r,
         None => {
             return Err(RemoveProjectError::ProjectNotFound {
                 project_id: project_id.clone(),
@@ -345,18 +402,14 @@ pub fn remove_project(
         }
     };
 
-    projects.projects.retain(|p| p.id != project_id);
-
-    if let Err(e) = persistence::save_projects(&projects) {
-        return Err(RemoveProjectError::PersistFailed {
-            message: e.to_string(),
-        });
-    }
-
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects.clone();
-    }
+    let projects = match persist_result {
+        Ok(next) => next,
+        Err(e) => {
+            return Err(RemoveProjectError::PersistFailed {
+                message: e.to_string(),
+            });
+        }
+    };
 
     Ok(RemoveProjectResult {
         project_id: removed.id.clone(),
@@ -397,7 +450,12 @@ pub fn relink_project(
         });
     }
 
-    let mut projects = state.projects.lock().unwrap().clone();
+    // B-R6: run the validation reads (canonicalize is per-entry disk I/O)
+    // against a SNAPSHOT without the lock, then apply the patch to the
+    // FRESH live state via `with_projects` — entry looked up again inside
+    // the closure — so a concurrent mutation landed during the reads is
+    // not clobbered by writing back the stale snapshot.
+    let projects = state.projects.lock().unwrap().clone();
 
     let target_index = projects
         .projects
@@ -428,38 +486,36 @@ pub fn relink_project(
     let unity_version = read_unity_version(&new_project_path);
     let new_mtime = read_dir_mtime_iso(&new_project_path)
         .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+    let new_name = derive_name(&new_project_path);
 
-    let target = &mut projects.projects[target_index];
-    target.path = new_path.clone();
-    target.name = derive_name(&new_project_path);
-    target.unity_version = unity_version;
-    target.last_modified_at = Some(new_mtime);
-    // Clear any cached state tied to the old path. `gitBranch` is the
-    // only field that depends on the project root; let the next refresh
-    // re-resolve it from the new `.git/HEAD` rather than showing a stale
-    // chip for a directory the user has moved away from.
-    target.git_branch = None;
+    let mut updated: Option<ProjectEntry> = None;
+    let persist_result = crate::config::commands::with_projects(&state.projects, |file| {
+        if let Some(target) = file.projects.iter_mut().find(|p| p.id == project_id) {
+            target.path = new_path.clone();
+            target.name = new_name.clone();
+            target.unity_version = unity_version.clone();
+            target.last_modified_at = Some(new_mtime.clone());
+            // Clear any cached state tied to the old path. `gitBranch` is the
+            // only field that depends on the project root; let the next refresh
+            // re-resolve it from the new `.git/HEAD` rather than showing a stale
+            // chip for a directory the user has moved away from.
+            target.git_branch = None;
+            updated = Some(target.clone());
+        }
+    });
 
-    if let Err(e) = persistence::save_projects(&projects) {
+    if let Err(e) = persist_result {
         return Err(RelinkProjectError::PersistFailed {
             message: e.to_string(),
         });
     }
 
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects.clone();
-    }
-
-    let updated = projects
-        .projects
-        .iter()
-        .find(|p| p.id == project_id)
-        .cloned()
-        .ok_or_else(|| RelinkProjectError::ProjectNotFound {
-            project_id: project_id.clone(),
-        })?;
-    Ok(updated)
+    // `None` here means the entry was removed concurrently between the
+    // snapshot checks and the locked apply — surface the same NotFound
+    // the loser of that race would have seen before.
+    updated.ok_or_else(|| RelinkProjectError::ProjectNotFound {
+        project_id: project_id.clone(),
+    })
 }
 
 /// M1.5-15: soft-delete a project row. The entry stays in
@@ -473,40 +529,49 @@ pub fn set_project_hidden(
     project_id: String,
     hidden: bool,
 ) -> Result<ProjectEntry, SetProjectFlagError> {
-    let mut projects = state.projects.lock().unwrap().clone();
-    let target_index = projects
-        .projects
-        .iter()
-        .position(|p| p.id == project_id)
-        .ok_or_else(|| SetProjectFlagError::ProjectNotFound {
-            project_id: project_id.clone(),
-        })?;
-
-    if projects.projects[target_index].hidden == hidden {
-        // Idempotent no-op: do not write the on-disk file.
-        let snapshot = projects.projects[target_index].clone();
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects;
-        return Ok(snapshot);
+    // B-R6: check the no-op fast path under a short lock, then apply the
+    // flag flip to the FRESH live state via `with_projects` (entry looked
+    // up again inside the closure). The old clone → mutate → save → swap
+    // shape could clobber a concurrent mutation with the stale snapshot;
+    // it also pointlessly swapped an identical clone back on the no-op
+    // path.
+    {
+        let guard = state.projects.lock().unwrap();
+        let current = guard
+            .projects
+            .iter()
+            .find(|p| p.id == project_id)
+            .ok_or_else(|| SetProjectFlagError::ProjectNotFound {
+                project_id: project_id.clone(),
+            })?;
+        if current.hidden == hidden {
+            // Idempotent no-op: do not write the on-disk file.
+            return Ok(current.clone());
+        }
     }
 
-    projects.projects[target_index].hidden = hidden;
-    // Clearing `stale` is a no-op for this command — Hide and Mark
-    // stale are independent flags per the spec. A hidden-and-stale
-    // row stays hidden, and a relink still clears `stale` (handled in
-    // `relink_project`).
+    let mut updated: Option<ProjectEntry> = None;
+    let persist_result = crate::config::commands::with_projects(&state.projects, |file| {
+        if let Some(p) = file.projects.iter_mut().find(|p| p.id == project_id) {
+            p.hidden = hidden;
+            // Clearing `stale` is a no-op for this command — Hide and Mark
+            // stale are independent flags per the spec. A hidden-and-stale
+            // row stays hidden, and a relink still clears `stale` (handled in
+            // `relink_project`).
+            updated = Some(p.clone());
+        }
+    });
 
-    if let Err(e) = persistence::save_projects(&projects) {
+    if let Err(e) = persist_result {
         return Err(SetProjectFlagError::PersistFailed {
             message: e.to_string(),
         });
     }
-
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects.clone();
-    }
-    Ok(projects.projects[target_index].clone())
+    // Entry removed concurrently between the fast-path check and the
+    // locked apply: same NotFound the loser saw under the old shape.
+    updated.ok_or_else(|| SetProjectFlagError::ProjectNotFound {
+        project_id: project_id.clone(),
+    })
 }
 
 /// M1.5-15: tag a project row as `stale`. Stale rows stay visible in
@@ -520,35 +585,40 @@ pub fn set_project_stale(
     project_id: String,
     stale: bool,
 ) -> Result<ProjectEntry, SetProjectFlagError> {
-    let mut projects = state.projects.lock().unwrap().clone();
-    let target_index = projects
-        .projects
-        .iter()
-        .position(|p| p.id == project_id)
-        .ok_or_else(|| SetProjectFlagError::ProjectNotFound {
-            project_id: project_id.clone(),
-        })?;
-
-    if projects.projects[target_index].stale == stale {
-        let snapshot = projects.projects[target_index].clone();
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects;
-        return Ok(snapshot);
+    // B-R6: same shape as `set_project_hidden` — no-op fast path under a
+    // short lock, then flip the flag on the FRESH live state via
+    // `with_projects`.
+    {
+        let guard = state.projects.lock().unwrap();
+        let current = guard
+            .projects
+            .iter()
+            .find(|p| p.id == project_id)
+            .ok_or_else(|| SetProjectFlagError::ProjectNotFound {
+                project_id: project_id.clone(),
+            })?;
+        if current.stale == stale {
+            // Idempotent no-op: do not write the on-disk file.
+            return Ok(current.clone());
+        }
     }
 
-    projects.projects[target_index].stale = stale;
+    let mut updated: Option<ProjectEntry> = None;
+    let persist_result = crate::config::commands::with_projects(&state.projects, |file| {
+        if let Some(p) = file.projects.iter_mut().find(|p| p.id == project_id) {
+            p.stale = stale;
+            updated = Some(p.clone());
+        }
+    });
 
-    if let Err(e) = persistence::save_projects(&projects) {
+    if let Err(e) = persist_result {
         return Err(SetProjectFlagError::PersistFailed {
             message: e.to_string(),
         });
     }
-
-    {
-        let mut guard = state.projects.lock().unwrap();
-        *guard = projects.clone();
-    }
-    Ok(projects.projects[target_index].clone())
+    updated.ok_or_else(|| SetProjectFlagError::ProjectNotFound {
+        project_id: project_id.clone(),
+    })
 }
 
 #[cfg(test)]

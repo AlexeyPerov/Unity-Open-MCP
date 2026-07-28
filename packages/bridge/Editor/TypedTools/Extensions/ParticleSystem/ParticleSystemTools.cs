@@ -327,6 +327,8 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
             var roots = SceneQuery.FindActiveTransforms();
             foreach (var root in roots)
             {
+                // Anchor multi-segment paths to scene roots (FindActiveTransforms returns every active transform), so "A/B" cannot resolve against a nested "A"; single-segment lookups keep matching anywhere.
+                if (parts.Length > 1 && root.parent != null) continue;
                 if (root.gameObject.name == parts[0])
                 {
                     var current = root.gameObject;
@@ -1058,7 +1060,13 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
             return sb.ToString();
         }
 
+        // A-R4 — Color components are floats; render them with invariant
+        // culture (bare interpolation uses the OS culture, so de/fr/ru
+        // locales emit "0,5" and the array parses with the wrong shape).
         private static string ColorJson(Color c)
-            => $"[{c.r},{c.g},{c.b},{c.a}]";
+            => "[" + Num(c.r) + "," + Num(c.g) + "," + Num(c.b) + "," + Num(c.a) + "]";
+
+        private static string Num(float v)
+            => v.ToString("R", CultureInfo.InvariantCulture);
     }
 }

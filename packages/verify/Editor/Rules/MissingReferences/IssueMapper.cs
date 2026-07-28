@@ -53,16 +53,33 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                 {
                     if (localRef.IdValid && localRef.LocalUsagesCount == 0 && !localRef.ExistsInAssets)
                     {
-                        sink.Add(MakeIssue(asset, CodeMissingLocalFileID,
+                        // C2: discriminator = the dangling local fileID itself
+                        // — the most stable field the scanner record carries
+                        // (mirrors missing_fileid's guid+fileID choice). The
+                        // line is deliberately excluded (B-N13: it shifts on
+                        // any unrelated edit above) and stays in evidence.
+                        sink.Add(MakeIssue(asset, CodeMissingLocalFileID + ":" + localRef.Id,
                             $"Missing local FileID ({localRef.Id}) at line {localRef.Line}",
                             VerifySeverity.Warning,
                             Evidence("fileID", localRef.Id.ToString(), localRef.Line)));
                     }
                 }
 
-                foreach (var empty in refs.EmptyFileIDs)
+                // C2: the scanner record for an empty local ref
+                // (EmptyLocalFileIDRegistry) carries ONLY the line — a
+                // `{fileID: 0}` has no identifying payload by definition, and
+                // the line is unstable (B-N13). The most stable discriminator
+                // available is the ORDINAL among the asset's empty refs: it is
+                // untouched by unrelated edits (only adding/removing empty
+                // refs earlier in the file renumbers, and that IS a change to
+                // this issue population), and it makes a count change visible
+                // to the gate delta as exactly the added/removed keys — e.g.
+                // 2 empty refs → keys :0,:1; a third appears → :2 is the one
+                // new key, nothing spuriously "resolved".
+                for (var emptyIdx = 0; emptyIdx < refs.EmptyFileIDs.Count; emptyIdx++)
                 {
-                    sink.Add(MakeIssue(asset, CodeEmptyLocalRef,
+                    var empty = refs.EmptyFileIDs[emptyIdx];
+                    sink.Add(MakeIssue(asset, CodeEmptyLocalRef + ":" + emptyIdx,
                         $"Empty local fileID reference at line {empty.Line}",
                         VerifySeverity.Warning,
                         Evidence("line", empty.Line.ToString(), empty.Line)));
@@ -70,7 +87,17 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 foreach (var method in refs.MissingMethods)
                 {
-                    sink.Add(MakeIssue(asset, CodeMissingMethod,
+                    // C2: discriminator = class + method (the stable identity
+                    // of the broken UnityEvent binding), sanitized like
+                    // duplicate_component's user-controlled strings — the
+                    // YAML-sourced names could carry '|'. Two listeners
+                    // binding the SAME missing class:method intentionally
+                    // share one key (the duplicate_component stance); the
+                    // line stays in evidence only.
+                    sink.Add(MakeIssue(asset,
+                        CodeMissingMethod + ":"
+                            + IssueKey.SanitizeComponent(method.ClassName) + ":"
+                            + IssueKey.SanitizeComponent(method.MethodName),
                         $"Missing method {method.MethodName} on {method.ClassName} at line {method.Line}",
                         VerifySeverity.Warning,
                         Evidence("className", method.ClassName, method.Line,
@@ -79,7 +106,12 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
 
                 foreach (var mismatch in refs.TypeMismatches)
                 {
-                    sink.Add(MakeIssue(asset, CodeTypeMismatch,
+                    // C2: discriminator = the unresolvable type name (stable;
+                    // sanitized because it is read from asset YAML). Distinct
+                    // broken argument types on one asset no longer collapse
+                    // to a single key; the line stays in evidence only.
+                    sink.Add(MakeIssue(asset,
+                        CodeTypeMismatch + ":" + IssueKey.SanitizeComponent(mismatch.TypeName),
                         $"Type mismatch: unresolvable type {mismatch.TypeName} at line {mismatch.Line}",
                         VerifySeverity.Warning,
                         Evidence("typeName", mismatch.TypeName, mismatch.Line)));

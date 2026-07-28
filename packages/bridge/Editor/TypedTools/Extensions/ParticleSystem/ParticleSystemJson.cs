@@ -57,7 +57,15 @@ namespace UnityOpenMcpBridge.Extensions.ParticlesExt
             return sb.ToString();
         }
 
-        public static string Vec3(UnityEngine.Vector3 v) => $"[{v.x},{v.y},{v.z}]";
-        public static string Vec4(UnityEngine.Vector4 v) => $"[{v.x},{v.y},{v.z},{v.w}]";
+        // A-R4 — render floats with invariant culture. Bare interpolation
+        // ($"{v.x}") uses the OS culture, so de/fr/ru locales emit "1,5" and
+        // the vector array parses as valid JSON with the wrong element count.
+        public static string Vec3(UnityEngine.Vector3 v)
+            => "[" + Num(v.x) + "," + Num(v.y) + "," + Num(v.z) + "]";
+        public static string Vec4(UnityEngine.Vector4 v)
+            => "[" + Num(v.x) + "," + Num(v.y) + "," + Num(v.z) + "," + Num(v.w) + "]";
+
+        public static string Num(float v)
+            => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
     }
 }

@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::config::commands::AppState;
-use crate::config::persistence;
 
 /// Returns the `.meta` file body for `asset_path`, picking the importer
 /// type Unity expects for that extension. The GUID is random; the rest
@@ -355,21 +354,22 @@ fn bump_project_mtime(
     state: &State<AppState>,
     project_id: &str,
 ) -> Result<(), MetaOperationError> {
-    let mut projects = state.projects.lock().unwrap().clone();
+    // B-R6: both callers finish their (long) package-tree walks BEFORE
+    // calling this, so the mtime stamp goes through `with_projects` —
+    // entry looked up fresh inside the closure — instead of the old
+    // clone → mutate → save → swap shape, which wrote a snapshot taken
+    // before the walk back over any concurrent mutation.
     let now = chrono::Utc::now().to_rfc3339();
-    for p in projects.projects.iter_mut() {
-        if p.id == project_id {
-            p.last_modified_at = Some(now);
-            break;
+    if let Err(e) = crate::config::commands::with_projects(&state.projects, |file| {
+        if let Some(p) = file.projects.iter_mut().find(|p| p.id == project_id) {
+            p.last_modified_at = Some(now.clone());
         }
-    }
-    if let Err(e) = persistence::save_projects(&projects) {
+    }) {
         log::error!("Failed to persist mtime after meta op: {}", e);
         return Err(MetaOperationError::PersistFailed {
             message: e.to_string(),
         });
     }
-    *state.projects.lock().unwrap() = projects;
     Ok(())
 }
 

@@ -10,7 +10,7 @@
 // so a `run-tool` call returns byte-for-byte the same JSON an MCP client would
 // receive — that parity is the primary acceptance criterion of T6.1.
 
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { RouterStack } from "../routers.js";
 import { ALL_TOOLS } from "../tools/index.js";
 import {
@@ -63,6 +63,39 @@ export interface CliCommandResult {
 }
 
 const TOOL_BY_NAME = new Map(ALL_TOOLS.map((t) => [t.name, t]));
+
+/**
+ * M15 / C3 — shared required-argument gate. The MCP SDK does not enforce
+ * `inputSchema.required`, so a missing required field would otherwise reach
+ * the bridge / batch spawn as the literal `undefined` (e.g. `regression_check`
+ * without `baseline_path` spawns Unity with `--baseline-path undefined`).
+ * Used by the run-tool path AND the arg-builder paths (verify / baseline /
+ * regression), which build args from CLI flags and can equally omit a
+ * required field. Returns null when nothing is missing, otherwise the same
+ * structured `missing_required_argument` error the run-tool path emits.
+ */
+function missingArgsError(
+  command: string,
+  toolName: string,
+  tool: Tool,
+  routedArgs: Record<string, unknown>,
+): CliCommandResult | null {
+  const missing = missingRequiredArgs(tool, routedArgs);
+  if (missing.length === 0) return null;
+  const message =
+    `Missing required argument(s): ${missing.join(", ")}. ` +
+    `Provide each as a non-null value and retry.`;
+  return {
+    exitCode: 2,
+    json: {
+      command,
+      tool: toolName,
+      error: { code: "missing_required_argument", message, missing },
+    },
+    human: message,
+    errorLabel: "missing_required_argument",
+  };
+}
 
 // ---------------------------------------------------------------------------
 // ping
@@ -315,26 +348,10 @@ export async function runRunToolCommand(
   // a different default than an MCP client — parity requires it.
   const routedArgs = withSchemaDefaults(tool, opts.toolArgs);
 
-  // M15 — parity with the MCP CallTool handler: validate required arguments.
-  // The SDK does not enforce `inputSchema.required`, and `run-tool` accepts
-  // arbitrary args, so a missing required field would otherwise reach the
-  // bridge / batch spawn as the literal `undefined`.
-  const missing = missingRequiredArgs(tool, routedArgs);
-  if (missing.length > 0) {
-    const message =
-      `Missing required argument(s): ${missing.join(", ")}. ` +
-      `Provide each as a non-null value and retry.`;
-    return {
-      exitCode: 2,
-      json: {
-        command: "run-tool",
-        tool: opts.toolName,
-        error: { code: "missing_required_argument", message, missing },
-      },
-      human: message,
-      errorLabel: "missing_required_argument",
-    };
-  }
+  // M15 — parity with the MCP CallTool handler: validate required arguments
+  // (shared helper, see missingArgsError).
+  const missingErr = missingArgsError("run-tool", opts.toolName, tool, routedArgs);
+  if (missingErr) return missingErr;
 
   const result: CallToolResult = await stack.router.route(
     opts.toolName,
@@ -478,9 +495,10 @@ export async function runStreamEventsCommand(
   const intervalMs = opts.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   // M7 — in follow mode events are streamed per-batch and NOT retained (the
   // loop runs until SIGINT, so retaining would grow unboundedly and the
-  // summary return value is never emitted). In non-follow mode the single
-  // drain populates the summary returned to the dispatcher.
-  const allEvents: unknown[] = opts.follow ? [] : [];
+  // summary return value is never emitted; the follow loop below never pushes
+  // into this array). In non-follow mode the single drain populates the
+  // summary returned to the dispatcher.
+  const allEvents: unknown[] = [];
   let firstPull: unknown = null;
   let connected = false;
   let lastError: string | null = null;
@@ -692,6 +710,9 @@ export async function runVerifyCommand(
   }
 
   const routedArgs = withSchemaDefaults(tool, args);
+  // C3 — same required-arg gate as run-tool (see missingArgsError).
+  const missingErr = missingArgsError("verify", toolName, tool, routedArgs);
+  if (missingErr) return missingErr;
   const result: CallToolResult = await stack.router.route(toolName, routedArgs);
   const body = extractResultBody(result);
   const isError = result.isError === true;
@@ -848,6 +869,9 @@ export async function runBaselineCommand(
   if (opts.platformProfile) args.platform_profile = opts.platformProfile;
 
   const routedArgs = withSchemaDefaults(tool, args);
+  // C3 — same required-arg gate as run-tool (see missingArgsError).
+  const missingErr = missingArgsError("baseline", toolName, tool, routedArgs);
+  if (missingErr) return missingErr;
   const result: CallToolResult = await stack.router.route(toolName, routedArgs);
   const body = extractResultBody(result);
   const isError = result.isError === true;
@@ -930,6 +954,9 @@ export async function runRegressionCommand(
   if (opts.platformProfile) args.platform_profile = opts.platformProfile;
 
   const routedArgs = withSchemaDefaults(tool, args);
+  // C3 — same required-arg gate as run-tool (see missingArgsError).
+  const missingErr = missingArgsError("regression", toolName, tool, routedArgs);
+  if (missingErr) return missingErr;
   const result: CallToolResult = await stack.router.route(toolName, routedArgs);
   const body = extractResultBody(result);
   const isError = result.isError === true;

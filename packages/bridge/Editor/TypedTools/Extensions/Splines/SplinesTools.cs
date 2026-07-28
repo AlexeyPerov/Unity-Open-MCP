@@ -410,11 +410,13 @@ namespace UnityOpenMcpBridge.Extensions.SplinesExt
             float length = container.CalculateLength(spline_index);
 
             var sb = new StringBuilder(200);
-            sb.Append("\"t\":").Append(clamped).Append(',');
+            // A-R4 — StringBuilder.Append(float) uses the current culture;
+            // route floats through SplinesJson.Num (invariant culture).
+            sb.Append("\"t\":").Append(SplinesJson.Num(clamped)).Append(',');
             sb.Append("\"position\":").Append(SplinesJson.Vec3(ToVec3(pos))).Append(',');
             sb.Append("\"tangent\":").Append(SplinesJson.Vec3(ToVec3(math.normalizesafe(tan)))).Append(',');
             sb.Append("\"up\":").Append(SplinesJson.Vec3(ToVec3(up))).Append(',');
-            sb.Append("\"length\":").Append(length);
+            sb.Append("\"length\":").Append(SplinesJson.Num(length));
             return SplinesJson.Ok(sb.ToString());
         }
 

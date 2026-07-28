@@ -252,7 +252,11 @@ fn parse_ps_output(stdout: &str) -> Vec<RunningUnity> {
 /// is a reliable end-of-path marker. The Hub GUI's command line has
 /// no such flag, so the helper consumes the entire line and the
 /// basename (`Hub`) is correctly rejected.
-fn is_unity_command_line(command_line: &str) -> bool {
+/// C5: `pub(crate)` so `config::process::kill_unity` can reuse the exact
+/// same identity test on a single pid's command line before signalling
+/// (guards against the OS recycling a stale `lastLaunchPid` onto an
+/// unrelated process).
+pub(crate) fn is_unity_command_line(command_line: &str) -> bool {
     let executable = first_executable_path(command_line);
     let unquoted = executable.trim_matches(|c| c == '"' || c == '\'');
     let basename = match std::path::Path::new(unquoted).file_name() {

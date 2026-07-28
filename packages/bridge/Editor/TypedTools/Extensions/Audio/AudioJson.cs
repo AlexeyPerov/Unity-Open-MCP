@@ -99,6 +99,8 @@ namespace UnityOpenMcpBridge.Extensions.AudioExt
             var roots = SceneQuery.FindActiveTransforms();
             foreach (var root in roots)
             {
+                // Anchor multi-segment paths to scene roots (FindActiveTransforms returns every active transform), so "A/B" cannot resolve against a nested "A"; single-segment lookups keep matching anywhere.
+                if (parts.Length > 1 && root.parent != null) continue;
                 if (root.gameObject.name == parts[0])
                 {
                     var current = root.gameObject;

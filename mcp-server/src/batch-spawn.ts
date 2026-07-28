@@ -93,15 +93,14 @@ function extractJson(stdout: string): string | null {
 //      retained tail; the verify JSON is emitted near the end (after the
 //      operation completes), so keeping the last `MAX_OUTPUT_BYTES` preserves
 //      the markers + body for any realistic verify output while bounding
-//      memory. `partial` tracks whether the head was dropped so diagnostics
-//      can flag a truncated log.
+//      memory. Head truncation is silent: only the tail is retained, and
+//      nothing downstream inspects whether leading bytes were dropped.
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024; // 16 MiB per stream — covers verify JSON + tail.
 
 export class BoundedTextAccumulator {
   private decoder = new StringDecoder("utf8");
   private bytes: Buffer[] = [];
   private byteLen = 0;
-  private droppedHead = 0;
 
   /** Append a chunk; bytes that don't yet form a complete character are
    *  buffered in the decoder and emitted on the next push / flush. */
@@ -128,12 +127,7 @@ export class BoundedTextAccumulator {
     while (this.byteLen > MAX_OUTPUT_BYTES && this.bytes.length > 1) {
       const head = this.bytes.shift()!;
       this.byteLen -= head.length;
-      this.droppedHead += head.length;
     }
-  }
-
-  get wasTruncated(): boolean {
-    return this.droppedHead > 0;
   }
 
   toString(): string {
