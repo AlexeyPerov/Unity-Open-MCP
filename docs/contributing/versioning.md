@@ -81,7 +81,10 @@ node scripts/release.mjs 0.8.0 --yes
 
 By default the script updates both `version.json` and `hub/version.json`,
 creates all four tags (`v*`, `bridge-v*`, `verify-v*`, `hub-v*`), and pushes
-`HEAD` plus those tags to `origin`. Scope with `--trio-only` or `--hub-only`
+`HEAD` plus those tags to `origin`. Trio tags and the Hub tag are pushed in
+**separate** commands (≤3 tags each): GitHub does not create webhook events
+when more than three tags are pushed at once, which would skip
+`npm-publish` / `hub-release`. Scope with `--trio-only` or `--hub-only`
 when the lines should diverge.
 
 Pushing `v*` / `hub-v*` still triggers the irreversible publish and Hub release
@@ -105,7 +108,8 @@ node scripts/sync-version.mjs tags X.Y.Z
 git push origin vX.Y.Z bridge-vX.Y.Z verify-vX.Y.Z
 ```
 
-Create a Hub release tag independently:
+Create a Hub release tag independently (do **not** combine with the trio push
+above — four tags in one push exceeds GitHub's three-tag webhook limit):
 
 ```bash
 node scripts/sync-version.mjs tags X.Y.Z --hub

@@ -14,6 +14,8 @@ suites. Root `AGENTS.md` also applies. Human overview:
   [Maintainer versioning](../docs/contributing/versioning.md).
 - Lockstep release (set + commit + tag + push): `node scripts/release.mjs X.Y.Z`
   (wrapper around sync-version + token estimates; does not replace those tools).
+  Push trio tags and the Hub tag in separate git pushes (≤3 tags per command);
+  GitHub skips tag webhook events when more than three tags are pushed at once.
 - Token estimates: `node scripts/generate-token-estimates.mjs` writes
   `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs`. Regenerate after
   MCP tool schema, catalog, or group changes; `--check` is advisory in CI.

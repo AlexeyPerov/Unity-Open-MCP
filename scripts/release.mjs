@@ -17,6 +17,11 @@
 // Requires a clean working tree. Pushing v* / hub-v* tags triggers the
 // irreversible npm-publish / hub-release workflows — review before confirming.
 //
+// GitHub does not emit tag push/create webhook events when more than three
+// tags are pushed in one command, so release tags are pushed in batches of
+// ≤3 (trio, then Hub). See:
+// https://docs.github.com/en/webhooks/webhook-events-and-payloads#push
+//
 // Requires Node 18+ (node: builtins only).
 
 import { createInterface } from "node:readline";
@@ -156,7 +161,14 @@ async function main() {
   if (doHub) console.log(`  hub:             set hub/version.json → ${version}`);
   console.log(`  commit:          chore: release ${version}`);
   console.log(`  tags:            ${tags.join(", ")}`);
-  console.log(`  push:            HEAD + tags → origin`);
+  // GitHub drops tag webhook events when >3 tags are pushed at once; keep
+  // trio (3) and Hub (1) as separate pushes even when releasing both.
+  const pushPlan = [
+    "HEAD → origin",
+    ...(doTrio ? [`trio tags (${trioTags.join(", ")})`] : []),
+    ...(doHub ? [`Hub tag (${hubTags.join(", ")})`] : []),
+  ];
+  console.log(`  push:            ${pushPlan.join("; ")}`);
   if (DRY_RUN) {
     console.log("\n--dry-run: no changes made.");
     process.exit(0);
@@ -214,8 +226,17 @@ async function main() {
   console.log("\n→ Pushing branch…");
   run(["git", "push", "origin", "HEAD"]);
 
-  console.log("\n→ Pushing tags…");
-  run(["git", "push", "origin", ...tags]);
+  // Push ≤3 tags per command. GitHub docs: "Events will not be created for
+  // tags when more than three tags are pushed at once." A combined
+  // trio+Hub push (4 tags) silently skips npm-publish / hub-release.
+  if (doTrio) {
+    console.log("\n→ Pushing trio tags…");
+    run(["git", "push", "origin", ...trioTags]);
+  }
+  if (doHub) {
+    console.log("\n→ Pushing Hub tag…");
+    run(["git", "push", "origin", ...hubTags]);
+  }
 
   console.log(`\n✔ Released ${version}.`);
   console.log(`  Tags pushed: ${tags.join(", ")}`);
