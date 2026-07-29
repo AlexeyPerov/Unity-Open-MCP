@@ -4,6 +4,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityOpenMcpBridge.MetaTools;
+using UnityOpenMcpBridge.ObjectRefs;
 
 namespace UnityOpenMcpBridge.Tests
 {
@@ -454,7 +455,7 @@ namespace UnityOpenMcpBridge.Tests
 
         private void DestroyAllPrefixed()
         {
-            var all = Object.FindObjectsByType<GameObject>(FindObjectsInactive.Exclude);
+            var all = SceneQuery.FindAllOfType<GameObject>(SceneQuery.Inactive.Exclude);
             foreach (var go in all)
             {
                 if (go != null && go.name != null && go.name.StartsWith(CleanupPrefix))

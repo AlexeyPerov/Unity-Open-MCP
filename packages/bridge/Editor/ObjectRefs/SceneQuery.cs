@@ -4,14 +4,20 @@
 // objects of type T" goes through here so the #if version-gating lives in one
 // audited place, mirroring InstanceId.
 //
-// Unity 2023.1 introduced Object.FindObjectsByType<T>(FindObjectsInactive)
-// and marked the legacy Object.FindObjectsOfType<T>() [Obsolete]. The package
-// manifest declares a 2022.3 LTS floor, so the legacy API is the only one
-// available there. On UNITY_2023_1_OR_NEWER the helper uses the new API; on
-// older Unity it falls back to FindObjectsOfType<T>(), which returns active
-// objects only — so FindObjectsInactive.Include degrades to active-only on
-// pre-2023.1 (graceful, never a compile failure), and a ONE-TIME warning
-// makes the semantic loss observable.
+// Unity 2023.1 introduced Object.FindObjectsByType<T>(FindObjectsInactive,
+// FindObjectsSortMode) and marked the legacy Object.FindObjectsOfType<T>()
+// [Obsolete]. There is NO single-arg FindObjectsByType<T>(FindObjectsInactive)
+// overload on 2023.1–6000.4 — calling that form fails CS1503 (FindObjectsInactive
+// cannot convert to FindObjectsSortMode). Unity 6000.5 obsolete'd
+// FindObjectsSortMode and added no-sort overloads including
+// FindObjectsByType<T>(FindObjectsInactive).
+//
+// The package manifest declares a 2022.3 LTS floor, so the legacy API is the
+// only one available there. Branching:
+//   UNITY_6000_5_OR_NEWER  → FindObjectsByType<T>(FindObjectsInactive)
+//   UNITY_2023_1_OR_NEWER  → FindObjectsByType<T>(…, FindObjectsSortMode.None)
+//   else                   → FindObjectsOfType<T>() (active-only; Include
+//                            degrades gracefully with a one-time warning)
 //
 // Resources.FindObjectsOfTypeAll (used by the toolbar / window enumerators)
 // is NOT version-gated — it exists in 2022.3 — so it stays at its call sites.
@@ -62,11 +68,20 @@ namespace UnityOpenMcpBridge.ObjectRefs
         /// </summary>
         public static T[] FindAllOfType<T>(Inactive inactive) where T : Object
         {
-#if UNITY_2023_1_OR_NEWER
+#if UNITY_6000_5_OR_NEWER
+            // 6000.5+ — FindObjectsSortMode overloads are obsolete (CS0619);
+            // use the no-sort FindObjectsInactive-only overload.
             var mode = inactive == Inactive.Include
                 ? FindObjectsInactive.Include
                 : FindObjectsInactive.Exclude;
             return Object.FindObjectsByType<T>(mode);
+#elif UNITY_2023_1_OR_NEWER
+            // 2023.1–6000.4 — must pass FindObjectsSortMode; there is no
+            // single-arg FindObjectsInactive overload (CS1503 on 6000.0).
+            var mode = inactive == Inactive.Include
+                ? FindObjectsInactive.Include
+                : FindObjectsInactive.Exclude;
+            return Object.FindObjectsByType<T>(mode, FindObjectsSortMode.None);
 #else
             // Pre-2023.1 has no FindObjectsInactive enum and FindObjectsOfType<T>()
             // is the only option — it returns active objects only. Include

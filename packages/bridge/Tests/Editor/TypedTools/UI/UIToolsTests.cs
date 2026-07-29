@@ -254,8 +254,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UIExt
         {
             // Clean up any stray EventSystem from prior tests so the
             // addedEventSystem assertion is unambiguous.
-            foreach (var es in UnityEngine.Object.FindObjectsByType<EventSystem>(
-                         FindObjectsInactive.Include))
+            foreach (var es in SceneQuery.FindAllOfType<EventSystem>(SceneQuery.Inactive.Include))
                 UnityEngine.Object.DestroyImmediate(es.gameObject);
 
             var go = new GameObject("UICanvasHost", typeof(RectTransform));
@@ -283,15 +282,13 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UIExt
                 Assert.AreEqual(5, canvas.sortingOrder);
 
                 // EventSystem created at scene root.
-                var es = UnityEngine.Object.FindObjectsByType<EventSystem>(
-                    FindObjectsInactive.Include);
+                var es = SceneQuery.FindAllOfType<EventSystem>(SceneQuery.Inactive.Include);
                 Assert.AreEqual(1, es.Length, "Expected exactly one EventSystem.");
             }
             finally
             {
                 Object.DestroyImmediate(go);
-                foreach (var es in UnityEngine.Object.FindObjectsByType<EventSystem>(
-                         FindObjectsInactive.Include))
+                foreach (var es in SceneQuery.FindAllOfType<EventSystem>(SceneQuery.Inactive.Include))
                     UnityEngine.Object.DestroyImmediate(es.gameObject);
             }
         }
@@ -299,8 +296,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UIExt
         [Test]
         public void RoundTrip_CanvasAdd_Idempotent_ReusingReportsAddedFalse()
         {
-            foreach (var es in UnityEngine.Object.FindObjectsByType<EventSystem>(
-                         FindObjectsInactive.Include))
+            foreach (var es in SceneQuery.FindAllOfType<EventSystem>(SceneQuery.Inactive.Include))
                 UnityEngine.Object.DestroyImmediate(es.gameObject);
 
             var go = new GameObject("UICanvasIdem", typeof(RectTransform));
@@ -320,8 +316,7 @@ namespace UnityOpenMcpBridge.Tests.Extensions.UIExt
             finally
             {
                 Object.DestroyImmediate(go);
-                foreach (var es in UnityEngine.Object.FindObjectsByType<EventSystem>(
-                         FindObjectsInactive.Include))
+                foreach (var es in SceneQuery.FindAllOfType<EventSystem>(SceneQuery.Inactive.Include))
                     UnityEngine.Object.DestroyImmediate(es.gameObject);
             }
         }

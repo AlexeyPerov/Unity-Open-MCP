@@ -867,7 +867,7 @@ namespace UnityOpenMcpBridge.Tests
                 // Find the clone: two objects named DupSourcePrefab now exist
                 // (source + clone share the name because we strip "(Clone)").
                 var matches = new System.Collections.Generic.List<GameObject>();
-                foreach (var go in Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include))
+                foreach (var go in SceneQuery.FindAllOfType<GameObject>(SceneQuery.Inactive.Include))
                     if (go.name == "DupSourcePrefab") matches.Add(go);
                 Assert.AreEqual(2, matches.Count, "source + clone expected");
 
@@ -887,7 +887,7 @@ namespace UnityOpenMcpBridge.Tests
             {
                 if (instance != null) Object.DestroyImmediate(instance);
                 // Destroy any leftover clones.
-                foreach (var go in Object.FindObjectsByType<GameObject>(FindObjectsInactive.Include))
+                foreach (var go in SceneQuery.FindAllOfType<GameObject>(SceneQuery.Inactive.Include))
                     if (go != null && go.name == "DupSourcePrefab") Object.DestroyImmediate(go);
                 if (AssetDatabase.IsValidFolder(TmpDir))
                     AssetDatabase.DeleteAsset(TmpDir);
