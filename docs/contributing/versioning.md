@@ -75,7 +75,7 @@ node scripts/release.mjs
 # Preview only (no file or git mutations):
 node scripts/release.mjs 0.8.0 --dry-run
 
-# Skip the confirmation prompt (CI / scripted use):
+# Skip the confirmation prompt (required when stdin is not a TTY):
 node scripts/release.mjs 0.8.0 --yes
 ```
 

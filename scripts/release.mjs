@@ -106,6 +106,12 @@ if (positional[0] && version === undefined) {
 
 async function main() {
   if (!version) {
+    if (!input.isTTY) {
+      console.error(
+        "✖ stdin is not interactive — pass the version as an argument: node scripts/release.mjs X.Y.Z",
+      );
+      process.exit(2);
+    }
     const answered = await ask("Release version (X.Y.Z): ");
     version = parseVersion(answered);
     if (!version) {
@@ -157,6 +163,12 @@ async function main() {
   }
 
   if (!YES) {
+    if (!input.isTTY) {
+      console.error(
+        "✖ stdin is not interactive — pass --yes to confirm the push, or run in a real terminal.",
+      );
+      process.exit(1);
+    }
     const confirm = await ask(
       `\nPushing these tags triggers publish/release workflows. Continue? [y/N] `,
     );
