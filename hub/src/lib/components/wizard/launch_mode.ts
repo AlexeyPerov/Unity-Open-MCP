@@ -17,7 +17,7 @@ export interface LaunchModeInput {
   /** True to onboard against a local toolkit checkout; false (npx default). */
   useLocalCheckout: boolean;
   /** True to launch the bare `unity-open-mcp` binary (assumes
-   *  `npm i -g unity-open-mcp`) instead of `npx -y unity-open-mcp@latest`. */
+   *  `npm i -g unity-open-mcp`) instead of `npx -y unity-open-mcp@0.8.2`. */
   useGlobalInstall: boolean;
 }
 

@@ -12,7 +12,7 @@ import {
   VERIFY_JSON_BEGIN,
   VERIFY_JSON_END,
   BRIDGE_DEFAULT_TIMEOUT_MS,
-  NPM_PACKAGE_LATEST,
+  NPM_PACKAGE,
   ARCHIVE_URL,
   RELEASE_NOTES_URL_PREFIX,
   REPO_URL,
@@ -164,16 +164,16 @@ test("npm package name matches across bridge C#, TS, and hub Rust", () => {
 
   if (bridge) {
     assert.equal(
-      extractCsConst(bridge, "NpmPackageLatest"),
-      NPM_PACKAGE_LATEST,
-      "bridge NpmPackageLatest drifted from TS",
+      extractCsConst(bridge, "NpmPackage"),
+      NPM_PACKAGE,
+      "bridge NpmPackage drifted from TS",
     );
   }
   if (hub) {
     assert.equal(
-      extractRustConst(hub, "NPM_PACKAGE_LATEST"),
-      NPM_PACKAGE_LATEST,
-      "hub NPM_PACKAGE_LATEST drifted from TS",
+      extractRustConst(hub, "NPM_PACKAGE"),
+      NPM_PACKAGE,
+      "hub NPM_PACKAGE drifted from TS",
     );
   }
 });

@@ -9,10 +9,11 @@
     label: string;
     state: "done" | "current" | "pending";
     passing: boolean;
-    /** Plan 2 — optional/advanced segments (MCP source, Agent skill) are
-     *  demoted out of the visible progress strip. They are still navigable
-     *  via step flow + Customize, but no longer advertised as peer segments. */
-    optional?: boolean;
+  /** Plan 2 — optional/advanced segments (MCP source) are demoted out of
+   *  the visible progress strip. They are still navigable via step flow +
+   *  Customize, but no longer advertised as peer segments. Agent skill stays
+   *  in the strip even though the step itself is skippable. */
+  optional?: boolean;
   }
 
   interface Props {
@@ -49,9 +50,9 @@
   }: Props = $props();
 
   // Plan 2 — the visible progress strip shows core segments only. Optional
-  // segments (MCP source, Agent skill) are demoted out of the strip unless
-  // they are the current step, so the user always sees where they are. The
-  // hidden segments are still fully navigable via the step flow.
+  // segments (MCP source) are demoted out of the strip unless they are the
+  // current step, so the user always sees where they are. The hidden
+  // segments are still fully navigable via the step flow.
   let visibleProgress = $derived(
     progress.filter(
       (seg) => !seg.optional || seg.state === "current",

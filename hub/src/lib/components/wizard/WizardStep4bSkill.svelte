@@ -24,16 +24,16 @@
     <strong>optional</strong>: skip it if you manage skills yourself.
   </p>
   <p class="wiz-hint">
-    Two options write to the same project-relative skill folder(s) for
+    Both actions write to the same project-relative skill folder(s) for
     the MCP client you picked on the Configure AI client step
     (<strong>{mcpClientLabel(state.mcpClient)}</strong>):
-    <strong>Copy skill</strong> installs the template playbook (the same
-    workflow guidance for every project), and
-    <strong>Generate project skill</strong> produces a project-specific
+    <strong>Install template skill</strong> writes the shared playbook
+    (the same workflow guidance for every project), and
+    <strong>Write project skill</strong> produces a project-specific
     file that merges that playbook with this project's inventory (Unity
     version, installed packages, key MonoBehaviour / ScriptableObject
-    types). Generate needs the built MCP server
-    (<code>mcp-server/dist/index.js</code>); copy does not.
+    types). Write project skill needs the built MCP server
+    (<code>mcp-server/dist/index.js</code>); install template does not.
     Paths are derived from a single manifest
     (<code>skills/client-paths.json</code>), so ZCode writes
     <code>.agents/skills/</code> and Cursor writes
@@ -42,7 +42,7 @@
   </p>
 
   {#if state.skillPlanning && !state.skillPlan}
-    <p class="wiz-hint">Planning skill copy…</p>
+    <p class="wiz-hint">Planning skill install…</p>
   {:else if state.skillError}
     <div class="wiz-block wiz-block-error" role="alert">
       {describeSkillCopyError(state.skillError)}
@@ -59,7 +59,7 @@
         Use the **Skip** button to continue, or pick a different MCP client on the Configure AI client step.
       </p>
     {:else}
-      <ul class="wiz-fingerprints" aria-label="Agent skill copy targets">
+      <ul class="wiz-fingerprints" aria-label="Agent skill install targets">
         {#each state.skillPlan.targets as target (target.targetPath)}
           {@const needsOverwrite = target.exists && !target.upToDate}
           {@const tone = needsOverwrite ? "warn" : "ok"}
@@ -79,6 +79,12 @@
           </li>
         {/each}
       </ul>
+      {#if state.skillPlan.sourcePreview}
+        <details class="wiz-advanced">
+          <summary>Preview template skill</summary>
+          <pre class="wiz-codeblock" aria-label="Template skill preview">{state.skillPlan.sourcePreview}</pre>
+        </details>
+      {/if}
       {#if state.skillPlan.targets.some((t) => t.exists && !t.upToDate)}
         <label class="wiz-toggle wiz-toggle-confirm">
           <input
@@ -96,8 +102,8 @@
         <div class="wiz-block wiz-block-ok" role="status">
           <strong>Already up to date.</strong>
           The existing skill file(s) already match the toolkit
-          template — no copy or backup is needed. Use
-          <strong>Generate project skill</strong> to produce a
+          template — no install or backup is needed. Use
+          <strong>Write project skill</strong> to produce a
           project-specific file instead.
         </div>
       {/if}
@@ -106,8 +112,8 @@
 
   {#if state.skillResult}
     <div class="wiz-block wiz-block-ok" role="status">
-      <strong>Skill copy complete.</strong>
-      Copied {state.skillResult.copied.length} file(s)
+      <strong>Template skill installed.</strong>
+      Wrote {state.skillResult.copied.length} file(s)
       {#if state.skillResult.overwritten.length > 0}
         ({state.skillResult.overwritten.length} replaced existing)
       {/if}
@@ -124,7 +130,7 @@
   {/if}
   {#if state.skillGenResult}
     <div class="wiz-block wiz-block-ok" role="status">
-      <strong>Project skill generated.</strong>
+      <strong>Project skill written.</strong>
       Wrote {state.skillGenResult.targets.length} file(s) — Unity {state.skillGenResult.unityVersion}
       {#if state.skillGenResult.bridgeVersion}
         · bridge {state.skillGenResult.bridgeVersion}
@@ -160,10 +166,14 @@
       title={
         state.skillPlan && state.skillPlan.targets.some((t) => t.exists) && !state.skillOverwriteAck
           ? "Confirm overwrite first"
-          : "Copy the template skill into the client's skill folder"
+          : "Write the template skill into the client's skill folder"
       }
     >
-      {state.skillCopying ? "Copying…" : state.skillResult?.copied.length ? "Copy again" : "Copy skill"}
+      {state.skillCopying
+        ? "Installing…"
+        : state.skillResult?.copied.length
+          ? "Install again"
+          : "Install template skill"}
     </Button>
     <Button
       variant="secondary"
@@ -178,10 +188,14 @@
           ? "Confirm overwrite first"
           : !state.canGenerateSkill
             ? "Build the MCP server (mcp-server/dist/index.js) first"
-            : "Generate a project-specific skill that merges the playbook with this project's inventory"
+            : "Generate a project-specific skill and write it to the client's skill folder"
       }
     >
-      {state.skillGenRunning ? "Generating…" : state.skillGenResult?.targets.length ? "Regenerate" : "Generate project skill"}
+      {state.skillGenRunning
+        ? "Writing…"
+        : state.skillGenResult?.targets.length
+          ? "Rewrite project skill"
+          : "Write project skill"}
     </Button>
     <Button variant="secondary" onclick={handlers.skipSkillStep}>
       Skip

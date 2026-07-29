@@ -91,28 +91,10 @@ export function diagnosticsRows(input: DiagnosticsInput): DiagRow[] {
       ? undefined
       : "Check write permissions on the project's Packages/ folder.",
   });
-  // Packages installed (informational — installed on Step 3).
-  rows.push({
-    id: "bridge-installed",
-    label: "Bridge package installed",
-    ok: !!d?.bridgeInstalled,
-    info: true,
-    group: "status",
-    remediation: d?.bridgeInstalled
-      ? undefined
-      : "Installed on the Unity packages step.",
-  });
-  rows.push({
-    id: "verify-installed",
-    label: "Verify package installed",
-    ok: !!d?.verifyInstalled,
-    info: true,
-    group: "status",
-    remediation: d?.verifyInstalled
-      ? undefined
-      : "Installed on the Unity packages step.",
-  });
-  // MCP configured (informational — configured on Step 4).
+  // MCP configured (informational — configured on the Configure AI client
+  // step). Bridge / verify package status is intentionally omitted here —
+  // those are owned by the Unity packages step and listing them as "Not yet"
+  // on Preflight confused users into thinking they were blockers.
   const mcpAny = !!d?.mcpConfigured && mcpHeuristicAny(d.mcpConfigured);
   rows.push({
     id: "mcp-configured",

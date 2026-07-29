@@ -452,12 +452,18 @@
           toolkitValidation,
         });
       case "step3":
-        return isManifestReady({
-          installBridge,
-          installVerify,
-          selectedUnityDomainDeps,
-          mergePlan,
-        });
+        // A successful Install leaves the in-memory plan as `add` until the
+        // next re-plan; treat mergeResult like canSkipStep3 so Next unlocks
+        // immediately after writing the manifest.
+        return (
+          !!mergeResult ||
+          isManifestReady({
+            installBridge,
+            installVerify,
+            selectedUnityDomainDeps,
+            mergePlan,
+          })
+        );
       case "step4":
         return true;
       case "step4b":
@@ -1486,6 +1492,7 @@
     S.appendDrawerLog(
       `AI Setup: skipped Step 5 verify for ${wizardProjectName} — wizard marked incomplete on Done`,
     );
+    currentStep = "done";
   }
 
   /** Plan 2 — whether the express path is offered. Shown on Preflight when the
@@ -1764,14 +1771,11 @@
       mergePlan,
       step5BridgeStatus,
     };
-    // Plan 2 — MCP source (step2) and Agent skill (step4b) are optional /
-    // advanced: they stay in the flow but are demoted out of the visible
-    // progress strip so the core path reads as Preset → Preflight → Packages
-    // → Client → Verify → Done.
-    const OPTIONAL_STEPS: ReadonlySet<StepId> = new Set<StepId>([
-      "step2",
-      "step4b",
-    ]);
+    // Plan 2 — MCP source (step2) is optional / advanced: demoted out of the
+    // visible progress strip so the core path reads as Preset → Preflight →
+    // Packages → Client → Agent skill → Verify → Done. Agent skill stays in
+    // the strip (always reachable) even though the step itself is skippable.
+    const OPTIONAL_STEPS: ReadonlySet<StepId> = new Set<StepId>(["step2"]);
     return STEP_ORDER.map((id, idx) => {
       const currentIdx = stepIndex(currentStep);
       const state: "done" | "current" | "pending" =

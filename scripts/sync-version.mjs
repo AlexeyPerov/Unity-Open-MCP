@@ -106,6 +106,18 @@ function replaceWizardTags(body, v) {
     .replace(/(verify-v)\d+\.\d+\.\d+/g, `$1${v}`);
 }
 
+/** Rewrite the workspace package version recorded in Cargo.lock for the Hub
+ *  crate (`name = "hub"`). Cargo.toml sync alone does not update this entry —
+ *  cargo rewrites it on the next build, which is why a Hub version bump used
+ *  to leave a surprise dirty lockfile after `tauri build`.
+ * @param {string} body @param {string} v */
+function replaceHubCargoLock(body, v) {
+  return body.replace(
+    /(name = "hub"\nversion = ")[^"]*(")/,
+    (_, pre, post) => `${pre}${v}${post}`,
+  );
+}
+
 // Bridge C# constant — kept in sync with packages/bridge/package.json so /ping
 // reports the package version rather than a hand-edited literal.
 const TRIO_TARGETS = [
@@ -242,6 +254,38 @@ const TRIO_TARGETS = [
     description: "GitLab CI template npm pins (unity-open-mcp@<ver>)",
     replace: replaceNpmPin,
   },
+  // Cross-tree npm package constant (parity-tested). The wizard / bridge /
+  // MCP server all launch via `npx -y unity-open-mcp@X.Y.Z` using this pin.
+  {
+    file: "mcp-server/src/constants.ts",
+    kind: "md-npm",
+    description: "mcp-server NPM_PACKAGE constant (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "hub/src-tauri/src/config/constants.rs",
+    kind: "md-npm",
+    description: "hub NPM_PACKAGE constant (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "packages/bridge/Editor/Config/BridgeConstants.cs",
+    kind: "md-npm",
+    description: "bridge NpmPackage constant (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "hub/src-tauri/src/config/mcp_config.rs",
+    kind: "md-npm",
+    description: "hub mcp_config npm pin literals / labels (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "hub/src/lib/services/wizard_presets.ts",
+    kind: "md-npm",
+    description: "wizard preset tooltip npm pin (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
 ];
 
 const HUB_TARGETS = [
@@ -260,6 +304,16 @@ const HUB_TARGETS = [
         /(^version\s*=\s*")[^"]*(")/m,
         (_, pre, post) => `${pre}${v}${post}`,
       ),
+  },
+  // Cargo.lock records the workspace package version separately from
+  // Cargo.toml. Bumping Cargo.toml alone leaves the lockfile stale until the
+  // next `cargo build` / `tauri build`, which is the surprise dirty tree after
+  // a Hub version push. Keep the `name = "hub"` package entry in lockstep.
+  {
+    file: "hub/src-tauri/Cargo.lock",
+    kind: "cargo-lock",
+    description: "Hub Cargo.lock package version (name = \"hub\")",
+    replace: replaceHubCargoLock,
   },
   {
     file: "hub/package.json",
@@ -358,6 +412,11 @@ function extractVersion(body, kind) {
   if (kind === "md-npm") {
     // First unity-open-mcp@<X.Y.Z> pin in the doc (npm install examples).
     const m = body.match(/unity-open-mcp@(\d+\.\d+\.\d+)/);
+    return m ? m[1] : undefined;
+  }
+  if (kind === "cargo-lock") {
+    // Workspace package entry for the Hub crate only.
+    const m = body.match(/name = "hub"\nversion = "([^"]+)"/);
     return m ? m[1] : undefined;
   }
   if (kind === "json-dep") {

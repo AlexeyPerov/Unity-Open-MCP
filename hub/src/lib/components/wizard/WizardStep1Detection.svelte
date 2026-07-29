@@ -23,8 +23,9 @@
 <section class="wiz-section">
   <p class="wiz-desc">
     Preflight checks your environment. <strong>Blocking</strong> rows
-    must pass to continue; <strong>Setup status</strong> rows report work
-    handled on later steps and read "Not yet" until then.
+    must pass to continue; <strong>Setup status</strong> rows report
+    later-step work (MCP client, bridge verify) and read "Not yet" until
+    then. Package install is handled on the Unity packages step.
   </p>
 
   {#if state.detection?.isValidUnityProject}

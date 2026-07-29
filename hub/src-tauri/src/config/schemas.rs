@@ -67,7 +67,7 @@ pub struct AiToolkitSettings {
     /// Step 2 toggle: when `true`, the wizard uses the local toolkit
     /// checkout to derive the MCP launch command (`node <root>/mcp-server/
     /// dist/index.js`); when `false` (default), onboarding resolves to the
-    /// bundled npm package via `npx -y unity-open-mcp@latest`. The wizard
+    /// bundled npm package via `npx -y unity-open-mcp@0.8.2`. The wizard
     /// auto-enables this when `root_path` is already set so existing M4
     /// (clone-based) onboarding keeps working without a forced migration.
     #[serde(default)]

@@ -67,9 +67,9 @@ test("diagnosticsRows: includes the core gate rows", () => {
   assert.ok(ids.includes("unity-version"));
   assert.ok(ids.includes("node"));
   assert.ok(ids.includes("manifest-writable"));
-  assert.ok(ids.includes("bridge-installed"));
-  assert.ok(ids.includes("verify-installed"));
   assert.ok(ids.includes("mcp-configured"));
+  assert.ok(!ids.includes("bridge-installed"));
+  assert.ok(!ids.includes("verify-installed"));
 });
 
 test("diagnosticsRows: omits bridge-reachable row until Step 5 runs", () => {
@@ -213,12 +213,9 @@ test("splitDiagnosticsGroups: gate rows are blocking, informational rows are sta
     [...blockingIds].sort(),
     ["manifest-writable", "node", "unity-project", "unity-version"].sort(),
   );
-  // The later-step informational rows.
+  // Later-step informational rows (packages are owned by Step 3 — omitted).
   const statusIds = status.map((r) => r.id);
-  assert.deepEqual(
-    [...statusIds].sort(),
-    ["bridge-installed", "mcp-configured", "verify-installed"].sort(),
-  );
+  assert.deepEqual([...statusIds].sort(), ["mcp-configured"].sort());
 });
 
 test("splitDiagnosticsGroups: defaults ungrouped rows to blocking", () => {

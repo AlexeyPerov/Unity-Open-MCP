@@ -1776,7 +1776,7 @@ export type McpClientIdWire =
 /**
  * How the MCP server is launched. Mirrors the Rust `McpLaunchMode`
  * (camelCase serialisation). The default (`npx`) resolves the published
- * npm package via `npx -y unity-open-mcp@latest`; `global` assumes a
+ * npm package via `npx -y unity-open-mcp@0.8.2`; `global` assumes a
  * `npm i -g unity-open-mcp` install; the two `local*` modes point at an
  * on-disk `mcp-server/dist/index.js` from a toolkit checkout. The Step 4
  * advanced override field promotes `local` to `localOverride`.
@@ -1874,6 +1874,8 @@ export interface SkillCopyPlan {
   projectPath: string;
   toolkitRoot: string;
   sourcePath: string | null;
+  /** Full template skill text when the source file is readable. */
+  sourcePreview?: string | null;
   targets: SkillCopyTarget[];
 }
 

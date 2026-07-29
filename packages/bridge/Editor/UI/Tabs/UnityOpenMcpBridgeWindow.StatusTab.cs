@@ -459,7 +459,7 @@ namespace UnityOpenMcpBridge
                 "The MCP server auto-discovers the bridge port via the instance lock.",
                 120);
             EditorGUILayout.SelectableLabel(
-                hasProject ? $"{BridgeConstants.ProjectPathEnvVar}=\"{projectPath}\" npx -y {BridgeConstants.NpmPackageLatest}" : "(unknown project path)",
+                hasProject ? $"{BridgeConstants.ProjectPathEnvVar}=\"{projectPath}\" npx -y {BridgeConstants.NpmPackage}" : "(unknown project path)",
                 EditorStyles.textField,
                 GUILayout.Height(EditorGUIUtility.singleLineHeight));
             EditorGUILayout.EndHorizontal();
@@ -470,7 +470,7 @@ namespace UnityOpenMcpBridge
             EditorGUI.BeginDisabledGroup(_mcpProbeInFlight || !hasProject);
             if (GUILayout.Button(
                 new GUIContent(_mcpProbeInFlight ? "Probing…" : "Probe MCP server",
-                    $"Runs `npx -y {BridgeConstants.NpmPackageLatest} status` to check end-to-end discovery + bridge reachability. " +
+                    $"Runs `npx -y {BridgeConstants.NpmPackage} status` to check end-to-end discovery + bridge reachability. " +
                     "Requires Node/npx on PATH. Does not start a long-running server."),
                 GUILayout.Width(160)))
             {
@@ -535,7 +535,7 @@ namespace UnityOpenMcpBridge
                 "Copy the MCP client config snippet for this project into your AI " +
                 "client's config file. The Hub wizard (Unity Hub Pro) writes the file " +
                 "for you in one click; this panel is for configuring a client without " +
-                "leaving Unity. The launch command is `npx -y unity-open-mcp@latest` " +
+                "leaving Unity. The launch command is `npx -y unity-open-mcp@0.8.2` " +
                 "(or `node <root>/mcp-server/dist/index.js` for a local checkout).",
                 MessageType.None);
 
@@ -564,7 +564,7 @@ namespace UnityOpenMcpBridge
             // required); a local checkout should be configured via the Hub
             // wizard where the toolkit root is validated.
             var command = "npx";
-            var args = new[] { "-y", BridgeConstants.NpmPackageLatest };
+            var args = new[] { "-y", BridgeConstants.NpmPackage };
 
             // Regenerate the snippet + target path on every repaint so it
             // always reflects the current client + project.
@@ -744,14 +744,14 @@ namespace UnityOpenMcpBridge
         private async Task RunMcpProbeAsync(string projectPath)
         {
             _mcpProbeInFlight = true;
-            _mcpProbeResult = $"Probing… (running `npx -y {BridgeConstants.NpmPackageLatest} status`)";
+            _mcpProbeResult = $"Probing… (running `npx -y {BridgeConstants.NpmPackage} status`)";
             _mcpProbeMessageType = MessageType.Info;
             try
             {
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "npx",
-                    Arguments = $"-y {BridgeConstants.NpmPackageLatest} status --project \"{projectPath}\"",
+                    Arguments = $"-y {BridgeConstants.NpmPackage} status --project \"{projectPath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,

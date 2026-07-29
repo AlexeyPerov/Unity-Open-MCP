@@ -69,12 +69,13 @@ export const BRIDGE_MIN_TIMEOUT_MS = 1_000;
 export const BRIDGE_MAX_TIMEOUT_MS = 600_000;
 
 /**
- * The npm package the MCP server is published as, pinned to `@latest` for
- * the `npx -y` invocation. The `@latest` suffix is behavior-affecting
- * (always resolves the newest published version). Mirrors the C#
- * `BridgeConstants.NpmPackageLatest`.
+ * The npm package the MCP server is published as, pinned to the shared
+ * trio version (`unity-open-mcp@X.Y.Z`) for the `npx -y` invocation.
+ * Pinning (not `@latest`) keeps the MCP server aligned with the bridge /
+ * verify packages. Mirrors the C# `BridgeConstants.NpmPackage`. Kept in
+ * sync by `scripts/sync-version.mjs`.
  */
-export const NPM_PACKAGE_LATEST = "unity-open-mcp@latest";
+export const NPM_PACKAGE = "unity-open-mcp@0.8.2";
 
 /**
  * Build the bridge base URL for a given port. Centralizes the loopback +

@@ -32,13 +32,14 @@ namespace UnityOpenMcpBridge.Config
         // --- npm package --------------------------------------------------
 
         /// <summary>
-        /// The npm package the MCP server is published as, pinned to
-        /// <c>@latest</c> for the <c>npx -y</c> invocation the bridge surfaces
-        /// in its Status / Configure panels. The <c>@latest</c> suffix is
-        /// behavior-affecting (always resolves the newest published version),
-        /// so it is part of the constant, not a caller choice.
+        /// The npm package the MCP server is published as, pinned to the
+        /// shared trio version (<c>unity-open-mcp@X.Y.Z</c>) for the
+        /// <c>npx -y</c> invocation the bridge surfaces in its Status /
+        /// Configure panels. Pinning (not <c>@latest</c>) keeps the MCP
+        /// server aligned with the bridge / verify packages. Kept in sync
+        /// by <c>scripts/sync-version.mjs</c>.
         /// </summary>
-        public const string NpmPackageLatest = "unity-open-mcp@latest";
+        public const string NpmPackage = "unity-open-mcp@0.8.2";
 
         // --- environment variable names -----------------------------------
 

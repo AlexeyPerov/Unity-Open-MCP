@@ -705,7 +705,7 @@ mod tests {
     fn entry(project: &str) -> Value {
         json!({
             "command": "npx",
-            "args": ["-y", "unity-open-mcp@latest"],
+            "args": ["-y", "unity-open-mcp@0.8.2"],
             "env": { "UNITY_PROJECT_PATH": project }
         })
     }

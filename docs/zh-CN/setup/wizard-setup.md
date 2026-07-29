@@ -60,7 +60,7 @@
 预检检查你的环境，是其他一切的前置闸门。检查分为两组：
 
 - **Blocking（阻塞）— 必须通过才能继续：** 合法的 Unity 项目布局、Unity 版本（最低 2022.3 LTS；推荐 Unity 6+）、Node.js 18+，以及可写的 `Packages/manifest.json`。这些必须全部通过，Next 才会启用。
-- **Setup status（安装状态）— 在后续步骤处理：** bridge / verify 包、某个 MCP 客户端配置以及智能体技能是否已安装。这些显示为“Not yet”（不作为失败），并随着你完成后续步骤而变绿。
+- **Setup status（安装状态）— 在后续步骤处理：** MCP 客户端配置是否已写入（以及在 Launch and verify 之后，bridge 是否可达）。这些显示为“Not yet”（不作为失败），并随着你完成后续步骤而变绿。bridge / verify 包的安装状态归 Unity packages 步骤所有，不在 Preflight 列出。
 
 一个 **Re-check** 按钮可重新运行项目检测和 Node 探测。检测与 Node 探测在 UI 线程之外运行并受超时限制，因此缓慢的磁盘或挂起的 `node --version` 会作为真实错误呈现，而不会冻结向导。你随时可以用 **Cancel**、**Escape** 或 **×** 按钮关闭向导 — 检测会在后台停止。
 
@@ -121,12 +121,12 @@ npm run build
 
 ### Agent skill（可选）
 
-智能体技能为你的 AI 客户端提供 Unity MCP 工具的工作流指引 — mutate→gate→fix 循环、capabilities 优先发现，以及智能体感知（测试、profiler、截图）。有两个选项写入你所选客户端的同一个项目级技能文件夹（ZCode → `.agents/skills/`，Cursor → `.cursor/skills/` 等）：
+智能体技能为你的 AI 客户端提供 Unity MCP 工具的工作流指引 — mutate→gate→fix 循环、capabilities 优先发现，以及智能体感知（测试、profiler、截图）。此步骤始终显示在进度条中；若你自行管理技能，可跳过。有两个选项写入你所选客户端的同一个项目级技能文件夹（ZCode → `.agents/skills/`，Cursor → `.cursor/skills/` 等）：
 
-- **Copy skill** — 安装模板操作手册（`skills/unity-open-mcp/SKILL.md`）。适用于每个项目的同一份工作流指引；无需构建。
-- **Generate project skill** — 生成项目专属的 `SKILL.md`，将模板操作手册与本项目的清单（Unity 版本、已安装的包、关键 MonoBehaviour / ScriptableObject 类型）合并。需要已构建的 MCP 服务器（`mcp-server/dist/index.js`）。
+- **Install template skill** — 写入模板操作手册（`skills/unity-open-mcp/SKILL.md`）。适用于每个项目的同一份工作流指引；无需构建。可展开 **Preview template skill** 在写入前查看内容。
+- **Write project skill** — 生成项目专属的 `SKILL.md`，将模板操作手册与本项目的清单（Unity 版本、已安装的包、关键 MonoBehaviour / ScriptableObject 类型）合并。需要已构建的 MCP 服务器（`mcp-server/dist/index.js`）。
 
-两者都遵循一个显式的覆盖勾选框；现有文件在被替换前会备份为 `*.bak`。你可以只复制、只生成，或两者都做（生成会覆盖复制写入的同一路径，因此请确认覆盖）。
+两者都遵循一个显式的覆盖勾选框；现有文件在被替换前会备份为 `*.bak`。你可以只安装模板、只写入项目技能，或两者都做（写入项目技能会覆盖模板安装写入的同一路径，因此请确认覆盖）。
 
 **Team CI** 预设会自动跳过此步骤 — CI 智能体通常不需要桌面技能文件。
 

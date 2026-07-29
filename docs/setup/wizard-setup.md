@@ -62,7 +62,7 @@ Pick a preset to pre-fill the rest of the wizard, or choose **Custom / skip** to
 Preflight checks your environment and is the gate for everything else. Checks split into two groups:
 
 - **Blocking — must pass to continue:** valid Unity project layout, Unity version (minimum 2022.3 LTS; Unity 6+ recommended), Node.js 18+, and a writable `Packages/manifest.json`. These must all pass before Next is enabled.
-- **Setup status — handled on later steps:** whether the bridge / verify packages, an MCP client config, and an agent skill are already installed. These read "Not yet" (not as failures) and turn green as you complete the later steps.
+- **Setup status — handled on later steps:** whether an MCP client config is already written (and, after Launch and verify, whether the bridge is reachable). These read "Not yet" (not as failures) and turn green as you complete the later steps. Bridge and verify package install status is owned by the Unity packages step, not Preflight.
 
 A single **Re-check** button re-runs project detection and the Node probe. Detection and the Node probe run off the UI thread and are bounded by timeouts, so a slow disk or a hung `node --version` spawn surfaces a real error instead of freezing the wizard. You can always close the wizard with **Cancel**, **Escape**, or the **×** button — detection stops in the background.
 
@@ -125,12 +125,12 @@ Review the generated config preview (JSON or TOML, or a CLI command for Claude C
 
 ### Agent skill (optional)
 
-The agent skill gives your AI client workflow guidance for the Unity MCP tools — the mutate→gate→fix loop, capabilities-first discovery, and the agent senses (tests, profiler, screenshots). Two options write to the same project-relative skill folder(s) for your selected client (ZCode → `.agents/skills/`, Cursor → `.cursor/skills/`, etc.):
+The agent skill gives your AI client workflow guidance for the Unity MCP tools — the mutate→gate→fix loop, capabilities-first discovery, and the agent senses (tests, profiler, screenshots). This step stays visible in the progress strip; skip it if you manage skills yourself. Two options write to the same project-relative skill folder(s) for your selected client (ZCode → `.agents/skills/`, Cursor → `.cursor/skills/`, etc.):
 
-- **Copy skill** — installs the template playbook (`skills/unity-open-mcp/SKILL.md`). The same workflow guidance for every project; no build required.
-- **Generate project skill** — produces a project-specific `SKILL.md` that merges the template playbook with this project's inventory (Unity version, installed packages, key MonoBehaviour / ScriptableObject types). Requires the built MCP server (`mcp-server/dist/index.js`).
+- **Install template skill** — writes the template playbook (`skills/unity-open-mcp/SKILL.md`). The same workflow guidance for every project; no build required. Expand **Preview template skill** to read the content before writing.
+- **Write project skill** — produces a project-specific `SKILL.md` that merges the template playbook with this project's inventory (Unity version, installed packages, key MonoBehaviour / ScriptableObject types). Requires the built MCP server (`mcp-server/dist/index.js`).
 
-Both honor an explicit overwrite checkbox; existing files are backed up to `*.bak` before they are replaced. You can copy only, generate only, or both (generate overwrites the same path the copy writes, so confirm the overwrite).
+Both honor an explicit overwrite checkbox; existing files are backed up to `*.bak` before they are replaced. You can install the template only, write a project skill only, or both (write project skill overwrites the same path the template install writes, so confirm the overwrite).
 
 The **Team CI** preset auto-skips this step — CI agents typically don't need a desktop skill file.
 

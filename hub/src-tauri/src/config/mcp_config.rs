@@ -44,7 +44,7 @@ use super::wizard::claude_desktop_config_path;
 use crate::config::ai_toolkit::derived_mcp_index_path;
 use crate::config::bridge_port::{parse_override, resolve_port};
 use crate::config::constants::{
-    NPM_PACKAGE_LATEST, PORT_ENV_VAR, PROJECT_PATH_ENV_VAR, UNITY_PATH_ENV_VAR,
+    NPM_PACKAGE, PORT_ENV_VAR, PROJECT_PATH_ENV_VAR, UNITY_PATH_ENV_VAR,
 };
 use crate::config::paths;
 
@@ -103,7 +103,7 @@ fn resolve_index_for_mode(
 /// npm-based launch modes. Keeps the field non-empty (so the UI's
 /// "what did we resolve" line still reads cleanly) without
 /// inventing a fake filesystem path.
-const NPM_RESOLVED_LABEL: &str = "npm: unity-open-mcp@latest";
+const NPM_RESOLVED_LABEL: &str = "npm: unity-open-mcp@0.8.2";
 
 /// MCP server key used in the parent config. Matches
 /// `MCP_SERVER_KEY` in `ai_toolkit.ts` and the spec
@@ -222,7 +222,7 @@ pub(crate) fn client_is_global(client: McpClientId) -> bool {
 /// flow). `LocalOverride` is the Step 4 advanced escape hatch
 /// for a custom `mcp-server/dist/index.js` path.
 ///
-/// - `Npx` — `command: npx, args: ["-y", "unity-open-mcp@latest"]`.
+/// - `Npx` — `command: npx, args: ["-y", "unity-open-mcp@0.8.2"]`.
 ///   Resolves the published package from the npm cache; no
 ///   toolkit root required.
 /// - `Global` — `command: unity-open-mcp, args: []`. Assumes the
@@ -806,7 +806,7 @@ fn launch_command_parts(mode: McpLaunchMode, resolved_index: &str) -> (String, V
     match mode {
         McpLaunchMode::Npx => (
             "npx".to_string(),
-            vec!["-y".to_string(), NPM_PACKAGE_LATEST.to_string()],
+            vec!["-y".to_string(), NPM_PACKAGE.to_string()],
         ),
         McpLaunchMode::Global => ("unity-open-mcp".to_string(), Vec::new()),
         McpLaunchMode::Local | McpLaunchMode::LocalOverride => (
@@ -828,8 +828,8 @@ fn build_entry_json(params: &McpConfigParams, resolved_index: &str) -> Value {
         }),
         McpClientId::OpencodeGlobal | McpClientId::OpencodeProject => {
             // OpenCode's `command` is an array (argv form); prepend the
-            // resolved command so `npx -y unity-open-mcp@latest` becomes
-            // `["npx", "-y", "unity-open-mcp@latest"]` and
+            // resolved command so `npx -y unity-open-mcp@0.8.2` becomes
+            // `["npx", "-y", "unity-open-mcp@0.8.2"]` and
             // `node /path/index.js` stays a two-element array.
             let mut cmd_array = vec![Value::String(command)];
             if let Value::Array(arr) = args_value {
@@ -964,7 +964,7 @@ pub(crate) fn cline_settings_path(home: &Path) -> PathBuf {
 /// [mcp_servers.unity-open-mcp]
 /// enabled = true
 /// command = "npx"
-/// args = ["-y", "unity-open-mcp@latest"]
+/// args = ["-y", "unity-open-mcp@0.8.2"]
 ///
 /// [mcp_servers.unity-open-mcp.env]
 /// UNITY_PROJECT_PATH = "..."
@@ -1135,7 +1135,7 @@ fn manual_root_for(params: &McpConfigParams) -> PathBuf {
 
 /// Render the `claude mcp add` command for the Claude Code
 /// client. Two env keys are required; the launch invocation is
-/// keyed off the launch mode — `npx -y unity-open-mcp@latest`
+/// keyed off the launch mode — `npx -y unity-open-mcp@0.8.2`
 /// for the bundled package, `unity-open-mcp` for a global
 /// install, and `node <path>` for a local checkout.
 pub fn claude_mcp_add_command(
@@ -1146,7 +1146,7 @@ pub fn claude_mcp_add_command(
 ) -> String {
     let port = resolve_port(unity_project_path, parse_override(bridge_port)).to_string();
     let invocation = match launch_mode {
-        McpLaunchMode::Npx => format!("npx -y {}", NPM_PACKAGE_LATEST),
+        McpLaunchMode::Npx => format!("npx -y {}", NPM_PACKAGE),
         McpLaunchMode::Global => "unity-open-mcp".to_string(),
         McpLaunchMode::Local | McpLaunchMode::LocalOverride => {
             format!("node {}", resolved_index)
@@ -1286,6 +1286,10 @@ pub struct SkillCopyPlan {
     pub project_path: String,
     pub toolkit_root: String,
     pub source_path: Option<String>,
+    /// Full text of the template skill when the source file is readable —
+    /// the wizard shows this in a Preview disclosure before writing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_preview: Option<String>,
     pub targets: Vec<SkillCopyTarget>,
 }
 
@@ -1400,10 +1404,15 @@ fn plan_skill_copy_at(params: &SkillCopyParams) -> Result<SkillCopyPlan, SkillCo
         }
     }
 
+    let source_preview = source_path
+        .as_ref()
+        .and_then(|p| fs::read_to_string(p).ok());
+
     Ok(SkillCopyPlan {
         project_path: params.project_path.clone(),
         toolkit_root: params.toolkit_root.clone(),
         source_path: source_path_str,
+        source_preview,
         targets,
     })
 }
@@ -2143,7 +2152,7 @@ mod tests {
         assert_eq!(entry.get("command").unwrap(), "npx");
         let args = entry.get("args").unwrap().as_array().unwrap();
         assert_eq!(args[0], "-y");
-        assert_eq!(args[1], "unity-open-mcp@latest");
+        assert_eq!(args[1], "unity-open-mcp@0.8.2");
         // Sentinel label, not a filesystem path.
         assert_eq!(plan.resolved_mcp_index, NPM_RESOLVED_LABEL);
     }
@@ -2437,7 +2446,7 @@ mod tests {
             McpLaunchMode::Npx,
             "/unused/local/index.js",
         );
-        assert!(cmd.contains("-- npx -y unity-open-mcp@latest"));
+        assert!(cmd.contains("-- npx -y unity-open-mcp@0.8.2"));
         assert!(!cmd.contains("-- node "));
     }
 

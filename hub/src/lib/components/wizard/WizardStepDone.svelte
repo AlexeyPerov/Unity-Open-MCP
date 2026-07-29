@@ -263,10 +263,14 @@
             title={
               state.skillPlan.targets.some((t) => t.exists) && !state.skillOverwriteAck
                 ? "Confirm overwrite first"
-                : "Copy skill files"
+                : "Write the template skill into the client's skill folder"
             }
           >
-            {state.skillCopying ? "Copying…" : state.skillResult?.copied.length ? "Copy again" : "Copy skill files"}
+            {state.skillCopying
+              ? "Installing…"
+              : state.skillResult?.copied.length
+                ? "Install again"
+                : "Install template skill"}
           </Button>
           <Button
             variant="secondary"
@@ -281,10 +285,14 @@
                 ? "Confirm overwrite first"
                 : !state.canGenerateSkill
                   ? "Build the MCP server (mcp-server/dist/index.js) first"
-                  : "Generate a project-specific skill that merges the playbook with this project's inventory"
+                  : "Generate a project-specific skill and write it to the client's skill folder"
             }
           >
-            {state.skillGenRunning ? "Generating…" : state.skillGenResult?.targets.length ? "Regenerate skill" : "Generate project skill"}
+            {state.skillGenRunning
+              ? "Writing…"
+              : state.skillGenResult?.targets.length
+                ? "Rewrite project skill"
+                : "Write project skill"}
           </Button>
         </div>
       {/if}

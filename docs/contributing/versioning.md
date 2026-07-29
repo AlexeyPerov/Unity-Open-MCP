@@ -22,8 +22,9 @@ The shared source updates:
 - bridge runtime version constants
 - setup/client/CI version examples registered in the sync script
 
-The Hub source updates its Tauri config, Cargo package, and npm package version.
-Community extension packs and the private root package are independent.
+The Hub source updates its Tauri config, Cargo package, Cargo.lock workspace
+package version, and npm package version. Community extension packs and the
+private root package are independent.
 
 ## Sync and drift checks
 

@@ -28,11 +28,12 @@ pub const UNITY_PATH_ENV_VAR: &str = "UNITY_PATH";
 /// `BridgeBindAddress.Loopback` and the TS `LOOPBACK_HOST`.
 pub const LOOPBACK_HOST: &str = "127.0.0.1";
 
-/// The npm package the MCP server is published as, pinned to `@latest` for
-/// the `npx -y` invocation. The `@latest` suffix is behavior-affecting
-/// (always resolves the newest published version). Mirrors the C#
-/// `BridgeConstants.NpmPackageLatest` and the TS `NPM_PACKAGE_LATEST`.
-pub const NPM_PACKAGE_LATEST: &str = "unity-open-mcp@latest";
+/// The npm package the MCP server is published as, pinned to the shared
+/// trio version (`unity-open-mcp@X.Y.Z`) for the `npx -y` invocation.
+/// Pinning (not `@latest`) keeps the MCP server aligned with the bridge /
+/// verify packages the wizard installs. Mirrors the C# `BridgeConstants.NpmPackage`
+/// and the TS `NPM_PACKAGE`. Kept in sync by `scripts/sync-version.mjs`.
+pub const NPM_PACKAGE: &str = "unity-open-mcp@0.8.2";
 
 /// Markers wrapping the JSON payload emitted by the headless batch / verify
 /// entry points so the mcp-server can extract it from mixed stdout. MUST
