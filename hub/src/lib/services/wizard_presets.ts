@@ -72,7 +72,7 @@ export const WIZARD_PRESETS: readonly WizardPreset[] = [
     description:
       "Published npm package via npx. No monorepo checkout needed — the fastest standard path.",
     tooltip:
-      "MCP server: npx -y unity-open-mcp@0.8.3. Packages: bridge + verify from published sources, domain deps off. Client: not pre-selected. Skill: on. Launch: standard verify, no auth.",
+      "MCP server: npx -y unity-open-mcp@0.8.4. Packages: bridge + verify from published sources, domain deps off. Client: not pre-selected. Skill: on. Launch: standard verify, no auth.",
     recommended: true,
     values: {
       useLocalCheckout: false,
