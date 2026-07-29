@@ -15,7 +15,7 @@
       "dependencies": {}
     },
     "com.unity.ai.navigation": {
-      "version": "2.0.13",
+      "version": "2.0.14",
       "depth": 0,
       "source": "registry",
       "dependencies": {
@@ -98,7 +98,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.probuilder": {
-      "version": "6.0.9",
+      "version": "6.1.2",
       "depth": 0,
       "source": "registry",
       "dependencies": {
@@ -162,7 +162,7 @@
       }
     },
     "com.unity.splines": {
-      "version": "2.8.4",
+      "version": "2.9.0",
       "depth": 0,
       "source": "registry",
       "dependencies": {

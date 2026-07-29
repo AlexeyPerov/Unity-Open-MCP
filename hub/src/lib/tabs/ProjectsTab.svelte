@@ -7,6 +7,7 @@
   import { walkUpScanStore } from "$lib/state/walk_up_scan.svelte";
   import { settingsStore } from "$lib/state/settings.svelte";
   import { discoveryStore } from "$lib/state/discovery.svelte";
+  import { sizesStore } from "$lib/state/sizes.svelte";
   import { activePalette } from "$lib/theme.svelte";
   import {
     addProject,
@@ -20,7 +21,6 @@
     getGitBranches,
     getLaunchLogTail,
     getLogPaths,
-    getProjectSizes,
     isPidAlive,
     killUnity,
     launchProject,
@@ -166,8 +166,6 @@
   let killingId = $state<string | null>(null);
   let addError = $state<string | null>(null);
   let actionError = $state<string | null>(null);
-  let sizeMap = $state<Record<string, number>>({});
-  let loadingSizes = $state(false);
   let logPathsMap = $state<Record<string, LogPaths>>({});
   let defaultBuildTargetMap = $state<Record<string, string | null>>({});
   let isDragOver = $state(false);
@@ -292,21 +290,30 @@
       await projectsStore.load();
       doneLoad(projectsStore.projects);
       if (cancelled) return;
-      // Path existence, sizes, and git branches are independent of each
-      // other — run them concurrently. The backing Tauri commands are
-      // `async` + `spawn_blocking`, so they no longer serialize on the
-      // webview thread and the window stays responsive while they run.
+      // Path existence and git branches are independent of each other —
+      // run them concurrently. The backing Tauri commands are `async`
+      // + `spawn_blocking`, so they no longer serialize on the webview
+      // thread and the window stays responsive while they run.
+      //
+      // Sizes are deliberately NOT awaited here: `sizesStore.load`
+      // kicks off a streamed backend run and returns immediately, so
+      // each row paints at once and its size fills in lazily via
+      // `sizes://progress` events (per-root). Awaiting the full size
+      // pass used to freeze the window ~20s on a multi-project list
+      // while every root was counted; the streamed duration is logged
+      // by the store when `sizes://done` arrives.
       const donePaths = bootSpan("refreshPathExistence");
-      const doneSizes = bootSpan("loadSizes");
       const doneBranches = bootSpan("loadGitBranches");
       await Promise.all([
         refreshPathExistence().then((r) => donePaths(r)),
-        loadSizes().then((r) => doneSizes(r)),
         loadGitBranches().then((r) => doneBranches(r)),
       ]);
       S.appendDrawerLog(
         `[boot] total onMount: ${Math.round(performance.now() - bootStart)}ms`,
       );
+      // Fire-and-forget the streamed size pass AFTER the blocking boot
+      // resolves, so the awaited phases can't be delayed by it.
+      void sizesStore.load(projectsStore.projects.map((p) => p.path));
       // AI-setup detection is best-effort and per-project; kick it off
       // after the blocking boot so rows paint first, then each AI
       // button flips to green as its snapshot arrives.
@@ -375,6 +382,7 @@
       if (unlistenDrop) unlistenDrop();
       runningUnityStore.stop();
       void walkUpScanStore.stop();
+      sizesStore.teardown();
       walkUpModalOpen = false;
       // M1.5-12: force the New Project modal closed so a pending
       // submit / overwrite prompt does not leak into the next time
@@ -458,19 +466,18 @@
     }
   });
 
+  /**
+   * Re-size the current project list via the batch `get_project_sizes`
+   * (one Tauri invoke) and merge the results into `sizesStore.sizeMap`.
+   * Used after add/create/replace/refresh mutations where a small,
+   * synchronous re-size of the affected rows is wanted without spinning
+   * up a whole streamed run. The boot path uses the streamed variant
+   * directly (`sizesStore.load`) so it never blocks.
+   */
   async function loadSizes() {
     const list = projectsStore.projects;
     if (list.length === 0) return;
-    loadingSizes = true;
-    try {
-      const paths = list.map((p) => p.path);
-      sizeMap = await getProjectSizes(paths);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      S.appendErrorLog(`size check failed: ${msg}`);
-    } finally {
-      loadingSizes = false;
-    }
+    await sizesStore.mergeBatch(list.map((p) => p.path));
   }
 
   async function refreshPathExistence() {
@@ -2603,8 +2610,8 @@
     showHidden,
     filtered,
     pathExistsMap,
-    sizeMap,
-    loadingSizes,
+    sizeMap: sizesStore.sizeMap,
+    loadingSizes: sizesStore.loading,
     checkingPaths,
     logPathsMap,
     defaultBuildTargetMap,

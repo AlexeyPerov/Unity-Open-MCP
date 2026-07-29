@@ -12,6 +12,8 @@ suites. Root `AGENTS.md` also applies. Human overview:
 - Version strings: `node scripts/sync-version.mjs` (shared trio) or
   `--hub` for Unity Hub Pro. Canonical contract:
   [Maintainer versioning](../docs/contributing/versioning.md).
+- Lockstep release (set + commit + tag + push): `node scripts/release.mjs X.Y.Z`
+  (wrapper around sync-version + token estimates; does not replace those tools).
 - Token estimates: `node scripts/generate-token-estimates.mjs` writes
   `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs`. Regenerate after
   MCP tool schema, catalog, or group changes; `--check` is advisory in CI.

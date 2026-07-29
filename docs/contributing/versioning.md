@@ -60,6 +60,35 @@ Review and commit the generated changes before creating tags. The Hub app's
 maintainer panel can run the same sync/check/bump/set operations, but it does
 not commit or tag.
 
+## One-shot release (trio + Hub)
+
+For a lockstep release that sets both version lines to the same `X.Y.Z`,
+regenerates token estimates, commits, tags, and pushes:
+
+```bash
+# Working tree must be clean. Prompts for confirmation before push.
+node scripts/release.mjs 0.8.0
+
+# Or prompt for the version interactively:
+node scripts/release.mjs
+
+# Preview only (no file or git mutations):
+node scripts/release.mjs 0.8.0 --dry-run
+
+# Skip the confirmation prompt (CI / scripted use):
+node scripts/release.mjs 0.8.0 --yes
+```
+
+By default the script updates both `version.json` and `hub/version.json`,
+creates all four tags (`v*`, `bridge-v*`, `verify-v*`, `hub-v*`), and pushes
+`HEAD` plus those tags to `origin`. Scope with `--trio-only` or `--hub-only`
+when the lines should diverge.
+
+Pushing `v*` / `hub-v*` still triggers the irreversible publish and Hub release
+workflows — use `--dry-run` first when unsure. Prefer this wrapper for routine
+releases; use the manual steps below when you need to review the sync diff
+before committing.
+
 ## Release tags
 
 | Tag | Release |

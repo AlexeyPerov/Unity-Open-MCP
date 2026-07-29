@@ -38,6 +38,16 @@ class ProjectsStore {
   projects = $state<ProjectEntry[]>([]);
   selectedProjectId = $state<string | null>(null);
   loading = $state(false);
+  /**
+   * True once the first `load()` has completed (success or error).
+   * `loading` alone can't distinguish "still bootstrapping on first
+   * boot" from "loaded and genuinely has zero projects" — both look
+   * like `projects.length === 0`. The list uses this flag to show a
+   * spinner instead of the "No projects yet." empty state until the
+   * initial load resolves, so a slow `load_projects` invoke no longer
+   * flashes the empty state.
+   */
+  loaded = $state(false);
   error = $state<string | null>(null);
 
   get settings(): Settings | null {
@@ -73,6 +83,7 @@ class ProjectsStore {
       this.projects = [];
     } finally {
       this.loading = false;
+      this.loaded = true;
     }
   }
 

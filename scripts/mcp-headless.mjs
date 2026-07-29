@@ -187,11 +187,12 @@ function main() {
 
   const runEnv = buildRunEnv();
 
-  // Preflight: assert the bridge is offline. If the Editor is open on the
-  // project, the bridge responds to ping — refuse with an actionable message.
+  // Preflight: assert the live bridge is offline. `unity_open_mcp_ping` always
+  // returns isError=false nowadays (batch fallback when live is down), so the
+  // live-Editor signal is `result.connected === true`, not envelope success.
   console.log("--- preflight: assert Editor is closed ---");
   const ping = invokeTool(opts.project, "unity_open_mcp_ping", {}, 8_000, runEnv);
-  if (ping && ping.isError !== true) {
+  if (ping?.result?.connected === true) {
     console.error("ERROR: bridge is reachable — the Unity Editor appears to be open on this project.");
     console.error("S2 proves the headless/batch path. Quit Unity (or close the project) and re-run.");
     console.error("For live-Editor coverage, run S0 (mcp-full-test.mjs) or S1 (mcp-behavior.mjs) instead.");

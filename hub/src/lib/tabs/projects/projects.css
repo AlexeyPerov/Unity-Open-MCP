@@ -570,6 +570,39 @@
 .empty-state p { margin: 0.2rem 0; font-size: 0.88rem; }
 .empty-state .empty-hint { font-size: 0.78rem; color: var(--hub-text-placeholder); }
 
+/*
+ * Initial-load placeholder. Shown while the first `load_projects`
+ * invoke is in flight, so the "No projects yet." empty state does not
+ * flash before the list has actually loaded. Reuses the `icon-spin`
+ * keyframes defined above (originally for the refresh button).
+ */
+.table-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  text-align: center;
+  color: var(--hub-text-muted);
+  padding: 2rem 0;
+  font-size: 0.88rem;
+}
+
+/*
+ * Generic spinner. The existing `.icon-btn .icon-spin` rule is scoped
+ * under the refresh button, so this standalone class is needed for the
+ * list-level loading state. Shares the same `icon-spin` keyframes and
+ * cadence as the button spinner for visual consistency.
+ */
+.spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--hub-border, rgba(255, 255, 255, 0.18));
+  border-top-color: var(--hub-accent, #4f9cf9);
+  border-radius: 50%;
+  animation: icon-spin 0.9s linear infinite;
+}
+
 .settings-actions {
   display: flex;
   flex-direction: row;

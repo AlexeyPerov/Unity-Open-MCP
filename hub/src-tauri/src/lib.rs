@@ -53,6 +53,7 @@ pub fn run() {
             config::diagnostics::get_diagnostics_paths,
             config::diagnostics::export_diagnostics,
             config::sizes::get_project_sizes,
+            config::sizes::stream_project_sizes,
             config::build_target::get_default_build_target,
             config::render_pipeline::get_render_pipeline,
             config::git_branch::get_git_branches,

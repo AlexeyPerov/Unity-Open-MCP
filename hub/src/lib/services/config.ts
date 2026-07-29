@@ -1182,6 +1182,37 @@ export async function getProjectSizes(
 }
 
 /**
+ * Streaming sizes payloads. The backend `stream_project_sizes` command
+ * returns immediately and emits `sizes://progress` per root (as each
+ * finishes) and `sizes://done` when the whole run completes. This
+ * decouples sizing from the boot path so rows paint instantly and
+ * sizes fill in lazily, instead of freezing the window ~20s while every
+ * root is counted.
+ */
+export interface SizesProgress {
+  path: string;
+  size: number;
+}
+
+export interface SizesDone {
+  total: number;
+  elapsedMs: number;
+}
+
+/**
+ * Kick off the streaming sizer. Resolves once the invoke is accepted
+ * (not when sizing finishes — sizes arrive via the events). Callers
+ * must attach listeners on `sizes://progress` / `sizes://done` first;
+ * `sizesStore` does this.
+ */
+export async function streamProjectSizes(paths: string[]): Promise<void> {
+  await invoke<void>("stream_project_sizes", { paths });
+}
+
+export const SIZES_PROGRESS_EVENT = "sizes://progress";
+export const SIZES_DONE_EVENT = "sizes://done";
+
+/**
  * M1.5-11 — walk-up directory scan.
  */
 

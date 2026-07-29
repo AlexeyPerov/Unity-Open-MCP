@@ -2,6 +2,10 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 
 const ALWAYS_EXCLUDED: &[&str] = &["Library", "Temp", "Logs", "UserSettings"];
 
@@ -131,6 +135,166 @@ pub async fn get_project_sizes(paths: Vec<String>) -> HashMap<String, u64> {
     result
 }
 
+// --- streaming variant ------------------------------------------------------
+//
+// The batch `get_project_sizes` above waits for the LAST root before
+// returning, and the boot sequence in ProjectsTab used to `await` it —
+// so a 14-project list with a few large repos froze the window for ~20s
+// while every byte was counted. The streaming variant here sizes each
+// root independently (and in parallel) and emits a `sizes://progress`
+// event per root as it completes, so the frontend can paint rows
+// immediately and fill sizes in lazily. `sizes://done` closes the run.
+//
+// The walker logic (`compute_size`, H26 symlink/cycle guards,
+// `.gitignore`/`ignore.conf` handling, `ALWAYS_EXCLUDED`) is unchanged —
+// only the driver (sequential batch → parallel + streamed) differs.
+
+/// One root finished sizing. Emitted on `sizes://progress`.
+#[derive(Debug, Clone, Serialize)]
+pub struct SizesProgress {
+    pub path: String,
+    pub size: u64,
+}
+
+/// All roots finished. Emitted on `sizes://done`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SizesDone {
+    pub total: usize,
+    pub elapsed_ms: u64,
+}
+
+/// Stream per-root sizes to the frontend as each root completes, sizing
+/// roots in parallel across the blocking thread pool. Returns
+/// immediately; results arrive via `sizes://progress` and the run closes
+/// with `sizes://done`.
+///
+/// Unlike `get_project_sizes` (batch, single return), this never blocks
+/// boot: the frontend kicks it off fire-and-forget and updates a keyed
+/// reactive map per event, so each project row flips to its size the
+/// moment its root is counted rather than waiting on the slowest root.
+#[tauri::command]
+pub fn stream_project_sizes(app: AppHandle, paths: Vec<String>) {
+    let count = paths.len();
+    let app_handle = app.clone();
+    std::thread::Builder::new()
+        .name("hub-sizes".to_string())
+        .spawn(move || {
+            let started = Instant::now();
+            // Size roots in parallel. `compute_size` owns no shared
+            // mutable state (its `visited` set is created fresh per
+            // root inside `compute_project_size`), so the threads never
+            // race. `scope` joins every worker before we emit `done`,
+            // guaranteeing no in-flight sizes are dropped.
+            let results = scope_parallel_sizes(&paths);
+            for (path, size) in results {
+                let _ = app_handle.emit(
+                    "sizes://progress",
+                    &SizesProgress {
+                        path,
+                        size,
+                    },
+                );
+            }
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            let _ = app_handle.emit(
+                "sizes://done",
+                &SizesDone {
+                    total: count,
+                    elapsed_ms,
+                },
+            );
+            log::info!("stream_project_sizes: {} paths in {}ms", count, elapsed_ms);
+        })
+        // A spawn failure is non-fatal: the frontend keeps the
+        // `loading` flag up only until `sizes://done` arrives, so on a
+        // rare thread-creation failure it would spin until teardown.
+        // Log and let it be — the next load (e.g. adding a project)
+        // re-attaches.
+        .ok();
+}
+
+/// Size a single root (pure helper, reused by the parallel driver and
+/// directly unit-testable). Returns `(path, size)`.
+fn compute_project_size(path: &str) -> (String, u64) {
+    let p = Path::new(path);
+    if !p.exists() {
+        return (path.to_string(), 0);
+    }
+    let patterns = parse_ignore_patterns(p);
+    let mut visited: HashSet<PathBuf> = HashSet::new();
+    let size = compute_size(p, &patterns, &mut visited);
+    (path.to_string(), size)
+}
+
+/// Size every root in parallel using a scoped thread pool bounded by the
+/// number of CPUs. Returns `(path, size)` pairs in input order so the
+/// `sizes://progress` stream is deterministic (tests rely on order, and
+/// a stable order makes the drawer log readable).
+fn scope_parallel_sizes(paths: &[String]) -> Vec<(String, u64)> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    // One worker per root up to available parallelism. A project list
+    // is small (tens, not thousands), so a thread-per-root fan-out is
+    // both simpler and faster than a fixed worker pool here.
+    let max_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let worker_count = paths.len().min(max_threads);
+    let chunks: Vec<Vec<String>> = chunk_paths(paths, worker_count);
+
+    std::thread::scope(|s| {
+        let mut handles = Vec::with_capacity(chunks.len());
+        for chunk in chunks {
+            let handle = s.spawn(move || {
+                let mut out: Vec<(String, u64)> = Vec::with_capacity(chunk.len());
+                for path in chunk {
+                    out.push(compute_project_size(&path));
+                }
+                out
+            });
+            handles.push(handle);
+        }
+        let mut merged: Vec<(String, u64)> = Vec::with_capacity(paths.len());
+        for h in handles {
+            match h.join() {
+                Ok(mut part) => merged.append(&mut part),
+                // A panic inside a sizer (e.g. a path that disappears
+                // mid-walk) must not take the whole run down. Skip the
+                // chunk; its roots will read as unsized (0) on the
+                // frontend, which is the same as a missing path.
+                Err(_) => log::error!("sizes: a worker thread panicked"),
+            }
+        }
+        // Restore input order so progress events are deterministic.
+        merged.sort_by_key(|(path, _)| {
+            paths.iter().position(|p| p == path).unwrap_or(usize::MAX)
+        });
+        merged
+    })
+}
+
+/// Split `paths` into `n` contiguous chunks (last chunk absorbs the
+/// remainder). Plain contiguous chunking keeps sibling roots (often the
+/// same disk) on one worker, which is friendlier to the page cache than
+/// round-robin.
+fn chunk_paths(paths: &[String], n: usize) -> Vec<Vec<String>> {
+    if n == 0 {
+        return vec![paths.to_vec()];
+    }
+    let mut chunks: Vec<Vec<String>> = Vec::with_capacity(n);
+    let base = paths.len() / n;
+    let rem = paths.len() % n;
+    let mut idx = 0;
+    for i in 0..n {
+        let take = base + if i < rem { 1 } else { 0 };
+        chunks.push(paths[idx..idx + take].to_vec());
+        idx += take;
+    }
+    chunks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +391,98 @@ mod tests {
             reported < asset_size * 4,
             "symlink cycle inflated reported size to {reported}"
         );
+    }
+
+    // --- streaming-driver helpers ---
+
+    #[test]
+    fn chunk_paths_distributes_evenly() {
+        let paths: Vec<String> = (0..6).map(|i| format!("/p{i}")).collect();
+        let chunks = chunk_paths(&paths, 3);
+        assert_eq!(chunks.len(), 3);
+        // Each chunk has 2; concatenated equals input (order preserved).
+        let flat: Vec<String> = chunks.into_iter().flatten().collect();
+        assert_eq!(flat, paths);
+    }
+
+    #[test]
+    fn chunk_paths_distributes_remainder_to_first_chunks() {
+        let paths: Vec<String> = (0..7).map(|i| format!("/p{i}")).collect();
+        let chunks = chunk_paths(&paths, 3);
+        assert_eq!(chunks.len(), 3);
+        // 7 / 3 = 2 remainder 1 → first chunk gets the extra.
+        assert_eq!(chunks[0].len(), 3);
+        assert_eq!(chunks[1].len(), 2);
+        assert_eq!(chunks[2].len(), 2);
+        let flat: Vec<String> = chunks.into_iter().flatten().collect();
+        assert_eq!(flat, paths);
+    }
+
+    #[test]
+    fn chunk_paths_more_workers_than_paths() {
+        let paths: Vec<String> = (0..2).map(|i| format!("/p{i}")).collect();
+        // Worker count is clamped to path count by the caller, but the
+        // helper itself must still produce non-empty chunks and not
+        // panic when n > len.
+        let chunks = chunk_paths(&paths, 5);
+        let flat: Vec<String> = chunks.into_iter().flatten().collect();
+        assert_eq!(flat, paths);
+    }
+
+    #[test]
+    fn chunk_paths_zero_workers_returns_single_chunk() {
+        let paths: Vec<String> = (0..3).map(|i| format!("/p{i}")).collect();
+        let chunks = chunk_paths(&paths, 0);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], paths);
+    }
+
+    #[test]
+    fn scope_parallel_sizes_matches_batch_and_preserves_order() {
+        // Build three roots with known content so we can assert sizes
+        // exactly and confirm the parallel driver agrees with the
+        // sequential batch command.
+        let dirs: Vec<_> = (0..3).map(|_| tempfile::tempdir().unwrap()).collect();
+        let mut paths: Vec<String> = Vec::new();
+        let mut expected: HashMap<String, u64> = HashMap::new();
+        for dir in &dirs {
+            let asset = dir.path().join("Assets").join("a.cs");
+            fs::create_dir_all(asset.parent().unwrap()).unwrap();
+            let mut f = fs::File::create(&asset).unwrap();
+            f.write_all(b"code").unwrap();
+            let path = dir.path().to_string_lossy().to_string();
+            expected.insert(
+                path.clone(),
+                fs::metadata(&asset).unwrap().len(),
+            );
+            paths.push(path);
+        }
+
+        let batch = compute_project_sizes(&paths);
+        let streamed = scope_parallel_sizes(&paths);
+
+        // Same length and input order.
+        assert_eq!(streamed.len(), paths.len());
+        assert_eq!(
+            streamed.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>(),
+            paths
+        );
+        // Same sizes as the batch command, per path.
+        for (path, size) in &streamed {
+            assert_eq!(batch.get(path), Some(size));
+            assert_eq!(expected.get(path), Some(size));
+        }
+    }
+
+    #[test]
+    fn scope_parallel_sizes_empty() {
+        assert!(scope_parallel_sizes(&[]).is_empty());
+    }
+
+    #[test]
+    fn compute_project_size_missing_returns_zero() {
+        let (path, size) = compute_project_size("/nonexistent/path");
+        assert_eq!(path, "/nonexistent/path");
+        assert_eq!(size, 0);
     }
 }

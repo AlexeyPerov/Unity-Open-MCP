@@ -335,7 +335,8 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public void Modify_RootDiff_QuotedActiveTrue_Activates()
         {
-            var go = new GameObject("__MCPTest_GO_QActive") { active = false };
+            var go = new GameObject("__MCPTest_GO_QActive");
+            go.SetActive(false);
             try
             {
                 // gameObjectDiffs carries the quoted-string form of the bool.
@@ -353,7 +354,8 @@ namespace UnityOpenMcpBridge.Tests
         public void Modify_PathPatch_QuotedActiveFalse_Deactivates()
         {
             var go = new GameObject("__MCPTest_GO_QActiveRoot");
-            var child = new GameObject("__MCPTest_GO_QActiveChild") { active = true };
+            var child = new GameObject("__MCPTest_GO_QActiveChild");
+            child.SetActive(true);
             child.transform.SetParent(go.transform, false);
             try
             {
@@ -375,7 +377,8 @@ namespace UnityOpenMcpBridge.Tests
         [Test]
         public void Modify_RootDiff_NullActive_DoesNotMutate()
         {
-            var go = new GameObject("__MCPTest_GO_NullActive") { active = true };
+            var go = new GameObject("__MCPTest_GO_NullActive");
+            go.SetActive(true);
             try
             {
                 var result = GameObjectsTools.Modify(
@@ -394,7 +397,8 @@ namespace UnityOpenMcpBridge.Tests
         public void Modify_PathPatch_NullActive_DoesNotMutate()
         {
             var go = new GameObject("__MCPTest_GO_NullActiveRoot");
-            var child = new GameObject("__MCPTest_GO_NullActiveChild") { active = true };
+            var child = new GameObject("__MCPTest_GO_NullActiveChild");
+            child.SetActive(true);
             child.transform.SetParent(go.transform, false);
             try
             {

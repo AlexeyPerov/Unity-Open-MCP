@@ -166,7 +166,19 @@
     </div>
 
     <div class="table-body">
-      {#if state.filtered.length === 0}
+      {#if !projectsStore.loaded}
+        <!--
+          Still on the first load: show a spinner instead of the empty
+          state. `projects` is still `[]` during boot, so without this
+          gate the "No projects yet." message flashes until `load()`
+          resolves. `loaded` flips true on success OR error, so a failed
+          load still falls through to the empty/error state below.
+        -->
+        <div class="table-loading" role="status" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <span>Loading projects…</span>
+        </div>
+      {:else if state.filtered.length === 0}
         <div class="empty-state">
           {#if projectsStore.projects.length === 0}
             <p>No projects yet.</p>
