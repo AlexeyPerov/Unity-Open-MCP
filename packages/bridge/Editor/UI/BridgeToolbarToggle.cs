@@ -1,11 +1,13 @@
 using UnityEditor;
 using UnityEngine;
 
-#if UNITY_6000_0_OR_NEWER
+// MainToolbarElement / MainToolbar.Refresh shipped in Unity 6.3 (6000.3).
+// UNITY_6000_0_OR_NEWER is too broad — 6000.0/6000.1/6000.2 lack these types.
+#if UNITY_6000_3_OR_NEWER
 using UnityEditor.Toolbars;
 #endif
 
-#if !UNITY_6000_0_OR_NEWER
+#if !UNITY_6000_3_OR_NEWER
 using UnityEngine.UIElements;
 #endif
 
@@ -17,14 +19,14 @@ namespace UnityOpenMcpBridge
     //   - Yellow "MCP" — Stop confirm armed (first click received; a second
     //                    click within 5s stops the listener). Mirrors the
     //                    Status tab's two-click confirm (M29 Plan 2).
-    // Unity 6 uses the native MainToolbarElement API; legacy versions fall back
-    // to injecting a UIElements button into the toolbar zone.
+    // Unity 6.3+ uses the native MainToolbarElement API; older versions fall
+    // back to injecting a UIElements button into the toolbar zone.
     [InitializeOnLoad]
     public static class BridgeToolbarToggle
     {
         private const string Label = "MCP";
 
-#if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_3_OR_NEWER
         const string ToolbarId = "UnityOpenMCP/Bridge Toggle";
 #else
         private const string ButtonName = "UnityOpenMCP_Toggle_Button";
@@ -52,7 +54,7 @@ namespace UnityOpenMcpBridge
             EditorApplication.update -= PollState;
             EditorApplication.update += PollState;
 
-#if !UNITY_6000_0_OR_NEWER
+#if !UNITY_6000_3_OR_NEWER
             EditorApplication.update -= TryInstallLegacyOnUpdate;
             EditorApplication.update += TryInstallLegacyOnUpdate;
 #endif
@@ -138,7 +140,7 @@ namespace UnityOpenMcpBridge
 
         private static void RefreshVisual()
         {
-#if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_3_OR_NEWER
             MainToolbar.Refresh(ToolbarId);
 #else
             ApplyLegacyVisual();
@@ -156,7 +158,7 @@ namespace UnityOpenMcpBridge
             return $"<color=#888888>{Label}</color>";
         }
 
-#if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_3_OR_NEWER
 
         [MainToolbarElement(ToolbarId, defaultDockPosition = MainToolbarDockPosition.Middle, defaultDockIndex = 200)]
         public static MainToolbarElement Create()

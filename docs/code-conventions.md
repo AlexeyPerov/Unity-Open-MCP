@@ -6,15 +6,17 @@ every call site.
 
 ## Instance IDs
 
-Unity 6000.0+ introduced `UnityEngine.EntityId` (an opaque struct) and marked
-the int instance-ID APIs `[Obsolete]`:
+Unity 6.2 exposed `UnityEngine.EntityId` / `GetEntityId()`. Unity 6000.5
+escalated the obsolete int InstanceID APIs from CS0618 (warning) to CS0619
+(error) and widened `EntityId` from 4 to 8 bytes. The int APIs can no longer
+be used on 6000.5+ at all (no pragma suppresses CS0619):
 
 - `Object.GetInstanceID()` → `Object.GetEntityId()`
 - `EditorUtility.InstanceIDToObject(int)` → `EditorUtility.EntityIdToObject(EntityId)`
 
-Unity 6000.5 escalated the diagnostic from CS0618 (warning) to CS0619 (error)
-and widened `EntityId` from 4 to 8 bytes. The int APIs can no longer be used on
-6000.5+ at all (no pragma suppresses CS0619).
+Gate the EntityId path on `UNITY_6000_5_OR_NEWER`, not
+`UNITY_6000_0_OR_NEWER` — 6000.0–6000.4 still compile against the int APIs,
+and `EntityId.ToULong` / `FromULong` are the 6000.5-era round-trip.
 
 The bridge keeps the agent-facing instance-ID contract but routes every read
 and resolve through one central, version-gated helper so the `#if` lives in one
@@ -36,7 +38,7 @@ precision if serialized as JSON numbers. The parser
 (`JsonBody.GetLongFlexible`) accepts both the canonical string form and a bare
 number for backward compatibility with older clients.
 
-Under the hood, on `UNITY_6000_0_OR_NEWER` the helper calls
+Under the hood, on `UNITY_6000_5_OR_NEWER` the helper calls
 `EntityId.ToULong(obj.GetEntityId())` (returns `ulong`, cast to `long`) and
 `EditorUtility.EntityIdToObject(FromULong((ulong)id))`; on older Unity it
 falls back to `GetInstanceID()` (int, widened to long) /

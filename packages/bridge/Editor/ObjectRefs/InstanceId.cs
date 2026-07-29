@@ -5,17 +5,18 @@
 //
 // See docs/code-conventions.md §Instance IDs for the contract.
 //
-// Unity 6000.0+ introduced UnityEngine.EntityId (an opaque struct) and marked
-// the int APIs [Obsolete]. Unity 6000.5 escalated the diagnostic to CS0619
-// (error) AND widened EntityId to 8 bytes — values like 568105589213726936 no
-// longer fit in int and exceed JS Number.MAX_SAFE_INTEGER (2^53). The
-// agent-facing instanceId / objectId / gameObjectId JSON fields are therefore
-// serialized as STRINGS (e.g. "568105589213726936") for full fidelity.
+// Unity 6.2 exposed UnityEngine.EntityId / GetEntityId(); Unity 6.5 escalated
+// the obsolete int InstanceID APIs to CS0619 (error) AND widened EntityId to 8
+// bytes — values like 568105589213726936 no longer fit in int and exceed JS
+// Number.MAX_SAFE_INTEGER (2^53). The agent-facing instanceId / objectId /
+// gameObjectId JSON fields are therefore serialized as STRINGS (e.g.
+// "568105589213726936") for full fidelity.
 //
-// On UNITY_6000_0_OR_NEWER the helper uses EntityId.ToULong()/FromULong(); on
-// older Unity it uses GetInstanceID()/InstanceIDToObject(int). In both cases
-// the wire value is a long (the legacy int widens cleanly), and is serialized
-// as a JSON string.
+// Gate on UNITY_6000_5_OR_NEWER (not UNITY_6000_0_OR_NEWER): EntityId.ToULong /
+// FromULong and the hard InstanceID removal land with 6000.5. Earlier Unity 6
+// minors (6000.0–6000.4) still compile against GetInstanceID() /
+// InstanceIDToObject(int). In both cases the wire value is a long (the legacy
+// int widens cleanly), and is serialized as a JSON string.
 using System.Globalization;
 using UnityEditor;
 using UnityEngine;
@@ -34,7 +35,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
         /// </summary>
         public static long Of(Object obj)
         {
-#if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_5_OR_NEWER
             return (long)UnityEngine.EntityId.ToULong(obj.GetEntityId());
 #else
             return obj.GetInstanceID();
@@ -65,7 +66,7 @@ namespace UnityOpenMcpBridge.ObjectRefs
         public static Object ToObject(long id)
         {
             if (id == 0) return null;
-#if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_5_OR_NEWER
             return EditorUtility.EntityIdToObject(ToEntityId(id));
 #else
             return EditorUtility.InstanceIDToObject((int)id);
@@ -92,9 +93,9 @@ namespace UnityOpenMcpBridge.ObjectRefs
 
         /// <summary>
         /// Build a UnityEngine.EntityId from the long wire value (negative ids
-        /// preserved through a uint cast). 6000.0+ only.
+        /// preserved through a uint cast). 6000.5+ only.
         /// </summary>
-#if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_5_OR_NEWER
         internal static UnityEngine.EntityId ToEntityId(long id)
             => UnityEngine.EntityId.FromULong((ulong)id);
 #endif

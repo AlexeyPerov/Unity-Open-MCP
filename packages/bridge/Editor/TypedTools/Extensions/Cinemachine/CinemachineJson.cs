@@ -87,16 +87,13 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
     // addressing convention (instance_id > path > name).
     internal static class CinemachineTargets
     {
-        // Unity 6 renamed Object.GetInstanceID() → GetEntityId() and
-        // EditorUtility.InstanceIDToObject → EntityIdToObject (both marked
-        // [Obsolete]). GetEntityId() returns the new EntityId struct, whose
-        // implicit int casts are *also* deprecated, and whose GetRawData() is
-        // obsolete in favor of EntityId.ToULong(EntityId). Use ToULong /
-        // FromULong (ulong) for the round-trip, casting through uint so a
-        // negative instance id sign-extends to the original ulong (instance ids
-        // are negative; e.g. -3072 ↔ 0xFFFFF400). This reflection-gated
-        // assembly must compile across Unity versions, so route the ID read/
-        // write through one version-guarded pair.
+        // Unity 6.5 made Object.GetInstanceID() / InstanceIDToObject a CS0619
+        // error and widened EntityId to 8 bytes. Prefer EntityId.ToULong /
+        // FromULong on UNITY_6000_5_OR_NEWER; earlier Editors (including
+        // 6000.0–6000.4) still use the int InstanceID APIs. Cast through uint
+        // so a negative instance id sign-extends (e.g. -3072 ↔ 0xFFFFF400).
+        // This reflection-gated assembly must compile across Unity versions,
+        // so route the ID read/write through one version-guarded pair.
         //
         // NOTE: the Unity 6 struct type is UnityEngine.EntityId. It is fully
         // qualified below because this class ALSO declares a method named
@@ -105,7 +102,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
         // rather than the struct type.
         public static int EntityId(Object obj)
         {
-#if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_5_OR_NEWER
             return (int)UnityEngine.EntityId.ToULong(obj.GetEntityId());
 #else
             return obj.GetInstanceID();
@@ -114,7 +111,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
 
         public static Object ObjectForId(int id)
         {
-#if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_5_OR_NEWER
             return EditorUtility.EntityIdToObject(EntityIdStruct(id));
 #else
             return EditorUtility.InstanceIDToObject(id);
@@ -122,7 +119,7 @@ namespace UnityOpenMcpBridge.Extensions.CinemachineExt
         }
 
         // Build an EntityId from the int wire value (negative ids preserved).
-#if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_5_OR_NEWER
         private static UnityEngine.EntityId EntityIdStruct(int id)
             => UnityEngine.EntityId.FromULong((uint)id);
 #endif

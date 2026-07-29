@@ -88,8 +88,11 @@ the warning; it does not make incompatible versions compatible.
 ## Unity Editor compatibility
 
 The bridge and verify package manifests require Unity 2022.3 LTS or newer,
-including Unity 6. The Node-based MCP server itself does not depend on a Unity
-Editor version.
+including Unity 6. APIs that only exist on later Unity 6 minors are
+version-gated in source (`MainToolbarElement` → `UNITY_6000_3_OR_NEWER`;
+`EntityId.ToULong` / hard InstanceID removal → `UNITY_6000_5_OR_NEWER`) so
+6000.0–6000.4 still compile. The Node-based MCP server itself does not
+depend on a Unity Editor version.
 
 ## Unity Hub Pro
 
