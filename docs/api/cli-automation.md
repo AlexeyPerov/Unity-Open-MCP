@@ -31,13 +31,13 @@ Use `unity-open-mcp --help` or
 Examples:
 
 ```bash
-npx -y unity-open-mcp@0.8.2 wait-for-ready \
+npx -y unity-open-mcp@0.8.3 wait-for-ready \
   --project /absolute/path/to/MyGame
 
-npx -y unity-open-mcp@0.8.2 status \
+npx -y unity-open-mcp@0.8.3 status \
   --project /absolute/path/to/MyGame --json
 
-npx -y unity-open-mcp@0.8.2 run-tool unity_open_mcp_capabilities \
+npx -y unity-open-mcp@0.8.3 run-tool unity_open_mcp_capabilities \
   --project /absolute/path/to/MyGame --json \
   --arg include_planned=false
 ```
