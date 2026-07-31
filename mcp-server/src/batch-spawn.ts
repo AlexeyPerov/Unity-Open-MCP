@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Router } from "./router.js";
 import { resolveUnityPath, scannedHubRoots } from "./unity-install-discovery.js";
-import { readInstanceLock } from "./instance-discovery.js";
+import { readInstanceLock, isPidAlive } from "./instance-discovery.js";
 import { makeErrorResult } from "./results.js";
 import { VERIFY_JSON_BEGIN, VERIFY_JSON_END } from "./constants.js";
 
@@ -405,6 +405,47 @@ export class BatchSpawn implements Router {
         code: "unknown_batch_tool",
         message: `Tool '${toolName}' is not a batch tool.`,
       });
+    }
+
+    // feedback-fable-31-07 §5 — pre-spawn instance-lock check. Unity allows
+    // only ONE Editor per project. When a live editor already holds this
+    // project, a batch spawn is GUARANTEED to fail on the project lock AND its
+    // startup rotates ~/Library/Logs/Unity/Editor.log → Editor-prev.log, which
+    // then poisons read_compile_errors (the live editor keeps writing to the
+    // rotated file). Short-circuit BEFORE spawning (and before Unity discovery
+    // — there's no point discovering Unity when the spawn will be refused): if
+    // the lock's PID is alive, return the same editor_instance_locked error the
+    // post-spawn classifier would produce, without the failed spawn and without
+    // the log rotation.
+    if (this.projectPath) {
+      try {
+        const lock = readInstanceLock(this.projectPath);
+        if (lock && lock.pid && isPidAlive(lock.pid)) {
+          return makeErrorResult({
+            code: "editor_instance_locked",
+            message:
+              "A live Unity Editor holds the project lock, so the headless " +
+              "spawn was not attempted (Unity allows one Editor per project, " +
+              "and the failed spawn would rotate Editor.log and break " +
+              "read_compile_errors).",
+            detail: {
+              error: {
+                code: "editor_instance_locked",
+                message:
+                  "A live Unity Editor (pid " + lock.pid + ") holds the project lock.",
+              },
+              agentNextSteps: [
+                "A live Unity Editor holds the project lock, so the headless spawn cannot open the project (one Editor per project).",
+                "To verify compile state without closing the Editor, call unity_open_mcp_read_compile_errors (reads Editor.log offline; if its logSource is a prev_log_* value, the log was rotated — prefer the live bridge's compile signal).",
+                "Or close the live Editor and retry the batch spawn.",
+              ],
+            },
+          });
+        }
+      } catch {
+        // Unreadable lock → fall through to the normal spawn path (its
+        // classification already handles the project-locked case reactively).
+      }
     }
 
     const pathError = await this.validateUnityPath();

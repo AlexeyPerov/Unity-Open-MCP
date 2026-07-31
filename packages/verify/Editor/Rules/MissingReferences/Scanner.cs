@@ -28,6 +28,27 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                 if (assetObject == null) continue;
                 if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(assetObject, out _, out long fileId))
                     scopedFileIDs.Add(fileId);
+
+                // feedback-fable-31-07 §6 — also index every SUB-asset fileID of
+                // each scanned asset. A prefab's root GameObject (fileID
+                // 100100000), embedded Materials, and stripped/instance sub-
+                // objects are all sub-assets whose fileID differs from the main
+                // asset's. Without this, a local-reference pointing at any of
+                // them read as missing (the core missing_local_fileid false
+                // positive on prefab-instance constructs). The same
+                // LoadAllAssetsAtPath enumeration backs the external-ref path
+                // via GetFileIdsForPath; reusing it here makes local refs and
+                // external refs resolve against the same fileID universe.
+                var subAssets = AssetDatabase.LoadAllAssetsAtPath(assetPath);
+                if (subAssets != null)
+                {
+                    foreach (var sub in subAssets)
+                    {
+                        if (sub == null || sub == assetObject) continue;
+                        if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(sub, out _, out long subFileId))
+                            scopedFileIDs.Add(subFileId);
+                    }
+                }
             }
 
             var regexFileAndGuid = SharedRegex.ExternalFileAndGuid;
@@ -79,12 +100,55 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
             Regex regexFileAndGuid, Regex regexFileID, Regex regexTypeStart,
             AssetReferencesData refsData, Dictionary<string, bool> guidResolveCache)
         {
+            // feedback-fable-31-07 §6 — track nesting inside PrefabInstance
+            // modification / source-prefab blocks. The `target:`/`value:`/
+            // `correspondingSourceObject:` references inside these blocks point
+            // at the SOURCE prefab's internal/stripped fileIDs, which are valid
+            // by construction (Unity resolves them at load time) but are not
+            // main-asset fileIDs the scanner indexes — producing systematic
+            // missing_fileid:<guid>:<id> false positives on every nested prefab
+            // instance. Block depth is measured by YAML indentation: a block
+            // opens at "m_Modification:" / "m_SourcePrefab:" and closes when a
+            // line dedents back to the opener's level (or a new top-level
+            // object begins). `modBlockIndent` = -1 means "not in a block".
+            int modBlockIndent = -1;
+            int modBlockOpenIndent = -1;
+            // The fileID of the most recent top-level YAML object header
+            // (`--- !u!T &NNN`). Used to key empty_local_ref issues by owning
+            // anchor so deltas are stable (feedback-fable-31-07 §7).
+            long currentAnchor = 0;
+
             for (var i = 0; i < lines.Length; i++)
             {
                 var line = lines[i];
 
                 if (YamlUtilities.IsSystemReference(line, YamlUtilities.KeyWordsToIgnore)) continue;
                 if (isScene && YamlUtilities.IsSystemReference(line, YamlUtilities.KeyWordsToIgnoreInSceneAsset)) continue;
+
+                // Track modification-block entry/exit. A new top-level YAML
+                // object ("--- !u!...") always closes any open block and
+                // updates the current owning anchor.
+                if (line.StartsWith("---", StringComparison.Ordinal))
+                {
+                    modBlockIndent = -1;
+                    modBlockOpenIndent = -1;
+                    var anchorMatch = SharedRegex.ObjectHeaderAnchor.Match(line);
+                    if (anchorMatch.Success && long.TryParse(anchorMatch.Groups[1].Value, out var anchor))
+                        currentAnchor = anchor;
+                }
+                else if (modBlockIndent >= 0)
+                {
+                    // Close the block when indentation returns to or above the
+                    // opener's level (blank lines and the opener itself excluded).
+                    var ind = LeadingIndent(line);
+                    if (ind >= 0 && ind <= modBlockOpenIndent && !string.IsNullOrWhiteSpace(line))
+                    {
+                        modBlockIndent = -1;
+                        modBlockOpenIndent = -1;
+                    }
+                }
+
+                var isPrefabModRef = modBlockIndent >= 0;
 
                 if (line.Contains("guid:"))
                 {
@@ -98,6 +162,26 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                         var localIdValid = localFileID > 0;
 
                         if (!guidValid && !localIdValid) continue;
+
+                        // feedback-fable-31-07 §6 (a) — the prefab-root fileID
+                        // 100100000 is Unity's conventional root-GameObject id
+                        // inside prefabs. It is rarely returned by
+                        // LoadAllAssetsAtPath, so an external ref to it read as
+                        // missing_fileid:<guid>:100100000 on every nested
+                        // prefab instance. It always resolves in the editor;
+                        // whitelist it as existing in the target asset.
+                        if (guidValid && localIdValid && localFileID == PrefabFileIds.RootGameObject)
+                            continue;
+
+                        // feedback-fable-31-07 §6 (b) — skip external refs that
+                        // live inside a PrefabInstance m_Modification /
+                        // m_SourcePrefab block. These target:/value:/source:
+                        // refs point at the source prefab's stripped objects;
+                        // they are valid by construction (Unity resolves them at
+                        // load) but their fileIDs are not main-asset ids. Emitting
+                        // them only ever produced false positives.
+                        if (isPrefabModRef)
+                            continue;
 
                         var referenceData = new ExternalReferenceRegistry(localIdValid, guidValid, localFileID, externalGuid, i);
 
@@ -122,23 +206,72 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                 }
                 else if (line.Contains("fileID:"))
                 {
-                    var localMatches = regexFileID.Matches(line);
-                    foreach (Match match in localMatches)
+                    // Same modification-block skip for local refs (stripped
+                    // object ids referenced only inside the block).
+                    if (!isPrefabModRef)
                     {
-                        var idStr = match.Value;
-                        var digitsOnly = idStr.Replace("{fileID: ", "").Replace("}", "").Trim();
+                        var localMatches = regexFileID.Matches(line);
+                        foreach (Match match in localMatches)
+                        {
+                            var idStr = match.Value;
+                            var digitsOnly = idStr.Replace("{fileID: ", "").Replace("}", "").Trim();
 
-                        if (digitsOnly == "0")
-                        {
-                            refsData.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(i));
-                        }
-                        else if (long.TryParse(digitsOnly, out var localId))
-                        {
-                            refsData.LocalReferences.Add(new LocalReferenceRegistry(localId, i));
+                            if (digitsOnly == "0")
+                            {
+                                // Capture the owning anchor (already tracked)
+                                // and the property key on this line so the
+                                // mapper can key empty_local_ref by
+                                // anchor+property instead of an unstable ordinal
+                                // (feedback-fable-31-07 §7).
+                                var propMatch = SharedRegex.PropertyKeyBeforeFileId.Match(line);
+                                var prop = propMatch.Success ? propMatch.Groups[1].Value : "";
+                                refsData.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(i, currentAnchor, prop));
+                            }
+                            else if (long.TryParse(digitsOnly, out var localId))
+                            {
+                                refsData.LocalReferences.Add(new LocalReferenceRegistry(localId, i));
+                            }
                         }
                     }
                 }
+
+                // Open a modification block on the opener line. The opener
+                // itself (e.g. "  m_Modification:") has no fileID ref, so it was
+                // already passed by the branches above.
+                if (modBlockIndent < 0 && IsPrefabModificationOpener(line, out var openerIndent))
+                {
+                    modBlockIndent = openerIndent;
+                    modBlockOpenIndent = openerIndent;
+                }
             }
+        }
+
+        // Count leading spaces (tabs not expected in Unity YAML; treat any tab
+        // as one space for the purposes of block-nesting comparison). Returns
+        // -1 for blank/whitespace-only lines so they never close a block.
+        private static int LeadingIndent(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return -1;
+            var n = 0;
+            foreach (var c in line)
+            {
+                if (c == ' ') n++;
+                else if (c == '\t') n++;
+                else break;
+            }
+            return n;
+        }
+
+        // True when the line opens a PrefabInstance m_Modification block or a
+        // m_SourcePrefab block — the two YAML structures whose contents
+        // reference the source prefab's stripped/internal fileIDs. `indent` is
+        // set to the opener's leading-space count for block-exit comparison.
+        private static bool IsPrefabModificationOpener(string line, out int indent)
+        {
+            indent = LeadingIndent(line);
+            var trimmed = line.AsSpan().TrimStart();
+            return trimmed.SequenceEqual("m_Modification:".AsSpan())
+                || trimmed.SequenceEqual("m_SourcePrefab:".AsSpan());
         }
 
         private static void CountLocalUsages(string[] lines, AssetReferencesData refsData)

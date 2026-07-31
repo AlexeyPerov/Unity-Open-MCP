@@ -206,16 +206,17 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         [Test]
-        public void EmptyLocalRef_Discriminator_IsOrdinal_CountVisibleToDelta()
+        public void EmptyLocalRef_Discriminator_IsAnchorPlusProperty_StableAcrossUnrelatedEdits()
         {
-            // The scanner record carries only the line (a {fileID: 0} has no
-            // identifying payload), so the key uses the ordinal among the
-            // asset's empty refs: two instances → two distinct keys, and a
-            // third appearing surfaces as exactly one NEW key (:2) in the
-            // gate delta instead of collapsing into the existing one.
+            // feedback-fable-31-07 §7 — empty-local-ref keys are now
+            // anchor+property (the content-addressed identity of the
+            // {fileID: 0} site), not positional ordinals. Two empty refs on
+            // distinct anchors/properties get distinct keys, and — crucially
+            // for the gate delta — adding an unrelated empty ref elsewhere
+            // does NOT rename the existing keys.
             var data = new AssetReferencesData();
-            data.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(5));
-            data.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(99));
+            data.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(5, 111L, "m_Father"));
+            data.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(99, 222L, "m_Cookie"));
             var asset = new AssetData("Assets/A.prefab", typeof(object), "Prefab", "guid", data);
 
             var sink = new List<VerifyIssue>();
@@ -224,8 +225,65 @@ namespace UnityOpenMcpVerify.Tests
             var codes = sink.Where(i => IssueKey.BareIssueCode(i.IssueCode) == "empty_local_ref")
                             .Select(i => i.IssueCode).ToList();
             CollectionAssert.AreEquivalent(
-                new[] { "empty_local_ref:0", "empty_local_ref:1" },
+                new[] { "empty_local_ref:111:m_Father", "empty_local_ref:222:m_Cookie" },
                 codes);
+
+            // Stability: adding a THIRD empty ref on a different object must
+            // not rename the two existing keys (the old ordinal scheme would
+            // have produced :0,:1,:2 and "resolved" :0/:1 as "new" :2).
+            var data2 = new AssetReferencesData();
+            data2.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(5, 111L, "m_Father"));
+            data2.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(99, 222L, "m_Cookie"));
+            data2.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(200, 333L, "m_ProbeAnchor"));
+            var asset2 = new AssetData("Assets/A.prefab", typeof(object), "Prefab", "guid", data2);
+            var sink2 = new List<VerifyIssue>();
+            IssueMapper.MapToIssues(new List<AssetData> { asset2 }, sink2);
+            var codes2 = sink2.Where(i => IssueKey.BareIssueCode(i.IssueCode) == "empty_local_ref")
+                              .Select(i => i.IssueCode).ToList();
+            CollectionAssert.AreEquivalent(
+                new[] { "empty_local_ref:111:m_Father", "empty_local_ref:222:m_Cookie", "empty_local_ref:333:m_ProbeAnchor" },
+                codes2);
+            CollectionAssert.IsSubsetOf(codes, codes2,
+                "adding an unrelated empty ref must not rename existing keys");
+        }
+
+        [Test]
+        public void EmptyLocalRef_Discriminator_DeduplicatesSameAnchorProperty_WithStableSuffix()
+        {
+            // Two {fileID: 0} on the SAME anchor+property (same property nulled
+            // twice on one object) must still produce distinct dedup keys — a
+            // 1-based suffix disambiguates without re-introducing positional
+            // churn for the common single-occurrence case.
+            var data = new AssetReferencesData();
+            data.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(5, 111L, "m_Father"));
+            data.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(99, 111L, "m_Father"));
+            var asset = new AssetData("Assets/A.prefab", typeof(object), "Prefab", "guid", data);
+
+            var sink = new List<VerifyIssue>();
+            IssueMapper.MapToIssues(new List<AssetData> { asset }, sink);
+
+            var codes = sink.Where(i => IssueKey.BareIssueCode(i.IssueCode) == "empty_local_ref")
+                            .Select(i => i.IssueCode).ToList();
+            CollectionAssert.AreEquivalent(
+                new[] { "empty_local_ref:111:m_Father", "empty_local_ref:111:m_Father#1" },
+                codes);
+        }
+
+        [Test]
+        public void EmptyLocalRef_Discriminator_FallsBackToLine_WhenAnchorAndPropertyAbsent()
+        {
+            // Legacy records (no anchor/property captured) keep a unique key
+            // via the line so malformed/old YAML still reports cleanly.
+            var data = new AssetReferencesData();
+            data.EmptyFileIDs.Add(new EmptyLocalFileIDRegistry(5));
+            var asset = new AssetData("Assets/A.prefab", typeof(object), "Prefab", "guid", data);
+
+            var sink = new List<VerifyIssue>();
+            IssueMapper.MapToIssues(new List<AssetData> { asset }, sink);
+
+            var codes = sink.Where(i => IssueKey.BareIssueCode(i.IssueCode) == "empty_local_ref")
+                            .Select(i => i.IssueCode).ToList();
+            CollectionAssert.AreEquivalent(new[] { "empty_local_ref:line:5" }, codes);
         }
 
         // ---- helpers ----

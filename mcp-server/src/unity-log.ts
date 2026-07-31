@@ -75,6 +75,34 @@ export function projectEditorLogPath(
 }
 
 /**
+ * The rotated previous log. Unity renames the live Editor.log to
+ * Editor-prev.log on every fresh launch (a new Editor start, AND a failed
+ * batch spawn against an already-open project). When a live editor holds the
+ * project and a batch invocation rotates the log, the live editor keeps its
+ * open handle and writes to Editor-prev.log from then on, while Editor.log is
+ * frozen at a tiny startup size — reading it returns "no errors" forever
+ * (feedback-fable-31-07 §5).
+ */
+export function editorPrevLogPath(
+  platform: UnityLogPlatform = process.platform as UnityLogPlatform,
+): string {
+  return join(editorLogsDir(platform), "Editor-prev.log");
+}
+
+/** Outcome of resolveEditorLogPath: the chosen path plus a short machine/
+ *  agent-facing reason so callers can surface WHY a non-obvious file was read
+ *  (e.g. "Editor.log frozen at 2.5KB while a live editor holds the project;
+ *  fell back to Editor-prev.log"). */
+export interface ResolvedEditorLog {
+  path: string;
+  reason:
+    | "project_log"
+    | "global_log"
+    | "prev_log_live_editor"
+    | "prev_log_fallback";
+}
+
+/**
  * Pick the authoritative Editor.log to read for compile-error extraction.
  *
  * Unity 6000.5+ redirects the Editor.log to a project-relative path
@@ -90,21 +118,68 @@ export function projectEditorLogPath(
  *
  * When the project path is unknown (no `--project`), or the project-relative
  * log doesn't exist, the global log is used as before.
+ *
+ * feedback-fable-31-07 §5 — Editor-prev.log fallback. When a live editor
+ * holds the project (a known `livePid` is alive) and the resolved Editor.log
+ * looks frozen (implausibly small, e.g. < 4KB — the tell-tale sign of a
+ * rotated log the live editor is no longer writing to), fall back to
+ * Editor-prev.log, which is where the live editor keeps writing after the
+ * rotation. `livePid` is optional; when absent the prev.log fallback only
+ * triggers on a frozen-looking log, which is conservative.
  */
 export function resolveEditorLogPath(
   projectPath: string | null | undefined,
   platform: UnityLogPlatform = process.platform as UnityLogPlatform,
-): string {
+  livePid?: number,
+): ResolvedEditorLog {
   const project = projectEditorLogPath(projectPath);
   const global = editorLogPath(platform);
-  if (project && existsSync(project)) {
-    // Prefer the project-relative log when it exists. On 6000.5+ this is the
-    // only authoritative log; on older Unity it may not exist (fall through to
-    // global). Ties (both exist) go to the project log because 6000.5 writes
-    // there even if the global file lingers from an older version.
-    return project;
+
+  const candidate = project && existsSync(project) ? project : global;
+  const candidateReason: ResolvedEditorLog["reason"] =
+    project && existsSync(project) ? "project_log" : "global_log";
+
+  const prev = editorPrevLogPath(platform);
+  const prevExists = existsSync(prev);
+  const candidateFrozen = isLogFrozen(candidate);
+
+  // Strong signal: a live editor is known to hold the project AND Editor.log
+  // is frozen/small. This is exactly the log-rotation scenario — a batch spawn
+  // rotated Editor.log while the live editor keeps writing to Editor-prev.log.
+  // Prefer Editor-prev.log when it exists.
+  //
+  // The frozen check is ONLY meaningful with a live PID: a machine that is not
+  // currently running Unity naturally has a small stale global Editor.log and a
+  // recent Editor-prev.log, which is the NORMAL state, not a rotation in
+  // progress. Without a live PID we never fall back on frozen-ness alone.
+  if (prevExists && livePid && livePid > 0 && candidateFrozen) {
+    return { path: prev, reason: "prev_log_live_editor" };
   }
-  return global;
+  // No live PID context: only fall back when the resolved candidate does not
+  // exist at all but Editor-prev.log does (a hard missing-log case).
+  if (!livePid && !existsSync(candidate) && prevExists) {
+    return { path: prev, reason: "prev_log_fallback" };
+  }
+  return { path: candidate, reason: candidateReason };
+}
+
+/** Threshold below which Editor.log is "frozen" — a freshly-rotated log the
+ *  live editor stopped writing to is typically a few hundred bytes to ~2.5KB
+ *  (just the batch spawn's startup banner before it died on the project lock). */
+const FROZEN_LOG_BYTES = 4096;
+
+function isLogFrozen(path: string): boolean {
+  // A frozen log is implausibly small. The real live log is usually tens of KB
+  // minimum once the editor has compiled anything.
+  return statSize(path) < FROZEN_LOG_BYTES;
+}
+
+function statSize(path: string): number {
+  try {
+    return existsSync(path) ? statSync(path).size : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** Default tail size. Bounded so a multi-MB log can't blow up the tool

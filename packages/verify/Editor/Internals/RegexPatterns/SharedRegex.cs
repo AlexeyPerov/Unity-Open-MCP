@@ -47,5 +47,20 @@ namespace UnityOpenMcpVerify.Internals.RegexPatterns
         public static readonly Regex GuidInputNormalize = new Regex(
             @"[\s\-{}]",
             RegexOptions.Compiled);
+
+        // A top-level YAML object header as Unity writes it:
+        //   "--- !u!114 &-8234567890123456789 MonoBehaviour"
+        // The anchor (the `&<digits>` fileID) keys empty_local_ref issues so
+        // they are stable across unrelated edits (feedback-fable-31-07 §7).
+        public static readonly Regex ObjectHeaderAnchor = new Regex(
+            @"^---\s*!u!\d+\s*&(-?\d+)",
+            RegexOptions.Compiled);
+
+        // The serialized property key on a `key: {fileID: 0}` line, e.g.
+        // "m_Father" in "  m_Father: {fileID: 0}". Captured so empty_local_ref
+        // issues can be keyed by owning anchor + property.
+        public static readonly Regex PropertyKeyBeforeFileId = new Regex(
+            @"^\s*([A-Za-z0-9_.\[\]]+):\s*\{fileID:",
+            RegexOptions.Compiled);
     }
 }

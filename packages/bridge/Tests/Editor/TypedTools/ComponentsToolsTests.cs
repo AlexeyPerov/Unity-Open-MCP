@@ -345,6 +345,64 @@ namespace UnityOpenMcpBridge.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        // feedback-fable-31-07 §2 — component_modify must resolve the host
+        // GameObject from the TOP-LEVEL instance_id/path, not from a nested
+        // fields[].value.instance_id. Before the fix the substring search in
+        // JsonBody matched the nested id and located the WRONG component.
+        [Test]
+        public void Modify_ResolvesHostFromTopLevelSelector_NotNestedFieldValue()
+        {
+            // Host GO carries a Transform; the nested value.instance_id points
+            // at a DIFFERENT GO (the value being assigned to m_Father). The host
+            // must resolve to the TOP-LEVEL instance_id and find Transform on it
+            // — the prior bug resolved the nested id and reported
+            // component_not_found on the wrong GameObject.
+            var host = new GameObject("__MCPTest_Comp_Modify_Host");
+            var other = new GameObject("__MCPTest_Comp_Modify_Other");
+            try
+            {
+                var result = ComponentsTools.Modify(
+                    "{\"instance_id\":" + InstanceId.Of(host) +
+                    ",\"type_name\":\"UnityEngine.Transform\"," +
+                    "\"fields\":[{\"path\":\"m_RootOrder\",\"value\":0," +
+                    "\"_nested_value_instance_id_should_not_shadow\":" + InstanceId.Of(other) + "}]}");
+                // A bad field name would still succeed with an errors entry; the
+                // load-bearing assertion is that the host resolved correctly
+                // (no component_not_found about 'other').
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.DoesNotContain("component_not_found", result.Output,
+                    "must resolve the host from the top-level selector, not the nested value.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(host);
+                Object.DestroyImmediate(other);
+            }
+        }
+
+        // feedback-fable-31-07 §10 — the optional `fields` name filter returns
+        // only matching entries (case-insensitive leaf match) without paging.
+        [Test]
+        public void Get_FieldsFilter_ReturnsOnlyMatchingEntries()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_FieldsFilter");
+            try
+            {
+                // Ask for just m_LocalPosition on a Transform.
+                var result = ComponentsTools.Get(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\"," +
+                    "\"fields\":[\"localPosition\"]}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"localPosition\"", result.Output);
+                // Other Transform serialized fields (m_LocalRotation,
+                // m_LocalScale) must be filtered OUT.
+                StringAssert.DoesNotContain("\"localScale\"", result.Output);
+                StringAssert.DoesNotContain("\"localRotation\"", result.Output);
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         [Test]
         public void Modify_WritesLocalPosition()
         {

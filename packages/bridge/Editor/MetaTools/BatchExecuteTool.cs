@@ -107,6 +107,31 @@ namespace UnityOpenMcpBridge.MetaTools
             return true;
         }
 
+        // feedback-fable-31-07 §3 — a step that writes a .cs file (and so can
+        // arm a compile on the next import). script_write is the canonical case;
+        // its `path` param is a project-relative .cs path. We treat any
+        // script_write step as a script-write for the combo check.
+        private static bool IsScriptWriteStep(BatchStep step)
+        {
+            if (step.Tool != "unity_open_mcp_script_write") return false;
+            var path = JsonBody.GetString(step.ParamsBody, "path");
+            // Only a .cs write arms a compile; script_write rejects non-.cs
+            // paths at its own layer, but check here so the combo refusal is
+            // precise and does not fire for an unrelated script_write.
+            return !string.IsNullOrEmpty(path) && path.EndsWith(".cs", System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        // A step that forces an import of pending changes (and thus a compile
+        // when a .cs write is pending). assets_refresh with
+        // ForceSynchronousImport is the repro trigger; reimport_package and
+        // reimport_asset on a scripts folder have the same effect.
+        private static bool IsImportTriggerStep(BatchStep step)
+        {
+            return step.Tool == "unity_open_mcp_assets_refresh"
+                || step.Tool == "unity_open_mcp_reimport_package"
+                || step.Tool == "unity_open_mcp_reimport_asset";
+        }
+
         public static ToolDispatchResult Execute(string body)
         {
             var sw = Stopwatch.StartNew();
@@ -202,6 +227,44 @@ namespace UnityOpenMcpBridge.MetaTools
                 }
 
                 steps.Add(new BatchStep { Tool = tool, ParamsBody = paramsBody });
+            }
+
+            // feedback-fable-31-07 §3 — detect a script-write followed (later in
+            // the batch) by an import/refresh that will trigger a compile
+            // mid-batch. The settle wait runs only ONCE at the batch level after
+            // all steps complete; a compile kicked off by assets_refresh after a
+            // script_write can kill the HTTP response mid-write (domain reload)
+            // before the batch envelope is serialized, producing
+            // bridge_response_unparsable. RestartThenSettle tools are already
+            // refused above, but script_write + assets_refresh is the concrete
+            // repro from the field report and is not caught by the lifecycle
+            // taxonomy (script_write is None, assets_refresh is EditorSettle).
+            // Refuse the combination up-front; the agent should run the script
+            // write as a single top-level call, let it settle, then continue.
+            var scriptWriteIndex = -1;
+            for (int i = 0; i < steps.Count; i++)
+            {
+                if (IsScriptWriteStep(steps[i]))
+                {
+                    scriptWriteIndex = i;
+                    break;
+                }
+            }
+            if (scriptWriteIndex >= 0)
+            {
+                for (int j = scriptWriteIndex + 1; j < steps.Count; j++)
+                {
+                    if (IsImportTriggerStep(steps[j]))
+                    {
+                        return ToolDispatchResult.Fail(
+                            "batch_nested_reload_unsafe",
+                            $"commands[{scriptWriteIndex}] writes a script and commands[{j}] " +
+                            $"('{steps[j].Tool}') would trigger a compile mid-batch, which can " +
+                            "kill the HTTP response mid-write via a domain reload before the " +
+                            "batch result is sent. Write the script as a single top-level call, " +
+                            "let it settle, then run the remaining steps in a separate batch.");
+                    }
+                }
             }
 
             // --- BridgeBatchRunHistory live progress -------------------------

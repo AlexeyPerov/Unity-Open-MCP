@@ -204,6 +204,27 @@ namespace UnityOpenMcpBridge.TestRunner
             sb.Append("\"inconclusive\":").Append(inconclusive);
             sb.Append("},");
 
+            // feedback-fable-31-07 §4 — a no-match filter makes TestRunnerApi
+            // run ZERO tests, and onFinished still fires with an empty list. The
+            // completed/total:0 file is indistinguishable from "results never
+            // arrive" and was reported as a bug. Surface a legible note so the
+            // agent knows the run matched nothing rather than assuming the suite
+            // passed. Common cause: test_class maps to NUnit `groupNames` (a
+            // partial/group match), and assembly_name must be an existing
+            // assembly or it matches nothing.
+            if (results.Count == 0)
+            {
+                sb.Append("\"note\":");
+                sb.Append(EscapeString(
+                    "0 tests matched the filter — TestRunnerApi.Execute runs nothing when " +
+                    "assembly_name/test_namespace/test_class/test_method do not match. " +
+                    "test_class maps to NUnit groupNames (a partial/group match); " +
+                    "assembly_name must name a real test assembly. To run a single test " +
+                    "method deterministically, invoke the test class/method directly via " +
+                    "unity_open_mcp_invoke_method — NUnit assertions come back verbatim."));
+                sb.Append(',');
+            }
+
             // When includePasses is false, emit only non-passed results so a
             // large suite doesn't overrun the client's context window. The
             // summary above always carries the full counts either way.

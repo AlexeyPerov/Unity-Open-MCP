@@ -947,10 +947,14 @@ export class LiveClient implements Router {
         message:
           `Bridge returned HTTP 200 for '${toolName}' but the response body ` +
           `was not valid JSON. This usually means a mutating tool's serialized ` +
-          `output was corrupted (e.g. an execute_csharp snippet whose result ` +
-          `threw during serialization). The result is unreliable — do not trust ` +
-          `any partial output. Check editor_status / bridge_status, then retry. ` +
-          `Endpoint: ${this.baseUrl}.`,
+          `output was corrupted, OR (for batch_execute) a nested step triggered ` +
+          `a script compile / domain reload mid-batch and killed the response ` +
+          `before the batch envelope was written (feedback-fable-31-07 §3). ` +
+          `The result is unreliable — do not trust any partial output. ` +
+          `Recovery: check editor_status / bridge_status; if this was a batch, ` +
+          `run the reload-triggering nested tool (assets_refresh, reimport_*, ` +
+          `script_write) as a single TOP-LEVEL call instead of inside the batch, ` +
+          `then continue in a new batch. Endpoint: ${this.baseUrl}.`,
       });
     }
 

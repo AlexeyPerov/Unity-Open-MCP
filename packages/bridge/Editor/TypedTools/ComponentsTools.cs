@@ -177,6 +177,36 @@ namespace UnityOpenMcpBridge.TypedTools
                 if (pageSize < 1) pageSize = 1;
             }
 
+            // Optional `fields` name filter (feedback-fable-31-07 §10): when
+            // provided, return only entries whose leaf path/name matches one of
+            // the requested names (exact, case-insensitive on the last path
+            // segment, so "CastleNotif" matches "m_CastleNotif" and
+            // "Items[0].CastleNotif"). The filter bypasses paging and the
+            // max_fields collection cap does not apply to the filtered set (an
+            // agent asking for one field should not have to raise max_fields on
+            // a 126-field component). It still respects max_depth.
+            var fieldsFilter = JsonBody.GetStringArray(body, "fields");
+            if (fieldsFilter != null && fieldsFilter.Length > 0)
+            {
+                var wanted = new System.Collections.Generic.HashSet<string>(
+                    System.Array.ConvertAll(fieldsFilter, n => n == null ? "" : n.ToLowerInvariant()));
+                var filtered = new List<ComponentGetEntry>(fieldsFilter.Length);
+                foreach (var e in entries)
+                {
+                    if (e.Path == null) continue;
+                    var leaf = e.Path;
+                    var dot = leaf.LastIndexOf('.');
+                    if (dot >= 0 && dot + 1 < leaf.Length) leaf = leaf.Substring(dot + 1);
+                    if (wanted.Contains(leaf.ToLowerInvariant()))
+                        filtered.Add(e);
+                }
+                entries = filtered;
+                // A filtered request returns all matches; turn paging off so the
+                // agent does not chase a next_cursor for a hand-picked set.
+                pageSize = null;
+                offset = 0;
+            }
+
             int pageStart = pageSize.HasValue ? offset : 0;
             int pageEnd = pageSize.HasValue
                 ? System.Math.Min(offset + pageSize.Value, entries.Count)
@@ -516,8 +546,12 @@ namespace UnityOpenMcpBridge.TypedTools
 
             // component_instance_id is a separate key from instance_id so a
             // single body can resolve both the host GameObject (instance_id)
-            // and a specific component on it (component_instance_id).
-            var componentInstanceId = JsonBody.GetLongFlexible(body, "component_instance_id", 0);
+            // and a specific component on it (component_instance_id). Read both
+            // selectors from the prefix before any patch array so a nested
+            // fields[].value.instance_id cannot shadow them
+            // (feedback-fable-31-07 §2).
+            var selectors = JsonBody.SelectorScope(body);
+            var componentInstanceId = JsonBody.GetLongFlexible(selectors, "component_instance_id", 0);
             if (componentInstanceId != 0)
             {
                 var found = InstanceId.ToObject(componentInstanceId) as Component;
@@ -531,7 +565,16 @@ namespace UnityOpenMcpBridge.TypedTools
                 return true;
             }
 
-            var typeName = JsonBody.GetString(body, "type_name");
+            var typeName = JsonBody.GetString(selectors, "type_name");
+            // component_types (array) is accepted as an alias for the singular
+            // type_name so the selector spelling matches component_add
+            // (feedback-fable-31-07 §8). Take the first element when both are
+            // absent/empty the singular is preferred.
+            if (string.IsNullOrEmpty(typeName))
+            {
+                var typesArr = JsonBody.GetStringArray(selectors, "component_types");
+                if (typesArr != null && typesArr.Length > 0) typeName = typesArr[0];
+            }
             if (string.IsNullOrEmpty(typeName))
             {
                 error = ToolDispatchResult.Fail("missing_parameter",
@@ -583,6 +626,11 @@ namespace UnityOpenMcpBridge.TypedTools
         {
             public bool IsProperty;
             public string Json;
+            // The propertyPath (serialized field) or property Name (reflected
+            // property). Used by the optional `fields` name filter so an agent
+            // can request only the entries it cares about without paging past
+            // max_fields (feedback-fable-31-07 §10).
+            public string Path;
         }
 
         private static GetOptions ParseGetOptions(string body)
@@ -654,6 +702,7 @@ namespace UnityOpenMcpBridge.TypedTools
             {
                 IsProperty = isProperty,
                 Json = BuildSerializedEntryJson(prop),
+                Path = prop.propertyPath,
             });
         }
 
@@ -669,6 +718,7 @@ namespace UnityOpenMcpBridge.TypedTools
             {
                 IsProperty = true,
                 Json = BuildPropertyEntryJson(prop, value),
+                Path = prop.Name,
             });
         }
 
@@ -895,9 +945,14 @@ namespace UnityOpenMcpBridge.TypedTools
                 case SerializedPropertyType.ArraySize:
                     return prop.intValue.ToString(CultureInfo.InvariantCulture);
                 default:
-                    // For nested containers, surface the path so the agent
-                    // can drill in via a path-scoped get later.
-                    return "{\"note\":\"unsupported_or_container\"}";
+                    // Nested containers/arrays are not expanded by the
+                    // SerializedProperty leaf reader. Surface the path and the
+                    // two expansion escape hatches so an agent is not left
+                    // guessing which tool to use (feedback-fable-31-07 §10):
+                    //   - property_path on this tool drills into one subtree;
+                    //   - object_get_data expands the same array reflectively.
+                    return "{\"note\":\"container_or_array\","
+                        + "\"hint\":\"use 'property_path' to drill in, or 'object_get_data' to expand\"}";
             }
         }
 
@@ -1013,37 +1068,19 @@ namespace UnityOpenMcpBridge.TypedTools
                     }
                 case SerializedPropertyType.ObjectReference:
                     {
-                        if (valueRaw == "null" || string.IsNullOrEmpty(valueRaw))
-                        {
-                            sp.objectReferenceValue = null;
-                            break;
-                        }
-                        var path = JsonBody.GetString("{\"v\":" + valueRaw + "}", "v");
-                        if (string.IsNullOrEmpty(path))
-                            path = JsonBody.GetString(valueRaw, "path");
-                        if (string.IsNullOrEmpty(path))
-                            path = JsonBody.GetString(valueRaw, "asset_path");
-                        if (!string.IsNullOrEmpty(path))
-                        {
-                            var obj = AssetDatabase.LoadAssetAtPath<Object>(path);
-                            sp.objectReferenceValue = obj;
-                            break;
-                        }
-                        // instance_id fallback. Use the long-backed InstanceId
-                        // parser so IDs > int.MaxValue resolve on Unity 6000.5+
-                        // (where the 8-byte EntityId no longer fits in an int).
-                        // Accept both bare numeric and JSON-string wire forms.
-                        var idStr = JsonBody.GetRawValue("{\"v\":" + valueRaw + "}", "v");
-                        if (!string.IsNullOrEmpty(idStr))
-                        {
-                            var id = InstanceId.Parse(StripQuotes(idStr));
-                            if (id != 0)
-                            {
-                                sp.objectReferenceValue = InstanceId.ToObject(id);
-                                break;
-                            }
-                        }
-                        throw new System.FormatException("object_reference value must be {\"path\": \"...\"}, {\"asset_path\": \"...\"}, {\"instance_id\": N}, or null.");
+                        // Routed through the shared ObjectRefValue resolver
+                        // (feedback-fable-31-07 §1/§1b): scene-hierarchy paths
+                        // and {"instance_id": N} now resolve, and a resolution
+                        // failure throws a per-field error instead of silently
+                        // writing {fileID: 0}. Resolve the field's declared
+                        // UnityEngine.Object subtype via reflection so a
+                        // Component-typed field is pulled off the resolved GO.
+                        var fieldType = ResolveObjectFieldType(sp) ?? typeof(Object);
+                        var obj = ObjectRefValue.Resolve(valueRaw, fieldType, out var refError);
+                        if (refError != null)
+                            throw new System.FormatException(refError);
+                        sp.objectReferenceValue = obj;
+                        break;
                     }
                 case SerializedPropertyType.LayerMask:
                     sp.intValue = ParseInt(valueRaw);
@@ -1055,6 +1092,63 @@ namespace UnityOpenMcpBridge.TypedTools
                     throw new System.NotSupportedException(
                         $"Property '{sp.propertyPath}' has unsupported type '{sp.propertyType}'. Use a path-scoped entry for the underlying leaf.");
             }
+        }
+
+        // Resolve the declared UnityEngine.Object subtype of an
+        // ObjectReference SerializedProperty by reflecting over the host
+        // component's fields. Used by the ObjectReference write path so a
+        // Component-typed field (e.g. a custom MonoBehaviour referencing
+        // another component) drives GetComponent coercion on the resolved GO
+        // — without this every object-reference field looks like a generic
+        // UnityEngine.Object and a {"path": ".../GO"} value targeting a
+        // Component field would resolve to the GameObject and fail to assign.
+        //
+        // Returns null when the field cannot be located (array/list elements,
+        // nested paths, or fields on types the reflection walk can't reach);
+        // callers fall back to typeof(UnityEngine.Object), which is the safe
+        // pre-fix behavior.
+        private static System.Type ResolveObjectFieldType(SerializedProperty sp)
+        {
+            var target = sp.serializedObject == null ? null : sp.serializedObject.targetObject;
+            if (target == null) return null;
+            return ResolveMemberType(target.GetType(), sp.propertyPath);
+        }
+
+        // Walk a propertyPath (e.g. "Foo.Bar" or "list.Array.data[3].Field")
+        // reflecting into fields, returning the first UnityEngine.Object subtype
+        // encountered. Array/List elements resolve to the element type.
+        private static System.Type ResolveMemberType(System.Type hostType, string propertyPath)
+        {
+            if (string.IsNullOrEmpty(propertyPath)) return null;
+            var current = hostType;
+            foreach (var segment in propertyPath.Split('.'))
+            {
+                if (current == null) return null;
+                var name = segment;
+                // Strip "Array.data[N]" — the element type is the list's generic arg.
+                if (name == "Array")
+                {
+                    // Next real segment is "data[N]"; the element type is the
+                    // generic argument of the enclosing IList field. Resolve it
+                    // by looking at the current type's serialized fields — but
+                    // this path is uncommon for object refs, so fall back.
+                    return null;
+                }
+                if (name.StartsWith("data["))
+                {
+                    // Element access — current is the list/element field type.
+                    if (current.IsGenericType)
+                    {
+                        var args = current.GetGenericArguments();
+                        if (args.Length == 1) current = args[0];
+                    }
+                    continue;
+                }
+                var field = current.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field == null) return null;
+                current = field.FieldType;
+            }
+            return typeof(Object).IsAssignableFrom(current) ? current : null;
         }
 
         private static int ParseInt(string raw)

@@ -259,5 +259,41 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsNull(JsonBody.GetObjectArray("{\"errors\":null}", "errors"));
             Assert.IsNull(JsonBody.GetObjectArray("{}", "errors"));
         }
+
+        // feedback-fable-31-07 §2 — SelectorScope trims the body at the first
+        // patch-array key (fields/entries/patches/...) so selector reads never
+        // see the same key names nested inside a patch value.
+        [Test]
+        public static void SelectorScope_TrimsBeforeFieldsArray()
+        {
+            // A top-level instance_id of 111 and a NESTED fields[].value
+            // .instance_id of 999. SelectorScope must cut before "fields" so a
+            // GetLongFlexible on the scope reads 111, not 999.
+            var body = "{\"instance_id\":111,\"type_name\":\"Foo\","
+                + "\"fields\":[{\"name\":\"a\",\"value\":{\"instance_id\":999}}]}";
+            var scope = JsonBody.SelectorScope(body);
+            Assert.AreEqual(111L, JsonBody.GetLongFlexible(scope, "instance_id", 0),
+                "scoped selector must read the TOP-LEVEL instance_id, not the nested one");
+            Assert.AreEqual("Foo", JsonBody.GetString(scope, "type_name"));
+        }
+
+        [Test]
+        public static void SelectorScope_ReturnsBodyUnchanged_WhenNoPatchArray()
+        {
+            // Read-only bodies (no fields/entries/patches/...) come back whole.
+            var body = "{\"instance_id\":111,\"path\":\"Root/Child\"}";
+            Assert.AreEqual(body, JsonBody.SelectorScope(body));
+        }
+
+        [Test]
+        public static void SelectorScope_TrimmedAtEarliestPatchArrayKey()
+        {
+            // Multiple reserved patch keys present — the earliest wins, so the
+            // selector prefix never crosses ANY patch array.
+            var body = "{\"path\":\"X\",\"patches\":[{}],\"fields\":[{}]}";
+            var scope = JsonBody.SelectorScope(body);
+            Assert.AreEqual("X", JsonBody.GetString(scope, "path"));
+            Assert.IsNull(JsonBody.GetString(scope, "fields"));
+        }
     }
 }

@@ -44,7 +44,14 @@ export const manageTools = makeTool(
     "package is installed (e.g. `shadergraph` when `com.unity.shadergraph` " +
     "is present) — these surface in `list_groups` with " +
     "`activationSource: \"auto\"` and require no manual call; deactivate to " +
-    "hide them.",
+    "hide them. " +
+    "Visibility note: activation is ADDITIVE (activating one group never " +
+    "drops another). After activate/activate_for the server emits " +
+    "`notifications/tools/list_changed`, but newly-activated tools only " +
+    "appear in your tool list if your client honors that notification and " +
+    "re-issues tools/list — if the tools do not show up, manually re-request " +
+    "the tool list, or route the tool by id through batch_execute (which " +
+    "works regardless of listChanged support).",
   {
     required: ["action"],
         properties: {

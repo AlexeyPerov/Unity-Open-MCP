@@ -246,6 +246,12 @@ namespace UnityOpenMcpBridge.MetaTools
                 var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance);
                 foreach (var f in fields)
                 {
+                    // Skip [Obsolete] members (feedback-fable-31-07 §9): the
+                    // dead Component shortcut fields throw on access and would
+                    // otherwise render as "<error: ...>" noise on every dump.
+                    // Attribute.IsDefined walks the inheritance chain without
+                    // instantiating the attribute.
+                    if (Attribute.IsDefined(f, typeof(ObsoleteAttribute))) continue;
                     string valJson;
                     try { valJson = SerializeInternal(f.GetValue(value), depth + 1, opts, visited); }
                     catch (Exception ex) { valJson = ErrorMarker(ex); }
@@ -261,6 +267,10 @@ namespace UnityOpenMcpBridge.MetaTools
                     if (p.GetIndexParameters().Length > 0) continue;
                     var getter = p.GetMethod;
                     if (getter == null || !getter.IsPublic) continue;
+                    // Skip [Obsolete] properties — same rationale as fields
+                    // above. The legacy Component shortcuts (rigidbody, camera,
+                    // light, collider, …) are [Obsolete] and throw.
+                    if (Attribute.IsDefined(p, typeof(ObsoleteAttribute))) continue;
                     // B-N6 — skip known instantiating properties on Components.
                     // See IsInstantiatingProperty for the rationale; in short,
                     // reading `Renderer.material` / `MeshFilter.mesh` in edit

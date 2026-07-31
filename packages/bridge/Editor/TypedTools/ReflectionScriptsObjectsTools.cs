@@ -1140,25 +1140,20 @@ namespace UnityOpenMcpBridge.TypedTools
                 throw new FormatException("Quaternion value must be [x,y,z,w] or euler [x,y,z].");
             }
 
-            // Object reference — accept {"path": ...}, {"instance_id": N}, or null.
+            // Object reference — routed through the shared ObjectRefValue
+            // resolver so the same path/asset_path/instance_id resolution and
+            // per-field error reporting backs object_modify, component_modify,
+            // and gameobject_modify. See ObjectRefValue.cs for the contract and
+            // the field-report bugs (feedback-fable-31-07 §1/§1b) it fixes: a
+            // scene-hierarchy path is no longer silently nulled, the
+            // documented {"instance_id": N} form is honored, and a resolution
+            // failure throws with a precise message instead of writing null.
             if (typeof(UnityEngine.Object).IsAssignableFrom(targetType))
             {
-                var path = JsonBody.GetString("{\"v\":" + raw + "}", "v");
-                if (string.IsNullOrEmpty(path)) path = JsonBody.GetString(raw, "path");
-                if (string.IsNullOrEmpty(path)) path = JsonBody.GetString(raw, "asset_path");
-                if (!string.IsNullOrEmpty(path))
-                    return AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(path);
-                // instance_id fallback — long-backed via InstanceId.Parse so
-                // IDs > int.MaxValue resolve on Unity 6000.5+ (the 8-byte
-                // EntityId no longer fits in an int). Accepts both bare numeric
-                // and JSON-string wire forms.
-                var idRaw = JsonBody.GetRawValue("{\"v\":" + raw + "}", "v");
-                if (!string.IsNullOrEmpty(idRaw))
-                {
-                    var id = InstanceId.Parse(StripQuotes(idRaw));
-                    if (id != 0) return InstanceId.ToObject(id);
-                }
-                throw new FormatException("object_reference value must be {\"path\": \"...\"}, {\"asset_path\": \"...\"}, {\"instance_id\": N}, or null.");
+                var resolved = ObjectRefValue.Resolve(raw, targetType, out var refError);
+                if (refError != null)
+                    throw new FormatException(refError);
+                return resolved;
             }
 
             // Fallback: hand the JSON fragment to Convert.ChangeType for

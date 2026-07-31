@@ -925,12 +925,12 @@
     }
   },
   "unity_senses_run_tests": {
-    "description": "Run Unity EditMode or PlayMode tests and return structured results. EditMode runs in-process and results are available within seconds. PlayMode survives domain reload via file handoff. Filter by assembly, namespace, class, or method name.",
+    "description": "Run Unity EditMode or PlayMode tests and return structured results. EditMode runs in-process and results are available within seconds. PlayMode survives domain reload via file handoff. Filter by assembly, namespace, class, or method name. Results are retrieved by the server polling a results file (NOT via unity_senses_pull_events, which streams only console/editor-state). Note: when the filter matches ZERO tests, Execute runs nothing and the result carries status completed with summary.total:0 and a note — this looks like 'no results' but is a no-match filter, not a failure. Tip: to run a single test method deterministically, invoke the test class/method directly via unity_open_mcp_invoke_method — NUnit assertion failures come back verbatim in the error.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
         "assembly_name": {
-          "description": "Filter: run tests in this assembly only (e.g. 'MyAssembly').",
+          "description": "Filter: run tests in this assembly only (e.g. 'MyAssembly'). Must name a real test assembly or the run matches nothing.",
           "type": "string"
         },
         "include_passes": {
@@ -943,8 +943,12 @@
           "description": "Run PlayMode tests instead of EditMode. Requires domain reload.",
           "type": "boolean"
         },
+        "run_id": {
+          "description": "Optional run id. Omit to let the bridge generate a safe one (<pid>-<unixMs>). Must be 1..128 chars of [A-Za-z0-9._-] only.",
+          "type": "string"
+        },
         "test_class": {
-          "description": "Filter: run tests in this class (full or partial name).",
+          "description": "Filter: run tests in this class. Maps to NUnit groupNames (a partial/group match), so a partial class name may match more or less than expected — prefer the full class name.",
           "type": "string"
         },
         "test_method": {
@@ -957,7 +961,7 @@
         },
         "timeout_ms": {
           "default": 60000,
-          "description": "Maximum time to wait for results (PlayMode may take longer due to domain reload).",
+          "description": "Client-side polling budget (seconds) the server waits for the results file. Not a bridge parameter — the bridge run is async and writes a results file the server polls. Raise for PlayMode (domain reload) or large suites.",
           "maximum": 600000,
           "minimum": 1000,
           "type": "integer"
@@ -3004,6 +3008,13 @@
         "cursor": {
           "description": "Opaque continuation token from a previous pagination.next_cursor. Mismatched cursors restart from the first page.",
           "type": "string"
+        },
+        "fields": {
+          "description": "Optional name filter: when set, return only entries whose leaf path/name matches one of these names (exact, case-insensitive on the last path segment, so \"CastleNotif\" matches \"m_CastleNotif\" and \"Items[0].CastleNotif\"). Bypasses page_size/cursor and the max_fields collection cap (ask for one field on a 126-field component without paging). Respects max_depth. Cannot be combined with property_path.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "include_properties": {
           "description": "Include non-serialized public properties (e.g. Rigidbody.velocity). Profile default: false for compact, true for balanced/full. Set explicitly to override.",
@@ -6866,7 +6877,7 @@
     }
   },
   "unity_open_mcp_manage_tools": {
-    "description": "Manage which tool groups are visible in this session. Sessions start with two groups enabled: `core` and `gate-and-verify`; activate other groups on demand to add their tools to your ListTools surface (and deactivate to hide them). State is ephemeral and per-session — it resets to those two defaults when the MCP server restarts. Actions: `list_groups` (show every group with active flag, description, and tool roster), `activate` (enable a group — its tools become visible), `deactivate` (hide a group's tools), `reset` (restore the two default-on groups), `suggest` (recommend groups for a task intent and/or tags WITHOUT changing state — the read-only path), `activate_for` (activate the recommended groups for an intent and/or tags in one call). Prefer `activate_for(intent=\"…\")` over hand-picking group ids: state what you are about to do and the server brings the right groups online, including `gate-intelligence` when the task looks mutating or verify-related. Always call `list_groups` first to discover group ids when you need to browse or hand-pick. Group availability also depends on the Unity domain dependency being compiled in — see `unity_open_mcp_capabilities` for compiled-state availability per group. Some groups **auto-activate** when their Unity package is installed (e.g. `shadergraph` when `com.unity.shadergraph` is present) — these surface in `list_groups` with `activationSource: \"auto\"` and require no manual call; deactivate to hide them.",
+    "description": "Manage which tool groups are visible in this session. Sessions start with two groups enabled: `core` and `gate-and-verify`; activate other groups on demand to add their tools to your ListTools surface (and deactivate to hide them). State is ephemeral and per-session — it resets to those two defaults when the MCP server restarts. Actions: `list_groups` (show every group with active flag, description, and tool roster), `activate` (enable a group — its tools become visible), `deactivate` (hide a group's tools), `reset` (restore the two default-on groups), `suggest` (recommend groups for a task intent and/or tags WITHOUT changing state — the read-only path), `activate_for` (activate the recommended groups for an intent and/or tags in one call). Prefer `activate_for(intent=\"…\")` over hand-picking group ids: state what you are about to do and the server brings the right groups online, including `gate-intelligence` when the task looks mutating or verify-related. Always call `list_groups` first to discover group ids when you need to browse or hand-pick. Group availability also depends on the Unity domain dependency being compiled in — see `unity_open_mcp_capabilities` for compiled-state availability per group. Some groups **auto-activate** when their Unity package is installed (e.g. `shadergraph` when `com.unity.shadergraph` is present) — these surface in `list_groups` with `activationSource: \"auto\"` and require no manual call; deactivate to hide them. Visibility note: activation is ADDITIVE (activating one group never drops another). After activate/activate_for the server emits `notifications/tools/list_changed`, but newly-activated tools only appear in your tool list if your client honors that notification and re-issues tools/list — if the tools do not show up, manually re-request the tool list, or route the tool by id through batch_execute (which works regardless of listChanged support).",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {

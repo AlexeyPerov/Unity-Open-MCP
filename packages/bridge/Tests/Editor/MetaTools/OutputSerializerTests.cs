@@ -43,6 +43,23 @@ namespace UnityOpenMcpBridge.Tests
         public int Beta { get; set; } = 2;
     }
 
+    // feedback-fable-31-07 §9 — mirrors a Component carrying [Obsolete]
+    // shortcut members. The serializer must SKIP [Obsolete] fields/properties
+    // so the dead Component shortcuts (rigidbody, camera, …) that throw on
+    // access don't render as "<error: ...>" noise on every dump.
+    public class HasObsoleteMembers
+    {
+        public int Keep = 7;
+
+        [System.Obsolete("dead field")]
+        public int DeadField = 99;
+
+        public int KeepProp { get; set; } = 11;
+
+        [System.Obsolete("dead property")]
+        public int DeadProp => throw new System.InvalidOperationException("boom");
+    }
+
     public static class OutputSerializerTests
     {
         [Test]
@@ -259,6 +276,23 @@ namespace UnityOpenMcpBridge.Tests
             Assert.IsTrue(result.Contains("<error:"), result);
             // The error must not abort serialization of sibling members.
             Assert.IsTrue(result.EndsWith("}"), result);
+        }
+
+        [Test]
+        public static void Serialize_SkipsObsoleteFieldsAndProperties()
+        {
+            // feedback-fable-31-07 §9 — [Obsolete] members are filtered out
+            // entirely so the dead Component shortcuts (which throw on access)
+            // don't appear as "<error: ...>" noise.
+            var result = OutputSerializer.Serialize(new HasObsoleteMembers(), new SerializeOptions());
+            Assert.IsTrue(result.Contains("\"Keep\":7"), result);
+            Assert.IsTrue(result.Contains("\"KeepProp\":11"), result);
+            Assert.IsFalse(result.Contains("DeadField"),
+                "[Obsolete] field must be skipped. Got: " + result);
+            Assert.IsFalse(result.Contains("DeadProp"),
+                "[Obsolete] property must be skipped. Got: " + result);
+            Assert.IsFalse(result.Contains("<error:"),
+                "no error markers expected once obsolete members are skipped. Got: " + result);
         }
 
         [Test]

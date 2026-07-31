@@ -69,6 +69,16 @@ export const componentGet = makeTool(
               "Drill into one SerializedProperty subtree by path (e.g. m_LocalPosition, m_Color.r). " +
               "Omit to read the component root per profile.",
           },
+          fields: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional name filter: when set, return only entries whose leaf path/name matches one of " +
+              "these names (exact, case-insensitive on the last path segment, so \"CastleNotif\" matches " +
+              "\"m_CastleNotif\" and \"Items[0].CastleNotif\"). Bypasses page_size/cursor and the max_fields " +
+              "collection cap (ask for one field on a 126-field component without paging). Respects " +
+              "max_depth. Cannot be combined with property_path.",
+          },
           max_depth: {
             type: ["string", "integer"],
             default: 3,

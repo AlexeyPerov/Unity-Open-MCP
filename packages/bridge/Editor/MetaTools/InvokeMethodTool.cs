@@ -15,7 +15,17 @@ namespace UnityOpenMcpBridge.MetaTools
             var methodName = JsonBody.GetString(body, "method_name");
             var isStatic = JsonBody.GetBool(body, "is_static", false);
             var assemblyName = JsonBody.GetString(body, "assembly_name");
-            var objectId = JsonBody.GetInt(body, "object_id", 0);
+            // Selector aliasing (feedback-fable-31-07 §8): every tool that
+            // EMITS object handles labels the id "objectId" (camelCase), while
+            // this tool historically read "object_id" (snake_case) — forcing the
+            // agent to rename on every chain. Accept all three spellings; prefer
+            // the long-backed InstanceId form so ids > int.MaxValue (Unity
+            // 6000.5+) resolve. instance_id is checked first as the canonical
+            // selector name across the typed surface, then objectId (what other
+            // tools emit), then object_id (legacy).
+            long objectId = JsonBody.GetLongFlexible(body, "instance_id", 0);
+            if (objectId == 0) objectId = JsonBody.GetLongFlexible(body, ObjectHandle.ObjectIdKey, 0);
+            if (objectId == 0) objectId = JsonBody.GetLongFlexible(body, "object_id", 0);
 
             if (string.IsNullOrEmpty(typeName))
                 return ToolDispatchResult.Fail("validation_error", "Field 'type_name' is required and must be non-empty");

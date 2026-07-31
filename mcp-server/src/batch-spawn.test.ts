@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
 import { BatchSpawn, BATCH_TOOL_NAMES, VERIFY_BATCH_TOOL_NAMES, ALWAYS_BATCH_TOOLS, buildMetaArgs, buildVerifyArgs, extractCompilerErrors, classifyBatchFailure, BatchClassificationError, encodeSpaces, buildUnityBatchArgs, BoundedTextAccumulator } from "./batch-spawn.js";
+import { lockPath } from "./instance-discovery.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 function parseBody(result: CallToolResult): Record<string, unknown> {
@@ -539,6 +540,59 @@ test("compile_check with a live Editor open surfaces editor_instance_locked, not
   } finally {
     if (savedPath === undefined) delete process.env.UNITY_PATH;
     else process.env.UNITY_PATH = savedPath;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// feedback-fable-31-07 §5 — pre-spawn instance-lock check. When a live editor
+// holds the project, the batch spawn must short-circuit BEFORE spawning (the
+// spawn is guaranteed to fail on the project lock AND its startup rotates
+// Editor.log, poisoning read_compile_errors).
+// ---------------------------------------------------------------------------
+test("compile_check short-circuits with editor_instance_locked when a live editor holds the project", async () => {
+  // Write a fake instance lock for a temp project whose PID is THIS test
+  // process (guaranteed alive). The pre-check must refuse to spawn and emit
+  // editor_instance_locked WITHOUT running Unity.
+  const tmp = mkdtempSync(join(tmpdir(), "batch-precheck-"));
+  const lockFile = lockPath(tmp);
+  // Ensure the parent dir exists (~/.unity-open-mcp/instances).
+  mkdirSync(dirname(lockFile), { recursive: true });
+  const alivePid = process.pid;
+  const lockJson = JSON.stringify({
+    pid: alivePid,
+    port: 20000,
+    projectPath: tmp,
+    projectHash: "deadbeef",
+    startedAt: "2026-07-31T00:00:00Z",
+    updatedAt: "2026-07-31T00:00:00Z",
+    heartbeatAt: new Date().toISOString(),
+    state: "healthy",
+    isPlaying: false,
+    isCompiling: false,
+    bridgeVersion: "0.0.0-test",
+    unityVersion: "6000.0.0f1",
+  });
+  writeFileSync(lockFile, lockJson);
+  try {
+    // A Unity path is not even needed — the pre-check runs before path
+    // validation is required to spawn, but validateUnityPath runs first. Point
+    // at a harmless fake to satisfy it (the spawn must never happen).
+    const batch = new BatchSpawn({ discoveryRoots: [tmp], projectPath: tmp });
+    const result = await batch.route("unity_open_mcp_compile_check", {});
+    const body = parseBody(result);
+    const error = body.error as Record<string, unknown>;
+    assert.equal(error.code, "editor_instance_locked");
+    assert.ok(
+      (error.message as string).includes("live Unity Editor"),
+      "message should explain the live-Editor lock",
+    );
+    assert.ok(
+      Array.isArray(body.agentNextSteps) && body.agentNextSteps.length > 0,
+      "pre-check editor_instance_locked should carry agentNextSteps",
+    );
+  } finally {
+    try { rmSync(lockFile, { force: true }); } catch { /* best effort */ }
+    rmSync(tmp, { recursive: true, force: true });
   }
 });
 

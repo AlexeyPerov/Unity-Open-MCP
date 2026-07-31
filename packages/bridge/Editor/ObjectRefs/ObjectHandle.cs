@@ -211,6 +211,14 @@ namespace UnityOpenMcpBridge.ObjectRefs
             var instanceId = JsonBody.GetLongFlexible(handleJson, ObjectIdKey, 0);
             if (instanceId == 0)
                 instanceId = JsonBody.GetLongFlexible(handleJson, "instanceId", 0);
+            // Selector aliasing (feedback-fable-31-07 §8): accept the snake_case
+            // spellings used across the typed surface so a handle emitted as
+            // {"objectId": N} can be fed back in as {"instance_id": N} or
+            // {"object_id": N} without renaming.
+            if (instanceId == 0)
+                instanceId = JsonBody.GetLongFlexible(handleJson, "instance_id", 0);
+            if (instanceId == 0)
+                instanceId = JsonBody.GetLongFlexible(handleJson, "object_id", 0);
 
             var typeName = JsonBody.GetString(handleJson, TypeKey);
             if (typeName == null)

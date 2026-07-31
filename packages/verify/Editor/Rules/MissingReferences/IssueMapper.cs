@@ -65,24 +65,49 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
                     }
                 }
 
-                // C2: the scanner record for an empty local ref
-                // (EmptyLocalFileIDRegistry) carries ONLY the line — a
-                // `{fileID: 0}` has no identifying payload by definition, and
-                // the line is unstable (B-N13). The most stable discriminator
-                // available is the ORDINAL among the asset's empty refs: it is
-                // untouched by unrelated edits (only adding/removing empty
-                // refs earlier in the file renumbers, and that IS a change to
-                // this issue population), and it makes a count change visible
-                // to the gate delta as exactly the added/removed keys — e.g.
-                // 2 empty refs → keys :0,:1; a third appears → :2 is the one
-                // new key, nothing spuriously "resolved".
-                for (var emptyIdx = 0; emptyIdx < refs.EmptyFileIDs.Count; emptyIdx++)
+                // C2 (feedback-fable-31-07 §7): key each empty-local-ref issue
+                // by owning anchor + property, the content-addressed identity of
+                // the `{fileID: 0}` site. The old ordinal keys (:0, :1, ...)
+                // renamed on every unrelated count change, so a delta reported
+                // hundreds of spurious resolves/adds. Anchor+property is stable:
+                // adding an empty ref on a DIFFERENT object/property does not
+                // rename this key. Fall back to the line only when the scanner
+                // could not determine anchor+property (both 0/empty), which
+                // keeps malformed/legacy YAML reportable. When two empty refs
+                // share the same anchor+property (same property nulled twice on
+                // one object), suffix a 1-based ordinal so each still gets a
+                // distinct dedup key without re-introducing positional churn for
+                // the common case.
+                var emptyKeyCounts = new Dictionary<string, int>();
+                foreach (var empty in refs.EmptyFileIDs)
                 {
-                    var empty = refs.EmptyFileIDs[emptyIdx];
-                    sink.Add(MakeIssue(asset, CodeEmptyLocalRef + ":" + emptyIdx,
-                        $"Empty local fileID reference at line {empty.Line}",
+                    var hasAnchor = empty.Anchor != 0;
+                    var hasProp = !string.IsNullOrEmpty(empty.Property);
+                    string disc;
+                    if (hasAnchor || hasProp)
+                    {
+                        disc = (hasAnchor ? empty.Anchor.ToString() : "0") + ":"
+                             + (hasProp ? IssueKey.SanitizeComponent(empty.Property) : "");
+                    }
+                    else
+                    {
+                        disc = "line:" + empty.Line;
+                    }
+                    // De-duplicate identical anchor+property keys with a stable
+                    // 1-based suffix.
+                    if (!emptyKeyCounts.TryGetValue(disc, out var dup)) dup = 0;
+                    emptyKeyCounts[disc] = dup + 1;
+                    var key = dup == 0 ? disc : disc + "#" + dup;
+
+                    sink.Add(MakeIssue(asset, CodeEmptyLocalRef + ":" + key,
+                        $"Empty local fileID reference at line {empty.Line}"
+                        + (hasAnchor || hasProp
+                            ? $" (anchor {empty.Anchor}, property '{empty.Property}')"
+                            : ""),
                         VerifySeverity.Warning,
-                        Evidence("line", empty.Line.ToString(), empty.Line)));
+                        Evidence("line", empty.Line.ToString(), empty.Line,
+                            ("anchor", empty.Anchor.ToString()),
+                            ("property", empty.Property ?? ""))));
                 }
 
                 foreach (var method in refs.MissingMethods)

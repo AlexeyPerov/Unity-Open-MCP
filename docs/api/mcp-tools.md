@@ -172,8 +172,76 @@ with `batch_nested_reload_unsafe` — a domain reload or scene switch mid-batch
 would silently abort every later step. `batch_execute` itself and `compile_check`
 are also refused as nested steps.
 
+A `script_write` step (any `.cs` write) followed later in the same batch by an
+import/refresh step (`assets_refresh`, `reimport_package`, `reimport_asset`) is
+also refused with `batch_nested_reload_unsafe`: the settle wait runs only once
+at the batch level after all steps complete, so a compile kicked off by the
+refresh can kill the HTTP response mid-write via a domain reload before the
+batch envelope is serialized (surfaced by the client as
+`bridge_response_unparsable`). Write the script as a single top-level call, let
+it settle, then run the remaining steps in a separate batch.
+
 This is live request batching, not headless Unity fallback. See
 [Routing and lifecycle](routing-lifecycle.md).
+
+### Target-selector conventions
+
+The typed tools accept a small, consistent set of target selectors, with
+aliases so chaining tools does not require renaming the id field each tool
+emits:
+
+| Tool family | Primary selector | Accepted aliases |
+| --- | --- | --- |
+| `invoke_method` | `object_id` | `instance_id`, `objectId` (what object handles from `scene_snapshot` / `spatial_query` / screenshot emit) |
+| `object_get_data` / `object_modify` | `instance_id` | `asset_path` |
+| `component_get` / `component_modify` / `component_add` | `path` + `type_name` (singular) | `instance_id` (host GameObject), `component_types` array (first element), `component_instance_id` |
+| `gameobject_*` | `path` + `parent_path` / `name` | `instance_id` |
+| `assets_delete` | `paths` (array) | — |
+
+`instance_id` is the canonical live-instance selector and is preferred. When a
+field value is itself an object reference (in `object_modify` / `component_modify`
+`fields[].value`), accept `{"path": "..."}`, `{"asset_path": "..."}`,
+`{"instance_id": N}`, or null. A scene-hierarchy `path` is resolved through the
+hierarchy walker (and `GetComponent(fieldType)` for component-typed fields); a
+value that cannot be resolved surfaces a per-field error and is **not** silently
+written as null.
+
+### `unity_senses_run_tests`
+
+Results are retrieved by the server polling a results file under
+`~/.unity-open-mcp/`, **not** via `unity_senses_pull_events` (which streams only
+console/editor-state). `timeout_ms` is a client-side polling budget, not a
+bridge parameter. When the filter matches zero tests, `TestRunnerApi.Execute`
+runs nothing and the result carries `status: "completed"` with
+`summary.total: 0` and a `note` — this looks like "no results" but is a no-match
+filter, not a failure (`test_class` maps to NUnit `groupNames`, a partial/group
+match). To run a single test method deterministically, invoke the test class or
+method directly via `unity_open_mcp_invoke_method` — NUnit assertion failures
+come back verbatim in the error.
+
+### `unity_open_mcp_manage_tools`
+
+Activation is **additive** (activating one group never drops another). After
+`activate` / `activate_for` the server emits `notifications/tools/list_changed`,
+but newly-activated tools only appear in your tool list if your client honors
+that notification and re-issues `tools/list`. If the tools do not show up,
+manually re-request the tool list, or route the tool by id through
+`batch_execute` (which works regardless of `listChanged` support).
+
+### `unity_open_mcp_read_compile_errors`
+
+Resolves the authoritative `Editor.log` per platform (project-relative on Unity
+6000.5+, global elsewhere). When a live editor holds the project (known from the
+instance lock) and the resolved log looks frozen (implausibly small — the
+signature of a batch spawn that rotated `Editor.log` to `Editor-prev.log` while
+the live editor keeps writing to the rotated file), it falls back to
+`Editor-prev.log` and reports `logSource: "prev_log_live_editor"` in the
+response. When an assembly is stuck in a failed-compile state,
+`AssetDatabase.Refresh` no-ops and the response carries `staleLogSuspected` —
+force a recompile (`reimport_package` / `compile_check`) before trusting the
+errors. `compile_check` itself short-circuits with `editor_instance_locked`
+**before** spawning when a live editor holds the project, avoiding the spawn
+that would rotate the log in the first place.
 
 ### `unity_open_mcp_dependencies`
 
@@ -188,6 +256,17 @@ supported.
 opened scenes by asset `path` first and display `name` second. Prefer paths.
 For `scene_save`, a path that does not identify an open scene is a save-as
 destination.
+
+### `unity_open_mcp_component_get`
+
+Reads serialized fields/properties of one Component. The optional `fields`
+array filters the response to entries whose leaf path/name matches (exact,
+case-insensitive on the last path segment), bypassing `page_size`/`cursor` and
+the `max_fields` cap — ask for one field on a 126-field component without
+paging. Containers and arrays that the SerializedProperty leaf reader does not
+expand render as `{"note":"container_or_array","hint":"use 'property_path' to
+drill in, or 'object_get_data' to expand"}`; drill in via `property_path`, or
+use `object_get_data` to expand the same array reflectively.
 
 ### `gameobject_modify`
 

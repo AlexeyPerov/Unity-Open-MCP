@@ -351,6 +351,78 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
+        // feedback-fable-31-07 §6 — prefab-instance construct false positives
+        // -------------------------------------------------------------------
+
+        // A nested-prefab instance carries (a) a target/value reference inside
+        // an m_Modification block pointing at the SOURCE prefab's internal
+        // fileID, and (b) an external PPtr to the prefab root fileID 100100000.
+        // Both are valid by construction; neither must produce a missing_fileid
+        // ERROR. We synthesize a prefab with both constructs and assert the
+        // rule reports zero missing_fileid/missing_guid issues for them.
+        [UnityTest]
+        public System.Collections.IEnumerator MissingReferences_PrefabModificationBlockAndRootFileId_NotFlagged()
+        {
+            var rule = new MissingReferencesRule();
+            var prefabPath = FixtureRoot + "/PrefabModBlock.prefab";
+
+            // A minimal but valid prefab: one GameObject + Transform, plus an
+            // m_Modification block (as a PrefabInstance would carry) whose
+            // target references a synthetic source-prefab fileID, and an
+            // external ref to a prefab root (fileID 100100000).
+            //
+            // Use a real, resolvable source GUID by creating a tiny "source"
+            // prefab first so the GUID leg resolves (the focus is the fileID /
+            // modification-block suppression, not GUID resolution).
+            var sourcePrefabPath = FixtureRoot + "/PrefabModBlockSource.prefab";
+            var srcGo = new GameObject("PrefabModBlockSource");
+            PrefabUtility.SaveAsPrefabAsset(srcGo, sourcePrefabPath);
+            Object.DestroyImmediate(srcGo);
+            AssetDatabase.Refresh();
+            yield return null;
+
+            AssetDatabase.TryGetGUIDAndLocalFileIdentifier(
+                AssetDatabase.LoadAssetAtPath<GameObject>(sourcePrefabPath), out var sourceGuid, out _);
+            Assume.That(string.IsNullOrEmpty(sourceGuid), Is.False);
+
+            var yaml = "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n" +
+                "--- !u!1 &100100000 GameObject\n" +
+                "  m_ObjectHideFlags: 0\n" +
+                "  m_Name: PrefabModBlock\n" +
+                "--- !u!4 &2000000000 Transform\n" +
+                "  m_GameObject: {fileID: 100100000}\n" +
+                "  m_LocalPosition: {x: 0, y: 0, z: 0}\n" +
+                "  m_Father: {fileID: 0}\n" +
+                "--- !u!1001 &3000000000 PrefabInstance\n" +
+                "  m_Modification:\n" +
+                "    m_TransformParent: {fileID: 0}\n" +
+                "    m_Modifications:\n" +
+                "    - target: {fileID: 5550000, guid: " + sourceGuid + ", type: 3}\n" +
+                "      propertyPath: m_Name\n" +
+                "      value: Nested\n" +
+                "  m_SourcePrefab: {fileID: 100100000, guid: " + sourceGuid + ", type: 3}\n" +
+                "--- !u!114 &4000000000 MonoBehaviour\n" +
+                "  m_GameObject: {fileID: 100100000}\n" +
+                "  m_Script: {fileID: -1, guid: 00000000000000000000000000000000, type: 0}\n";
+            EnsureDirectory(Path.GetDirectoryName(prefabPath));
+            File.WriteAllText(prefabPath, yaml);
+            // Copy the source prefab's meta GUID stub so the file is importable
+            // as a prefab; the import itself is not load-bearing for the scan,
+            // which reads the YAML text directly.
+            AssetDatabase.ImportAsset(prefabPath, ImportAssetOptions.ForceUpdate);
+            yield return null;
+
+            var sink = new List<VerifyIssue>();
+            var scope = new VerifyScope(new[] { prefabPath });
+            rule.Scan(scope, VerifyRunMode.Full, sink);
+
+            var missingFile = sink.Where(i => i.IssueCode.StartsWith("missing_fileid")).ToList();
+            Assert.AreEqual(0, missingFile.Count,
+                "prefab root fileID 100100000 and m_Modification/m_SourcePrefab target refs must NOT be flagged. " +
+                $"Got: {string.Join(", ", missingFile.Select(i => i.IssueCode))}");
+        }
+
+        // -------------------------------------------------------------------
         // T3.3 — ResolveProjectPath handles paths containing /Assets
         // -------------------------------------------------------------------
 

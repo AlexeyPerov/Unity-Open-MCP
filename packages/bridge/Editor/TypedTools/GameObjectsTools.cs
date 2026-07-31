@@ -777,9 +777,16 @@ namespace UnityOpenMcpBridge.TypedTools
 
         public static InstanceResolve ResolveInstance(string body)
         {
-            var instanceId = JsonBody.GetLongFlexible(body, "instance_id", 0);
-            var path = JsonBody.GetString(body, "path");
-            var name = JsonBody.GetString(body, "name");
+            // Scope selector reads to the prefix before any patch array
+            // (fields/entries/patches/...). Without this, a nested
+            // fields[].value.instance_id shadows the top-level selector because
+            // JsonBody.GetRawValue does a substring search over the whole body
+            // (feedback-fable-31-07 §2). The patch-array keys are reserved
+            // top-level fields, so this never trims real selector content.
+            var selectors = JsonBody.SelectorScope(body);
+            var instanceId = JsonBody.GetLongFlexible(selectors, "instance_id", 0);
+            var path = JsonBody.GetString(selectors, "path");
+            var name = JsonBody.GetString(selectors, "name");
 
             var go = TypedTargets.ResolveGameObject(instanceId, path, name);
             if (go == null)

@@ -198,6 +198,69 @@ namespace UnityOpenMcpBridge.Tests
             }
             finally { Object.DestroyImmediate(so); }
         }
+
+        // feedback-fable-31-07 §1/§1b — object-reference field wiring via the
+        // documented {"instance_id": N} value form. Before the fix the parser
+        // wrapped the value as {"v": <raw>} so a structured object never exposed
+        // a bare key, and the form was REJECTED by its own error message. Now
+        // ObjectRefValue reads the structured key directly. Verify the live
+        // instance resolves and the field is actually set (not silently nulled).
+        [Test]
+        public void ObjectModify_ObjectReference_ByInstanceIdValueForm_IsAssigned()
+        {
+            var so = ScriptableObject.CreateInstance<ObjectRefTestScriptableObject>();
+            var target = new GameObject("RefTarget");
+            try
+            {
+                Assert.IsNull(so.target, "precondition: field starts null");
+                var result = ReflectionScriptsObjectsTools.ObjectModify(
+                    "{\"instance_id\":" + InstanceId.Of(so) +
+                    ",\"fields\":[{\"name\":\"target\",\"value\":{\"instance_id\":" +
+                    InstanceId.Of(target) + "}}]}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                Assert.AreSame(target, so.target,
+                    "{\"instance_id\": N} value must resolve and assign the live Object, not null.");
+                // 'modified' must list the field whose serialized value actually
+                // changed (feedback §1: the prior bug reported success while
+                // writing {fileID: 0}).
+                Assert.IsTrue(result.Output.Contains("\"modified\":[\"target\"]"),
+                    "modified must list the field that changed. Got: " + result.Output);
+            }
+            finally
+            {
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(so);
+            }
+        }
+
+        // feedback-fable-31-07 §1 — a value that does NOT resolve (bogus
+        // instance_id) must surface a per-field error and NOT silently write
+        // null. The prior bug wrote {fileID: 0} and reported success.
+        [Test]
+        public void ObjectModify_ObjectReference_UnresolvableValue_ReportsError_LeavesFieldUntouched()
+        {
+            var so = ScriptableObject.CreateInstance<ObjectRefTestScriptableObject>();
+            var sentinel = new GameObject("Sentinel");
+            so.target = sentinel; // field starts SET so we can detect a silent null
+            try
+            {
+                var result = ReflectionScriptsObjectsTools.ObjectModify(
+                    "{\"instance_id\":" + InstanceId.Of(so) +
+                    ",\"fields\":[{\"name\":\"target\",\"value\":{\"instance_id\":987654321}}]}");
+                // The tool still returns Success (it processes the batch), but
+                // the field must NOT be in 'modified' and an error must appear.
+                Assert.IsFalse(result.Output.Contains("\"modified\":[\"target\"]")
+                    || result.Output.Contains("\"target\""),
+                    "an unresolvable value must NOT be reported as modified. Got: " + result.Output);
+                Assert.AreSame(sentinel, so.target,
+                    "an unresolvable value must leave the existing field untouched (no silent null write).");
+            }
+            finally
+            {
+                Object.DestroyImmediate(sentinel);
+                Object.DestroyImmediate(so);
+            }
+        }
     }
 
     // Test fixture SO with an enum field exercising the ConvertValue enum path.
@@ -228,5 +291,13 @@ namespace UnityOpenMcpBridge.Tests
         A = 1,
         B = 4,
         C = 8,
+    }
+
+    // feedback-fable-31-07 §1/§1b — fixture SO carrying a UnityEngine.Object
+    // reference field, exercising the ObjectRefValue resolver on the
+    // object_modify reflection path.
+    public class ObjectRefTestScriptableObject : ScriptableObject
+    {
+        public GameObject target;
     }
 }

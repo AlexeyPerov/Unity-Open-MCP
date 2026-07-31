@@ -52,13 +52,13 @@ namespace UnityOpenMcpVerify
                 "The reference's GUID does not resolve to a loadable asset — the target was likely deleted, moved, or never committed. Relink to the correct target GUID via apply_fix (relink_broken_guid) with a deliberately chosen target_guid, or remove the reference."),
             ["missing_references|missing_fileid"] = new Entry(
                 "missing_fileid_reference",
-                "The GUID resolves but the fileID is not a top-level object in the target asset (the sub-object was removed or the asset was re-exported). Relink to the correct fileID, or repoint the reference."),
+                "The GUID resolves but the fileID is not a top-level object in the target asset (the sub-object was removed or the asset was re-exported). Relink to the correct fileID, or repoint the reference. Note: prefab-composition refs (the prefab root fileID 100100000, and target/value refs inside m_Modification / m_SourcePrefab blocks) are resolved by construction and are suppressed; a remaining report here is a genuine broken ref."),
             ["missing_references|missing_local_fileid"] = new Entry(
                 "missing_fileid_reference",
-                "A local (same-file) fileID is referenced but no longer declared in the file. Reconnect the reference to a valid local object, or remove it."),
+                "A local (same-file) fileID is referenced but no longer declared in the file. Reconnect the reference to a valid local object, or remove it. Note: sub-asset fileIDs of the scanned asset (prefab root, embedded materials, stripped objects) are indexed, so a report here points at a truly undeclared id."),
             ["missing_references|empty_local_ref"] = new Entry(
                 "missing_fileid_reference",
-                "An empty local fileID reference was serialized. Reconnect it to a valid local object, or remove it."),
+                "An empty local fileID reference ({fileID: 0}) was serialized. Reconnect it to a valid local object, or remove it."),
             ["missing_references|missing_method"] = new Entry(
                 "missing_script_class",
                 "A serialized call (e.g. UnityEvent) targets a method that no longer exists on the receiver class. Re-add the method, update the call to the new name, or clear the target."),

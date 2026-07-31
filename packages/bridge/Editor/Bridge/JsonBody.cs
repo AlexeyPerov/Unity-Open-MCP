@@ -536,5 +536,40 @@ namespace UnityOpenMcpBridge
 
             return (null, i + 1);
         }
+
+        // Return a substring of `json` covering only the top-level selector keys
+        // (everything BEFORE the first "fields"/"entries"/"patches" patch array),
+        // so selector reads (instance_id/path/name/component_instance_id/...)
+        // never collide with the same key names nested INSIDE a patch value.
+        //
+        // Fixes feedback-fable-31-07 §2: component_modify resolved the host
+        // GameObject from the nested fields[].value.instance_id because the
+        // substring search in GetRawValue/GetLongFlexible matched the first
+        // occurrence anywhere in the body. Scoping the read window to the prefix
+        // before "fields" means the top-level selector always wins.
+        //
+        // Returns the original body when there is no patch-array key (read-only
+        // tools, or bodies without patches) so non-mutating callers are
+        // unaffected. The match is a plain IndexOf on the quoted key, which is
+        // safe here because the patch-array keys are reserved top-level fields
+        // that never appear before the selectors in a well-formed tool body.
+        public static string SelectorScope(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return json;
+            var earliest = -1;
+            foreach (var key in PatchArrayKeys)
+            {
+                var idx = json.IndexOf("\"" + key + "\"", StringComparison.Ordinal);
+                if (idx >= 0 && (earliest < 0 || idx < earliest)) earliest = idx;
+            }
+            return earliest < 0 ? json : json.Substring(0, earliest);
+        }
+
+        // Top-level patch-array keys whose contents must be excluded from
+        // selector reads. "fields" (component_modify/object_modify),
+        // "entries"/"components" (component_add), "patches"/"jsonPatches"
+        // (gameobject_modify/material), "deletes" (assets_delete).
+        private static readonly string[] PatchArrayKeys =
+            { "fields", "entries", "patches", "jsonPatches", "deletes" };
     }
 }

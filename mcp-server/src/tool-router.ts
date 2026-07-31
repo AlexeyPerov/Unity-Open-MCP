@@ -735,7 +735,15 @@ export class ToolRouter implements Router {
     // project-relative log (<project>/Logs/Editor.log); the global per-user
     // log is stale there. resolveEditorLogPath prefers the project-relative
     // log when it exists and falls back to the global log for older Unity.
-    const logPath = resolveEditorLogPath(this.projectPath);
+    //
+    // feedback-fable-31-07 §5 — when a live editor holds the project AND the
+    // resolved Editor.log looks frozen (rotated by a batch spawn that failed
+    // on the project lock), fall back to Editor-prev.log, where the live
+    // editor keeps writing. Pass the live PID from the instance lock so the
+    // resolver can make the strong-signal decision.
+    const livePid = this.resolveLiveEditorPid();
+    const resolvedLog = resolveEditorLogPath(this.projectPath, undefined, livePid);
+    const logPath = resolvedLog.path;
     const tail = readLogTail(logPath, tailBytes);
 
     if (tail.error) {
@@ -819,6 +827,10 @@ export class ToolRouter implements Router {
         issues: health.issues,
         issueCount: health.issues.length,
         logPath,
+        // Why this log file was chosen (feedback-fable-31-07 §5). Non-default
+        // values signal a log-rotation fallback: the live editor is writing to
+        // Editor-prev.log after a batch spawn rotated Editor.log.
+        logSource: resolvedLog.reason,
         tailBytes: tail.bytes,
         // Present ONLY when at least one cited source file is newer than
         // Editor.log — the log's most-recent error block may be stale and
@@ -833,6 +845,23 @@ export class ToolRouter implements Router {
       },
       "offline",
     );
+  }
+
+  // Resolve the live Unity Editor PID for this project from the instance lock,
+  // or undefined when no live editor is known. Used by routeReadCompileErrors
+  // to feed the log-rotation fallback in resolveEditorLogPath
+  // (feedback-fable-31-07 §5): a frozen Editor.log + a live PID is the
+  // signature of a batch spawn that rotated the log while the live editor
+  // keeps writing to Editor-prev.log.
+  private resolveLiveEditorPid(): number | undefined {
+    if (!this.projectPath) return undefined;
+    try {
+      const lock = readInstanceLock(this.projectPath);
+      if (lock && lock.pid && isPidAlive(lock.pid)) return lock.pid;
+    } catch {
+      // Unreadable/missing lock → no live PID known.
+    }
+    return undefined;
   }
 
   private async routeListAssets(
@@ -1684,7 +1713,7 @@ export class ToolRouter implements Router {
     //    fixable compile failure. We reuse the same offline log read +
     //    health-issue extractor as read_compile_errors so the diagnosis is
     //    identical to what the agent already saw.
-    const logPath = resolveEditorLogPath(this.projectPath);
+    const logPath = resolveEditorLogPath(this.projectPath, undefined, this.resolveLiveEditorPid()).path;
     const tail = readLogTail(logPath, DEFAULT_LOG_TAIL_BYTES);
     let signaturePresent = false;
     let logWarning: string | null = null;

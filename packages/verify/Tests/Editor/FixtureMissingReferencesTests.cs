@@ -137,9 +137,9 @@ namespace UnityOpenMcpVerify.Tests
             // boilerplate noise, not real missing-reference defects. Filter
             // them out before asserting health so the test reflects the
             // fixture's intent rather than the rule's null-marker sensitivity.
-            // C2: empty_local_ref now carries an ordinal discriminator
-            // ("empty_local_ref:0"), so compare the BARE code, not the full
-            // IssueCode.
+            // C2: empty_local_ref carries an anchor+property discriminator
+            // (e.g. "empty_local_ref:111:m_Father"), so compare the BARE code,
+            // not the full IssueCode.
             var realIssues = sink.Where(i => IssueKey.BareIssueCode(i.IssueCode) != "empty_local_ref").ToList();
 
             Assert.AreEqual(0, realIssues.Count,

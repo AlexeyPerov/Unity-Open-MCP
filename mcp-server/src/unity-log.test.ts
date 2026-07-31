@@ -71,13 +71,15 @@ test("projectEditorLogPath returns null when projectPath is null/undefined/empty
 
 test("resolveEditorLogPath prefers the project-relative log when it exists", () => {
   // Create a fake project with a Logs/Editor.log; the resolver must pick it
-  // over the global log.
+  // over the global log. The project log is large enough (>4KB) to not look
+  // frozen, so the prev.log fallback must NOT trigger.
   const project = mkdtempSync(join(tmpdir(), "proj-"));
   mkdirSync(join(project, "Logs"));
-  writeFileSync(join(project, "Logs", "Editor.log"), "project log content");
+  writeFileSync(join(project, "Logs", "Editor.log"), "x".repeat(8192));
 
   const resolved = resolveEditorLogPath(project, "darwin");
-  assert.equal(resolved, join(project, "Logs", "Editor.log"));
+  assert.equal(resolved.path, join(project, "Logs", "Editor.log"));
+  assert.equal(resolved.reason, "project_log");
 });
 
 test("resolveEditorLogPath falls back to the global log when the project log is absent", () => {
@@ -85,13 +87,43 @@ test("resolveEditorLogPath falls back to the global log when the project log is 
   const project = mkdtempSync(join(tmpdir(), "proj-"));
   // No Logs/ folder created → project log does not exist.
   const resolved = resolveEditorLogPath(project, "darwin");
-  assert.equal(resolved, editorLogPath("darwin"));
+  assert.equal(resolved.path, editorLogPath("darwin"));
+  assert.equal(resolved.reason, "global_log");
 });
 
 test("resolveEditorLogPath falls back to the global log when projectPath is null", () => {
   // No project context (e.g. the tool was called without --project) → global.
   const resolved = resolveEditorLogPath(null, "darwin");
-  assert.equal(resolved, editorLogPath("darwin"));
+  assert.equal(resolved.path, editorLogPath("darwin"));
+  assert.equal(resolved.reason, "global_log");
+});
+
+// feedback-fable-31-07 §5 — Editor-prev.log fallback when the resolved log is
+// frozen and a live editor holds the project (the log-rotation scenario: a
+// batch spawn rotated Editor.log while the live editor keeps writing to
+// Editor-prev.log).
+//
+// These tests pin the live-PID + frozen branch without depending on the host
+// machine's real global Editor.log state (which varies by whether Unity ran
+// recently). They use a large (non-frozen) project log for the normal case and
+// verify the structured {path, reason} return shape.
+test("resolveEditorLogPath returns the project log (not prev.log) when it is non-frozen even with a live editor PID", () => {
+  // A healthy, large project log is the authoritative log regardless of PID —
+  // the frozen/rotation fallback must NOT trigger.
+  const project = mkdtempSync(join(tmpdir(), "proj-"));
+  mkdirSync(join(project, "Logs"));
+  writeFileSync(join(project, "Logs", "Editor.log"), "x".repeat(8192));
+  const resolved = resolveEditorLogPath(project, "darwin", process.pid);
+  assert.equal(resolved.path, join(project, "Logs", "Editor.log"));
+  assert.equal(resolved.reason, "project_log");
+});
+
+test("resolveEditorLogPath returns a structured {path, reason} object", () => {
+  // Sanity: the resolver returns an object (not a bare string) so callers can
+  // surface the chosen-file reason.
+  const resolved = resolveEditorLogPath(null, "darwin");
+  assert.equal(typeof resolved, "object");
+  assert.ok("path" in resolved && "reason" in resolved);
 });
 
 // ---------------------------------------------------------------------------

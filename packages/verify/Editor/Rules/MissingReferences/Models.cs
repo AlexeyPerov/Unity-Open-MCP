@@ -58,7 +58,26 @@ namespace UnityOpenMcpVerify.Rules.MissingReferences
     public class EmptyLocalFileIDRegistry
     {
         public EmptyLocalFileIDRegistry(int line) { Line = line; }
+
+        public EmptyLocalFileIDRegistry(int line, long anchor, string property)
+        {
+            Line = line;
+            Anchor = anchor;
+            Property = property;
+        }
+
         public int Line { get; }
+
+        // feedback-fable-31-07 §7 — the owning top-level YAML object's fileID
+        // (the `&NNN` on the most recent `--- !u!T &NNN` header before this
+        // `{fileID: 0}` line) and the serialized property key (e.g.
+        // "m_Father", "m_StaticBatchRoot"). Together they key the issue so a
+        // delta means something on large scenes: adding an unrelated empty ref
+        // elsewhere no longer renames hundreds of issues (the old ordinal keys
+        // shifted on every count change). 0 / null when the scanner could not
+        // determine them; the mapper falls back to the line in that case.
+        public long Anchor { get; }
+        public string Property { get; }
     }
 
     public class MissingMethodEntry
