@@ -16,7 +16,7 @@
    добавьте только запись `unity-open-mcp` — не стирайте соседние.
 5. Перезапустите MCP-клиент, чтобы он перечитал конфигурацию.
 
-Зафиксируйте ту же версию сервера, что у пакетов bridge/verify (`0.7.0` ниже).
+Зафиксируйте ту же версию сервера, что у пакетов bridge/verify (`0.8.4` ниже).
 При обновлении см. [Версионирование](../../versioning.md). Первый запуск `npx`
 может занять 10–60 секунд на скачивание пакета; последующие запуски быстрые.
 
@@ -55,7 +55,7 @@ Rider, Unity AI, ZooCode и Antigravity:
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.7.0"],
+      "args": ["-y", "unity-open-mcp@0.8.4"],
       "env": {
         "UNITY_PROJECT_PATH": "/absolute/path/to/project"
       }
@@ -72,7 +72,7 @@ Rider, Unity AI, ZooCode и Antigravity:
     "unity-open-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.7.0"],
+      "args": ["-y", "unity-open-mcp@0.8.4"],
       "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
   }
@@ -87,7 +87,7 @@ Rider, Unity AI, ZooCode и Antigravity:
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@0.7.0"],
+      "command": ["npx", "-y", "unity-open-mcp@0.8.4"],
       "enabled": true,
       "environment": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
@@ -104,7 +104,7 @@ Rider, Unity AI, ZooCode и Antigravity:
       "unity-open-mcp": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "unity-open-mcp@0.7.0"],
+        "args": ["-y", "unity-open-mcp@0.8.4"],
         "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
       }
     }
@@ -118,7 +118,7 @@ Rider, Unity AI, ZooCode и Antigravity:
 [mcp_servers.unity-open-mcp]
 enabled = true
 command = "npx"
-args = ["-y", "unity-open-mcp@0.7.0"]
+args = ["-y", "unity-open-mcp@0.8.4"]
 
 [mcp_servers.unity-open-mcp.env]
 UNITY_PROJECT_PATH = "/absolute/path/to/project"
@@ -129,7 +129,7 @@ UNITY_PROJECT_PATH = "/absolute/path/to/project"
 ```sh
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/absolute/path/to/project \
-  -- npx -y unity-open-mcp@0.7.0
+  -- npx -y unity-open-mcp@0.8.4
 ```
 
 Если сервер уже зарегистрирован, удалите и добавьте его заново, когда нужно

@@ -44,7 +44,7 @@
 
 | 预设 | 最适合 | 预填内容 |
 |---|---|---|
-| **Regular user (npm)** *(推荐)* | 想使用已发布 npm 包、不检出 monorepo 的开发者 | `npx -y unity-open-mcp@0.7.0`；bridge + verify 来自已发布源；领域依赖关闭；技能开启 |
+| **Regular user (npm)** *(推荐)* | 想使用已发布 npm 包、不检出 monorepo 的开发者 | `npx -y unity-open-mcp@0.8.4`；bridge + verify 来自已发布源；领域依赖关闭；技能开启 |
 | **Contributor (local checkout)** | 在 bridge / verify / MCP 服务器上改动的 monorepo 贡献者 | 本地检出 + 克隆中的 `file:` 包；领域依赖关闭；技能开启。先构建 `mcp-server/`（见 [开发安装](development-setup.md)） |
 | **Custom / skip** | 想用向导内置默认值的任何人 | 无预填 — 与手动流程相同 |
 

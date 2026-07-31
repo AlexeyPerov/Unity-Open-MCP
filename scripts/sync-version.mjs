@@ -195,6 +195,45 @@ const TRIO_TARGETS = [
     replace: (b, v) =>
       b.replace(/(#verify-v)\d+\.\d+\.\d+/g, `$1${v}`),
   },
+  // Translated setup docs (ru / zh-CN) carry the same git-URL install pins
+  // as the English docs. Keep them in lockstep so a stale `#bridge-v` /
+  // `#verify-v` tag never ships in a translation.
+  {
+    file: "docs/ru/setup/manual-setup.md",
+    kind: "md-git",
+    description: "ru manual-setup.md git-URL install pins (#bridge-v / #verify-v)",
+    replace: (b, v) =>
+      b
+        .replace(/(#bridge-v)\d+\.\d+\.\d+/g, `$1${v}`)
+        .replace(/(#verify-v)\d+\.\d+\.\d+/g, `$1${v}`),
+  },
+  {
+    file: "docs/ru/setup/agent-setup.md",
+    kind: "md-git",
+    description: "ru agent-setup.md git-URL install pins (#bridge-v / #verify-v)",
+    replace: (b, v) =>
+      b
+        .replace(/(#bridge-v)\d+\.\d+\.\d+/g, `$1${v}`)
+        .replace(/(#verify-v)\d+\.\d+\.\d+/g, `$1${v}`),
+  },
+  {
+    file: "docs/zh-CN/setup/manual-setup.md",
+    kind: "md-git",
+    description: "zh-CN manual-setup.md git-URL install pins (#bridge-v / #verify-v)",
+    replace: (b, v) =>
+      b
+        .replace(/(#bridge-v)\d+\.\d+\.\d+/g, `$1${v}`)
+        .replace(/(#verify-v)\d+\.\d+\.\d+/g, `$1${v}`),
+  },
+  {
+    file: "docs/zh-CN/setup/agent-setup.md",
+    kind: "md-git",
+    description: "zh-CN agent-setup.md git-URL install pins (#bridge-v / #verify-v)",
+    replace: (b, v) =>
+      b
+        .replace(/(#bridge-v)\d+\.\d+\.\d+/g, `$1${v}`)
+        .replace(/(#verify-v)\d+\.\d+\.\d+/g, `$1${v}`),
+  },
   // Wizard UI tag examples — the Packages step shows a `bridge-v<ver>` /
   // `verify-v<ver>` placeholder + hint so the version-pin field's example
   // matches the default the Rust planner derives from version.json. Kept in
@@ -234,6 +273,56 @@ const TRIO_TARGETS = [
     file: "docs/setup/client-configuration.md",
     kind: "md-npm",
     description: "client-configuration.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  // Translated setup docs (ru / zh-CN) carry the same `unity-open-mcp@<ver>`
+  // pins as the English docs. Keep them in lockstep with releases.
+  {
+    file: "docs/ru/setup/manual-setup.md",
+    kind: "md-npm",
+    description: "ru manual-setup.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/ru/setup/agent-setup.md",
+    kind: "md-npm",
+    description: "ru agent-setup.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/ru/setup/wizard-setup.md",
+    kind: "md-npm",
+    description: "ru wizard-setup.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/ru/setup/client-configuration.md",
+    kind: "md-npm",
+    description: "ru client-configuration.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/zh-CN/setup/manual-setup.md",
+    kind: "md-npm",
+    description: "zh-CN manual-setup.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/zh-CN/setup/agent-setup.md",
+    kind: "md-npm",
+    description: "zh-CN agent-setup.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/zh-CN/setup/wizard-setup.md",
+    kind: "md-npm",
+    description: "zh-CN wizard-setup.md npm server pins (unity-open-mcp@<ver>)",
+    replace: replaceNpmPin,
+  },
+  {
+    file: "docs/zh-CN/setup/client-configuration.md",
+    kind: "md-npm",
+    description: "zh-CN client-configuration.md npm server pins (unity-open-mcp@<ver>)",
     replace: replaceNpmPin,
   },
   {

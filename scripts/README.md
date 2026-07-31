@@ -16,7 +16,7 @@ Live suites need a Unity Editor open on the target project with the bridge runni
 
 | Script | Purpose |
 |--------|---------|
-| [`sync-version.mjs`](sync-version.mjs) | Keeps version strings in sync from `version.json` (MCP server + bridge + verify trio) or `hub/version.json` (Hub app). Supports `--check`, `bump`, `set`, and `tags`. |
+| [`sync-version.mjs`](sync-version.mjs) | Keeps version strings in sync from `version.json` (MCP server + bridge + verify trio) or `hub/version.json` (Hub app). Covers the English setup docs plus their `docs/ru/` and `docs/zh-CN/` mirrors (git-URL pins and npm pins). Supports `--check`, `bump`, `set`, and `tags`. |
 | [`release.mjs`](release.mjs) | One-shot release: clean-tree gate → token estimates → set trio + Hub → commit → tags → push (trio and Hub tags in separate pushes, ≤3 tags each — GitHub drops tag webhooks above that). Supports `--dry-run`, `--yes`, `--trio-only`, `--hub-only`. See [Maintainer versioning](../docs/contributing/versioning.md#one-shot-release-trio--hub). |
 | [`generate-token-estimates.mjs`](generate-token-estimates.mjs) | Generates `packages/bridge/Editor/UI/BridgeToolTokenEstimates.cs` from live MCP tool schemas. `--check` is advisory in CI (`continue-on-error`). |
 | [`gen-mcp-coverage-matrix.mjs`](gen-mcp-coverage-matrix.mjs) | Regenerates the internal, gitignored per-tool coverage matrix. Fails if any registered tool has no suite owner. |

@@ -1144,6 +1144,11 @@ pub fn derive_package_urls(
     } else {
         DEFAULT_GIT_REMOTE.to_string()
     };
+    // SSH remotes read from `.git/config` (or pasted into the custom-URL
+    // field) would write an SSH pin into `manifest.json` that fails for
+    // users without a GitHub SSH key. Normalize to HTTPS before building
+    // the entries and before storing the displayed `git_remote`.
+    let remote = normalize_git_remote_to_https(&remote);
 
     let bridge = build_package_entry(
         BRIDGE_PACKAGE_ID,
@@ -1318,6 +1323,33 @@ fn read_git_origin(toolkit_root: &str) -> Option<String> {
 fn split_ini_kv(line: &str) -> Option<(&str, &str)> {
     let (key, value) = line.split_once('=')?;
     Some((key.trim(), value.trim()))
+}
+
+/// Normalize a GitHub SSH remote URL to its HTTPS form so the package
+/// install pin written into `manifest.json` works for users without an
+/// SSH key registered with GitHub. Both common SSH spellings are handled:
+///
+/// - SCP-like: `git@github.com:owner/repo.git` → `https://github.com/owner/repo.git`
+/// - RFC form: `ssh://git@github.com/owner/repo.git` → `https://github.com/owner/repo.git`
+///
+/// HTTPS URLs, `file:` paths, and anything that is not a GitHub SSH remote
+/// are returned unchanged. This mirrors the SSH→HTTPS conversion the docs
+/// already promise (the canonical install pins are HTTPS) and keeps the
+/// wizard's derived URLs consistent with `DEFAULT_GIT_REMOTE`.
+fn normalize_git_remote_to_https(remote: &str) -> String {
+    let trimmed = remote.trim();
+    // SCP-like SSH form: `git@github.com:owner/repo[.git]`.
+    if let Some(rest) = trimmed.strip_prefix("git@github.com:") {
+        return format!("https://github.com/{}", rest);
+    }
+    // RFC-style SSH form: `ssh://git@github.com/owner/repo[.git]`.
+    if let Some(rest) = trimmed
+        .strip_prefix("ssh://git@github.com/")
+        .or_else(|| trimmed.strip_prefix("ssh://github.com/"))
+    {
+        return format!("https://github.com/{}", rest);
+    }
+    trimmed.to_string()
 }
 
 fn classify(
@@ -1880,8 +1912,82 @@ mod tests {
             false,
             &[],
         );
-        assert_eq!(derived.git_remote, "git@github.com:AlexeyPerov/unity-open-mcp.git");
-        assert!(derived.bridge.url.starts_with("git@github.com:AlexeyPerov/unity-open-mcp.git"));
+        // The SSH origin is normalized to HTTPS so the written pin works
+        // without a GitHub SSH key (see `normalize_git_remote_to_https`).
+        assert_eq!(derived.git_remote, "https://github.com/AlexeyPerov/unity-open-mcp.git");
+        assert!(derived.bridge.url.starts_with("https://github.com/AlexeyPerov/unity-open-mcp.git"));
+    }
+
+    #[test]
+    fn derive_package_urls_normalizes_rfc_style_ssh_origin() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".git")).unwrap();
+        fs::write(
+            dir.path().join(".git").join("config"),
+            "[core]\n  repositoryformatversion = 0\n[remote \"origin\"]\n  url = ssh://git@github.com/AlexeyPerov/unity-open-mcp.git\n  fetch = +refs/heads/*:refs/remotes/origin/*\n",
+        )
+        .unwrap();
+        let derived = derive_package_urls(
+            "/proj/demo",
+            dir.path().to_str().unwrap(),
+            "",
+            "",
+            false,
+            &[],
+        );
+        assert_eq!(derived.git_remote, "https://github.com/AlexeyPerov/unity-open-mcp.git");
+        assert!(derived.bridge.url.starts_with("https://github.com/AlexeyPerov/unity-open-mcp.git"));
+    }
+
+    #[test]
+    fn derive_package_urls_normalizes_ssh_custom_url() {
+        // A user may paste an SSH URL into the custom-URL field; it must
+        // also be normalized so the resulting pin is fetchable over HTTPS.
+        let derived = derive_package_urls(
+            "/proj/demo",
+            "/repos/uai",
+            "",
+            "git@github.com:fork/unity-open-mcp.git",
+            false,
+            &[],
+        );
+        assert_eq!(derived.git_remote, "https://github.com/fork/unity-open-mcp.git");
+        assert!(derived
+            .bridge
+            .url
+            .starts_with("https://github.com/fork/unity-open-mcp.git"));
+    }
+
+    #[test]
+    fn normalize_git_remote_to_https_table() {
+        let conv = |s: &str| normalize_git_remote_to_https(s);
+        // SCP-like SSH.
+        assert_eq!(
+            conv("git@github.com:owner/repo.git"),
+            "https://github.com/owner/repo.git"
+        );
+        // RFC-style SSH, with and without the `git@` user prefix.
+        assert_eq!(
+            conv("ssh://git@github.com/owner/repo.git"),
+            "https://github.com/owner/repo.git"
+        );
+        assert_eq!(
+            conv("ssh://github.com/owner/repo.git"),
+            "https://github.com/owner/repo.git"
+        );
+        // Whitespace is tolerated.
+        assert_eq!(
+            conv("  git@github.com:owner/repo.git  "),
+            "https://github.com/owner/repo.git"
+        );
+        // HTTPS passes through unchanged.
+        assert_eq!(
+            conv("https://github.com/owner/repo.git"),
+            "https://github.com/owner/repo.git"
+        );
+        // Non-GitHub SSH hosts and file: paths are left untouched.
+        assert_eq!(conv("git@gitlab.com:owner/repo.git"), "git@gitlab.com:owner/repo.git");
+        assert_eq!(conv("file:../../packages/bridge"), "file:../../packages/bridge");
     }
 
     #[test]

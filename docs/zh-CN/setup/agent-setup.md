@@ -58,8 +58,8 @@
    `https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/version.json`
 
    本地检出：仓库根目录的 `version.json`。
-2. 解析 JSON，将 `VERSION` 设为 `version` 字段（例如 `"0.7.0"` →
-   `VERSION=0.7.0`）。
+2. 解析 JSON，将 `VERSION` 设为 `version` 字段（例如 `"0.8.4"` →
+   `VERSION=0.8.4`）。
 3. 可选：与已发布的 npm 对照：
 
    ```bash
@@ -87,11 +87,11 @@
 "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v<VERSION>"
 ```
 
-当 `VERSION=0.7.0` 时的示例：
+当 `VERSION=0.8.4` 时的示例：
 
 ```json
-"com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.7.0",
-"com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.7.0"
+"com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.8.4",
+"com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.8.4"
 ```
 
 **幂等规则：**

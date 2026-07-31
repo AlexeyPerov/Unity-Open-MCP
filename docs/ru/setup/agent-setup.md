@@ -74,7 +74,7 @@
 
    Локальный чекаут: `version.json` в корне репозитория.
 2. Разберите JSON и установите `VERSION` из поля `version` (например,
-   `"0.7.0"` → `VERSION=0.7.0`).
+   `"0.8.4"` → `VERSION=0.8.4`).
 3. Опционально сверьте с опубликованным npm:
 
    ```bash
@@ -105,11 +105,11 @@
 "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v<VERSION>"
 ```
 
-Пример при `VERSION=0.7.0`:
+Пример при `VERSION=0.8.4`:
 
 ```json
-"com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.7.0",
-"com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.7.0"
+"com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.8.4",
+"com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v0.8.4"
 ```
 
 **Идемпотентные правила:**

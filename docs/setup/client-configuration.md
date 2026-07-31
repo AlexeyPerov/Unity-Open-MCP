@@ -13,7 +13,7 @@ set your project path, save the file, restart the client.
    add only the `unity-open-mcp` entry — do not wipe siblings.
 5. Restart the MCP client so it reloads the config.
 
-Pin the same server version as your bridge/verify packages (`0.7.0` below).
+Pin the same server version as your bridge/verify packages (`0.8.4` below).
 See [Versioning](../versioning.md) when upgrading. The first `npx` launch can
 take 10–60 seconds while the package downloads; later launches are fast.
 

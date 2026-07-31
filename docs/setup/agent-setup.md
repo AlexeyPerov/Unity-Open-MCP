@@ -69,8 +69,8 @@ Read the release pin **before** any manifest or MCP edit.
    `https://raw.githubusercontent.com/AlexeyPerov/Unity-Open-MCP/master/version.json`
 
    Local checkout: `version.json` at the repo root.
-2. Parse JSON and set `VERSION` to the `version` field (e.g. `"0.7.0"` →
-   `VERSION=0.7.0`).
+2. Parse JSON and set `VERSION` to the `version` field (e.g. `"0.8.4"` →
+   `VERSION=0.8.4`).
 3. Optionally confirm published npm matches:
 
    ```bash
@@ -100,7 +100,7 @@ these two keys only — leave every other dependency untouched), substituting th
 "com.alexeyperov.unity-open-mcp-verify": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/verify#verify-v<VERSION>"
 ```
 
-Example when `VERSION=0.7.0`:
+Example when `VERSION=0.8.4`:
 
 ```json
 "com.alexeyperov.unity-open-mcp-bridge": "https://github.com/AlexeyPerov/unity-open-mcp.git?path=packages/bridge#bridge-v0.8.4",

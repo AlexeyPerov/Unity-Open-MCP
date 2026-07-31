@@ -14,7 +14,7 @@
    不要清掉同级项。
 5. 重启 MCP 客户端以重新加载配置。
 
-服务器版本需与 bridge/verify 包锁定一致（下方为 `0.7.0`）。升级见
+服务器版本需与 bridge/verify 包锁定一致（下方为 `0.8.4`）。升级见
 [版本管理](../../versioning.md)。首次 `npx` 启动可能需要 10–60 秒下载包；之后很快。
 
 ## 放在哪里
@@ -52,7 +52,7 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
   "mcpServers": {
     "unity-open-mcp": {
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.7.0"],
+      "args": ["-y", "unity-open-mcp@0.8.4"],
       "env": {
         "UNITY_PROJECT_PATH": "/absolute/path/to/project"
       }
@@ -69,7 +69,7 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
     "unity-open-mcp": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "unity-open-mcp@0.7.0"],
+      "args": ["-y", "unity-open-mcp@0.8.4"],
       "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
   }
@@ -84,7 +84,7 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
   "mcp": {
     "unity-open-mcp": {
       "type": "local",
-      "command": ["npx", "-y", "unity-open-mcp@0.7.0"],
+      "command": ["npx", "-y", "unity-open-mcp@0.8.4"],
       "enabled": true,
       "environment": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
     }
@@ -101,7 +101,7 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
       "unity-open-mcp": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "unity-open-mcp@0.7.0"],
+        "args": ["-y", "unity-open-mcp@0.8.4"],
         "env": { "UNITY_PROJECT_PATH": "/absolute/path/to/project" }
       }
     }
@@ -115,7 +115,7 @@ Code、Rider、Unity AI、ZooCode 和 Antigravity：
 [mcp_servers.unity-open-mcp]
 enabled = true
 command = "npx"
-args = ["-y", "unity-open-mcp@0.7.0"]
+args = ["-y", "unity-open-mcp@0.8.4"]
 
 [mcp_servers.unity-open-mcp.env]
 UNITY_PROJECT_PATH = "/absolute/path/to/project"
@@ -126,7 +126,7 @@ UNITY_PROJECT_PATH = "/absolute/path/to/project"
 ```sh
 claude mcp add unity-open-mcp \
   --env UNITY_PROJECT_PATH=/absolute/path/to/project \
-  -- npx -y unity-open-mcp@0.7.0
+  -- npx -y unity-open-mcp@0.8.4
 ```
 
 若服务器已注册，当命令、版本锁定或项目路径需要变更时，请先移除再重新添加。
