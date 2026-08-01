@@ -55,7 +55,7 @@ export const runTests = makeTool(
             minimum: 1000,
             maximum: 600000,
             description:
-              "Client-side polling budget (seconds) the server waits for the results file. " +
+              "Client-side polling budget (milliseconds) the server waits for the results file. " +
               "Not a bridge parameter — the bridge run is async and writes a results file " +
               "the server polls. Raise for PlayMode (domain reload) or large suites.",
           },

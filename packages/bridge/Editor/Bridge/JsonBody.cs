@@ -537,38 +537,222 @@ namespace UnityOpenMcpBridge
             return (null, i + 1);
         }
 
-        // Return a substring of `json` covering only the top-level selector keys
-        // (everything BEFORE the first "fields"/"entries"/"patches" patch array),
-        // so selector reads (instance_id/path/name/component_instance_id/...)
-        // never collide with the same key names nested INSIDE a patch value.
+        // Return a synthetic JSON object containing ONLY the top-level (depth-1)
+        // selector keys and their values, with every patch-array key
+        // ("fields"/"entries"/"patches"/"jsonPatches"/"deletes") and its contents
+        // dropped. Selector reads (instance_id/path/name/component_instance_id/
+        // ...) then never collide with the same key names nested INSIDE a patch
+        // value, regardless of the order keys appear in the body.
         //
         // Fixes feedback-fable-31-07 §2: component_modify resolved the host
         // GameObject from the nested fields[].value.instance_id because the
         // substring search in GetRawValue/GetLongFlexible matched the first
-        // occurrence anywhere in the body. Scoping the read window to the prefix
-        // before "fields" means the top-level selector always wins.
+        // occurrence anywhere in the body. The original SelectorScope trimmed the
+        // body at the first patch-array key, which worked only when the patch
+        // array followed every selector — a body emitted with the array first
+        // (e.g. {"fields":[...],"instance_id":5}) silently lost the selector.
+        // This depth-aware walk collects selector keys wherever they appear at
+        // depth 1, so key order no longer matters.
         //
         // Returns the original body when there is no patch-array key (read-only
         // tools, or bodies without patches) so non-mutating callers are
-        // unaffected. The match is a plain IndexOf on the quoted key, which is
-        // safe here because the patch-array keys are reserved top-level fields
-        // that never appear before the selectors in a well-formed tool body.
+        // unaffected and no allocation happens on the hot read path.
         public static string SelectorScope(string json)
         {
             if (string.IsNullOrEmpty(json)) return json;
-            var earliest = -1;
+
+            // Fast path: if no patch-array key appears at all, the body is the
+            // scope (read-only tools). IndexOf is safe for the membership check
+            // — a false positive (a patch key name nested inside a string) just
+            // routes us through the depth-aware walk, which still emits only
+            // depth-1 selector pairs.
+            bool anyPatchKey = false;
             foreach (var key in PatchArrayKeys)
             {
-                var idx = json.IndexOf("\"" + key + "\"", StringComparison.Ordinal);
-                if (idx >= 0 && (earliest < 0 || idx < earliest)) earliest = idx;
+                if (json.IndexOf("\"" + key + "\"", StringComparison.Ordinal) >= 0)
+                {
+                    anyPatchKey = true;
+                    break;
+                }
             }
-            return earliest < 0 ? json : json.Substring(0, earliest);
+            if (!anyPatchKey) return json;
+
+            // Depth-aware walk. We track whether we are inside a string (so
+            // braces/brackets/colons inside string values do not affect depth)
+            // and the object/array nesting depth. A key token is a top-level
+            // selector only when it sits at object depth 1.
+            var scope = new StringBuilder(json.Length);
+            scope.Append('{');
+            bool first = true;
+            int depth = 0;
+            bool inString = false;
+            bool escape = false;
+            int i = 0;
+            // Track the start of the current key token (the quoted string right
+            // after a '{' or ',') so we can read its name at depth 1.
+            int keyStart = -1;
+
+            while (i < json.Length)
+            {
+                char c = json[i];
+
+                if (inString)
+                {
+                    if (escape) { escape = false; }
+                    else if (c == '\\') { escape = true; }
+                    else if (c == '"') { inString = false; }
+                    i++;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    inString = true;
+                    // A quoted string that opens at depth 1 right after '{' or
+                    // ',' is a top-level key. Record its token span.
+                    if (depth == 1 && keyStart < 0)
+                        keyStart = i;
+                    i++;
+                    continue;
+                }
+
+                if (c == '{' || c == '[') { depth++; i++; continue; }
+                if (c == '}' || c == ']') { depth--; i++; continue; }
+
+                // A colon at depth 1 separates a top-level key from its value.
+                if (c == ':' && depth == 1 && keyStart >= 0)
+                {
+                    var (keyName, keyEnd) = ReadQuotedToken(json, keyStart);
+                    // The value starts after the colon (`i` points at ':' here).
+                    var valueStart = i + 1;
+                    if (IsPatchArrayKey(keyName))
+                    {
+                        // Skip this key AND its value (a value may be a nested
+                        // object/array/string — scan to its end at depth 1).
+                        i = ScanValueEnd(json, valueStart);
+                        // After skipping, advance past the trailing comma if any
+                        // (handled by the generic comma path below).
+                        keyStart = -1;
+                        continue;
+                    }
+                    // Selector key: copy "key":<value> into the scope. Copy from
+                    // the key's opening quote through the value end (spanning the
+                    // key, colon, and value verbatim) so the emitted pair is
+                    // valid JSON without re-serialization.
+                    var valueEnd = ScanValueEnd(json, valueStart);
+                    if (!first) scope.Append(',');
+                    first = false;
+                    scope.Append(json, keyStart, valueEnd - keyStart);
+                    i = valueEnd;
+                    keyStart = -1;
+                    continue;
+                }
+
+                // Reset the pending-key marker on commas at depth 1 so the next
+                // quoted string is recognized as a sibling key.
+                if (c == ',' && depth == 1) keyStart = -1;
+
+                i++;
+            }
+
+            scope.Append('}');
+            return scope.ToString();
+        }
+
+        // Read a quoted JSON string token starting at the opening quote `start`
+        // (json[start] == '"'). Returns the decoded name and the index just past
+        // the closing quote.
+        private static (string name, int end) ReadQuotedToken(string json, int start)
+        {
+            var i = start + 1;
+            var sb = new StringBuilder();
+            while (i < json.Length)
+            {
+                var c = json[i];
+                if (c == '\\')
+                {
+                    if (i + 1 < json.Length) { sb.Append(json[i + 1]); i += 2; continue; }
+                    i++; continue;
+                }
+                if (c == '"') return (sb.ToString(), i + 1);
+                sb.Append(c);
+                i++;
+            }
+            return (sb.ToString(), i);
+        }
+
+        // Given a position right after a top-level key's colon, find the index
+        // where the value ends (the position of the comma at depth 1 separating
+        // it from the next sibling, or the end of the object). Honors strings
+        // and nested containers so a value containing ',' '}' ']' is not split.
+        private static int ScanValueEnd(string json, int afterColon)
+        {
+            var i = afterColon;
+            // Skip whitespace between colon and value.
+            while (i < json.Length && char.IsWhiteSpace(json[i])) i++;
+            if (i >= json.Length) return i;
+
+            char c = json[i];
+            if (c == '"')
+            {
+                i++;
+                while (i < json.Length)
+                {
+                    if (json[i] == '\\') { i += 2; continue; }
+                    if (json[i] == '"') { i++; break; }
+                    i++;
+                }
+                return i;
+            }
+            if (c == '{' || c == '[')
+            {
+                var open = c;
+                var close = open == '{' ? '}' : ']';
+                var depth = 1;
+                i++;
+                while (i < json.Length && depth > 0)
+                {
+                    var cc = json[i];
+                    if (cc == '"')
+                    {
+                        i++;
+                        while (i < json.Length)
+                        {
+                            if (json[i] == '\\') { i += 2; continue; }
+                            if (json[i] == '"') { i++; break; }
+                            i++;
+                        }
+                        continue;
+                    }
+                    if (cc == open) depth++;
+                    else if (cc == close) depth--;
+                    i++;
+                }
+                return i;
+            }
+            // Primitive (number/bool/null): read until a depth-1 separator.
+            while (i < json.Length)
+            {
+                var cc = json[i];
+                if (cc == ',' || cc == '}' || cc == ']') break;
+                i++;
+            }
+            return i;
+        }
+
+        private static bool IsPatchArrayKey(string key)
+        {
+            foreach (var k in PatchArrayKeys)
+                if (k == key) return true;
+            return false;
         }
 
         // Top-level patch-array keys whose contents must be excluded from
         // selector reads. "fields" (component_modify/object_modify),
-        // "entries"/"components" (component_add), "patches"/"jsonPatches"
-        // (gameobject_modify/material), "deletes" (assets_delete).
+        // "patches"/"jsonPatches" (gameobject_modify/material), "entries"
+        // (assets_copy/assets_move), "deletes" (assets_delete). component_add's
+        // "component_types" is a bare-string array (no nested objects), so it
+        // cannot shadow a selector and is intentionally not listed.
         private static readonly string[] PatchArrayKeys =
             { "fields", "entries", "patches", "jsonPatches", "deletes" };
     }

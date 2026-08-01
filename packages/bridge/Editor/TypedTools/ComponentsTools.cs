@@ -140,6 +140,19 @@ namespace UnityOpenMcpBridge.TypedTools
             var options = ParseGetOptions(body);
             var propertyPath = JsonBody.GetString(body, "property_path");
 
+            // Optional `fields` name filter (feedback-fable-31-07 §10). Parse it
+            // BEFORE collection: when present, the filter narrows the result to
+            // the requested names, so the max_fields collection cap must NOT
+            // apply (an agent asking for one field should not have to raise
+            // max_fields on a 126-field component). Raise the cap to
+            // effectively unbounded so a requested field past the default 40 is
+            // still collected before the filter runs. Paging is also turned off
+            // after collection for a filtered set.
+            var fieldsFilter = JsonBody.GetStringArray(body, "fields");
+            var hasFieldsFilter = fieldsFilter != null && fieldsFilter.Length > 0;
+            if (hasFieldsFilter)
+                options.MaxFields = int.MaxValue;
+
             var entries = new List<ComponentGetEntry>(options.MaxFields);
             int truncatedDuringCollect = 0;
 
@@ -177,16 +190,13 @@ namespace UnityOpenMcpBridge.TypedTools
                 if (pageSize < 1) pageSize = 1;
             }
 
-            // Optional `fields` name filter (feedback-fable-31-07 §10): when
-            // provided, return only entries whose leaf path/name matches one of
-            // the requested names (exact, case-insensitive on the last path
+            // Apply the `fields` name filter parsed above (feedback-fable-31-07
+            // §10): keep only entries whose leaf path/name matches one of the
+            // requested names (exact, case-insensitive on the last path
             // segment, so "CastleNotif" matches "m_CastleNotif" and
-            // "Items[0].CastleNotif"). The filter bypasses paging and the
-            // max_fields collection cap does not apply to the filtered set (an
-            // agent asking for one field should not have to raise max_fields on
-            // a 126-field component). It still respects max_depth.
-            var fieldsFilter = JsonBody.GetStringArray(body, "fields");
-            if (fieldsFilter != null && fieldsFilter.Length > 0)
+            // "Items[0].CastleNotif"). The cap was raised before collection so
+            // a requested field past the default max_fields is present here.
+            if (hasFieldsFilter)
             {
                 var wanted = new System.Collections.Generic.HashSet<string>(
                     System.Array.ConvertAll(fieldsFilter, n => n == null ? "" : n.ToLowerInvariant()));
@@ -1098,13 +1108,14 @@ namespace UnityOpenMcpBridge.TypedTools
         // ObjectReference SerializedProperty by reflecting over the host
         // component's fields. Used by the ObjectReference write path so a
         // Component-typed field (e.g. a custom MonoBehaviour referencing
-        // another component) drives GetComponent coercion on the resolved GO
-        // — without this every object-reference field looks like a generic
-        // UnityEngine.Object and a {"path": ".../GO"} value targeting a
-        // Component field would resolve to the GameObject and fail to assign.
+        // another component, including a list element of such a field) drives
+        // GetComponent coercion on the resolved GO — without this every
+        // object-reference field looks like a generic UnityEngine.Object and a
+        // {"path": ".../GO"} value targeting a Component field would resolve to
+        // the GameObject and fail to assign.
         //
-        // Returns null when the field cannot be located (array/list elements,
-        // nested paths, or fields on types the reflection walk can't reach);
+        // Returns null when the field cannot be located (deeply nested paths
+        // the reflection walk can't reach, or non-generic IList element types);
         // callers fall back to typeof(UnityEngine.Object), which is the safe
         // pre-fix behavior.
         private static System.Type ResolveObjectFieldType(SerializedProperty sp)
@@ -1115,8 +1126,12 @@ namespace UnityOpenMcpBridge.TypedTools
         }
 
         // Walk a propertyPath (e.g. "Foo.Bar" or "list.Array.data[3].Field")
-        // reflecting into fields, returning the first UnityEngine.Object subtype
-        // encountered. Array/List elements resolve to the element type.
+        // reflecting into fields, returning the declared Type of the final
+        // segment. Unity serializes a list element access as the three segments
+        // "Array", "data[N]" between the list field and the element field, so
+        // both must be consumed to reach the element type. Returns null for a
+        // type that is not a UnityEngine.Object subtype (non-object-ref fields
+        // never reach this path, but guard anyway).
         private static System.Type ResolveMemberType(System.Type hostType, string propertyPath)
         {
             if (string.IsNullOrEmpty(propertyPath)) return null;
@@ -1125,23 +1140,30 @@ namespace UnityOpenMcpBridge.TypedTools
             {
                 if (current == null) return null;
                 var name = segment;
-                // Strip "Array.data[N]" — the element type is the list's generic arg.
+                // "Array" precedes "data[N]" in Unity's serialized list path
+                // ("list.Array.data[3]"). The current type IS the list field at
+                // this point — resolve the element type from its generic arg so
+                // the following "data[N]" segment is walked against the element
+                // type, not the list type. A non-generic IList (e.g. ArrayList)
+                // cannot be resolved reflectively, so fall back.
                 if (name == "Array")
                 {
-                    // Next real segment is "data[N]"; the element type is the
-                    // generic argument of the enclosing IList field. Resolve it
-                    // by looking at the current type's serialized fields — but
-                    // this path is uncommon for object refs, so fall back.
-                    return null;
+                    // The current type IS the list field here — resolve the
+                    // element type so the following "data[N]" segment walks into
+                    // the element's fields, not the list's.
+                    current = GetListElementType(current);
+                    continue;
                 }
                 if (name.StartsWith("data["))
                 {
-                    // Element access — current is the list/element field type.
-                    if (current.IsGenericType)
-                    {
-                        var args = current.GetGenericArguments();
-                        if (args.Length == 1) current = args[0];
-                    }
+                    // Element index. In Unity's canonical "list.Array.data[N]"
+                    // path the preceding "Array" segment already resolved the
+                    // element type, so this is a no-op. Only resolve again when
+                    // "Array" was absent (a malformed/hand-built path) and
+                    // current is still a list/array — otherwise re-resolving the
+                    // already-resolved element type nulls it out.
+                    if (current != null && (current.IsArray || current.IsGenericType))
+                        current = GetListElementType(current);
                     continue;
                 }
                 var field = current.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
@@ -1149,6 +1171,22 @@ namespace UnityOpenMcpBridge.TypedTools
                 current = field.FieldType;
             }
             return typeof(Object).IsAssignableFrom(current) ? current : null;
+        }
+
+        // Resolve the element Type of a serialized list/array field, or null
+        // when the type is not a generic IList<T>/array (the common fallback
+        // case: reflection can't see the element type, so the caller degrades
+        // to typeof(UnityEngine.Object) which is the safe pre-fix behavior).
+        private static System.Type GetListElementType(System.Type type)
+        {
+            if (type == null) return null;
+            if (type.IsArray) return type.GetElementType();
+            if (type.IsGenericType)
+            {
+                var args = type.GetGenericArguments();
+                if (args.Length == 1) return args[0];
+            }
+            return null;
         }
 
         private static int ParseInt(string raw)

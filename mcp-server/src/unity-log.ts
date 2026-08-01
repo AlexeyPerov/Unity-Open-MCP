@@ -82,11 +82,31 @@ export function projectEditorLogPath(
  * open handle and writes to Editor-prev.log from then on, while Editor.log is
  * frozen at a tiny startup size — reading it returns "no errors" forever
  * (feedback-fable-31-07 §5).
+ *
+ * Returns the GLOBAL prev-log path. On Unity 6000.5+ the rotated prev log
+ * lives next to the project-relative live log (`<project>/Logs/Editor-prev.log`),
+ * not in the global dir — use {@link projectEditorPrevLogPath} when the
+ * project-relative live log is the resolved candidate.
  */
 export function editorPrevLogPath(
   platform: UnityLogPlatform = process.platform as UnityLogPlatform,
 ): string {
   return join(editorLogsDir(platform), "Editor-prev.log");
+}
+
+/**
+ * Resolve the project-relative Editor-prev.log path Unity 6000.5+ rotates the
+ * live log into (`<project>/Logs/Editor-prev.log`). Returns null when no
+ * project path is given. Mirrors {@link projectEditorLogPath}: on 6000.5+ the
+ * prev log follows the live log into the project's Logs dir, so the prev-log
+ * fallback must read THAT file, not the stale global Editor-prev.log left over
+ * from a pre-6000.5 session.
+ */
+export function projectEditorPrevLogPath(
+  projectPath: string | null | undefined,
+): string | null {
+  if (!projectPath) return null;
+  return join(projectPath, "Logs", "Editor-prev.log");
 }
 
 /** Outcome of resolveEditorLogPath: the chosen path plus a short machine/
@@ -139,7 +159,17 @@ export function resolveEditorLogPath(
   const candidateReason: ResolvedEditorLog["reason"] =
     project && existsSync(project) ? "project_log" : "global_log";
 
-  const prev = editorPrevLogPath(platform);
+  // On 6000.5+ the rotated prev log lives next to the project-relative live
+  // log (<project>/Logs/Editor-prev.log), not in the global dir. When the
+  // resolved candidate is the project log, the prev-log fallback must read the
+  // project prev log; otherwise (pre-6000.5 global candidate) fall back to the
+  // global prev log as before. Reading the stale global prev log here would
+  // return compile errors from an unrelated older session.
+  const usingProjectLog = candidateReason === "project_log";
+  const prev =
+    usingProjectLog && project
+      ? projectEditorPrevLogPath(projectPath) ?? editorPrevLogPath(platform)
+      : editorPrevLogPath(platform);
   const prevExists = existsSync(prev);
   const candidateFrozen = isLogFrozen(candidate);
 

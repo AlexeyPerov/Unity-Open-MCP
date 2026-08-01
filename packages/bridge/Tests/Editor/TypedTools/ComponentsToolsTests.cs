@@ -403,6 +403,32 @@ namespace UnityOpenMcpBridge.Tests
             finally { Object.DestroyImmediate(go); }
         }
 
+        // The `fields` filter must bypass the max_fields collection cap: an
+        // agent asking for one field should not have to raise max_fields on a
+        // 126-field component. Force the issue by capping max_fields at 1 and
+        // requesting a serialized field that is NOT the first one collected —
+        // without the bypass it would be truncated before the filter runs and
+        // the result would be empty.
+        [Test]
+        public void Get_FieldsFilter_BypassesMaxFieldsCap()
+        {
+            var go = new GameObject("__MCPTest_Comp_Get_FieldsFilter_Cap");
+            try
+            {
+                // max_fields=1 would collect only one field; m_LocalScale is
+                // not the first serialized field on Transform, so a filter that
+                // respected the cap would miss it entirely.
+                var result = ComponentsTools.Get(
+                    "{\"instance_id\":" + InstanceId.Of(go) +
+                    ",\"type_name\":\"UnityEngine.Transform\"," +
+                    "\"max_fields\":1,\"fields\":[\"localScale\"]}");
+                Assert.IsTrue(result.Success, result.ErrorMessage);
+                StringAssert.Contains("\"localScale\"", result.Output,
+                    "fields filter must bypass the max_fields collection cap");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
         [Test]
         public void Modify_WritesLocalPosition()
         {

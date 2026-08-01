@@ -211,6 +211,55 @@ namespace UnityOpenMcpBridge.Tests
         }
 
         // -------------------------------------------------------------------
+        // feedback-fable-31-07 §3 — a script_write step (file_path ending in
+        // .cs) followed by an import-trigger step (assets_refresh) must be
+        // refused up-front: the import arms a compile mid-batch, which can
+        // kill the HTTP response via a domain reload before the result is
+        // sent. The script_write step's param is `file_path` (the same key
+        // script_write/script_read read) — an earlier revision read `path`
+        // and the guard never fired.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void Execute_ScriptWriteFilePath_ThenAssetsRefresh_RefusedAsCombo()
+        {
+            // script_write's param is `file_path`, not `path`. The combo guard
+            // must read the right key or it never fires (regression guard).
+            var body = "{\"commands\":[" +
+                       "{\"tool\":\"unity_open_mcp_script_write\",\"params\":{\"file_path\":\"Assets/__MCPTest_Combo.cs\",\"content\":\"// x\"}}," +
+                       "{\"tool\":\"unity_open_mcp_assets_refresh\",\"params\":{}}" +
+                       "]}";
+            var result = BatchExecuteTool.Execute(body);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual("batch_nested_reload_unsafe", result.ErrorCode);
+            StringAssert.Contains("commands[0] writes a script", result.ErrorMessage);
+            StringAssert.Contains("commands[1]", result.ErrorMessage);
+            // The offending import-trigger step must be named.
+            StringAssert.Contains("assets_refresh", result.ErrorMessage);
+        }
+
+        [Test]
+        public void Execute_ScriptWriteLegacyPathKey_DoesNotTriggerComboGuard()
+        {
+            // A script_write step that uses a wrong/legacy `path` key (instead
+            // of `file_path`) must NOT trip the combo guard: script_write
+            // itself will reject the missing `file_path` at dispatch, but the
+            // pre-flight combo check is keyed on the real param. This pins
+            // that the guard reads the same key the handler does.
+            var body = "{\"commands\":[" +
+                       "{\"tool\":\"unity_open_mcp_script_write\",\"params\":{\"path\":\"Assets/__MCPTest_Combo.cs\",\"content\":\"// x\"}}," +
+                       "{\"tool\":\"unity_open_mcp_assets_refresh\",\"params\":{}}" +
+                       "]}";
+            var result = BatchExecuteTool.Execute(body);
+            // The combo guard must NOT fire (it reads file_path, which is
+            // absent here). The batch proceeds; assets_refresh itself is a
+            // valid nested step, and script_write will report its own
+            // missing_parameter per-step.
+            Assert.AreNotEqual("batch_nested_reload_unsafe", result.ErrorCode,
+                "Combo guard must read `file_path`, not `path`. Got: " + result.ErrorCode);
+        }
+
+        // -------------------------------------------------------------------
         // Happy path: 3× gameobject_create
         // -------------------------------------------------------------------
 

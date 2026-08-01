@@ -145,6 +145,46 @@ namespace UnityOpenMcpVerify.Tests
         }
 
         // -------------------------------------------------------------------
+        // feedback-fable-31-07 §7 — PropertyKeyBeforeFileId must capture the
+        // property key on YAML list-item lines too. Unity serializes UnityEvent
+        // persistent-call targets as "      - m_Target: {fileID: 0}"; the
+        // leading "- " (a list marker) is not in the key char class, so without
+        // the optional list-item prefix the match failed and every empty
+        // m_Target collapsed onto the same fallback key, reintroducing the
+        // positional-ordinal churn the §7 keying removed.
+        // -------------------------------------------------------------------
+
+        [Test]
+        public void PropertyKeyBeforeFileId_MatchesListItemTarget()
+        {
+            // Real UnityEvent YAML shape (Button.prefab): a list-item empty ref.
+            var line = "      - m_Target: {fileID: 0}";
+            var m = SharedRegex.PropertyKeyBeforeFileId.Match(line);
+            Assert.IsTrue(m.Success, "list-item '- m_Target:' must match");
+            Assert.AreEqual("m_Target", m.Groups[1].Value);
+        }
+
+        [Test]
+        public void PropertyKeyBeforeFileId_MatchesNestedObjectArgument()
+        {
+            // The nested m_ObjectArgument ref (not a list item) must still match
+            // — the optional list-item prefix must not break the plain case.
+            var line = "          m_ObjectArgument: {fileID: 0}";
+            var m = SharedRegex.PropertyKeyBeforeFileId.Match(line);
+            Assert.IsTrue(m.Success);
+            Assert.AreEqual("m_ObjectArgument", m.Groups[1].Value);
+        }
+
+        [Test]
+        public void PropertyKeyBeforeFileId_MatchesPlainProperty()
+        {
+            // The original case (no list marker) must still match.
+            var m = SharedRegex.PropertyKeyBeforeFileId.Match("  m_Father: {fileID: 0}");
+            Assert.IsTrue(m.Success);
+            Assert.AreEqual("m_Father", m.Groups[1].Value);
+        }
+
+        // -------------------------------------------------------------------
         // V9 — CountLocalUsages single-pass equivalence. The replacement walks
         // every line ONCE (was O(R × L) with a fresh Regex per reference).
         // This test exercises the equivalence by building a prefab with two

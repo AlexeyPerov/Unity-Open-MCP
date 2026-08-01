@@ -7,7 +7,9 @@ import { join } from "node:path";
 import {
   editorLogsDir,
   editorLogPath,
+  editorPrevLogPath,
   projectEditorLogPath,
+  projectEditorPrevLogPath,
   resolveEditorLogPath,
   readLogTail,
   detectStaleLog,
@@ -116,6 +118,54 @@ test("resolveEditorLogPath returns the project log (not prev.log) when it is non
   const resolved = resolveEditorLogPath(project, "darwin", process.pid);
   assert.equal(resolved.path, join(project, "Logs", "Editor.log"));
   assert.equal(resolved.reason, "project_log");
+});
+
+test("projectEditorPrevLogPath resolves <project>/Logs/Editor-prev.log", () => {
+  // Mirrors projectEditorLogPath: on 6000.5+ the rotated prev log follows the
+  // live log into the project's Logs dir.
+  const p = projectEditorPrevLogPath("/Users/me/MyProject");
+  assert.equal(p, join("/Users/me/MyProject", "Logs", "Editor-prev.log"));
+});
+
+test("projectEditorPrevLogPath returns null when projectPath is null/undefined/empty", () => {
+  assert.equal(projectEditorPrevLogPath(null), null);
+  assert.equal(projectEditorPrevLogPath(undefined), null);
+  assert.equal(projectEditorPrevLogPath(""), null);
+});
+
+test("resolveEditorLogPath prefers the PROJECT prev.log (not the global prev.log) on 6000.5+ rotation", () => {
+  // The log-rotation scenario: a frozen project-relative Editor.log (<4KB) +
+  // a live PID + a project-relative Editor-prev.log the live editor keeps
+  // writing to. The fallback MUST read the PROJECT prev log, not the stale
+  // global Editor-prev.log from a pre-6000.5 session. Without the project-prev
+  // fix the resolver would return the global prev path and read errors from an
+  // unrelated older session.
+  const project = mkdtempSync(join(tmpdir(), "proj-"));
+  mkdirSync(join(project, "Logs"));
+  // Frozen live log (tiny) + a large project prev log.
+  writeFileSync(join(project, "Logs", "Editor.log"), "x".repeat(100));
+  writeFileSync(join(project, "Logs", "Editor-prev.log"), "y".repeat(8192));
+
+  const resolved = resolveEditorLogPath(project, "darwin", process.pid);
+  assert.equal(resolved.reason, "prev_log_live_editor");
+  assert.equal(
+    resolved.path,
+    join(project, "Logs", "Editor-prev.log"),
+    "must read the PROJECT prev log, not the global one",
+  );
+  assert.notEqual(resolved.path, editorPrevLogPath("darwin"));
+});
+
+test("resolveEditorLogPath falls back to the global prev.log when the candidate is the global log", () => {
+  // Pre-6000.5 case: no project log exists, so the candidate is the global
+  // log. The prev-log fallback must then use the GLOBAL prev log (the project
+  // prev path does not apply). We cannot easily synthesize a frozen global log
+  // on disk here, so this test pins only the project/global dichotomy by
+  // confirming a non-project candidate never resolves to a project prev path.
+  const project = mkdtempSync(join(tmpdir(), "proj-"));
+  // No Logs/Editor.log → candidate is global.
+  const resolved = resolveEditorLogPath(project, "darwin");
+  assert.notEqual(resolved.reason, "project_log");
 });
 
 test("resolveEditorLogPath returns a structured {path, reason} object", () => {

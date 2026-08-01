@@ -55,9 +55,10 @@ namespace UnityOpenMcpBridge.TypedTools
             //    when it wants a GameObject, return the GO itself.
             var path = JsonBody.GetString(rawValue, "path");
             if (string.IsNullOrEmpty(path)) path = JsonBody.GetString(rawValue, "asset_path");
-            // A bare JSON string value: {"value": "Assets/Foo.prefab"} or
-            // {"value": "Canvas/.../Tab_Shop"}. Wrap-and-read via the same
-            // GetString helper the old code used.
+            // A bare JSON string value: "Assets/Foo.prefab" or
+            // "Canvas/.../Tab_Shop". Wrap it as {"v": <raw>} and read the "v"
+            // key — the same wrap-and-read helper the old code used (a bare
+            // quoted string has no "path"/"asset_path" key of its own).
             if (string.IsNullOrEmpty(path)) path = JsonBody.GetString("{\"v\":" + rawValue + "}", "v");
             if (!string.IsNullOrEmpty(path))
             {
@@ -82,9 +83,9 @@ namespace UnityOpenMcpBridge.TypedTools
             }
 
             // 2) instance_id — read the structured key directly off the
-            //    fragment (NOT via the {"v": <raw>} wrap, which can't see a
-            //    nested key). Accept {"instance_id": N}; a bare numeric value
-            //    is also accepted via the wrap fallback for back-compat.
+            //    fragment first ({"instance_id": N}). When that is absent, also
+            //    accept a bare numeric value (12345) via the {"v": <raw>} wrap
+            //    fallback for back-compat with callers that pass the id inline.
             var idRaw = JsonBody.GetRawValue(rawValue, "instance_id");
             if (string.IsNullOrEmpty(idRaw))
                 idRaw = JsonBody.GetRawValue("{\"v\":" + rawValue + "}", "v");

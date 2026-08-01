@@ -109,12 +109,13 @@ namespace UnityOpenMcpBridge.MetaTools
 
         // feedback-fable-31-07 §3 — a step that writes a .cs file (and so can
         // arm a compile on the next import). script_write is the canonical case;
-        // its `path` param is a project-relative .cs path. We treat any
-        // script_write step as a script-write for the combo check.
+        // its `file_path` param (the same key script_write/script_read read) is a
+        // project-relative .cs path. We treat any .cs script_write step as a
+        // script-write for the combo check.
         private static bool IsScriptWriteStep(BatchStep step)
         {
             if (step.Tool != "unity_open_mcp_script_write") return false;
-            var path = JsonBody.GetString(step.ParamsBody, "path");
+            var path = JsonBody.GetString(step.ParamsBody, "file_path");
             // Only a .cs write arms a compile; script_write rejects non-.cs
             // paths at its own layer, but check here so the combo refusal is
             // precise and does not fire for an unrelated script_write.
@@ -123,13 +124,13 @@ namespace UnityOpenMcpBridge.MetaTools
 
         // A step that forces an import of pending changes (and thus a compile
         // when a .cs write is pending). assets_refresh with
-        // ForceSynchronousImport is the repro trigger; reimport_package and
-        // reimport_asset on a scripts folder have the same effect.
+        // ForceSynchronousImport is the repro trigger and the only nested tool
+        // that can land here: reimport_package has the RestartThenSettle
+        // lifecycle and is already refused up-front by IsNestedReloadUnsafe, so
+        // it never reaches this check.
         private static bool IsImportTriggerStep(BatchStep step)
         {
-            return step.Tool == "unity_open_mcp_assets_refresh"
-                || step.Tool == "unity_open_mcp_reimport_package"
-                || step.Tool == "unity_open_mcp_reimport_asset";
+            return step.Tool == "unity_open_mcp_assets_refresh";
         }
 
         public static ToolDispatchResult Execute(string body)

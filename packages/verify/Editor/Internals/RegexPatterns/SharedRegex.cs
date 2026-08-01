@@ -59,8 +59,16 @@ namespace UnityOpenMcpVerify.Internals.RegexPatterns
         // The serialized property key on a `key: {fileID: 0}` line, e.g.
         // "m_Father" in "  m_Father: {fileID: 0}". Captured so empty_local_ref
         // issues can be keyed by owning anchor + property.
+        //
+        // The optional leading "- " matches YAML list-item entries, which is
+        // how Unity serializes UnityEvent persistent-call targets:
+        //   "      - m_Target: {fileID: 0}"
+        // Without it the leading "-" (not in the key char class) made the match
+        // fail for the single most common empty-ref source, collapsing every
+        // UnityEvent m_Target onto the same fallback key and reintroducing the
+        // positional-ordinal churn feedback-fable-31-07 §7 set out to remove.
         public static readonly Regex PropertyKeyBeforeFileId = new Regex(
-            @"^\s*([A-Za-z0-9_.\[\]]+):\s*\{fileID:",
+            @"^\s*(?:-\s*)?([A-Za-z0-9_.\[\]]+):\s*\{fileID:",
             RegexOptions.Compiled);
     }
 }

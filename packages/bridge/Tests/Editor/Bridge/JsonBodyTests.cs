@@ -295,5 +295,44 @@ namespace UnityOpenMcpBridge.Tests
             Assert.AreEqual("X", JsonBody.GetString(scope, "path"));
             Assert.IsNull(JsonBody.GetString(scope, "fields"));
         }
+
+        // The scope is order-independent: a patch array BEFORE the selector must
+        // not hide the selector. The depth-aware walk collects top-level
+        // selector keys wherever they appear. (The old prefix-trim version
+        // returned "{}" here and the host failed to resolve.)
+        [Test]
+        public static void SelectorScope_PatchArrayBeforeSelector_StillReadsSelector()
+        {
+            var body = "{\"fields\":[{\"name\":\"a\",\"value\":{\"instance_id\":999}}]," +
+                       "\"instance_id\":111,\"type_name\":\"Foo\"}";
+            var scope = JsonBody.SelectorScope(body);
+            Assert.AreEqual(111L, JsonBody.GetLongFlexible(scope, "instance_id", 0),
+                "selector after a patch array must still resolve (order-independent)");
+            Assert.AreEqual("Foo", JsonBody.GetString(scope, "type_name"));
+            // The patch array and its nested shadow value must be gone.
+            Assert.IsNull(JsonBody.GetStringArray(scope, "fields"));
+        }
+
+        // A selector value that is itself a nested object (e.g. a {path:...}
+        // selector on gameobject_modify) must survive the depth-aware walk.
+        [Test]
+        public static void SelectorScope_PreservesObjectValuedSelector()
+        {
+            var body = "{\"fields\":[],\"value\":{\"path\":\"Root/Child\"}}";
+            var scope = JsonBody.SelectorScope(body);
+            var raw = JsonBody.GetRawValue(scope, "value");
+            Assert.IsNotNull(raw, "object-valued selector must survive the scope");
+            StringAssert.Contains("\"Root/Child\"", raw);
+        }
+
+        // The patch-array value is dropped wholesale even when it contains a
+        // sibling selector key name as a nested value — no leakage.
+        [Test]
+        public static void SelectorScope_DropsPatchArrayNestedShadowValue()
+        {
+            var body = "{\"instance_id\":111,\"fields\":[{\"value\":{\"instance_id\":999}}]}";
+            var scope = JsonBody.SelectorScope(body);
+            Assert.AreEqual(111L, JsonBody.GetLongFlexible(scope, "instance_id", 0));
+        }
     }
 }
